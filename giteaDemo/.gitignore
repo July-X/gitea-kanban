@@ -1,0 +1,6 @@
+# gitea 运行时数据（git 排除）
+data/
+
+# docker 临时产物
+*.log
+docker-compose.override.yml

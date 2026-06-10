@@ -3,3 +3,6 @@
 .opencode/
 node_modules/
 
+# gitea 测试服务运行时数据
+giteaDemo/data/
+
