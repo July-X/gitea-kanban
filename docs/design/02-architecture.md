@@ -46,11 +46,11 @@ flowchart TB
 
         subgraph Main["主进程 Node 侧"]
             IpcServer[IPC 服务端<br/>ipcMain.handle]
-            GitOps[gitea 集成<br/>go-sdk via HTTP / TS fetch]
+            GitOps[gitea 集成<br/>openapi-fetch + 手写 TS 类型]
             Cache[本地缓存<br/>SQLite / LevelDB]
             Keychain[系统 keychain<br/>token 安全存储]
             FS[本地文件<br/>配置 / 日志 / DB]
-            OptionalWH[可选 webhook server<br/>仅高级用户开]
+            OptionalWH[webhook server<br/>v2 才启用，v1 走轮询]
         end
     end
 
@@ -125,7 +125,7 @@ flowchart TB
 | **框架** | **React 18 + Vite** | 生态成熟、X6 集成示例多、TS 友好 |
 | **状态管理** | **Zustand** | 轻量、无 boilerplate、IPC 桥接自然 |
 | **路由** | **React Router 6** | 多视图（看板 / timeline / 仓库设置） |
-| **UI 组件库** | **Radix UI Primitives + Tailwind CSS** | 无样式强约束、易于做"零术语"自定义；不引 antd（视觉太重） |
+| **UI 组件库** | **Radix UI Primitives + CSS Modules** | Radix UI Primitives 是 headless 无样式库，提供可访问性 + 行为约束；样式走 CSS Modules + CSS 变量（见 03-frontend.md §7.1）。不引 antd（视觉太重）；**不引 Tailwind**（类名爆炸、运行时 / 编译开销与 OVERRIDE"克制 / 信息密度优先"风格冲突；OVERRIDE 不变 MASTER，本字段在 AGENTS §2.2 与 03 §7.1 已统一为不引 Tailwind，本表保持一致） |
 | **timeline / git graph** | **AntV X6@3.1.7** | 已在用户熟悉栈中、图编辑引擎最契合 git graph 场景 |
 | **HTTP 客户端** | **原生 fetch** | 主进程内走，不在渲染进程起 HTTP（避免 CORS） |
 | **数据校验** | **Zod** | 与 TS 类型双向同步，IPC 边界强制校验 |
@@ -219,7 +219,7 @@ gitea-kanban/
 └── src/
     ├── main/                         # ========== 主进程 ==========
     │   ├── index.ts                  # 应用入口、生命周期、托盘
-    │   ├── window.ts                 # BrowserWindow 管理（主窗 + 设置窗 + OAuth 窗预留）
+    │   ├── window.ts                 # BrowserWindow 管理（主窗 + 设置窗 + 通知窗预留；不做 OAuth 跳转）
     │   ├── ipc/                      # ========== IPC 路由层 ==========
     │   │   ├── index.ts              # 统一注册 ipcMain.handle
     │   │   ├── repo.ts               # 仓库相关 handler
@@ -667,7 +667,7 @@ type ListReposResp = {
 };
 
 // IPC
-'gitea.repos.list': (args: ListReposArgs) => Promise<ListReposResp>;
+'repos.list': (args: ListReposArgs) => Promise<ListReposResp>;
 'repos.addProject': (args: { giteaAccountId: string; owner: string; name: string }) => Promise<RepoProjectDTO>;
 'repos.removeProject': (args: { projectId: string }) => Promise<void>;
 ```
@@ -722,37 +722,91 @@ interface CommitDTO {
 'commits.get':   (args: { projectId: string; sha: string }) => Promise<CommitDTO>;
 ```
 
-#### 5.3.4 commit 时间轴（聚合多分支）
+#### 5.3.4 commit 时间轴（聚合多分支）—— IPC 单一来源
+
+> **本节是 Timeline 结构的 single source of truth**。03-frontend.md §5.2 字段必须与本节严格一致；
+> 任何字段增减 → 先改本节，再让前端同步。X6 渲染骨架（lanes/PR 标签/lane 过滤）依赖
+> 完整字段（lanes/prs/range/totalCommits），不是装饰字段。
 
 ```ts
+// === Args（IPC 入参）===
 interface TimelineArgs {
   projectId: string;
   branches: string[];            // 选中的分支（最多 10）
-  since?: string;
-  until?: string;
+  since?: string;                // 同 range.from
+  until?: string;                // 同 range.to
   maxNodes?: number;             // default 500，超出提示用户缩窗
+  laneMode?: 'branch' | 'author' | 'pr';  // 决定 lanes[i].kind 集合
 }
-interface TimelineNode {
+
+// === Lanes（X6 渲染骨架：每条泳道一个分支 / 作者 / PR）===
+interface Lane {
+  id: string;             // "branch:main" / "author:alice" / "pr:42"
+  label: string;          // 显示文本
+  kind: 'branch' | 'author' | 'pr';
+  color: string;          // #609926 绿（主分支）/ #f76707 橙（活跃开发）/ #6c757d 灰（archived）
+  order: number;          // y 轴排序（默认 main 在最上、其它按活跃度）
+  hidden?: boolean;
+}
+
+// === Commit 节点（每个 commit / 合并点）===
+interface CommitNode {
+  id: string;             // sha
+  laneId: string;         // 归属到哪条 lane
+  x: number;              // 横向时间位置（由 from/to 归一化）
+  y: number;              // 纵向 lane 位置
   sha: string;
-  shortSha: string;
-  message: string;
-  author: string;
-  authorAvatar?: string;
-  date: string;
-  branchHints: string[];         // 该 commit 出现在哪些分支的 history 上
+  shortSha: string;       // 7 位
+  message: string;        // commit message 第一行
+  author: { name: string; avatarUrl?: string };
+  timestamp: string;      // ISO
+  parents: string[];      // 父 commit sha 列表
+  isMerge: boolean;       // parents 数量 > 1
+  branchHints: string[];  // 该 commit 出现在哪些分支的 history 上
+  linkedCardIds: string[];// 关联到本地卡片（来自 card_links JOIN gitea_refs，见 §4.2 + §5.3.8）
+  additions: number;
+  deletions: number;
+  filesChanged: number;
 }
-interface TimelineEdge {
-  source: string;                // parent sha
-  target: string;                // child sha
-  kind: 'parent' | 'merge';      // merge = PR 合并产生的多 parent 边
-  prIndex?: number;              // merge 时填充
+
+// === 边（父子关系 / 合并关系）===
+interface ParentEdge {
+  id: string;
+  source: string;         // source node id
+  target: string;         // target node id
+  kind: 'parent' | 'merge';  // parent = 直接父子；merge = 合并 PR 时产生
+  prIndex?: number;       // merge 时填，链接到 PR
 }
+
+// === PR 列表（高亮用）===
+interface TimelinePR {
+  id: string;             // gitea PR id
+  index: number;          // PR 全局编号
+  title: string;
+  state: 'open' | 'closed' | 'merged';
+  head: string;           // 源分支
+  base: string;           // 目标分支
+  author: { name: string; avatarUrl?: string };
+  url: string;            // gitea web URL
+  mergedAt?: string;      // ISO
+}
+
+// === DTO（IPC 出参）===
 interface TimelineDTO {
-  nodes: TimelineNode[];
-  edges: TimelineEdge[];
-  truncated: boolean;
-  windowStart?: string;
-  windowEnd?: string;
+  // 时间窗（与 TimelineArgs.since/until 双名同义）
+  windowStart?: string;   // ISO；与 range.from 等价
+  windowEnd?: string;     // ISO；与 range.to 等价
+  range: { from: string /* ISO */; to: string };
+
+  // 渲染骨架
+  lanes: Lane[];
+  nodes: CommitNode[];
+  edges: ParentEdge[];
+  prs: TimelinePR[];
+
+  // 性能与降级
+  truncated: boolean;     // 节点数超过 maxNodes 时为 true
+  totalCommits: number;   // 满足过滤条件的总 commit 数（含被截断未返回的）
 }
 
 'commits.timeline': (args: TimelineArgs) => Promise<TimelineDTO>;
@@ -1132,7 +1186,7 @@ sequenceDiagram
 | 维度 | 后端 agent（主进程） | 前端 agent（渲染进程） |
 |---|---|---|
 | 职责 | 主进程所有代码：IPC handler、gitea 集成、缓存、SQLite、keychain、webhook server（v2）、日志、轮询 | 渲染进程所有代码：UI 组件、状态管理、路由、可视化（X6）、IPC 客户端 |
-| 依赖 | `electron`, `better-sqlite3`, `drizzle-orm`, `pino`, `keytar`, `openapi-fetch` | `react`, `react-dom`, `react-router-dom`, `zustand`, `@antv/x6`, `zod`, `tailwindcss`, `radix-ui` |
+| 依赖 | `electron`, `better-sqlite3`, `drizzle-orm`, `pino`, `keytar`, `openapi-fetch` | `react`, `react-dom`, `react-router-dom`, `zustand`, `@antv/x6`, `zod`, `@radix-ui/*`, `lucide-react` |
 | 不允许 | 写 UI / 写 React 组件 / 写 CSS | 写主进程代码 / 调 gitea API 直连 / 碰 keychain / 碰 SQLite |
 | 共享 | `src/shared/*`（TS 类型、错误格式、常量）由后端 agent 写 schema，前端 agent 消费类型 | |
 | 测试 | Vitest（主进程单测、mock gitea HTTP） | Vitest（组件单测）+ Playwright（e2e，跨主+渲染） |
@@ -1180,8 +1234,9 @@ sequenceDiagram
 | Plan 子任务 | 负责 agent | 输入 | 输出 |
 |---|---|---|---|
 | 1. 项目脚手架（electron-vite + tsconfig + 打包配置） | 后端 | 本文档 §2、§3 | 仓库可 `pnpm dev` 跑 |
+| 1a. **keytar 评估与备选方案**（keytar 上次 release 2022 年已无人维护；M0 阶段需评估 `@napi-rs/keyring` / Electron `safeStorage` + 加密文件 / 继续 keytar） | 后端 | `§2.3 keychain` + 各备选文档 | **明确给出 M1 选型结论**（含理由 + 触发条件：如 keytar 在 macOS arm64 装不上 → 切 `@napi-rs/keyring`）；输出 ADR 落到 `docs/adr/0001-keychain.md` |
 | 2. 主进程骨架（窗口 / IPC 路由 / 错误格式 / 日志） | 后端 | §3、§5 错误格式 | 空 handler 返回 `not_implemented` |
-| 3. 鉴权 + gitea client + keychain | 后端 | §6.1、§6.2 | `auth.connect/disconnect/status` 跑通 |
+| 3. 鉴权 + gitea client + keychain | 后端 | §6.1、§6.2 + 任务 1a 选型结论 | `auth.connect/disconnect/status` 跑通 |
 | 4. 数据模型 + migration | 后端 | §4 | drizzle schema + `pnpm db:migrate` 跑通 |
 | 5. 仓库 / 分支 / commit / pulls IPC handler | 后端 | §5.3.1–5.3.6 + §6.2 缓存策略 | 全 read API 跑通 |
 | 6. 看板 / 卡片 / 关联 IPC handler | 后端 | §5.3.7、§5.3.8 | 全 CRUD 跑通 |

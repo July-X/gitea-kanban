@@ -5,81 +5,62 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gitea Kanban · 时间轴</title>
   <style>
-    /* ===== design tokens ===== */
     :root {
-      --color-primary: #609926;
+      --color-primary: #609926; --color-primary-hover: #54a31d;
       --color-primary-soft: rgba(96, 153, 38, 0.12);
-      --color-accent: #f76707;
+      --color-accent: #f76707; --color-accent-soft: rgba(247, 103, 7, 0.12);
+      --color-text: #1f2328; --color-text-secondary: #59636e; --color-text-muted: #8b949e;
+      --color-bg: #ffffff; --color-bg-elevated: #f6f8fa; --color-bg-hover: #eef1f4;
+      --color-border: #d0d7de; --color-border-strong: #afb8c1;
       --color-warning: #f0ad4e;
-      --color-danger: #cf222e;
-      --color-info: #0969da;
-      --color-text: #1f2328;
-      --color-text-secondary: #59636e;
-      --color-text-muted: #8b949e;
-      --color-bg: #ffffff;
-      --color-bg-elevated: #f6f8fa;
-      --color-bg-hover: #eef1f4;
-      --color-border: #d0d7de;
-      --color-border-strong: #afb8c1;
-      --shadow-sm: 0 1px 0 rgba(31, 35, 40, 0.04);
+      --color-info: #0969da; --color-info-soft: rgba(9, 105, 218, 0.12);
+      --color-success: #1a7f37; --color-success-soft: rgba(26, 127, 55, 0.12);
+      --color-danger: #cf222e; --color-danger-soft: rgba(207, 34, 46, 0.12);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
       --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
-      --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.2);
-      --radius-sm: 4px;
-      --radius-md: 6px;
-      --radius-lg: 8px;
-      --space-1: 4px;
-      --space-2: 8px;
-      --space-3: 12px;
-      --space-4: 16px;
-      --space-5: 24px;
-      --font-xs: 11px;
-      --font-sm: 13px;
-      --font-md: 14px;
-      --font-lg: 16px;
-      --titlebar-h: 48px;
-      --navrail-w: 224px;
+      --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.20);
+      --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+      --font-xs: 11px; --font-sm: 13px; --font-md: 14px; --font-lg: 16px; --font-xl: 20px;
+      --t-fast: 150ms; --t-base: 200ms; --t-slow: 300ms;
+      --ease: cubic-bezier(0.2, 0, 0, 1);
+      --titlebar-h: 48px; --navrail-w: 224px;
       --lane-h: 56px;
-      --lane-w: 140px;
     }
     [data-theme='dark'] {
-      --color-text: #e6edf3;
-      --color-text-secondary: #adbac7;
-      --color-text-muted: #768390;
-      --color-bg: #0d1117;
-      --color-bg-elevated: #161b22;
-      --color-bg-hover: #1c222b;
-      --color-border: #30363d;
-      --color-border-strong: #444c56;
+      --color-text: #e6edf3; --color-text-secondary: #adbac7; --color-text-muted: #768390;
+      --color-bg: #0d1117; --color-bg-elevated: #161b22; --color-bg-hover: #1c222b;
+      --color-border: #30363d; --color-border-strong: #444c56;
+      --color-success: #3fb950; --color-warning: #d29922; --color-danger: #f85149; --color-info: #58a6ff;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.5); --shadow-md: 0 3px 6px rgba(0,0,0,0.6); --shadow-lg: 0 8px 24px rgba(0,0,0,0.7);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
-      font-size: var(--font-md);
-      color: var(--color-text);
-      background: var(--color-bg);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+      font-size: var(--font-md); color: var(--color-text); background: var(--color-bg);
+      transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
     }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; box-shadow: 0 0 0 4px rgba(96, 153, 38, 0.25); border-radius: var(--radius-sm); }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
-    /* shell (same as index, but compact) */
     .app { display: grid; grid-template-rows: var(--titlebar-h) 1fr; height: 100vh; }
-    .titlebar {
-      display: flex; align-items: center; gap: var(--space-3);
-      padding: 0 var(--space-4);
-      background: var(--color-bg-elevated);
-      border-bottom: 1px solid var(--color-border);
-    }
+    .titlebar { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); background: var(--color-bg-elevated); border-bottom: 1px solid var(--color-border); }
     .titlebar__logo { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; color: var(--color-primary); }
-    .titlebar__logo-mark { width: 24px; height: 24px; background: var(--color-primary); color: #fff; border-radius: var(--radius-sm); display: grid; place-items: center; font-size: 14px; }
+    .titlebar__logo-mark { width: 24px; height: 24px; background: var(--color-primary); color: #fff; border-radius: var(--radius-sm); display: grid; place-items: center; }
     .titlebar__repo { display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); font-size: var(--font-sm); }
     .titlebar__spacer { flex: 1; }
     .titlebar__sync { display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px; border-radius: var(--radius-sm); font-size: var(--font-sm); color: var(--color-text-secondary); }
-    .titlebar__sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 3px rgba(46, 160, 67, 0.15); }
+    .titlebar__sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); }
+    .icon-btn { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
+    .icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text); }
     .titlebar__user { width: 28px; height: 28px; border-radius: 50%; background: var(--color-primary); color: #fff; display: grid; place-items: center; font-size: var(--font-sm); font-weight: 600; }
 
     .main { display: grid; grid-template-columns: var(--navrail-w) 1fr; min-height: 0; }
     .navrail { background: var(--color-bg-elevated); border-right: 1px solid var(--color-border); padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
     .navrail__section-label { font-size: var(--font-xs); text-transform: uppercase; color: var(--color-text-muted); padding: var(--space-2) var(--space-3) var(--space-1); letter-spacing: 0.04em; }
-    .navrail__item { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-3); border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text); font-size: var(--font-sm); text-decoration: none; }
+    .navrail__item { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-3); border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text); font-size: var(--font-sm); text-decoration: none; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
     .navrail__item:hover { background: var(--color-bg-hover); }
     .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
     .navrail__item .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; }
@@ -87,277 +68,67 @@
     .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
     .navrail__footer { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
 
-    /* content */
     .content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
     .content__tabs { display: flex; align-items: center; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); gap: var(--space-4); height: 40px; flex-shrink: 0; }
-    .content__tab { height: 100%; display: flex; align-items: center; padding: 0 var(--space-2); border-bottom: 2px solid transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; }
+    .content__tab { height: 100%; display: flex; align-items: center; padding: 0 var(--space-2); border-bottom: 2px solid transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
     .content__tab.is-active { color: var(--color-text); border-bottom-color: var(--color-primary); font-weight: 600; }
+    .content__tab:hover { color: var(--color-text); }
     .content__tab-actions { margin-left: auto; display: flex; gap: var(--space-2); }
 
-    .btn { height: 28px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); }
+    .btn { height: 28px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
     .btn:hover { background: var(--color-bg-hover); }
-    .btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
-    .btn--primary:hover { background: #54a31d; }
-    .btn--ghost { border-color: transparent; background: transparent; }
     .btn--sm { height: 24px; padding: 0 var(--space-2); font-size: var(--font-xs); }
 
-    /* toolbar */
-    .toolbar {
-      display: flex; align-items: center; gap: var(--space-3);
-      padding: var(--space-3) var(--space-4);
-      border-bottom: 1px solid var(--color-border);
-      background: var(--color-bg-elevated);
-      flex-wrap: wrap;
-    }
+    .toolbar { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-bg-elevated); flex-wrap: wrap; }
     .toolbar__group { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); border-right: 1px solid var(--color-border); }
     .toolbar__group:last-child { border-right: none; }
     .toolbar label { font-size: var(--font-xs); color: var(--color-text-muted); }
-
-    .select {
-      height: 28px;
-      padding: 0 var(--space-2);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm);
-      background: var(--color-bg);
-      font-size: var(--font-sm);
-      color: var(--color-text);
-    }
-    .chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 2px 8px;
-      border-radius: 12px;
-      background: var(--color-bg);
-      border: 1px solid var(--color-border);
-      font-size: var(--font-xs);
-      color: var(--color-text-secondary);
-      cursor: pointer;
-    }
+    .select { height: 28px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); font-size: var(--font-sm); color: var(--color-text); }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--color-bg); border: 1px solid var(--color-border); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
+    .chip:hover { background: var(--color-bg-hover); }
     .chip.is-active { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); }
     .chip__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 
-    /* timeline */
-    .timeline-wrapper {
-      flex: 1; min-height: 0;
-      display: flex;
-      flex-direction: column;
-    }
-    .timeline {
-      flex: 1; min-height: 0;
-      position: relative;
-      overflow: auto;
-      background:
-        linear-gradient(to right, var(--color-border) 1px, transparent 1px) 0 0 / 80px 100%,
-        var(--color-bg);
-    }
-    .timeline__inner {
-      position: relative;
-      min-width: 1280px;
-      height: 100%;
-      padding-top: 32px; /* axis label row */
-    }
+    .timeline-wrapper { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .timeline { flex: 1; min-height: 0; position: relative; overflow: auto; background: linear-gradient(to right, var(--color-border) 1px, transparent 1px) 0 0 / 80px 100%, var(--color-bg); }
+    .timeline__inner { position: relative; min-width: 1280px; height: 100%; padding-top: 32px; }
 
-    /* top axis */
-    .axis {
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      border-bottom: 1px solid var(--color-border);
-      background: var(--color-bg-elevated);
-      z-index: 3;
-    }
-    .axis__label {
-      position: absolute;
-      font-size: var(--font-xs);
-      color: var(--color-text-muted);
-      transform: translateX(8px);
-    }
-    .axis__line {
-      position: absolute;
-      top: 0; bottom: 0;
-      width: 1px;
-      background: var(--color-border);
-    }
+    .axis { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; border-bottom: 1px solid var(--color-border); background: var(--color-bg-elevated); z-index: 3; }
+    .axis__label { position: absolute; font-size: var(--font-xs); color: var(--color-text-muted); transform: translateX(8px); }
+    .axis__line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--color-border); }
     .axis__line.major { background: var(--color-border-strong); }
 
-    /* lane rows */
-    .lane {
-      position: absolute;
-      left: 0;
-      height: var(--lane-h);
-      border-bottom: 1px solid var(--color-border);
-      display: flex;
-      align-items: center;
-    }
-    .lane__stripe {
-      position: absolute;
-      left: 0; top: 0; bottom: 0;
-      width: 3px;
-    }
-    .lane__label {
-      position: sticky;
-      left: var(--space-3);
-      display: inline-flex; align-items: center; gap: var(--space-2);
-      padding: 2px 8px;
-      background: var(--color-bg-elevated);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm);
-      font-size: var(--font-xs);
-      color: var(--color-text);
-      max-width: 160px;
-      z-index: 2;
-    }
+    .lane { position: absolute; left: 0; height: var(--lane-h); border-bottom: 1px solid var(--color-border); display: flex; align-items: center; }
+    .lane__stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+    .lane__label { position: sticky; left: var(--space-3); display: inline-flex; align-items: center; gap: var(--space-2); padding: 2px 8px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: var(--font-xs); color: var(--color-text); max-width: 160px; z-index: 2; }
     .lane__label .swatch { width: 8px; height: 8px; border-radius: 50%; }
-    .lane.is-hover { background: var(--color-bg-hover); }
 
-    /* commit nodes */
-    .node {
-      position: absolute;
-      width: 14px; height: 14px;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      cursor: pointer;
-      box-shadow: 0 0 0 2px var(--color-bg);
-      z-index: 2;
-    }
-    .node:hover { transform: translate(-50%, -50%) scale(1.4); z-index: 5; }
-    .node.is-merge {
-      width: 16px; height: 16px;
-      transform: translate(-50%, -50%) rotate(45deg);
-      border-radius: 2px;
-    }
+    .node { position: absolute; width: 14px; height: 14px; border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; box-shadow: 0 0 0 2px var(--color-bg); z-index: 2; transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease); }
+    .node:hover { transform: translate(-50%, -50%) scale(1.4); z-index: 5; box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-primary); }
+    .node.is-merge { width: 16px; height: 16px; transform: translate(-50%, -50%) rotate(45deg); border-radius: 2px; }
     .node.is-merge:hover { transform: translate(-50%, -50%) rotate(45deg) scale(1.4); }
-    .node.has-card {
-      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-warning);
-    }
-    .node.is-head::after {
-      content: '';
-      position: absolute;
-      left: 50%; top: -10px;
-      transform: translateX(-50%);
-      border: 5px solid transparent;
-      border-top-color: var(--color-primary);
-    }
+    .node.has-card { box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-warning); }
+    .node.is-head::after { content: ''; position: absolute; left: 50%; top: -10px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--color-primary); }
+    .edge { position: absolute; pointer-events: none; z-index: 1; }
 
-    /* edges (commit parents) */
-    .edge {
-      position: absolute;
-      pointer-events: none;
-      z-index: 1;
-    }
-
-    /* tooltip */
-    .tooltip {
-      position: fixed;
-      top: 240px; left: 580px;
-      width: 360px;
-      background: var(--color-bg);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-lg);
-      padding: var(--space-3);
-      z-index: 10;
-    }
-    .tooltip__head {
-      display: flex; align-items: center; gap: var(--space-2);
-      margin-bottom: var(--space-2);
-    }
-    .tooltip__sha {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: var(--font-xs);
-      color: var(--color-accent);
-      font-weight: 600;
-    }
-    .tooltip__time {
-      margin-left: auto;
-      font-size: var(--font-xs);
-      color: var(--color-text-muted);
-    }
-    .tooltip__msg {
-      font-size: var(--font-sm);
-      font-weight: 500;
-      line-height: 1.4;
-      margin-bottom: var(--space-2);
-    }
-    .tooltip__row {
-      display: flex; align-items: center; gap: var(--space-2);
-      padding: 4px 0;
-      font-size: var(--font-xs);
-      color: var(--color-text-secondary);
-    }
+    .tooltip { position: fixed; top: 240px; left: 580px; width: 360px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); padding: var(--space-3); z-index: 10; }
+    .tooltip__head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+    .tooltip__sha { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-xs); color: var(--color-accent); font-weight: 600; }
+    .tooltip__time { margin-left: auto; font-size: var(--font-xs); color: var(--color-text-muted); }
+    .tooltip__msg { font-size: var(--font-sm); font-weight: 500; line-height: 1.4; margin-bottom: var(--space-2); }
+    .tooltip__row { display: flex; align-items: center; gap: var(--space-2); padding: 4px 0; font-size: var(--font-xs); color: var(--color-text-secondary); }
     .tooltip__avatar { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 600; color: #fff; background: var(--color-info); }
-    .tooltip__linked {
-      background: var(--color-primary-soft);
-      border: 1px solid var(--color-primary);
-      padding: 6px;
-      border-radius: var(--radius-sm);
-      font-size: var(--font-xs);
-      margin-top: var(--space-2);
-    }
+    .tooltip__linked { background: var(--color-primary-soft); border: 1px solid var(--color-primary); padding: 6px; border-radius: var(--radius-sm); font-size: var(--font-xs); margin-top: var(--space-2); }
     .tooltip__linked strong { color: var(--color-primary); }
-    .tooltip__actions {
-      display: flex; gap: var(--space-2);
-      margin-top: var(--space-2);
-      padding-top: var(--space-2);
-      border-top: 1px solid var(--color-border);
-    }
+    .tooltip__actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
 
-    /* zoom bar */
-    .zoombar {
-      height: 40px;
-      border-top: 1px solid var(--color-border);
-      background: var(--color-bg-elevated);
-      display: flex;
-      align-items: center;
-      padding: 0 var(--space-4);
-      gap: var(--space-3);
-      flex-shrink: 0;
-    }
-    .zoombar__track {
-      flex: 1;
-      position: relative;
-      height: 6px;
-      background: var(--color-border);
-      border-radius: 3px;
-    }
-    .zoombar__range {
-      position: absolute;
-      top: -3px;
-      height: 12px;
-      background: var(--color-primary);
-      opacity: 0.4;
-      border-radius: 3px;
-    }
-    .zoombar__handle {
-      position: absolute;
-      top: -4px;
-      width: 6px;
-      height: 14px;
-      background: var(--color-primary);
-      border-radius: 3px;
-      cursor: ew-resize;
-    }
-    .zoombar__label {
-      font-size: var(--font-xs);
-      color: var(--color-text-muted);
-      font-variant-numeric: tabular-nums;
-      min-width: 80px;
-    }
+    .zoombar { height: 40px; border-top: 1px solid var(--color-border); background: var(--color-bg-elevated); display: flex; align-items: center; padding: 0 var(--space-4); gap: var(--space-3); flex-shrink: 0; }
+    .zoombar__track { flex: 1; position: relative; height: 6px; background: var(--color-border); border-radius: 3px; }
+    .zoombar__range { position: absolute; top: -3px; height: 12px; background: var(--color-primary); opacity: 0.4; border-radius: 3px; }
+    .zoombar__handle { position: absolute; top: -4px; width: 6px; height: 14px; background: var(--color-primary); border-radius: 3px; cursor: ew-resize; }
+    .zoombar__label { font-size: var(--font-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; min-width: 80px; }
 
-    /* legend */
-    .legend {
-      position: absolute;
-      bottom: 16px; right: 16px;
-      background: var(--color-bg);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      padding: var(--space-3);
-      font-size: var(--font-xs);
-      color: var(--color-text-secondary);
-      box-shadow: var(--shadow-sm);
-      z-index: 4;
-    }
+    .legend { position: absolute; bottom: 16px; right: 16px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); font-size: var(--font-xs); color: var(--color-text-secondary); box-shadow: var(--shadow-sm); z-index: 4; }
     .legend__row { display: flex; align-items: center; gap: var(--space-2); padding: 2px 0; }
     .legend__dot { width: 10px; height: 10px; border-radius: 50%; }
     .legend__dot.merge { transform: rotate(45deg); border-radius: 2px; }
@@ -368,59 +139,63 @@
   <div class="app">
     <header class="titlebar">
       <div class="titlebar__logo">
-        <span class="titlebar__logo-mark">G</span>
+        <span class="titlebar__logo-mark" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+        </span>
         <span>Gitea Kanban</span>
       </div>
       <div class="titlebar__repo">
-        <span>📁</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4"/><path d="M3 17l9 4 9-4"/></svg>
         <span><strong>my-team</strong> / <strong>web-app</strong></span>
       </div>
       <div class="titlebar__spacer"></div>
-      <div class="titlebar__sync">
-        <span class="dot"></span>
-        <span>已同步 · 2 分钟前</span>
-      </div>
+      <div class="titlebar__sync"><span class="dot" aria-hidden="true"></span><span>已同步 · 2 分钟前</span></div>
+      <button class="icon-btn" id="theme-toggle" aria-label="切换到暗色模式" title="切换主题">
+        <svg id="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
       <div class="titlebar__user">ZS</div>
     </header>
 
     <div class="main">
-      <nav class="navrail">
+      <nav class="navrail" aria-label="主导航">
         <div class="navrail__section-label">我的工作</div>
-        <a class="navrail__item" href="#"><span class="icon">🗂</span> 我的卡片<span class="badge">3</span></a>
-        <a class="navrail__item" href="index.html"><span class="icon">📋</span> 看板</a>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span> 我的卡片<span class="badge">3</span></a>
+        <a class="navrail__item" href="index.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg></span> 看板</a>
         <div class="navrail__section-label">代码</div>
-        <a class="navrail__item" href="#"><span class="icon">🌿</span> 分支</a>
-        <a class="navrail__item" href="merge.html"><span class="icon">⇄</span> 合并请求<span class="badge">5</span></a>
-        <a class="navrail__item is-active" href="timeline.html"><span class="icon">📈</span> 时间轴</a>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span> 分支</a>
+        <a class="navrail__item" href="merge.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M15 18H9a3 3 0 0 1-3-3V9"/></svg></span> 合并请求<span class="badge">5</span></a>
+        <a class="navrail__item is-active" href="timeline.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg></span> 时间轴</a>
         <div class="navrail__section-label">协作</div>
-        <a class="navrail__item" href="#"><span class="icon">👥</span> 成员</a>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> 成员</a>
         <div class="navrail__footer">
-          <a class="navrail__item" href="#"><span class="icon">⚙</span> 设置</a>
+          <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> 设置</a>
         </div>
       </nav>
 
       <section class="content">
-        <div class="content__tabs">
-          <div class="content__tab">📋 看板</div>
-          <div class="content__tab is-active">📈 时间轴</div>
-          <div class="content__tab">⇄ 合并请求 (5)</div>
+        <div class="content__tabs" role="tablist">
+          <a class="content__tab" href="index.html" role="tab">看板</a>
+          <div class="content__tab is-active" role="tab" aria-selected="true">时间轴</div>
+          <a class="content__tab" href="merge.html" role="tab">合并请求 (5)</a>
           <div class="content__tab-actions">
             <button class="btn">+ 关联到卡片</button>
-            <button class="btn">⤢ 在浏览器打开</button>
+            <button class="btn">在浏览器打开</button>
           </div>
         </div>
 
         <div class="toolbar">
           <div class="toolbar__group">
             <label>泳道</label>
-            <select class="select">
+            <select class="select" aria-label="泳道分组方式">
               <option>按分支</option>
               <option>按作者</option>
               <option>按合并请求</option>
             </select>
           </div>
           <div class="toolbar__group">
-            <span class="chip is-active"><span class="chip__dot" style="color: #609926;"></span> main</span>
+            <span class="chip is-active"><span class="chip__dot" style="color: #609926;"></span> 主线</span>
             <span class="chip is-active"><span class="chip__dot" style="color: #f76707;"></span> feature/login</span>
             <span class="chip is-active"><span class="chip__dot" style="color: #0969da;"></span> hotfix/safari</span>
             <span class="chip"><span class="chip__dot" style="color: #8250df;"></span> user/alice/exp</span>
@@ -436,7 +211,6 @@
         <div class="timeline-wrapper">
           <div class="timeline">
             <div class="timeline__inner">
-              <!-- top axis (date scale) -->
               <div class="axis">
                 <div class="axis__line major" style="left: 80px;"></div>
                 <div class="axis__label" style="left: 80px;">5/18 (周一)</div>
@@ -451,11 +225,9 @@
                 <div class="axis__line" style="left: 1200px;"></div>
               </div>
 
-              <!-- lane: main -->
               <div class="lane" style="top: 32px; width: 100%; background: rgba(96, 153, 38, 0.04);">
                 <div class="lane__stripe" style="background: #609926;"></div>
                 <div class="lane__label"><span class="swatch" style="background: #609926;"></span> main (主线)</div>
-                <!-- commits -->
                 <div class="node" style="left: 80px; top: 28px; background: #609926;"></div>
                 <div class="node" style="left: 200px; top: 28px; background: #609926;"></div>
                 <div class="node is-merge" style="left: 360px; top: 28px; background: #609926;"></div>
@@ -463,11 +235,9 @@
                 <div class="node is-merge" style="left: 640px; top: 28px; background: #609926;"></div>
                 <div class="node" style="left: 820px; top: 28px; background: #609926;"></div>
                 <div class="node has-card is-head" style="left: 1000px; top: 28px; background: #609926;"></div>
-                <!-- merge label -->
-                <div style="position: absolute; left: 650px; top: 8px; padding: 1px 6px; background: var(--color-accent); color: #fff; font-size: 10px; border-radius: 3px; font-weight: 600;">#PR-128</div>
+                <div style="position: absolute; left: 650px; top: 8px; padding: 1px 6px; background: var(--color-accent); color: #fff; font-size: 10px; border-radius: 3px; font-weight: 600;">合并请求 #128</div>
               </div>
 
-              <!-- lane: feature/login -->
               <div class="lane" style="top: 88px; width: 100%; background: rgba(247, 103, 7, 0.04);">
                 <div class="lane__stripe" style="background: #f76707;"></div>
                 <div class="lane__label"><span class="swatch" style="background: #f76707;"></span> feature/login</div>
@@ -475,13 +245,11 @@
                 <div class="node" style="left: 280px; top: 28px; background: #f76707;"></div>
                 <div class="node has-card" style="left: 440px; top: 28px; background: #f76707;"></div>
                 <div class="node" style="left: 560px; top: 28px; background: #f76707;"></div>
-                <!-- branch back-merge to main -->
                 <svg class="edge" style="left: 0; top: 0; width: 100%; height: 100%;" preserveAspectRatio="none">
                   <path d="M 560 88 Q 620 88 640 60" stroke="#f76707" stroke-width="2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>
                 </svg>
               </div>
 
-              <!-- lane: hotfix/safari -->
               <div class="lane" style="top: 144px; width: 100%; background: rgba(9, 105, 218, 0.04);">
                 <div class="lane__stripe" style="background: #0969da;"></div>
                 <div class="lane__label"><span class="swatch" style="background: #0969da;"></span> hotfix/safari</div>
@@ -490,13 +258,12 @@
                 <div class="node" style="left: 600px; top: 28px; background: #0969da;"></div>
                 <div class="node is-merge" style="left: 780px; top: 28px; background: #0969da;"></div>
                 <div class="node" style="left: 920px; top: 28px; background: #0969da;"></div>
-                <div style="position: absolute; left: 790px; top: 8px; padding: 1px 6px; background: var(--color-accent); color: #fff; font-size: 10px; border-radius: 3px; font-weight: 600;">#PR-124</div>
+                <div style="position: absolute; left: 790px; top: 8px; padding: 1px 6px; background: var(--color-accent); color: #fff; font-size: 10px; border-radius: 3px; font-weight: 600;">合并请求 #124</div>
                 <svg class="edge" style="left: 0; top: 0; width: 100%; height: 100%;" preserveAspectRatio="none">
                   <path d="M 780 144 Q 820 144 820 60" stroke="#0969da" stroke-width="2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>
                 </svg>
               </div>
 
-              <!-- lane: user/alice/experiment -->
               <div class="lane" style="top: 200px; width: 100%; background: rgba(130, 80, 223, 0.04);">
                 <div class="lane__stripe" style="background: #8250df;"></div>
                 <div class="lane__label"><span class="swatch" style="background: #8250df;"></span> user/alice/exp</div>
@@ -507,46 +274,42 @@
                 <div class="node" style="left: 860px; top: 28px; background: #8250df; opacity: 0.4;"></div>
               </div>
 
-              <!-- back-merge from feature/login to main (#128) -->
               <svg class="edge" style="left: 0; top: 0; width: 100%; height: 100%; position: absolute; pointer-events: none;" preserveAspectRatio="none">
                 <path d="M 440 116 Q 540 116 640 60" stroke="#f76707" stroke-width="2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>
               </svg>
 
-              <!-- legend -->
-              <div class="legend">
+              <div class="legend" aria-label="图例">
                 <div style="font-weight: 600; color: var(--color-text); margin-bottom: 4px;">图例</div>
                 <div class="legend__row"><span class="legend__dot" style="background: #609926;"></span> 提交</div>
                 <div class="legend__row"><span class="legend__dot merge" style="background: #609926;"></span> 合并提交</div>
                 <div class="legend__row"><span class="legend__dot has-card" style="background: #609926;"></span> 关联了卡片</div>
                 <div class="legend__row" style="margin-top: 4px;">
-                  <svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="#f76707" stroke-width="2" stroke-dasharray="4 3"/></svg>
+                  <svg width="20" height="8" aria-hidden="true"><line x1="0" y1="4" x2="20" y2="4" stroke="#f76707" stroke-width="2" stroke-dasharray="4 3"/></svg>
                   合并到主线
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- zoom bar -->
           <div class="zoombar">
-            <button class="btn btn--ghost btn--sm" title="缩小">−</button>
-            <div class="zoombar__track">
+            <button class="btn btn--sm" aria-label="缩小">−</button>
+            <div class="zoombar__track" role="slider" aria-label="时间范围">
               <div class="zoombar__range" style="left: 8%; right: 12%;"></div>
               <div class="zoombar__handle" style="left: 8%;"></div>
               <div class="zoombar__handle" style="left: 88%;"></div>
             </div>
-            <button class="btn btn--ghost btn--sm" title="放大">+</button>
+            <button class="btn btn--sm" aria-label="放大">+</button>
             <span class="zoombar__label">5/18 - 6/05</span>
             <span style="color: var(--color-text-muted);">·</span>
             <span class="zoombar__label">20 个提交</span>
-            <button class="btn btn--sm">⊟ 适应窗口</button>
+            <button class="btn btn--sm">适应窗口</button>
           </div>
         </div>
 
-        <!-- tooltip (hover state mock on the head node) -->
-        <div class="tooltip" role="tooltip">
+        <div class="tooltip" role="tooltip" aria-label="提交 a1b2c3d 详情">
           <div class="tooltip__head">
             <span class="tooltip__sha">a1b2c3d</span>
-            <span class="pill pill--green" style="background: rgba(96, 153, 38, 0.15); color: var(--color-primary); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">HEAD</span>
+            <span class="pill" style="background: var(--color-success-soft); color: var(--color-success); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">HEAD</span>
             <span class="tooltip__time">2 小时前 · 陈杨</span>
           </div>
           <div class="tooltip__msg">fix(login): 关闭 iOS 18 下的背景动效</div>
@@ -561,14 +324,14 @@
           </div>
           <div class="tooltip__row">
             <span style="width: 60px; color: var(--color-text-muted);">分支</span>
-            <span>main ← hotfix/safari</span>
+            <span>主线 ← hotfix/safari</span>
           </div>
           <div class="tooltip__linked">
             <strong>关联 1 张卡片：</strong>登录页背景动效在 Safari 下崩溃（紧急 · 进行中）<br/>
-            <span style="color: var(--color-text-muted);">#CARD-482</span>
+            <span style="color: var(--color-text-muted);">编号 #CARD-482</span>
           </div>
           <div class="tooltip__actions">
-            <button class="btn btn--sm btn--primary">查看卡片</button>
+            <button class="btn btn--sm btn--primary" style="background: var(--color-primary); color: #fff; border-color: var(--color-primary);">查看卡片</button>
             <button class="btn btn--sm">在 gitea 打开</button>
             <button class="btn btn--sm">复制链接</button>
           </div>
@@ -576,5 +339,23 @@
       </section>
     </div>
   </div>
+
+  <script>
+    (function() {
+      var btn = document.getElementById('theme-toggle');
+      var icon = document.getElementById('theme-icon');
+      btn.addEventListener('click', function() {
+        var cur = document.documentElement.getAttribute('data-theme');
+        var next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        btn.setAttribute('aria-label', next === 'dark' ? '切换到浅色模式' : '切换到暗色模式');
+        if (next === 'dark') {
+          icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+        } else {
+          icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

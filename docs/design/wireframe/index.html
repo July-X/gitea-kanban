@@ -5,15 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gitea Kanban · 看板主页</title>
   <style>
-    /* ===== design tokens (gitea 风格 + 暗色变量) ===== */
+    /* ============================================================
+       Design tokens — 来自 design-system/gitea-kanban/OVERRIDE.md
+       (OVERRIDE 覆盖 MASTER 的 #22C55E / Fira Code+Sans / 默认深色)
+       ============================================================ */
     :root {
       --color-primary: #609926;
       --color-primary-hover: #54a31d;
+      --color-primary-active: #4d8a1a;
       --color-primary-soft: rgba(96, 153, 38, 0.12);
       --color-accent: #f76707;
-      --color-warning: #f0ad4e;
-      --color-danger: #cf222e;
-      --color-info: #0969da;
+      --color-accent-soft: rgba(247, 103, 7, 0.12);
       --color-text: #1f2328;
       --color-text-secondary: #59636e;
       --color-text-muted: #8b949e;
@@ -22,28 +24,29 @@
       --color-bg-hover: #eef1f4;
       --color-border: #d0d7de;
       --color-border-strong: #afb8c1;
-      --shadow-sm: 0 1px 0 rgba(31, 35, 40, 0.04);
+      --color-success: #1a7f37;
+      --color-success-soft: rgba(26, 127, 55, 0.12);
+      --color-warning: #9a6700;
+      --color-warning-soft: rgba(154, 103, 0, 0.12);
+      --color-danger: #cf222e;
+      --color-danger-soft: rgba(207, 34, 46, 0.12);
+      --color-info: #0969da;
+      --color-info-soft: rgba(9, 105, 218, 0.12);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
       --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
-      --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.2);
+      --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.20);
       --radius-sm: 4px;
       --radius-md: 6px;
       --radius-lg: 8px;
-      --space-1: 4px;
-      --space-2: 8px;
-      --space-3: 12px;
-      --space-4: 16px;
-      --space-5: 24px;
-      --space-6: 32px;
-      --font-xs: 11px;
-      --font-sm: 13px;
-      --font-md: 14px;
-      --font-lg: 16px;
-      --font-xl: 20px;
-      --font-2xl: 24px;
+      --space-1: 4px; --space-2: 8px; --space-3: 12px;
+      --space-4: 16px; --space-5: 24px; --space-6: 32px;
+      --font-xs: 11px; --font-sm: 13px; --font-md: 14px;
+      --font-lg: 16px; --font-xl: 20px; --font-2xl: 24px;
+      --t-fast: 150ms; --t-base: 200ms; --t-slow: 300ms;
+      --ease: cubic-bezier(0.2, 0, 0, 1);
       --titlebar-h: 48px;
       --navrail-w: 224px;
     }
-
     [data-theme='dark'] {
       --color-text: #e6edf3;
       --color-text-secondary: #adbac7;
@@ -53,46 +56,54 @@
       --color-bg-hover: #1c222b;
       --color-border: #30363d;
       --color-border-strong: #444c56;
-      --color-primary-soft: rgba(96, 153, 38, 0.22);
+      --color-success: #3fb950;
+      --color-warning: #d29922;
+      --color-danger: #f85149;
+      --color-info: #58a6ff;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
+      --shadow-md: 0 3px 6px rgba(0,0,0,0.6);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,0.7);
     }
-
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
       font-size: var(--font-md);
       color: var(--color-text);
       background: var(--color-bg);
       -webkit-font-smoothing: antialiased;
+      transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
+    }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* ====== focus ring (MASTER §a11y) ====== */
+    :focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+      box-shadow: 0 0 0 4px rgba(96, 153, 38, 0.25);
+      border-radius: var(--radius-sm);
+    }
+    /* ====== reduced-motion respect ====== */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
 
-    /* ===== app shell ===== */
-    .app {
-      display: grid;
-      grid-template-rows: var(--titlebar-h) 1fr;
-      height: 100vh;
-    }
+    /* ====== app shell ====== */
+    .app { display: grid; grid-template-rows: var(--titlebar-h) 1fr; height: 100vh; }
 
-    /* ===== title bar ===== */
+    /* ====== title bar ====== */
     .titlebar {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
+      display: flex; align-items: center; gap: var(--space-3);
       padding: 0 var(--space-4);
       background: var(--color-bg-elevated);
       border-bottom: 1px solid var(--color-border);
-      -webkit-app-region: drag;
     }
-    .titlebar > * { -webkit-app-region: no-drag; }
-    .titlebar__logo {
-      display: flex; align-items: center; gap: var(--space-2);
-      font-weight: 600; color: var(--color-primary);
-    }
+    .titlebar__logo { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; color: var(--color-primary); }
     .titlebar__logo-mark {
       width: 24px; height: 24px;
       background: var(--color-primary); color: #fff;
       border-radius: var(--radius-sm);
-      display: grid; place-items: center; font-size: 14px;
+      display: grid; place-items: center;
     }
     .titlebar__repo {
       display: flex; align-items: center; gap: var(--space-2);
@@ -102,13 +113,11 @@
       background: var(--color-bg);
       font-size: var(--font-sm);
       cursor: pointer;
+      transition: background-color var(--t-base) var(--ease);
     }
     .titlebar__repo:hover { background: var(--color-bg-hover); }
     .titlebar__repo strong { font-weight: 600; }
-    .titlebar__repo small { color: var(--color-text-muted); }
-
     .titlebar__spacer { flex: 1; }
-
     .titlebar__search {
       width: 360px; height: 28px;
       padding: 0 var(--space-3);
@@ -119,438 +128,191 @@
       font-size: var(--font-sm);
       display: flex; align-items: center; gap: var(--space-2);
     }
-    .titlebar__search input {
-      flex: 1; border: none; outline: none; background: transparent;
-      color: inherit; font: inherit;
-    }
-    .titlebar__search kbd {
-      font-size: var(--font-xs);
-      padding: 2px 6px;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm);
-      background: var(--color-bg-elevated);
-      color: var(--color-text-muted);
-    }
+    .titlebar__search input { flex: 1; border: none; outline: none; background: transparent; color: inherit; font: inherit; }
+    .titlebar__search kbd { font-size: var(--font-xs); padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-muted); }
 
     .titlebar__sync {
       display: flex; align-items: center; gap: var(--space-2);
-      padding: 4px 8px;
-      border-radius: var(--radius-sm);
+      padding: 4px 8px; border-radius: var(--radius-sm);
       font-size: var(--font-sm);
       color: var(--color-text-secondary);
     }
-    .titlebar__sync .dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--color-success);
-      box-shadow: 0 0 0 3px rgba(46, 160, 67, 0.15);
-    }
+    .titlebar__sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); }
     .titlebar__sync.is-offline .dot { background: var(--color-warning); }
     .titlebar__sync.is-offline { color: var(--color-warning); }
+
+    .icon-btn {
+      width: 28px; height: 28px;
+      display: grid; place-items: center;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
+    }
+    .icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text); }
 
     .titlebar__user {
       width: 28px; height: 28px; border-radius: 50%;
       background: var(--color-primary); color: #fff;
-      display: grid; place-items: center; font-size: var(--font-sm);
-      font-weight: 600;
+      display: grid; place-items: center; font-size: var(--font-sm); font-weight: 600;
     }
 
-    /* ===== main area ===== */
-    .main {
-      display: grid;
-      grid-template-columns: var(--navrail-w) 1fr;
-      min-height: 0;
-    }
+    /* ====== main ====== */
+    .main { display: grid; grid-template-columns: var(--navrail-w) 1fr; min-height: 0; }
 
-    /* ===== nav rail ===== */
-    .navrail {
-      background: var(--color-bg-elevated);
-      border-right: 1px solid var(--color-border);
-      padding: var(--space-3) var(--space-2);
-      display: flex; flex-direction: column; gap: 2px;
-      overflow-y: auto;
-    }
-    .navrail__section-label {
-      font-size: var(--font-xs);
-      text-transform: uppercase;
-      color: var(--color-text-muted);
-      padding: var(--space-2) var(--space-3) var(--space-1);
-      letter-spacing: 0.04em;
-    }
+    /* ====== nav rail ====== */
+    .navrail { background: var(--color-bg-elevated); border-right: 1px solid var(--color-border); padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+    .navrail__section-label { font-size: var(--font-xs); text-transform: uppercase; color: var(--color-text-muted); padding: var(--space-2) var(--space-3) var(--space-1); letter-spacing: 0.04em; }
     .navrail__item {
       display: flex; align-items: center; gap: var(--space-3);
       padding: 6px var(--space-3);
       border-radius: var(--radius-sm);
-      cursor: pointer;
-      color: var(--color-text);
+      cursor: pointer; color: var(--color-text);
       font-size: var(--font-sm);
       text-decoration: none;
+      transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
     }
     .navrail__item:hover { background: var(--color-bg-hover); }
-    .navrail__item.is-active {
-      background: var(--color-primary-soft);
-      color: var(--color-primary);
-      font-weight: 600;
-    }
-    .navrail__item .icon {
-      width: 16px; height: 16px;
-      display: inline-grid; place-items: center;
-      color: currentColor;
-    }
-    .navrail__item .badge {
-      margin-left: auto;
-      font-size: var(--font-xs);
-      padding: 1px 6px;
-      border-radius: 10px;
-      background: var(--color-bg);
-      color: var(--color-text-secondary);
-      border: 1px solid var(--color-border);
-      min-width: 22px; text-align: center;
-    }
-    .navrail__item.is-active .badge {
-      background: var(--color-primary);
-      color: #fff;
-      border-color: var(--color-primary);
-    }
+    .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .navrail__item .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; }
+    .navrail__item .badge { margin-left: auto; font-size: var(--font-xs); padding: 1px 6px; border-radius: 10px; background: var(--color-bg); color: var(--color-text-secondary); border: 1px solid var(--color-border); min-width: 22px; text-align: center; }
+    .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+    .navrail__footer { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
 
-    .navrail__footer {
-      margin-top: auto;
-      padding-top: var(--space-3);
-      border-top: 1px solid var(--color-border);
-    }
-
-    /* ===== content area ===== */
-    .content {
-      display: flex; flex-direction: column;
-      min-width: 0; min-height: 0;
-    }
-    .content__tabs {
-      display: flex; align-items: center;
-      padding: 0 var(--space-4);
-      border-bottom: 1px solid var(--color-border);
-      gap: var(--space-4);
-      height: 40px;
-      flex-shrink: 0;
-    }
-    .content__tab {
-      height: 100%;
-      display: flex; align-items: center;
-      padding: 0 var(--space-2);
-      border-bottom: 2px solid transparent;
-      color: var(--color-text-secondary);
-      font-size: var(--font-sm);
-      cursor: pointer;
-    }
-    .content__tab.is-active {
-      color: var(--color-text);
-      border-bottom-color: var(--color-primary);
-      font-weight: 600;
-    }
+    /* ====== content ====== */
+    .content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .content__tabs { display: flex; align-items: center; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); gap: var(--space-4); height: 40px; flex-shrink: 0; }
+    .content__tab { height: 100%; display: flex; align-items: center; padding: 0 var(--space-2); border-bottom: 2px solid transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
+    .content__tab.is-active { color: var(--color-text); border-bottom-color: var(--color-primary); font-weight: 600; }
+    .content__tab:hover { color: var(--color-text); }
     .content__tab-actions { margin-left: auto; display: flex; gap: var(--space-2); }
 
-    .btn {
-      height: 28px; padding: 0 var(--space-3);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm);
-      background: var(--color-bg);
-      color: var(--color-text);
-      font-size: var(--font-sm);
-      cursor: pointer;
-      display: inline-flex; align-items: center; gap: var(--space-2);
-    }
+    .btn { height: 28px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
     .btn:hover { background: var(--color-bg-hover); }
-    .btn--primary {
-      background: var(--color-primary);
-      border-color: var(--color-primary);
-      color: #fff;
-    }
-    .btn--primary:hover { background: var(--color-primary-hover); }
+    .btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+    .btn--primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
     .btn--ghost { border-color: transparent; background: transparent; }
     .btn--sm { height: 24px; padding: 0 var(--space-2); font-size: var(--font-xs); }
 
-    .content__filterbar {
-      display: flex; align-items: center; gap: var(--space-2);
-      padding: var(--space-3) var(--space-4);
-      border-bottom: 1px solid var(--color-border);
-      background: var(--color-bg-elevated);
-    }
-    .chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 2px 8px;
-      border-radius: 12px;
-      background: var(--color-bg);
-      border: 1px solid var(--color-border);
-      font-size: var(--font-xs);
-      color: var(--color-text-secondary);
-    }
-    .chip.is-active {
-      background: var(--color-primary-soft);
-      border-color: var(--color-primary);
-      color: var(--color-primary);
-    }
+    .content__filterbar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-bg-elevated); }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--color-bg); border: 1px solid var(--color-border); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
+    .chip:hover { background: var(--color-bg-hover); }
+    .chip.is-active { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); }
     .chip__close { cursor: pointer; opacity: 0.6; }
     .chip__close:hover { opacity: 1; }
 
-    /* ===== board ===== */
-    .board {
-      flex: 1; min-height: 0;
-      overflow-x: auto;
-      padding: var(--space-4);
-      display: flex; gap: var(--space-3);
-    }
-    .column {
-      flex: 0 0 280px;
-      background: var(--color-bg-elevated);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      display: flex; flex-direction: column;
-      max-height: 100%;
-    }
-    .column__header {
-      display: flex; align-items: center; gap: var(--space-2);
-      padding: var(--space-3);
-      border-bottom: 1px solid var(--color-border);
-    }
-    .column__title {
-      font-weight: 600; font-size: var(--font-sm);
-      display: flex; align-items: center; gap: var(--space-2);
-    }
-    .column__title .swatch {
-      width: 8px; height: 8px; border-radius: 50%;
-    }
-    .column__count {
-      font-size: var(--font-xs);
-      color: var(--color-text-muted);
-      background: var(--color-bg);
-      border: 1px solid var(--color-border);
-      padding: 1px 6px; border-radius: 10px;
-    }
-    .column__wip {
-      font-size: var(--font-xs);
-      color: var(--color-text-muted);
-      margin-left: auto;
-    }
+    /* ====== board ====== */
+    .board { flex: 1; min-height: 0; overflow-x: auto; padding: var(--space-4); display: flex; gap: var(--space-3); }
+    .column { flex: 0 0 280px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: var(--radius-md); display: flex; flex-direction: column; max-height: 100%; }
+    .column__header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); border-bottom: 1px solid var(--color-border); }
+    .column__title { font-weight: 600; font-size: var(--font-sm); display: flex; align-items: center; gap: var(--space-2); }
+    .column__title .swatch { width: 8px; height: 8px; border-radius: 50%; }
+    .column__count { font-size: var(--font-xs); color: var(--color-text-muted); background: var(--color-bg); border: 1px solid var(--color-border); padding: 1px 6px; border-radius: 10px; }
+    .column__wip { font-size: var(--font-xs); color: var(--color-text-muted); margin-left: auto; }
     .column__wip.is-over { color: var(--color-danger); font-weight: 600; }
-    .column__add {
-      width: 24px; height: 24px; padding: 0;
-      display: grid; place-items: center;
-    }
-    .column__body {
-      flex: 1; overflow-y: auto;
-      padding: var(--space-2);
-      display: flex; flex-direction: column; gap: var(--space-2);
-    }
-    .column__add-card {
-      padding: var(--space-2) var(--space-3);
-      color: var(--color-text-muted);
-      font-size: var(--font-sm);
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      text-align: left;
-    }
-    .column__add-card:hover { background: var(--color-bg-hover); color: var(--color-text); }
+    .column__add { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; }
+    .column__body { flex: 1; overflow-y: auto; padding: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); }
+    .column__add-card { padding: var(--space-2) var(--space-3); color: var(--color-text-muted); font-size: var(--font-sm); border-radius: var(--radius-sm); cursor: pointer; text-align: left; background: transparent; border: 1px dashed transparent; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
+    .column__add-card:hover { background: var(--color-bg-hover); color: var(--color-text); border-color: var(--color-border); }
 
-    .card {
-      background: var(--color-bg);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm);
-      padding: var(--space-3);
-      cursor: grab;
-      box-shadow: var(--shadow-sm);
-    }
+    .card { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-3); cursor: grab; box-shadow: var(--shadow-sm); transition: border-color var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease); }
     .card:hover { border-color: var(--color-border-strong); box-shadow: var(--shadow-md); }
-    .card.is-dragging { opacity: 0.5; }
     .card.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
-    .card__title {
-      font-size: var(--font-sm);
-      font-weight: 500;
-      line-height: 1.4;
-      margin-bottom: var(--space-2);
-    }
-    .card__labels {
-      display: flex; flex-wrap: wrap; gap: 4px;
-      margin-bottom: var(--space-2);
-    }
-    .label {
-      display: inline-block;
-      padding: 1px 8px;
-      border-radius: 10px;
-      font-size: var(--font-xs);
-      color: #fff;
-    }
-    .card__meta {
-      display: flex; align-items: center; gap: var(--space-3);
-      font-size: var(--font-xs);
-      color: var(--color-text-muted);
-    }
+    .card__title { font-size: var(--font-sm); font-weight: 500; line-height: 1.4; margin-bottom: var(--space-2); }
+    .card__labels { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-2); }
+    .label { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: var(--font-xs); color: #fff; }
+    .card__meta { display: flex; align-items: center; gap: var(--space-3); font-size: var(--font-xs); color: var(--color-text-muted); }
     .card__meta > * { display: flex; align-items: center; gap: 4px; }
-    .card__meta .avatar {
-      width: 18px; height: 18px; border-radius: 50%;
-      background: var(--color-info); color: #fff;
-      display: grid; place-items: center;
-      font-size: 10px; font-weight: 600;
-    }
-    .card__meta .commit-badge {
-      color: var(--color-accent);
-      font-weight: 600;
-    }
+    .card__meta .avatar { width: 18px; height: 18px; border-radius: 50%; background: var(--color-info); color: #fff; display: grid; place-items: center; font-size: 10px; font-weight: 600; }
+    .card__meta .commit-badge { color: var(--color-accent); font-weight: 600; }
     .card__meta .due.is-overdue { color: var(--color-danger); font-weight: 600; }
     .card__meta .due.is-soon { color: var(--color-warning); }
 
-    /* ===== card detail drawer (right side) ===== */
-    .drawer {
-      position: fixed;
-      top: var(--titlebar-h);
-      right: 0; bottom: 0;
-      width: 420px;
-      background: var(--color-bg);
-      border-left: 1px solid var(--color-border);
-      box-shadow: var(--shadow-lg);
-      padding: var(--space-4);
-      overflow-y: auto;
-      transform: translateX(0);
-    }
-    .drawer__close {
-      position: absolute; top: 12px; right: 12px;
-    }
-    .drawer__crumb {
-      font-size: var(--font-xs);
-      color: var(--color-text-muted);
-      margin-bottom: var(--space-2);
-    }
-    .drawer__title {
-      font-size: var(--font-xl);
-      font-weight: 600;
-      margin-bottom: var(--space-3);
-      padding-right: 32px;
-    }
-    .drawer__row {
-      display: flex; align-items: center; gap: var(--space-2);
-      padding: 6px 0;
-      font-size: var(--font-sm);
-      border-bottom: 1px solid var(--color-border);
-    }
+    /* ====== drawer ====== */
+    .drawer { position: fixed; top: var(--titlebar-h); right: 0; bottom: 0; width: 420px; background: var(--color-bg); border-left: 1px solid var(--color-border); box-shadow: var(--shadow-lg); padding: var(--space-4); overflow-y: auto; }
+    .drawer__close { position: absolute; top: 12px; right: 12px; }
+    .drawer__crumb { font-size: var(--font-xs); color: var(--color-text-muted); margin-bottom: var(--space-2); }
+    .drawer__title { font-size: var(--font-xl); font-weight: 600; margin-bottom: var(--space-3); padding-right: 32px; }
+    .drawer__row { display: flex; align-items: center; gap: var(--space-2); padding: 6px 0; font-size: var(--font-sm); border-bottom: 1px solid var(--color-border); }
     .drawer__row .label-text { color: var(--color-text-muted); width: 72px; flex-shrink: 0; }
-    .drawer__section {
-      margin-top: var(--space-4);
-    }
-    .drawer__section h4 {
-      font-size: var(--font-sm);
-      text-transform: uppercase;
-      color: var(--color-text-muted);
-      margin: 0 0 var(--space-2);
-      letter-spacing: 0.04em;
-    }
-    .drawer__desc {
-      font-size: var(--font-sm);
-      line-height: 1.6;
-      color: var(--color-text-secondary);
-    }
-    .commit-link {
-      display: flex; align-items: center; gap: var(--space-2);
-      padding: 6px 8px;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-sm);
-      font-size: var(--font-xs);
-      margin-bottom: 4px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
+    .drawer__section { margin-top: var(--space-4); }
+    .drawer__section h4 { font-size: var(--font-sm); text-transform: uppercase; color: var(--color-text-muted); margin: 0 0 var(--space-2); letter-spacing: 0.04em; }
+    .drawer__desc { font-size: var(--font-sm); line-height: 1.6; color: var(--color-text-secondary); }
+    .commit-link { display: flex; align-items: center; gap: var(--space-2); padding: 6px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: var(--font-xs); margin-bottom: 4px; }
     .commit-link .sha { color: var(--color-accent); font-weight: 600; }
     .commit-link .msg { color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
-    /* ===== global toast (offline) ===== */
-    .toast {
-      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-      background: var(--color-warning); color: #fff;
-      padding: 10px 16px;
-      border-radius: var(--radius-md);
-      font-size: var(--font-sm);
-      display: flex; align-items: center; gap: var(--space-2);
-      box-shadow: var(--shadow-md);
-    }
+    /* ====== toast ====== */
+    .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--color-warning); color: #fff; padding: 10px 16px; border-radius: var(--radius-md); font-size: var(--font-sm); display: flex; align-items: center; gap: var(--space-2); box-shadow: var(--shadow-md); }
 
-    /* ===== mock badges ===== */
-    .pill {
-      display: inline-block;
-      padding: 1px 6px;
-      border-radius: 4px;
-      font-size: var(--font-xs);
-      font-weight: 600;
-    }
-    .pill--green { background: rgba(96, 153, 38, 0.15); color: var(--color-primary); }
-    .pill--orange { background: rgba(247, 103, 7, 0.15); color: var(--color-accent); }
-    .pill--red { background: rgba(207, 34, 46, 0.15); color: var(--color-danger); }
-    .pill--blue { background: rgba(9, 105, 218, 0.15); color: var(--color-info); }
-    .pill--gray { background: rgba(139, 148, 158, 0.18); color: var(--color-text-muted); }
+    /* ====== pills (状态徽章) ====== */
+    .pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; font-size: var(--font-xs); font-weight: 600; }
+    .pill--green { background: var(--color-success-soft); color: var(--color-success); }
+    .pill--orange { background: var(--color-accent-soft); color: var(--color-accent); }
+    .pill--red { background: var(--color-danger-soft); color: var(--color-danger); }
+    .pill--blue { background: var(--color-info-soft); color: var(--color-info); }
+    .pill--gray { background: var(--color-bg-hover); color: var(--color-text-muted); }
   </style>
 </head>
 <body>
   <div class="app">
-    <!-- ===== title bar ===== -->
+    <!-- ====== title bar ====== -->
     <header class="titlebar">
       <div class="titlebar__logo">
-        <span class="titlebar__logo-mark">G</span>
+        <span class="titlebar__logo-mark" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+        </span>
         <span>Gitea Kanban</span>
       </div>
       <div class="titlebar__repo" title="点击切换仓库">
-        <span>📁</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4"/><path d="M3 17l9 4 9-4"/></svg>
         <span><strong>my-team</strong> / <strong>web-app</strong></span>
-        <small style="color: var(--color-text-muted);">▾</small>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="titlebar__spacer"></div>
       <div class="titlebar__search">
-        <span>🔍</span>
-        <input type="text" placeholder="搜索卡片、合并请求、提交…" />
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="搜索卡片、合并请求、提交…" aria-label="全局搜索" />
         <kbd>⌘K</kbd>
       </div>
       <div class="titlebar__sync" title="最近一次同步：2 分钟前">
-        <span class="dot"></span>
+        <span class="dot" aria-hidden="true"></span>
         <span>已同步 · 2 分钟前</span>
       </div>
+      <button class="icon-btn" id="theme-toggle" aria-label="切换到暗色模式" title="切换主题">
+        <svg id="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
       <div class="titlebar__user" title="张三 (产品经理)">ZS</div>
     </header>
 
-    <!-- ===== main ===== -->
+    <!-- ====== main ====== -->
     <div class="main">
-      <!-- nav rail -->
-      <nav class="navrail">
+      <nav class="navrail" aria-label="主导航">
         <div class="navrail__section-label">我的工作</div>
-        <a class="navrail__item" href="#">
-          <span class="icon">🗂</span> 我的卡片
-          <span class="badge">3</span>
-        </a>
-        <a class="navrail__item is-active" href="#">
-          <span class="icon">📋</span> 看板
-        </a>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span> 我的卡片<span class="badge">3</span></a>
+        <a class="navrail__item is-active" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg></span> 看板</a>
         <div class="navrail__section-label">代码</div>
-        <a class="navrail__item" href="#">
-          <span class="icon">🌿</span> 分支
-        </a>
-        <a class="navrail__item" href="#">
-          <span class="icon">⇄</span> 合并请求
-          <span class="badge">5</span>
-        </a>
-        <a class="navrail__item" href="#">
-          <span class="icon">📈</span> 时间轴
-        </a>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span> 分支</a>
+        <a class="navrail__item" href="merge.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M15 18H9a3 3 0 0 1-3-3V9"/></svg></span> 合并请求<span class="badge">5</span></a>
+        <a class="navrail__item" href="timeline.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg></span> 时间轴</a>
         <div class="navrail__section-label">协作</div>
-        <a class="navrail__item" href="#">
-          <span class="icon">👥</span> 成员
-        </a>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> 成员</a>
         <div class="navrail__footer">
-          <a class="navrail__item" href="#">
-            <span class="icon">⚙</span> 设置
-          </a>
+          <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> 设置</a>
         </div>
       </nav>
 
-      <!-- content -->
       <section class="content">
-        <div class="content__tabs">
-          <div class="content__tab is-active">📋 看板</div>
-          <div class="content__tab">📈 时间轴</div>
-          <div class="content__tab">⇄ 合并请求 (5)</div>
+        <div class="content__tabs" role="tablist">
+          <div class="content__tab is-active" role="tab" aria-selected="true">看板</div>
+          <a class="content__tab" href="timeline.html" role="tab">时间轴</a>
+          <a class="content__tab" href="merge.html" role="tab">合并请求 (5)</a>
           <div class="content__tab-actions">
-            <button class="btn">⇲ 导入</button>
+            <button class="btn">导入</button>
             <button class="btn">+ 新建看板</button>
             <button class="btn btn--primary">+ 新建卡片</button>
           </div>
@@ -565,7 +327,6 @@
           <span class="chip">截止：本周</span>
         </div>
 
-        <!-- board -->
         <div class="board">
           <!-- column 1: 待开始 -->
           <div class="column">
@@ -576,10 +337,10 @@
               </div>
               <span class="column__count">2</span>
               <span class="column__wip">上限 3</span>
-              <button class="btn btn--ghost btn--sm column__add">+</button>
+              <button class="btn btn--ghost btn--sm column__add" aria-label="添加卡片">+</button>
             </div>
             <div class="column__body">
-              <div class="card">
+              <div class="card" tabindex="0">
                 <div class="card__labels">
                   <span class="label" style="background: #0969da;">设计</span>
                 </div>
@@ -590,7 +351,7 @@
                   <span class="due">📅 5/30</span>
                 </div>
               </div>
-              <div class="card">
+              <div class="card" tabindex="0">
                 <div class="card__labels">
                   <span class="label" style="background: #9a6700;">文案</span>
                 </div>
@@ -600,7 +361,7 @@
                   <span class="due">📅 6/02</span>
                 </div>
               </div>
-              <div class="column__add-card">+ 添加卡片</div>
+              <button class="column__add-card">+ 添加卡片</button>
             </div>
           </div>
 
@@ -615,7 +376,7 @@
               <span class="column__wip is-over">上限 2 · 超 1</span>
             </div>
             <div class="column__body">
-              <div class="card is-selected">
+              <div class="card is-selected" tabindex="0" aria-label="当前选中卡片：登录页背景动效在 Safari 下崩溃">
                 <div class="card__labels">
                   <span class="label" style="background: #cf222e;">紧急</span>
                   <span class="label" style="background: #0969da;">前端</span>
@@ -627,7 +388,7 @@
                   <span class="due is-overdue">📅 5/28 逾期</span>
                 </div>
               </div>
-              <div class="card">
+              <div class="card" tabindex="0">
                 <div class="card__labels">
                   <span class="label" style="background: #0969da;">前端</span>
                 </div>
@@ -636,13 +397,13 @@
                   <span><span class="avatar" style="background: #0969da;">CY</span> 陈</span>
                 </div>
               </div>
-              <div class="card">
+              <div class="card" tabindex="0">
                 <div class="card__labels">
                   <span class="label" style="background: #609926;">后端</span>
                 </div>
                 <div class="card__title">/api/v2/users 接口分页 cursor 改造：避免深分页越界</div>
                 <div class="card__meta">
-                  <span title="关联 2 次提交 + 1 合并请求" class="commit-badge">● 2 提交 · 1 合并</span>
+                  <span title="关联 2 次提交 + 1 合并请求" class="commit-badge">● 2 提交 · 1 合并请求</span>
                   <span><span class="avatar" style="background: #8250df;">ZH</span> 周</span>
                 </div>
               </div>
@@ -659,23 +420,23 @@
               <span class="column__count">2</span>
             </div>
             <div class="column__body">
-              <div class="card">
+              <div class="card" tabindex="0">
                 <div class="card__labels">
                   <span class="label" style="background: #609926;">后端</span>
                 </div>
                 <div class="card__title">把订单状态机的日志改成结构化 JSON</div>
                 <div class="card__meta">
-                  <span title="合并请求 #128" class="commit-badge">⇄ PR #128</span>
+                  <span title="合并请求 #128" class="commit-badge">⇄ 合并请求 #128</span>
                   <span><span class="avatar" style="background: #8250df;">ZH</span> 周</span>
                 </div>
               </div>
-              <div class="card">
+              <div class="card" tabindex="0">
                 <div class="card__labels">
                   <span class="label" style="background: #9a6700;">文案</span>
                 </div>
                 <div class="card__title">更新注册流程的 6 处错误提示文案</div>
                 <div class="card__meta">
-                  <span title="合并请求 #130" class="commit-badge">⇄ PR #130</span>
+                  <span title="合并请求 #130" class="commit-badge">⇄ 合并请求 #130</span>
                   <span><span class="avatar" style="background: #f76707;">LY</span> 林</span>
                 </div>
               </div>
@@ -692,13 +453,13 @@
               <span class="column__count">1</span>
             </div>
             <div class="column__body">
-              <div class="card">
+              <div class="card" tabindex="0">
                 <div class="card__labels">
                   <span class="label" style="background: #6c757d;">运维</span>
                 </div>
                 <div class="card__title">生产 Redis 升级到 7.2（含 5 月停机维护窗口）</div>
                 <div class="card__meta">
-                  <span title="已合并到 main，5/24 上线" class="commit-badge">✓ 已合并 5/24</span>
+                  <span title="已合并到主线，5/24 上线" class="commit-badge">✓ 已合并 5/24</span>
                   <span><span class="avatar" style="background: #444c56;">SY</span> 孙</span>
                 </div>
               </div>
@@ -706,19 +467,16 @@
           </div>
         </div>
 
-        <!-- drawer (card detail) -->
         <aside class="drawer" aria-label="卡片详情">
           <button class="btn btn--ghost drawer__close" aria-label="关闭">✕</button>
-          <div class="drawer__crumb">
-            本期冲刺 · 进行中
-          </div>
+          <div class="drawer__crumb">本期冲刺 · 进行中</div>
           <h2 class="drawer__title">登录页背景动效在 Safari 下崩溃（iOS 18 复现）</h2>
 
           <div class="drawer__row">
             <span class="label-text">负责人</span>
             <span class="avatar" style="background: #0969da; width: 20px; height: 20px; font-size: 11px; display: inline-grid; place-items: center; border-radius: 50%; color: #fff;">CY</span>
             <span>陈杨</span>
-            <span class="pill pill--red" style="margin-left: 8px;">紧急</span>
+            <span class="pill pill--red" style="margin-left: 8px;">⚠ 紧急</span>
             <span class="pill pill--blue">前端</span>
           </div>
           <div class="drawer__row">
@@ -727,32 +485,32 @@
           </div>
           <div class="drawer__row">
             <span class="label-text">编号</span>
-            <span>#CARD-482</span>
+            <span class="mono">#CARD-482</span>
           </div>
 
           <div class="drawer__section">
             <h4>描述</h4>
             <p class="drawer__desc">
-              iOS 18 Safari 在执行 <code>backdrop-filter: blur()</code> + <code>transform: scale()</code>
+              iOS 18 Safari 在执行 <code class="mono">backdrop-filter: blur()</code> + <code class="mono">transform: scale()</code>
               组合时偶发白屏崩溃。已通过 Sentry 收到 47 例报告，影响 iPhone XS 及以上机型。
               计划：先关闭该动效做兜底，后续在 iOS 18.2 修复稳定后重新开启。
             </p>
           </div>
 
           <div class="drawer__section">
-            <h4>关联提交 (3) · <a href="#" style="color: var(--color-primary); text-decoration: none;">时间轴中查看 →</a></h4>
+            <h4>关联提交 (3) · <a href="timeline.html" style="color: var(--color-primary); text-decoration: none;">时间轴中查看 →</a></h4>
             <div class="commit-link">
-              <span class="sha">a1b2c3d</span>
+              <span class="sha mono">a1b2c3d</span>
               <span class="msg">fix(login): 关闭 iOS 18 下的背景动效</span>
               <span style="color: var(--color-text-muted);">2 小时前</span>
             </div>
             <div class="commit-link">
-              <span class="sha">9f8e7d6</span>
+              <span class="sha mono">9f8e7d6</span>
               <span class="msg">revert: 临时回退 transform scale 防崩溃</span>
               <span style="color: var(--color-text-muted);">昨天 16:20</span>
             </div>
             <div class="commit-link">
-              <span class="sha">5c4b3a2</span>
+              <span class="sha mono">5c4b3a2</span>
               <span class="msg">feat(login): 尝试用 will-change 优化</span>
               <span style="color: var(--color-text-muted);">5/25</span>
             </div>
@@ -761,7 +519,7 @@
           <div class="drawer__section">
             <h4>关联合并请求</h4>
             <div class="commit-link">
-              <span class="sha" style="color: var(--color-primary);">#124</span>
+              <span class="sha mono" style="color: var(--color-primary);">#124</span>
               <span class="msg" style="font-family: inherit;">fix: 关闭 iOS 18 下的背景动效</span>
               <span class="pill pill--orange">待合并</span>
             </div>
@@ -770,7 +528,7 @@
           <div class="drawer__section">
             <h4>最近活动</h4>
             <p class="drawer__desc" style="font-size: var(--font-xs);">
-              <strong>陈杨</strong> 添加了提交 <code>a1b2c3d</code> · 2 小时前<br/>
+              <strong>陈杨</strong> 添加了提交 <code class="mono">a1b2c3d</code> · 2 小时前<br/>
               <strong>张三</strong> 把它移到"进行中"列 · 昨天<br/>
               <strong>陈杨</strong> 创建卡片 · 5/24
             </p>
@@ -780,9 +538,28 @@
     </div>
   </div>
 
-  <div class="toast" role="status">
-    <span>⚠</span>
+  <div class="toast" role="status" aria-live="polite">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     <span>暂时连不上 gitea，已切到本地缓存。最近一次同步：<strong>2 小时前</strong>。<a href="#" style="color: #fff; text-decoration: underline; margin-left: 8px;">重试</a></span>
   </div>
+
+  <script>
+    // theme toggle (顶栏按钮, 验证默认浅色 + 暗色可切架构)
+    (function() {
+      var btn = document.getElementById('theme-toggle');
+      var icon = document.getElementById('theme-icon');
+      btn.addEventListener('click', function() {
+        var cur = document.documentElement.getAttribute('data-theme');
+        var next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        btn.setAttribute('aria-label', next === 'dark' ? '切换到浅色模式' : '切换到暗色模式');
+        if (next === 'dark') {
+          icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+        } else {
+          icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

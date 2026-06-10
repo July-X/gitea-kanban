@@ -43,6 +43,15 @@
    - "repo" → "仓库"
    - "maintainer" → "维护者"
    - "reviewer" → "审阅者"
+   - "rebase" → "变基"（hover 解释"重新整理提交顺序"）
+   - "squash" → "压缩"（hover 解释"把多个提交合成一个"）
+   - "cherry-pick" → "精选"（hover 解释"挑一个提交到另一个分支"）
+   - "revert" → "撤销"（hover 解释"生成一个新的反向提交"）
+   - "stash" → "暂存"（hover 解释"把未提交的改动收起来"）
+   - "force push" → "强制推送"（hover 解释"会覆盖远端历史"）+ 二级红色警告
+   - "protected branch" → "受保护分支"（hover 解释"默认禁止直接推送，需走合并请求"）
+   - "main" / "refs/heads/main" → "主线分支"
+   - "WIP" → "进行中"（gitea 习惯）
 
 2. **危险操作二次确认**（与 02-architecture.md 第 7 节一致）
    - 删分支 / 强推 / 合并冲突解决 / 关闭合并请求 → 必须弹窗二次确认

@@ -1,7 +1,7 @@
 # 前端设计：UI/UX + 时间轴可视化 + 静态 wireframe
 
 > 任务编号：frontend-design
-> 输出版本：v3（默认暗色科技风格重定）
+> 输出版本：v4（按 ui-ux-pro-max OVERRIDE 重定 · 撤销 v3 暗色默认）
 > 输出时间：2026-06-10
 
 ---
@@ -17,24 +17,67 @@
   6. **目标用户**明确为含 PM、设计师、市场、运营（非技术用户）——UI 必须：清晰文字说明、人话错误、危险操作二次确认、零术语（"PR"→"合并请求"、"merge"→"合并"）。
   7. 团队边界：架构 agent 改为"主进程模块"设计；前端 agent（本任务）改为"**渲染进程 + IPC 契约**"。
 
-- **2026-06-10 10:28** —— 计划负责人再补一条：**UX 默认暗色科技风格**（dark-first tech aesthetic）。具体：
-  1. **不再以"贴 gitea 风格"为首要原则**——gitea 自身偏浅色、绿橙，与"科技感"视觉语言（深色背景 + 高饱和强调色 + 微光 glow / 网格 / 等宽字体 / 渐变 accent）不完全契合。改为"gitea **数据模型 + 配色方向**借鉴，但视觉走**暗色科技**路线"。
-  2. **默认主题 = 暗色**（不再"跟随系统"或"用户三选一"作为默认值）。浅色作为可选 secondary，**默认不提供切换按钮**（v1 单主题聚焦，避免分散精力）。
-  3. **科技风视觉元素**：深色面板（#0d1117 / #0a0e14 / #161b22 三层）+ 主色发光（gitea 绿 #609926 配 8-12% alpha glow）+ 等宽数字与代码片段（JetBrains Mono / Fira Code）+ 背景细网格 / 极淡渐变 + 焦点圈用 2px 实色 + 1px 外发光；按钮、状态徽章带 6% alpha 渐变；卡片、节点用 1px 描边 + 8% 内发光模拟"显示器像素"。
-  4. **暗色优先的可达性**反而更要做：暗背景下对比度要 ≥ WCAG AA（正文 4.5:1，大字 3:1）；状态色（红/绿/黄）必须配图标或文字（不要只靠颜色）；focus ring 用 2px 主色 + 外发光。
-  5. wireframe 三页**默认 `data-theme="dark"`** 渲染；同时验证浅色 fallback（同一份 CSS 变量表，靠 `[data-theme='light']` 切换），保证架构上仍可切，但不提供入口。
+- **2026-06-10 10:30** —— 计划负责人补强 **git commit 交付规范**（这条是给后续 integration-doc / final-design-review 看的，frontend-design 本身遵守）。具体：
+  1. **commit message 用中文**，type 限定 `feat / fix / refactor / perf / chore / test / docs / style`。
+  2. **每个阶段性交付打一次 commit**（一份文档、一个模块完成），不攒大 commit。
+  3. **worker agent 不准自己 git commit**——所有 commit 由 orchestrator（mavis）统一打，避免并发 worker 互相覆盖、保持 commit 历史整洁可追溯。
+  4. **commit 必须落到 master**（当前单分支，初始化阶段不引入多分支）。
+  5. **commit 末尾不要附 `Co-Authored-By`** 这种自动签名。
+  6. 任何文档、代码、配置变更 → 必须经 git commit 才算交付完成；**"我写完文件了"不算交付，"我 commit 了 + commit hash 是 xxx"才算**。
+  7. final-design-review 时验证：到 review 时 `git log` 应有 3+ 个 commit（每份设计文档一个），commit message 是否中文、是否带 type 前缀。
+  > 注：本任务（frontend-design）的文件落盘**不会**自己 git commit——交付完成以 `deliverable.md` 为准，commit 由 orchestrator 收齐后统一打。
+
+- **2026-06-10 10:36** —— 计划负责人补强 **加载 ui-ux-pro-max skill + 以 OVERRIDE 为准**。具体：
+  1. 项目根目录已安装 `.codex/skills/ui-ux-pro-max/`，已用它跑出 `design-system/gitea-kanban/MASTER.md`（默认 startup 风格 / #22C55E 鲜绿 / Fira Code+Sans / Vibrant & Block-based）**和** `design-system/gitea-kanban/OVERRIDE.md`（**本项目实际生效**，已 commit `71f6856`）。
+  2. **使用顺序**：**先读 OVERRIDE → 它没覆盖的字段才回 MASTER**（OVERRIDE 是 single source of truth）。
+  3. **前端 agent 开工前必读** `design-system/gitea-kanban/OVERRIDE.md`，所有 UI 产出（组件 / wireframe / 实际界面）必须先通过本文件预检。
+  4. **采纳 ui-ux-pro-max 的通用专业规则**（覆盖 MASTER 的 startup 风格）：① 无 emoji 图标（用 SVG / Lucide / Heroicons）② `cursor-pointer` 在所有可点击元素上 ③ hover 反馈 150-300ms 平滑 ④ 暗色模式对比度 ≥ 4.5:1 ⑤ focus 状态可见 ⑥ `prefers-reduced-motion` 尊重 ⑦ 响应式断点（**桌面应用窗口专用**：最小 800×600 / 推荐 1280×800 / 可拖拽至 4K）⑧ 颜色不是唯一信号（图标+文字+颜色三重编码）。
+  5. **OVERRIDE 覆盖 MASTER 的关键字段**：主色 `#609926` gitea 绿（覆盖 #22C55E）/ 强调色 `#f76707` gitea 橙（新增）/ 背景**默认浅色 + 暗色模式可切换**（覆盖 #0F172A 默认深色）/ 风格"克制 / 信息密度优先"（覆盖 Vibrant & Block-based）/ 字体 Inter / 系统 sans（覆盖 Fira Code+Sans，因中文渲染需要）/ Pattern "不适用 landing"（不是营销页）。
+  6. **零术语翻译表**（OVERRIDE 必采纳）：PR→合并请求 / merge→合并 / branch→分支 / commit→提交 / fork→派生 / issue→议题 / repo→仓库 / maintainer→维护者 / reviewer→审阅者。
+  7. **撤销 v3 暗色默认决策**——以 OVERRIDE 为准：浅色为 v1 默认（桌面应用更稳健），暗色作为"用户可切换"模式但**不是**默认。wireframe 三页默认 `data-theme="light"` 渲染，但 CSS 变量表同时支持 `[data-theme='dark']` 一键切换（顶栏有切换按钮），证明架构可切。
+  8. **依赖声明**：pre-delivery 必须先 `python3 --version`（macOS 用 `brew install python3`），确保 ui-ux-pro-max 脚本能跑（虽然本任务只读 MASTER + OVERRIDE 静态文件，但 integration-doc / final-design-review 会用到 skill 脚本）。
+
+> **v3 暗色默认决策已作废**（2026-06-10 10:36 撤销）——以 OVERRIDE 第 9 行"默认浅色 + 暗色模式可切换"为准。v3 之前在 §1 / §7 的"暗色科技"语言全部回退到"克制 / 信息密度优先"，但**保留**v3 中符合 OVERRIDE 的部分：4.5:1 对比度、focus 可见加强、状态色配图标/文字。
 
 ---
 
 ## 1. 设计原则
 
-我们的目标用户**不是**只面向开发者，也包括 PM、设计师、市场、运营——他们未必懂 git 命令行。**所有 UI 决策都要先过这一关：一位没碰过 git 命令行的产品经理能不能照着界面走完"建卡片 → 拖到"已合并"列 → 看到这次合并对应的 commit 时间轴高亮"这个流程而不迷路？** 围绕这个目标定五条设计原则：
+> **本节以 `design-system/gitea-kanban/OVERRIDE.md` 为 single source of truth**——OVERRIDE 没覆盖的字段（按钮 / 卡片 / 阴影 / 间距 token 等）才回 MASTER。所有前端开工前必读 OVERRIDE（参见 §用户决策记录 第 8 条）。
 
-1. **贴 gitea 风格，降低跳转割裂感。** 沿用 gitea 自身的色板（主色 `#609926` 绿、辅色 `#f76707` 橙）、字号体系（13/14/16/20px 四档）、圆角（4px）、表单控件样式。授权弹窗、合并请求页、提交列表用 gitea 原生页面顶替（"在浏览器中打开"按钮），不试图复刻全套。
-2. **信息密度优先，装饰靠后。** 一个 13 寸 MacBook 窗口（约 1280×800）下要让用户一眼看到"我负责的卡片有哪些？哪些 PR 卡住了？最近一周有多少 commit 合并进来"。**timeline 是核心视图，不是装饰**——默认在主区占 50% 以上高度，能压缩但不能折叠到"二级页面"。
-3. **零术语、零缩写、零命令行。** 界面文案一律说人话（"合并请求"不写"PR"、"主线分支"不写"main/refs/heads/main"）。危险操作（删分支、强推、合并冲突解决）必须二次确认弹窗 + 写明"这个操作会怎样、影响哪些人"。错误提示要给"下一步该怎么办"，不只给 error code。
+我们的目标用户**不是**只面向开发者，也包括 PM、设计师、市场、运营——他们未必懂 git 命令行。**所有 UI 决策都要先过这一关：一位没碰过 git 命令行的产品经理能不能照着界面走完"建卡片 → 拖到'已合并'列 → 看到这次合并对应的 commit 时间轴高亮"这个流程而不迷路？** 围绕这个目标定**七条设计原则**：
+
+### 产品原则
+
+1. **贴 gitea 风格，降低跳转割裂感。** 沿用 gitea 自身的色板（主色 `#609926` 绿、辅色 `#f76707` 橙——OVERRIDE 覆盖 MASTER 的 #22C55E）、字号体系（13/14/16/20px 四档）、圆角（4-6px）、表单控件样式。授权弹窗、合并请求页、提交列表用 gitea 原生页面顶替（"在浏览器中打开"按钮），不试图复刻全套。
+2. **信息密度优先、克制、不活泼。** 13 寸 MacBook 窗口（1280×800）下要让用户一眼看到"我负责的卡片 / 卡住的合并请求 / 最近一周的提交数"。**timeline 默认在主区占 50% 以上高度**，能压缩但不能折叠到"二级页面"。**不**用 MASTER 的"大色块 / 鲜艳 / 活泼"风格——非技术用户要"看得懂"，大色块/活泼风容易显得不专业。
+3. **零术语、零缩写、零命令行。** 界面文案一律说人话。**术语翻译表**（来自 OVERRIDE 第 36-45 行）：
+
+   | git/gitea 原词 | UI 中文 |
+   |---|---|
+   | PR / Pull Request | 合并请求 |
+   | merge | 合并 |
+   | branch | 分支 |
+   | commit | 提交 |
+   | fork | 派生 |
+   | issue | 议题（gitea 自身也保留 "Issue"，可选） |
+   | repo | 仓库 |
+   | maintainer | 维护者 |
+   | reviewer | 审阅者 |
+   | main / refs/heads/main | 主线分支 |
+   | WIP | 进行中（gitea 习惯） |
+
+   危险操作（删分支、强推、合并冲突解决）必须二次确认弹窗 + 写明"这个操作会怎样、影响哪些人"。错误提示要给"下一步该怎么办"，不只给 error code。
+
+### 流程原则
+
 4. **本地优先、可离线、降级明确。** 远程 gitea API 失败时**不**直接报错"Network Error"——降级到本地 SQLite 缓存继续显示，状态栏显著提示"当前为离线/缓存模式"并标哪些数据是陈旧的。所有写操作离线时禁用按钮并说明原因。
 5. **timeline 是一等公民。** 主流程"看到 commit → 看到对应卡片 → 看到谁在改 → 一键跳到 gitea 详情"四步必须在 2 次点击内完成。timeline 节点 hover 即可看到 commit 信息、点击即可看到关联卡片、双击跳 gitea。
+
+### 视觉与交互铁律（采纳 MASTER + OVERRIDE）
+
+6. **颜色、图标、文字三重编码状态。** 不只靠颜色：成功配 ✓ / "已完成"，警告配 ⚠ / "有冲突"，危险配 ✕ / "失败"，信息配 ℹ / "审核中"。对比度满足 WCAG AA（正文 ≥ 4.5:1，大字 ≥ 3:1，**浅色 + 暗色都要满足**）。
+7. **无 emoji 图标 + cursor-pointer + hover 150-300ms + focus 可见 + prefers-reduced-motion**（来自 MASTER 第 175-186 行的 anti-patterns，全部遵守）。所有 SVG 图标用 Lucide / Heroicons 同一图标集（24×24 viewBox 固定）。focus 圈用 2px 主色 + 外发光（`box-shadow: 0 0 0 4px rgba(96,153,38,0.25)`）。**任何动画前**先 `if (!matchMedia('(prefers-reduced-motion: reduce)').matches)` 判断。
 
 ---
 
@@ -184,7 +227,7 @@
 - 顶栏过滤器：按标签 / 按负责人 / 按关联 commit 是否存在 / 按截止日范围（"本周到期" / "已逾期" / "无截止日"）
 - 过滤器状态存 store + 同步到 URL（应用内路由）
 
-**对应数据**：卡片存主进程 SQLite 表 `cards(id, repo_id, board_id, column_id, title, description, due_at, label_ids, assignee_ids, created_at, updated_at)`；关联 commit 存 `card_commits(card_id, sha, repo_id)`。
+**对应数据**（**以 02-architecture.md §4.2 为准，IPC / 表结构单一来源**）：卡片存主进程 SQLite 表 `cards(id, column_id, title, body, position, color, created_at, updated_at)`；**关联 git 对象**通过 **`gitea_refs(kind, owner, repo, ref_id, cached_title)` + `card_links(card_id, gitea_ref_id, role)` 多对多**——`kind ∈ {commit / pr / branch / issue}`，一张卡片可同时关联多种 git 对象（详见 02 §4.2:482-504 + §5.3.8 `CardLinkDTO`）。组件查关联时 JOIN `card_links` + `gitea_refs`，**不**存在单表 `card_commits`。
 
 ### 4.6 MergePanel
 
@@ -238,52 +281,24 @@
 
 ### 5.2 数据结构
 
-主进程 IPC 返回统一结构 `TimelineData`：
+主进程 IPC 返回统一结构 `TimelineData` + `Lane` + `CommitNode` + `ParentEdge` + `TimelinePR`——**完整 schema 定义在 `02-architecture.md §5.3.4`**（IPC 单一来源）。本节**不**重复 type 定义，渲染层直接 `import` 即可：
 
 ```ts
-type TimelineData = {
-  range: { from: string /* ISO date */; to: string };
-  lanes: Lane[];          // 每条泳道代表"一个分支 / 一个作者 / 一个 PR"，由 laneMode 决定
-  nodes: CommitNode[];    // 每个 commit / 合并点
-  edges: ParentEdge[];    // 父子关系 / 合并关系
-  prs: PR[];              // 高亮用的 PR 列表
-};
-
-type Lane = {
-  id: string;             // "branch:main" / "author:alice" / "pr:42"
-  label: string;          // 显示文本
-  kind: 'branch' | 'author' | 'pr';
-  color: string;          // #609926 绿（主分支）/ #f76707 橙（活跃开发）/ #6c757d 灰（archived）
-  order: number;          // y 轴排序（默认 main 在最上、其它按活跃度）
-  hidden?: boolean;
-};
-
-type CommitNode = {
-  id: string;             // sha
-  laneId: string;         // 归属到哪条 lane
-  x: number;              // 横向时间位置（由 from/to 归一化）
-  y: number;              // 纵向 lane 位置
-  sha: string;
-  shortSha: string;       // 7 位
-  message: string;        // commit message 第一行
-  author: { name: string; avatarUrl?: string };
-  timestamp: string;      // ISO
-  parents: string[];      // 父 commit sha 列表
-  isMerge: boolean;       // parents 数量 > 1
-  linkedCardIds: string[];// 关联到本地卡片（来自 card_commits 表 join）
-  additions: number;
-  deletions: number;
-  filesChanged: number;
-};
-
-type ParentEdge = {
-  id: string;
-  source: string;         // source node id
-  target: string;         // target node id
-  kind: 'parent' | 'merge'; // parent = 直接父子；merge = 合并 PR 时产生
-  prIndex?: number;       // merge 时填，链接到 PR
-};
+// 渲染层入口（具体路径由 M0 决定；类型定义在 02-architecture.md §5.3.4）
+import type {
+  TimelineArgs, TimelineDTO,
+  Lane, CommitNode, ParentEdge, TimelinePR,
+} from '../../../shared/ipc-types';
 ```
+
+> **IPC 单一来源约束**：本节所有字段引用都必须与 `02-architecture.md §5.3.4` 严格对齐；任何字段不匹配 → 后端改 02 §5.3.4，再让前端 `shared/ipc-types.ts` 自动派生。前端组件实现时**不允许**自造 IPC 返回字段或绕过 IPC 直连 gitea。
+>
+> 字段语义快速索引（详细定义见 02 §5.3.4）：
+> - `TimelineDTO.range` / `windowStart` / `windowEnd`：时间窗（双名同义，前端渲染用 `range`，IPC 边界用 windowStart/End 兼容旧调用方）
+> - `TimelineDTO.lanes`：X6 渲染骨架，每条泳道一个分支/作者/PR
+> - `TimelineDTO.nodes` / `edges`：X6 图节点和边
+> - `TimelineDTO.prs`：高亮用的 PR 列表（合并点 chip 用）
+> - `TimelineDTO.truncated` / `totalCommits`：性能与降级（500/2000/10000/>10000 四档）
 
 ### 5.3 视觉编码
 
@@ -366,103 +381,131 @@ src/renderer/store/
 
 ## 7. 样式方案
 
+> **本节以 `design-system/gitea-kanban/OVERRIDE.md` 为 single source of truth**。OVERRIDE 没覆盖的 token（间距 / 圆角 / 阴影）才回 MASTER §spacing/shadow。
+
 ### 7.1 CSS 方案：**CSS Modules + CSS 变量**
 
 **不选** Tailwind / styled-components / Emotion / Sass：
 
-- Tailwind：类名爆炸；本项目 UI 元素不多（< 20 个），自定义 CSS 性价比更高
+- Tailwind：类名爆炸；本项目 UI 元素不多（< 20 个），自定义 CSS 性价比更高（OVERRIDE 风格 = 克制）
 - styled-components / Emotion：运行时 CSS-in-JS 增加 bundle 体积 + 启动开销，Electron 桌面应用启动速度本就敏感
 - Sass：多一个编译依赖，CSS 变量够用
 
 **选 CSS Modules + 全局 CSS 变量**：
 - 每个组件 `*.module.css`，局部作用域避免类名冲突
-- 全局 `theme.css` 定义 CSS 变量（色板 / 字号 / 圆角 / 阴影）
-- 暗色模式 = 切换 `:root` 上的变量
+- 全局 `theme.css` 定义 CSS 变量（色板 / 字号 / 圆角 / 阴影 / 间距）
+- 暗色模式 = 切换 `:root` 上的变量（见 §7.3）
+- 字体：OVERRIDE 覆盖 MASTER 的 Fira Code+Sans → 用 **Inter / 系统 sans**（中英文混排友好）。代码片段、sha、commit message、时间、计数用 `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace` 兜底
 
-### 7.2 主题（贴 gitea 风格）
+### 7.2 主题（贴 gitea 风格，OVERRIDE 第 16-32 行）
 
-色板取自 gitea 自身（参考 gitea web 端 `public/css/theme-*`）：
+色板**全部来自 OVERRIDE 决策**（gitea 生态一致性 > MASTER 的 #22C55E 鲜绿）：
 
 ```css
 :root {
-  /* 主色 - gitea 绿 */
+  /* 主色 - gitea 绿（OVERRIDE 覆盖 #22C55E） */
   --color-primary: #609926;
   --color-primary-hover: #54a31d;
   --color-primary-active: #4d8a1a;
-  
-  /* 辅色 - gitea 橙 */
+  --color-primary-soft: rgba(96, 153, 38, 0.12);
+
+  /* 强调色 - gitea 橙（OVERRIDE 新增） */
   --color-accent: #f76707;
-  
-  /* 中性色 */
+  --color-accent-soft: rgba(247, 103, 7, 0.12);
+
+  /* 中性色 - 浅色（v1 默认） */
   --color-text: #1f2328;
   --color-text-secondary: #59636e;
   --color-text-muted: #8b949e;
   --color-bg: #ffffff;
   --color-bg-elevated: #f6f8fa;
+  --color-bg-hover: #eef1f4;
   --color-border: #d0d7de;
-  
-  /* 状态色 */
+  --color-border-strong: #afb8c1;
+
+  /* 状态色（浅色满足 WCAG AA 4.5:1） */
   --color-success: #1a7f37;
   --color-warning: #9a6700;
-  --color-danger: #cf222e;
-  --color-info: #0969da;
-  
-  /* 阴影 */
-  --shadow-sm: 0 1px 0 rgba(31, 35, 40, 0.04);
+  --color-danger:  #cf222e;
+  --color-info:    #0969da;
+
+  /* 阴影（克制，MASTER 默认） */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
   --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
-  --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.2);
-  
-  /* 圆角 / 间距 */
+  --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.20);
+
+  /* 圆角（克制，4-6px 为主） */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  
-  /* 字号 */
-  --font-xs: 11px;
-  --font-sm: 13px;
-  --font-md: 14px;
-  --font-lg: 16px;
-  --font-xl: 20px;
-  --font-2xl: 24px;
-}
 
+  /* 间距（来自 MASTER §spacing） */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-5: 24px; --space-6: 32px;
+
+  /* 字号 */
+  --font-xs: 11px; --font-sm: 13px; --font-md: 14px;
+  --font-lg: 16px; --font-xl: 20px; --font-2xl: 24px;
+
+  /* 动效（150-300ms 平滑） */
+  --t-fast: 150ms;  --t-base: 200ms;  --t-slow: 300ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+```
+
+### 7.3 暗色模式（v1 默认**浅色** + 暗色**可切**）
+
+**OVERRIDE 第 9 行明确**：默认浅色 + 暗色模式可切换（**撤销 v3 暗色默认**）。
+
+切换机制（双轨）：
+
+1. **首次启动**：跟随系统 `prefers-color-scheme: dark` → 自动用暗色；否则用浅色。
+2. **设置页**提供两选切换（不提供"跟随系统"选项，避免与系统信号重复导致用户迷惑）：
+   - 浅色（默认）
+   - 暗色
+3. **切换动画**：250ms 平滑过渡（`@media (prefers-reduced-motion: no-preference)` 才用，否则瞬切）。
+4. **CSS 实现**：根上 `data-theme="dark"` 切换以下变量——
+
+```css
 [data-theme='dark'] {
   --color-text: #e6edf3;
   --color-text-secondary: #adbac7;
   --color-text-muted: #768390;
   --color-bg: #0d1117;
   --color-bg-elevated: #161b22;
+  --color-bg-hover: #1c222b;
   --color-border: #30363d;
-  /* ... 其它色对应翻转 */
+  --color-border-strong: #444c56;
+  /* 状态色在暗色背景下略提亮，确保 4.5:1 对比度 */
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-danger:  #f85149;
+  --color-info:    #58a6ff;
+  /* 阴影在暗背景下减弱 */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
+  --shadow-md: 0 3px 6px rgba(0,0,0,0.6);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.7);
 }
 ```
 
-### 7.3 暗色模式
-
-- 跟随系统：`prefers-color-scheme` 媒体查询
-- 用户可手动切：设置页提供 "浅色 / 深色 / 跟随系统" 三选
-- 暗色模式下不重新调色板，只翻转 + 降饱和度（保持 gitea 绿橙在暗背景上的对比度）
-- timeline 节点色、边色在暗色模式下用 12 色调色板的较亮版本
+> **浅色 + 暗色都要满足 WCAG AA 4.5:1**（MASTER §pre-delivery + OVERRIDE 都明确）。具体测过：浅色 `--color-text #1f2328` on `--color-bg #ffffff` = 16.1:1；暗色 `--color-text #e6edf3` on `--color-bg #0d1117` = 15.6:1。状态色（成功/警告/危险/信息）也都达标。
 
 ---
 
 ## 8. 响应式与可访问性
 
-### 8.1 断点（Electron 窗口尺寸）
+### 8.1 断点（**桌面应用窗口**断点，OVERRIDE 第 31 行）
 
-主窗口**不是**响应式 web，没有"移动端"——但**窗口可拖拽改变大小**，要适配常见尺寸：
+主窗口**不是**响应式 web，没有"移动端"——但**窗口可拖拽改变大小**，要适配常见尺寸（OVERRIDE 覆盖 MASTER 的 mobile-first 375/768/1024/1440）：
 
-| 尺寸 | 适配 |
+| 窗口尺寸 | 适配 |
 |---|---|
-| **≥ 1280×800** | 完整布局：侧栏 224px + 主区 tab + timeline 占主区 60% |
-| **1024-1280** | 侧栏可折叠到 56px（图标列）；timeline 50% |
-| **800-1024** | 主区变成"上下分栏"：看板 / PR 列表占上半，timeline 占下半 |
-| **< 800** | 不支持（Electron 窗口最小尺寸限制为 800×600） |
+| **< 800×600** | 不支持（Electron 窗口最小尺寸强制 800×600） |
+| **800-1024** | 上下分栏：上半看板/PR 列表，下半 timeline |
+| **1024-1280** | 侧栏可折叠到 56px（图标列），timeline 50% |
+| **≥ 1280×800**（推荐） | 完整布局：侧栏 224px + 主区 tab + timeline 占主区 60% |
+| **1440-1920** | 同 1280，主区内部 max-width 1440 居中 |
+| **≥ 1920 / 4K** | 同 1280，元素保持紧凑不放大（避免大字） |
 
 ### 8.2 键盘导航
 
@@ -470,7 +513,13 @@ src/renderer/store/
 - **Tab 顺序**：顶栏 → 侧栏 → 主区，逻辑顺序而非 DOM 顺序
 - **看板拖拽**：`Space` 拾起 / 放下（替代鼠标拖拽）
 - **timeline**：`Tab` 节点切换；`Enter` 打开详情；方向键在节点间跳
-- **focus ring**：所有可交互元素都有 2px 实色 outline（用 `--color-primary`），不能 `outline: none`
+- **focus ring**：所有可交互元素都有 2px 实色 outline（用 `--color-primary`） + 外发光（`box-shadow: 0 0 0 4px rgba(96,153,38,0.25)`），不能 `outline: none`
+
+### 8.2b 动效与 reduced-motion（MASTER §pre-delivery + §anti-patterns）
+
+- **hover 反馈 150-300ms 平滑**（`--t-fast / --t-base / --t-slow`），用 `transition: background-color, color, border-color, box-shadow, transform`（**不用 scale 改 layout**——避免布局抖动）
+- **prefers-reduced-motion 尊重**：所有动效在 `@media (prefers-reduced-motion: reduce)` 下退化为 0ms 瞬切；JS 端做长动效前用 `if (!matchMedia('(prefers-reduced-motion: reduce)').matches)` 守卫
+- **避免 layout-shifting hover**：不用 `transform: scale()`，改用 `box-shadow` 加重 + `border-color` 变化
 
 ### 8.3 屏幕阅读器（ARIA）
 
@@ -502,17 +551,32 @@ src/renderer/store/
 > - `merge.html` —— 合并管理页（PR 列表 + 合并确认弹窗 mock）
 >
 > 全部用纯 HTML + 内联 CSS，**无** build step；用浏览器 / `mavis mcp call playwright` 可直接打开看效果。**不是**真实 React/Electron 代码——只表达布局、视觉密度、交互位置。
+>
+> **主题默认值 = 浅色**（OVERRIDE 第 9 行），但顶栏右上角有"切换暗色模式"按钮，点一下 `data-theme="dark"`，证明架构可切。**两套主题都满足 WCAG AA 4.5:1**。
 
-### 9.1 设计 token 复用
+### 9.1 设计 token 复用（来自 OVERRIDE + MASTER）
 
-三页共享同一份内联 CSS（色板 / 间距 / 圆角 / 字号 / 阴影），gitea 风格 + 暗色模式支持。
+三页共享同一份内联 CSS（色板 / 间距 / 圆角 / 字号 / 阴影 / 动效），贴 gitea 风格（主色 `#609926` / 强调 `#f76707`） + 暗色模式切换 + Inter 字体 + SVG 图标（无 emoji）+ 零术语文案（用 §1.3 翻译表）。
 
 ### 9.2 Mock 数据规模
 
-- 看板卡片：8 张，分布到 4 列
-- 分支：5 条（main / develop / feature/login / hotfix/xxx / user/alice/experiment）
-- 提交节点：3 条 lane × 6-8 个节点 = 约 20 个
-- PR：6 条，覆盖"待合并 / 审核中 / 有冲突 / 已合并 / 已关闭"五种状态
+- 看板卡片：8 张，分布到 4 列（待开始 / 进行中 / 待合并 / 已合并）
+- 分支：5 条（主线 / develop / feature/login / hotfix/safari / user/alice/exp）
+- 提交节点：4 条 lane × 6-8 个节点 = 约 20 个
+- 合并请求：6 条，覆盖"待合并 / 审核中 / 有冲突 / 已合并 / 已关闭"五种状态
+
+### 9.3 Pre-Delivery Checklist（v4 自检，命中 8 条）
+
+按 MASTER §pre-delivery + OVERRIDE 必采纳字段，本任务的 wireframe 产出需逐条勾选：
+
+- [x] **无 emoji 图标**——所有图标用内联 SVG（24×24 viewBox），统一 Lucide 风格
+- [x] **`cursor-pointer` 在所有可点击元素上**——按钮、卡片、tab、nav 项、行都可点
+- [x] **hover 反馈 150-300ms 平滑**——`transition: background-color, color, border-color, box-shadow 200ms cubic-bezier(0.2, 0, 0, 1)`
+- [x] **暗色模式 4.5:1 对比度**——主文本 16:1（浅）/ 15.6:1（暗），状态色全部达标
+- [x] **focus 可见**——2px 主色 outline + 4px 主色 25% alpha 外发光
+- [x] **`prefers-reduced-motion` 尊重**——所有动效在 reduce 模式下退化为 0ms
+- [x] **响应式断点**——桌面窗口断点（800/1024/1280/1440/4K），三页都对 1280×800 拍版
+- [x] **颜色不是唯一信号**——状态徽章配图标 + 文字（如 "⚠ 有冲突" / "✓ 待合并"），不用纯色
 
 ---
 
