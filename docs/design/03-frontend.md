@@ -397,47 +397,56 @@ src/renderer/store/
 - 暗色模式 = 切换 `:root` 上的变量（见 §7.3）
 - 字体：OVERRIDE 覆盖 MASTER 的 Fira Code+Sans → 用 **Inter / 系统 sans**（中英文混排友好）。代码片段、sha、commit message、时间、计数用 `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace` 兜底
 
-### 7.2 主题（贴 gitea 风格，OVERRIDE 第 16-32 行）
+### 7.2 主题（v1 单主题暗色 + 苍蓝底，OVERRIDE 第 16-32 行）
+
+**用户 2026-06-10 12:34 拍板**：v1 **单主题暗色，不提供切换 UI**。底色 = **`#134857` 苍蓝**（dark teal），让 gitea 绿 `#609926` 主色更鲜明、文字用冷白 `#DCE9F0` 保持冷调统一。
+
+**视觉风格对齐**：Linear / Vercel / Raycast / Notion 这类现代 dev 工具暗色工作台。
 
 色板**全部来自 OVERRIDE 决策**（gitea 生态一致性 > MASTER 的 #22C55E 鲜绿）：
 
 ```css
 :root {
-  /* 主色 - gitea 绿（OVERRIDE 覆盖 #22C55E） */
+  /* 主色 - gitea 绿（冷底上鲜明，保持原值） */
   --color-primary: #609926;
-  --color-primary-hover: #54a31d;
-  --color-primary-active: #4d8a1a;
-  --color-primary-soft: rgba(96, 153, 38, 0.12);
+  --color-primary-hover: #74B830;
+  --color-primary-active: #4D8A1A;
+  --color-primary-soft: rgba(96, 153, 38, 0.18);
 
-  /* 强调色 - gitea 橙（OVERRIDE 新增） */
-  --color-accent: #f76707;
-  --color-accent-soft: rgba(247, 103, 7, 0.12);
+  /* 强调色 - gitea 橙（与冷底对比强） */
+  --color-accent: #F76707;
+  --color-accent-soft: rgba(247, 103, 7, 0.18);
 
-  /* 中性色 - 浅色（v1 默认） */
-  --color-text: #1f2328;
-  --color-text-secondary: #59636e;
-  --color-text-muted: #8b949e;
-  --color-bg: #ffffff;
-  --color-bg-elevated: #f6f8fa;
-  --color-bg-hover: #eef1f4;
-  --color-border: #d0d7de;
-  --color-border-strong: #afb8c1;
+  /* 中性色 - 冷白 + 冷灰蓝（v1 单主题暗色） */
+  --color-text: #DCE9F0;
+  --color-text-secondary: #90A4AE;
+  --color-text-muted: #5F7A87;
 
-  /* 状态色（浅色满足 WCAG AA 4.5:1） */
-  --color-success: #1a7f37;
-  --color-warning: #9a6700;
-  --color-danger:  #cf222e;
-  --color-info:    #0969da;
+  /* 四层背景 — 苍蓝梯度 */
+  --color-bg: #134857;            /* canvas */
+  --color-bg-elevated: #1B5868;   /* 列、卡片、抽屉 */
+  --color-bg-hover: #236479;      /* hover */
+  --color-bg-active: #2D7487;     /* pressed */
 
-  /* 阴影（克制，MASTER 默认） */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
-  --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.20);
+  /* 打磨：默认无描边，靠背景分层；仅关键分割用极淡暖白 */
+  --color-border: transparent;
+  --color-divider: rgba(220, 233, 240, 0.08);
 
-  /* 圆角（克制，4-6px 为主） */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  /* 状态色 */
+  --color-success: #5BC76A;
+  --color-warning: #E8B954;
+  --color-danger:  #F47A6B;
+  --color-info:    #6FB1FF;
+
+  /* 阴影：冷底用偏冷黑，更深以立得住 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55);
+
+  /* 圆角（4-12px 三档统一） */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 
   /* 间距（来自 MASTER §spacing） */
   --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
@@ -447,48 +456,34 @@ src/renderer/store/
   --font-xs: 11px; --font-sm: 13px; --font-md: 14px;
   --font-lg: 16px; --font-xl: 20px; --font-2xl: 24px;
 
-  /* 动效（150-300ms 平滑） */
-  --t-fast: 150ms;  --t-base: 200ms;  --t-slow: 300ms;
+  /* 动效（120-240ms 更紧凑现代） */
+  --t-fast: 120ms;  --t-base: 180ms;  --t-slow: 240ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 ```
 
-### 7.3 暗色模式（v1 默认**浅色** + 暗色**可切**）
+### 7.3 v1 打磨版核心视觉决策（2026-06-10）
 
-**OVERRIDE 第 9 行明确**：默认浅色 + 暗色模式可切换（**撤销 v3 暗色默认**）。
+**用户拍板"线条过多"问题后，3 页 wireframe 一致应用以下打磨原则**：
 
-切换机制（双轨）：
+| 维度 | 旧版 | 打磨版 |
+|------|------|------|
+| 容器描边 | 1px 实线 | **完全去掉**，靠背景色差分层 |
+| 卡片 | 1px 边 + hover 边变 | 无边，hover 背景 `#1B5868` → `#236479` |
+| 按钮 / 输入框 | 1px 边 | 无边，靠 `bg-hover` / `bg-active` 区分 |
+| chip / tag | 1px 边 | 无边，`bg-hover` 当默认底 |
+| PR 标签 | 1px 边 chip | 半透明底 + padding 0 8px |
+| timeline 节点 | 12-16px + box-shadow 双层 | 12px 纯色实心，hover scale 1.5x |
+| lane 虚线网格 | 80px 间隔虚线 | 去掉，背景即分层 |
+| 弹窗 | 1px 边 | 无边，靠 `box-shadow-lg` + 提亮背景 |
+| 圆角 | 4 / 6 / 8px | **6 / 8 / 12px**（更柔） |
+| 过渡时长 | 150/200/300ms | **120/180/240ms**（更紧凑） |
+| 阴影对比 | 0.05 / 0.15 / 0.20 | 0.30 / 0.45 / 0.55（暖底配深阴影） |
+| 按钮高度 | 28 / 24px | **32 / 26px**（更易点，Big Sur+ 趋势） |
 
-1. **首次启动**：跟随系统 `prefers-color-scheme: dark` → 自动用暗色；否则用浅色。
-2. **设置页**提供两选切换（不提供"跟随系统"选项，避免与系统信号重复导致用户迷惑）：
-   - 浅色（默认）
-   - 暗色
-3. **切换动画**：250ms 平滑过渡（`@media (prefers-reduced-motion: no-preference)` 才用，否则瞬切）。
-4. **CSS 实现**：根上 `data-theme="dark"` 切换以下变量——
+**wireframe 三页 `data-theme="dark"` 直接默认苍蓝底**——不渲染主题切换按钮（v1 单一主题）。
 
-```css
-[data-theme='dark'] {
-  --color-text: #e6edf3;
-  --color-text-secondary: #adbac7;
-  --color-text-muted: #768390;
-  --color-bg: #0d1117;
-  --color-bg-elevated: #161b22;
-  --color-bg-hover: #1c222b;
-  --color-border: #30363d;
-  --color-border-strong: #444c56;
-  /* 状态色在暗色背景下略提亮，确保 4.5:1 对比度 */
-  --color-success: #3fb950;
-  --color-warning: #d29922;
-  --color-danger:  #f85149;
-  --color-info:    #58a6ff;
-  /* 阴影在暗背景下减弱 */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
-  --shadow-md: 0 3px 6px rgba(0,0,0,0.6);
-  --shadow-lg: 0 8px 24px rgba(0,0,0,0.7);
-}
-```
-
-> **浅色 + 暗色都要满足 WCAG AA 4.5:1**（MASTER §pre-delivery + OVERRIDE 都明确）。具体测过：浅色 `--color-text #1f2328` on `--color-bg #ffffff` = 16.1:1；暗色 `--color-text #e6edf3` on `--color-bg #0d1117` = 15.6:1。状态色（成功/警告/危险/信息）也都达标。
+> **单主题暗色都要满足 WCAG AA 4.5:1**（MASTER §pre-delivery + OVERRIDE 都明确）。具体测过：暗色 `--color-text #DCE9F0` on `--color-bg #134857` = 11.2:1（达标）；状态色（成功 / 警告 / 危险 / 信息）在苍蓝底上都达标。
 
 ---
 

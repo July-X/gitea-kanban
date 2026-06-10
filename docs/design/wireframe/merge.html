@@ -1,37 +1,33 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gitea Kanban · 合并管理</title>
   <style>
+    /* v1 单主题暗色（打磨版：去描边 / 靠背景分层 / 克制阴影）
+       底色：苍蓝 #134857（冷青 dark teal） */
     :root {
-      --color-primary: #609926; --color-primary-hover: #54a31d;
-      --color-primary-soft: rgba(96, 153, 38, 0.12);
-      --color-accent: #f76707; --color-accent-soft: rgba(247, 103, 7, 0.12);
-      --color-text: #1f2328; --color-text-secondary: #59636e; --color-text-muted: #8b949e;
-      --color-bg: #ffffff; --color-bg-elevated: #f6f8fa; --color-bg-hover: #eef1f4;
-      --color-border: #d0d7de; --color-border-strong: #afb8c1;
-      --color-success: #1a7f37; --color-success-soft: rgba(26, 127, 55, 0.12);
-      --color-warning: #9a6700; --color-warning-soft: rgba(154, 103, 0, 0.12);
-      --color-danger: #cf222e; --color-danger-soft: rgba(207, 34, 46, 0.12);
-      --color-info: #0969da; --color-info-soft: rgba(9, 105, 218, 0.12);
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-      --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
-      --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.20);
-      --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
+      --color-primary: #609926; --color-primary-hover: #74B830;
+      --color-primary-soft: rgba(96, 153, 38, 0.18);
+      --color-accent: #F76707; --color-accent-soft: rgba(247, 103, 7, 0.18);
+      --color-text: #DCE9F0; --color-text-secondary: #90A4AE; --color-text-muted: #5F7A87;
+      --color-bg: #134857; --color-bg-elevated: #1B5868; --color-bg-hover: #236479; --color-bg-active: #2D7487;
+      --color-border: transparent;            /* 打磨：默认无描边 */
+      --color-divider: rgba(220, 233, 240, 0.08);  /* 冷白半透 */
+      --color-success: #5BC76A; --color-success-soft: rgba(91, 199, 106, 0.18);
+      --color-warning: #E8B954; --color-warning-soft: rgba(232, 185, 84, 0.18);
+      --color-danger: #F47A6B; --color-danger-soft: rgba(244, 122, 107, 0.18);
+      --color-info: #6FB1FF; --color-info-soft: rgba(111, 177, 255, 0.18);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+      --shadow-md: 0 2px 8px rgba(0,0,0,0.45);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,0.55);
+      --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px;
       --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
       --font-xs: 11px; --font-sm: 13px; --font-md: 14px; --font-lg: 16px; --font-xl: 20px;
-      --t-fast: 150ms; --t-base: 200ms; --t-slow: 300ms;
+      --t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms;
       --ease: cubic-bezier(0.2, 0, 0, 1);
       --titlebar-h: 48px; --navrail-w: 224px;
-    }
-    [data-theme='dark'] {
-      --color-text: #e6edf3; --color-text-secondary: #adbac7; --color-text-muted: #768390;
-      --color-bg: #0d1117; --color-bg-elevated: #161b22; --color-bg-hover: #1c222b;
-      --color-border: #30363d; --color-border-strong: #444c56;
-      --color-success: #3fb950; --color-warning: #d29922; --color-danger: #f85149; --color-info: #58a6ff;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.5); --shadow-md: 0 3px 6px rgba(0,0,0,0.6); --shadow-lg: 0 8px 24px rgba(0,0,0,0.7);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; }
@@ -45,7 +41,7 @@
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
     .app { display: grid; grid-template-rows: var(--titlebar-h) 1fr; height: 100vh; }
-    .titlebar { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); background: var(--color-bg-elevated); border-bottom: 1px solid var(--color-border); }
+    .titlebar { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); background: var(--color-bg-elevated); border-bottom: 1px solid var(--color-divider); }
     .titlebar__logo { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; color: var(--color-primary); }
     .titlebar__logo-mark { width: 24px; height: 24px; background: var(--color-primary); color: #fff; border-radius: var(--radius-sm); display: grid; place-items: center; }
     .titlebar__repo { display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); font-size: var(--font-sm); }
@@ -57,44 +53,45 @@
     .titlebar__user { width: 28px; height: 28px; border-radius: 50%; background: var(--color-primary); color: #fff; display: grid; place-items: center; font-size: var(--font-sm); font-weight: 600; }
 
     .main { display: grid; grid-template-columns: var(--navrail-w) 1fr; min-height: 0; }
-    .navrail { background: var(--color-bg-elevated); border-right: 1px solid var(--color-border); padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+    .navrail { background: var(--color-bg-elevated); border-right: 1px solid var(--color-divider); padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
     .navrail__section-label { font-size: var(--font-xs); text-transform: uppercase; color: var(--color-text-muted); padding: var(--space-2) var(--space-3) var(--space-1); letter-spacing: 0.04em; }
     .navrail__item { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-3); border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text); font-size: var(--font-sm); text-decoration: none; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
     .navrail__item:hover { background: var(--color-bg-hover); }
     .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
     .navrail__item .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; }
-    .navrail__item .badge { margin-left: auto; font-size: var(--font-xs); padding: 1px 6px; border-radius: 10px; background: var(--color-bg); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
-    .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
-    .navrail__footer { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
+    .navrail__item .badge { margin-left: auto; font-size: var(--font-xs); padding: 1px 6px; border-radius: 10px; background: var(--color-bg-active); color: var(--color-text-secondary); }
+    .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; }
+    .navrail__footer { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--color-divider); }
 
     .content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-    .content__tabs { display: flex; align-items: center; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); gap: var(--space-4); height: 40px; flex-shrink: 0; }
+    .content__tabs { display: flex; align-items: center; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-divider); gap: var(--space-4); height: 40px; flex-shrink: 0; }
     .content__tab { height: 100%; display: flex; align-items: center; padding: 0 var(--space-2); border-bottom: 2px solid transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
     .content__tab.is-active { color: var(--color-text); border-bottom-color: var(--color-primary); font-weight: 600; }
     .content__tab:hover { color: var(--color-text); }
     .content__tab-actions { margin-left: auto; display: flex; gap: var(--space-2); }
 
-    .btn { height: 28px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
-    .btn:hover { background: var(--color-bg-hover); }
+    .btn { height: 32px; padding: 0 var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-hover); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); transition: background-color var(--t-base) var(--ease); }
+    .btn:hover { background: var(--color-bg-active); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn:disabled:hover { background: var(--color-bg); }
-    .btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
-    .btn--primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
-    .btn--danger { background: var(--color-danger); border-color: var(--color-danger); color: #fff; }
-    .btn--danger:hover { background: #b51a25; border-color: #b51a25; }
-    .btn--ghost { border-color: transparent; background: transparent; }
-    .btn--sm { height: 24px; padding: 0 var(--space-2); font-size: var(--font-xs); }
+    .btn:disabled:hover { background: var(--color-bg-hover); }
+    .btn--primary { background: var(--color-primary); color: #fff; font-weight: 600; }
+    .btn--primary:hover { background: var(--color-primary-hover); }
+    .btn--danger { background: var(--color-danger); color: #fff; }
+    .btn--danger:hover { background: #d63b3b; }
+    .btn--ghost { background: transparent; }
+    .btn--ghost:hover { background: var(--color-bg-hover); }
+    .btn--sm { height: 26px; padding: 0 var(--space-2); font-size: var(--font-xs); }
 
-    .toolbar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-bg-elevated); }
-    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--color-bg); border: 1px solid var(--color-border); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
-    .chip:hover { background: var(--color-bg-hover); }
-    .chip.is-active { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); font-weight: 600; }
-    .chip__count { background: var(--color-bg-elevated); border-radius: 8px; padding: 0 4px; }
+    .toolbar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider); background: var(--color-bg-elevated); }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 10px; background: var(--color-bg-hover); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease); }
+    .chip:hover { background: var(--color-bg-active); }
+    .chip.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .chip__count { background: var(--color-bg); border-radius: 8px; padding: 0 4px; }
 
     .list { flex: 1; overflow-y: auto; padding: var(--space-3) var(--space-4); }
-    .pr { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); cursor: pointer; transition: border-color var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease); }
-    .pr:hover { border-color: var(--color-border-strong); box-shadow: var(--shadow-sm); }
-    .pr.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
+    .pr { background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); cursor: pointer; transition: background-color var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease); }
+    .pr:hover { background: var(--color-bg-hover); box-shadow: var(--shadow-sm); }
+    .pr.is-selected { background: var(--color-bg-hover); box-shadow: 0 0 0 1.5px var(--color-primary); }
 
     .pr__head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
     .pr__num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--color-text-muted); font-size: var(--font-sm); }
@@ -118,16 +115,16 @@
 
     .pr__actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
 
-    .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: grid; place-items: center; z-index: 100; }
-    .modal { width: 520px; background: var(--color-bg); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; }
-    .modal__head { padding: var(--space-4); border-bottom: 1px solid var(--color-border); display: flex; align-items: center; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: grid; place-items: center; z-index: 100; }
+    .modal { width: 520px; background: var(--color-bg-elevated); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; }
+    .modal__head { padding: var(--space-4); display: flex; align-items: center; }
     .modal__head h3 { margin: 0; font-size: var(--font-lg); flex: 1; }
     .modal__body { padding: var(--space-4); }
     .modal__row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; font-size: var(--font-sm); }
     .modal__row label { color: var(--color-text-muted); min-width: 80px; }
-    .modal__select { flex: 1; height: 28px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); font-size: var(--font-sm); }
-    .modal__foot { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-border); background: var(--color-bg-elevated); display: flex; gap: var(--space-2); justify-content: flex-end; }
-    .merge-summary { background: var(--color-primary-soft); border: 1px solid var(--color-primary); border-radius: var(--radius-sm); padding: var(--space-3); margin: var(--space-3) 0; font-size: var(--font-sm); }
+    .modal__select { flex: 1; height: 32px; padding: 0 var(--space-2); border-radius: var(--radius-sm); background: var(--color-bg-hover); font-size: var(--font-sm); }
+    .modal__foot { padding: var(--space-3) var(--space-4); display: flex; gap: var(--space-2); justify-content: flex-end; }
+    .merge-summary { background: var(--color-primary-soft); border-radius: var(--radius-sm); padding: var(--space-3); margin: var(--space-3) 0; font-size: var(--font-sm); }
     .merge-summary strong { color: var(--color-primary); }
     .conflict-list { background: var(--color-danger-soft); border: 1px solid var(--color-danger); border-radius: var(--radius-sm); padding: var(--space-3); margin: var(--space-3) 0; font-size: var(--font-sm); }
     .conflict-list strong { color: var(--color-danger); }
@@ -213,7 +210,7 @@
               <span class="dst">主线</span>
             </div>
             <div class="pr__meta">
-              <span><span class="pr__avatar" style="background: #0969da;">CY</span> 陈杨 · 昨天 16:20</span>
+              <span><span class="pr__avatar" style="background: #6FB1FF;">CY</span> 陈杨 · 昨天 16:20</span>
               <span class="pr__check pr__check--ok">✓ 无冲突</span>
               <span class="pr__check pr__check--ok">✓ 3 人通过审核</span>
               <span>3 次提交 · +24 / −86</span>
@@ -237,7 +234,7 @@
               <span class="dst">主线</span>
             </div>
             <div class="pr__meta">
-              <span><span class="pr__avatar" style="background: #8250df;">ZH</span> 周航 · 3 小时前</span>
+              <span><span class="pr__avatar" style="background: #B294E2;">ZH</span> 周航 · 3 小时前</span>
               <span class="pr__check pr__check--ok">✓ 无冲突</span>
               <span class="pr__check pr__check--ok">✓ 1 人通过审核</span>
               <span>5 次提交 · +187 / −42</span>
@@ -260,7 +257,7 @@
               <span class="dst">develop</span>
             </div>
             <div class="pr__meta">
-              <span><span class="pr__avatar" style="background: #0969da;">CY</span> 陈杨 · 今天 09:14</span>
+              <span><span class="pr__avatar" style="background: #6FB1FF;">CY</span> 陈杨 · 今天 09:14</span>
               <span class="pr__check pr__check--ok">✓ 无冲突</span>
               <span style="color: var(--color-warning);">⏳ 等待 2 人审核</span>
               <span>7 次提交 · +412 / −198</span>
@@ -283,7 +280,7 @@
               <span class="dst">主线</span>
             </div>
             <div class="pr__meta">
-              <span><span class="pr__avatar" style="background: #8250df;">ZH</span> 周航 · 5/26</span>
+              <span><span class="pr__avatar" style="background: #B294E2;">ZH</span> 周航 · 5/26</span>
               <span class="pr__check pr__check--bad">✕ 2 个文件冲突</span>
               <span>8 次提交 · +340 / −125</span>
             </div>
@@ -305,7 +302,7 @@
               <span class="dst">主线</span>
             </div>
             <div class="pr__meta">
-              <span><span class="pr__avatar" style="background: #444c56;">SY</span> 孙宇 · 5/24</span>
+              <span><span class="pr__avatar" style="background: #5F7A87;">SY</span> 孙宇 · 5/24</span>
               <span class="pr__check pr__check--ok">合并到主线 · 5/24</span>
               <span>3 次提交</span>
             </div>
@@ -327,7 +324,7 @@
               <span class="dst">主线</span>
             </div>
             <div class="pr__meta">
-              <span><span class="pr__avatar" style="background: #f76707;">LY</span> 林雨 · 5/10</span>
+              <span><span class="pr__avatar" style="background: #F76707;">LY</span> 林雨 · 5/10</span>
               <span>方案废弃，作者主动关闭</span>
             </div>
           </div>
