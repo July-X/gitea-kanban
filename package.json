@@ -9,16 +9,15 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "pnpm rebuild:native:electron && electron-vite dev",
-    "dev:skip-rebuild": "electron-vite dev",
-    "build": "pnpm rebuild:native:electron && electron-vite build",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
     "preview": "electron-vite preview",
     "type-check": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit",
     "type-check:main": "tsc -p tsconfig.node.json --noEmit",
     "type-check:renderer": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm rebuild:native:node && vitest run",
-    "test:watch": "pnpm rebuild:native:node && vitest",
-    "test:coverage": "pnpm rebuild:native:node && vitest run --coverage",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,json,css,md}\"",
@@ -27,9 +26,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "check:no-jargon": "tsx scripts/check-no-jargon.ts",
-    "rebuild:native:node": "pnpm rebuild better-sqlite3",
-    "rebuild:native:electron": "electron-builder install-app-deps",
-    "postinstall": "electron-builder install-app-deps"
+    "rebuild:native": "bash scripts/rebuild-native.sh",
+    "postinstall": "bash scripts/rebuild-native.sh"
   },
   "dependencies": {
     "@napi-rs/keyring": "^1.3.0",
