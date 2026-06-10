@@ -333,7 +333,7 @@ gitea-kanban/
 | **设计原则（零术语 / 二次确认 / 错误人话）** | `docs/design/02-architecture.md` §2.7 + §7.3 + `design-system/gitea-kanban/OVERRIDE.md` | UI 文案 + 危险操作清单 |
 | **IPC 端点清单** | `docs/design/02-architecture.md` §5.3（10 个 namespace × 多 method） | 仓库 / 分支 / commit / PR / 看板 / 卡片 / 鉴权 / 偏好 / 事件 |
 | **端点命名约定** | `<namespace>.<method>`（`repos.list` / `board.cards.list` / `auth.connect`） | 由 02-architecture §5.1 落定；**前端 agent 假设的 `资源:动作` 风格已被 02 §5.1 覆盖** |
-| **设计系统 token** | `design-system/gitea-kanban/OVERRIDE.md`（**先读 OVERRIDE**，未覆盖字段才回 MASTER） | 主色 `#609926` / 强调 `#f76707` / 默认浅色 + 暗色可切 |
+| **设计系统 token** | `design-system/gitea-kanban/OVERRIDE.md`（**先读 OVERRIDE**，未覆盖字段才回 MASTER） | 主色 `#609926` / 强调 `#f76707` / **v1 单主题暗色（不提供切换）** |
 
 ---
 
@@ -407,7 +407,11 @@ gitea-kanban/
 ### 8.1 设计阶段的两条关键修正
 
 1. **技术栈 v1 → v2 修正（2026-06-10）**：原计划是"React Web + Go 后端 + SQLite + nginx 反代"，**被用户改为 Electron + TS 桌面应用 + PAT + keychain**。如果看到 **`docs/design/01-research.md §1.2 / §5.2 / §5.3 / §5.4`** 还在提"Go + Gin + go-sdk" / "OAuth 跳转" / "nginx 反代"，**一律忽略**——以本文件 §2 与 `02-architecture.md §2` 为准（01 §1 头部已显式声明调研报告完成于决策切换前）。
-2. **暗色模式默认 v3 → v4 修正（2026-06-10）**：v3 草稿曾把暗色作为默认，**已被 OVERRIDE 撤销**——浅色为 v1 默认，暗色可切。详见 `design-system/gitea-kanban/OVERRIDE.md`。
+2. **主题策略 v3 → v4 → v5 修正（2026-06-10）**：
+   - v3 草稿（frontend-design attempt=1）曾定"默认暗色 + 不提供切换"
+   - v4（attempt=2）按 OVERRIDE 改回"默认浅色 + 暗色可切"
+   - **v5（2026-06-10 12:12 用户拍板）**：**v1 单主题暗色、不提供切换**——以 `design-system/gitea-kanban/OVERRIDE.md` §"覆盖决策"表 "背景" 行为准
+   - 三次反复的教训：M0 启动前**任何主题策略变更必须经过用户拍板**，worker 不准自由发挥
 
 ### 8.2 端到端鉴权铁律（用户决策 #3）
 

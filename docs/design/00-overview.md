@@ -91,7 +91,7 @@ flowchart TB
 | 5 | **timeline 库** | AntV X6@3.1.7 | 图编辑引擎，git graph 的 DAG（commit 节点 + 父子边 + 合并边）是其甜区；用户已熟悉栈 | [01 §4](./01-research.md#4-timeline-方案对比), [03 §5](./03-frontend.md#5-时间轴可视化方案重点) |
 | 6 | **IPC 契约** | Zod schema → TS 类型自动派生到 `src/shared/ipc-types.ts` | 前后端编译时共用，字段不匹配编译报错 | [02 §5.1 / §8.2](./02-architecture.md#51-ipc-通道约定) |
 | 7 | **缓存策略** | cache-aside + 写穿失效 + 离线降级 stale | 远程失败不崩，按 stale 缓存继续显示 + 状态栏提示 | [02 §6.3](./02-architecture.md#63-缓存策略本地优先远程兜底断网只读) |
-| 8 | **设计原则** | 零术语 + 二次确认 + 错误人话 + a11y 加强 | 目标用户含非技术人员（PM / 设计师 / 运营） | [02 §2.7](./02-architecture.md#27-设计原则必须显式遵守), `design-system/gitea-kanban/OVERRIDE.md` |
+| 8 | **设计原则** | 零术语 + 二次确认 + 错误人话 + a11y 加强 + **v1 单主题暗色（不提供切换）** | 目标用户含非技术人员（PM / 设计师 / 运营）；主题策略由用户 2026-06-10 12:12 拍板 | [02 §2.7](./02-architecture.md#27-设计原则必须显式遵守), `design-system/gitea-kanban/OVERRIDE.md` |
 | 9 | **设计系统** | gitea 绿 `#609926` 主色 + 橙 `#f76707` 强调 + 浅色默认 + 暗色可切 | 贴 gitea 生态保持一致；非技术用户要"看得懂"，大色块 / 暗色默认不专业 | `design-system/gitea-kanban/OVERRIDE.md` |
 | 10 | **打包** | electron-builder，macOS dmg v1 优先 / Windows exe / Linux AppImage | 跨平台单二进制；macOS 用户群在 gitea 生态最活跃 | [02 §2.5](./02-architecture.md#25-部署形态) |
 | 11 | **v1 不做** | 实时协作 / in-app 冲突解决 / OAuth 跳转 / webhook server（v2 开） / git CLI（v2 高级场景） | 范围收敛；桌面应用无 OAuth 必要；in-app 冲突是 GitLens 级别工作量 | [02 §2.6 + §6.4 + §7.1](./02-architecture.md) |
