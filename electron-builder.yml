@@ -1,0 +1,49 @@
+appId: io.gitea-kanban.app
+productName: gitea-kanban
+copyright: Copyright © 2026 gitea-kanban
+directories:
+  output: release/${version}
+  buildResources: resources
+
+files:
+  - out/**
+  - package.json
+  - "!**/.git"
+  - "!**/.DS_Store"
+
+asar: true
+asarUnpack:
+  - resources/**
+
+# macOS：dmg 优先
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# Windows：nsis（v1 best-effort 签名）
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+# Linux：AppImage
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Development
+  artifactName: ${productName}-${version}-${arch}.${ext}

@@ -1,8 +1,25 @@
+# IDE / agent
 .codex/
 .mavis/
 .opencode/
+
+# 构建产物
 node_modules/
+out/
+dist/
+coverage/
+
+# 临时/缓存
+*.log
+.DS_Store
+.tmp/
+.cache/
 
 # gitea 测试服务运行时数据
 giteaDemo/data/
 
+# 渲染端类型生成物（d.ts 编译产物）
+src/renderer/.d.ts/
+
+# drizzle studio local
+drizzle/.snapshot/
