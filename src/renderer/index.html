@@ -1,35 +1,25 @@
 <!DOCTYPE html>
-<html lang="zh-Hans">
+<html lang="zh-Hans" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>gitea-kanban</title>
-    <!-- CSP（02-architecture.md §9.3） -->
+    <!--
+      CSP（02-architecture.md §9.3）
+      - default-src 'self'：只允许同源资源
+      - script-src 'self'：禁止 inline script（Vite 走 ESM 加载）
+      - style-src 'self' 'unsafe-inline'：允许 scoped style 内联（Vite dev 模式需要）
+      - img-src 'self' data: https:：允许头像（gitea 头像走 https）
+      - connect-src 'self'：渲染端不走 HTTP（gitea 调用都走 main 端）
+      - font-src 'self' data:：本地字体走 data URI；v1 字体走 Google Fonts CDN 需要补充
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:"
     />
-    <style>
-      :root {
-        color-scheme: dark;
-        --bg: #1a1a1a;
-        --fg: #e6e6e6;
-        --muted: #8b8b8b;
-        --accent: #609926;
-      }
-      html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
-      .placeholder { display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 16px; }
-      h1 { font-size: 24px; font-weight: 600; margin: 0; }
-      .muted { color: var(--muted); font-size: 14px; }
-      code { background: #2a2a2a; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
-    </style>
   </head>
   <body>
-    <div class="placeholder">
-      <h1>gitea-kanban</h1>
-      <p class="muted">M0 脚手架：渲染端占位 · 主进程已就绪</p>
-      <p class="muted">打开 DevTools 看 <code>window.api</code> 状态</p>
-    </div>
+    <div id="app"></div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

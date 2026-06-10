@@ -9,21 +9,26 @@ export default defineConfig({
       '@main': resolve(__dirname, 'src/main'),
       '@shared': resolve(__dirname, 'src/shared'),
       '@preload': resolve(__dirname, 'src/preload'),
+      '@renderer': resolve(__dirname, 'src/renderer'),
     },
   },
   test: {
+    // 默认 node 环境（不破坏现有 main/preload/shared 测试）
+    // 渲染端测试如需 DOM（如 ConfirmDialog 组件），可在文件顶部加
+    //   // @vitest-environment happy-dom
+    // 当前 frontend 任务 0 装新依赖,DOM 测试用最小 stub 规避
     environment: 'node',
     globals: true,
     include: [
       'src/main/**/*.test.ts',
       'src/preload/**/*.test.ts',
       'src/shared/**/*.test.ts',
+      'src/renderer/**/*.test.ts',  // frontend agent 单测（plan_373b3dd8 M2）
     ],
     exclude: [
       'node_modules/**',
       'out/**',
       'dist/**',
-      'src/renderer/**',  // 由 frontend agent 单独测
     ],
     coverage: {
       provider: 'v8',

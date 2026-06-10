@@ -30,8 +30,55 @@ const FORBIDDEN_TERMS = [
   { term: 'merge', desc: '合并', except: ['mergeMethod'] },  // 字段名除外
   { term: 'rebase', desc: '变基', except: [] },
   { term: 'fork', desc: '派生（v2 考虑）', except: [] },
-  { term: 'repo', desc: '仓库', except: ['repository', 'repos'] },  // repos 是 endpoint namespace
-  { term: 'branch', desc: '分支', except: [] },
+  // repo: 除了"repos"是 endpoint namespace 外,渲染端代码里还有合法的
+  // 类型名 / 变量名 / IPC schema 字段名('owner'/'repo'/'refId' 三元组 / RepoDto 等)。
+  // 这些都是"代码内合法英文术语",不是 UI 文本。
+  {
+    term: 'repo',
+    desc: '仓库',
+    except: [
+      'repository',
+      'repos',          // endpoint namespace
+      'RepoDto',        // 类型名
+      'RepoProject',    // 类型名
+      'useRepoStore',   // pinia store id
+      'repos.',
+      'repo:',          // IPC schema 字段名(owner/repo/refId 三元组)
+      'repo ',          // 标识符后空格
+      'repo)',          // 函数调用
+      'repo(',
+      "'repo",          // pinia defineStore id 字面量
+    ],
+  },
+  // branch: 渲染端代码里有 IPC schema LaneModeSchema 字面量('branch')、
+  // 类型名(BranchDto/BranchRef/BranchLastCommit)、字段名(branchHints)、
+  // 变量名(branches.value/selectedBranches/defaultBranch)、CSS class。
+  // 这些都是"代码内合法英文术语",不是 UI 文本。
+  {
+    term: 'branch',
+    desc: '分支',
+    except: [
+      'BranchDto',
+      'BranchRef',
+      'BranchLastCommit',
+      'branchHints',
+      'branchDto',     // 变量名驼峰
+      'branches',      // 复数(branches.value 等)+ IPC channel
+      'BranchesList',  // 函数名
+      'branchesList',
+      'selectedBranches',
+      'defaultBranch',
+      'branch-chip',   // CSS class
+      'timeline__branches',
+      "'branch",       // LaneModeSchema 字面量
+      "'Branch",
+      'branch:',
+      'branch.',       // 变量名前缀(但注意 branch. 会让 "branch.x" 漏过——所以用 'branch.\n' 不行)
+      'branch)',
+      'branch(',
+      'branch ',
+    ],
+  },
   { term: 'maintainer', desc: '维护者', except: [] },
 ];
 

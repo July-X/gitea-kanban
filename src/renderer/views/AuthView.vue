@@ -1,0 +1,360 @@
+<script setup lang="ts">
+/**
+ * AuthView —— PAT 输入 + 连接
+ *
+ * 设计（AGENTS §8.2 鉴权铁律 + OVERRIDE §本项目专属规则 #1）：
+ *   - 输入 gitea URL + 个人访问令牌 → 调 window.api.auth.connect
+ *   - token 在传输到 main 端后立刻进 keychain，**不**在 store / localStorage / cookie 留底
+ *   - 错误展示走"人话"：从 IpcError.hint + 类别前缀（ipc-client.ts 已统一处理）
+ *   - UI 文本零术语：不说"Personal Access Token" 而说"个人访问令牌"（hover 解释怎么生成）
+ *
+ * 交互：
+ *   - URL 输入框：placeholder 给出示例
+ *   - Token 输入框：type="password"（遮蔽），不显示明文
+ *   - "如何获取令牌"链接：跳 gitea 设置页（v1 用 anchor，新窗口打开）
+ *   - 提交中：按钮禁用 + 显示加载文案
+ *   - 成功后：跳 /board（路由 push）
+ */
+import { computed, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { Eye, EyeOff, KeyRound, LogIn, ShieldCheck } from 'lucide-vue-next';
+import { useAuthStore } from '@renderer/stores/auth';
+import { showToast } from '@renderer/lib/toast';
+
+const auth = useAuthStore();
+const router = useRouter();
+const route = useRoute();
+
+const giteaUrl = ref('');
+const token = ref('');
+const showToken = ref(false);
+const localError = ref<string | null>(null);
+
+const submitting = computed(() => auth.loading);
+const hasAnyError = computed(() => Boolean(localError.value) || Boolean(auth.error));
+
+/** 提交时优先级：local validation > auth.error（来自 main 端） */
+const errorMessage = computed(() => {
+  if (localError.value) return localError.value;
+  if (auth.error) return auth.error.messageText;
+  return null;
+});
+
+const errorHint = computed(() => auth.error?.hint ?? null);
+
+onMounted(async () => {
+  // 拉一次状态（如果已经接好直接跳走）
+  if (auth.accounts.length === 0) {
+    try {
+      await auth.refreshStatus();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (auth.isConnected) {
+    goNext();
+  }
+});
+
+function validateUrl(url: string): string | null {
+  if (!url.trim()) return '请输入 gitea 地址';
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return 'gitea 地址必须以 http:// 或 https:// 开头';
+    }
+  } catch {
+    return 'gitea 地址格式不正确（示例：https://gitea.example.com）';
+  }
+  return null;
+}
+
+function validateToken(t: string): string | null {
+  if (!t.trim()) return '请输入个人访问令牌';
+  if (t.trim().length < 8) return '令牌长度至少 8 个字符';
+  return null;
+}
+
+async function onSubmit(): Promise<void> {
+  localError.value = null;
+  auth.clearError();
+  const urlErr = validateUrl(giteaUrl.value);
+  if (urlErr) {
+    localError.value = urlErr;
+    return;
+  }
+  const tokenErr = validateToken(token.value);
+  if (tokenErr) {
+    localError.value = tokenErr;
+    return;
+  }
+  try {
+    await auth.connect(giteaUrl.value.trim(), token.value.trim());
+    showToast({
+      type: 'success',
+      message: '连接成功',
+      description: `欢迎，${auth.currentUser?.login ?? ''}`,
+    });
+    goNext();
+  } catch {
+    // 错误已存到 auth.error，由模板渲染
+  }
+}
+
+function goNext(): void {
+  const from = route.query.from;
+  const target = typeof from === 'string' && from.startsWith('/') ? from : '/board';
+  void router.push(target);
+}
+</script>
+
+<template>
+  <div class="auth">
+    <div class="auth__card">
+      <header class="auth__header">
+        <div class="auth__logo" aria-hidden="true">
+          <ShieldCheck :size="32" :stroke-width="1.5" />
+        </div>
+        <h1 class="auth__title">连接 gitea</h1>
+        <p class="auth__subtitle">
+          第一次使用？请输入你的 gitea 地址和个人访问令牌。
+          <br />
+          令牌只在本机加密保存，不会上传到任何地方。
+        </p>
+      </header>
+
+      <form class="auth__form" @submit.prevent="onSubmit">
+        <div class="auth__field">
+          <label class="auth__label" for="gitea-url">gitea 地址</label>
+          <input
+            id="gitea-url"
+            v-model="giteaUrl"
+            type="url"
+            class="auth__input"
+            placeholder="https://gitea.example.com"
+            autocomplete="url"
+            spellcheck="false"
+            :disabled="submitting"
+          />
+          <p class="auth__hint">自托管 gitea 多部署在子路径，例如 https://git.example.com/gitea/</p>
+        </div>
+
+        <div class="auth__field">
+          <label class="auth__label" for="gitea-token">个人访问令牌</label>
+          <div class="auth__input-wrap">
+            <input
+              id="gitea-token"
+              v-model="token"
+              :type="showToken ? 'text' : 'password'"
+              class="auth__input auth__input--with-icon"
+              placeholder="粘贴令牌（至少 8 个字符）"
+              autocomplete="off"
+              spellcheck="false"
+              :disabled="submitting"
+            />
+            <button
+              type="button"
+              class="auth__toggle"
+              :aria-label="showToken ? '隐藏令牌' : '显示令牌'"
+              :title="showToken ? '隐藏令牌' : '显示令牌'"
+              @click="showToken = !showToken"
+            >
+              <component :is="showToken ? EyeOff : Eye" :size="16" :stroke-width="2" />
+            </button>
+          </div>
+          <p class="auth__hint">
+            不知道怎么获取？去 gitea 的
+            <a
+              href="https://docs.gitea.com/usage/api-usage#generating-an-access-token"
+              target="_blank"
+              rel="noopener noreferrer"
+              >设置 → 应用 → 生成令牌</a
+            >
+            （需要勾选仓库、议题、用户的读写权限）
+          </p>
+        </div>
+
+        <div v-if="hasAnyError" class="auth__error" role="alert">
+          <KeyRound :size="16" :stroke-width="2" aria-hidden="true" />
+          <div>
+            <p class="auth__error-message">{{ errorMessage }}</p>
+            <p v-if="errorHint" class="auth__error-hint">{{ errorHint }}</p>
+          </div>
+        </div>
+
+        <button type="submit" class="auth__submit" :disabled="submitting">
+          <LogIn :size="16" :stroke-width="2" aria-hidden="true" />
+          <span>{{ submitting ? '正在连接…' : '连接' }}</span>
+        </button>
+      </form>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.auth {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  overflow-y: auto;
+}
+
+.auth__card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.auth__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+}
+
+.auth__logo {
+  color: var(--color-primary);
+  margin-bottom: var(--space-1);
+}
+
+.auth__title {
+  font-size: var(--font-xl);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.auth__subtitle {
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-relaxed);
+}
+
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.auth__label {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.auth__input {
+  width: 100%;
+}
+
+.auth__input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth__input--with-icon {
+  padding-right: 40px;
+}
+
+.auth__toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 6px;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth__toggle:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.auth__hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  line-height: var(--line-base);
+}
+
+.auth__hint a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.auth__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-danger);
+  color: var(--color-text);
+}
+
+.auth__error-message {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  margin: 0 0 2px 0;
+}
+
+.auth__error-hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.auth__submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 40px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px var(--color-primary-active),
+    0 0 16px var(--color-primary-glow);
+  transition:
+    background var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+}
+
+.auth__submit:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.auth__submit:active:not(:disabled) {
+  background: var(--color-primary-active);
+  transform: translateY(1px);
+}
+
+.auth__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+</style>
