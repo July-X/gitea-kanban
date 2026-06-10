@@ -16,6 +16,14 @@
  */
 
 import { z } from 'zod';
+import { IpcChannel } from '../../shared/ipc-channels.js';
+
+// IpcChannel 常量已抽到 src/shared/ipc-channels.ts（zod-free）——
+// 主进程 / preload 共享同一份 channel 名常量，但 preload 端不能 import 自带
+// zod 的本文件（sandboxed preload 不允许 runtime require external，AGENTS §8.10）。
+// 此处 re-export 以保持所有 main 端现有 `import { IpcChannel } from '.../schema.js'` 调用点不变。
+export { IpcChannel };
+export type { IpcChannelName } from '../../shared/ipc-channels.js';
 
 // ===== 通用基础类型 =====
 export const UuidSchema = z.string().uuid();
@@ -827,56 +835,6 @@ export const TimelineArgsSchema = z
 export type TimelineArgs = z.infer<typeof TimelineArgsSchema>;
 
 // ===== channel 名称（ipcMain.handle 字符串 + 渲染端 invoke 字符串共用） =====
+// IpcChannel 常量定义已抽到 src/shared/ipc-channels.ts（zod-free），本文件顶部 re-export。
+// 新增 / 修改 / 删除 channel 时，**只**改 src/shared/ipc-channels.ts。
 
-/**
- * IPC channel 集中常量
- *
- * 命名约定：`<namespace>.<method>`，camelCase
- * 02-architecture.md §5.1
- */
-export const IpcChannel = {
-  AUTH_CONNECT: 'auth.connect',
-  AUTH_DISCONNECT: 'auth.disconnect',
-  AUTH_STATUS: 'auth.status',
-
-  // === repos namespace（02-architecture.md §5.3.1）===
-  REPOS_LIST: 'repos.list',
-  REPOS_ADD_PROJECT: 'repos.addProject',
-  REPOS_REMOVE_PROJECT: 'repos.removeProject',
-
-  // === branches namespace（02-architecture.md §5.3.2）===
-  BRANCHES_LIST: 'branches.list',
-  BRANCHES_CREATE: 'branches.create',
-  BRANCHES_RENAME: 'branches.rename',
-  BRANCHES_DELETE: 'branches.delete',
-  BRANCHES_STAR: 'branches.star',
-
-  // === commits namespace（02-architecture.md §5.3.3 + §5.3.4）===
-  COMMITS_LIST: 'commits.list',
-  COMMITS_GET: 'commits.get',
-  COMMITS_TIMELINE: 'commits.timeline',
-
-  // === pulls namespace（02-architecture.md §5.3.5 + §5.3.6）===
-  PULLS_LIST: 'pulls.list',
-  PULLS_GET: 'pulls.get',
-  PULLS_CREATE: 'pulls.create',
-  PULLS_MERGE: 'pulls.merge',
-
-  // === board.columns namespace（02-architecture.md §5.3.7）===
-  BOARD_COLUMNS_LIST: 'board.columns.list',
-  BOARD_COLUMNS_CREATE: 'board.columns.create',
-  BOARD_COLUMNS_UPDATE: 'board.columns.update',
-  BOARD_COLUMNS_REORDER: 'board.columns.reorder',
-  BOARD_COLUMNS_DELETE: 'board.columns.delete',
-
-  // === board.cards namespace（02-architecture.md §5.3.8）===
-  BOARD_CARDS_LIST: 'board.cards.list',
-  BOARD_CARDS_CREATE: 'board.cards.create',
-  BOARD_CARDS_UPDATE: 'board.cards.update',
-  BOARD_CARDS_MOVE: 'board.cards.move',
-  BOARD_CARDS_DELETE: 'board.cards.delete',
-  BOARD_CARDS_LINK: 'board.cards.link',
-  BOARD_CARDS_UNLINK: 'board.cards.unlink',
-} as const;
-
-export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];

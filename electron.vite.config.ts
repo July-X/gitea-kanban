@@ -30,7 +30,10 @@ export default defineConfig({
   },
   preload: {
     build: {
-      externalizeDeps: true,
+      // 不 externalizeDeps：sandboxed preload 不允许 runtime require external（AGENTS §8.10.1），
+      // rollup 把所有依赖（含 transitive）静态 bundle 进单文件，sandbox 加载时零 require。
+      // 当前 preload 只用 electron + src/shared/*（zod-free），bundle 体积 ~4 kB；保持 inline 不影响大小。
+      externalizeDeps: false,
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/preload/index.ts') },
         output: {

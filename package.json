@@ -9,9 +9,9 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "electron-vite dev",
-    "dev:pre": "pnpm rebuild:native:electron",
-    "build": "electron-vite build",
+    "dev": "pnpm rebuild:native:electron && electron-vite dev",
+    "dev:skip-rebuild": "electron-vite dev",
+    "build": "pnpm rebuild:native:electron && electron-vite build",
     "preview": "electron-vite preview",
     "type-check": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit",
     "type-check:main": "tsc -p tsconfig.node.json --noEmit",

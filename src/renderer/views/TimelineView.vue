@@ -285,7 +285,7 @@ function laneLabel(id: string): string {
       <div v-if="!activeRepo" class="timeline__placeholder">
         <EmptyState
           title="还没有选中仓库"
-          description="去"看板"页选一个仓库，再回来这里看时间轴"
+          description='去"看板"页选一个仓库，再回来这里看时间轴'
         />
       </div>
       <div v-else-if="!branches.length" class="timeline__placeholder">

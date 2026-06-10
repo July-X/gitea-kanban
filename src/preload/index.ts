@@ -20,7 +20,7 @@
  */
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import { IpcChannel } from '../main/ipc/schema.js';
+import { IpcChannel } from '../shared/ipc-channels.js';
 
 /** 标准 invoke 包装：`(args) => ipcRenderer.invoke(channel, args)` */
 const invoke =
