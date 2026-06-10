@@ -10,19 +10,24 @@
 import { registerAuthIpc, unregisterAuthIpc } from './auth.js';
 import { registerReposIpc, unregisterReposIpc } from './repos.js';
 import { registerBranchesIpc, unregisterBranchesIpc } from './branches.js';
+import { registerCommitsIpc, unregisterCommitsIpc } from './commits.js';
+import { registerPullsIpc, unregisterPullsIpc } from './pulls.js';
+import { registerBoardIpc, unregisterBoardIpc } from './board.js';
 
 export function registerAllIpcHandlers(): void {
   registerAuthIpc();
   registerReposIpc();
   registerBranchesIpc();
-  // === 后续 namespace 在此追加 ===
-  // registerCommitsIpc();
-  // registerPullsIpc();
-  // ...
+  registerCommitsIpc();
+  registerPullsIpc();
+  registerBoardIpc();
 }
 
 export function unregisterAllIpcHandlers(): void {
   unregisterAuthIpc();
   unregisterReposIpc();
   unregisterBranchesIpc();
+  unregisterCommitsIpc();
+  unregisterPullsIpc();
+  unregisterBoardIpc();
 }
