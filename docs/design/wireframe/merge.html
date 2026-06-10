@@ -4,17 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gitea Kanban · 合并管理</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
-    /* v1 单主题暗色（打磨版：去描边 / 靠背景分层 / 克制阴影）
-       底色：苍蓝 #134857（冷青 dark teal） */
+    /* v1 精修版（2026-06-10 12:50 ui-ux-pro-max 打磨）
+       底色：苍蓝 #134857；字体：Inter + JetBrains Mono + Noto Sans SC */
     :root {
       --color-primary: #609926; --color-primary-hover: #74B830;
-      --color-primary-soft: rgba(96, 153, 38, 0.18);
+      --color-primary-soft: rgba(96, 153, 38, 0.22);
+      --color-primary-bright: #95D046;
       --color-accent: #F76707; --color-accent-soft: rgba(247, 103, 7, 0.18);
       --color-text: #DCE9F0; --color-text-secondary: #90A4AE; --color-text-muted: #5F7A87;
       --color-bg: #134857; --color-bg-elevated: #1B5868; --color-bg-hover: #236479; --color-bg-active: #2D7487;
-      --color-border: transparent;            /* 打磨：默认无描边 */
-      --color-divider: rgba(220, 233, 240, 0.08);  /* 冷白半透 */
+      --color-border: transparent;
+      --color-divider: rgba(220, 233, 240, 0.08);
       --color-success: #5BC76A; --color-success-soft: rgba(91, 199, 106, 0.18);
       --color-warning: #E8B954; --color-warning-soft: rgba(232, 185, 84, 0.18);
       --color-danger: #F47A6B; --color-danger-soft: rgba(244, 122, 107, 0.18);
@@ -32,11 +36,15 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; }
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+      font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
       font-size: var(--font-md); color: var(--color-text); background: var(--color-bg);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: 'cv11', 'ss01', 'ss03';
+      text-rendering: optimizeLegibility;
       transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
     }
-    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code, .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.01em; }
     :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; box-shadow: 0 0 0 4px rgba(96, 153, 38, 0.25); border-radius: var(--radius-sm); }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
@@ -57,7 +65,7 @@
     .navrail__section-label { font-size: var(--font-xs); text-transform: uppercase; color: var(--color-text-muted); padding: var(--space-2) var(--space-3) var(--space-1); letter-spacing: 0.04em; }
     .navrail__item { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-3); border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text); font-size: var(--font-sm); text-decoration: none; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
     .navrail__item:hover { background: var(--color-bg-hover); }
-    .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary-bright); font-weight: 600; }
     .navrail__item .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; }
     .navrail__item .badge { margin-left: auto; font-size: var(--font-xs); padding: 1px 6px; border-radius: 10px; background: var(--color-bg-active); color: var(--color-text-secondary); }
     .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; }
@@ -83,9 +91,9 @@
     .btn--sm { height: 26px; padding: 0 var(--space-2); font-size: var(--font-xs); }
 
     .toolbar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider); background: var(--color-bg-elevated); }
-    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 10px; background: var(--color-bg-hover); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease); }
-    .chip:hover { background: var(--color-bg-active); }
-    .chip.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px; background: var(--color-bg-hover); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease); }
+    .chip:hover { background: var(--color-bg-active); color: var(--color-text); }
+    .chip.is-active { background: var(--color-primary-soft); color: var(--color-primary-bright); font-weight: 600; }
     .chip__count { background: var(--color-bg); border-radius: 8px; padding: 0 4px; }
 
     .list { flex: 1; overflow-y: auto; padding: var(--space-3) var(--space-4); }
@@ -100,7 +108,7 @@
     .pr__status--open { background: var(--color-success-soft); color: var(--color-success); }
     .pr__status--review { background: var(--color-info-soft); color: var(--color-info); }
     .pr__status--conflict { background: var(--color-danger-soft); color: var(--color-danger); }
-    .pr__status--merged { background: var(--color-primary-soft); color: var(--color-primary); }
+    .pr__status--merged { background: var(--color-primary-soft); color: var(--color-primary-bright); }
     .pr__status--closed { background: var(--color-bg-hover); color: var(--color-text-muted); }
 
     .pr__branches { display: flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--color-text-secondary); margin-bottom: var(--space-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -125,7 +133,7 @@
     .modal__select { flex: 1; height: 32px; padding: 0 var(--space-2); border-radius: var(--radius-sm); background: var(--color-bg-hover); font-size: var(--font-sm); }
     .modal__foot { padding: var(--space-3) var(--space-4); display: flex; gap: var(--space-2); justify-content: flex-end; }
     .merge-summary { background: var(--color-primary-soft); border-radius: var(--radius-sm); padding: var(--space-3); margin: var(--space-3) 0; font-size: var(--font-sm); }
-    .merge-summary strong { color: var(--color-primary); }
+    .merge-summary strong { color: var(--color-primary-bright); }
     .conflict-list { background: var(--color-danger-soft); border: 1px solid var(--color-danger); border-radius: var(--radius-sm); padding: var(--space-3); margin: var(--space-3) 0; font-size: var(--font-sm); }
     .conflict-list strong { color: var(--color-danger); }
     .conflict-list ul { margin: var(--space-2) 0 0; padding-left: 20px; }
@@ -152,9 +160,10 @@
       </div>
       <div class="titlebar__spacer"></div>
       <div class="titlebar__sync"><span class="dot" aria-hidden="true"></span><span>已同步 · 2 分钟前</span></div>
-      <button class="icon-btn" id="theme-toggle" aria-label="切换到暗色模式" title="切换主题">
-        <svg id="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      <button class="icon-btn" aria-label="通知" title="通知">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
         </svg>
       </button>
       <div class="titlebar__user">ZS</div>
@@ -247,7 +256,10 @@
 
           <div class="pr" tabindex="0">
             <div class="pr__head">
-              <span class="pr__status pr__status--review">⏳ 审核中</span>
+              <span class="pr__status pr__status--review">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                审核中
+              </span>
               <span class="pr__title">把"个人主页"页面的懒加载从图片扩展到组件</span>
               <span class="pr__num">#131</span>
             </div>
@@ -259,7 +271,7 @@
             <div class="pr__meta">
               <span><span class="pr__avatar" style="background: #6FB1FF;">CY</span> 陈杨 · 今天 09:14</span>
               <span class="pr__check pr__check--ok">✓ 无冲突</span>
-              <span style="color: var(--color-warning);">⏳ 等待 2 人审核</span>
+              <span style="color: var(--color-warning);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align: -2px; margin-right: 2px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>等待 2 人审核</span>
               <span>7 次提交 · +412 / −198</span>
             </div>
             <div class="pr__actions">
@@ -270,7 +282,10 @@
 
           <div class="pr" tabindex="0">
             <div class="pr__head">
-              <span class="pr__status pr__status--conflict">⚠ 有冲突</span>
+              <span class="pr__status pr__status--conflict">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                有冲突
+              </span>
               <span class="pr__title">/api/v2/users 接口分页 cursor 改造</span>
               <span class="pr__num">#127</span>
             </div>
@@ -281,7 +296,10 @@
             </div>
             <div class="pr__meta">
               <span><span class="pr__avatar" style="background: #B294E2;">ZH</span> 周航 · 5/26</span>
-              <span class="pr__check pr__check--bad">✕ 2 个文件冲突</span>
+              <span class="pr__check pr__check--bad">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                2 个文件冲突
+              </span>
               <span>8 次提交 · +340 / −125</span>
             </div>
             <div class="pr__actions">
@@ -303,7 +321,10 @@
             </div>
             <div class="pr__meta">
               <span><span class="pr__avatar" style="background: #5F7A87;">SY</span> 孙宇 · 5/24</span>
-              <span class="pr__check pr__check--ok">合并到主线 · 5/24</span>
+              <span class="pr__check pr__check--ok">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                合并到主线 · 5/24
+              </span>
               <span>3 次提交</span>
             </div>
             <div class="pr__actions">
@@ -314,7 +335,10 @@
 
           <div class="pr" tabindex="0" style="opacity: 0.65;">
             <div class="pr__head">
-              <span class="pr__status pr__status--closed">⊗ 已关闭</span>
+              <span class="pr__status pr__status--closed">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                已关闭
+              </span>
               <span class="pr__title">[废弃] 旧版用户中心改造方案 v1</span>
               <span class="pr__num">#108</span>
             </div>
@@ -355,7 +379,7 @@
               </div>
 
               <div class="merge-summary">
-                <strong>✓ 这次合并预计：</strong><br/>
+                <strong><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align: -2px; margin-right: 4px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>这次合并预计：</strong><br/>
                 · 不需要解决冲突<br/>
                 · 3 个审核已通过<br/>
                 · 会把 hotfix/safari 的 3 次提交合并进主线<br/>
@@ -363,10 +387,10 @@
               </div>
 
               <ul class="checklist">
-                <li class="is-good"><span class="icon">✓</span> 无冲突</li>
-                <li class="is-good"><span class="icon">✓</span> 3 人通过审核</li>
-                <li class="is-good"><span class="icon">✓</span> 所有 CI 检查已通过</li>
-                <li class="is-good"><span class="icon">✓</span> 你有合并权限（写权限）</li>
+                <li class="is-good"><span class="icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span> 无冲突</li>
+                <li class="is-good"><span class="icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span> 3 人通过审核</li>
+                <li class="is-good"><span class="icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span> 所有 CI 检查已通过</li>
+                <li class="is-good"><span class="icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span> 你有合并权限（写权限）</li>
               </ul>
             </div>
             <div class="modal__foot">
@@ -380,21 +404,8 @@
   </div>
 
   <script>
-    (function() {
-      var btn = document.getElementById('theme-toggle');
-      var icon = document.getElementById('theme-icon');
-      btn.addEventListener('click', function() {
-        var cur = document.documentElement.getAttribute('data-theme');
-        var next = cur === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        btn.setAttribute('aria-label', next === 'dark' ? '切换到浅色模式' : '切换到暗色模式');
-        if (next === 'dark') {
-          icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
-        } else {
-          icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
-        }
-      });
-    })();
+    // v1 单主题暗色（不切换）—— 不绑定任何切换逻辑
+    // 设计意图参考 design-system/gitea-kanban/OVERRIDE.md
   </script>
 </body>
 </html>

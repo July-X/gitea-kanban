@@ -20,8 +20,9 @@
 | 背景 | `#0F172A` 深色 | **v1 单主题暗色（不提供切换）**——底色 `#134857` 苍蓝（dark teal），四层分层：`#134857` canvas / `#1B5868` elevated / `#236479` hover / `#2D7487` active + 8-12% 主色 alpha glow | 用户 2026-06-10 拍板：实施最快，避免分散精力；暗色风符合 dev 工具桌面的常见范式（VSCode / Cursor / Linear）；非技术用户友好通过"清晰文字 + 二次确认 + 零术语"保证，不靠浅色。底色选苍蓝 `#134857`（冷青）让 gitea 绿 `#609926` 主色更鲜明、文字用冷白 `#DCE9F0` 保持冷调统一 |
 | 风格 | Vibrant & Block-based（块状/大色块/活泼） | **克制 / 信息密度优先** | 非技术用户要"看得懂"，大色块/活泼风容易显得不专业 |
 | Pattern | Feature-Rich Showcase（Hero > Features > CTA） | **不适用**（这不是 landing） | 我们是工具型应用，没有 marketing 页面 |
-| 标题字体 | Fira Code | **Inter** 或系统默认 sans | 桌面应用要中英文混排，Fira Code 中文不行 |
-| 正文字体 | Fira Sans | **Inter** 或系统默认 sans | 同上 |
+| 标题字体 | Fira Code | **Inter**（Google Fonts 载入） | 桌面应用要中英文混排，Fira Code 中文不行 |
+| 正文字体 | Fira Sans | **Inter**（中文 fallback：Noto Sans SC） | 同上 |
+| 等宽字体 | Fira Code | **JetBrains Mono** | commit hash / branch / `#CARD-482` / tooltip SHA 必须用正经 mono，dev 工具标配；`cv11/ss01` 启用 → 数字"0"带斜线、"1"有底杠，可读性↑ |
 | 图标 | SVG（Heroicons/Lucide） | **✅ 采纳** | 跟 MASTER 一致，专业规则 |
 | `cursor-pointer` | 必须 | **✅ 采纳** | 跟 MASTER 一致 |
 | Hover 反馈 | 150-300ms 平滑 | **✅ 采纳** | 跟 MASTER 一致 |
@@ -85,3 +86,4 @@
 - 任何前端开发任务开工前 → 必读本 OVERRIDE
 - 任何 UI 风格 / 配色 / 字体变更 → 必须先改本文件再改实现
 - 任何术语翻译表变更 → 必须同步本文件
+- 字体三件套（Inter + JetBrains Mono + Noto Sans SC）默认从 Google Fonts CDN 载入；wireframe 用 `<link rel="stylesheet" href="...Inter:wght@400;500;600;700&family=JetBrains+Mono...&family=Noto+Sans+SC...">`；实现期（Electron）需考虑离线场景 → v1 把三套字体内置到 `resources/fonts/`，不走 CDN；启动期异步加载，渲染进程阻塞 < 200ms

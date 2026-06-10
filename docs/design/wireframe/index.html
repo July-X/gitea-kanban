@@ -4,19 +4,24 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gitea Kanban · 看板主页</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     /* ============================================================
-       Design tokens — v1 打磨版（2026-06-10 12:34 用户拍板底色）
+       Design tokens — v1 精修版（2026-06-10 12:50 ui-ux-pro-max 打磨）
        原则：去描边、靠背景分层、克制的间距与阴影、现代暗色
        底色：苍蓝 #134857（冷青 dark teal），四层分层 + 冷白文字
-       来源：design-system/gitea-kanban/OVERRIDE.md
+       字体：Inter（UI）+ JetBrains Mono（commit / branch）+ Noto Sans SC（中文）
+       来源：design-system/gitea-kanban/OVERRIDE.md + ui-ux-pro-max
        ============================================================ */
     :root {
       /* v1 单主题暗色（不提供切换）— 冷底苍蓝 */
       --color-primary: #609926;            /* gitea 绿（冷底上鲜明，保持原值） */
       --color-primary-hover: #74B830;
       --color-primary-active: #4D8A1A;
-      --color-primary-soft: rgba(96, 153, 38, 0.18);
+      --color-primary-soft: rgba(96, 153, 38, 0.22);
+      --color-primary-bright: #95D046;    /* 提亮的绿，用于"绿底+绿字"chip 文字对比 */
       --color-accent: #F76707;             /* gitea 橙（与冷底对比强） */
       --color-accent-soft: rgba(247, 103, 7, 0.18);
       /* 冷白文字：与冷底色统一 */
@@ -61,14 +66,17 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; }
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+      font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
       font-size: var(--font-md);
       color: var(--color-text);
       background: var(--color-bg);
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: 'cv11', 'ss01', 'ss03';
+      text-rendering: optimizeLegibility;
       transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
     }
-    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code, .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.01em; }
 
     /* ====== focus ring (a11y 必须) ====== */
     :focus-visible {
@@ -168,7 +176,7 @@
       transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
     }
     .navrail__item:hover { background: var(--color-bg-hover); }
-    .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary-bright); font-weight: 600; }
     .navrail__item .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; }
     .navrail__item .badge { margin-left: auto; font-size: var(--font-xs); padding: 1px 6px; border-radius: 10px; background: var(--color-bg-active); color: var(--color-text-secondary); min-width: 22px; text-align: center; }
     .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; }
@@ -191,9 +199,9 @@
     .btn--sm { height: 26px; padding: 0 var(--space-2); font-size: var(--font-xs); }
 
     .content__filterbar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider); background: var(--color-bg-elevated); }
-    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 10px; background: var(--color-bg-hover); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
-    .chip:hover { background: var(--color-bg-active); }
-    .chip.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px; background: var(--color-bg-hover); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
+    .chip:hover { background: var(--color-bg-active); color: var(--color-text); }
+    .chip.is-active { background: var(--color-primary-soft); color: var(--color-primary-bright); font-weight: 600; }
     .chip__close { cursor: pointer; opacity: 0.6; }
     .chip__close:hover { opacity: 1; }
 
@@ -204,12 +212,13 @@
     .column__title { font-weight: 600; font-size: var(--font-sm); display: flex; align-items: center; gap: var(--space-2); }
     .column__title .swatch { width: 8px; height: 8px; border-radius: 50%; }
     .column__count { font-size: var(--font-xs); color: var(--color-text-muted); background: var(--color-bg-active); padding: 1px 6px; border-radius: 10px; }
-    .column__wip { font-size: var(--font-xs); color: var(--color-text-muted); margin-left: auto; }
-    .column__wip.is-over { color: var(--color-danger); font-weight: 600; }
+    .column__wip { font-size: var(--font-xs); color: var(--color-text-muted); margin-left: auto; padding: 2px 8px; border-radius: 10px; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
+    .column__wip.is-over { color: #fff; background: var(--color-danger); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+    .column__wip.is-over::before { content: ''; width: 10px; height: 10px; display: inline-block; background: currentColor; mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2L1 21h22L12 2zm0 6l7.53 13H4.47L12 8zm-1 4v4h2v-4h-2zm0 6v2h2v-2h-2z'/></svg>") center / contain no-repeat; -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2L1 21h22L12 2zm0 6l7.53 13H4.47L12 8zm-1 4v4h2v-4h-2zm0 6v2h2v-2h-2z'/></svg>") center / contain no-repeat; }
     .column__add { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; }
     .column__body { flex: 1; overflow-y: auto; padding: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); }
-    .column__add-card { padding: var(--space-2) var(--space-3); color: var(--color-text-muted); font-size: var(--font-sm); border-radius: var(--radius-sm); cursor: pointer; text-align: left; background: transparent; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
-    .column__add-card:hover { background: var(--color-bg-hover); color: var(--color-text); }
+    .column__add-card { padding: var(--space-3); color: var(--color-text-secondary); font-size: var(--font-sm); border-radius: var(--radius-sm); cursor: pointer; text-align: center; background: transparent; border: 1px dashed transparent; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
+    .column__add-card:hover { background: var(--color-bg-hover); color: var(--color-text); border-color: rgba(220, 233, 240, 0.12); }
 
     .card { background: var(--color-bg); border-radius: var(--radius-sm); padding: var(--space-3); cursor: grab; box-shadow: var(--shadow-sm); transition: background-color var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease); }
     .card:hover { background: var(--color-bg-hover); box-shadow: var(--shadow-md); }
@@ -218,7 +227,7 @@
     .card__labels { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-2); }
     .label { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: var(--font-xs); color: #fff; }
     .card__meta { display: flex; align-items: center; gap: var(--space-3); font-size: var(--font-xs); color: var(--color-text-muted); }
-    .card__meta > * { display: flex; align-items: center; gap: 4px; }
+    .card__meta > * { display: inline-flex; align-items: center; gap: 4px; }
     .card__meta .avatar { width: 18px; height: 18px; border-radius: 50%; background: var(--color-info); color: #fff; display: grid; place-items: center; font-size: 10px; font-weight: 600; }
     .card__meta .commit-badge { color: var(--color-accent); font-weight: 600; }
     .card__meta .due.is-overdue { color: var(--color-danger); font-weight: 600; }
@@ -228,19 +237,22 @@
     .drawer { position: fixed; top: var(--titlebar-h); right: 0; bottom: 0; width: 420px; background: var(--color-bg-elevated); box-shadow: var(--shadow-lg); padding: var(--space-4); overflow-y: auto; }
     .drawer__close { position: absolute; top: 12px; right: 12px; }
     .drawer__crumb { font-size: var(--font-xs); color: var(--color-text-muted); margin-bottom: var(--space-2); }
-    .drawer__title { font-size: var(--font-xl); font-weight: 600; margin-bottom: var(--space-3); padding-right: 32px; }
+    .drawer__title { font-size: var(--font-xl); font-weight: 600; margin-bottom: var(--space-3); padding-right: 32px; line-height: 1.35; }
     .drawer__row { display: flex; align-items: center; gap: var(--space-2); padding: 6px 0; font-size: var(--font-sm); border-bottom: 1px solid var(--color-divider); }
     .drawer__row .label-text { color: var(--color-text-muted); width: 72px; flex-shrink: 0; }
     .drawer__section { margin-top: var(--space-4); }
-    .drawer__section h4 { font-size: var(--font-sm); text-transform: uppercase; color: var(--color-text-muted); margin: 0 0 var(--space-2); letter-spacing: 0.04em; }
-    .drawer__desc { font-size: var(--font-sm); line-height: 1.6; color: var(--color-text-secondary); }
-    .commit-link { display: flex; align-items: center; gap: var(--space-2); padding: 6px 10px; border-radius: var(--radius-sm); font-size: var(--font-xs); margin-bottom: 4px; transition: background-color var(--t-base) var(--ease); }
+    .drawer__section h4 { font-size: var(--font-xs); text-transform: uppercase; color: var(--color-text-muted); margin: 0 0 var(--space-2); letter-spacing: 0.06em; font-weight: 600; }
+    .drawer__desc { font-size: var(--font-sm); line-height: 1.65; color: var(--color-text); }
+    .commit-link { display: flex; align-items: center; gap: var(--space-2); padding: 6px 10px; border-radius: var(--radius-sm); font-size: var(--font-xs); margin-bottom: 4px; transition: background-color var(--t-base) var(--ease); cursor: pointer; }
     .commit-link:hover { background: var(--color-bg-hover); }
     .commit-link .sha { color: var(--color-accent); font-weight: 600; }
     .commit-link .msg { color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
     /* ====== toast ====== */
-    .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--color-warning); color: #fff; padding: 10px 16px; border-radius: var(--radius-md); font-size: var(--font-sm); display: flex; align-items: center; gap: var(--space-2); box-shadow: var(--shadow-md); }
+    .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--color-bg-elevated); color: var(--color-text); padding: 10px 16px 10px 14px; border-radius: var(--radius-md); font-size: var(--font-sm); display: flex; align-items: center; gap: var(--space-2); box-shadow: var(--shadow-md); border-left: 3px solid var(--color-warning); max-width: 540px; }
+    .toast strong { color: var(--color-warning); font-weight: 600; }
+    .toast a { color: var(--color-primary); text-decoration: none; font-weight: 500; margin-left: 8px; }
+    .toast a:hover { text-decoration: underline; }
 
     /* ====== pills (状态徽章) ====== */
     .pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; font-size: var(--font-xs); font-weight: 600; }
@@ -276,9 +288,10 @@
         <span class="dot" aria-hidden="true"></span>
         <span>已同步 · 2 分钟前</span>
       </div>
-      <button class="icon-btn" id="theme-toggle" aria-label="切换到暗色模式" title="切换主题">
-        <svg id="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      <button class="icon-btn" aria-label="通知" title="通知">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
         </svg>
       </button>
       <div class="titlebar__user" title="张三 (产品经理)">ZS</div>
@@ -341,9 +354,9 @@
                 </div>
                 <div class="card__title">新首页首屏改版：Hero 区高度统一为 480px，标题字号从 36 改为 28</div>
                 <div class="card__meta">
-                  <span title="关联 1 次提交" class="commit-badge">● 1 提交</span>
+                  <span title="关联 1 次提交" class="commit-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5L9 15.5"/></svg> 1 提交</span>
                   <span><span class="avatar">ZS</span> 我</span>
-                  <span class="due">📅 5/30</span>
+                  <span class="due"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> 5/30</span>
                 </div>
               </div>
               <div class="card" tabindex="0">
@@ -353,7 +366,7 @@
                 <div class="card__title">检查所有 404 页文案，准备新一期文案库</div>
                 <div class="card__meta">
                   <span><span class="avatar" style="background: #f76707;">LY</span> 林</span>
-                  <span class="due">📅 6/02</span>
+                  <span class="due"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> 6/02</span>
                 </div>
               </div>
               <button class="column__add-card">+ 添加卡片</button>
@@ -378,9 +391,9 @@
                 </div>
                 <div class="card__title">登录页背景动效在 Safari 下崩溃（iOS 18 复现）</div>
                 <div class="card__meta">
-                  <span title="关联 3 次提交" class="commit-badge">● 3 提交</span>
+                  <span title="关联 3 次提交" class="commit-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5L9 15.5"/></svg> 3 提交</span>
                   <span><span class="avatar" style="background: #0969da;">CY</span> 陈</span>
-                  <span class="due is-overdue">📅 5/28 逾期</span>
+                  <span class="due is-overdue"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> 5/28 逾期</span>
                 </div>
               </div>
               <div class="card" tabindex="0">
@@ -398,7 +411,7 @@
                 </div>
                 <div class="card__title">/api/v2/users 接口分页 cursor 改造：避免深分页越界</div>
                 <div class="card__meta">
-                  <span title="关联 2 次提交 + 1 合并请求" class="commit-badge">● 2 提交 · 1 合并请求</span>
+                  <span title="关联 2 次提交 + 1 合并请求" class="commit-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5L9 15.5"/></svg> 2 提交 · 1 合并请求</span>
                   <span><span class="avatar" style="background: #8250df;">ZH</span> 周</span>
                 </div>
               </div>
@@ -421,7 +434,7 @@
                 </div>
                 <div class="card__title">把订单状态机的日志改成结构化 JSON</div>
                 <div class="card__meta">
-                  <span title="合并请求 #128" class="commit-badge">⇄ 合并请求 #128</span>
+                  <span title="合并请求 #128" class="commit-badge" style="color: var(--color-primary);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10l-3-3"/><path d="M17 17H7l3 3"/></svg> 合并请求 #128</span>
                   <span><span class="avatar" style="background: #8250df;">ZH</span> 周</span>
                 </div>
               </div>
@@ -431,7 +444,7 @@
                 </div>
                 <div class="card__title">更新注册流程的 6 处错误提示文案</div>
                 <div class="card__meta">
-                  <span title="合并请求 #130" class="commit-badge">⇄ 合并请求 #130</span>
+                  <span title="合并请求 #130" class="commit-badge" style="color: var(--color-primary);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10l-3-3"/><path d="M17 17H7l3 3"/></svg> 合并请求 #130</span>
                   <span><span class="avatar" style="background: #f76707;">LY</span> 林</span>
                 </div>
               </div>
@@ -454,7 +467,7 @@
                 </div>
                 <div class="card__title">生产 Redis 升级到 7.2（含 5 月停机维护窗口）</div>
                 <div class="card__meta">
-                  <span title="已合并到主线，5/24 上线" class="commit-badge">✓ 已合并 5/24</span>
+                  <span title="已合并到主线，5/24 上线" class="commit-badge" style="color: var(--color-success);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> 已合并 5/24</span>
                   <span><span class="avatar" style="background: #444c56;">SY</span> 孙</span>
                 </div>
               </div>
@@ -534,27 +547,13 @@
   </div>
 
   <div class="toast" role="status" aria-live="polite">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    <span>暂时连不上 gitea，已切到本地缓存。最近一次同步：<strong>2 小时前</strong>。<a href="#" style="color: #fff; text-decoration: underline; margin-left: 8px;">重试</a></span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--color-warning); flex-shrink: 0;"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    <span>暂时连不上 gitea，已切到本地缓存。最近一次同步：<strong>2 小时前</strong>。<a href="#">重试</a></span>
   </div>
 
   <script>
-    // theme toggle (顶栏按钮, 验证默认浅色 + 暗色可切架构)
-    (function() {
-      var btn = document.getElementById('theme-toggle');
-      var icon = document.getElementById('theme-icon');
-      btn.addEventListener('click', function() {
-        var cur = document.documentElement.getAttribute('data-theme');
-        var next = cur === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        btn.setAttribute('aria-label', next === 'dark' ? '切换到浅色模式' : '切换到暗色模式');
-        if (next === 'dark') {
-          icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
-        } else {
-          icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
-        }
-      });
-    })();
+    // v1 单主题暗色（不切换）—— 不绑定任何切换逻辑
+    // 设计意图参考 design-system/gitea-kanban/OVERRIDE.md
   </script>
 </body>
 </html>
