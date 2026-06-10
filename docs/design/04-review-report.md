@@ -53,7 +53,7 @@
 
 **证据**：
 - **Electron + TS**：合理；`02 §2.1` 给的三个理由（单二进制、跨平台、与本地资源零摩擦）都站得住。
-- **React + Vite + Zustand + CSS Modules**：合理；`03 §7.1` 显式给出"不选 Tailwind/styled-components/Emotion/Sass"的 4 条理由（类名爆炸、运行时开销、编译依赖），不是凭感觉。
+- **Vue 3 + Vite + Pinia + CSS Modules**（v5 决策 2026-06-10 17:24 改 Vue 3，原 v1 文档"React + Vite + Zustand"已作废）：合理；`03 §7.1` 显式给出"不选 Tailwind/styled-components/Emotion/Sass"的 4 条理由（类名爆炸、运行时开销、编译依赖），不是凭感觉。
 - **AntV X6@3.1.7**：合理；`01 §4 + §5` 给出 4 个候选库横评，理由（用户已熟悉栈 / git graph 是图编辑引擎甜区 / MIT / 性能可控）扎实。但**版本钉死 3.1.7** 留了个隐患——AntV X6 当前主线是 v2（v2.x 已发布），v3.x 是老稳定线（参考 https://x6.antv.antgroup.com/）；钉 3.1.7 意味着新功能不会进，v2 重写时是 breaking change。`01 §5.1` 最后一句"X6 v4 升级时要重新评估 React 适配深度" 也提示了这个风险，但没有行动项。
 - **better-sqlite3 + Drizzle + drizzle-kit**：合理；同步 API + schema-first + 迁移工具链成熟是真实收益。`02 §2.3` 还给了 `keytar` 维护停滞的备选 `@napi-rs/keyring`——预案到位。
 - **openapi-fetch 而非官方 Go SDK**：合理（决策记录里早就把 Go SDK 否决了），`02 §2.3` 给出"轻量、零运行时依赖膨胀、优先用 gitea 自带 OpenAPI 生成类型"三个理由。
@@ -63,7 +63,7 @@
 **扣分点**：
 - AntV X6 v3 与 v2 主线的版本断层是真实风险，文档没给出"如果 X6 突然停更怎么办"的明确行动项（`01 §4` 只说"v2 短期 G6@5 替代 / 性能爆发期 D3 自绘"是模糊预案，没有责任人 / 触发条件）。
 - keytar 维护停滞是已知事实，`02 §2.3` 提到"后续若 keytar 维护停滞可换 @napi-rs/keyring"——但**没有把"换 keyring"列入 M0/M1 的任务**，意味着开工后才会临时决策。
-- 渲染进程状态管理选 Zustand（`03 §6.1` 给的 4 条理由没问题），但 `02 §2.2` 没说"Zustand 跟 IPC bridge 的中间层"——前端 agent 开工时会有"Zustand store 直接调 window.api 还是封一层"的设计岔路。
+- 渲染进程状态管理选 Pinia（`03 §6.1` 给的理由没问题，v5 决策从 Zustand 改 Pinia 是因 Vue 3 选型联动），但 `02 §2.2` 没说"Pinia store 跟 IPC bridge 的中间层"——前端 agent 开工时会有"Pinia store 直接调 window.api 还是封一层"的设计岔路。
 
 ---
 

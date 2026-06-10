@@ -4,6 +4,7 @@
 > 技术选型、关键决策、UI 草案、M0~M3 路线图。要深入任何一节，点对应链接到 `01~03` 设计文档。
 >
 > 设计阶段产物时间：2026-06-10
+> **v5 增量（2026-06-10 17:24）**：渲染进程框架 React 18 → **Vue 3**（用户拍板；理由：团队无 React 积累，Vue 3 在团队内有现成积累）。配套：Zustand → Pinia / Radix UI → Radix Vue / React Router 6 → Vue Router 4 / 新增 `@antv/x6-vue-shape` 桥接包。
 > 依赖文档：[01-research.md](./01-research.md) · [02-architecture.md](./02-architecture.md) · [03-frontend.md](./03-frontend.md)
 
 ---
@@ -39,8 +40,8 @@ flowchart TB
 
     subgraph Desktop["Electron 应用（用户机器本地）"]
         subgraph Renderer["渲染进程 Chromium"]
-            UI[UI 组件<br/>React + TS]
-            Store[状态管理<br/>Zustand]
+            UI[UI 组件<br/>Vue 3 + TS]
+            Store[状态管理<br/>Pinia]
             X6[AntV X6@3.1.7<br/>timeline + git graph]
             IpcClient[IPC 客户端<br/>preload bridge]
         end
@@ -87,7 +88,7 @@ flowchart TB
 | 1 | **技术栈** | Electron + TypeScript 桌面应用 | 单二进制、跨平台、与本地资源零摩擦；桌面应用无 OAuth 跳转必要 | [02 §2](./02-architecture.md#2-技术栈定型), [01 §5](./01-research.md#5-技术决策候选) |
 | 2 | **鉴权** | gitea Personal Access Token + 系统 keychain | 桌面应用单机单用户，OAuth 跳转 + CSRF 是负担；keychain 是 macOS/Win/Linux 通用的安全 token 落盘 | [02 §2.6 / §6.1](./02-architecture.md#26-鉴权gitea-pat--系统-keychain) |
 | 3 | **后端 / 数据** | 主进程 + SQLite（better-sqlite3 + Drizzle ORM） | 单进程无需 HTTP；Drizzle schema-first 与 TS 类型双向同步 | [02 §2.3 / §2.4 / §4](./02-architecture.md#23-主进程本地服务层) |
-| 4 | **前端框架** | React 18 + Vite + Zustand + CSS Modules | X6 集成示例多；Zustand 轻量无 boilerplate；CSS 变量易切暗色 | [02 §2.2](./02-architecture.md#22-渲染进程ui-层), [03 §6 / §7](./03-frontend.md#6-状态管理) |
+| 4 | **前端框架** | **Vue 3 + Vite + Pinia + CSS Modules**（2026-06-10 17:24 用户拍板；理由：团队无 React 积累，Vue 3 在团队内有现成积累） | X6 通过 `@antv/x6-vue-shape` 官方桥接；Pinia setup store 与 Composition API 同源；CSS 变量易切暗色 | [02 §2.2 + §2.2.1](./02-architecture.md#22-渲染进程ui-层), [03 §6 / §7 / §5.6](./03-frontend.md) |
 | 5 | **timeline 库** | AntV X6@3.1.7 | 图编辑引擎，git graph 的 DAG（commit 节点 + 父子边 + 合并边）是其甜区；用户已熟悉栈 | [01 §4](./01-research.md#4-timeline-方案对比), [03 §5](./03-frontend.md#5-时间轴可视化方案重点) |
 | 6 | **IPC 契约** | Zod schema → TS 类型自动派生到 `src/shared/ipc-types.ts` | 前后端编译时共用，字段不匹配编译报错 | [02 §5.1 / §8.2](./02-architecture.md#51-ipc-通道约定) |
 | 7 | **缓存策略** | cache-aside + 写穿失效 + 离线降级 stale | 远程失败不崩，按 stale 缓存继续显示 + 状态栏提示 | [02 §6.3](./02-architecture.md#63-缓存策略本地优先远程兜底断网只读) |
@@ -217,6 +218,7 @@ flowchart TB
 | 4 | 2026-06-10 | **打包：macOS dmg 优先，Windows exe + Linux AppImage 跟上** | 架构 §2.5 部署形态、§9.6 兼容性矩阵 |
 | 5 | 2026-06-10 | **不需要 nginx 反代、OAuth 回调、CSRF、公开 webhook URL**——桌面应用一切内网化 | 架构 §1 架构图（去掉公网入口）、§6.3 缓存策略（本地优先、远程兜底、断网只读） |
 | 6 | 2026-06-10 | **后端 agent 边界变"主进程模块"，前端 agent 边界变"渲染进程 + IPC 契约"**，verifier / orchestrator 不变 | 架构 §8 agent 角色与接口契约；AGENTS.md §5 团队角色 |
+| 7 | 2026-06-10 17:24 | **渲染进程框架从 React 18 改为 Vue 3**（团队技术栈匹配，非技术横评）—— 状态管理 Zustand → Pinia，UI 组件库 Radix UI → Radix Vue，路由 React Router 6 → Vue Router 4，新增 `@antv/x6-vue-shape` 桥接包 | 架构 §2.2 + §2.2.1 + §8.1；前端 03 §6 / §7 / §5.6；AGENTS.md §2.2 + §5.1 + §5.2 + §7.1 + §8.1 v2→v3 修正 + §9 |
 
 ---
 

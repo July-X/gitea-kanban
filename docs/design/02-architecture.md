@@ -34,8 +34,8 @@ flowchart TB
 
     subgraph Desktop["Electron 应用（用户机器本地）"]
         subgraph Renderer["渲染进程 Chromium"]
-            UI[UI 组件<br/>React + TS]
-            Store[状态管理<br/>Zustand]
+            UI[UI 组件<br/>Vue 3 + TS]
+            Store[状态管理<br/>Pinia]
             X6[AntV X6@3.1.7<br/>timeline + git graph]
             IpcClient[IPC 客户端<br/>preload bridge]
         end
@@ -122,14 +122,53 @@ flowchart TB
 
 | 项 | 选型 | 说明 |
 |---|---|---|
-| **框架** | **React 18 + Vite** | 生态成熟、X6 集成示例多、TS 友好 |
-| **状态管理** | **Zustand** | 轻量、无 boilerplate、IPC 桥接自然 |
-| **路由** | **React Router 6** | 多视图（看板 / timeline / 仓库设置） |
-| **UI 组件库** | **Radix UI Primitives + CSS Modules** | Radix UI Primitives 是 headless 无样式库，提供可访问性 + 行为约束；样式走 CSS Modules + CSS 变量（见 03-frontend.md §7.1）。不引 antd（视觉太重）；**不引 Tailwind**（类名爆炸、运行时 / 编译开销与 OVERRIDE"克制 / 信息密度优先"风格冲突；OVERRIDE 不变 MASTER，本字段在 AGENTS §2.2 与 03 §7.1 已统一为不引 Tailwind，本表保持一致） |
-| **timeline / git graph** | **AntV X6@3.1.7** | 已在用户熟悉栈中、图编辑引擎最契合 git graph 场景 |
+| **框架** | **Vue 3 + Vite**（Composition API + `<script setup>`） | 用户 2026-06-10 17:24 拍板（团队无 React 积累，Vue 3 在团队内有现成积累）；X6 通过 `@antv/x6-vue-shape` 官方桥接；TS 友好、Composition API 与 Pinia setup store 同源 |
+| **状态管理** | **Pinia** | Vue 官方；setup store 风格与 Composition API 同源；TypeScript 类型推导完整；devtools / 持久化插件成熟 |
+| **路由** | **Vue Router 4** | 官方；用 `createWebHashHistory` 适配 Electron（避免 file:// 协议下 hash 更稳） |
+| **UI 组件库** | **Radix Vue（同一团队，unstyled primitives）+ @headlessui/vue 补缺 + CSS Modules** | Radix Vue 是 Radix UI 在 Vue 生态的对位（同一团队 unstyled primitives），提供可访问性 + 行为约束；如 Radix Vue 组件不够（dialog / dropdown / popover / toast）按需 `@headlessui/vue` 补。样式走 CSS Modules + CSS 变量（见 03-frontend.md §7.1）。**不引** antd / Element Plus / Naive UI（视觉太重）；**不引 Tailwind**（类名爆炸、运行时 / 编译开销与 OVERRIDE"克制 / 信息密度优先"风格冲突） |
+| **timeline / git graph** | **AntV X6@3.1.7 + @antv/x6-vue-shape** | X6 本身框架无关；通过 `@antv/x6-vue-shape` 包把 Vue SFC 注册为 X6 节点（详见 §2.2.1） |
 | **HTTP 客户端** | **原生 fetch** | 主进程内走，不在渲染进程起 HTTP（避免 CORS） |
-| **数据校验** | **Zod** | 与 TS 类型双向同步，IPC 边界强制校验 |
-| **测试** | **Vitest + React Testing Library + Playwright（e2e）** | 见 §8 |
+| **数据校验** | **Zod** | 与 TS 类型双向同步，IPC 边界强制校验（前后端共用） |
+| **测试** | **Vitest + @vue/test-utils + @testing-library/vue + Playwright（e2e）** | 见 §8 |
+
+### 2.2.1 Vue 3 + X6 集成说明
+
+> 单独列出本节是因为 X6 本身是框架无关的图编辑引擎，需要通过 **`@antv/x6-vue-shape`** 这个官方桥接包才能在 Vue 3 中把 SFC 注册为 X6 节点。
+
+**桥接包用法**：
+
+```ts
+// src/renderer/features/timeline/CommitNode.ts
+import { register } from '@antv/x6-vue-shape';
+import CommitNodeVue from './CommitNode.vue';
+
+// 把 Vue 组件注册为名为 'commit-node' 的 X6 节点
+register({
+  shape: 'commit-node',
+  component: CommitNodeVue,
+  // 可选：节点初始 attrs / 端口
+});
+```
+
+**节点数据更新模式**（X6 是命令式 API，Vue 是声明式，需注意协调）：
+
+- 节点**创建**走 `graph.addNode({ shape: 'commit-node', data: ... })`；初始 data 通过 `props.data` 透传到 SFC
+- 节点**数据变化**走 `node.setData(nextData)` + `node.replaceData(nextData)`；X6 内部触发 SFC `props.data` 响应式更新，**不要**直接修改 props.data 字段
+- 节点**视图**（位置 / 大小 / 样式）走 `node.position(x, y)` / `node.resize(w, h)` / `node.attr({ ... })`；这些不会触发 SFC 重渲染，仅更新 SVG attr
+- 边连 / 拆 / 改属性走 `graph.addEdge` / `edge.remove` / `edge.attr`
+
+**Pinia store 与 X6 实例的协调**：
+
+- X6 graph 实例**不**放 Pinia store（避免序列化问题，graph 有大量循环引用），用 `ref` / `shallowRef` 在组件内持有
+- Pinia 存 X6 需要的**结构化数据**（lanes / nodes / edges / prs），组件 `watch(store, () => graph.fromJSON(...))` 重建图，**或**逐 cell 调 `cell.setData()` 增量更新
+- 节点 hover / 选中事件**从 X6 推回 Pinia**（`graph.on('node:mouseenter', ({ cell }) => store.setHovered(cell.id))`）以便侧栏 / 抽屉订阅
+
+**已知坑**（同 AGENTS §8.4，Vue 版补充）：
+
+- `interacting.*` 回调第一参数是 `cellView`（view），不是 cell；想拿 cell 用 `view.cell`
+- 默认事件回调（`graph.on('node:moving', ...)`）第一参数是 `{ cell, view }` 对象
+- attr 处理器只透传 SVG presentation 属性；CSS 属性走全局 stylesheet
+- SFC 内**禁止**用 `v-html` 渲染 X6 节点数据（X6 节点内容默认走 text 渲染；如果需要复杂结构，把 X6 节点的 view 改为 foreignObject + Vue 组件渲染 + sanitize；v1 不实现 foreignObject 方案，统一用 attr-only 渲染）
 
 ### 2.3 主进程（本地服务层）
 
@@ -261,12 +300,12 @@ gitea-kanban/
     │   └── api.d.ts                  # window.api 类型声明
     ├── renderer/                     # ========== 渲染进程 ==========
     │   ├── index.html
-    │   ├── main.tsx
-    │   ├── App.tsx
+    │   ├── main.ts
+    │   ├── App.vue
     │   ├── routes/                   # 路由级页面
     │   ├── components/               # 通用组件
     │   ├── features/                 # 业务特性（board / timeline / repo-list）
-    │   ├── stores/                   # Zustand store
+    │   ├── stores/                   # Pinia store
     │   ├── lib/                      # 工具
     │   └── styles/
     └── shared/                       # ========== 主/渲染共享 ==========
@@ -1186,8 +1225,8 @@ sequenceDiagram
 | 维度 | 后端 agent（主进程） | 前端 agent（渲染进程） |
 |---|---|---|
 | 职责 | 主进程所有代码：IPC handler、gitea 集成、缓存、SQLite、keychain、webhook server（v2）、日志、轮询 | 渲染进程所有代码：UI 组件、状态管理、路由、可视化（X6）、IPC 客户端 |
-| 依赖 | `electron`, `better-sqlite3`, `drizzle-orm`, `pino`, `keytar`, `openapi-fetch` | `react`, `react-dom`, `react-router-dom`, `zustand`, `@antv/x6`, `zod`, `@radix-ui/*`, `lucide-react` |
-| 不允许 | 写 UI / 写 React 组件 / 写 CSS | 写主进程代码 / 调 gitea API 直连 / 碰 keychain / 碰 SQLite |
+| 依赖 | `electron`, `better-sqlite3`, `drizzle-orm`, `pino`, `keytar` / `@napi-rs/keyring`, `openapi-fetch` | `vue`, `pinia`, `vue-router`, `@antv/x6`, `@antv/x6-vue-shape`, `zod`, `@radix-vue/*`, `@headlessui/vue`, `lucide-vue-next` |
+| 不允许 | 写 UI / 写 Vue 组件 / 写 CSS | 写主进程代码 / 调 gitea API 直连 / 碰 keychain / 碰 SQLite |
 | 共享 | `src/shared/*`（TS 类型、错误格式、常量）由后端 agent 写 schema，前端 agent 消费类型 | |
 | 测试 | Vitest（主进程单测、mock gitea HTTP） | Vitest（组件单测）+ Playwright（e2e，跨主+渲染） |
 | 谁负责 mock | **后端 agent** 写 gitea API mock（MSW 拦截 fetch + 静态 fixtures） | **前端 agent** 在开发期连 mock 起前端 |
@@ -1288,7 +1327,7 @@ sequenceDiagram
 | 威胁 | 措施 |
 |---|---|
 | **token 泄露** | ① keychain 存储（macOS Keychain / Windows Credential / Linux Secret Service）<br>② 渲染进程不接触 token<br>③ 导出日志 / DB 时自动 scrub `token` 字段<br>④ 主进程禁止把 token 写日志（pino redact 规则） |
-| **XSS** | 渲染进程默认开启 Electron `contextIsolation: true` + `nodeIntegration: false` + `sandbox: true`<br>所有用户输入（卡片 title/body）走 React 转义，不 `dangerouslySetInnerHTML`<br>markdown 渲染（如果有）走白名单 sanitizer |
+| **XSS** | 渲染进程默认开启 Electron `contextIsolation: true` + `nodeIntegration: false` + `sandbox: true`<br>所有用户输入（卡片 title/body）走 Vue 3 默认 `{{ }}` 模板转义，**禁止** `v-html`（Vue 没有 `dangerouslySetInnerHTML`，但 `v-html` 等价——走 `{{ }}` 文本插值天然防 XSS）<br>markdown 渲染（如果有）走白名单 sanitizer（如 DOMPurify）|
 | **SQL 注入** | Drizzle ORM 全部走 prepared statement；禁止拼接 SQL |
 | **路径遍历** | 主进程所有文件 I/O 走 `app.getPath` + 白名单；不接受用户提供的绝对路径 |
 | **CSRF** | **桌面应用无 CSRF 风险**（无浏览器跨域自动带 cookie） |

@@ -12,8 +12,15 @@
 
 我们要做的是**基于 gitea 的看板 + 时间轴工具**，核心差异点是：**强 git 集成**（多分支 / commit 节点 / PR 合并可视化）+ **轻量自托管**。通过本次调研得出三条关键结论：
 
-1. **集成方式选"独立服务 + 反代"**：gitea 自带的 issue + project 看板已能跑通基础场景，且 awesome-gitea 已有同名竞品 [qontu/gitea-kanban](https://github.com/qontu/gitea-kanban)（Vue 写的插件型）。我们要做的是**比官方 + 现有插件更深入的 git 数据可视化**，独立服务调用 gitea API 比"做成 gitea 插件"更灵活（不受 gitea 模板渲染框架约束，可独立选型）。
-2. **技术栈候选收敛到一组安全组合**：前端 **React + Vite + AntV X6@3.1.7**（X6 已在用户熟悉栈中、且天然支持多分支节点 + PR 合并边）；后端 **Go + Gin + go-sdk**（与 gitea 同一语言，官方 go-sdk 完整，部署二进制即跑）；数据库 **SQLite 默认 + 可选 PostgreSQL**（轻量场景够用，结构化数据（看板卡片 / 用户偏好 / webhook 缓存）值得落库）；部署 **独立服务 + nginx 反代到 gitea 同域**。
+1. **集成方式**：v1 调研时是"独立服务 + 反代"——已被用户 v2 决策（2026-06-08）改为 **Electron 桌面应用**。本次调研的 baseline（独立服务 / nginx 反代）**已作废**，保留作 audit trail；**最新决策以 02-architecture.md + AGENTS.md §2 为准**。gitea 自带的 issue + project 看板已能跑通基础场景，竞品 [qontu/gitea-kanban](https://github.com/qontu/gitea-kanban)（Vue 写的插件型）思路相近。
+2. **技术栈**（v5 决策 2026-06-10 17:24 拍板 Vue 3 + Electron 桌面应用）：
+   - 运行时：**Electron + Node 20 LTS**（v2 决策 2026-06-08）
+   - 渲染进程：**Vue 3 + Vite + Pinia + Vue Router 4 + Radix Vue**（v5 决策 2026-06-10 17:24，团队技术栈匹配）
+   - timeline：**AntV X6@3.1.7 + @antv/x6-vue-shape**（X6 框架无关，桥接 Vue 3）
+   - 主进程：**Node + better-sqlite3 + Drizzle + keychain**（v2 决策）
+   - 鉴权：**gitea PAT + 系统 keychain**（不走 OAuth 跳转，本地应用）
+   - 打包：**electron-builder**（macOS dmg 优先）
+   - 数据库：SQLite 文件（`app.getPath('userData')/kanban.db`）
 3. **timeline 方案选 AntV X6**：vis-timeline / react-calendar-timeline 都是"甘特/日程"思维，**不适合多分支并行 + commit 节点 + PR 合并的图状结构**；dhtmlx-gantt 商业授权贵；AntV X6 本身就是"图编辑引擎"，多节点多边 + 自定义渲染 + 交互最契合 git graph 场景，且我们在 visualizer 项目里已用过，风险可控。
 
 下文按 6 节展开，每节给"事实 + 判断 + 来源 URL"。
@@ -220,12 +227,12 @@ X6 默认 SVG 渲染，移动端浏览器天然支持，但触控交互（pinch 
 
 | 候选 | 推荐 | 理由 | 主要风险 |
 |---|---|---|---|
-| **React + Vite + TypeScript** | ✅ **推荐** | X6@3.1.7 在 React 生态下集成示例最多、社区 hook/状态管理成熟；TS 与 go-sdk 类型对得齐；Vite 启动 < 1s | AntV X6 v3 后续版本不一定维持 React 优先策略，迁移到 v4 时可能要适配 |
-| Vue 3 + Vite | 可选 | qontu/gitea-kanban 用了 Vue，证明可行 | X6 的 React 例子多于 Vue，自定义复杂节点时文档量吃亏 |
+| ~~React + Vite + TypeScript~~ | ❌ 已否决 | v1 推荐过；2026-06-10 17:24 v5 决策改 Vue 3（团队无 React 积累） | — |
+| **Vue 3 + Vite + TypeScript** | ✅ **已选**（2026-06-10 17:24 v5 拍板） | qontu/gitea-kanban 用了 Vue、团队有 Vue 积累、Vue 3 Composition API 与 Pinia setup store 同源；X6 走官方 `@antv/x6-vue-shape` 桥接 | X6 Vue 例子少于 React，自定义复杂节点时文档量吃亏（@antv/x6-vue-shape 桥接后能复用 X6 React 文档的 80% 概念） |
 | Svelte | 可选 | bundle 小、响应式直观 | X6 没有官方 Svelte wrapper，自己封一层工作量不小 |
 | 纯 HTML + JS | ❌ | 无 build step，部署最简 | 失去 TS 类型保护、组件复用靠 copy-paste；v2 加复杂功能（虚拟滚动）会很难 |
 
-**推荐**：React + Vite + TypeScript。**风险**：X6 v4 升级时要重新评估 React 适配深度。
+**2026-06-10 17:24 拍板**：Vue 3 + Vite + TypeScript。**理由**：团队无 React 积累，Vue 3 在团队内有现成积累——是组织能力优先的决策，不是技术横评结果。**X6 Vue 集成**：走 `@antv/x6-vue-shape` 官方桥接包（X6 本身框架无关）。**风险**：X6 Vue 文档量 < React，但桥接后概念可复用。
 
 ### 5.2 后端框架
 

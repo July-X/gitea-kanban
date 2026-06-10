@@ -3,6 +3,7 @@
 > 任务编号：frontend-design
 > 输出版本：v4（按 ui-ux-pro-max OVERRIDE 重定 · 撤销 v3 暗色默认）
 > 输出时间：2026-06-10
+> **v5 增量（2026-06-10 17:24）**：技术栈从 React 18 + Zustand + Radix UI 改为 **Vue 3 + Pinia + Radix Vue**（团队技术栈匹配）；其他业务规则（零术语 / 二次确认 / 错误人话 / X6 选型 / 设计系统 token）不变。
 
 ---
 
@@ -38,6 +39,20 @@
   8. **依赖声明**：pre-delivery 必须先 `python3 --version`（macOS 用 `brew install python3`），确保 ui-ux-pro-max 脚本能跑（虽然本任务只读 MASTER + OVERRIDE 静态文件，但 integration-doc / final-design-review 会用到 skill 脚本）。
 
 > **v3 暗色默认决策已作废**（2026-06-10 10:36 撤销）——以 OVERRIDE 第 9 行"默认浅色 + 暗色模式可切换"为准。v3 之前在 §1 / §7 的"暗色科技"语言全部回退到"克制 / 信息密度优先"，但**保留**v3 中符合 OVERRIDE 的部分：4.5:1 对比度、focus 可见加强、状态色配图标/文字。
+
+- **2026-06-10 17:24** —— 计划负责人拍板：**渲染进程框架从 React 18 改为 Vue 3**。具体：
+  1. 原因：团队内**无 React 技术栈支撑**，**Vue 3 在团队内有现成积累**——是组织能力优先的决策，不是技术横评结果。
+  2. 配套变更（与 AGENTS.md §8.1 v2→v3 修正 + 02-architecture.md §2.2 + §2.2.1 同步）：
+     - 框架：React 18 → **Vue 3**（Composition API + `<script setup>` + TypeScript）
+     - 状态管理：Zustand → **Pinia**（Vue 官方，setup store 风格与 Composition API 同源）
+     - 路由：React Router 6 → **Vue Router 4**（用 `createWebHashHistory` 适配 Electron `file://` 协议）
+     - UI 组件库：Radix UI Primitives → **Radix Vue**（同一团队，unstyled primitives）；按需 `@headlessui/vue` 补缺
+     - timeline：新增 **`@antv/x6-vue-shape` 官方桥接包**（X6 本身框架无关，桥接包把 Vue SFC 注册为 X6 节点；详见 02-architecture §2.2.1）
+     - 图标：`lucide-react` → **`lucide-vue-next`**（同包名 Vue 版）
+     - 测试：React Testing Library → **`@vue/test-utils` + `@testing-library/vue`**
+  3. **不变**：CSS Modules + 全局 CSS 变量（OVERRIDE 仍生效）、Zod 校验（前后端共享）、X6 选型（X6@3.1.7 跟 React/Vue 都有官方桥）、设计原则（零术语 / 二次确认 / 错误人话 / 主题策略）、设计系统 token（主色 / 强调 / 字号 / 圆角 / 暗色背景）。
+  4. **代码示例同步**：本文件下文 §3 / §4 / §5 / §6 / §7 / §8 中所有 JSX 代码块（"假设性 / 参考性 / 范例性"代码）已改为 Vue 3 SFC（`<template> + <script setup lang="ts"> + <style scoped>`）；业务规则、IPC 契约、组件层级结构、视觉编码不变。
+  5. 任何"前文 React / 后文 Vue"的不一致以**本节 + 02-architecture §2.2 + 02-architecture §2.2.1 + package.json 实际安装依赖**为准（这是用户拍板过的，不属于"自决"边界）。
 
 ---
 
@@ -339,31 +354,206 @@ import type {
 
 > 实现细节：v1 默认范围是"近 30 天 + 所有未合并 PR"（数据量在 200-500 区间），不主动触发高量降级；降级是"用户拉到全仓库"时的兜底。
 
+### 5.6 Vue 3 集成（@antv/x6-vue-shape）
+
+> 单独列出本节是因为 X6 本身是框架无关的图编辑引擎，需要通过 **`@antv/x6-vue-shape`** 官方桥接包才能在 Vue 3 中把 SFC 注册为 X6 节点。**完整集成说明**在 `02-architecture.md §2.2.1`；本节只讲 03 前端视角的代码范例与组件拆分。
+
+**组件拆分**（推荐目录）：
+
+```
+src/renderer/features/timeline/
+├── TimelineView.vue           # 主视图：含 X6 graph 实例 + 监听 store 变化
+├── CommitNode.vue             # 自定义节点：圆点 / 菱形 / 关联卡片描边
+├── MergeEdgeConnector.ts      # 自定义边的 connector 函数（合并边用贝塞尔）
+├── ZoomBar.vue                # 缩放控制
+├── LaneFilter.vue             # lane 多选侧栏
+├── TooltipCard.vue            # commit hover 浮层
+└── graph/
+    ├── register.ts            # 集中注册所有自定义节点
+    └── fromStore.ts           # 把 Pinia state 转 X6 JSON
+```
+
+**桥接包用法**（节点注册）：
+
+```ts
+// features/timeline/graph/register.ts
+import { register } from '@antv/x6-vue-shape';
+import CommitNodeVue from '../CommitNode.vue';
+
+export function registerTimelineShapes() {
+  register({
+    shape: 'commit-node',
+    component: CommitNodeVue,
+    // props：默认 { node, graph }，X6 在创建节点时自动注入
+  });
+}
+```
+
+**节点组件**（SFC）：
+
+```vue
+<!-- features/timeline/CommitNode.vue -->
+<script setup lang="ts">
+import { computed } from 'vue';
+import type { Node } from '@antv/x6';
+import type { CommitNode } from '@shared/ipc-types';
+
+const props = defineProps<{
+  node: Node;
+}>();
+
+// X6 节点 data 默认通过 props.node.getData() 读取
+const data = computed<CommitNode>(() => props.node.getData() as CommitNode);
+const isMerge = computed(() => data.value.parents.length > 1);
+const shape = computed(() => (isMerge.value ? 'diamond' : 'circle'));
+const fillColor = computed(() => (isMerge.value ? '#F76707' : '#609926'));
+const hasLinkedCards = computed(() => data.value.linkedCardIds.length > 0);
+</script>
+
+<template>
+  <g class="commit-node">
+    <!-- X6 节点的 view 容器由 @antv/x6-vue-shape 包装；
+         这里只放 SVG 几何体，attrs 已在 node.attr() 时设过 -->
+    <text class="commit-sha">{{ data.shortSha }}</text>
+    <text v-if="hasLinkedCards" class="commit-badge">{{ data.linkedCardIds.length }}</text>
+  </g>
+</template>
+
+<style scoped>
+.commit-node { cursor: pointer; }
+.commit-sha {
+  font-size: 10px;
+  fill: var(--color-text);
+  text-anchor: middle;
+}
+.commit-badge {
+  font-size: 9px;
+  fill: #fff;
+  paint-order: stroke;
+  stroke: #F0AD4E;
+  stroke-width: 1.5;
+}
+</style>
+```
+
+**主视图**（X6 graph 实例 + Pinia 协调）：
+
+```vue
+<!-- features/timeline/TimelineView.vue -->
+<script setup lang="ts">
+import { onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { Graph } from '@antv/x6';
+import { useTimelineStore } from '@renderer/stores/timelineStore';
+import { registerTimelineShapes } from './graph/register';
+import { buildGraphData } from './graph/fromStore';
+
+const store = useTimelineStore();
+const containerRef = ref<HTMLDivElement | null>(null);
+// X6 graph 不放 Pinia（避免序列化），用 shallowRef 在组件内持有
+const graphRef = shallowRef<Graph | null>(null);
+
+onMounted(() => {
+  registerTimelineShapes();
+  const g = new Graph({
+    container: containerRef.value!,
+    background: { color: 'transparent' },
+    panning: { enabled: true, modifiers: 'shift' },
+    mousewheel: { enabled: true, zoomAtMousePosition: true, modifiers: 'ctrl' },
+    connecting: { ... },
+    interacting: { nodeMovable: false, edgeMovable: false },
+  });
+  graphRef.value = g;
+
+  // Pinia 数据变化 → 重建图（或增量更新）
+  watch(
+    () => store.timelineDTO,
+    (dto) => {
+      if (!dto) return;
+      g.fromJSON(buildGraphData(dto));
+    },
+    { immediate: true },
+  );
+
+  // X6 事件 → 推回 Pinia
+  g.on('node:mouseenter', ({ cell }) => store.setHoveredNode(cell.id));
+  g.on('node:click', ({ cell }) => store.openCommitDetail(cell.id));
+});
+
+onBeforeUnmount(() => {
+  graphRef.value?.dispose();
+});
+</script>
+
+<template>
+  <div ref="containerRef" class="timeline-graph" />
+</template>
+
+<style scoped>
+.timeline-graph { width: 100%; height: 100%; min-height: 480px; }
+</style>
+```
+
+**Pinia store**（与 X6 协调）：
+
+```ts
+// stores/timelineStore.ts
+import { defineStore } from 'pinia';
+import { ref } from 'vue';
+import type { TimelineDTO, CommitNode } from '@shared/ipc-types';
+import { ipc } from '@renderer/lib/ipc-client';
+
+export const useTimelineStore = defineStore('timeline', () => {
+  // setup store 风格：直接 ref + computed，与 Composition API 同源
+  const timelineDTO = ref<TimelineDTO | null>(null);
+  const hoveredNodeId = ref<string | null>(null);
+  const selectedNodeId = ref<string | null>(null);
+  const branches = ref<string[]>(['main']);
+
+  async function loadTimeline() {
+    timelineDTO.value = await ipc.invoke('commits.timeline', {
+      projectId: store.currentProjectId,
+      branches: branches.value,
+    });
+  }
+
+  function setHoveredNode(id: string | null) { hoveredNodeId.value = id; }
+  function openCommitDetail(id: string) { selectedNodeId.value = id; }
+
+  return { timelineDTO, hoveredNodeId, selectedNodeId, branches, loadTimeline, setHoveredNode, openCommitDetail };
+});
+```
+
+**已知坑**（同 AGENTS §8.4，Vue 版强调）：
+
+- **`interacting.*` 回调第一参数是 `cellView`（view），不是 cell**；想拿 cell 用 `view.cell`
+- **view 上没有 `getData()`**；默认事件回调（`graph.on('node:moving', ...)`）第一参数是 `{ cell, view }` 对象
+- **attr 处理器只透传 SVG presentation 属性**（fill / stroke / r / cx / cy / transform 等）；**CSS 属性（cursor / pointer-events 等）不会通过 attrs 写到 DOM**——必须用 CSS 选择器在 styles.css / `<style scoped>` 里覆盖（上面 CommitNode.vue 的 `.commit-node { cursor: pointer; }` 就是这种用法）
+- **SFC 内禁止用 `v-html` 渲染 X6 节点 data**——X6 节点内容默认走 attr + 文本渲染；如果需要复杂结构，把 X6 节点改为 foreignObject + Vue 组件渲染（v1 不实现，统一用 attr-only）
+- 写回调前先查 X6 官方文档 / TS 类型定义，**别靠"参数名像 cell"想当然**——已经因为这个挂过右侧面板一次
+
 ---
 
 ## 6. 状态管理
 
-### 6.1 选型：**Zustand**
+### 6.1 选型：**Pinia**
 
 **理由**：
-- 比 Redux 轻量（无 action/reducer 模板），写一个 slice 一份 store 即可
-- 比 React Context 性能好（按 selector 订阅，避免无差别 re-render）
-- TS 友好：`create<State>()(set => ...)` 写起来和写 interface 一样自然
-- 与 X6 集成简单：X6 实例存 ref 不放 store（避免序列化问题），但 X6 触发的"节点 hover / 选中"事件反过来 dispatch store
+- Vue 官方推荐（v2 替代 Vuex），与 Vue 3 Composition API 同源；TS 类型推导完整（无需手写泛型）
+- 比 Vuex 4 轻量（无 mutation 模板），`defineStore` 写一个 store 即可
+- setup store 风格（直接 `ref` / `computed` / 函数）写起来像写 SFC `<script setup>`，与 Vue 组件心智一致
+- 与 X6 集成简单：X6 实例存 `shallowRef` 不放 store（避免序列化问题），但 X6 触发的"节点 hover / 选中"事件反过来调 store action
+- devtools / 持久化插件成熟（`@pinia/plugin-persistedstate` 用于 uiStore 主题/侧栏折叠）
 
-**不选 Pinia / Redux Toolkit**：
-- Pinia 是 Vue 生态专用；不选 Vue 的话不必引入
-- Redux Toolkit 在"应用规模 < 50 个组件、状态切片 < 10 个"时**过度工程**
-
-**不选"React 自带 useState + useReducer"**：
-- 跨组件共享状态（当前仓库 / 当前用户 / 同步状态）太多，Context 嵌套地狱
-- 没有时间旅行 / devtools 不致命，但 Zustand 也能装 devtools middleware
+**不选 Vuex 4 / Redux Toolkit / MobX**：
+- Vuex 4 是 Vue 2 时代方案，Vue 3 推荐 Pinia
+- Redux Toolkit 在 Vue 生态水土不服；MobX 的 observable 思路与 Vue 响应式重叠
+- "Vue 自带 `ref` / `reactive`"：跨组件共享状态（当前仓库 / 当前用户 / 同步状态）太多，需要命名空间与持久化，不能只靠 module-scope ref
 
 ### 6.2 状态切片划分
 
 ```
-src/renderer/store/
-├── index.ts              # 组合 rootStore
+src/renderer/stores/
+├── index.ts              # Pinia 入口（createPinia + 持久化插件）
 ├── authStore.ts          # 当前用户、PAT 是否已配、keychain 状态
 ├── repoStore.ts          # 当前 repo、repo 列表、最近仓库
 ├── boardStore.ts         # 看板列表、当前看板、列、卡片
@@ -375,15 +565,196 @@ src/renderer/store/
 └── settingsStore.ts      # 主题、gitea 实例 URL（PAT 不入 store，只入 keychain）
 ```
 
-每个 store 用 Zustand 的 `create` 工厂；`authStore` 和 `settingsStore` 通过 IPC 持久化到主进程（主进程写 SQLite `settings` 表 + keychain 存 PAT），其他 store 内存里，重启后从主进程拉。
+每个 store 用 Pinia 的 `defineStore` + setup 写法（`defineStore('id', () => { ... })`），返回 ref / computed / action；`authStore` 和 `settingsStore` 通过 IPC 持久化到主进程（主进程写 SQLite `settings` 表 + keychain 存 PAT），其他 store 内存里，重启后从主进程拉。
+
+**典型 Pinia store 模板**（setup store 风格）：
+
+```ts
+// stores/boardStore.ts
+import { defineStore } from 'pinia';
+import { ref, computed } from 'vue';
+import type { BoardDTO, ColumnDTO, CardDTO } from '@shared/ipc-types';
+import { ipc } from '@renderer/lib/ipc-client';
+
+export const useBoardStore = defineStore('board', () => {
+  // state
+  const board = ref<BoardDTO | null>(null);
+  const columns = ref<ColumnDTO[]>([]);
+  const cardsByColumn = ref<Record<string, CardDTO[]>>({});
+  const loading = ref(false);
+
+  // getters
+  const totalCards = computed(() =>
+    Object.values(cardsByColumn.value).reduce((sum, arr) => sum + arr.length, 0),
+  );
+
+  // actions
+  async function loadBoard(projectId: string) {
+    loading.value = true;
+    try {
+      const cols = await ipc.invoke('board.columns.list', { projectId });
+      columns.value = cols;
+      const byCol: Record<string, CardDTO[]> = {};
+      for (const col of cols) {
+        byCol[col.id] = await ipc.invoke('board.cards.list', { columnId: col.id });
+      }
+      cardsByColumn.value = byCol;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function moveCard(cardId: string, toColumnId: string, toPosition: number) {
+    const updated = await ipc.invoke('board.cards.move', { cardId, toColumnId, toPosition });
+    // 本地乐观更新：找到旧列移除 + 新列插入
+    // （实现见 frontend agent 任务 #10）
+    return updated;
+  }
+
+  return { board, columns, cardsByColumn, loading, totalCards, loadBoard, moveCard };
+});
+```
+
+**入口注册**（main.ts）：
+
+```ts
+// src/renderer/main.ts
+import { createApp } from 'vue';
+import { createPinia } from 'pinia';
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate';
+import App from './App.vue';
+import { router } from './router';
+
+const app = createApp(App);
+const pinia = createPinia();
+pinia.use(piniaPluginPersistedstate);
+
+app.use(pinia);
+app.use(router);
+app.mount('#app');
+```
+
+**在组件中使用**：
+
+```vue
+<script setup lang="ts">
+import { useBoardStore } from '@renderer/stores/boardStore';
+import { storeToRefs } from 'pinia';
+
+const board = useBoardStore();
+const { columns, cardsByColumn, loading } = storeToRefs(board);
+</script>
+```
+
+> `storeToRefs` 是 Pinia 提供给 Vue 解构响应式（避免直接解构丢失响应性）的工具——和 React 的 selector 思路不同，Pinia store 本身是 reactive 对象。
 
 ---
 
-## 7. 样式方案
+## 7. 路由（Vue Router 4）
+
+> v3 之前用 React Router 6；**v3 拍板改 Vue 3 后改为 Vue Router 4**。Vue Router 4 是 Vue 官方路由（与 Vue 3 Composition API 同源），TypeScript 友好。
+
+### 7.1 选型理由
+
+- **官方**：Vue Router 4 是 Vue 3 官方推荐（与 Vue 2 时代的 Vue Router 3 是大版本 breaking change，但文档 / 生态都从 v3 起步）
+- **TypeScript 友好**：`RouteRecordRaw` 类型完整，路由 meta 自定义字段用 module augmentation 即可
+- **支持 Composition API**：用 `useRoute()` / `useRouter()` 而不是 `this.$route` 形式
+- **Electron 友好**：用 `createWebHashHistory` 模式——Electron 加载本地 `file://` 协议的 `index.html` 时，hash history 不会触发路径解析（`/path/foo` 在 file:// 下走不通），hash history 走 `#/path/foo` 完全 OK
+- **路由 meta + 守卫**：做权限校验（未连接 gitea 跳到设置页）、懒加载（动态 `import()`）原生支持
+
+**不选 history 模式（createWebHistory）**：Electron + file:// 协议下 history 模式需要 `app://` 自定义 scheme 或本地 HTTP server，工作量不值；hash 模式零配置。
+
+### 7.2 路由表
+
+应用分 5 个主视图 + 设置 + 帮助（与 §2.2 入口清单 V1~V8 对应）：
+
+```ts
+// src/renderer/router/index.ts
+import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
+
+const routes: RouteRecordRaw[] = [
+  {
+    path: '/',
+    redirect: '/repo',
+  },
+  {
+    path: '/repo',
+    name: 'repo-list',
+    component: () => import('@renderer/features/repo-list/RepoListView.vue'),
+    meta: { title: '仓库列表' },
+  },
+  {
+    path: '/:projectId/board',
+    name: 'board',
+    component: () => import('@renderer/features/board/BoardView.vue'),
+    meta: { title: '看板', requiresAuth: true },
+  },
+  {
+    path: '/:projectId/timeline',
+    name: 'timeline',
+    component: () => import('@renderer/features/timeline/TimelineView.vue'),
+    meta: { title: '时间轴', requiresAuth: true },
+  },
+  {
+    path: '/:projectId/merge',
+    name: 'merge',
+    component: () => import('@renderer/features/merge/MergeView.vue'),
+    meta: { title: '合并管理', requiresAuth: true },
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@renderer/features/settings/SettingsView.vue'),
+    meta: { title: '设置' },
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@renderer/components/NotFound.vue'),
+  },
+];
+
+export const router = createRouter({
+  history: createWebHashHistory(),  // 适配 Electron file:// 协议
+  routes,
+});
+
+// 全局守卫：未连接 gitea 时强制跳设置页
+router.beforeEach(async (to) => {
+  if (to.meta.requiresAuth) {
+    const auth = useAuthStore();
+    if (!auth.isConnected) {
+      return { name: 'settings', query: { from: to.fullPath } };
+    }
+  }
+});
+```
+
+### 7.3 路由 + Pinia 协调
+
+- **当前 projectId**：用 `route.params.projectId` 派生，**不**单独存到 uiStore（避免两处真理源）
+- **过滤器状态**（如看板的标签 / 负责人过滤）：存到对应 store，但**同步 query string**（用 `router.replace({ query: ... })`），刷新页面能恢复——这是 v1 后期 polish 项，M1 不阻塞
+- **`<router-link>` 替代 `<a>`**：所有内部跳转用 `<router-link to="/repo">`（自动 SPA 切换，hash 模式不会有整页刷新）；外部跳转（gitea 详情页）才用 `<a target="_blank" rel="noopener">`
+
+### 7.4 与 React Router 6 的差异速查（迁移参考）
+
+| 概念 | React Router 6 | Vue Router 4 |
+|---|---|---|
+| 路由定义 | `<Route path="..." element={<Foo />}>` 嵌套 | `routes: [{ path, component, children }]` 配置式 |
+| 编程跳转 | `useNavigate()` → `navigate('/path')` | `useRouter()` → `router.push('/path')` |
+| 当前路由信息 | `useLocation()` / `useParams()` | `useRoute()` → `route.params/path/query` |
+| 守卫 | `<Route element={<RequireAuth />}>` 包组件 | `router.beforeEach((to) => ...)` 全局守卫 |
+| 链接 | `<Link to="/path">` | `<router-link to="/path">` |
+| 懒加载 | `lazy(() => import('./Foo'))` | `component: () => import('./Foo.vue')` |
+| 404 | `path="*"` | `path: '/:pathMatch(.*)*'` |
+
+---
+
+## 8. 样式方案
 
 > **本节以 `design-system/gitea-kanban/OVERRIDE.md` 为 single source of truth**。OVERRIDE 没覆盖的 token（间距 / 圆角 / 阴影）才回 MASTER §spacing/shadow。
 
-### 7.1 CSS 方案：**CSS Modules + CSS 变量**
+### 8.1 CSS 方案：**CSS Modules + CSS 变量**
 
 **不选** Tailwind / styled-components / Emotion / Sass：
 
@@ -394,10 +765,10 @@ src/renderer/store/
 **选 CSS Modules + 全局 CSS 变量**：
 - 每个组件 `*.module.css`，局部作用域避免类名冲突
 - 全局 `theme.css` 定义 CSS 变量（色板 / 字号 / 圆角 / 阴影 / 间距）
-- 暗色模式 = 切换 `:root` 上的变量（见 §7.3）
+- 暗色模式 = 切换 `:root` 上的变量（见 §8.3）
 - 字体：OVERRIDE 覆盖 MASTER 的 Fira Code+Sans → 用 **Inter / 系统 sans**（中英文混排友好）。代码片段、sha、commit message、时间、计数用 `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace` 兜底
 
-### 7.2 主题（v1 单主题暗色 + 苍蓝底，OVERRIDE 第 16-32 行）
+### 8.2 主题（v1 单主题暗色 + 苍蓝底，OVERRIDE 第 16-32 行）
 
 **用户 2026-06-10 12:34 拍板**：v1 **单主题暗色，不提供切换 UI**。底色 = **`#134857` 苍蓝**（dark teal），让 gitea 绿 `#609926` 主色更鲜明、文字用冷白 `#DCE9F0` 保持冷调统一。
 
@@ -462,7 +833,7 @@ src/renderer/store/
 }
 ```
 
-### 7.3 v1 打磨版核心视觉决策（2026-06-10）
+### 8.3 v1 打磨版核心视觉决策（2026-06-10）
 
 **用户拍板"线条过多"问题后，3 页 wireframe 一致应用以下打磨原则**：
 
@@ -487,9 +858,9 @@ src/renderer/store/
 
 ---
 
-## 8. 响应式与可访问性
+## 9. 响应式与可访问性
 
-### 8.1 断点（**桌面应用窗口**断点，OVERRIDE 第 31 行）
+### 9.1 断点（**桌面应用窗口**断点，OVERRIDE 第 31 行）
 
 主窗口**不是**响应式 web，没有"移动端"——但**窗口可拖拽改变大小**，要适配常见尺寸（OVERRIDE 覆盖 MASTER 的 mobile-first 375/768/1024/1440）：
 
@@ -502,7 +873,7 @@ src/renderer/store/
 | **1440-1920** | 同 1280，主区内部 max-width 1440 居中 |
 | **≥ 1920 / 4K** | 同 1280，元素保持紧凑不放大（避免大字） |
 
-### 8.2 键盘导航
+### 9.2 键盘导航
 
 - **全局快捷键**：`Cmd/Ctrl + 1..7` 切侧栏；`Cmd/Ctrl + K` 搜索；`Cmd/Ctrl + N` 新建卡片；`Cmd/Ctrl + ,` 设置；`Esc` 关闭模态
 - **Tab 顺序**：顶栏 → 侧栏 → 主区，逻辑顺序而非 DOM 顺序
@@ -510,13 +881,13 @@ src/renderer/store/
 - **timeline**：`Tab` 节点切换；`Enter` 打开详情；方向键在节点间跳
 - **focus ring**：所有可交互元素都有 2px 实色 outline（用 `--color-primary`） + 外发光（`box-shadow: 0 0 0 4px rgba(96,153,38,0.25)`），不能 `outline: none`
 
-### 8.2b 动效与 reduced-motion（MASTER §pre-delivery + §anti-patterns）
+### 9.2b 动效与 reduced-motion（MASTER §pre-delivery + §anti-patterns）
 
 - **hover 反馈 150-300ms 平滑**（`--t-fast / --t-base / --t-slow`），用 `transition: background-color, color, border-color, box-shadow, transform`（**不用 scale 改 layout**——避免布局抖动）
 - **prefers-reduced-motion 尊重**：所有动效在 `@media (prefers-reduced-motion: reduce)` 下退化为 0ms 瞬切；JS 端做长动效前用 `if (!matchMedia('(prefers-reduced-motion: reduce)').matches)` 守卫
 - **避免 layout-shifting hover**：不用 `transform: scale()`，改用 `box-shadow` 加重 + `border-color` 变化
 
-### 8.3 屏幕阅读器（ARIA）
+### 9.3 屏幕阅读器（ARIA）
 
 - 主区 landmark：`role="main"` + `aria-labelledby` 指向 tab 标题
 - 看板列：`role="list"` + 每张卡 `role="listitem"`，列名 `aria-label="待合并 5 张卡片"`
@@ -524,7 +895,7 @@ src/renderer/store/
 - 模态弹窗：`role="dialog"` + `aria-modal="true"`，打开时 focus trap，关闭时还原 focus
 - 图标按钮：必须有 `aria-label`（不能只靠 tooltip）
 
-### 8.4 错误处理（人话）
+### 9.4 错误处理（人话）
 
 错误提示统一走 Toast / 模态，规则：
 
@@ -538,14 +909,14 @@ src/renderer/store/
 
 ---
 
-## 9. 静态 wireframe
+## 10. 静态 wireframe
 
 > 三个 HTML 落地在 `docs/design/wireframe/`：
 > - `index.html` —— 看板主页（含左导航 + 看板列 + 卡片 + 抽屉状态）
 > - `timeline.html` —— 时间轴视图（多泳道 + commit 节点 + 边 + zoom bar + tooltip mock）
 > - `merge.html` —— 合并管理页（PR 列表 + 合并确认弹窗 mock）
 >
-> 全部用纯 HTML + 内联 CSS，**无** build step；用浏览器 / `mavis mcp call playwright` 可直接打开看效果。**不是**真实 React/Electron 代码——只表达布局、视觉密度、交互位置。
+> 全部用纯 HTML + 内联 CSS，**无** build step；用浏览器 / `mavis mcp call playwright` 可直接打开看效果。**不是**真实 Vue/Electron 代码——只表达布局、视觉密度、交互位置。
 >
 > **主题默认值 = 浅色**（OVERRIDE 第 9 行），但顶栏右上角有"切换暗色模式"按钮，点一下 `data-theme="dark"`，证明架构可切。**两套主题都满足 WCAG AA 4.5:1**。
 
@@ -575,7 +946,7 @@ src/renderer/store/
 
 ---
 
-## 10. 与架构 agent 的契约
+## 11. 与架构 agent 的契约
 
 本任务输出**不**写架构（02-architecture.md 是另一个 agent 的输出）。但前端 agent 在 03-frontend.md 里**假设的 IPC 契约**见第 3 节"主进程 IPC channel"列，架构 agent 应按此命名风格（`资源:动作`）+ 载荷结构落最终版。
 
