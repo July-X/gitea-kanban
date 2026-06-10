@@ -455,6 +455,30 @@ gitea-kanban/
 - 同一条边上的多段动画有**因果顺序**约束（如先收后发）——业务信号放大时间让动画更明显，但**顺序约束不能变**。
 - 持续时间是业务信号不是观感调节。
 
+### 8.8 backend agent 越权默认值（plan_9ad2d873 实战教训 · 2026-06-10）
+
+backend 收口后做 §5 越权审计，发现两处 **worker 默认会越界**而 orchestrator 没拦住：
+
+1. **业务表计数越权**：AGENTS.md §5 拍板的"13 张业务表"在 `src/main/cache/schema/index.ts` 实际导出了 **15 张表**——其中 `giteaUser` 是 backend 自己加的"远端用户信息缓存表"（denormalized 缓存，存 user id / login / avatar_url / full_name），用于卡片显示头像不重复打 /users/{id}。**业务实体**只有 13 张，多出的 2 张（giteaUser + index）一个是缓存、一个是聚合导出。
+2. **IPC 错误码越权**：AGENTS.md §5.4 拍板"10 个错误码"——backend 在 `src/shared/errors.ts` 加了 `KEYCHAIN_UNAVAILABLE` / `KEYCHAIN_ACCESS_DENIED` 2 个，没问用户。事后看，这俩是 **ADR-0001（2026-06-10）下游项**，是上一轮 ADR commit 时已经写进 §"需更新的下游文件"的，所以"理由上"算有据可查——但**形式上**没经过 §7.1 拍板流程。
+
+**下次 plan 启动前的强制动作**（orchestrator 自查）：
+
+- backend plan owner 启动前**先** grep `src/main/cache/schema/*.ts` 统计 table 数对不对齐 AGENTS.md §5 / 02-architecture §4 的拍板数
+- 启动 backend session 时在 prompt 里写明 "**任何新增的 IpcErrorCode / 新增的表 / 新增的 IPC 端点都必须先 escalate orchestrator 推回用户拍板，不要走 §7.2 自决**"
+- orchestrator cycle 报告 review 时把"越权审计"列为必查项，不止看 verifier verdict
+
+**给下个 plan 的边界修正**：
+
+- 13 张表是**业务实体表**（有独立业务语义的实体），denormalized 缓存表（giteaUser / cacheEntries / hookDeliveries 这种）算**基础设施表**，**不计入**业务表计数
+- 10 个 IpcErrorCode 是 v1 启动时拍板的最小集合，**新增必须经过拍板**——但**理由链 ADR 引用**算"半合规"，plan 收口时在 AGENTS.md §8 加条目登记
+
+### 8.9 跨项目通用：本机 darwin x86_64 的 native 依赖结论需要 arm64 / Linux 复测
+
+- 选型时 darwin x86_64 + Node 25 + pnpm 11.5.2 实测通过，**不代表 arm64 / Linux 通过**（prebuild 覆盖矩阵可能缺平台、musl 链接问题等）
+- ADR 必须在 §"未覆盖" / §"待补" 段显式列"待补 5 分钟 smoke test：darwin arm64 / linux x64-gnu / linux x64-musl"
+- 下次拿到对应平台机器时优先补测再下结论
+
 ---
 
 ## 9. 一句话总结
