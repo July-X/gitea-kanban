@@ -8,15 +8,21 @@
  */
 
 import { registerAuthIpc, unregisterAuthIpc } from './auth.js';
+import { registerReposIpc, unregisterReposIpc } from './repos.js';
+import { registerBranchesIpc, unregisterBranchesIpc } from './branches.js';
 
 export function registerAllIpcHandlers(): void {
   registerAuthIpc();
+  registerReposIpc();
+  registerBranchesIpc();
   // === 后续 namespace 在此追加 ===
-  // registerRepoIpc();
-  // registerBranchIpc();
+  // registerCommitsIpc();
+  // registerPullsIpc();
   // ...
 }
 
 export function unregisterAllIpcHandlers(): void {
   unregisterAuthIpc();
+  unregisterReposIpc();
+  unregisterBranchesIpc();
 }
