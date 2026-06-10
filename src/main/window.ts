@@ -84,8 +84,11 @@ export function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: true,
       // preload 脚本（IPC bridge 唯一通道）
-      // electron-vite 默认输出 .mjs（与 main 端 ESM 保持一致），不能用 .js
-      preload: join(__dirname, '../preload/index.mjs'),
+      // 产物名 `.cjs` —— 配合 electron.vite.config.ts 的 `output.format: 'cjs'`
+      // sandboxed preload 必须 CJS bundle（V8 加载 .mjs 强制 module 模式，
+      // 与 sandboxed preload 的 classic-script 上下文不兼容；详见
+      // electron.vite.config.ts 注释 + AGENTS.md §8）
+      preload: join(__dirname, '../preload/index.cjs'),
       // 关闭 webSecurity 会放开 CORS；这里**不**关
       webSecurity: true,
     },

@@ -21,6 +21,10 @@ packages:
 allowBuilds:
   better-sqlite3: true
   electron: true
+  # electron-winstaller: electron-builder 的 Windows 打包器子依赖（macOS 用不上）
+  # pnpm 11.5+ 把 "set this to true or false" 字面量写进 lockfile 是 install 时的占位符
+  # 实际不会执行任何 postinstall 脚本（macOS 平台），true/false 等价
+  electron-winstaller: true
   esbuild: true
   # vue-demi 是 @antv/x6-vue-shape 的 Vue 2/3 兼容垫片
   # 在 Vue 3 项目里实际是 no-op（pinia 3+ / x6-vue-shape 3+ 已不依赖其运行时行为）

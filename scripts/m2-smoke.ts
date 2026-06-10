@@ -8,7 +8,7 @@
  * 3. token 鉴权能通过
  * 4. 30 端点用的 gitea client schema 解析 OK
  */
-import { giteaFetch, getGiteaClient, clearGiteaClientCache } from '../src/main/gitea/client.js';
+import { clearGiteaClientCache } from '../src/main/gitea/client.js';
 
 const URL = 'http://localhost:3000';
 const TOKEN = '67190ca685604d902b996facc52d2274e2b190ee';
@@ -45,7 +45,7 @@ async function main() {
       headers: { Authorization: `token ${TOKEN}` },
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-    const u = await r.json();
+    const u = (await r.json()) as { id: number; login: string; is_admin: boolean };
     if (u.login !== USER) throw new Error(`expected ${USER}, got ${u.login}`);
     return { id: u.id, login: u.login, is_admin: u.is_admin };
   });
@@ -56,7 +56,7 @@ async function main() {
       headers: { Authorization: `token ${TOKEN}` },
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
+    const d = (await r.json()) as { data?: unknown[] };
     return { count: d.data?.length ?? 0 };
   });
 
