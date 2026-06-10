@@ -84,7 +84,8 @@ export function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: true,
       // preload 脚本（IPC bridge 唯一通道）
-      preload: join(__dirname, '../preload/index.js'),
+      // electron-vite 默认输出 .mjs（与 main 端 ESM 保持一致），不能用 .js
+      preload: join(__dirname, '../preload/index.mjs'),
       // 关闭 webSecurity 会放开 CORS；这里**不**关
       webSecurity: true,
     },
