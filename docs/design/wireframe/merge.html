@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gitea Kanban · 合并管理</title>
+  <style>
+    :root {
+      --color-primary: #609926;
+      --color-primary-soft: rgba(96, 153, 38, 0.12);
+      --color-accent: #f76707;
+      --color-warning: #f0ad4e;
+      --color-danger: #cf222e;
+      --color-info: #0969da;
+      --color-success: #1a7f37;
+      --color-text: #1f2328;
+      --color-text-secondary: #59636e;
+      --color-text-muted: #8b949e;
+      --color-bg: #ffffff;
+      --color-bg-elevated: #f6f8fa;
+      --color-bg-hover: #eef1f4;
+      --color-border: #d0d7de;
+      --color-border-strong: #afb8c1;
+      --shadow-sm: 0 1px 0 rgba(31, 35, 40, 0.04);
+      --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
+      --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.2);
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --font-xs: 11px;
+      --font-sm: 13px;
+      --font-md: 14px;
+      --font-lg: 16px;
+      --titlebar-h: 48px;
+      --navrail-w: 224px;
+    }
+    [data-theme='dark'] {
+      --color-text: #e6edf3;
+      --color-text-secondary: #adbac7;
+      --color-text-muted: #768390;
+      --color-bg: #0d1117;
+      --color-bg-elevated: #161b22;
+      --color-bg-hover: #1c222b;
+      --color-border: #30363d;
+      --color-border-strong: #444c56;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+      font-size: var(--font-md);
+      color: var(--color-text);
+      background: var(--color-bg);
+    }
+
+    .app { display: grid; grid-template-rows: var(--titlebar-h) 1fr; height: 100vh; }
+    .titlebar { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); background: var(--color-bg-elevated); border-bottom: 1px solid var(--color-border); }
+    .titlebar__logo { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; color: var(--color-primary); }
+    .titlebar__logo-mark { width: 24px; height: 24px; background: var(--color-primary); color: #fff; border-radius: var(--radius-sm); display: grid; place-items: center; font-size: 14px; }
+    .titlebar__repo { display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); font-size: var(--font-sm); }
+    .titlebar__spacer { flex: 1; }
+    .titlebar__sync { display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px; border-radius: var(--radius-sm); font-size: var(--font-sm); color: var(--color-text-secondary); }
+    .titlebar__sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 3px rgba(46, 160, 67, 0.15); }
+    .titlebar__user { width: 28px; height: 28px; border-radius: 50%; background: var(--color-primary); color: #fff; display: grid; place-items: center; font-size: var(--font-sm); font-weight: 600; }
+
+    .main { display: grid; grid-template-columns: var(--navrail-w) 1fr; min-height: 0; }
+    .navrail { background: var(--color-bg-elevated); border-right: 1px solid var(--color-border); padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+    .navrail__section-label { font-size: var(--font-xs); text-transform: uppercase; color: var(--color-text-muted); padding: var(--space-2) var(--space-3) var(--space-1); letter-spacing: 0.04em; }
+    .navrail__item { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-3); border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text); font-size: var(--font-sm); text-decoration: none; }
+    .navrail__item:hover { background: var(--color-bg-hover); }
+    .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .navrail__item .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; }
+    .navrail__item .badge { margin-left: auto; font-size: var(--font-xs); padding: 1px 6px; border-radius: 10px; background: var(--color-bg); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
+    .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+    .navrail__footer { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
+
+    .content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .content__tabs { display: flex; align-items: center; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); gap: var(--space-4); height: 40px; flex-shrink: 0; }
+    .content__tab { height: 100%; display: flex; align-items: center; padding: 0 var(--space-2); border-bottom: 2px solid transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; }
+    .content__tab.is-active { color: var(--color-text); border-bottom-color: var(--color-primary); font-weight: 600; }
+    .content__tab-actions { margin-left: auto; display: flex; gap: var(--space-2); }
+
+    .btn { height: 28px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); }
+    .btn:hover { background: var(--color-bg-hover); }
+    .btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+    .btn--primary:hover { background: #54a31d; }
+    .btn--danger { background: var(--color-danger); border-color: var(--color-danger); color: #fff; }
+    .btn--danger:hover { background: #b51a25; }
+    .btn--ghost { border-color: transparent; background: transparent; }
+    .btn--sm { height: 24px; padding: 0 var(--space-2); font-size: var(--font-xs); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .toolbar {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-bg-elevated);
+    }
+    .chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      font-size: var(--font-xs);
+      color: var(--color-text-secondary);
+      cursor: pointer;
+    }
+    .chip.is-active { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); font-weight: 600; }
+    .chip__count { background: var(--color-bg-elevated); border-radius: 8px; padding: 0 4px; }
+
+    .list { flex: 1; overflow-y: auto; padding: var(--space-3) var(--space-4); }
+    .pr {
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+      margin-bottom: var(--space-2);
+      cursor: pointer;
+    }
+    .pr:hover { border-color: var(--color-border-strong); box-shadow: var(--shadow-sm); }
+    .pr.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
+
+    .pr__head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+    .pr__num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--color-text-muted); font-size: var(--font-sm); }
+    .pr__title { font-size: var(--font-md); font-weight: 600; flex: 1; }
+    .pr__status {
+      font-size: var(--font-xs);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 600;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .pr__status--open { background: rgba(96, 153, 38, 0.15); color: var(--color-primary); }
+    .pr__status--review { background: rgba(9, 105, 218, 0.15); color: var(--color-info); }
+    .pr__status--conflict { background: rgba(207, 34, 46, 0.15); color: var(--color-danger); }
+    .pr__status--merged { background: rgba(130, 80, 223, 0.15); color: #8250df; }
+    .pr__status--closed { background: rgba(139, 148, 158, 0.18); color: var(--color-text-muted); }
+
+    .pr__branches { display: flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--color-text-secondary); margin-bottom: var(--space-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .pr__branches .src { padding: 1px 6px; background: var(--color-bg-elevated); border-radius: var(--radius-sm); }
+    .pr__branches .dst { padding: 1px 6px; background: var(--color-primary-soft); color: var(--color-primary); border-radius: var(--radius-sm); font-weight: 600; }
+
+    .pr__meta { display: flex; align-items: center; gap: var(--space-3); font-size: var(--font-xs); color: var(--color-text-muted); }
+    .pr__avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 10px; font-weight: 600; color: #fff; background: var(--color-info); margin-right: 4px; }
+    .pr__check { display: inline-flex; align-items: center; gap: 4px; }
+    .pr__check--ok { color: var(--color-success); }
+    .pr__check--bad { color: var(--color-danger); }
+
+    .pr__actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+
+    /* modal */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: grid; place-items: center;
+      z-index: 100;
+    }
+    .modal {
+      width: 520px;
+      background: var(--color-bg);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+    }
+    .modal__head {
+      padding: var(--space-4);
+      border-bottom: 1px solid var(--color-border);
+      display: flex; align-items: center;
+    }
+    .modal__head h3 { margin: 0; font-size: var(--font-lg); flex: 1; }
+    .modal__body { padding: var(--space-4); }
+    .modal__row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; font-size: var(--font-sm); }
+    .modal__row label { color: var(--color-text-muted); min-width: 80px; }
+    .modal__select { flex: 1; height: 28px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); font-size: var(--font-sm); }
+    .modal__foot {
+      padding: var(--space-3) var(--space-4);
+      border-top: 1px solid var(--color-border);
+      background: var(--color-bg-elevated);
+      display: flex; gap: var(--space-2); justify-content: flex-end;
+    }
+    .merge-summary {
+      background: var(--color-primary-soft);
+      border: 1px solid var(--color-primary);
+      border-radius: var(--radius-sm);
+      padding: var(--space-3);
+      margin: var(--space-3) 0;
+      font-size: var(--font-sm);
+    }
+    .merge-summary strong { color: var(--color-primary); }
+    .conflict-list {
+      background: rgba(207, 34, 46, 0.08);
+      border: 1px solid var(--color-danger);
+      border-radius: var(--radius-sm);
+      padding: var(--space-3);
+      margin: var(--space-3) 0;
+      font-size: var(--font-sm);
+    }
+    .conflict-list strong { color: var(--color-danger); }
+    .conflict-list ul { margin: var(--space-2) 0 0; padding-left: 20px; }
+    .conflict-list li { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-xs); padding: 2px 0; }
+
+    .checklist { padding: 0; margin: var(--space-2) 0; list-style: none; }
+    .checklist li { padding: 4px 0; font-size: var(--font-sm); display: flex; align-items: center; gap: 6px; }
+    .checklist li.is-bad { color: var(--color-danger); }
+    .checklist .icon { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <div class="titlebar__logo">
+        <span class="titlebar__logo-mark">G</span>
+        <span>Gitea Kanban</span>
+      </div>
+      <div class="titlebar__repo">
+        <span>📁</span>
+        <span><strong>my-team</strong> / <strong>web-app</strong></span>
+      </div>
+      <div class="titlebar__spacer"></div>
+      <div class="titlebar__sync">
+        <span class="dot"></span>
+        <span>已同步 · 2 分钟前</span>
+      </div>
+      <div class="titlebar__user">ZS</div>
+    </header>
+
+    <div class="main">
+      <nav class="navrail">
+        <div class="navrail__section-label">我的工作</div>
+        <a class="navrail__item" href="#"><span class="icon">🗂</span> 我的卡片<span class="badge">3</span></a>
+        <a class="navrail__item" href="index.html"><span class="icon">📋</span> 看板</a>
+        <div class="navrail__section-label">代码</div>
+        <a class="navrail__item" href="#"><span class="icon">🌿</span> 分支</a>
+        <a class="navrail__item is-active" href="merge.html"><span class="icon">⇄</span> 合并请求<span class="badge">5</span></a>
+        <a class="navrail__item" href="timeline.html"><span class="icon">📈</span> 时间轴</a>
+        <div class="navrail__section-label">协作</div>
+        <a class="navrail__item" href="#"><span class="icon">👥</span> 成员</a>
+        <div class="navrail__footer">
+          <a class="navrail__item" href="#"><span class="icon">⚙</span> 设置</a>
+        </div>
+      </nav>
+
+      <section class="content">
+        <div class="content__tabs">
+          <div class="content__tab">📋 看板</div>
+          <div class="content__tab">📈 时间轴</div>
+          <div class="content__tab is-active">⇄ 合并请求 (5)</div>
+          <div class="content__tab-actions">
+            <button class="btn">+ 新建合并请求</button>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <span class="chip is-active">全部 <span class="chip__count">6</span></span>
+          <span class="chip">待合并 <span class="chip__count">2</span></span>
+          <span class="chip">审核中 <span class="chip__count">1</span></span>
+          <span class="chip">有冲突 <span class="chip__count">1</span></span>
+          <span class="chip">已合并 <span class="chip__count">1</span></span>
+          <span class="chip">已关闭 <span class="chip__count">1</span></span>
+          <div style="flex: 1;"></div>
+          <span style="font-size: var(--font-xs); color: var(--color-text-muted);">排序：最近活动 ▾</span>
+        </div>
+
+        <div class="list">
+          <!-- PR 1: 待合并 - 可合并 -->
+          <div class="pr is-selected">
+            <div class="pr__head">
+              <span class="pr__status pr__status--open">✓ 待合并</span>
+              <span class="pr__title">fix(login): 关闭 iOS 18 下的背景动效</span>
+              <span class="pr__num">#124</span>
+            </div>
+            <div class="pr__branches">
+              <span class="src">hotfix/safari</span>
+              <span>→</span>
+              <span class="dst">main</span>
+            </div>
+            <div class="pr__meta">
+              <span><span class="pr__avatar" style="background: #0969da;">CY</span> 陈杨 · 昨天 16:20</span>
+              <span class="pr__check pr__check--ok">✓ 无冲突</span>
+              <span class="pr__check pr__check--ok">✓ 3 人通过审核</span>
+              <span>3 次提交 · +24 / −86</span>
+            </div>
+            <div class="pr__actions">
+              <button class="btn btn--primary">⇄ 合并到 main</button>
+              <button class="btn">在浏览器打开</button>
+              <button class="btn btn--ghost btn--sm" style="color: var(--color-danger);">关闭</button>
+            </div>
+          </div>
+
+          <!-- PR 2: 待合并 - 后端 -->
+          <div class="pr">
+            <div class="pr__head">
+              <span class="pr__status pr__status--open">✓ 待合并</span>
+              <span class="pr__title">把订单状态机的日志改成结构化 JSON</span>
+              <span class="pr__num">#128</span>
+            </div>
+            <div class="pr__branches">
+              <span class="src">feature/order-log</span>
+              <span>→</span>
+              <span class="dst">main</span>
+            </div>
+            <div class="pr__meta">
+              <span><span class="pr__avatar" style="background: #8250df;">ZH</span> 周航 · 3 小时前</span>
+              <span class="pr__check pr__check--ok">✓ 无冲突</span>
+              <span class="pr__check pr__check--ok">✓ 1 人通过审核</span>
+              <span>5 次提交 · +187 / −42</span>
+            </div>
+            <div class="pr__actions">
+              <button class="btn btn--primary">⇄ 合并到 main</button>
+              <button class="btn">在浏览器打开</button>
+            </div>
+          </div>
+
+          <!-- PR 3: 审核中 -->
+          <div class="pr">
+            <div class="pr__head">
+              <span class="pr__status pr__status--review">⏳ 审核中</span>
+              <span class="pr__title">把"个人主页"页面的懒加载从图片扩展到组件</span>
+              <span class="pr__num">#131</span>
+            </div>
+            <div class="pr__branches">
+              <span class="src">feature/lazyload</span>
+              <span>→</span>
+              <span class="dst">develop</span>
+            </div>
+            <div class="pr__meta">
+              <span><span class="pr__avatar" style="background: #0969da;">CY</span> 陈杨 · 今天 09:14</span>
+              <span class="pr__check pr__check--ok">✓ 无冲突</span>
+              <span style="color: var(--color-warning);">⏳ 等待 2 人审核</span>
+              <span>7 次提交 · +412 / −198</span>
+            </div>
+            <div class="pr__actions">
+              <button class="btn" disabled>合并到 develop（等待审核）</button>
+              <button class="btn">在浏览器打开</button>
+            </div>
+          </div>
+
+          <!-- PR 4: 有冲突 -->
+          <div class="pr">
+            <div class="pr__head">
+              <span class="pr__status pr__status--conflict">⚠ 有冲突</span>
+              <span class="pr__title">/api/v2/users 接口分页 cursor 改造</span>
+              <span class="pr__num">#127</span>
+            </div>
+            <div class="pr__branches">
+              <span class="src">feature/user-pagination</span>
+              <span>→</span>
+              <span class="dst">main</span>
+            </div>
+            <div class="pr__meta">
+              <span><span class="pr__avatar" style="background: #8250df;">ZH</span> 周航 · 5/26</span>
+              <span class="pr__check pr__check--bad">✕ 2 个文件冲突</span>
+              <span>8 次提交 · +340 / −125</span>
+            </div>
+            <div class="pr__actions">
+              <button class="btn" disabled>先解决冲突再合并</button>
+              <button class="btn btn--primary">在浏览器打开并解决</button>
+            </div>
+          </div>
+
+          <!-- PR 5: 已合并 -->
+          <div class="pr">
+            <div class="pr__head">
+              <span class="pr__status pr__status--merged">✓ 已合并</span>
+              <span class="pr__title">生产 Redis 升级到 7.2</span>
+              <span class="pr__num">#120</span>
+            </div>
+            <div class="pr__branches">
+              <span class="src">ops/redis-72</span>
+              <span>→</span>
+              <span class="dst">main</span>
+            </div>
+            <div class="pr__meta">
+              <span><span class="pr__avatar" style="background: #444c56;">SY</span> 孙宇 · 5/24</span>
+              <span class="pr__check pr__check--ok">合并到 main · 5/24</span>
+              <span>3 次提交</span>
+            </div>
+            <div class="pr__actions">
+              <button class="btn">查看时间轴</button>
+              <button class="btn">在浏览器打开</button>
+            </div>
+          </div>
+
+          <!-- PR 6: 已关闭 -->
+          <div class="pr" style="opacity: 0.6;">
+            <div class="pr__head">
+              <span class="pr__status pr__status--closed">⊗ 已关闭</span>
+              <span class="pr__title">[废弃] 旧版用户中心改造方案 v1</span>
+              <span class="pr__num">#108</span>
+            </div>
+            <div class="pr__branches">
+              <span class="src">feature/old-redesign</span>
+              <span>→</span>
+              <span class="dst">main</span>
+            </div>
+            <div class="pr__meta">
+              <span><span class="pr__avatar" style="background: #f76707;">LY</span> 林雨 · 5/10</span>
+              <span>方案废弃，作者主动关闭</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- modal: merge confirm -->
+        <div class="modal-backdrop">
+          <div class="modal" role="dialog" aria-labelledby="merge-title" aria-modal="true">
+            <div class="modal__head">
+              <h3 id="merge-title">合并 #124 到 main</h3>
+              <button class="btn btn--ghost btn--sm" aria-label="关闭">✕</button>
+            </div>
+            <div class="modal__body">
+              <div class="modal__row">
+                <label>源分支</label>
+                <code class="pr__branches .src" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">hotfix/safari</code>
+              </div>
+              <div class="modal__row">
+                <label>目标分支</label>
+                <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 6px; background: var(--color-primary-soft); color: var(--color-primary); border-radius: var(--radius-sm); font-weight: 600;">main</code>
+              </div>
+              <div class="modal__row">
+                <label>合并方式</label>
+                <select class="modal__select">
+                  <option>创建一个合并提交（保留完整历史）</option>
+                  <option>压缩并合并（把 3 次提交合成 1 个）</option>
+                  <option>变基并合并（保持线性历史）</option>
+                </select>
+              </div>
+
+              <div class="merge-summary">
+                <strong>✓ 这次合并预计：</strong><br/>
+                · 不需要解决冲突<br/>
+                · 3 个审核已通过<br/>
+                · 会把 hotfix/safari 的 3 次提交合并进 main<br/>
+                · 合并后 hotfix/safari 仍保留
+              </div>
+
+              <ul class="checklist">
+                <li class="is-good"><span class="icon">✓</span> 无冲突</li>
+                <li class="is-good"><span class="icon">✓</span> 3 人通过审核</li>
+                <li class="is-good"><span class="icon">✓</span> 所有 CI 检查已通过</li>
+                <li class="is-good"><span class="icon">✓</span> 你有合并权限（写权限）</li>
+              </ul>
+            </div>
+            <div class="modal__foot">
+              <button class="btn">取消</button>
+              <button class="btn btn--primary">确认合并</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- (alternative state) modal: conflict -->
+        <!--
+        <div class="modal-backdrop">
+          <div class="modal">
+            <div class="modal__head">
+              <h3>无法合并 #127</h3>
+            </div>
+            <div class="modal__body">
+              <p style="margin-top: 0;">这个合并请求有冲突的文件：</p>
+              <div class="conflict-list">
+                <strong>2 个文件冲突：</strong>
+                <ul>
+                  <li>src/api/v2/users.go</li>
+                  <li>src/api/v2/users_test.go</li>
+                </ul>
+              </div>
+              <p style="font-size: var(--font-sm); color: var(--color-text-secondary);">
+                请先在编辑器或 gitea 网页里解决冲突，然后再回来合并。
+              </p>
+            </div>
+            <div class="modal__foot">
+              <button class="btn">取消</button>
+              <button class="btn btn--primary">在 gitea 中打开</button>
+            </div>
+          </div>
+        </div>
+        -->
+      </section>
+    </div>
+  </div>
+</body>
+</html>

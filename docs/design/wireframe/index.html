@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gitea Kanban · 看板主页</title>
+  <style>
+    /* ===== design tokens (gitea 风格 + 暗色变量) ===== */
+    :root {
+      --color-primary: #609926;
+      --color-primary-hover: #54a31d;
+      --color-primary-soft: rgba(96, 153, 38, 0.12);
+      --color-accent: #f76707;
+      --color-warning: #f0ad4e;
+      --color-danger: #cf222e;
+      --color-info: #0969da;
+      --color-text: #1f2328;
+      --color-text-secondary: #59636e;
+      --color-text-muted: #8b949e;
+      --color-bg: #ffffff;
+      --color-bg-elevated: #f6f8fa;
+      --color-bg-hover: #eef1f4;
+      --color-border: #d0d7de;
+      --color-border-strong: #afb8c1;
+      --shadow-sm: 0 1px 0 rgba(31, 35, 40, 0.04);
+      --shadow-md: 0 3px 6px rgba(140, 149, 159, 0.15);
+      --shadow-lg: 0 8px 24px rgba(140, 149, 159, 0.2);
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --font-xs: 11px;
+      --font-sm: 13px;
+      --font-md: 14px;
+      --font-lg: 16px;
+      --font-xl: 20px;
+      --font-2xl: 24px;
+      --titlebar-h: 48px;
+      --navrail-w: 224px;
+    }
+
+    [data-theme='dark'] {
+      --color-text: #e6edf3;
+      --color-text-secondary: #adbac7;
+      --color-text-muted: #768390;
+      --color-bg: #0d1117;
+      --color-bg-elevated: #161b22;
+      --color-bg-hover: #1c222b;
+      --color-border: #30363d;
+      --color-border-strong: #444c56;
+      --color-primary-soft: rgba(96, 153, 38, 0.22);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+      font-size: var(--font-md);
+      color: var(--color-text);
+      background: var(--color-bg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ===== app shell ===== */
+    .app {
+      display: grid;
+      grid-template-rows: var(--titlebar-h) 1fr;
+      height: 100vh;
+    }
+
+    /* ===== title bar ===== */
+    .titlebar {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: 0 var(--space-4);
+      background: var(--color-bg-elevated);
+      border-bottom: 1px solid var(--color-border);
+      -webkit-app-region: drag;
+    }
+    .titlebar > * { -webkit-app-region: no-drag; }
+    .titlebar__logo {
+      display: flex; align-items: center; gap: var(--space-2);
+      font-weight: 600; color: var(--color-primary);
+    }
+    .titlebar__logo-mark {
+      width: 24px; height: 24px;
+      background: var(--color-primary); color: #fff;
+      border-radius: var(--radius-sm);
+      display: grid; place-items: center; font-size: 14px;
+    }
+    .titlebar__repo {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: 4px 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      font-size: var(--font-sm);
+      cursor: pointer;
+    }
+    .titlebar__repo:hover { background: var(--color-bg-hover); }
+    .titlebar__repo strong { font-weight: 600; }
+    .titlebar__repo small { color: var(--color-text-muted); }
+
+    .titlebar__spacer { flex: 1; }
+
+    .titlebar__search {
+      width: 360px; height: 28px;
+      padding: 0 var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-size: var(--font-sm);
+      display: flex; align-items: center; gap: var(--space-2);
+    }
+    .titlebar__search input {
+      flex: 1; border: none; outline: none; background: transparent;
+      color: inherit; font: inherit;
+    }
+    .titlebar__search kbd {
+      font-size: var(--font-xs);
+      padding: 2px 6px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg-elevated);
+      color: var(--color-text-muted);
+    }
+
+    .titlebar__sync {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      font-size: var(--font-sm);
+      color: var(--color-text-secondary);
+    }
+    .titlebar__sync .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--color-success);
+      box-shadow: 0 0 0 3px rgba(46, 160, 67, 0.15);
+    }
+    .titlebar__sync.is-offline .dot { background: var(--color-warning); }
+    .titlebar__sync.is-offline { color: var(--color-warning); }
+
+    .titlebar__user {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--color-primary); color: #fff;
+      display: grid; place-items: center; font-size: var(--font-sm);
+      font-weight: 600;
+    }
+
+    /* ===== main area ===== */
+    .main {
+      display: grid;
+      grid-template-columns: var(--navrail-w) 1fr;
+      min-height: 0;
+    }
+
+    /* ===== nav rail ===== */
+    .navrail {
+      background: var(--color-bg-elevated);
+      border-right: 1px solid var(--color-border);
+      padding: var(--space-3) var(--space-2);
+      display: flex; flex-direction: column; gap: 2px;
+      overflow-y: auto;
+    }
+    .navrail__section-label {
+      font-size: var(--font-xs);
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      padding: var(--space-2) var(--space-3) var(--space-1);
+      letter-spacing: 0.04em;
+    }
+    .navrail__item {
+      display: flex; align-items: center; gap: var(--space-3);
+      padding: 6px var(--space-3);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      color: var(--color-text);
+      font-size: var(--font-sm);
+      text-decoration: none;
+    }
+    .navrail__item:hover { background: var(--color-bg-hover); }
+    .navrail__item.is-active {
+      background: var(--color-primary-soft);
+      color: var(--color-primary);
+      font-weight: 600;
+    }
+    .navrail__item .icon {
+      width: 16px; height: 16px;
+      display: inline-grid; place-items: center;
+      color: currentColor;
+    }
+    .navrail__item .badge {
+      margin-left: auto;
+      font-size: var(--font-xs);
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: var(--color-bg);
+      color: var(--color-text-secondary);
+      border: 1px solid var(--color-border);
+      min-width: 22px; text-align: center;
+    }
+    .navrail__item.is-active .badge {
+      background: var(--color-primary);
+      color: #fff;
+      border-color: var(--color-primary);
+    }
+
+    .navrail__footer {
+      margin-top: auto;
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--color-border);
+    }
+
+    /* ===== content area ===== */
+    .content {
+      display: flex; flex-direction: column;
+      min-width: 0; min-height: 0;
+    }
+    .content__tabs {
+      display: flex; align-items: center;
+      padding: 0 var(--space-4);
+      border-bottom: 1px solid var(--color-border);
+      gap: var(--space-4);
+      height: 40px;
+      flex-shrink: 0;
+    }
+    .content__tab {
+      height: 100%;
+      display: flex; align-items: center;
+      padding: 0 var(--space-2);
+      border-bottom: 2px solid transparent;
+      color: var(--color-text-secondary);
+      font-size: var(--font-sm);
+      cursor: pointer;
+    }
+    .content__tab.is-active {
+      color: var(--color-text);
+      border-bottom-color: var(--color-primary);
+      font-weight: 600;
+    }
+    .content__tab-actions { margin-left: auto; display: flex; gap: var(--space-2); }
+
+    .btn {
+      height: 28px; padding: 0 var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-size: var(--font-sm);
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: var(--space-2);
+    }
+    .btn:hover { background: var(--color-bg-hover); }
+    .btn--primary {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: #fff;
+    }
+    .btn--primary:hover { background: var(--color-primary-hover); }
+    .btn--ghost { border-color: transparent; background: transparent; }
+    .btn--sm { height: 24px; padding: 0 var(--space-2); font-size: var(--font-xs); }
+
+    .content__filterbar {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-bg-elevated);
+    }
+    .chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      font-size: var(--font-xs);
+      color: var(--color-text-secondary);
+    }
+    .chip.is-active {
+      background: var(--color-primary-soft);
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+    }
+    .chip__close { cursor: pointer; opacity: 0.6; }
+    .chip__close:hover { opacity: 1; }
+
+    /* ===== board ===== */
+    .board {
+      flex: 1; min-height: 0;
+      overflow-x: auto;
+      padding: var(--space-4);
+      display: flex; gap: var(--space-3);
+    }
+    .column {
+      flex: 0 0 280px;
+      background: var(--color-bg-elevated);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      display: flex; flex-direction: column;
+      max-height: 100%;
+    }
+    .column__header {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: var(--space-3);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .column__title {
+      font-weight: 600; font-size: var(--font-sm);
+      display: flex; align-items: center; gap: var(--space-2);
+    }
+    .column__title .swatch {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+    .column__count {
+      font-size: var(--font-xs);
+      color: var(--color-text-muted);
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      padding: 1px 6px; border-radius: 10px;
+    }
+    .column__wip {
+      font-size: var(--font-xs);
+      color: var(--color-text-muted);
+      margin-left: auto;
+    }
+    .column__wip.is-over { color: var(--color-danger); font-weight: 600; }
+    .column__add {
+      width: 24px; height: 24px; padding: 0;
+      display: grid; place-items: center;
+    }
+    .column__body {
+      flex: 1; overflow-y: auto;
+      padding: var(--space-2);
+      display: flex; flex-direction: column; gap: var(--space-2);
+    }
+    .column__add-card {
+      padding: var(--space-2) var(--space-3);
+      color: var(--color-text-muted);
+      font-size: var(--font-sm);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      text-align: left;
+    }
+    .column__add-card:hover { background: var(--color-bg-hover); color: var(--color-text); }
+
+    .card {
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: var(--space-3);
+      cursor: grab;
+      box-shadow: var(--shadow-sm);
+    }
+    .card:hover { border-color: var(--color-border-strong); box-shadow: var(--shadow-md); }
+    .card.is-dragging { opacity: 0.5; }
+    .card.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
+    .card__title {
+      font-size: var(--font-sm);
+      font-weight: 500;
+      line-height: 1.4;
+      margin-bottom: var(--space-2);
+    }
+    .card__labels {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      margin-bottom: var(--space-2);
+    }
+    .label {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-size: var(--font-xs);
+      color: #fff;
+    }
+    .card__meta {
+      display: flex; align-items: center; gap: var(--space-3);
+      font-size: var(--font-xs);
+      color: var(--color-text-muted);
+    }
+    .card__meta > * { display: flex; align-items: center; gap: 4px; }
+    .card__meta .avatar {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--color-info); color: #fff;
+      display: grid; place-items: center;
+      font-size: 10px; font-weight: 600;
+    }
+    .card__meta .commit-badge {
+      color: var(--color-accent);
+      font-weight: 600;
+    }
+    .card__meta .due.is-overdue { color: var(--color-danger); font-weight: 600; }
+    .card__meta .due.is-soon { color: var(--color-warning); }
+
+    /* ===== card detail drawer (right side) ===== */
+    .drawer {
+      position: fixed;
+      top: var(--titlebar-h);
+      right: 0; bottom: 0;
+      width: 420px;
+      background: var(--color-bg);
+      border-left: 1px solid var(--color-border);
+      box-shadow: var(--shadow-lg);
+      padding: var(--space-4);
+      overflow-y: auto;
+      transform: translateX(0);
+    }
+    .drawer__close {
+      position: absolute; top: 12px; right: 12px;
+    }
+    .drawer__crumb {
+      font-size: var(--font-xs);
+      color: var(--color-text-muted);
+      margin-bottom: var(--space-2);
+    }
+    .drawer__title {
+      font-size: var(--font-xl);
+      font-weight: 600;
+      margin-bottom: var(--space-3);
+      padding-right: 32px;
+    }
+    .drawer__row {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: 6px 0;
+      font-size: var(--font-sm);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .drawer__row .label-text { color: var(--color-text-muted); width: 72px; flex-shrink: 0; }
+    .drawer__section {
+      margin-top: var(--space-4);
+    }
+    .drawer__section h4 {
+      font-size: var(--font-sm);
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin: 0 0 var(--space-2);
+      letter-spacing: 0.04em;
+    }
+    .drawer__desc {
+      font-size: var(--font-sm);
+      line-height: 1.6;
+      color: var(--color-text-secondary);
+    }
+    .commit-link {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: 6px 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      font-size: var(--font-xs);
+      margin-bottom: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .commit-link .sha { color: var(--color-accent); font-weight: 600; }
+    .commit-link .msg { color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+    /* ===== global toast (offline) ===== */
+    .toast {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: var(--color-warning); color: #fff;
+      padding: 10px 16px;
+      border-radius: var(--radius-md);
+      font-size: var(--font-sm);
+      display: flex; align-items: center; gap: var(--space-2);
+      box-shadow: var(--shadow-md);
+    }
+
+    /* ===== mock badges ===== */
+    .pill {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: var(--font-xs);
+      font-weight: 600;
+    }
+    .pill--green { background: rgba(96, 153, 38, 0.15); color: var(--color-primary); }
+    .pill--orange { background: rgba(247, 103, 7, 0.15); color: var(--color-accent); }
+    .pill--red { background: rgba(207, 34, 46, 0.15); color: var(--color-danger); }
+    .pill--blue { background: rgba(9, 105, 218, 0.15); color: var(--color-info); }
+    .pill--gray { background: rgba(139, 148, 158, 0.18); color: var(--color-text-muted); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- ===== title bar ===== -->
+    <header class="titlebar">
+      <div class="titlebar__logo">
+        <span class="titlebar__logo-mark">G</span>
+        <span>Gitea Kanban</span>
+      </div>
+      <div class="titlebar__repo" title="点击切换仓库">
+        <span>📁</span>
+        <span><strong>my-team</strong> / <strong>web-app</strong></span>
+        <small style="color: var(--color-text-muted);">▾</small>
+      </div>
+      <div class="titlebar__spacer"></div>
+      <div class="titlebar__search">
+        <span>🔍</span>
+        <input type="text" placeholder="搜索卡片、合并请求、提交…" />
+        <kbd>⌘K</kbd>
+      </div>
+      <div class="titlebar__sync" title="最近一次同步：2 分钟前">
+        <span class="dot"></span>
+        <span>已同步 · 2 分钟前</span>
+      </div>
+      <div class="titlebar__user" title="张三 (产品经理)">ZS</div>
+    </header>
+
+    <!-- ===== main ===== -->
+    <div class="main">
+      <!-- nav rail -->
+      <nav class="navrail">
+        <div class="navrail__section-label">我的工作</div>
+        <a class="navrail__item" href="#">
+          <span class="icon">🗂</span> 我的卡片
+          <span class="badge">3</span>
+        </a>
+        <a class="navrail__item is-active" href="#">
+          <span class="icon">📋</span> 看板
+        </a>
+        <div class="navrail__section-label">代码</div>
+        <a class="navrail__item" href="#">
+          <span class="icon">🌿</span> 分支
+        </a>
+        <a class="navrail__item" href="#">
+          <span class="icon">⇄</span> 合并请求
+          <span class="badge">5</span>
+        </a>
+        <a class="navrail__item" href="#">
+          <span class="icon">📈</span> 时间轴
+        </a>
+        <div class="navrail__section-label">协作</div>
+        <a class="navrail__item" href="#">
+          <span class="icon">👥</span> 成员
+        </a>
+        <div class="navrail__footer">
+          <a class="navrail__item" href="#">
+            <span class="icon">⚙</span> 设置
+          </a>
+        </div>
+      </nav>
+
+      <!-- content -->
+      <section class="content">
+        <div class="content__tabs">
+          <div class="content__tab is-active">📋 看板</div>
+          <div class="content__tab">📈 时间轴</div>
+          <div class="content__tab">⇄ 合并请求 (5)</div>
+          <div class="content__tab-actions">
+            <button class="btn">⇲ 导入</button>
+            <button class="btn">+ 新建看板</button>
+            <button class="btn btn--primary">+ 新建卡片</button>
+          </div>
+        </div>
+
+        <div class="content__filterbar">
+          <strong style="font-size: var(--font-sm);">本期冲刺：5/20 - 6/03</strong>
+          <span class="chip is-active">所有标签 ✕</span>
+          <span class="chip is-active">所有负责人 ✕</span>
+          <span class="chip">只看我</span>
+          <span class="chip">只看带提交</span>
+          <span class="chip">截止：本周</span>
+        </div>
+
+        <!-- board -->
+        <div class="board">
+          <!-- column 1: 待开始 -->
+          <div class="column">
+            <div class="column__header">
+              <div class="column__title">
+                <span class="swatch" style="background: #6c757d;"></span>
+                待开始
+              </div>
+              <span class="column__count">2</span>
+              <span class="column__wip">上限 3</span>
+              <button class="btn btn--ghost btn--sm column__add">+</button>
+            </div>
+            <div class="column__body">
+              <div class="card">
+                <div class="card__labels">
+                  <span class="label" style="background: #0969da;">设计</span>
+                </div>
+                <div class="card__title">新首页首屏改版：Hero 区高度统一为 480px，标题字号从 36 改为 28</div>
+                <div class="card__meta">
+                  <span title="关联 1 次提交" class="commit-badge">● 1 提交</span>
+                  <span><span class="avatar">ZS</span> 我</span>
+                  <span class="due">📅 5/30</span>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card__labels">
+                  <span class="label" style="background: #9a6700;">文案</span>
+                </div>
+                <div class="card__title">检查所有 404 页文案，准备新一期文案库</div>
+                <div class="card__meta">
+                  <span><span class="avatar" style="background: #f76707;">LY</span> 林</span>
+                  <span class="due">📅 6/02</span>
+                </div>
+              </div>
+              <div class="column__add-card">+ 添加卡片</div>
+            </div>
+          </div>
+
+          <!-- column 2: 进行中 -->
+          <div class="column">
+            <div class="column__header">
+              <div class="column__title">
+                <span class="swatch" style="background: #609926;"></span>
+                进行中
+              </div>
+              <span class="column__count">3</span>
+              <span class="column__wip is-over">上限 2 · 超 1</span>
+            </div>
+            <div class="column__body">
+              <div class="card is-selected">
+                <div class="card__labels">
+                  <span class="label" style="background: #cf222e;">紧急</span>
+                  <span class="label" style="background: #0969da;">前端</span>
+                </div>
+                <div class="card__title">登录页背景动效在 Safari 下崩溃（iOS 18 复现）</div>
+                <div class="card__meta">
+                  <span title="关联 3 次提交" class="commit-badge">● 3 提交</span>
+                  <span><span class="avatar" style="background: #0969da;">CY</span> 陈</span>
+                  <span class="due is-overdue">📅 5/28 逾期</span>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card__labels">
+                  <span class="label" style="background: #0969da;">前端</span>
+                </div>
+                <div class="card__title">把"个人主页"页面的懒加载从图片扩展到组件</div>
+                <div class="card__meta">
+                  <span><span class="avatar" style="background: #0969da;">CY</span> 陈</span>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card__labels">
+                  <span class="label" style="background: #609926;">后端</span>
+                </div>
+                <div class="card__title">/api/v2/users 接口分页 cursor 改造：避免深分页越界</div>
+                <div class="card__meta">
+                  <span title="关联 2 次提交 + 1 合并请求" class="commit-badge">● 2 提交 · 1 合并</span>
+                  <span><span class="avatar" style="background: #8250df;">ZH</span> 周</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- column 3: 待合并 -->
+          <div class="column">
+            <div class="column__header">
+              <div class="column__title">
+                <span class="swatch" style="background: #f76707;"></span>
+                待合并
+              </div>
+              <span class="column__count">2</span>
+            </div>
+            <div class="column__body">
+              <div class="card">
+                <div class="card__labels">
+                  <span class="label" style="background: #609926;">后端</span>
+                </div>
+                <div class="card__title">把订单状态机的日志改成结构化 JSON</div>
+                <div class="card__meta">
+                  <span title="合并请求 #128" class="commit-badge">⇄ PR #128</span>
+                  <span><span class="avatar" style="background: #8250df;">ZH</span> 周</span>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card__labels">
+                  <span class="label" style="background: #9a6700;">文案</span>
+                </div>
+                <div class="card__title">更新注册流程的 6 处错误提示文案</div>
+                <div class="card__meta">
+                  <span title="合并请求 #130" class="commit-badge">⇄ PR #130</span>
+                  <span><span class="avatar" style="background: #f76707;">LY</span> 林</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- column 4: 已合并 -->
+          <div class="column">
+            <div class="column__header">
+              <div class="column__title">
+                <span class="swatch" style="background: #1a7f37;"></span>
+                已合并
+              </div>
+              <span class="column__count">1</span>
+            </div>
+            <div class="column__body">
+              <div class="card">
+                <div class="card__labels">
+                  <span class="label" style="background: #6c757d;">运维</span>
+                </div>
+                <div class="card__title">生产 Redis 升级到 7.2（含 5 月停机维护窗口）</div>
+                <div class="card__meta">
+                  <span title="已合并到 main，5/24 上线" class="commit-badge">✓ 已合并 5/24</span>
+                  <span><span class="avatar" style="background: #444c56;">SY</span> 孙</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- drawer (card detail) -->
+        <aside class="drawer" aria-label="卡片详情">
+          <button class="btn btn--ghost drawer__close" aria-label="关闭">✕</button>
+          <div class="drawer__crumb">
+            本期冲刺 · 进行中
+          </div>
+          <h2 class="drawer__title">登录页背景动效在 Safari 下崩溃（iOS 18 复现）</h2>
+
+          <div class="drawer__row">
+            <span class="label-text">负责人</span>
+            <span class="avatar" style="background: #0969da; width: 20px; height: 20px; font-size: 11px; display: inline-grid; place-items: center; border-radius: 50%; color: #fff;">CY</span>
+            <span>陈杨</span>
+            <span class="pill pill--red" style="margin-left: 8px;">紧急</span>
+            <span class="pill pill--blue">前端</span>
+          </div>
+          <div class="drawer__row">
+            <span class="label-text">截止</span>
+            <span style="color: var(--color-danger); font-weight: 600;">5/28 · 逾期 1 天</span>
+          </div>
+          <div class="drawer__row">
+            <span class="label-text">编号</span>
+            <span>#CARD-482</span>
+          </div>
+
+          <div class="drawer__section">
+            <h4>描述</h4>
+            <p class="drawer__desc">
+              iOS 18 Safari 在执行 <code>backdrop-filter: blur()</code> + <code>transform: scale()</code>
+              组合时偶发白屏崩溃。已通过 Sentry 收到 47 例报告，影响 iPhone XS 及以上机型。
+              计划：先关闭该动效做兜底，后续在 iOS 18.2 修复稳定后重新开启。
+            </p>
+          </div>
+
+          <div class="drawer__section">
+            <h4>关联提交 (3) · <a href="#" style="color: var(--color-primary); text-decoration: none;">时间轴中查看 →</a></h4>
+            <div class="commit-link">
+              <span class="sha">a1b2c3d</span>
+              <span class="msg">fix(login): 关闭 iOS 18 下的背景动效</span>
+              <span style="color: var(--color-text-muted);">2 小时前</span>
+            </div>
+            <div class="commit-link">
+              <span class="sha">9f8e7d6</span>
+              <span class="msg">revert: 临时回退 transform scale 防崩溃</span>
+              <span style="color: var(--color-text-muted);">昨天 16:20</span>
+            </div>
+            <div class="commit-link">
+              <span class="sha">5c4b3a2</span>
+              <span class="msg">feat(login): 尝试用 will-change 优化</span>
+              <span style="color: var(--color-text-muted);">5/25</span>
+            </div>
+          </div>
+
+          <div class="drawer__section">
+            <h4>关联合并请求</h4>
+            <div class="commit-link">
+              <span class="sha" style="color: var(--color-primary);">#124</span>
+              <span class="msg" style="font-family: inherit;">fix: 关闭 iOS 18 下的背景动效</span>
+              <span class="pill pill--orange">待合并</span>
+            </div>
+          </div>
+
+          <div class="drawer__section">
+            <h4>最近活动</h4>
+            <p class="drawer__desc" style="font-size: var(--font-xs);">
+              <strong>陈杨</strong> 添加了提交 <code>a1b2c3d</code> · 2 小时前<br/>
+              <strong>张三</strong> 把它移到"进行中"列 · 昨天<br/>
+              <strong>陈杨</strong> 创建卡片 · 5/24
+            </p>
+          </div>
+        </aside>
+      </section>
+    </div>
+  </div>
+
+  <div class="toast" role="status">
+    <span>⚠</span>
+    <span>暂时连不上 gitea，已切到本地缓存。最近一次同步：<strong>2 小时前</strong>。<a href="#" style="color: #fff; text-decoration: underline; margin-left: 8px;">重试</a></span>
+  </div>
+</body>
+</html>
