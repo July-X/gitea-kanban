@@ -1,5 +1,6 @@
 # IDE / agent
 .codex/
+.harness/
 .mavis/
 .opencode/
 
