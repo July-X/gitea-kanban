@@ -17,14 +17,16 @@
       --color-accent: #F76707; --color-accent-soft: rgba(247, 103, 7, 0.18);
       --color-text: #DCE9F0; --color-text-secondary: #90A4AE; --color-text-muted: #5F7A87;
       --color-bg: #134857; --color-bg-elevated: #1B5868; --color-bg-hover: #236479; --color-bg-active: #2D7487;
+      --color-lane-bg: #1F6171;   /* lane 卡片背景，比 elevated 再提一档，让"卡片"清晰 */
       --color-border: transparent;
       --color-divider: rgba(220, 233, 240, 0.08);
       --color-warning: #E8B954; --color-info: #6FB1FF;
       --color-success: #5BC76A; --color-success-soft: rgba(91, 199, 106, 0.18);
       --color-danger: #F47A6B; --color-danger-soft: rgba(244, 122, 107, 0.18);
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-      --shadow-md: 0 2px 8px rgba(0,0,0,0.45);
-      --shadow-lg: 0 8px 32px rgba(0,0,0,0.55);
+      /* 阴影：暗色模式原则——更深底色 + 主色微光外环（避免纯黑阴影"消失"在苍蓝底上） */
+      --shadow-sm: 0 1px 2px rgba(10, 42, 50, 0.45), 0 0 0 1px rgba(220, 233, 240, 0.04);
+      --shadow-md: 0 4px 12px rgba(10, 42, 50, 0.5), 0 0 0 1px rgba(220, 233, 240, 0.04), 0 0 16px rgba(96, 153, 38, 0.06);
+      --shadow-lg: 0 12px 40px rgba(10, 42, 50, 0.6), 0 0 0 1px rgba(220, 233, 240, 0.06), 0 0 32px rgba(96, 153, 38, 0.08);
       --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px;
       --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
       --font-xs: 11px; --font-sm: 13px; --font-md: 14px; --font-lg: 16px; --font-xl: 20px;
@@ -45,6 +47,21 @@
       transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
     }
     code, .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.01em; }
+
+    /* ====== scrollbar (v1 精修：避免 WebKit 默认白底撞色) ====== */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--color-bg-hover) transparent;
+    }
+    *::-webkit-scrollbar { width: 8px; height: 8px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb {
+      background: var(--color-bg-hover);
+      border-radius: 4px;
+      transition: background-color var(--t-base) var(--ease);
+    }
+    *::-webkit-scrollbar-thumb:hover { background: var(--color-bg-active); }
+    *::-webkit-scrollbar-corner { background: transparent; }
     :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; box-shadow: 0 0 0 4px rgba(96, 153, 38, 0.25); border-radius: var(--radius-sm); }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
@@ -94,24 +111,28 @@
 
     .timeline-wrapper { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     .timeline { flex: 1; min-height: 0; position: relative; overflow: auto; background: var(--color-bg); }
-    .timeline__inner { position: relative; min-width: 1280px; height: 100%; padding-top: 32px; }
+    .timeline__inner { position: relative; min-width: 1280px; min-height: 100%; padding: 50px 8px 24px; }
 
-    .axis { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; border-bottom: 1px solid var(--color-divider); background: var(--color-bg-elevated); z-index: 3; }
-    .axis__label { position: absolute; font-size: var(--font-xs); color: var(--color-text-muted); transform: translateX(8px); }
-    .axis__line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--color-divider); }
-    .axis__line.major { background: rgba(255, 255, 255, 0.1); }
+    /* axis（时间轴顶标）—— 文字色提亮 + 加对比 */
+    .axis { position: absolute; top: 0; left: 0; right: 0; height: 36px; display: flex; align-items: center; border-bottom: 1px solid rgba(220, 233, 240, 0.14); background: var(--color-bg-elevated); z-index: 3; }
+    .axis__label { position: absolute; font-size: var(--font-xs); color: var(--color-text-secondary); transform: translateX(8px); font-weight: 500; }
+    .axis__line { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(220, 233, 240, 0.06); }
+    .axis__line.major { background: rgba(220, 233, 240, 0.16); }
 
-    .lane { position: absolute; left: 0; height: var(--lane-h); border-bottom: 1px solid var(--color-border); display: flex; align-items: center; }
-    .lane__stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
-    .lane__label { position: sticky; left: var(--space-3); display: inline-flex; align-items: center; gap: var(--space-2); padding: 2px 8px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: var(--font-xs); color: var(--color-text); max-width: 160px; z-index: 2; }
-    .lane__label .swatch { width: 8px; height: 8px; border-radius: 50%; }
+    /* lane —— 每条 lane 是独立 elevated 卡片块（看板列范式）：左右留白 + 1px 描边 + shadow 浮起 */
+    .lane { position: absolute; left: 12px; right: 12px; height: var(--lane-h); display: flex; align-items: center; background: var(--color-lane-bg); border-radius: var(--radius-md); box-shadow: 0 8px 20px rgba(10, 42, 50, 0.55), inset 0 0 0 1px rgba(220, 233, 240, 0.06); }
+    .lane__stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: var(--radius-md) 0 0 var(--radius-md); }
+    .lane__label { position: sticky; left: 16px; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; background: transparent; backdrop-filter: none; border-radius: 0; font-size: var(--font-xs); color: var(--color-text); max-width: 200px; z-index: 2; font-weight: 600; letter-spacing: 0.01em; }
+    .lane__label .swatch { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .lane__label .lane-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    .node { position: absolute; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; z-index: 2; transition: transform var(--t-base) var(--ease); }
-    .node:hover { transform: translate(-50%, -50%) scale(1.5); z-index: 5; }
-    .node.is-merge { width: 12px; height: 12px; transform: translate(-50%, -50%) rotate(45deg); border-radius: 2px; }
+    /* 节点 —— 加大 + 苍蓝环 + 强阴影 + 关联卡片的环清晰 */
+    .node { position: absolute; width: 14px; height: 14px; border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; z-index: 2; transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease); box-shadow: 0 0 0 2px var(--color-lane-bg), 0 0 0 3px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.6); }
+    .node:hover { transform: translate(-50%, -50%) scale(1.5); z-index: 5; box-shadow: 0 0 0 2px var(--color-lane-bg), 0 0 0 3px rgba(0, 0, 0, 0.35), 0 0 12px currentColor, 0 2px 6px rgba(0, 0, 0, 0.6); }
+    .node.is-merge { width: 14px; height: 14px; transform: translate(-50%, -50%) rotate(45deg); border-radius: 3px; }
     .node.is-merge:hover { transform: translate(-50%, -50%) rotate(45deg) scale(1.5); }
-    .node.has-card { box-shadow: 0 0 0 2px var(--color-warning); }
-    .node.is-head::after { content: ''; position: absolute; left: 50%; top: -10px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--color-primary); }
+    .node.has-card { box-shadow: 0 0 0 2px var(--color-lane-bg), 0 0 0 4px var(--color-warning), 0 1px 4px rgba(0, 0, 0, 0.5); }
+    .node.is-head::after { content: ''; position: absolute; left: 50%; top: -10px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--color-primary); filter: drop-shadow(0 0 4px var(--color-primary)); }
     .edge { position: absolute; pointer-events: none; z-index: 1; }
 
     .tooltip { position: fixed; top: 240px; left: 580px; width: 360px; background: var(--color-bg-elevated); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); padding: var(--space-3); z-index: 10; }
@@ -229,9 +250,9 @@
                 <div class="axis__line" style="left: 1200px;"></div>
               </div>
 
-              <div class="lane" style="top: 32px; width: 100%; background: rgba(96, 153, 38, 0.04);">
+              <div class="lane" style="top: 50px;">
                 <div class="lane__stripe" style="background: #609926;"></div>
-                <div class="lane__label"><span class="swatch" style="background: #609926;"></span> main (主线)</div>
+                <div class="lane__label"><span class="swatch" style="background: #609926;"></span><span class="lane-name">main (主线)</span></div>
                 <div class="node" style="left: 80px; top: 28px; background: #609926;"></div>
                 <div class="node" style="left: 200px; top: 28px; background: #609926;"></div>
                 <div class="node is-merge" style="left: 360px; top: 28px; background: #609926;"></div>
@@ -242,9 +263,9 @@
                 <div style="position: absolute; left: 650px; top: 8px; padding: 1px 6px; background: var(--color-accent); color: #fff; font-size: 10px; border-radius: 3px; font-weight: 600;">合并请求 #128</div>
               </div>
 
-              <div class="lane" style="top: 88px; width: 100%; background: rgba(247, 103, 7, 0.04);">
+              <div class="lane" style="top: 122px;">
                 <div class="lane__stripe" style="background: #f76707;"></div>
-                <div class="lane__label"><span class="swatch" style="background: #f76707;"></span> feature/login</div>
+                <div class="lane__label"><span class="swatch" style="background: #f76707;"></span><span class="lane-name">feature/login</span></div>
                 <div class="node" style="left: 120px; top: 28px; background: #f76707;"></div>
                 <div class="node" style="left: 280px; top: 28px; background: #f76707;"></div>
                 <div class="node has-card" style="left: 440px; top: 28px; background: #f76707;"></div>
@@ -254,9 +275,9 @@
                 </svg>
               </div>
 
-              <div class="lane" style="top: 144px; width: 100%; background: rgba(9, 105, 218, 0.04);">
+              <div class="lane" style="top: 194px;">
                 <div class="lane__stripe" style="background: #0969da;"></div>
-                <div class="lane__label"><span class="swatch" style="background: #0969da;"></span> hotfix/safari</div>
+                <div class="lane__label"><span class="swatch" style="background: #0969da;"></span><span class="lane-name">hotfix/safari</span></div>
                 <div class="node" style="left: 320px; top: 28px; background: #0969da;"></div>
                 <div class="node has-card" style="left: 480px; top: 28px; background: #0969da;"></div>
                 <div class="node" style="left: 600px; top: 28px; background: #0969da;"></div>
@@ -268,9 +289,9 @@
                 </svg>
               </div>
 
-              <div class="lane" style="top: 200px; width: 100%; background: rgba(130, 80, 223, 0.04);">
+              <div class="lane" style="top: 266px;">
                 <div class="lane__stripe" style="background: #8250df;"></div>
-                <div class="lane__label"><span class="swatch" style="background: #8250df;"></span> user/alice/exp</div>
+                <div class="lane__label"><span class="swatch" style="background: #8250df;"></span><span class="lane-name">user/alice/exp</span></div>
                 <div class="node" style="left: 220px; top: 28px; background: #8250df;"></div>
                 <div class="node" style="left: 380px; top: 28px; background: #8250df;"></div>
                 <div class="node" style="left: 540px; top: 28px; background: #8250df;"></div>

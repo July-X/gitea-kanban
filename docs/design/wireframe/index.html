@@ -43,10 +43,10 @@
       --color-danger-soft: rgba(244, 122, 107, 0.18);
       --color-info: #6FB1FF;
       --color-info-soft: rgba(111, 177, 255, 0.18);
-      /* 阴影：冷底用偏冷黑 */
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-      --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
-      --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55);
+      /* 阴影：冷底用偏冷黑 + 主色微光外环（暗色模式阴影原则：不能纯黑，要更深一档底色 + 主题色晕） */
+      --shadow-sm: 0 1px 2px rgba(10, 42, 50, 0.45), 0 0 0 1px rgba(220, 233, 240, 0.04);
+      --shadow-md: 0 4px 12px rgba(10, 42, 50, 0.5), 0 0 0 1px rgba(220, 233, 240, 0.04), 0 0 16px rgba(96, 153, 38, 0.06);
+      --shadow-lg: 0 12px 40px rgba(10, 42, 50, 0.6), 0 0 0 1px rgba(220, 233, 240, 0.06), 0 0 32px rgba(96, 153, 38, 0.08);
       /* 圆角三档统一 */
       --radius-sm: 6px;
       --radius-md: 8px;
@@ -77,6 +77,21 @@
       transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease);
     }
     code, .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.01em; }
+
+    /* ====== scrollbar (v1 精修：避免 WebKit 默认白底撞色) ====== */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--color-bg-hover) transparent;
+    }
+    *::-webkit-scrollbar { width: 8px; height: 8px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb {
+      background: var(--color-bg-hover);
+      border-radius: 4px;
+      transition: background-color var(--t-base) var(--ease);
+    }
+    *::-webkit-scrollbar-thumb:hover { background: var(--color-bg-active); }
+    *::-webkit-scrollbar-corner { background: transparent; }
 
     /* ====== focus ring (a11y 必须) ====== */
     :focus-visible {
@@ -190,10 +205,10 @@
     .content__tab:hover { color: var(--color-text); }
     .content__tab-actions { margin-left: auto; display: flex; gap: var(--space-2); }
 
-    .btn { height: 32px; padding: 0 var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-hover); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
+    .btn { height: 32px; padding: 0 var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-hover); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease); }
     .btn:hover { background: var(--color-bg-active); }
-    .btn--primary { background: var(--color-primary); color: #fff; font-weight: 600; }
-    .btn--primary:hover { background: var(--color-primary-hover); }
+    .btn--primary { background: var(--color-primary); color: #fff; font-weight: 600; box-shadow: 0 0 0 1px rgba(96, 153, 38, 0.4), 0 0 12px rgba(96, 153, 38, 0.18); }
+    .btn--primary:hover { background: var(--color-primary-hover); box-shadow: 0 0 0 1px rgba(96, 153, 38, 0.6), 0 0 16px rgba(96, 153, 38, 0.32); }
     .btn--ghost { background: transparent; }
     .btn--ghost:hover { background: var(--color-bg-hover); }
     .btn--sm { height: 26px; padding: 0 var(--space-2); font-size: var(--font-xs); }
