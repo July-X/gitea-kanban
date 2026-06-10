@@ -22,3 +22,7 @@ allowBuilds:
   better-sqlite3: true
   electron: true
   esbuild: true
+  # vue-demi 是 @antv/x6-vue-shape 的 Vue 2/3 兼容垫片
+  # 在 Vue 3 项目里实际是 no-op（pinia 3+ / x6-vue-shape 3+ 已不依赖其运行时行为）
+  # 不需要 build 脚本——明确禁止以避免 pnpm 11 ERR_PNPM_IGNORED_BUILDS
+  vue-demi: false

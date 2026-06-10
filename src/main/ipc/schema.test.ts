@@ -138,9 +138,9 @@ describe('StatusResultSchema', () => {
 });
 
 describe('IpcChannel 常量', () => {
-  it('所有 channel 是点分命名（namespace.method）', () => {
+  it('所有 channel 是点分命名（namespace.method，camelCase 允许）', () => {
     for (const v of Object.values(IpcChannel)) {
-      expect(v).toMatch(/^[a-z]+\.[a-z]+$/);
+      expect(v).toMatch(/^[a-z]+\.[a-z][a-zA-Z0-9]*$/);
     }
   });
   it('auth.* 三个 channel 存在', () => {

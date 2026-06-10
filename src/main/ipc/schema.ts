@@ -103,6 +103,166 @@ export const StatusResultSchema = z
   .strict();
 export type StatusResult = z.infer<typeof StatusResultSchema>;
 
+// ============================================================
+// ===== repos namespace（02-architecture.md §5.3.1）=====
+// ============================================================
+
+export const PermissionsSchema = z
+  .object({
+    pull: z.boolean(),
+    push: z.boolean(),
+    admin: z.boolean(),
+  })
+  .strict();
+export type Permissions = z.infer<typeof PermissionsSchema>;
+
+export const RepoDtoSchema = z
+  .object({
+    id: z.number().int().positive(),
+    owner: NonEmptyStringSchema,
+    name: NonEmptyStringSchema,
+    fullName: NonEmptyStringSchema,
+    description: z.string().default(''),
+    defaultBranch: NonEmptyStringSchema,
+    archived: z.boolean(),
+    private: z.boolean(),
+    updatedAt: IsoDateSchema,
+    permissions: PermissionsSchema,
+    isProject: z.boolean().default(false),
+    lastSyncAt: IsoDateSchema.optional(),
+  })
+  .strict();
+export type RepoDto = z.infer<typeof RepoDtoSchema>;
+
+export const RepoProjectDtoSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    giteaAccountId: NonEmptyStringSchema,
+    owner: NonEmptyStringSchema,
+    name: NonEmptyStringSchema,
+    defaultBranch: z.string().nullable(),
+    lastSyncAt: IsoDateSchema.nullable(),
+    createdAt: IsoDateSchema,
+  })
+  .strict();
+export type RepoProjectDto = z.infer<typeof RepoProjectDtoSchema>;
+
+export const ListReposArgsSchema = z
+  .object({
+    giteaAccountId: NonEmptyStringSchema,
+    query: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    page: z.number().int().min(1).default(1),
+  })
+  .strict();
+export type ListReposArgs = z.infer<typeof ListReposArgsSchema>;
+
+export const ListReposRespSchema = z
+  .object({
+    items: z.array(RepoDtoSchema),
+    total: z.number().int().min(0),
+    page: z.number().int().min(1),
+    hasMore: z.boolean(),
+  })
+  .strict();
+export type ListReposResp = z.infer<typeof ListReposRespSchema>;
+
+export const AddProjectArgsSchema = z
+  .object({
+    giteaAccountId: NonEmptyStringSchema,
+    owner: NonEmptyStringSchema,
+    name: NonEmptyStringSchema,
+  })
+  .strict();
+export type AddProjectArgs = z.infer<typeof AddProjectArgsSchema>;
+
+export const RemoveProjectArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+  })
+  .strict();
+export type RemoveProjectArgs = z.infer<typeof RemoveProjectArgsSchema>;
+
+// ============================================================
+// ===== branches namespace（02-architecture.md §5.3.2）=====
+// ============================================================
+
+export const BranchLastCommitDtoSchema = z
+  .object({
+    sha: NonEmptyStringSchema,
+    message: z.string(),
+    author: z.string(),
+    date: IsoDateSchema,
+  })
+  .strict();
+export type BranchLastCommitDto = z.infer<typeof BranchLastCommitDtoSchema>;
+
+export const BranchDtoSchema = z
+  .object({
+    name: NonEmptyStringSchema,
+    sha: NonEmptyStringSchema,
+    protected: z.boolean(),
+    isDefault: z.boolean(),
+    starred: z.boolean().default(false),
+    lastCommit: BranchLastCommitDtoSchema.optional(),
+  })
+  .strict();
+export type BranchDto = z.infer<typeof BranchDtoSchema>;
+
+export const ListBranchesArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    query: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    page: z.number().int().min(1).default(1),
+  })
+  .strict();
+export type ListBranchesArgs = z.infer<typeof ListBranchesArgsSchema>;
+
+export const ListBranchesRespSchema = z
+  .object({
+    items: z.array(BranchDtoSchema),
+    total: z.number().int().min(0),
+    hasMore: z.boolean(),
+  })
+  .strict();
+export type ListBranchesResp = z.infer<typeof ListBranchesRespSchema>;
+
+export const CreateBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    newBranch: NonEmptyStringSchema,
+    fromBranch: NonEmptyStringSchema,
+  })
+  .strict();
+export type CreateBranchArgs = z.infer<typeof CreateBranchArgsSchema>;
+
+export const RenameBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    oldName: NonEmptyStringSchema,
+    newName: NonEmptyStringSchema,
+  })
+  .strict();
+export type RenameBranchArgs = z.infer<typeof RenameBranchArgsSchema>;
+
+export const DeleteBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    branch: NonEmptyStringSchema,
+  })
+  .strict();
+export type DeleteBranchArgs = z.infer<typeof DeleteBranchArgsSchema>;
+
+export const StarBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    branch: NonEmptyStringSchema,
+    starred: z.boolean(),
+  })
+  .strict();
+export type StarBranchArgs = z.infer<typeof StarBranchArgsSchema>;
+
 // ===== channel 名称（ipcMain.handle 字符串 + 渲染端 invoke 字符串共用） =====
 
 /**
@@ -115,10 +275,21 @@ export const IpcChannel = {
   AUTH_CONNECT: 'auth.connect',
   AUTH_DISCONNECT: 'auth.disconnect',
   AUTH_STATUS: 'auth.status',
-  // === 占位（Plan 2 补全）===
+
+  // === repos namespace（02-architecture.md §5.3.1）===
   REPOS_LIST: 'repos.list',
+  REPOS_ADD_PROJECT: 'repos.addProject',
+  REPOS_REMOVE_PROJECT: 'repos.removeProject',
+
+  // === branches namespace（02-architecture.md §5.3.2）===
   BRANCHES_LIST: 'branches.list',
-  COMMITS_LIST: 'commits.list',
+  BRANCHES_CREATE: 'branches.create',
+  BRANCHES_RENAME: 'branches.rename',
+  BRANCHES_DELETE: 'branches.delete',
+  BRANCHES_STAR: 'branches.star',
+
+  // === 后续 namespace 占位（Plan 2 续）===
+  // COMMITS_LIST: 'commits.list',
   // ...
 } as const;
 
