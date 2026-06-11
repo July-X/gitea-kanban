@@ -1,19 +1,21 @@
 #!/usr/bin/env tsx
 /**
- * 跑 drizzle 迁移到 userData/kanban.db
+ * 跑 drizzle 迁移到指定 db 文件
  *
  * 用法：
- *   pnpm db:migrate              # 跑迁移（用默认 userData 路径）
- *   pnpm db:migrate --target=path/to/test.db  # 显式目标（**只**给单测/CI 用）
+ *   pnpm db:migrate              # 跑迁移到 ~/.gitea-kanban/kanban.db（默认）
+ *   GITEA_KANBAN_DATA_DIR=path pnpm db:migrate  # 显式数据目录
+ *   DB_PATH=/abs/path/to/test.db pnpm db:migrate  # 显式 db 文件（CI/测试用）
+ *   pnpm db:migrate --target=path/to/test.db     # 同上，CLI 参数形式
  *
  * 设计：
- * - 路径来自 app.getPath('userData')（电子运行时）
- * - 测试用脚本不依赖 electron；用 DB_PATH 环境变量或 --target 参数
+ * - 默认路径 = GITEA_KANBAN_DATA_DIR 环境变量 或 ~/.gitea-kanban/kanban.db
  * - 幂等：drizzle migrate 跟踪 _journal 表，重复跑无副作用
  */
 
 import { existsSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import os from 'node:os';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -25,17 +27,23 @@ function parseArgs(): { target: string | null } {
 }
 
 function resolveTargetPath(): string {
-  const env = process.env['DB_PATH'];
+  // 优先级：--target > DB_PATH > GITEA_KANBAN_DATA_DIR + kanban.db
   const arg = parseArgs().target;
-  const target = env || arg;
-  if (target) {
-    if (!isAbsolute(target)) {
-      throw new Error(`DB_PATH / --target must be absolute, got: ${target}`);
-    }
-    return target;
+  const dbPathEnv = process.env['DB_PATH'];
+  const dataDirEnv = process.env.GITEA_KANBAN_DATA_DIR;
+
+  if (arg) {
+    if (!isAbsolute(arg)) throw new Error(`--target must be absolute, got: ${arg}`);
+    return arg;
   }
-  // 默认：../kanban.db（相对 cwd 落仓库根；开发期方便）
-  return join(process.cwd(), SQLITE_DB_FILENAME);
+  if (dbPathEnv) {
+    if (!isAbsolute(dbPathEnv)) throw new Error(`DB_PATH must be absolute, got: ${dbPathEnv}`);
+    return dbPathEnv;
+  }
+  // 默认：~/.gitea-kanban/kanban.db（跨平台统一）
+  const dataDir = dataDirEnv ?? join(os.homedir(), '.gitea-kanban');
+  if (!isAbsolute(dataDir)) throw new Error(`GITEA_KANBAN_DATA_DIR must be absolute, got: ${dataDir}`);
+  return join(dataDir, SQLITE_DB_FILENAME);
 }
 
 async function main(): Promise<void> {
