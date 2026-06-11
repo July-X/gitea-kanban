@@ -24,6 +24,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json,css,md}\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed-kanban-demo.ts",
     "db:studio": "drizzle-kit studio",
     "check:no-jargon": "tsx scripts/check-no-jargon.ts",
     "rebuild:native": "bash scripts/rebuild-native.sh",
