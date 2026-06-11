@@ -191,7 +191,7 @@ register({
 |---|---|---|
 | **结构化数据** | **SQLite（文件型）** | 用户偏好 / 看板列 / 卡片关联 / 缓存元数据；落 `$GITEA_KANBAN_DATA_DIR/kanban.db` 或 `~/.gitea-kanban/kanban.db`（详见 AGENTS §8.15 / commit 66c6566） |
 | **可选 KV** | **LevelDB（如果需要）** | 仅当 SQLite 写并发撞墙（实际不会，但留口子）；用 `level` 包 |
-| **日志** | **滚动文件**，`app.getPath('logs')` 下按日切分 | |
+| **日志** | **滚动文件**，`$GITEA_KANBAN_DATA_DIR/logs/main/` 或 `~/.gitea-kanban/logs/main/` 下按日切分（跟 db 同根，详见 AGENTS §8.16） | |
 | **blob（如头像缓存）** | **本地文件系统**，`$GITEA_KANBAN_DATA_DIR/cache/` 或 `~/.gitea-kanban/cache/`（与 db 同目录，详见 AGENTS §8.15） | |
 
 > **不**额外引入 PostgreSQL / Redis / MongoDB。桌面应用单机单用户，SQLite 完全够用。
@@ -1324,11 +1324,11 @@ sequenceDiagram
 
 | 层 | 工具 | 输出 |
 |---|---|---|
-| 日志 | `pino` 结构化日志 | `app.getPath('logs')/main-YYYY-MM-DD.log`，日滚动，保留 14 天 |
+| 日志 | `pino` 结构化日志 | `$GITEA_KANBAN_DATA_DIR/logs/main/main-YYYY-MM-DD.log` 或 `~/.gitea-kanban/logs/main/main-YYYY-MM-DD.log`（跟 db 同根，详见 AGENTS §8.16），日滚动，保留 14 天 |
 | 错误 | 本地日志 + Sentry（可选） | 用户设置页填 DSN 才上报；默认关闭 |
 | 指标 | `prom-client` + `/metrics` 端点（v2） | 进程内指标（IPC 延迟、gitea 调用次数、缓存命中率）；v1 仅在主进程内 statsd 风格输出到日志 |
 | 链路追踪 | v1 不做 | v2 考虑 OpenTelemetry（仅主进程） |
-| 用户反馈 | 设置页"导出日志"按钮 | 一键打包 `logs/` + `kanban.db`（去掉 token）给用户发邮件用 |
+| 用户反馈 | 设置页"导出日志"按钮 | 一键打包 `$GITEA_KANBAN_DATA_DIR/logs/` 或 `~/.gitea-kanban/logs/` + `kanban.db`（去掉 token）给用户发邮件用 |
 
 **关键日志字段**：`{ ts, level, msg, userId?, giteaUrl?, projectId?, op, latencyMs, errCode? }`
 

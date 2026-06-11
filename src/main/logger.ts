@@ -4,14 +4,20 @@
  * 铁律（AGENTS.md §4.5 / §8.2）：
  * - token / password / key 字段**永远**从日志里 redact（redact 规则写死，禁止关闭）
  * - 热路径用 logger.isLevelEnabled('debug') 保护，避免字符串拼接开销
- * - 日志落 app.getPath('logs')/main-YYYY-MM-DD.log，按日滚动，保留 14 天
+ * - 日志落 ~/.gitea-kanban/logs/main-YYYY-MM-DD.log（跨平台同源），按日滚动，保留 14 天
+ *
+ * 历史：
+ * - v1 设计走 app.getPath('logs')（macOS = ~/Library/Logs/gitea-kanban/main/）
+ * - 2026-06-11 改为 ~/.gitea-kanban/logs/ 跟 db 同源（详见 AGENTS §8.15 / commit 76c3a72 配套）
+ * - 跟 db 路径同构：环境变量 GITEA_KANBAN_DATA_DIR 优先 → 兜底 ~/.gitea-kanban
  *
  * 渲染进程直接用 console（开发期）；生产期通过 IPC 转发到主进程 logger。
  */
 
 import { app } from 'electron';
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
+import os from 'node:os';
 import { pino, type Logger, type LoggerOptions } from 'pino';
 import { LOG_RETENTION_DAYS, LOG_SUBDIR } from '@shared/constants';
 
@@ -33,19 +39,38 @@ const REDACT_PATHS = [
 ];
 
 /**
- * 计算日志目录：app.getPath('logs')/main
+ * 计算数据根目录（与 src/main/cache/sqlite.ts:resolveDbPath 同源 —— 见 AGENTS §8.15）
  *
- * 不能接受用户路径——这是 Electron 标准 API 的安全调用。
+ * 优先级：
+ * 1. 环境变量 GITEA_KANBAN_DATA_DIR（绝对路径，多实例/备份场景）
+ * 2. 兜底 ~/.gitea-kanban（跨平台统一）
+ */
+function resolveDataRoot(): string {
+  const fromEnv = process.env.GITEA_KANBAN_DATA_DIR;
+  if (fromEnv) {
+    if (!isAbsolute(fromEnv)) {
+      throw new Error(`GITEA_KANBAN_DATA_DIR must be absolute, got: ${fromEnv}`);
+    }
+    return fromEnv;
+  }
+  return join(os.homedir(), '.gitea-kanban');
+}
+
+/**
+ * 计算日志目录：<dataRoot>/logs/<LOG_SUBDIR>
+ *
+ * 与 db 路径同根（多实例场景下 db + log 在一起方便备份/迁移）。
  * app.isReady() 之前 logger 可能被引用（早期启动日志），所以用 try/catch。
  */
 function resolveLogDir(): string {
   try {
-    const logsRoot = app.getPath('logs');
-    const dir = join(logsRoot, LOG_SUBDIR);
+    const dataRoot = resolveDataRoot();
+    const dir = join(dataRoot, 'logs', LOG_SUBDIR);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
-  } catch {
-    // app 还没 ready 时 fallback 到 tmp
+  } catch (err) {
+    // app 还没 ready 时 / 路径解析失败 — fallback 到 tmp（pino 至少能写，不丢日志）
+    console.error('[logger] resolveLogDir failed, fallback to /tmp:', err);
     return '/tmp/gitea-kanban-logs';
   }
 }
