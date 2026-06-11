@@ -16,6 +16,9 @@ coverage/
 .tmp/
 .cache/
 
+# e2e bundle 产物（worker esbuild 自动生成，跑完可重建）
+scripts/.e2e-verify-*.bundled.mjs
+
 # gitea 测试服务运行时数据
 giteaDemo/data/
 

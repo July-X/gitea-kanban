@@ -1,0 +1,131 @@
+{
+  "pullsListInitial": [
+    {
+      "index": 12,
+      "state": "closed",
+      "merged": true,
+      "head": "feature-merge",
+      "base": "main",
+      "title": "合并工作流（feature-merge → main）"
+    },
+    {
+      "index": 11,
+      "state": "closed",
+      "merged": true,
+      "head": "feature-kanban",
+      "base": "main",
+      "title": "看板 UI 改稿（feature-kanban → main）"
+    }
+  ],
+  "pr11Before": {
+    "index": 11,
+    "state": "closed",
+    "merged": true,
+    "head": {
+      "ref": "feature-kanban",
+      "sha": "c23c6ee07f55a2d0525f9f112ee0a1564af50f32"
+    },
+    "base": {
+      "ref": "main",
+      "sha": "37bb9a8d68c33f353e66fb5c346ae13105277a76"
+    },
+    "title": "看板 UI 改稿（feature-kanban → main）"
+  },
+  "timelineSummary": {
+    "totalCommits": 15,
+    "nodes": 15,
+    "lanes": [
+      {
+        "id": "branch:main",
+        "label": "main",
+        "color": "#609926",
+        "order": 0
+      },
+      {
+        "id": "branch:feature-kanban",
+        "label": "feature-kanban",
+        "color": "#6c757d",
+        "order": 1
+      },
+      {
+        "id": "branch:feature-merge",
+        "label": "feature-merge",
+        "color": "#f76707",
+        "order": 2
+      },
+      {
+        "id": "branch:develop",
+        "label": "develop",
+        "color": "#6c757d",
+        "order": 3
+      }
+    ],
+    "edges": 14,
+    "truncated": false,
+    "prs": 2,
+    "branchHintCount": {
+      "main": 7,
+      "feature-kanban": 5,
+      "feature-merge": 5,
+      "develop": 1
+    },
+    "firstNode": {
+      "sha": "680b925",
+      "msg": "Initial commit",
+      "lane": "branch:main",
+      "hints": [
+        "main",
+        "feature-kanban",
+        "feature-merge",
+        "develop"
+      ]
+    },
+    "lastNode": {
+      "sha": "37bb9a8",
+      "msg": "看板 UI 改稿（feature-kanban → main） (#11)",
+      "lane": "branch:main",
+      "hints": [
+        "main"
+      ]
+    }
+  },
+  "pr11Commits": [
+    {
+      "sha": "c23c6ee",
+      "msg": "docs(kanban): 补 README 看板用法",
+      "parents": 1
+    },
+    {
+      "sha": "1b3dd44",
+      "msg": "refactor(kanban): 提取 useColumnLayout hook",
+      "parents": 1
+    },
+    {
+      "sha": "4202724",
+      "msg": "feat(kanban): 加卡片渲染",
+      "parents": 1
+    },
+    {
+      "sha": "e9d92e6",
+      "msg": "feat(kanban): 加列容器组件",
+      "parents": 1
+    }
+  ],
+  "pr11After": {
+    "index": 11,
+    "state": "closed",
+    "merged": true
+  },
+  "pullsListAfter": [
+    {
+      "index": 12,
+      "state": "closed",
+      "merged": true
+    },
+    {
+      "index": 11,
+      "state": "closed",
+      "merged": true
+    }
+  ]
+}
