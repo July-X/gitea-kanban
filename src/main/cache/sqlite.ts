@@ -2,14 +2,15 @@
  * better-sqlite3 单例 + Drizzle ORM
  *
  * 铁律（02-architecture.md §9.3 路径遍历防护）：
- * - DB 路径**永远**来自 app.getPath('userData') —— 不接受任何用户输入的绝对路径
+ * - DB 路径**永远**来自 app.getPath('userData') 或 GITEA_KANBAN_DATA_DIR 环境变量
+ *   —— 不接受任何用户输入的绝对路径
  * - 不存在则建（mkdir 0700）
  * - 测试用 _setSqlitePathForTest() 显式指定（**只**给 vitest 用）
  */
 
-import { app } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
+import os from 'node:os';
 import Database, { type Database as BetterSqliteDb } from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -22,7 +23,9 @@ let dbInstance: BetterSQLite3Database<typeof schema> | null = null;
 let testDbPath: string | null = null;
 
 /**
- * 计算 db 路径：app.getPath('userData')/kanban.db
+ * 计算 db 路径：
+ * 1. 环境变量 GITEA_KANBAN_DATA_DIR（绝对路径）
+ * 2. 兜底 ~/.gitea-kanban（跨平台统一，开发/打包都一致）
  *
  * 显式白名单 + isAbsolute 校验：避免任何 caller 注入路径
  */
@@ -34,12 +37,13 @@ export function resolveDbPath(): string {
     }
     return testDbPath;
   }
-  // 生产路径：app.getPath('userData')
-  const userDataDir = app.getPath('userData');
-  if (!isAbsolute(userDataDir)) {
-    throw new Error(`app.getPath('userData') must be absolute, got: ${userDataDir}`);
+  // 生产路径：环境变量或 ~/.gitea-kanban
+  const dataDir = process.env.GITEA_KANBAN_DATA_DIR
+    ?? join(os.homedir(), '.gitea-kanban');
+  if (!isAbsolute(dataDir)) {
+    throw new Error(`data dir must be absolute, got: ${dataDir}`);
   }
-  return join(userDataDir, SQLITE_DB_FILENAME);
+  return join(dataDir, SQLITE_DB_FILENAME);
 }
 
 /** 应用启动时调用：开库 + 跑迁移 */
