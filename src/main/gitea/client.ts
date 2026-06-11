@@ -27,6 +27,7 @@ type GiteaClient = ReturnType<typeof createClient<Record<string, never>>>;
 
 interface ClientEntry {
   client: GiteaClient;
+  baseUrl: string;
   token?: string;
   tokenFetchedAt: number;
 }
@@ -141,7 +142,11 @@ export async function getGiteaClient(
       });
     }
     if (!entry) {
-      entry = { client: createClient<Record<string, never>>({ baseUrl: normalizeBaseUrl(giteaUrl) }), tokenFetchedAt: 0 };
+      entry = {
+        client: createClient<Record<string, never>>({ baseUrl: normalizeBaseUrl(giteaUrl) }),
+        baseUrl: normalizeBaseUrl(giteaUrl),
+        tokenFetchedAt: 0,
+      };
       cache.set(key, entry);
     }
     entry.token = token;
@@ -184,6 +189,13 @@ function rewireAuth(entry: ClientEntry, token: string): void {
  *   const user = await giteaFetch<User>(giteaUrl, username, '/user', { method: 'GET' });
  *
  * 错误：抛 IpcError（httpErrorToIpcError 映射）
+ *
+ * 实现说明（2026-06-11）：
+ * - 之前用 openapi-fetch 的 client.raw()，但 openapi-fetch 0.13 / 0.17 都没有 .raw
+ *   这个公开 API（只有 GET/POST/PUT/DELETE/HEAD/PATCH/OPTIONS/TRACE 加上 .request()）
+ * - 直接用 globalThis.fetch + baseUrl + path + token，绕开 openapi-fetch
+ * - openapi-fetch 仍然作为依赖保留（将来接入 gitea OpenAPI generate-types 时复用）
+ *   但本文件实际不再调用它
  */
 export async function giteaFetch<T = unknown>(
   giteaUrl: string,
@@ -191,7 +203,8 @@ export async function giteaFetch<T = unknown>(
   path: string,
   init: { method?: string; body?: unknown; query?: Record<string, string | number | boolean | undefined>; headers?: Record<string, string> } = {},
 ): Promise<T> {
-  const client = await getGiteaClient(giteaUrl, username);
+  // getGiteaClient 拿 baseUrl + 缓存的 token（不依赖 openapi-fetch 的 client 实例）
+  const client = (await getGiteaClient(giteaUrl, username)) as unknown as { baseUrl: string; token?: string };
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const query = init.query
     ? Object.fromEntries(
@@ -199,13 +212,24 @@ export async function giteaFetch<T = unknown>(
       )
     : undefined;
 
-  const res = await (client as unknown as {
-    raw: (path: string, init: { method: string; body?: string; params?: Record<string, string | number | boolean>; headers?: Record<string, string> }) => Promise<Response>;
-  }).raw(normalizedPath, {
+  // 拼 URL：baseUrl + path + (optional) query
+  const u = new URL(normalizedPath, `${client.baseUrl}/`);
+  if (query) {
+    for (const [k, v] of Object.entries(query)) {
+      u.searchParams.set(k, String(v));
+    }
+  }
+
+  const res = await globalThis.fetch(u.toString(), {
     method: init.method ?? 'GET',
-    ...(init.body !== undefined ? { body: typeof init.body === 'string' ? init.body : JSON.stringify(init.body) } : {}),
-    ...(query !== undefined ? { params: query } : {}),
-    ...(init.headers !== undefined ? { headers: init.headers } : {}),
+    ...(init.body !== undefined
+      ? { body: typeof init.body === 'string' ? init.body : JSON.stringify(init.body) }
+      : {}),
+    headers: {
+      Accept: 'application/json',
+      Authorization: `token ${client.token ?? ''}`,
+      ...(init.headers ?? {}),
+    },
   });
 
   if (!res.ok) {
