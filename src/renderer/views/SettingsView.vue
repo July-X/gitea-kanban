@@ -101,19 +101,7 @@ async function onSave(): Promise<void> {
           <span class="settings__unit">分钟</span>
         </div>
         <p class="settings__hint settings__hint--small">
-          也可以直接输入秒数：<br />
-          <input
-            type="number"
-            class="settings__input settings__input--inline"
-            :value="Math.round(draftMs / 1000)"
-            min="30"
-            max="1800"
-            @change="onSecondsChange"
-          /> 秒
-          <br />
-          <span class="settings__hint--muted">
-            （范围：30 秒 ~ 30 分钟；当前设置保存在浏览器本地，不跨设备同步）
-          </span>
+          范围：1 ~ 30 分钟；当前设置保存在浏览器本地，不跨设备同步。
         </p>
       </div>
 

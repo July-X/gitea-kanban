@@ -17,7 +17,6 @@ import { logger } from './logger.js';
 const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
-let cspInstalled = false;
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -27,22 +26,33 @@ export function getMainWindow(): BrowserWindow | null {
  * 在 default session 注入 CSP header（AGENTS.md §4.7 模板）
  *
  * - default-src 'self'：默认只允许同源
- * - script-src 'self'：禁止内联 script（React/Preact 编译产物在 'self' 内 OK）
- * - style-src 'self' 'unsafe-inline'：允许 CSS-in-JS / Radix 内联 style
- * - connect-src 'self' <gitea URL>：XHR 只允许同源 + gitea 实例（**用户**在设置里加）
- * - img-src 'self' data: https:：图片允许 base64 + 任何 https（gitea avatar）
+ * - script-src 'self'：禁止内联 script（Vue 编译产物在 'self' 内 OK）
+ * - style-src 'self' 'unsafe-inline'：允许 CSS-in-JS / 内联 style
+ * - connect-src 'self' <gitea URL>：XHR/fetch 只允许同源 + gitea 实例
+ * - img-src 'self' data: https: <gitea URL>：图片允许 base64 + 任何 https + gitea 头像
+ *   （2026-06-11 修复：之前只写 https:，本地 gitea http://localhost:3000 头像被拦）
  *
- * 安装一次（session 是全局的，不重复注册）。
+ * 2026-06-11 修复 CSP 重装：cspInstalled 守卫**只**挡重复 webRequest 注册；
+ * 真正的 CSP 拼接每次按 giteaUrl 重算（auth connect 后**重新设置**响应头）。
+ * 实现：先 removeListener 旧的再重新注册（用 onHeadersReceived 返回的 listener 句柄）。
  */
+let cspListener:
+  | ((
+      details: Electron.OnHeadersReceivedListenerDetails,
+      callback: (response: Electron.HeadersReceivedResponse) => void,
+    ) => void)
+  | null = null;
+
 export function installCspHeader(giteaUrl: string | null = null): void {
-  if (cspInstalled) return;
   const connectSrc = giteaUrl ? `'self' ${giteaUrl}` : "'self'";
+  // img-src：保留 https: 通配（公网 https 头像 / oauth provider logo）+ 加 giteaUrl（http://localhost:3000 等）
+  const imgSrc = giteaUrl ? `'self' data: https: ${giteaUrl}` : "'self' data: https:";
   const csp = [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     `connect-src ${connectSrc}`,
-    "img-src 'self' data: https:",
+    `img-src ${imgSrc}`,
     "font-src 'self' data:",
     "object-src 'none'",
     "base-uri 'self'",
@@ -50,15 +60,21 @@ export function installCspHeader(giteaUrl: string | null = null): void {
     "frame-ancestors 'none'",
   ].join('; ');
 
-  session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+  // 如果之前注册过 listener，先摘掉（重装支持 giteaUrl 变化）
+  if (cspListener) {
+    // Electron 41 把 removeListener 改名为 off()；先 off 再重新 onHeadersReceived
+    (session.defaultSession.webRequest.onHeadersReceived as unknown as { off: (l: unknown) => void }).off(cspListener);
+  }
+
+  cspListener = (details, cb) => {
     cb({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [csp],
       },
     });
-  });
-  cspInstalled = true;
+  };
+  session.defaultSession.webRequest.onHeadersReceived(cspListener);
   logger.info({ csp }, 'CSP header installed');
 }
 

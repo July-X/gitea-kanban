@@ -97,9 +97,11 @@ export const logger: Logger = buildLogger();
  *
  * 设计：lazy open —— 主进程早期（app.whenReady 之前）的日志先打到 stdout / dev console，
  * ready 之后再切到文件，避免启动阻塞。
+ *
+ * 2026-06-11 修改：dev 模式也升级（teedup 调试时不光写 stdout 也写文件，
+ * 方便 mavis agent 通过读日志定位 UI 报错）—— dev 时同时跑 stdout + file
  */
 export function upgradeLoggerToFile(): void {
-  if (isDev) return; // dev 永远走 stdout
   const logDir = resolveLogDir();
   const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   const filename = join(logDir, `main-${date}.log`);

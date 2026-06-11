@@ -11,8 +11,8 @@
 import { clearGiteaClientCache } from '../src/main/gitea/client.js';
 
 const URL = 'http://localhost:3000';
-const TOKEN = '67190ca685604d902b996facc52d2274e2b190ee';
-const USER = 'tester';
+const TOKEN = '9c3fdf27b132c9564b012326344c3993486bf868';
+const USER = 'kanban_bot';
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -65,6 +65,26 @@ async function main() {
     const r = await fetch(`${URL}/api/v1/version`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
+  });
+
+  // 6. /user/repos（listGiteaRepos 走的真实端点）
+  await check('gitea API /user/repos (listGiteaRepos endpoint)', async () => {
+    const r = await fetch(`${URL}/api/v1/user/repos?page=1&limit=50`, {
+      headers: { Authorization: `token ${TOKEN}` },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+    const items = (await r.json()) as unknown[];
+    return { count: items.length, isArray: Array.isArray(items) };
+  });
+
+  // 7. /orgs/kanban_demo/repos（listGiteaRepos 应该改走这个，但目前还是 /user/repos）
+  await check('gitea API /orgs/kanban_demo/repos', async () => {
+    const r = await fetch(`${URL}/api/v1/orgs/kanban_demo/repos?page=1&limit=50`, {
+      headers: { Authorization: `token ${TOKEN}` },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+    const items = (await r.json()) as unknown[];
+    return { count: items.length, isArray: Array.isArray(items) };
   });
 
   console.log(`\nResult: ${pass} pass / ${fail} fail`);

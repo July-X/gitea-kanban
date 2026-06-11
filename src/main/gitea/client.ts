@@ -117,7 +117,15 @@ function normalizeBaseUrl(giteaUrl: string): string {
 }
 
 /**
- * 拿一个 openapi-fetch client
+ * 拿一个 client 入口（{ baseUrl, token }）
+ *
+ * 实现说明（2026-06-11）：
+ * - openapi-fetch 0.17 的 createClient 不暴露 baseUrl 到返回的 client 实例上
+ *   （baseUrl 是 createClient 内部闭包变量）
+ * - 业务侧 giteaFetch 不再走 openapi-fetch（client.raw 根本不存在）
+ *   改用 globalThis.fetch + baseUrl + token
+ * - 这里仍然占位创建 openapi-fetch client，保留接口向后兼容；
+ *   未来接入 gitea OpenAPI generate-types 时可以拿这个 client 直接 GET/POST
  *
  * 注意：openapi-fetch 内部不缓存 token；我们自己做 5 min 内存缓存
  *
@@ -126,13 +134,14 @@ function normalizeBaseUrl(giteaUrl: string): string {
 export async function getGiteaClient(
   giteaUrl: string,
   username: string,
-): Promise<GiteaClient> {
+): Promise<{ baseUrl: string; token?: string }> {
   const key = cacheKey(giteaUrl, username);
   const now = Date.now();
   let entry = cache.get(key);
 
   // token 是否需要刷新
-  if (!entry || !entry.token || now - entry.tokenFetchedAt > TOKEN_CACHE_TTL_MS) {
+  const needRefresh = !entry || !entry.token || now - entry.tokenFetchedAt > TOKEN_CACHE_TTL_MS;
+  if (needRefresh) {
     const token = await keychainGet(giteaUrl, username);
     if (!token) {
       throw new IpcError({
@@ -142,6 +151,7 @@ export async function getGiteaClient(
       });
     }
     if (!entry) {
+      // 首次创建 entry：baseUrl 留个备份给 giteaFetch；openapi-fetch client 占位（未来用）
       entry = {
         client: createClient<Record<string, never>>({ baseUrl: normalizeBaseUrl(giteaUrl) }),
         baseUrl: normalizeBaseUrl(giteaUrl),
@@ -151,10 +161,11 @@ export async function getGiteaClient(
     }
     entry.token = token;
     entry.tokenFetchedAt = now;
-    // 重新装 token 中间件
+    // 重新装 token 中间件（openapi-fetch 未来要用）
     rewireAuth(entry, token);
   }
-  return entry!.client;
+  // 业务侧 giteaFetch 只用 { baseUrl, token }；client 字段保留给未来 OpenAPI 集成
+  return { baseUrl: entry!.baseUrl, token: entry!.token };
 }
 
 function rewireAuth(entry: ClientEntry, token: string): void {
@@ -212,8 +223,12 @@ export async function giteaFetch<T = unknown>(
       )
     : undefined;
 
-  // 拼 URL：baseUrl + path + (optional) query
-  const u = new URL(normalizedPath, `${client.baseUrl}/`);
+  // 拼 URL：baseUrl + /api/v1 + path + (optional) query
+  // （注意：new URL(absolutePath, base) 会**覆盖** base 的 path，所以 path 必须是**相对**路径（去掉前导 /））
+  const baseWithApi = `${client.baseUrl.replace(/\/+$/, '')}/api/v1/`;
+  // 去掉前导 / 让 path 成为相对路径
+  const relPath = normalizedPath.replace(/^\/+/, '');
+  const u = new URL(relPath, baseWithApi);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       u.searchParams.set(k, String(v));
