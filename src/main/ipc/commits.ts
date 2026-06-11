@@ -358,10 +358,12 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
     repo: proj.repo,
     shas: [...allShas],
   });
-  const linkedCardIdsBySha = new Map<string, string[]>();
-  for (const [sha, links] of linkedCardsMap.entries()) {
-    linkedCardIdsBySha.set(sha, links.map((l) => l.cardId));
-  }
+ const linkedCardIdsBySha = new Map<string, string[]>();
+ for (const [sha, links] of linkedCardsMap.entries()) {
+ // v1 stub：linkedCardsMap.value 类型是 never[]（永不返回任何 linkedCard）
+ // 真有 link 时会是 { cardId: string }，v1 不会发生
+ linkedCardIdsBySha.set(sha, (links as Array<{ cardId: string }>).map((l) => l.cardId));
+ }
 
   // 6. buildTimeline 归一化
   const dto = buildTimeline({ args, commitsByBranch, pulls: timelinePrs, linkedCardIdsBySha });

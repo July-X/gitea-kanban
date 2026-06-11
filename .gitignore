@@ -24,3 +24,6 @@ src/renderer/.d.ts/
 
 # drizzle studio local
 drizzle/.snapshot/
+
+# 调研用第三方 API 文档（gitea swagger yaml，不入仓）
+docs/plugin-redoc-2.yaml

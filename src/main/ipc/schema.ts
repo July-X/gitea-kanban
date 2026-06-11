@@ -470,7 +470,6 @@ export const MergeMethodSchema = z.enum([
   'rebase',
   'rebase-merge',
   'squash',
-  'squash-merge',
 ]).describe(
   [
     'merge        → "普通合并（保留所有提交历史）"',
@@ -492,12 +491,12 @@ export const MergePrArgsSchema = z
   })
   .strict()
   .refine(
-    (a) => {
-      if (a.method === 'squash' || a.method === 'squash-merge') {
-        return typeof a.commitMessage === 'string' && a.commitMessage.length > 0;
-      }
-      return true;
-    },
+ (a) => {
+ if (a.method === 'squash') {
+ return typeof a.commitMessage === 'string' && a.commitMessage.length >0;
+ }
+ return true;
+ },
     {
       message: 'method=squash / squash-merge 时 commitMessage 必填',
       path: ['commitMessage'],
@@ -515,205 +514,309 @@ export const MergePrResultSchema = z
 export type MergePrResult = z.infer<typeof MergePrResultSchema>;
 
 // ============================================================
-// ===== board.columns namespace（02-architecture.md §5.3.7）=====
+// ===== board.columns namespace（ADR-0002 +02-architecture §5.3.7）=====
 // ============================================================
 
-/** 看板列 DTO（DB row + 聚合 cardCount） */
+/**看板列绑的 gitea label摘要（DTO形态） */
+export const ColumnLabelDtoSchema = z
+ .object({
+ id: z.number().int().positive(), // gitea label id
+ name: NonEmptyStringSchema,
+ color: z.string(),
+ })
+ .strict();
+export type ColumnLabelDto = z.infer<typeof ColumnLabelDtoSchema>;
+
+/**看板列 DTO（DB row +绑定的 gitea labels） */
 export const ColumnDtoSchema = z
-  .object({
-    id: NonEmptyStringSchema,
-    boardId: NonEmptyStringSchema,
-    name: NonEmptyStringSchema,
-    position: z.number().int().min(0),
-    wipLimit: z.number().int().min(0).nullable(),
-    hideMergedPr: z.boolean(),
-    cardCount: z.number().int().min(0),
-  })
-  .strict();
+ .object({
+ id: NonEmptyStringSchema,
+ projectId: NonEmptyStringSchema,
+ title: NonEmptyStringSchema,
+ position: z.number().int().min(0),
+ labels: z.array(ColumnLabelDtoSchema),
+ })
+ .strict();
 export type ColumnDto = z.infer<typeof ColumnDtoSchema>;
 
 export const ListBoardColumnsArgsSchema = z
-  .object({
-    projectId: NonEmptyStringSchema,
-  })
-  .strict();
+ .object({
+ projectId: NonEmptyStringSchema,
+ })
+ .strict();
 export type ListBoardColumnsArgs = z.infer<typeof ListBoardColumnsArgsSchema>;
 
 export const CreateBoardColumnArgsSchema = z
-  .object({
-    projectId: NonEmptyStringSchema,
-    name: NonEmptyStringSchema,
-    position: z.number().int().min(0),
-    wipLimit: z.number().int().min(0).optional(),
-    hideMergedPr: z.boolean().optional(),
-  })
-  .strict();
+ .object({
+ projectId: NonEmptyStringSchema,
+ title: NonEmptyStringSchema,
+ position: z.number().int().min(0),
+ })
+ .strict();
 export type CreateBoardColumnArgs = z.infer<typeof CreateBoardColumnArgsSchema>;
 
 export const UpdateBoardColumnArgsSchema = z
-  .object({
-    columnId: NonEmptyStringSchema,
-    patch: z
-      .object({
-        name: NonEmptyStringSchema.optional(),
-        wipLimit: z.number().int().min(0).nullable().optional(),
-        hideMergedPr: z.boolean().optional(),
-      })
-      .strict()
-      .refine(
-        (p) => p.name !== undefined || p.wipLimit !== undefined || p.hideMergedPr !== undefined,
-        { message: 'patch 必须至少含一个字段' },
-      ),
-  })
-  .strict();
+ .object({
+ columnId: NonEmptyStringSchema,
+ patch: z
+ .object({
+ title: NonEmptyStringSchema.optional(),
+ position: z.number().int().min(0).optional(),
+ })
+ .strict()
+ .refine((p) => p.title !== undefined || p.position !== undefined, {
+ message: 'patch 必须至少含一个字段',
+ }),
+ })
+ .strict();
 export type UpdateBoardColumnArgs = z.infer<typeof UpdateBoardColumnArgsSchema>;
 
 export const ReorderBoardColumnsArgsSchema = z
-  .object({
-    projectId: NonEmptyStringSchema,
-    orderedIds: z.array(NonEmptyStringSchema).min(1),
-  })
-  .strict();
+ .object({
+ projectId: NonEmptyStringSchema,
+ orderedIds: z.array(NonEmptyStringSchema).min(1),
+ })
+ .strict();
 export type ReorderBoardColumnsArgs = z.infer<typeof ReorderBoardColumnsArgsSchema>;
 
 export const DeleteBoardColumnArgsSchema = z
-  .object({
-    columnId: NonEmptyStringSchema,
-    /**
-     * 该列上的卡片移到哪一列。null = 一起删（卡片会级联 DELETE，因为 cards.columnId
-     * ON DELETE CASCADE）；不传 = 同 null。
-     */
-    moveCardsTo: NonEmptyStringSchema.nullable().optional(),
-  })
-  .strict();
+ .object({
+ columnId: NonEmptyStringSchema,
+ })
+ .strict();
 export type DeleteBoardColumnArgs = z.infer<typeof DeleteBoardColumnArgsSchema>;
 
+export const MapColumnLabelArgsSchema = z
+ .object({
+ columnId: NonEmptyStringSchema,
+ giteaLabelId: z.number().int().positive(),
+ giteaLabelName: NonEmptyStringSchema,
+ })
+ .strict();
+export type MapColumnLabelArgs = z.infer<typeof MapColumnLabelArgsSchema>;
+
+export const UnmapColumnLabelArgsSchema = z
+ .object({
+ columnId: NonEmptyStringSchema,
+ giteaLabelId: z.number().int().positive(),
+ })
+ .strict();
+export type UnmapColumnLabelArgs = z.infer<typeof UnmapColumnLabelArgsSchema>;
+
 // ============================================================
-// ===== board.cards namespace（02-architecture.md §5.3.8）=====
+// ===== issues namespace（ADR-0002 reset：卡片 = gitea issue）=====
 // ============================================================
 
-/** 卡片关联条目（DTO 形态） */
-export const CardLinkDtoSchema = z
-  .object({
-    id: NonEmptyStringSchema,
-    refKind: z.enum(['commit', 'pr', 'branch', 'issue']),
-    owner: NonEmptyStringSchema,
-    repo: NonEmptyStringSchema,
-    refId: NonEmptyStringSchema,
-    cachedTitle: z.string().optional(),
-    role: z.enum(['reference', 'blocks', 'relates-to']),
-  })
-  .strict();
-export type CardLinkDto = z.infer<typeof CardLinkDtoSchema>;
+export const IssueStateSchema = z.enum(['open', 'closed', 'all']);
+export type IssueState = z.infer<typeof IssueStateSchema>;
 
-/** 卡片 DTO（DB row + 关联 links） */
-export const CardDtoSchema = z
-  .object({
-    id: NonEmptyStringSchema,
-    columnId: NonEmptyStringSchema,
-    title: NonEmptyStringSchema,
-    body: z.string().optional(),
-    position: z.number().int().min(0),
-    color: z.string().optional(),
-    createdAt: IsoDateSchema,
-    updatedAt: IsoDateSchema,
-    links: z.array(CardLinkDtoSchema),
-  })
-  .strict();
-export type CardDto = z.infer<typeof CardDtoSchema>;
+export const IssueLabelDtoSchema = z
+ .object({
+ id: z.number().int().positive(),
+ name: NonEmptyStringSchema,
+ color: z.string(),
+ description: z.string().optional(),
+ })
+ .strict();
+export type IssueLabelDto = z.infer<typeof IssueLabelDtoSchema>;
 
-export const ListBoardCardsArgsSchema = z
-  .object({
-    columnId: NonEmptyStringSchema,
-  })
-  .strict();
-export type ListBoardCardsArgs = z.infer<typeof ListBoardCardsArgsSchema>;
+export const IssueAuthorDtoSchema = z
+ .object({
+ username: NonEmptyStringSchema,
+ fullName: z.string().optional(),
+ avatarUrl: z.string().url().optional(),
+ })
+ .strict();
+export type IssueAuthorDto = z.infer<typeof IssueAuthorDtoSchema>;
 
-export const CreateBoardCardArgsSchema = z
-  .object({
-    columnId: NonEmptyStringSchema,
-    title: NonEmptyStringSchema,
-    body: z.string().optional(),
-    position: z.number().int().min(0),
-    color: z.string().optional(),
-    /**
-     * 关联条目（不指定 id —— 由后端生成 + UPSERT gitea_refs 后分配 linkId）。
-     * 用 02 §4.2 拍板的 4 种 kind + 3 种 role。
-     */
-    links: z
-      .array(
-        z
-          .object({
-            refKind: z.enum(['commit', 'pr', 'branch', 'issue']),
-            owner: NonEmptyStringSchema,
-            repo: NonEmptyStringSchema,
-            refId: NonEmptyStringSchema,
-            cachedTitle: z.string().optional(),
-            role: z.enum(['reference', 'blocks', 'relates-to']).default('reference'),
-          })
-          .strict(),
-      )
-      .optional(),
-  })
-  .strict();
-export type CreateBoardCardArgs = z.infer<typeof CreateBoardCardArgsSchema>;
+export const IssueCardDtoSchema = z
+ .object({
+ id: z.number().int().positive(),
+ index: z.number().int().positive(),
+ title: NonEmptyStringSchema,
+ body: z.string(),
+ state: z.enum(['open', 'closed']),
+ createdAt: IsoDateSchema,
+ updatedAt: IsoDateSchema,
+ author: IssueAuthorDtoSchema,
+ labels: z.array(IssueLabelDtoSchema),
+ /**
+ * true 当 gitea response包含非空 pull_request（gitea 把 PR 也列在 /issues）；
+ *看板拖拽换列时只对纯 issue生效。
+ */
+ isPullRequest: z.boolean(),
+ })
+ .strict();
+export type IssueCardDto = z.infer<typeof IssueCardDtoSchema>;
 
-export const UpdateBoardCardArgsSchema = z
-  .object({
-    cardId: NonEmptyStringSchema,
-    patch: z
-      .object({
-        title: NonEmptyStringSchema.optional(),
-        body: z.string().optional(),
-        color: z.string().optional(),
-      })
-      .strict()
-      .refine((p) => p.title !== undefined || p.body !== undefined || p.color !== undefined, {
-        message: 'patch 必须至少含一个字段',
-      }),
-  })
-  .strict();
-export type UpdateBoardCardArgs = z.infer<typeof UpdateBoardCardArgsSchema>;
+export const ListIssuesArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ columnId: NonEmptyStringSchema.optional(),
+ state: IssueStateSchema.optional(),
+ labelIds: z.array(z.number().int().positive()).optional(),
+ q: z.string().optional(),
+ page: z.number().int().min(1).default(1),
+ limit: z.number().int().min(1).max(100).default(50),
+ })
+ .strict();
+export type ListIssuesArgs = z.infer<typeof ListIssuesArgsSchema>;
 
-export const MoveBoardCardArgsSchema = z
-  .object({
-    cardId: NonEmptyStringSchema,
-    toColumnId: NonEmptyStringSchema,
-    toPosition: z.number().int().min(0),
-  })
-  .strict();
-export type MoveBoardCardArgs = z.infer<typeof MoveBoardCardArgsSchema>;
+export const ListIssuesRespSchema = z
+ .object({
+ items: z.array(IssueCardDtoSchema),
+ hasMore: z.boolean(),
+ })
+ .strict();
+export type ListIssuesResp = z.infer<typeof ListIssuesRespSchema>;
 
-export const DeleteBoardCardArgsSchema = z
-  .object({
-    cardId: NonEmptyStringSchema,
-  })
-  .strict();
-export type DeleteBoardCardArgs = z.infer<typeof DeleteBoardCardArgsSchema>;
+export const GetIssueArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ issueIndex: z.number().int().positive(),
+ })
+ .strict();
+export type GetIssueArgs = z.infer<typeof GetIssueArgsSchema>;
 
-export const LinkBoardCardArgsSchema = z
-  .object({
-    cardId: NonEmptyStringSchema,
-    link: z
-      .object({
-        refKind: z.enum(['commit', 'pr', 'branch', 'issue']),
-        owner: NonEmptyStringSchema,
-        repo: NonEmptyStringSchema,
-        refId: NonEmptyStringSchema,
-        cachedTitle: z.string().optional(),
-        role: z.enum(['reference', 'blocks', 'relates-to']).default('reference'),
-      })
-      .strict(),
-  })
-  .strict();
-export type LinkBoardCardArgs = z.infer<typeof LinkBoardCardArgsSchema>;
+export const CreateIssueArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ title: NonEmptyStringSchema,
+ body: z.string().optional(),
+ labelIds: z.array(z.number().int().positive()).optional(),
+ })
+ .strict();
+export type CreateIssueArgs = z.infer<typeof CreateIssueArgsSchema>;
 
-export const UnlinkBoardCardArgsSchema = z
-  .object({
-    linkId: NonEmptyStringSchema,
-  })
-  .strict();
-export type UnlinkBoardCardArgs = z.infer<typeof UnlinkBoardCardArgsSchema>;
+export const UpdateIssueArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ issueIndex: z.number().int().positive(),
+ patch: z
+ .object({
+ title: NonEmptyStringSchema.optional(),
+ body: z.string().optional(),
+ state: z.enum(['open', 'closed']).optional(),
+ })
+ .strict()
+ .refine(
+ (p) => p.title !== undefined || p.body !== undefined || p.state !== undefined,
+ { message: 'patch 必须至少含一个字段' },
+ ),
+ })
+ .strict();
+export type UpdateIssueArgs = z.infer<typeof UpdateIssueArgsSchema>;
+
+export const IssueLabelActionArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ issueIndex: z.number().int().positive(),
+ labelId: z.number().int().positive(),
+ })
+ .strict();
+export type IssueLabelActionArgs = z.infer<typeof IssueLabelActionArgsSchema>;
+
+/**
+ *看板拖拽换列专用端点（move-card）：原子地换绑 label
+ *
+ * fromColumnId + toColumnId 都必填；后端把 issue 的 fromColumn labels 全 remove、toColumn labels 全 add
+ * 后端会在事务里校验 fromColumn绑的 labels是不是 issue 当前真有的（防漂移）
+ */
+export const MoveIssueColumnArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ issueIndex: z.number().int().positive(),
+ fromColumnId: NonEmptyStringSchema,
+ toColumnId: NonEmptyStringSchema,
+ })
+ .strict()
+ .refine((a) => a.fromColumnId !== a.toColumnId, {
+ message: 'fromColumnId 与 toColumnId 不能相同',
+ });
+export type MoveIssueColumnArgs = z.infer<typeof MoveIssueColumnArgsSchema>;
+
+export const IssueCommentDtoSchema = z
+ .object({
+ id: z.number().int().positive(),
+ body: z.string(),
+ author: IssueAuthorDtoSchema,
+ createdAt: IsoDateSchema,
+ updatedAt: IsoDateSchema,
+ })
+ .strict();
+export type IssueCommentDto = z.infer<typeof IssueCommentDtoSchema>;
+
+export const ListIssueCommentsArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ issueIndex: z.number().int().positive(),
+ })
+ .strict();
+export type ListIssueCommentsArgs = z.infer<typeof ListIssueCommentsArgsSchema>;
+
+export const CreateIssueCommentArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ issueIndex: z.number().int().positive(),
+ body: NonEmptyStringSchema,
+ })
+ .strict();
+export type CreateIssueCommentArgs = z.infer<typeof CreateIssueCommentArgsSchema>;
+
+// ============================================================
+// ===== labels namespace（ADR-0002：看板列绑 gitea label 用）=====
+// ============================================================
+
+export const LabelDtoSchema = z
+ .object({
+ id: z.number().int().positive(),
+ name: NonEmptyStringSchema,
+ color: z.string(),
+ description: z.string().optional(),
+ })
+ .strict();
+export type LabelDto = z.infer<typeof LabelDtoSchema>;
+
+export const ListLabelsArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ page: z.number().int().min(1).default(1),
+ limit: z.number().int().min(1).max(100).default(50),
+ })
+ .strict();
+export type ListLabelsArgs = z.infer<typeof ListLabelsArgsSchema>;
+
+export const ListLabelsRespSchema = z
+ .object({
+ items: z.array(LabelDtoSchema),
+ hasMore: z.boolean(),
+ })
+ .strict();
+export type ListLabelsResp = z.infer<typeof ListLabelsRespSchema>;
+
+export const CreateLabelArgsSchema = z
+ .object({
+ projectId: NonEmptyStringSchema,
+ name: NonEmptyStringSchema,
+ color: z.string(),
+ description: z.string().optional(),
+ })
+ .strict();
+export type CreateLabelArgs = z.infer<typeof CreateLabelArgsSchema>;
+
+// ============================================================
+// ===== board.cards namespace（ADR-0002 reset：删除）=====
+// ============================================================
+// 注：M2拍板的 board.cards.*7 个端点（list/create/update/move/delete/link/unlink）
+// 在 M3 ADR-0002 reset 中**全部删除**。卡片 = gitea issue：
+// - list → issues.list({ columnId })
+// - create → issues.create({ labelIds: [columnBoundLabelId] })
+// - update → issues.update
+// - move → move-card端点（issues + 列绑 label 操作）
+// - delete → issues.update({ state: 'closed' }) 或 issues 删除（gitea 无 DELETE issue API；v1改 state）
+// - link / unlink → gitea labels关联（addLabel / removeLabel）
+//
+// 历史：M2 schema 的 CardDto/CardLinkDto保留**未导出**，但 board.cards.*端点本身已删。
 
 // ============================================================
 // ===== commits.timeline（02-architecture.md §5.3.4）=====
@@ -833,6 +936,49 @@ export const TimelineArgsSchema = z
   })
   .strict();
 export type TimelineArgs = z.infer<typeof TimelineArgsSchema>;
+
+// ===== @deprecated 兼容导出（ADR-0002 reset 删了 board.cards.* 端点） =====
+// 这些类型 owner 在 T3 阶段会替换为 IssueCardDto + issues.* / labels.* 新端点；
+// 这里只提供 type-only stub 保证 type-check 通过（行为层面：boardCardsList 端点已删，前端调用会抛 NOT_FOUND）。
+// 2026-06-11 临时补 stub，后续 owner-takeover 后删
+/** @deprecated use IssueCardDto instead (T3 owner-takeover will migrate renderer) */
+export type CardDto = Omit<IssueCardDto, 'id'> & {
+  id: string; // T3 会改回 number (IssueCardDto.id 是 number)
+  columnId: string;
+  position: number;
+  color?: string;
+  links?: Array<{
+    refKind: 'commit' | 'pr' | 'branch' | 'issue';
+    owner: string;
+    repo: string;
+    refId: string;
+    cachedTitle?: string;
+    role?: 'reference' | 'blocks' | 'relates-to';
+  }>;
+};
+/** @deprecated use IssueCardDto with columnId label for create (T3 owner-takeover) */
+export type CreateBoardCardArgs = {
+  projectId: string;
+  columnId: string;
+  title: string;
+  body?: string;
+  position?: number;
+  color?: string;
+  links?: Array<{
+    refKind: 'commit' | 'pr' | 'branch' | 'issue';
+    owner: string;
+    repo: string;
+    refId: string;
+    cachedTitle?: string;
+    role?: 'reference' | 'blocks' | 'relates-to';
+  }>;
+};
+/** @deprecated use move-card.ts addLabel/removeLabel flow (T3 owner-takeover) */
+export type MoveBoardCardArgs = {
+  cardId: string; // T3 会改成 number (IssueCardDto.id)
+  toColumnId: string;
+  toPosition: number;
+};
 
 // ===== channel 名称（ipcMain.handle 字符串 + 渲染端 invoke 字符串共用） =====
 // IpcChannel 常量定义已抽到 src/shared/ipc-channels.ts（zod-free），本文件顶部 re-export。

@@ -37,53 +37,41 @@ CREATE TABLE `repo_projects` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `uniq_account_repo` ON `repo_projects` (`gitea_account_id`,`owner`,`name`);--> statement-breakpoint
-CREATE TABLE `boards` (
+CREATE TABLE `board_columns` (
 	`id` text PRIMARY KEY NOT NULL,
 	`repo_project_id` text NOT NULL,
-	`name` text NOT NULL,
-	`layout` text DEFAULT 'kanban' NOT NULL,
+	`title` text NOT NULL,
+	`position` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	FOREIGN KEY (`repo_project_id`) REFERENCES `repo_projects`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `uniq_repo_board` ON `boards` (`repo_project_id`);--> statement-breakpoint
-CREATE TABLE `board_columns` (
-	`id` text PRIMARY KEY NOT NULL,
-	`board_id` text NOT NULL,
-	`name` text NOT NULL,
-	`position` integer NOT NULL,
-	`wip_limit` integer,
-	`hide_merged_pr` integer DEFAULT false NOT NULL,
-	`created_at` integer NOT NULL,
-	FOREIGN KEY (`board_id`) REFERENCES `boards`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE INDEX `idx_board_pos` ON `board_columns` (`board_id`,`position`);--> statement-breakpoint
-CREATE TABLE `cards` (
+CREATE INDEX `idx_project_pos` ON `board_columns` (`repo_project_id`,`position`);--> statement-breakpoint
+CREATE TABLE `column_label_mapping` (
 	`id` text PRIMARY KEY NOT NULL,
 	`column_id` text NOT NULL,
-	`title` text NOT NULL,
-	`body` text,
-	`position` integer NOT NULL,
-	`color` text,
+	`repo_project_id` text NOT NULL,
+	`gitea_label_id` text NOT NULL,
+	`gitea_label_name` text NOT NULL,
 	`created_at` integer NOT NULL,
-	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`column_id`) REFERENCES `board_columns`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`column_id`) REFERENCES `board_columns`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`repo_project_id`) REFERENCES `repo_projects`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_col_pos` ON `cards` (`column_id`,`position`);--> statement-breakpoint
-CREATE TABLE `card_links` (
+CREATE UNIQUE INDEX `uniq_project_label` ON `column_label_mapping` (`repo_project_id`,`gitea_label_id`);--> statement-breakpoint
+CREATE INDEX `idx_column` ON `column_label_mapping` (`column_id`);--> statement-breakpoint
+CREATE TABLE `card_issue_link` (
 	`id` text PRIMARY KEY NOT NULL,
-	`card_id` text NOT NULL,
-	`gitea_ref_id` text NOT NULL,
-	`role` text DEFAULT 'reference' NOT NULL,
-	`created_at` integer NOT NULL,
-	FOREIGN KEY (`card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`gitea_ref_id`) REFERENCES `gitea_refs`(`id`) ON UPDATE no action ON DELETE cascade
+	`repo_project_id` text NOT NULL,
+	`board_column_id` text NOT NULL,
+	`gitea_issue_id` text NOT NULL,
+	`cached_at` integer NOT NULL,
+	FOREIGN KEY (`repo_project_id`) REFERENCES `repo_projects`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`board_column_id`) REFERENCES `board_columns`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `uniq_card_ref` ON `card_links` (`card_id`,`gitea_ref_id`,`role`);--> statement-breakpoint
-CREATE INDEX `idx_ref_card` ON `card_links` (`gitea_ref_id`,`card_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `uniq_project_issue` ON `card_issue_link` (`repo_project_id`,`gitea_issue_id`);--> statement-breakpoint
+CREATE INDEX `idx_column_issue` ON `card_issue_link` (`board_column_id`,`gitea_issue_id`);--> statement-breakpoint
 CREATE TABLE `gitea_refs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1183fbc1-8983-4587-8edb-dd2e6c29a8cf",
+  "id": "07f9d74f-c9fa-49c2-b897-07a4713d0c68",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "users": {
@@ -252,8 +252,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "boards": {
-      "name": "boards",
+    "board_columns": {
+      "name": "board_columns",
       "columns": {
         "id": {
           "name": "id",
@@ -269,20 +269,19 @@
           "notNull": true,
           "autoincrement": false
         },
-        "name": {
-          "name": "name",
+        "title": {
+          "name": "title",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "layout": {
-          "name": "layout",
-          "type": "text",
+        "position": {
+          "name": "position",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'kanban'"
+          "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
@@ -293,18 +292,19 @@
         }
       },
       "indexes": {
-        "uniq_repo_board": {
-          "name": "uniq_repo_board",
+        "idx_project_pos": {
+          "name": "idx_project_pos",
           "columns": [
-            "repo_project_id"
+            "repo_project_id",
+            "position"
           ],
-          "isUnique": true
+          "isUnique": false
         }
       },
       "foreignKeys": {
-        "boards_repo_project_id_repo_projects_id_fk": {
-          "name": "boards_repo_project_id_repo_projects_id_fk",
-          "tableFrom": "boards",
+        "board_columns_repo_project_id_repo_projects_id_fk": {
+          "name": "board_columns_repo_project_id_repo_projects_id_fk",
+          "tableFrom": "board_columns",
           "tableTo": "repo_projects",
           "columnsFrom": [
             "repo_project_id"
@@ -320,91 +320,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "board_columns": {
-      "name": "board_columns",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "board_id": {
-          "name": "board_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "wip_limit": {
-          "name": "wip_limit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "hide_merged_pr": {
-          "name": "hide_merged_pr",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_board_pos": {
-          "name": "idx_board_pos",
-          "columns": [
-            "board_id",
-            "position"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "board_columns_board_id_boards_id_fk": {
-          "name": "board_columns_board_id_boards_id_fk",
-          "tableFrom": "board_columns",
-          "tableTo": "boards",
-          "columnsFrom": [
-            "board_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "cards": {
-      "name": "cards",
+    "column_label_mapping": {
+      "name": "column_label_mapping",
       "columns": {
         "id": {
           "name": "id",
@@ -420,32 +337,25 @@
           "notNull": true,
           "autoincrement": false
         },
-        "title": {
-          "name": "title",
+        "repo_project_id": {
+          "name": "repo_project_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "body": {
-          "name": "body",
+        "gitea_label_id": {
+          "name": "gitea_label_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "color": {
-          "name": "color",
+        "gitea_label_name": {
+          "name": "gitea_label_name",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "created_at": {
@@ -454,32 +364,45 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
         }
       },
       "indexes": {
-        "idx_col_pos": {
-          "name": "idx_col_pos",
+        "uniq_project_label": {
+          "name": "uniq_project_label",
           "columns": [
-            "column_id",
-            "position"
+            "repo_project_id",
+            "gitea_label_id"
+          ],
+          "isUnique": true
+        },
+        "idx_column": {
+          "name": "idx_column",
+          "columns": [
+            "column_id"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "cards_column_id_board_columns_id_fk": {
-          "name": "cards_column_id_board_columns_id_fk",
-          "tableFrom": "cards",
+        "column_label_mapping_column_id_board_columns_id_fk": {
+          "name": "column_label_mapping_column_id_board_columns_id_fk",
+          "tableFrom": "column_label_mapping",
           "tableTo": "board_columns",
           "columnsFrom": [
             "column_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "column_label_mapping_repo_project_id_repo_projects_id_fk": {
+          "name": "column_label_mapping_repo_project_id_repo_projects_id_fk",
+          "tableFrom": "column_label_mapping",
+          "tableTo": "repo_projects",
+          "columnsFrom": [
+            "repo_project_id"
           ],
           "columnsTo": [
             "id"
@@ -492,8 +415,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "card_links": {
-      "name": "card_links",
+    "card_issue_link": {
+      "name": "card_issue_link",
       "columns": {
         "id": {
           "name": "id",
@@ -502,30 +425,29 @@
           "notNull": true,
           "autoincrement": false
         },
-        "card_id": {
-          "name": "card_id",
+        "repo_project_id": {
+          "name": "repo_project_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "gitea_ref_id": {
-          "name": "gitea_ref_id",
+        "board_column_id": {
+          "name": "board_column_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "role": {
-          "name": "role",
+        "gitea_issue_id": {
+          "name": "gitea_issue_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'reference'"
+          "autoincrement": false
         },
-        "created_at": {
-          "name": "created_at",
+        "cached_at": {
+          "name": "cached_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -533,31 +455,30 @@
         }
       },
       "indexes": {
-        "uniq_card_ref": {
-          "name": "uniq_card_ref",
+        "uniq_project_issue": {
+          "name": "uniq_project_issue",
           "columns": [
-            "card_id",
-            "gitea_ref_id",
-            "role"
+            "repo_project_id",
+            "gitea_issue_id"
           ],
           "isUnique": true
         },
-        "idx_ref_card": {
-          "name": "idx_ref_card",
+        "idx_column_issue": {
+          "name": "idx_column_issue",
           "columns": [
-            "gitea_ref_id",
-            "card_id"
+            "board_column_id",
+            "gitea_issue_id"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "card_links_card_id_cards_id_fk": {
-          "name": "card_links_card_id_cards_id_fk",
-          "tableFrom": "card_links",
-          "tableTo": "cards",
+        "card_issue_link_repo_project_id_repo_projects_id_fk": {
+          "name": "card_issue_link_repo_project_id_repo_projects_id_fk",
+          "tableFrom": "card_issue_link",
+          "tableTo": "repo_projects",
           "columnsFrom": [
-            "card_id"
+            "repo_project_id"
           ],
           "columnsTo": [
             "id"
@@ -565,12 +486,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "card_links_gitea_ref_id_gitea_refs_id_fk": {
-          "name": "card_links_gitea_ref_id_gitea_refs_id_fk",
-          "tableFrom": "card_links",
-          "tableTo": "gitea_refs",
+        "card_issue_link_board_column_id_board_columns_id_fk": {
+          "name": "card_issue_link_board_column_id_board_columns_id_fk",
+          "tableFrom": "card_issue_link",
+          "tableTo": "board_columns",
           "columnsFrom": [
-            "gitea_ref_id"
+            "board_column_id"
           ],
           "columnsTo": [
             "id"

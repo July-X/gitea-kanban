@@ -17,9 +17,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)
-      openapi-fetch:
-        specifier: ^0.17.0
-        version: 0.17.0
+      gitea-js:
+        specifier: ^1.23.0
+        version: 1.23.0
       pino:
         specifier: ^9.5.0
         version: 9.5.0
@@ -2461,6 +2461,9 @@ packages:
   get-tsconfig@4.14.0:
     resolution: {integrity: sha512-yTb+8DXzDREzgvYmh6s9vHsSVCHeC0G3PI5bEXNBHtmshPnO+S5O7qgLEOn0I5QvMy6kpZN8K1NKGyilLb93wA==}
 
+  gitea-js@1.23.0:
+    resolution: {integrity: sha512-f4+UPoWgDetZeZ+Awo5iI1nVdO5bjxA8+2QCeLo3oYWUYxKyzLfXgbW1EPD635wb8hLgS0DRBu5XhtiuYKEeUA==}
+
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
 
@@ -2982,12 +2985,6 @@ packages:
 
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
-
-  openapi-fetch@0.17.0:
-    resolution: {integrity: sha512-PsbZR1wAPcG91eEthKhN+Zn92FMHxv+/faECIwjXdxfTODGSGegYv0sc1Olz+HYPvKOuoXfp+0pA2XVt2cI0Ig==}
-
-  openapi-typescript-helpers@0.1.0:
-    resolution: {integrity: sha512-OKTGPthhivLw/fHz6c3OPtg72vi86qaMlqbJuVJ23qOvQ+53uw1n7HdmkJFibloF7QEjDrDkzJiOJuockM/ljw==}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -5987,6 +5984,8 @@ snapshots:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
+  gitea-js@1.23.0: {}
+
   github-from-package@0.0.0: {}
 
   glob-parent@6.0.2:
@@ -6478,12 +6477,6 @@ snapshots:
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
-
-  openapi-fetch@0.17.0:
-    dependencies:
-      openapi-typescript-helpers: 0.1.0
-
-  openapi-typescript-helpers@0.1.0: {}
 
   optionator@0.9.4:
     dependencies:
