@@ -10,7 +10,7 @@
  */
 import { clearGiteaClientCache } from '../src/main/gitea/client.js';
 
-const URL = 'http://localhost:3000';
+const URL = 'http://127.0.0.1:3000';
 const TOKEN = '9c3fdf27b132c9564b012326344c3993486bf868';
 const USER = 'kanban_bot';
 
