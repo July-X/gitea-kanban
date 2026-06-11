@@ -25,7 +25,7 @@ export interface AppConfig {
   tokenCacheTtlMs: number;
   /** 应用名（IPC channel 前缀 / 日志 tag） */
   appName: string;
-  /** sqlite 文件名（必须落在 userData 下） */
+  /** sqlite 文件名（落在 $GITEA_KANBAN_DATA_DIR 或 ~/.gitea-kanban 下，详见 AGENTS §8.15） */
   sqliteFilename: string;
   /** 是否开发模式 */
   isDev: boolean;

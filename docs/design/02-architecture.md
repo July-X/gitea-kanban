@@ -189,10 +189,10 @@ register({
 
 | 项 | 选型 | 说明 |
 |---|---|---|
-| **结构化数据** | **SQLite（文件型）** | 用户偏好 / 看板列 / 卡片关联 / 缓存元数据；落 `app.getPath('userData')/kanban.db` |
+| **结构化数据** | **SQLite（文件型）** | 用户偏好 / 看板列 / 卡片关联 / 缓存元数据；落 `$GITEA_KANBAN_DATA_DIR/kanban.db` 或 `~/.gitea-kanban/kanban.db`（详见 AGENTS §8.15 / commit 66c6566） |
 | **可选 KV** | **LevelDB（如果需要）** | 仅当 SQLite 写并发撞墙（实际不会，但留口子）；用 `level` 包 |
 | **日志** | **滚动文件**，`app.getPath('logs')` 下按日切分 | |
-| **blob（如头像缓存）** | **本地文件系统**，`userData/cache/` | |
+| **blob（如头像缓存）** | **本地文件系统**，`$GITEA_KANBAN_DATA_DIR/cache/` 或 `~/.gitea-kanban/cache/`（与 db 同目录，详见 AGENTS §8.15） | |
 
 > **不**额外引入 PostgreSQL / Redis / MongoDB。桌面应用单机单用户，SQLite 完全够用。
 
@@ -1275,7 +1275,7 @@ sequenceDiagram
 | 零术语：UI 文本不含 `PR` / `merge` / `rebase` 等原词（用中文业务词） | 前端 agent 跑 `pnpm check:no-jargon` 脚本 |
 | keychain 路径在 Linux 不可用时降级为加密文件 | 后端 agent 启动时探针 |
 | 离线模式：网络断开时不崩、显示 stale 缓存 | e2e 跑"断网"场景 |
-| sqlite 路径在 `app.getPath('userData')` | 后端 agent 单测 |
+| sqlite 路径在 `$GITEA_KANBAN_DATA_DIR` 或 `~/.gitea-kanban` | 后端 agent 单测（详见 AGENTS §8.15） |
 | macOS dmg 产物可双击安装并启动 | e2e 在 CI mac runner 跑 |
 
 ### 8.5 mavis-team 实现 plan 的建议拆分
@@ -1352,12 +1352,12 @@ sequenceDiagram
 
 | 场景 | 措施 |
 |---|---|
-| **sqlite 损坏** | 启动时 `PRAGMA integrity_check`；损坏则提示用户"恢复"或"导出日志后重置"<br>每次写操作前 `VACUUM INTO` 滚动一份到 `userData/backups/kanban-YYYYMMDD-HH.db`（v1 仅关键写） |
+| **sqlite 损坏** | 启动时 `PRAGMA integrity_check`；损坏则提示用户"恢复"或"导出日志后重置"<br>每次写操作前 `VACUUM INTO` 滚动一份到 `$GITEA_KANBAN_DATA_DIR/backups/kanban-YYYYMMDD-HH.db`（v1 仅关键写） |
 | **用户误删** | 撤销栈（最近 20 步） + 看板 / 卡片 / 列 删除走 soft delete + 7 天回收站 |
 | **gitea 宕机** | 缓存读 + 离线模式；写操作排队到内存（v2 持久化到 sqlite outbox，重连后发） |
 | **keychain 不可用（Linux 无 dbus）** | 降级：弹明确错误"未检测到系统 keychain，请安装 `gnome-keyring` 或 `kwallet5`，或选用 v2 的加密文件 fallback" |
-| **磁盘满** | 启动时检查 userData 所在盘 ≥ 500 MB 可用空间；不够则弹警告 |
-| **跨设备迁移** | 设置页"导出"按钮：把 `kanban.db` + 偏好导出成 zip（不含 token）<br>"导入"按钮：合并到新设备（冲突项让用户选） |
+| **磁盘满** | 启动时检查 `~/.gitea-kanban` 所在盘 ≥ 500 MB 可用空间（macOS 域控漫游 profile 接受 `os.homedir()` fallback，详见 AGENTS §8.15）；不够则弹警告 |
+| **跨设备迁移** | 设置页"导出"按钮：把 `~/.gitea-kanban/kanban.db` + 偏好导出成 zip（不含 token）<br>"导入"按钮：把 `kanban.db` 放到目标机器的 `~/.gitea-kanban/` 即可（冲突由用户选，保留原策略） |
 | **应用崩溃** | 主进程 `process.on('uncaughtException')` 记日志 + 弹"应用已恢复上次状态"模态（状态来自 sqlite 事务） |
 
 ### 9.5 国际化（i18n）

@@ -45,7 +45,7 @@ app.on('ready', async () => {
     upgradeLoggerToFile();
     logger.info({ version: app.getVersion(), isPackaged: app.isPackaged }, 'app ready');
 
-    // 2a. 初始化 sqlite（创建 userData/kanban.db + 跑迁移）
+    // 2a. 初始化 sqlite（创建 $GITEA_KANBAN_DATA_DIR/kanban.db 或 ~/.gitea-kanban/kanban.db + 跑迁移，详见 AGENTS §8.15）
     await initSqlite();
     logger.info('sqlite initialized');
 
