@@ -131,12 +131,12 @@ function goNext(): void {
             v-model="giteaUrl"
             type="url"
             class="auth__input"
-            placeholder="https://gitea.example.com"
+            placeholder="http://localhost:3000"
             autocomplete="url"
             spellcheck="false"
             :disabled="submitting"
           />
-          <p class="auth__hint">自托管 gitea 多部署在子路径，例如 https://git.example.com/gitea/</p>
+          <p class="auth__hint">默认本地测试地址 http://localhost:3000；自托管 gitea 多部署在子路径，例如 https://git.example.com/gitea/</p>
         </div>
 
         <div class="auth__field">

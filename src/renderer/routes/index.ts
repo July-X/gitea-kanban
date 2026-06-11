@@ -39,6 +39,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '时间轴', requiresAuth: true },
   },
   {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@renderer/views/SettingsView.vue'),
+    meta: { title: '设置', requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/board',
   },

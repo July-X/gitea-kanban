@@ -4,21 +4,25 @@
  *
  * 设计：
  *   - 高度 28px（var(--statusbar-height)）
- *   - 左侧：连接状态 + 当前仓库上下文
- *   - 中部：占位 / 进度条
- *   - 右侧：当前用户 + 版本
+ *   - 左侧：连接状态 + 当前仓库上下文 + **刷新按钮**
+ *   - 右侧：当前用户（avatar + login）+ **退出登录**
  *   - 颜色 + 文字 + 图标三重编码（OVERRIDE §本项目专属规则 #8）
  *
  * AGENTS §8.5：离线降级不可省。gitea API 失败时**不**直接报"Network Error"，
  * 这里显著提示"当前为离线/缓存模式"。
  */
 import { computed } from 'vue';
-import { CircleCheck, CircleAlert, CircleSlash, KeyRound, Plug, User } from 'lucide-vue-next';
+import { CircleCheck, CircleAlert, CircleSlash, KeyRound, Plug, RefreshCw, LogOut, User } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
+import { useSettingsStore } from '@renderer/stores/settings';
+import { useRouter } from 'vue-router';
+import { showToast } from '@renderer/lib/toast';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
+const settings = useSettingsStore();
+const router = useRouter();
 
 type ConnState = 'connected' | 'offline' | 'error' | 'unauthenticated';
 
@@ -56,6 +60,31 @@ const stateIcon = computed(() => {
       return Plug;
   }
 });
+
+/** 主动刷新：拉最新仓库列表（gitea API + 本地 project 标记聚合） */
+async function onRefreshClick(): Promise<void> {
+  try {
+    await repo.loadRepos('', true);
+  } catch (e) {
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: '刷新失败', description: err.messageText ?? '请稍后重试' });
+  }
+}
+
+/** 退出当前 gitea 账号（清 keychain + 内存），跳回 /auth */
+async function onLogoutClick(): Promise<void> {
+  const url = auth.currentGiteaUrl;
+  if (!url) return;
+  try {
+    await auth.disconnect(url);
+    repo.repos.length = 0; // 清空本地仓库缓存
+    showToast({ type: 'success', message: '已退出登录' });
+    await router.push('/auth');
+  } catch (e) {
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: '退出失败', description: err.messageText ?? '请稍后重试' });
+  }
+}
 </script>
 
 <template>
@@ -72,12 +101,38 @@ const stateIcon = computed(() => {
         <KeyRound :size="12" :stroke-width="2" aria-hidden="true" />
         <span class="statusbar__repo-name">{{ repo.currentRepo.fullName }}</span>
       </span>
+      <button
+        v-if="auth.isConnected"
+        type="button"
+        class="statusbar__action"
+        :disabled="repo.loading"
+        :title="`刷新仓库（每 ${Math.round(settings.pollingIntervalMs / 60000)} 分钟自动）`"
+        @click="onRefreshClick"
+      >
+        <RefreshCw :size="12" :stroke-width="2" :class="{ 'statusbar__action--spin': repo.loading }" />
+      </button>
     </div>
     <div class="statusbar__right">
       <span v-if="auth.currentUser" class="statusbar__user">
-        <User :size="12" :stroke-width="2" aria-hidden="true" />
+        <img
+          v-if="auth.currentUser.avatarUrl"
+          :src="auth.currentUser.avatarUrl"
+          :alt="`${auth.currentUser.login} 头像`"
+          class="statusbar__avatar"
+        />
+        <User v-else :size="12" :stroke-width="2" aria-hidden="true" />
         <span>{{ auth.currentUser.login }}</span>
       </span>
+      <button
+        v-if="auth.isConnected"
+        type="button"
+        class="statusbar__action statusbar__action--danger"
+        title="退出当前 gitea 账号"
+        @click="onLogoutClick"
+      >
+        <LogOut :size="12" :stroke-width="2" />
+        <span>退出</span>
+      </button>
     </div>
   </footer>
 </template>
@@ -145,6 +200,49 @@ const stateIcon = computed(() => {
   align-items: center;
   gap: 4px;
   color: var(--color-text-secondary);
+}
+
+.statusbar__avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+  vertical-align: middle;
+}
+
+.statusbar__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.statusbar__action:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.statusbar__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.statusbar__action--danger:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+.statusbar__action--spin {
+  animation: statusbar-spin 1s linear infinite;
+}
+@keyframes statusbar-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .statusbar__repo-name {

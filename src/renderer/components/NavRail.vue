@@ -34,7 +34,7 @@ const items: NavItem[] = [
   { id: 'merges', label: '合并请求', icon: GitMerge, to: '/merges', disabledReason: '即将推出' },
   { id: 'my-cards', label: '我的卡片', icon: ListChecks, to: '/my-cards', disabledReason: '即将推出' },
   { id: 'members', label: '成员', icon: Users2, to: '/members', disabledReason: '即将推出' },
-  { id: 'settings', label: '设置', icon: Settings, to: '/settings', disabledReason: '即将推出' },
+  { id: 'settings', label: '设置', icon: Settings, to: '/settings' },
 ];
 
 const currentPath = computed(() => route.path);
