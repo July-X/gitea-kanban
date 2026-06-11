@@ -180,26 +180,23 @@ async function pullsListHandler(args: ListPullsArgs): Promise<ListPullsResp> {
   // 2. resolve
   const proj = resolveProject(args.projectId);
 
-  // 3. 调 gitea
-  const giteaResult = await listGiteaPulls({
-    giteaUrl: proj.giteaUrl,
-    username: proj.username,
-    owner: proj.owner,
-    repo: proj.repo,
-    state: args.state,
-    head: args.head,
-    base: args.base,
-    author: args.author,
-    page: args.page,
-    limit: args.limit,
-  });
+ // 3. 调 gitea
+ const giteaResult = await listGiteaPulls({
+ giteaUrl: proj.giteaUrl,
+ username: proj.username,
+ owner: proj.owner,
+ repo: proj.repo,
+ state: args.state,
+ page: args.page,
+ limit: args.limit,
+ });
 
   // 4. JOIN 本地 linkedCards
-  const linkedCardsMap = getLinkedCardsForPulls({
-    owner: proj.owner,
-    repo: proj.repo,
-    indices: giteaResult.items.map((p) => p.index),
-  });
+ const linkedCardsMap = getLinkedCardsForPulls({
+ owner: proj.owner,
+ repo: proj.repo,
+ indexes: giteaResult.items.map((p) => p.index),
+ });
 
   const items: PullDto[] = giteaResult.items.map((p) => ({
     ...p,
