@@ -54,7 +54,11 @@ const selectedNode = ref<CommitNodeDto | null>(null);
 /** 默认分支优先（来自 branchDto.isDefault） */
 const defaultBranch = computed(() => branches.value.find((b) => b.isDefault) ?? null);
 
-const activeRepo = computed(() => repo.repos.find((r) => r.fullName === activeProjectId.value) ?? null);
+const activeRepo = computed(() => {
+  // activeProjectId 是 uuid，反查 RepoDto 走 currentProject.fullName
+  const fn = repo.currentProject ? `${repo.currentProject.owner}/${repo.currentProject.name}` : null;
+  return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
+});
 
 onMounted(async () => {
   // 0. 注册 Vue 自定义节点（X6 节点用 SFC 渲染）
@@ -72,7 +76,15 @@ onMounted(async () => {
     }
   }
   if (!activeProjectId.value && repo.projects.length > 0) {
-    repo.selectProject(repo.projects[0]!.fullName);
+    // 默认选第一个 project —— addProject 是幂等的（已存在返现有 uuid）
+    // selectProject 接收 RepoProjectDto（强类型）保证 IPC 拿到真 uuid
+    const first = repo.projects[0]!;
+    try {
+      const project = await repo.addProject({ owner: first.owner, name: first.name });
+      repo.selectProject(project);
+    } catch {
+      /* error in repo.error */
+    }
   }
   // 2. 拉分支列表
   if (activeProjectId.value) {

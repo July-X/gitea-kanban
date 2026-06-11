@@ -82,35 +82,47 @@ const filteredRepos = computed<RepoDto[]>(() => {
 });
 
 /**当前选中的 projectId（优先 URL query > store current） */
-const activeProjectId = computed<string | null>(() => {
- const qp = route.query.project;
- if (typeof qp === 'string' && qp) return qp;
- return repo.currentProjectId;
-});
+const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
 /**当前选中的仓库元信息 */
 const activeRepo = computed<RepoDto | null>(() => {
  if (!activeProjectId.value) return null;
- return repo.repos.find((r) => r.fullName === activeProjectId.value) ?? null;
+ // store 持有 currentProject（带 owner/name），用 fullName 反查 RepoDto
+ const fn = repo.currentProject ? `${repo.currentProject.owner}/${repo.currentProject.name}` : null;
+ return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
 });
 
 /**选仓库 →触发加载 +同步到 URL */
 async function selectProject(r: RepoDto): Promise<void> {
+ let project;
  if (!r.isProject) {
  try {
- await repo.addProject({ owner: r.owner, name: r.name });
+ // addProject 返回 RepoProjectDto（uuid 源），store 内部已自动 selectProject
+ project = await repo.addProject({ owner: r.owner, name: r.name });
  showToast({ type: 'success', message: '已加入看板' });
  } catch {
  return;
  }
- }
- repo.selectProject(r.fullName);
- showProjectPicker.value = false;
- void router.replace({ query: { ...route.query, project: r.fullName } });
+ } else {
+ // 已加为 project 的：addProject 是幂等的（cacheAddProject 已存在返现有），
+ // 调一次拿真 uuid 给 selectProject
  try {
- await board.loadBoard(r.fullName);
+ project = await repo.addProject({ owner: r.owner, name: r.name });
  } catch {
- /* error 已存 board.error */
+ return;
+ }
+ }
+ if (project) {
+ // 持有真 uuid，IPC 端走 uuid（addProject 内部已经 selectProject 进去了，再调一次显式声明意图）
+ repo.selectProject(project);
+ }
+  showProjectPicker.value = false;
+  void router.replace({ query: { ...route.query, project: r.fullName } });
+  try {
+  // 走 uuid 给 IPC（route query 仍存 fullName 给 UI 友好）
+  await board.loadBoard(repo.currentProjectId ?? r.fullName);
+  } catch {
+  /* error 已存 board.error */
  }
  }
 
