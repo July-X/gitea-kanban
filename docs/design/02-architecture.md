@@ -904,59 +904,69 @@ interface MergePrResult { sha: string; merged: boolean; message: string; }
 'pulls.merge': (args: MergePrArgs) => Promise<MergePrResult>;
 ```
 
-#### 5.3.7 看板列
+#### 5.3.7 看板列（gitea-kanban 本地概念）
+
+> **设计 reset（2026-06-11）**：gitea 1.26 社区版不再暴露 projects REST API，gitea-kanban 不再镜像 gitea 端的 `project_board` / `project_column` 概念。**看板列是 gitea-kanban 本地 sqlite 实体**；卡片是 gitea issue（按 label 过滤）。详见 `docs/adr/0002-board-data-source-reset.md`。
 
 ```ts
-interface ColumnDTO {
-  id: string;
-  boardId: string;
-  name: string;
-  position: number;
-  wipLimit: number | null;
-  hideMergedPr: boolean;
-  cardCount: number;
-}
-
-'board.columns.list':   (args: { projectId: string }) => Promise<ColumnDTO[]>;
-'board.columns.create': (args: { projectId: string; name: string; position: number; wipLimit?: number }) => Promise<ColumnDTO>;
-'board.columns.update': (args: { columnId: string; patch: Partial<Pick<ColumnDTO, 'name'|'wipLimit'|'hideMergedPr'>> }) => Promise<ColumnDTO>;
-'board.columns.reorder':(args: { projectId: string; orderedIds: string[] }) => Promise<void>;
-'board.columns.delete': (args: { columnId: string; moveCardsTo?: string }) => Promise<void>;
-```
-
-#### 5.3.8 卡片
-
-```ts
-interface CardDTO {
-  id: string;
-  columnId: string;
-  title: string;
-  body?: string;
-  position: number;
-  color?: string;
+interface BoardColumnDTO {
+  id: string;                       // 本地 sqlite rowid (uuid)
+  boardProjectId: string;           // repo_projects.id
+  title: string;                    // 列标题自定（"待办/进行中/已完成"），与 gitea label name 解耦
+  position: number;                 // 拖拽排序
+  mappedLabelIds: number[];         // gitea repo label ids（多对多）；issue 带这些 label 就属于此列
   createdAt: string;
   updatedAt: string;
-  links: CardLinkDTO[];
 }
 
-interface CardLinkDTO {
-  id: string;
-  refKind: 'commit' | 'pr' | 'branch' | 'issue';
-  owner: string;
-  repo: string;
-  refId: string;
-  cachedTitle?: string;
-  role: 'reference' | 'blocks' | 'relates-to';
-}
-
-'board.cards.list':    (args: { columnId: string }) => Promise<CardDTO[]>;
-'board.cards.create':  (args: { columnId: string; title: string; body?: string; position: number; color?: string; links?: Array<Omit<CardLinkDTO,'id'>> }) => Promise<CardDTO>;
-'board.cards.update':  (args: { cardId: string; patch: Partial<Pick<CardDTO,'title'|'body'|'color'>> }) => Promise<CardDTO>;
-'board.cards.move':    (args: { cardId: string; toColumnId: string; toPosition: number }) => Promise<CardDTO>;
-'board.cards.delete':  (args: { cardId: string }) => Promise<void>;
-'board.cards.link':    (args: { cardId: string; link: Omit<CardLinkDTO,'id'> }) => Promise<CardLinkDTO>;
-'board.cards.unlink':  (args: { linkId: string }) => Promise<void>;
+'board.columns.list':     (args: { boardProjectId: string }) => Promise<BoardColumnDTO[]>;
+'board.columns.create':   (args: { boardProjectId: string; title: string; position: number; labelIds?: number[] }) => Promise<BoardColumnDTO>;
+'board.columns.update':   (args: { columnId: string; patch: Partial<Pick<BoardColumnDTO, 'title'|'position'>> }) => Promise<BoardColumnDTO>;
+'board.columns.reorder':  (args: { boardProjectId: string; orderedIds: string[] }) => Promise<void>;
+'board.columns.delete':   (args: { columnId: string; unmapLabels?: boolean }) => Promise<void>;
+'board.columns.mapLabel': (args: { columnId: string; giteaLabelId: number }) => Promise<void>;
+'board.columns.unmapLabel': (args: { columnId: string; giteaLabelId: number }) => Promise<void>;
 ```
+
+#### 5.3.8 卡片（gitea issue 透传 + label 关联）
+
+> 卡片实体不复存在——gitea issue 本身就是卡片。**列 ↔ 卡片关联靠 gitea label**：
+> - 把 issue 从列 A 拖到列 B = 给 issue 加列 B 映射的 label / 去列 A 映射的 label
+> - 列下的卡片列表 = `GET /repos/{owner}/{repo}/issues?labels={labelId}&state=open`
+
+```ts
+interface IssueCardDTO {
+  // gitea issue 字段透传（按 gitea-js Issue 类型裁剪）
+  id: number;                       // gitea issue id
+  number: number;                   // gitea issue number
+  title: string;
+  body?: string;
+  state: 'open' | 'closed';
+  labels: { id: number; name: string; color: string }[];
+  assignee?: { id: number; login: string; avatarUrl?: string };
+  createdAt: string;
+  updatedAt: string;
+  // 我们的扩展
+  columnId: string;                 // 派生：issue 第一个匹配 column_label_mapping 的列
+  priority?: 'P0' | 'P1' | 'P2' | 'P3';
+}
+
+'issues.list':    (args: { boardProjectId: string; columnId?: string; state?: 'open'|'closed'|'all'; labelIds?: number[]; q?: string; page?: number; limit?: number }) => Promise<IssueCardDTO[]>;
+'issues.get':     (args: { boardProjectId: string; issueId: number }) => Promise<IssueCardDTO>;
+'issues.create':  (args: { boardProjectId: string; title: string; body?: string; labelIds: number[] }) => Promise<IssueCardDTO>;
+'issues.update':  (args: { boardProjectId: string; issueId: number; patch: Partial<Pick<IssueCardDTO, 'title'|'body'|'state'>> }) => Promise<IssueCardDTO>;
+'issues.addLabel':    (args: { boardProjectId: string; issueId: number; labelId: number }) => Promise<void>;  // 拖拽到列 = addLabel
+'issues.removeLabel': (args: { boardProjectId: string; issueId: number; labelId: number }) => Promise<void>; // 拖离列 = removeLabel
+'issues.comment.list':   (args: { boardProjectId: string; issueId: number }) => Promise<unknown[]>;            // v1: 跳 gitea 网页
+'issues.comment.create': (args: { boardProjectId: string; issueId: number; body: string }) => Promise<unknown>; // v1: 跳 gitea 网页
+
+// 辅助：列 label 映射查询
+'labels.list':   (args: { boardProjectId: string }) => Promise<{ id: number; name: string; color: string; description: string }[]>;
+'labels.create': (args: { boardProjectId: string; name: string; color: string; description?: string }) => Promise<{ id: number; name: string; color: string }>;
+```
+
+> **v1 拖拽换列的二次确认**：拖到"已完成"列时弹 ConfirmDialog 写明"标记为完成后该 issue 在 gitea 自动关闭"；拖回非完成列时弹"重新打开 issue"。
+> **CardLinkDTO（引用 commit/PR/branch）**功能推迟到 v2：v1 卡片仅显示 issue 自身的 commit 关联，不在卡片上挂自定义 link。
 
 #### 5.3.9 鉴权 / 用户 / 偏好
 
