@@ -32,7 +32,7 @@
  * -保留 giteaFetch（fallback 给 tests/scripts）
  */
 
-import { giteaApi, type Api, type HttpResponse } from 'gitea-js';
+import { Api, type HttpResponse } from 'gitea-js';
 import { IpcError, IpcErrorCode } from '@shared/errors';
 import { keychainGet } from './keychain.js';
 
@@ -142,15 +142,15 @@ function normalizeBaseUrl(giteaUrl: string): string {
  * 2026-06-11验证：gitea-js1.23.0 的 securityWorker默认输出 Bearer → 不适配 gitea → override
  */
 function makeGiteaSecurityWorker() {
- return (securityData: unknown) => {
- if (!securityData) return;
- return {
- secure: true,
- headers: {
- Authorization: `token ${String(securityData)}`,
- },
- };
- };
+  return async (securityData: unknown) => {
+  if (!securityData) return;
+  return {
+  secure: true,
+  headers: {
+  Authorization: `token ${String(securityData)}`,
+  },
+  };
+  };
 }
 
 /**
@@ -182,17 +182,21 @@ export async function getGiteaClient(
  hint: '跳转到连接页',
  });
  }
- if (!entry) {
- //首次创建 entry：用 gitea-js工厂 + override security worker（token而不是 Bearer）
- entry = {
- api: giteaApi(normalizeBaseUrl(giteaUrl), {
- securityWorker: makeGiteaSecurityWorker(),
- }),
- baseUrl: normalizeBaseUrl(giteaUrl),
- tokenFetchedAt:0,
- };
- cache.set(key, entry);
- }
+  if (!entry) {
+  //首次创建 entry：直接 new Api() 绕开 giteaApi factory 的内置 securityWorker
+  //（factory 写死 Bearer ${options.token}，覆盖我们传的 worker；gitea 习惯 token ${pat} 走不通）
+  //自己 new + 自定义 securityWorker + setSecurityData() 路径完整保留
+  entry = {
+  api: new Api({
+  baseUrl: `${normalizeBaseUrl(giteaUrl)}/api/v1`,
+  baseApiParams: { format: 'json' },
+  securityWorker: makeGiteaSecurityWorker(),
+  }),
+  baseUrl: normalizeBaseUrl(giteaUrl),
+  tokenFetchedAt:0,
+  };
+  cache.set(key, entry);
+  }
  entry.token = token;
  entry.tokenFetchedAt = now;
  entry.api.setSecurityData(token);
@@ -286,14 +290,24 @@ export function invalidateGiteaClient(giteaUrl: string, username: string): void 
  * 类型从 res.data 自动推断，无需显式 T
  */
 export function unwrapGitea<TData, TError = unknown>(
- res: HttpResponse<TData, TError>,
- fallbackMessage: string,
+  res: HttpResponse<TData, TError>,
+  fallbackMessage: string,
 ): TData {
- if (!res.ok) {
- const cause = `HTTP ${res.status}`;
- throw httpErrorToIpcError(res.status, cause, fallbackMessage);
- }
- return res.data;
+  if (!res.ok) {
+  // gitea 错误响应是 JSON {message, url?}，TError 默认 unknown 时 res.data?.message 是 string
+  // 兜底链：res.data.message -> res.data.error -> res.statusText -> "HTTP <status>"
+  const data = res.data as unknown;
+  const dataObj = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : null;
+  const errObj = (dataObj && typeof dataObj['error'] === 'object' && dataObj['error'] !== null)
+  ? (dataObj['error'] as Record<string, unknown>)
+  : null;
+  const cause =
+  (typeof dataObj?.['message'] === 'string' && (dataObj['message'] as string)) ||
+  (typeof errObj?.['message'] === 'string' && (errObj['message'] as string)) ||
+  (res.statusText || `HTTP ${res.status}`);
+  throw httpErrorToIpcError(res.status, cause, fallbackMessage);
+  }
+  return res.data;
 }
 
 //导出供测试的内部函数
