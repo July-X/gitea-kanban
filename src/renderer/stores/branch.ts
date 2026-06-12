@@ -15,7 +15,7 @@
  */
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { branchesList } from '@renderer/lib/ipc-client';
+import { branchesList, branchesStar } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { BranchDto, ListBranchesResp } from '../../main/ipc/schema.js';
 
@@ -161,6 +161,36 @@ export const useBranchStore = defineStore('branch', () => {
     }
   }
 
+  /**
+   * 切换某分支的收藏状态（IPC：branches.star）
+   *
+   * 策略：**悲观更新**——IPC 成功才改 items 里的 starred，失败抛错（上层 toast）。
+   * 收藏是低频操作 + 失败可重试，乐观更新引入的竞态收益小。
+   *
+   * @param name 分支名
+   * @param starred 目标状态（true=收藏，false=取消）
+   * @returns 新的 starred 状态
+   */
+  async function star(name: string, starred: boolean): Promise<boolean> {
+    if (!currentProjectId.value) {
+      throw {
+        code: 'validation_failed',
+        messageText: '输入有误：尚未选中项目',
+        hint: '请先在"看板"页选择一个仓库',
+        recoverable: false,
+      } satisfies UserFacingError;
+    }
+    await branchesStar({ projectId: currentProjectId.value, branch: name, starred });
+    const idx = items.value.findIndex((b) => b.name === name);
+    if (idx >= 0) {
+      const next = items.value.slice();
+      const cur = next[idx]!;
+      next[idx] = { ...cur, starred };
+      items.value = next;
+    }
+    return starred;
+  }
+
   /** 写跨视图状态："在时间轴查看此分支"——TimelineView onMounted consume */
   function setPendingTimelineFocus(name: string): void {
     pendingTimelineFocus.value = name;
@@ -201,6 +231,7 @@ export const useBranchStore = defineStore('branch', () => {
     list,
     refresh,
     select,
+    star,
     setPendingTimelineFocus,
     consumePendingTimelineFocus,
     clearError,
