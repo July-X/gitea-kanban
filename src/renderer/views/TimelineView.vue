@@ -208,19 +208,34 @@ function initGraph(): void {
   });
 }
 
-/** 把 TimelineDto 渲染成 X6 图（节点 + 边） */
+/** 画布尺寸（X6 节点坐标 = 绝对像素，需要把后端归一化 0~1 浮点换算成像素） */
+const CANVAS_PADDING = 40; // 上下左右留白
+const LANE_HEIGHT = 90; // 每条 lane 垂直间距（后端 lane.order → y 像素）
+
 function renderGraph(dto: TimelineDto): void {
   const g = graphRef.value;
   if (!g) return;
   g.clearCells();
+
+  // 取 graph 容器实测宽高作为画布基准（首次渲染时容器可能还没拿到尺寸 → 兜底 1200x600）
+  const wrap = graphContainer.value;
+  const measuredW = wrap?.clientWidth ?? 0;
+  const measuredH = wrap?.clientHeight ?? 0;
+  const canvasW = measuredW > 0 ? measuredW : 1200;
+  const canvasH = measuredH > 0 ? measuredH : 600;
+
+  // x: 后端 0~1 归一化 → 横向像素（按时间戳跨度，最早的贴左边、最晚的贴右边）
+  // y: 后端 lane.order → 纵向像素（lane 0 在最上）
+  const drawW = canvasW - CANVAS_PADDING * 2;
+  const drawH = canvasH - CANVAS_PADDING * 2;
 
   // === 节点 ===
   for (const node of dto.nodes) {
     g.addNode({
       id: node.id,
       shape: 'commit-node',
-      x: node.x,
-      y: node.y,
+      x: CANVAS_PADDING + node.x * drawW,
+      y: CANVAS_PADDING + node.y * LANE_HEIGHT,
       data: node,
     });
   }
