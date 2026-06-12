@@ -2,6 +2,10 @@
 
 > 本文件**覆盖** `MASTER.md` 的全局规则。本项目有明确的产品定位，MASTER 的默认
 > 推荐（Vibrant & Block-based / #22C55E 鲜绿 / Fira Code+Sans / startup 风格）不能直接套用。
+>
+> **v1.1 更新（2026-06-12）**：本项目暗色主题强化为「技术工具的科技感」方向。具体 token
+> 落地到 `design-system/pages/tech-refine.md`（page-level 精修文件，HUD / Sci-Fi FUI 风格）。
+> 本文件 §"科技感精修（v1.1）" 章节登记 v1.1 决策摘要 + 链到精修文件。
 
 ## 适用范围
 
@@ -17,7 +21,7 @@
 |------|------------|----------|------|
 | 主色 | `#22C55E` 鲜绿 | **gitea 绿 `#609926`** | 贴 gitea 生态，可识别度强 |
 | 强调色 | （无） | **gitea 橙 `#f76707`** | 贴 gitea 生态，用于警示/重操作 |
-| 背景 | `#0F172A` 深色 | **v1 单主题暗色（不提供切换）**——底色 `#134857` 苍蓝（dark teal），四层分层：`#134857` canvas / `#1B5868` elevated / `#236479` hover / `#2D7487` active + 8-12% 主色 alpha glow | 用户 2026-06-10 拍板：实施最快，避免分散精力；暗色风符合 dev 工具桌面的常见范式（VSCode / Cursor / Linear）；非技术用户友好通过"清晰文字 + 二次确认 + 零术语"保证，不靠浅色。底色选苍蓝 `#134857`（冷青）让 gitea 绿 `#609926` 主色更鲜明、文字用冷白 `#DCE9F0` 保持冷调统一 |
+| 背景 | `#0F172A` 深色 | **v1.1.2 推翻 v1 → 3 主题切换**——A 暗 `#0E3A52`（默认，v1 苍蓝精神 + 提饱和解决灰蒙）/ C 暗 `#0F1115`（VSCode / Linear 主流）/ Light `#E8F1F5`（浅苍蓝，亮色 CTA 用加深版主色 `#4F7A1A` 过 WCAG AA）。**v1 原拍板（2026-06-10）保留为 history**：v1 单主题暗色 `#134857` 苍蓝（dark teal）四层 `#134857` canvas / `#1B5868` elevated / `#236479` hover / `#2D7487` active + 8-12% 主色 alpha glow —— **v1.1.2 user 拍板推翻**，理由：① 灰蒙反馈（苍蓝 sat 偏低 R/G 分布偏绿青）→ A 暗提饱和到 71% 推色相到 201°；② "非技术用户友好不靠浅色"过度收口，浅色版有利于白天/会议室使用。完整 token 矩阵见 `tech-refine.md` §14 | 顶部 24px StatusBar 加主题按钮（cycle 切换）+ 设置页"外观"分组 + 命令面板 ⌘K "主题"命令（user 2026-06-12 拍板加） |
 | 风格 | Vibrant & Block-based（块状/大色块/活泼） | **克制 / 信息密度优先** | 非技术用户要"看得懂"，大色块/活泼风容易显得不专业 |
 | Pattern | Feature-Rich Showcase（Hero > Features > CTA） | **不适用**（这不是 landing） | 我们是工具型应用，没有 marketing 页面 |
 | 标题字体 | Fira Code | **Inter**（Google Fonts 载入） | 桌面应用要中英文混排，Fira Code 中文不行 |
@@ -67,7 +71,7 @@
    - 应用图标 = gitea 主题（#609926 圆角方块）
    - 顶栏原生（macOS traffic light / Windows title bar）
    - 菜单栏（Menu Bar）走 Electron 原生 + 平台惯例（macOS = 应用名 / Win = File/Edit/...）
-   - 窗口可缩放、最小尺寸 800×600、**v1 单主题暗色（不跟随系统）**
+   - 窗口可缩放、最小尺寸 800×600、**v1.1.2 推翻 v1 → 3 主题切换**（A 暗 / C 暗 / Light，用户主动选；**不**跟随 OS 系统设置——避免用户切桌面主题时 app 也跟着切，引起认知负担）
 
 5. **暗色模式阴影原则**（v1.1 精修）
    - **不能用纯黑阴影**——暗色底上纯黑阴影"消失"
@@ -92,16 +96,77 @@
    - 关键操作（合并、删除）除了二次确认还要声音/震动反馈
    - 颜色不是唯一信号（用图标 + 文字 + 颜色三重编码状态）
 
+## 科技感精修（v1.1，2026-06-12）
+
+> 本节是 v1.1 主题精修的**决策摘要 + 索引**。完整 token 落地在
+> **`design-system/pages/tech-refine.md`**（page-level 精修文件，~280 行），
+> 可视化 demo 在 **`docs/design/wireframe/theme-tech.html`**。
+
+### v1.1 决策摘要
+
+| 维度 | v1 OVERRIDE | v1.1 精修 | 理由 |
+|---|---|---|---|
+| 卡片边角 | 12px | **6px** | dev 工具主流（Linear / Notion / Cursor），与 gitea 桌面端调性一致 |
+| 按钮边角 | 8px | **4px** | 配合卡片锐化；按钮是"操作件"不是"装饰件" |
+| 标签 / chip | 12px | **2px** | HUD 极小锐角，区分"标签"和"按钮" |
+| 阴影 | 4-12px 单层 | **三件套**：`深底色阴影 + 1px 冷白内描边 + 主色外环 glow` | 暗色底纯黑阴影"消失"，v1 #5 已奠基，v1.1 量化分级 |
+| 状态色 | 仅绿 / 橙 | **新增 4 色**：红 `#db2828` / 青 `#4fc4d6` / 等待灰 `#94a3b8` / 离线灰 `#64748b` | 三重编码（颜色 + 图标 + 文字）需要更细的语义；红 / 青跟 gitea 生态一致 |
+| 主按钮 glow | （无） | **`0 0 0 1px 主色 50% + 0 0 12px 主色 30%`** | 静态 / hover / 错误三档分级，hover 升级到 24px |
+| HUD 装饰 | （无） | **装饰角**（卡片左上 / 右上 L 形）+ **标题前缀条**（4×16 主色窄条）+ **键帽**（24×20 mono） | 来自 ui-ux-pro-max skill style.domain "HUD / Sci-Fi FUI" 方向 |
+| mono 字体场景 | 等宽字体 | **强制 9 类**（commit hash / issue id / 版本号 / 时间戳 / 状态码 / 路径 / 命令 / 卡片 ID / SHA 短码）**+ 推荐 6 类**（KPI 大数字 / 百分比 / 行号 / commit 标题 / 状态大字 / 数字标签） | v1 已定 JetBrains Mono，v1.1 显式列场景避免装饰化 / 漏用 |
+| 顶部 StatusBar | （无） | **24px 高，路径 + 快捷键 + 同步状态 + 版本号** | 桌面应用窗口本来就少空间，状态条把"现在在哪 / 在干啥"压顶 |
+| 背景装饰 | （无） | **主画布 8% alpha 24px grid**（不进卡片 / 列 / 弹窗）+ 窗口顶角 4×4 装饰点阵 | HUD 风装饰，**不进阅读区**；可关 |
+| scanline / glitch | （无） | **v1 不采用** | a11y 差 + 干扰阅读 + LED 屏"噼啪" |
+| KPI 大数字 | （无） | **JetBrains Mono 36-48px 主色 + text-shadow 0 0 8px 主色 40%** | "科技感"最浓的展示位，强发光的唯一例外 |
+| 进度条 | （无） | **主色 8% 底 + 1px 20% 描边 + 渐变填充 + 微弱 glow + 12px 数字百分比** | 合并管理 / 看板列头 / 设置页通用 |
+| 过渡时长 | 200ms | **150-240ms 分级**（颜色 150 / 卡片抬升 200 / 弹窗 180 / 抽屉 240 / KPI 数字滚动 400） | 颜色快、动效慢，更"工程" |
+| 状态点呼吸 | （无） | **1500ms 循环 ease-in-out** | 仅等待 / 同步状态点，**接受** `prefers-reduced-motion: reduce` 关闭 |
+| Layout-shift hover | 禁用 scale | **禁用**（保持） | OVERRIDE 已有；v1.1 补充：允许 `translateY(-1px)` |
+
+### 不破坏的硬约束（重申 · v1.1.2 更新）
+
+- ✅ 主色仍是 gitea 绿 `#609926`（3 主题通用品牌色，不换矩阵绿 `#00FF41`）—— 亮色 CTA 文字用 `#4F7A1A` 加深版（v1.1.2 新增）
+- ✅ 强调色仍是 gitea 橙 `#f76707`（3 主题通用）—— 亮色警示用 `#D85804` 加深版（v1.1.2 新增）
+- ✅ 苍蓝 4 层底色决策保留（A 暗 `#0E3A52` / `#135070` / `#18658F` / `#1E7BAD`，C 暗中性 4 层，Light 浅 4 层）
+- ⚠️ **v1 单主题暗色 → v1.1.2 推翻**：3 主题切换（A 暗默认 / C 暗 / Light），用户主动选；不跟随 OS 系统设置
+- ✅ 零术语 / 二次确认 / 错误人话（v1 OVERRIDE §本项目专属规则 #1-3）
+- ✅ 不引 Cyberpunk 强霓虹（a11y 差 + 跟非技术用户友好冲突）
+- ✅ 不引 CRT scanline / glitch 错位动画
+- ✅ 不引 Tailwind utility class（本项目走 CSS Modules + 全局 CSS 变量）
+
+### 拍板（待 user 确认，详见 `tech-refine.md` §13）
+
+1. 边角锐化（卡片 6 / 按钮 4 / 标签 2）是否接受？
+2. HUD 装饰（装饰角 + 标题前缀条 + 键帽）装饰程度合不合适？
+3. 状态色新增（红 / 青 / 灰 x2）是否引入？
+4. 背景 grid（8% alpha 24px）做不做？or 只做顶角点阵？
+5. 顶部 StatusBar（24px 高）v1.1 必做还是 v1.2？
+6. KPI 大数字 + 强发光放首页 / 合并管理 / 两者？
+7. scanline 关闭（v1 接受不开）？
+8. 数字滚动 / 状态点呼吸 v1.1 做还是 v1.2？
+
+### 拍板后的落地路径
+
+- ✅ 通过 → 写 `docs/design/wireframe/theme-tech.html` 验证（已包含）→ Phase 1 改 `src/renderer/styles/theme.css` + `hud-decor.css`
+- ⏸ 暂缓 → `tech-refine.md` 留作 reference，落地推迟到 v1.2
+- ❌ 拒绝 → 回 v1 现状（卡片 12px / 按钮 8px / 标签 12px），OVERRIDE 本节标注"已撤回"
+
+---
+
 ## Skill 来源声明
 
 本项目的 UI/UX 决策参考了：
 - `.codex/skills/ui-ux-pro-max/SKILL.md` — 全套设计系统 + UX 规则（取其通用专业规则）
 - gitea 官方 UI 色板（#609926 / #f76707）—— 项目生态一致性
-- 用户明确决策（2026-06-10）：Electron + TS，对非技术用户友好，**v1 单主题暗色**
+- ui-ux-pro-max `style.domain` 的 **HUD / Sci-Fi FUI** + **Dark Mode (OLED)** 两条线（v1.1 科技感精修）
+- 用户明确决策（2026-06-10）：Electron + TS，对非技术用户友好，**v1 单主题暗色**（**v1.1.2 2026-06-12 推翻为 3 主题切换**）
+- 用户明确决策（2026-06-12）：暗色主题强化"技术工具的科技感"——v1.1 拍板 ✅（A 暗提饱和 + 主文字 #C5D4DD + HUD 装饰 + mono 字体场景化）
+- 用户明确决策（2026-06-12）：**v1.1.2 推翻 v1 单主题暗色 → 3 主题切换**（A 暗默认 / C 暗 / Light），持久化走 sqlite，IPC 端点扩 2 个（`preferences.theme.get` / `set`）
 
 ## 何时回看本文件
 
 - 任何前端开发任务开工前 → 必读本 OVERRIDE
 - 任何 UI 风格 / 配色 / 字体变更 → 必须先改本文件再改实现
 - 任何术语翻译表变更 → 必须同步本文件
+- 任何主题精修 / HUD 装饰 / 科技感 token 变更 → 必读 `design-system/pages/tech-refine.md`
 - 字体三件套（Inter + JetBrains Mono + Noto Sans SC）默认从 Google Fonts CDN 载入；wireframe 用 `<link rel="stylesheet" href="...Inter:wght@400;500;600;700&family=JetBrains+Mono...&family=Noto+Sans+SC...">`；实现期（Electron）需考虑离线场景 → v1 把三套字体内置到 `resources/fonts/`，不走 CDN；启动期异步加载，渲染进程阻塞 < 200ms

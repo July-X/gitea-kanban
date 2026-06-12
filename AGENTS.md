@@ -333,7 +333,7 @@ gitea-kanban/
 | **设计原则（零术语 / 二次确认 / 错误人话）** | `docs/design/02-architecture.md` §2.7 + §7.3 + `design-system/gitea-kanban/OVERRIDE.md` | UI 文案 + 危险操作清单 |
 | **IPC 端点清单** | `docs/design/02-architecture.md` §5.3（**8 个 namespace × 多 method**：repos / branches / commits / pulls / board.columns / issues / labels / auth） | 仓库 / 分支 / commit / PR / 看板列 / 卡片(=gitea issue) / 标签 / 鉴权 / 偏好 / 事件 |
 | **端点命名约定** | `<namespace>.<method>`（`repos.list` / `board.columns.list` / `issues.list` / `auth.connect`） | 由 02-architecture §5.1 落定；**前端 agent 假设的 `资源:动作` 风格已被 02 §5.1 覆盖**；**卡片端点从 `board.cards.*` reset 为 `issues.*`**（ADR-0002 2026-06-11） |
-| **设计系统 token** | `design-system/gitea-kanban/OVERRIDE.md`（**先读 OVERRIDE**，未覆盖字段才回 MASTER） | 主色 `#609926` / 强调 `#f76707` / **v1 单主题暗色（不提供切换）** |
+| **设计系统 token** | `design-system/gitea-kanban/OVERRIDE.md`（**先读 OVERRIDE**，未覆盖字段才回 MASTER）+ `design-system/pages/tech-refine.md`（v1.1 科技感精修 + v1.1.2 主题切换） | 主色 `#609926` / 强调 `#f76707` / **v1.1.2 推翻 v1 → 3 主题切换**（A 暗 `#0E3A52` / C 暗 `#0F1115` / Light `#E8F1F5`，默认 A 暗）|
 
 ---
 
@@ -416,11 +416,12 @@ gitea-kanban/
    - **测试**：React Testing Library → **`@vue/test-utils` + `@testing-library/vue`**
    - **CSS / 构建 / 数据校验**：保持不变（CSS Modules + Vite + Zod）
    - 任何 agent 开工时看到本节 + 02-architecture §2.2 + 03-frontend §2 + 03-frontend §6 + package.json 的 deps 已统一是 Vue 栈；如遇到历史 commit / 旧文档 / 调研报告残留的 "React" / "Zustand" / "Radix UI" 字样，**一律以本节 + package.json 实际安装的依赖为准**——这是用户拍板过的，不属于"自决"边界。
-3. **主题策略 v3 → v4 → v5 修正（2026-06-10）**：
+3. **主题策略 v3 → v4 → v5 → v1.1.2 修正（2026-06-10 / 2026-06-12）**：
    - v3 草稿（frontend-design attempt=1）曾定"默认暗色 + 不提供切换"
    - v4（attempt=2）按 OVERRIDE 改回"默认浅色 + 暗色可切"
    - **v5（2026-06-10 12:12 用户拍板）**：**v1 单主题暗色、不提供切换**——以 `design-system/gitea-kanban/OVERRIDE.md` §"覆盖决策"表 "背景" 行为准
-   - 三次反复的教训：M0 启动前**任何主题策略变更必须经过用户拍板**，worker 不准自由发挥
+   - **v1.1.2（2026-06-12 15:25 用户拍板推翻 v5）**：**3 主题切换**（A 暗 `#0E3A52` 默认 / C 暗 `#0F1115` / Light `#E8F1F5`），持久化走 sqlite，IPC 端点扩 2 个（`preferences.theme.get` / `set`），切换入口 3 处（StatusBar cycle / Settings 外观 / 命令面板 ⌘K）。完整 token 矩阵 + 切换 UX + IPC 契约 + 落地任务拆分见 `design-system/pages/tech-refine.md` §14-§16
+   - 四次反复的教训：M0 启动前**任何主题策略变更必须经过用户拍板**，worker 不准自由发挥；v5 的"单主题暗色不切换"是**过度收口**（"非技术用户友好不靠浅色"），v1.1.2 重新放开
 
 ### 8.2 端到端鉴权铁律（用户决策 #3）
 
