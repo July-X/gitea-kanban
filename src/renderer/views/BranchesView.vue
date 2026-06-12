@@ -438,19 +438,26 @@ function onPageNext(): void {
 }
 
 /**
- * 行内展开/折叠（v1.1.3 · task #23 改）
- * - 首次展开：异步调 commits.get 拿 files（已含 functions 解析）
- * - 收起：直接关掉
- * - 二次展开：读缓存（5 min TTL main 端 setCommitsCache —— 即使重复查也走 LRU）
+ * 行内展开/折叠 —— v1.1.3 · task #30 改手风琴
+ *
+ * 历史（task #23 起）：首次展开走 commits.get 拿 files + functions；
+ *   二次展开读 commitDetails Map 缓存；收起不删缓存。
+ * 现在（task #30）：手风琴语义 —— 任意点击都"全清再开"。
+ *   - 点开着的 → 折叠（commitsExpanded = new Set()）
+ *   - 点没开着的 → fetch 后 commitsExpanded = new Set([sha])（其他已开的被自动关掉）
+ *
+ * 缓存策略零变化：commitDetails 只在 fetch 成功时增（line 463 风格的 detailsNext.set），
+ *   收起**不删**；二次展开走 if (!commitDetails.value.has(sha)) 的 false 分支跳过 fetch。
+ *   切分支时（line 412 附近 watcher）整张 Map 清空，跨分支不污染。
  */
 async function toggleCommitExpand(sha: string): Promise<void> {
-  const next = new Set(commitsExpanded.value);
-  if (next.has(sha)) {
-    next.delete(sha);
-    commitsExpanded.value = next;
-    return;
+  // 手风琴：点开着的 → 关；点没开着的 → fetch 后只开这一条（自动关其他）
+  const willOpen = !commitsExpanded.value.has(sha);
+  if (!willOpen) {
+    commitsExpanded.value = new Set();
+    return; // 收起 —— 缓存保留，不再删 commitDetails
   }
-  // 首次展开：取 detail
+  // 首次展开：取 detail（命中缓存则跳过 fetch）
   if (!commitDetails.value.has(sha)) {
     const pid = activeProjectId.value;
     if (!pid) return;
@@ -477,8 +484,8 @@ async function toggleCommitExpand(sha: string): Promise<void> {
     loadingDone.delete(sha);
     loadingCommitDetails.value = loadingDone;
   }
-  next.add(sha);
-  commitsExpanded.value = next;
+  // 手风琴：清空所有已展开的，只开当前这一条
+  commitsExpanded.value = new Set([sha]);
 }
 
 // ============== v1.1.3 · task #23 · 文件清单统计 helpers ==============
@@ -760,6 +767,7 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
                   type="button"
                   class="branch-commit-row__head"
                   :aria-expanded="commitsExpanded.has(c.sha)"
+                  :aria-controls="`commit-detail-${c.sha}`"
                   @click="toggleCommitExpand(c.sha)"
                 >
                   <span
@@ -789,78 +797,93 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
                     · {{ relativeTime(c.date) }}
                   </span>
                 </button>
-                <div v-if="commitsExpanded.has(c.sha)" class="branch-commit-row__detail">
-                  <pre class="branch-commit-row__fullmsg">{{ c.message }}</pre>
-                  <!-- v1.1.3 · task #23 · 单条 commit 详情：文件清单（展开时按需拉） -->
+                <Transition name="branch-commit-row" appear>
                   <div
-                    v-if="commitDetails.get(c.sha)?.files"
-                    class="branch-commit-row__files"
+                    v-if="commitsExpanded.has(c.sha)"
+                    :id="`commit-detail-${c.sha}`"
+                    class="branch-commit-row__detail"
                   >
-                    <p class="branch-commit-row__files-summary">
-                      共修改 {{ commitDetails.get(c.sha).files.length }} 个文件<span
-                        v-if="filesHasNonBinary(commitDetails.get(c.sha).files)"
-                      >，包含 <span class="branch-commit-row__files-add">+{{ totalAdditions(commitDetails.get(c.sha).files) }}</span> 行新增 和 <span class="branch-commit-row__files-del">-{{ totalDeletions(commitDetails.get(c.sha).files) }}</span> 行删除</span>
-                    </p>
-                    <ul class="branch-commit-row__files-list">
-                      <li
-                        v-for="f in commitDetails.get(c.sha).files"
-                        :key="(f.previousFilename ?? f.filename) + '|' + (f.status ?? '')"
-                        class="branch-commit-row__file"
-                        :class="{ 'branch-commit-row__file--binary': f.binary }"
+                    <!--
+                      v1.1.3 · task #30 · detail-body 内部可滚容器
+                      - 父 li 有 overflow:hidden 防止圆角溢出 → 长内容会被裁
+                      - 这里给 detail-body max-height + overflow-y:auto 让长 commit（30+ 文件）完整可达
+                      - 关联卡片 / 文件清单都进 body 参与滚动；actions 区留在外面 → 永远可见
+                    -->
+                    <div class="branch-commit-row__detail-body">
+                      <pre class="branch-commit-row__fullmsg">{{ c.message }}</pre>
+                      <!-- v1.1.3 · task #23 · 单条 commit 详情：文件清单（展开时按需拉） -->
+                      <div
+                        v-if="commitDetails.get(c.sha)?.files"
+                        class="branch-commit-row__files"
                       >
-                        <span class="branch-commit-row__file-name" :title="f.filename">
-                          <span v-if="f.status === 'renamed' && f.previousFilename" class="branch-commit-row__file-rename">
-                            {{ f.previousFilename }} → {{ f.filename }}
-                          </span>
-                          <span v-else>{{ f.filename }}</span>
-                        </span>
-                        <span v-if="!f.binary" class="branch-commit-row__file-stats">
-                          <span class="branch-commit-row__files-add">+{{ f.additions ?? 0 }}</span>
-                          <span class="branch-commit-row__files-del">-{{ f.deletions ?? 0 }}</span>
-                        </span>
-                        <span v-else class="branch-commit-row__file-tag">二进制</span>
-                        <span
-                          v-if="f.functions && f.functions.length"
-                          class="branch-commit-row__file-funcs"
-                        >
-                          <span
-                            v-for="fn in f.functions"
-                            :key="fn"
-                            class="branch-commit-row__file-func"
-                            :title="fn"
-                          >{{ fn }}</span>
-                        </span>
-                      </li>
-                    </ul>
+                        <p class="branch-commit-row__files-summary">
+                          共修改 {{ commitDetails.get(c.sha).files.length }} 个文件<span
+                            v-if="filesHasNonBinary(commitDetails.get(c.sha).files)"
+                          >，包含 <span class="branch-commit-row__files-add">+{{ totalAdditions(commitDetails.get(c.sha).files) }}</span> 行新增 和 <span class="branch-commit-row__files-del">-{{ totalDeletions(commitDetails.get(c.sha).files) }}</span> 行删除</span>
+                        </p>
+                        <ul class="branch-commit-row__files-list">
+                          <li
+                            v-for="f in commitDetails.get(c.sha).files"
+                            :key="(f.previousFilename ?? f.filename) + '|' + (f.status ?? '')"
+                            class="branch-commit-row__file"
+                            :class="{ 'branch-commit-row__file--binary': f.binary }"
+                          >
+                            <span class="branch-commit-row__file-name" :title="f.filename">
+                              <span v-if="f.status === 'renamed' && f.previousFilename" class="branch-commit-row__file-rename">
+                                {{ f.previousFilename }} → {{ f.filename }}
+                              </span>
+                              <span v-else>{{ f.filename }}</span>
+                            </span>
+                            <span v-if="!f.binary" class="branch-commit-row__file-stats">
+                              <span class="branch-commit-row__files-add">+{{ f.additions ?? 0 }}</span>
+                              <span class="branch-commit-row__files-del">-{{ f.deletions ?? 0 }}</span>
+                            </span>
+                            <span v-else class="branch-commit-row__file-tag">二进制</span>
+                            <span
+                              v-if="f.functions && f.functions.length"
+                              class="branch-commit-row__file-funcs"
+                            >
+                              <span
+                                v-for="fn in f.functions"
+                                :key="fn"
+                                class="branch-commit-row__file-func"
+                                :title="fn"
+                              >{{ fn }}</span>
+                            </span>
+                          </li>
+                        </ul>
+                      </div>
+                      <p
+                        v-else-if="loadingCommitDetails.has(c.sha)"
+                        class="branch-commit-row__files-loading muted text-xs"
+                      >正在加载文件清单…</p>
+                      <p v-if="c.linkedCards && c.linkedCards.length" class="branch-commit-row__cards muted text-xs">
+                        关联卡片：{{ c.linkedCards.map((lc) => lc.columnName).join('、') }}
+                      </p>
+                    </div>
+                    <!-- actions 区留在 detail-body 外 —— 永远可见，固定在 detail 底部 -->
+                    <div class="branch-commit-row__actions">
+                      <button
+                        type="button"
+                        class="branches__chip"
+                        :title="`复制完整提交号 ${c.sha}`"
+                        @click="onCopyCommitHash(c, $event)"
+                      >
+                        <Clipboard :size="13" :stroke-width="2" aria-hidden="true" />
+                        <span>复制完整提交号</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="branches__chip"
+                        :title="`在 gitea 打开此提交 ${c.shortSha}`"
+                        @click="onOpenCommitInGitea(c, $event)"
+                      >
+                        <ExternalLink :size="13" :stroke-width="2" aria-hidden="true" />
+                        <span>在 gitea 打开</span>
+                      </button>
+                    </div>
                   </div>
-                  <p
-                    v-else-if="loadingCommitDetails.has(c.sha)"
-                    class="branch-commit-row__files-loading muted text-xs"
-                  >正在加载文件清单…</p>
-                  <p v-if="c.linkedCards && c.linkedCards.length" class="branch-commit-row__cards muted text-xs">
-                    关联卡片：{{ c.linkedCards.map((lc) => lc.columnName).join('、') }}
-                  </p>
-                  <div class="branch-commit-row__actions">
-                    <button
-                      type="button"
-                      class="branches__chip"
-                      :title="`复制完整提交号 ${c.sha}`"
-                      @click="onCopyCommitHash(c, $event)"
-                    >
-                      <Clipboard :size="13" :stroke-width="2" aria-hidden="true" />
-                      <span>复制完整提交号</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="branches__chip"
-                      :title="`在 gitea 打开此提交 ${c.shortSha}`"
-                      @click="onOpenCommitInGitea(c, $event)"
-                    >
-                      <ExternalLink :size="13" :stroke-width="2" aria-hidden="true" />
-                      <span>在 gitea 打开</span>
-                    </button>
-                  </div>
-                </div>
+                </Transition>
               </li>
             </ul>
 
@@ -1555,6 +1578,56 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   padding: 10px 12px 12px;
   border-top: 1px solid var(--color-divider);
   background: var(--color-bg-elevated);
+}
+
+/*
+ * v1.1.3 · task #30 · detail 内部可滚容器
+ * - 父 li（.branch-commit-row）有 overflow:hidden 防止圆角溢出
+ *   → 长内容会被裁，所以 detail 内部必须自带可滚容器
+ * - max-height 用 cqh 容器查询，60vh 兜底
+ * - overscroll-behavior:contain 让长内容滚到底时不滚外层 commits list
+ * - scrollbar-gutter:stable 滚动条出现时不抖动
+ */
+.branch-commit-row__detail-body {
+  max-height: 60vh;
+  max-height: 60cqh; /* container query 优先（外层 flex 列布局时 cqh 更准） */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/*
+ * v1.1.3 · task #30 · 手风琴展开过渡
+ * 用 grid-template-rows 0fr ↔ 1fr 技巧做 height 过渡（CSS 纯 native，无 JS 测量）
+ * 兼容性：Chromium 117+ / Edge 117+ / Safari 17.4+ —— 项目锁 Electron ≥ Chromium 120
+ *
+ * 不用 transition: max-height 0→9999px 的原因：过渡时长会按 9999px 走，
+ * 用户感觉"等 1s 还没展开完"。grid-rows 0fr→1fr 走的是实际内容高度，
+ * 过渡时长匹配 --t-base。
+ */
+.branch-commit-row-enter-active,
+.branch-commit-row-leave-active {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition:
+    opacity var(--t-base) var(--ease),
+    grid-template-rows var(--t-base) var(--ease);
+}
+.branch-commit-row-enter-from,
+.branch-commit-row-leave-to {
+  opacity: 0;
+  grid-template-rows: 0fr;
+}
+.branch-commit-row-enter-to,
+.branch-commit-row-leave-from {
+  opacity: 1;
+  grid-template-rows: 1fr;
+}
+/* grid 子项必须 min-height:0 + overflow:hidden 配合 0fr→1fr 真正裁出高度 */
+.branch-commit-row-enter-active > .branch-commit-row__detail,
+.branch-commit-row-leave-active > .branch-commit-row__detail {
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* 行内短 hash 单独可点击复制（inline 按钮 · 跟 meta 一行 · hover 提示 + focus ring） */
