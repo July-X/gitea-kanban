@@ -4,7 +4,8 @@
  * 契约：docs/adr/0002-board-data-source-reset.md §"IPC端点"
  *
  * endpoint清单：
- * - GET /repos/{owner}/{repo}/issues?state=&labels=&page=&limit= → list
+ * - GET /repos/{owner}/{repo}/issues?state=&labels=&assigned_by=&q=&page=&limit= → list
+ *   （a1 扩展：assigned_by 透传 assignee 过滤；看板"我的卡片"用）
  * - GET /repos/{owner}/{repo}/issues/{index} → get
  * - POST /repos/{owner}/{repo}/issues → create
  * - PATCH /repos/{owner}/{repo}/issues/{index} → edit
@@ -66,6 +67,13 @@ function labelToDto(l: Label): { id: number; name: string; color: string; descri
  *
  * @param labelIds 逗号分隔的 label id列表（gitea端 OR关系：fetch issues that have any of these labels）
  * 业务侧调用：列绑了哪些 label → 列出带这些 label 的 issue
+ * @param assignee 可选 gitea username（'me' 写法**不**支持——gitea 端不识别 magic string）。
+ *   业务层（IPC handler / store）拿到 'me' 后必须先 resolve 成当前连接 username 再传进来。
+ *   不传 = 走原行为（不过滤 assignee，向后兼容）。
+ *
+ *   gitea 端映射：透传到 `assigned_by` query 参数
+ *   （gitea-js swagger "Only show items for which the given user is assigned"）。
+ *   注：gitea 不支持"未指派"过滤（v1 简化：业务层拿到空列表时再前端过滤）。
  */
 export async function listGiteaIssues(args: {
   giteaUrl: string;
@@ -74,6 +82,7 @@ export async function listGiteaIssues(args: {
   repo: string;
   state?: IssueState;
   labelIds?: string[]; // 列绑的 label id列表
+  assignee?: string;   // gitea username；不传 = 不过滤（向后兼容）
   q?: string;
   page?: number;
   limit?: number;
@@ -85,6 +94,9 @@ export async function listGiteaIssues(args: {
   const res = await api.repos.issueListIssues(args.owner, args.repo, {
     ...(args.state !== undefined ? { state: args.state } : {}),
     ...(args.labelIds && args.labelIds.length > 0 ? { labels: args.labelIds.join(',') } : {}),
+    ...(args.assignee !== undefined && args.assignee.length > 0
+      ? { assigned_by: args.assignee }
+      : {}),
     ...(args.q !== undefined ? { q: args.q } : {}),
     type: 'issues', //排除 PR（gitea /issues 也会列 PR；看板只看纯 issue）
     page,

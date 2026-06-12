@@ -4,6 +4,8 @@
  * 契约：02-architecture.md §5.3.1 + §6.2
  * 职责：
  * - 调 gitea /user/repos
+ * - 调 gitea /repos/{owner}/{repo}/collaborators + /collaborators/{user}/permission
+ *   （a1 扩展：Members view 拉仓库成员用；DTO 走 CollaboratorDto）
  * - 把 gitea-js Repository → RepoDTO
  * - 错误统一抛 IpcError（client.ts 的 unwrapGitea 已映射 HTTP code）
  *
@@ -14,9 +16,10 @@
  *
  * 历史（ADR-0002）：
  * - 从 openapi-fetch + 手写 GiteaRepoRaw改成 gitea-js 的 Repository 类型
+ * - a1（2026-06-12）：新增 listRepoCollaborators + CollaboratorDto
  */
 
-import type { Repository } from 'gitea-js';
+import type { Repository, User } from 'gitea-js';
 import { getGiteaClient, unwrapGitea } from './client.js';
 import type { RepoDto } from '../ipc/schema.js';
 
@@ -98,4 +101,128 @@ function rawToRepoDto(r: Repository): RepoDto {
     },
     isProject: false, // 由 cache/repos.ts 的 JOIN 覆盖
   };
+}
+
+// ============================================================
+// ===== 仓库成员（collaborators）—— a1 新增 =====================
+// ============================================================
+
+/**
+ * 仓库成员 DTO（Members view 用）
+ *
+ * 字段来源：
+ * - username / avatarUrl ← gitea-js User（来自 /repos/{owner}/{repo}/collaborators）
+ * - permission           ← gitea RepoCollaboratorPermission（来自 per-user /permission 端点）
+ *                          'unknown' = 取权限失败（per-user 403 / 404 / 5xx 等降级）
+ *
+ * 历史（2026-06-12 a1）：
+ * - gitea /collaborators 列表端点**不**带 per-user permission（只列用户名）
+ * - per-user 权限走独立端点 /repos/{owner}/{repo}/collaborators/{user}/permission
+ * - v1 简化：parallel fetch，one user fail 不影响其它（try/catch per user）
+ * - 大仓库 N+1 风险 v2 评估（可考虑 gitea team API 或前端懒加载）
+ */
+export interface CollaboratorDto {
+  username: string;
+  avatarUrl?: string;
+  /**
+   * gitea 权限字符串：'read' | 'write' | 'admin' | 'owner'（gitea 自定义语义）。
+   * 'unknown' = 取权限失败（per-user 端点 403 / 404 / 5xx）；前端展示成"—"。
+   */
+  permission: string;
+}
+
+export interface ListGiteaCollaboratorsResult {
+  items: CollaboratorDto[];
+  hasMore: boolean;
+}
+
+/**
+ * 拉仓库成员列表（带 per-user 权限）
+ *
+ * endpoint 组合：
+ * - GET /repos/{owner}/{repo}/collaborators?page=&limit=  → User[]（只取 username / avatar）
+ * - GET /repos/{owner}/{repo}/collaborators/{user}/permission  → RepoCollaboratorPermission
+ *   （per-user，parallel；任一失败 → 该用户 permission = 'unknown'）
+ *
+ * 设计权衡（a1 §7.2 自决）：
+ * - 不用 N+1 走全部 pages：v1 假定单页（limit=50）足够覆盖大多数仓库
+ * - per-user 权限取失败不 throw：避免一个 user 403 把整个列表带崩
+ * - 整体抛错（401/403/404 等）走 unwrapGitea → IpcError
+ */
+export async function listRepoCollaborators(args: {
+  giteaUrl: string;
+  username: string;
+  owner: string;
+  repo: string;
+  page?: number;
+  limit?: number;
+}): Promise<ListGiteaCollaboratorsResult> {
+  const page = args.page ?? 1;
+  const limit = args.limit ?? 50;
+  const { api } = await getGiteaClient(args.giteaUrl, args.username);
+
+  // 1. 拉成员 user 列表
+  const res = await api.repos.repoListCollaborators(args.owner, args.repo, { page, limit });
+  const raws = unwrapGitea(res, `/repos/${args.owner}/${args.repo}/collaborators列表失败`);
+
+  if (raws.length === 0) {
+    return { items: [], hasMore: false };
+  }
+
+  // 2. per-user permission 并发拉（任一失败 → permission='unknown'）
+  const perms = await Promise.all(
+    raws.map((u) =>
+      api.repos.repoGetRepoPermissions(args.owner, args.repo, u.login ?? '').then(
+        (r) => ({ login: u.login ?? '', permResp: r }),
+        (err: unknown) => ({ login: u.login ?? '', permResp: null, err }),
+      ),
+    ),
+  );
+
+  const permByLogin = new Map<string, string>();
+  for (const p of perms) {
+    if (p.permResp && p.permResp.ok) {
+      // gitea RepoCollaboratorPermission: { permission?, role_name?, user? }
+      const perm = p.permResp.data?.permission;
+      permByLogin.set(p.login, perm ?? 'unknown');
+    } else if (p.permResp && !p.permResp.ok) {
+      // per-user 端点 4xx/5xx → 'unknown'（避免破坏整个列表）
+      // 注：v1 不打 pino 日志（避免在 gitea 层 import logger.ts → 拉链 electron，tsx 跑不通）
+      // 大仓库降级常见，前端展示 "—" 即可，调试用 console 即可
+      if (process.env['DEBUG_COLLAB_PERM']) {
+        // eslint-disable-next-line no-console
+        console.debug(
+          `[repos] collaborator permission 降级: ${args.owner}/${args.repo} user=${p.login} status=${p.permResp.status}`,
+        );
+      }
+      permByLogin.set(p.login, 'unknown');
+    } else if (p.permResp === null) {
+      // 网络错 / 抛错（Promise.all 第二个参数 rejected 分支）
+      // Cycle 2 retry fix：原 WIP 写法 `const errInfo = 'err' in p ? p.err : undefined;`
+      // 触发 `error TS2339: Property 'err' does not exist on type ...`
+      // （TS 对带 `err?: unknown` 字段的 union 不做 `in` narrowing；详见
+      //  plan_32018da5/notes/cycle-1-decision.md §P0-3 + AGENTS §8 待补）
+      //
+      // 改 type assertion（cycle-1-decision.md 推荐方案 a）：改动小、向后兼容
+      const errInfo = (p as { err?: unknown }).err;
+      if (process.env['DEBUG_COLLAB_PERM']) {
+        // eslint-disable-next-line no-console
+        console.debug(
+          `[repos] collaborator permission fetch threw: ${args.owner}/${args.repo} user=${p.login} err=${String(errInfo)}`,
+        );
+      }
+      permByLogin.set(p.login, 'unknown');
+    }
+  }
+
+  const items: CollaboratorDto[] = raws.map((u: User) => {
+    const username = u.login ?? '<unknown>';
+    return {
+      username,
+      ...(u.avatar_url ? { avatarUrl: u.avatar_url } : {}),
+      permission: permByLogin.get(username) ?? 'unknown',
+    };
+  });
+
+  return { items, hasMore: raws.length === limit };
 }

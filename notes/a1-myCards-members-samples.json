@@ -1,0 +1,26 @@
+{
+  "assigneeFiltered": [
+    {
+      "number": 13,
+      "title": "e2e-card-20260611122917",
+      "state": "closed",
+      "isPullRequest": false
+    }
+  ],
+  "allIssues": {
+    "count": 11,
+    "hasMore": false
+  },
+  "collaborators": [
+    {
+      "username": "kanban_bot",
+      "avatarUrl": "http://127.0.0.1:3000/avatars/2835a86b80ad0954d2f5ea0942eba30e",
+      "permission": "owner"
+    }
+  ],
+  "meCollaborator": {
+    "username": "kanban_bot",
+    "avatarUrl": "http://127.0.0.1:3000/avatars/2835a86b80ad0954d2f5ea0942eba30e",
+    "permission": "owner"
+  }
+}
