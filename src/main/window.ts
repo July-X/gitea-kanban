@@ -16,6 +16,14 @@ import { logger } from './logger.js';
 
 const isDev = !app.isPackaged;
 
+// === dev only：远程调试端口 + 跨域 allowlist ===
+// AGENTS §4.7 安全边界：仅 dev 启用；prod 严禁（任意 JS 注入风险）。
+// 用途：chrome-devtools-mcp 用 --browser-url=http://127.0.0.1:9492 attach Renderer 调试
+if (isDev) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9492');
+  app.commandLine.appendSwitch('remote-allow-origins', '*');
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 export function getMainWindow(): BrowserWindow | null {
@@ -62,8 +70,20 @@ export function installCspHeader(giteaUrl: string | null = null): void {
 
   // 如果之前注册过 listener，先摘掉（重装支持 giteaUrl 变化）
   if (cspListener) {
-    // Electron 41 把 removeListener 改名为 off()；先 off 再重新 onHeadersReceived
-    (session.defaultSession.webRequest.onHeadersReceived as unknown as { off: (l: unknown) => void }).off(cspListener);
+    // Electron webRequest API：Node EventEmitter 用 removeListener()；
+    // Electron 41 webRequest 不暴露 .off()（曾误用报 TypeError → uncaughtException）。
+    // 兜底：优先 removeListener，fallback to off() 以兼容未来改名。
+    const wr = session.defaultSession.webRequest.onHeadersReceived as unknown as {
+      removeListener?: (l: unknown) => void;
+      off?: (l: unknown) => void;
+    };
+    if (typeof wr.removeListener === 'function') {
+      wr.removeListener(cspListener);
+    } else if (typeof wr.off === 'function') {
+      wr.off(cspListener);
+    } else {
+      logger.warn('CSP listener: cannot remove previous (no removeListener/off); skipping reinstall');
+    }
   }
 
   cspListener = (details, cb) => {
@@ -96,9 +116,11 @@ export function createMainWindow(): BrowserWindow {
     title: 'gitea-kanban',
     webPreferences: {
       // === 安全铁律（AGENTS.md §4.7） ===
+      // contextIsolation / nodeIntegration 始终写死；sandbox 仅 prod 启用
+      // （dev 模式 macOS 没签名 sandbox 启动会报 "Operation not permitted" → GPU/network 链式 crash）
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: !isDev,
       // preload 脚本（IPC bridge 唯一通道）
       // 产物名 `.cjs` —— 配合 electron.vite.config.ts 的 `output.format: 'cjs'`
       // sandboxed preload 必须 CJS bundle（V8 加载 .mjs 强制 module 模式，

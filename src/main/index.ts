@@ -30,8 +30,31 @@ if (!app.isPackaged && process.env['GITEA_KANBAN_DISABLE_REMOTE_DEBUG'] !== '1')
   logger.info({ port: 9492 }, 'electron remote debugging enabled (dev only)');
 }
 
+// ===== 0b. dev only 禁用 Chromium 子进程 sandbox =====
+// 2026-06-12 修复：macOS dev 模式没签名 sandbox helper process 启动会报
+//   "Failed to initialize sandbox: Operation not permitted"
+// → GPU/network service chain crash → Electron 主进程死
+// dev 临时关掉（AGENTS §4.7 安全边界：prod 必须 sandbox: true）
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch('no-sandbox');
+  logger.info('chromium sandbox disabled (dev only)');
+}
+
+// ===== 0c. dev only 改 userData 目录 =====
+// 2026-06-12 修复：Electron 在 macOS userData 路径
+//   ~/Library/Application Support/gitea-kanban/ 在 SIP / TCC 受限
+// DevToolsActivePort / SingletonLock / Cache 等写不进去 → Electron 退出
+// dev 临时改到 /tmp/gitea-kanban-dev（prod 不动：仍走 macOS 标准 userData）
+if (!app.isPackaged) {
+  app.setPath('userData', '/tmp/gitea-kanban-dev');
+  logger.info('userData moved to /tmp/gitea-kanban-dev (dev only)');
+}
+
 // ===== 1. 单实例锁（必须在 app.whenReady 之前） =====
-const gotLock = app.requestSingleInstanceLock({
+// dev 模式跳过单实例锁（dev 启动频繁 + Electron 41 在 macOS sandbox 限制 userData
+// 写入导致 SingletonLock 创建失败 → 直接退出；prod 必须保留）
+const skipSingleton = !app.isPackaged && process.env['GITEA_KANBAN_SKIP_SINGLETON'] !== '0';
+const gotLock = skipSingleton ? true : app.requestSingleInstanceLock({
   name: APP_SINGLE_INSTANCE_LOCK_NAME,
   appName: APP_NAME,
 });
@@ -52,21 +75,26 @@ app.on('second-instance', () => {
 // ===== 2. 生命周期 =====
 app.on('ready', async () => {
   try {
+    logger.info('app ready (before upgradeLoggerToFile)');
     upgradeLoggerToFile();
     logger.info({ version: app.getVersion(), isPackaged: app.isPackaged }, 'app ready');
 
-    // 2a. 初始化 sqlite（创建 $GITEA_KANBAN_DATA_DIR/kanban.db 或 ~/.gitea-kanban/kanban.db + 跑迁移，详见 AGENTS §8.15）
+    // 2a. 初始化 sqlite
+    logger.info('initSqlite start');
     await initSqlite();
     logger.info('sqlite initialized');
 
     // 2b. 注册 IPC
+    logger.info('registerAllIpcHandlers start');
     registerAllIpcHandlers();
     logger.info('IPC handlers registered');
 
     // 2c. 创建主窗口
+    logger.info('createMainWindow start');
     createMainWindow();
+    logger.info('createMainWindow done');
   } catch (err) {
-    logger.fatal({ err }, 'failed during app ready');
+    logger.error({ err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined }, 'failed during app ready');
     app.quit();
   }
 });
@@ -91,11 +119,10 @@ app.on('before-quit', () => {
   closeSqlite();
 });
 
-// 未捕获异常 → 日志
+// 未捕获异常 → 静默兜底（不调 logger.fatal — logger 可能已坏：SonicBoom fd=-1 会循环 RangeError）
 process.on('uncaughtException', (err) => {
-  logger.fatal({ err }, 'uncaughtException');
-  // 不立刻退出；让 pino 落盘后由 OS 决定
+  void err;
 });
 process.on('unhandledRejection', (reason) => {
-  logger.fatal({ reason }, 'unhandledRejection');
+  void reason;
 });
