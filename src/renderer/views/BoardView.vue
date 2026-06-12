@@ -71,6 +71,15 @@ const confirmFinish = ref<{
  toColumnId: null,
 });
 const newIssueDrafts = ref<Record<string, string>>({});
+// v1.1: 列管理 state
+const showCreateColumn = ref(false);
+const newColumnTitle = ref('');
+const creatingColumn = ref(false);
+const showColumnMenu = ref<{ open: boolean; column: ColumnDto | null }>({ open: false, column: null });
+const editingColumnTitle = ref('');
+const confirmDeleteColumn = ref<{ open: boolean; column: ColumnDto | null }>({ open: false, column: null });
+const showBindLabel = ref(false);
+const bindingLabel = ref(false);
 
 /**过滤后的仓库列表（搜索框） */
 const filteredRepos = computed<RepoDto[]>(() => {
@@ -151,6 +160,67 @@ function openMoveMenu(issue: IssueCardDto, fromColumnId: string): void {
 /**关闭换列菜单 */
 function closeMoveMenu(): void {
  moveMenu.value = { open: false, issue: null, fromColumnId: null };
+}
+
+// v1.1: 列管理 actions
+function openCreateColumn(): void { showCreateColumn.value = true; newColumnTitle.value = ''; }
+function closeCreateColumn(): void { showCreateColumn.value = false; newColumnTitle.value = ''; }
+async function confirmCreateColumn(): Promise<void> {
+ const title = newColumnTitle.value.trim();
+ if (!title || !activeProjectId.value) return;
+ creatingColumn.value = true;
+ try {
+  await board.createColumn({ projectId: activeProjectId.value, title });
+  showToast({ type: 'success', message: '已新增列 ' + title });
+  closeCreateColumn();
+ } catch { /* board.error */ } finally { creatingColumn.value = false; }
+}
+function openColumnMenu(col: ColumnDto): void { showColumnMenu.value = { open: true, column: col }; editingColumnTitle.value = col.title; }
+function closeColumnMenu(): void { showColumnMenu.value = { open: false, column: null }; editingColumnTitle.value = ''; }
+async function confirmUpdateColumn(): Promise<void> {
+ const col = showColumnMenu.value.column;
+ if (!col) return;
+ const title = editingColumnTitle.value.trim();
+ if (!title || title === col.title) { closeColumnMenu(); return; }
+ try {
+  await board.updateColumn({ columnId: col.id, title });
+  showToast({ type: 'success', message: '列已改名为 ' + title });
+  closeColumnMenu();
+ } catch { /* board.error */ }
+}
+function requestDeleteColumn(): void {
+ const col = showColumnMenu.value.column;
+ if (!col) return;
+ closeColumnMenu();
+ confirmDeleteColumn.value = { open: true, column: col };
+}
+async function performDeleteColumn(): Promise<void> {
+ const col = confirmDeleteColumn.value.column;
+ if (!col) return;
+ confirmDeleteColumn.value = { open: false, column: null };
+ try {
+  await board.deleteColumn({ columnId: col.id });
+  showToast({ type: 'success', message: '列已删除' });
+ } catch { /* board.error */ }
+}
+function openBindLabelPicker(): void { showBindLabel.value = true; }
+function closeBindLabelPicker(): void { showBindLabel.value = false; }
+async function bindLabel(labelId: number, labelName: string): Promise<void> {
+ const col = showColumnMenu.value.column;
+ if (!col) return;
+ bindingLabel.value = true;
+ try {
+  await board.mapLabelToColumn({ columnId: col.id, giteaLabelId: labelId, giteaLabelName: labelName });
+  showToast({ type: 'success', message: '已绑标签 ' + labelName + ' 到列' });
+ } catch { /* board.error */ } finally { bindingLabel.value = false; }
+}
+async function unbindLabel(labelId: number): Promise<void> {
+ const col = showColumnMenu.value.column;
+ if (!col) return;
+ try {
+  await board.unmapLabelFromColumn({ columnId: col.id, giteaLabelId: labelId });
+  showToast({ type: 'success', message: '已解绑标签' });
+ } catch { /* board.error */ }
 }
 
 /** 选择目标列 → 判断是否需要二次确认 */
@@ -362,7 +432,7 @@ watch(
  <button
  type="button"
  class="board__add-col-btn"
- @click="board.columns.length ===0 && alert('请去设置页初始化看板列（v1.1补 UI）')"
+ @click="openCreateColumn"
  >
  <Plus :size="16" :stroke-width="2" />
  <span>新增列</span>
@@ -508,6 +578,116 @@ watch(
  />
 
  <!-- ==============拖到"已完成"列二次确认 ============== -->
+<!-- v1.1: 新增列弹窗 -->
+<Teleport to="body">
+<div v-if="showCreateColumn" class="modal-overlay" @click.self="closeCreateColumn">
+<div class="modal" role="dialog" aria-label="新增列">
+<header class="modal__header">
+<h2 class="modal__title">新增列</h2>
+<button type="button" class="modal__close" @click="closeCreateColumn">
+<X :size="16" :stroke-width="2" />
+</button>
+</header>
+<div class="modal__body">
+<label class="modal__label" for="new-col-title">列名</label>
+<input id="new-col-title" v-model="newColumnTitle" type="text" class="modal__input" placeholder="例如: 待办 / 进行中 / 已完成" :disabled="creatingColumn" maxlength="32" autofocus @keydown.enter="confirmCreateColumn" />
+<p class="modal__hint muted">列会按从左到右展示;之后可改列名、删除、或绑 gitea 仓库里的标签</p>
+</div>
+<footer class="modal__footer">
+<button type="button" class="modal__btn modal__btn--ghost" :disabled="creatingColumn" @click="closeCreateColumn">取消</button>
+<button type="button" class="modal__btn modal__btn--primary" :disabled="!newColumnTitle.trim() || creatingColumn" @click="confirmCreateColumn">
+  {{ creatingColumn ? '创建中...' : '新增列' }}
+</button>
+</footer>
+</div>
+</div>
+</Teleport>
+
+<!-- v1.1: 列设置弹窗 -->
+<Teleport to="body">
+<div v-if="showColumnMenu.open" class="modal-overlay" @click.self="closeColumnMenu">
+<div class="modal" role="dialog" :aria-label="'设置列 ' + (showColumnMenu.column && showColumnMenu.column.title)">
+<header class="modal__header">
+<h2 class="modal__title">设置列</h2>
+<button type="button" class="modal__close" @click="closeColumnMenu">
+<X :size="16" :stroke-width="2" />
+</button>
+</header>
+<div class="modal__body">
+<label class="modal__label" for="edit-col-title">列名</label>
+<input id="edit-col-title" v-model="editingColumnTitle" type="text" class="modal__input" maxlength="32" @keydown.enter="confirmUpdateColumn" />
+<div class="modal__sub">
+<p class="modal__sub-title">已绑定的标签</p>
+<div v-if="showColumnMenu.column && showColumnMenu.column.labels && showColumnMenu.column.labels.length" class="modal__chip-list">
+<span v-for="lab in showColumnMenu.column.labels" :key="lab.id" class="modal__chip" :style="{ '--label-color': lab.color || '#888' }">
+  <span class="modal__chip-dot" />
+  <span class="modal__chip-name">{{ lab.name }}</span>
+  <button type="button" class="modal__chip-rm" :title="'解绑 ' + lab.name" @click="unbindLabel(lab.id)">×</button>
+</span>
+</div>
+<p v-else class="muted modal__empty">还没绑标签</p>
+<button type="button" class="modal__btn modal__btn--ghost modal__btn--block" @click="openBindLabelPicker">+ 绑定 gitea 标签</button>
+</div>
+</div>
+<footer class="modal__footer">
+<button type="button" class="modal__btn modal__btn--danger" @click="requestDeleteColumn">
+  <Trash2 :size="14" :stroke-width="2" />
+  <span>删除此列</span>
+</button>
+<div class="modal__footer-right">
+  <button type="button" class="modal__btn modal__btn--ghost" @click="closeColumnMenu">取消</button>
+  <button type="button" class="modal__btn modal__btn--primary" :disabled="!editingColumnTitle.trim() || editingColumnTitle === (showColumnMenu.column && showColumnMenu.column.title)" @click="confirmUpdateColumn">
+    保存
+  </button>
+</div>
+</footer>
+</div>
+</div>
+</Teleport>
+
+<!-- v1.1: 绑 label picker -->
+<Teleport to="body">
+<div v-if="showBindLabel" class="modal-overlay" @click.self="closeBindLabelPicker">
+<div class="modal" role="dialog" aria-label="绑定标签">
+<header class="modal__header">
+<h2 class="modal__title">绑定标签到 {{ showColumnMenu.column ? showColumnMenu.column.title : '' }}</h2>
+<button type="button" class="modal__close" @click="closeBindLabelPicker">
+<X :size="16" :stroke-width="2" />
+</button>
+</header>
+<div class="modal__body">
+<p class="muted">gitea 仓库里所有标签都在这里;勾上 = 绑到当前列,议题带这个标签就会进此列</p>
+<ul class="modal__label-list">
+<li v-for="lab in board.labelsByProject" :key="lab.id">
+<button type="button" class="modal__label-item" :class="{ 'modal__label-item--bound': showColumnMenu.column && showColumnMenu.column.labels && showColumnMenu.column.labels.some((l) => l.id === lab.id) }" :disabled="bindingLabel" @click="bindLabel(lab.id, lab.name)">
+  <span class="modal__label-dot" :style="{ background: lab.color || '#888' }" />
+  <span class="modal__label-name">{{ lab.name }}</span>
+  <span v-if="showColumnMenu.column && showColumnMenu.column.labels && showColumnMenu.column.labels.some((l) => l.id === lab.id)" class="modal__label-state">已绑</span>
+  <span v-else class="modal__label-state modal__label-state--add">+ 绑</span>
+</button>
+</li>
+</ul>
+</div>
+<footer class="modal__footer">
+<button type="button" class="modal__btn modal__btn--ghost" @click="closeBindLabelPicker">关闭</button>
+</footer>
+</div>
+</div>
+</Teleport>
+
+<!-- v1.1: 删列二次确认 -->
+<ConfirmDialog
+ :open="confirmDeleteColumn.open"
+ :title="'删除列 ' + (confirmDeleteColumn.column ? confirmDeleteColumn.column.title : '')"
+ description="删除后无法恢复。如果列里有议题,它们不会消失,只是不再被这个看板列归类。"
+ confirm-label="我了解风险,仍要删除"
+ cancel-label="取消"
+ danger
+ confirm-keyword="删除"
+ @update:open="(v) => (confirmDeleteColumn.open = v)"
+ @confirm="performDeleteColumn"
+/>
+
  <ConfirmDialog
  :open="confirmFinish.open"
  title="标记为已完成？"
@@ -1080,4 +1260,58 @@ watch(
 }
 
 /* gitea label颜色 →背景/前景转换（OVERRIDE §"无障碍"颜色 +文字 双编码） */
+</style>
+
+<!-- v1.1 列管理 UI 样式（不 scoped：Teleport 到 body 后 data-v-xxx 失效） -->
+<style>
+.column__header { display:flex; align-items:flex-start; gap: var(--space-2); }
+.column__title-wrap { flex:1; min-width:0; }
+.column__settings-btn { flex-shrink:0; background:transparent; border:1px solid var(--color-divider); border-radius:var(--radius-sm); padding:4px 6px; color:var(--color-text-muted); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background var(--t-fast) var(--ease); }
+.column__settings-btn:hover { background:var(--color-bg-hover); color:var(--color-text); }
+.column__label-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 6px; background:var(--color-bg-hover); border:1px solid var(--label-color, #888); border-radius:var(--radius-sm); font-size:var(--font-xs); color:var(--color-text); }
+.column__label-dot { width:6px; height:6px; border-radius:50%; background:var(--label-color, #888); flex-shrink:0; }
+.column__label-name { line-height:1; }
+.column__label-unbind { background:transparent; border:0; color:var(--color-text-muted); font-size:var(--font-md); line-height:1; padding:0 2px; cursor:pointer; border-radius:var(--radius-sm); }
+.column__label-unbind:hover { color:var(--color-danger); background:var(--color-danger-soft); }
+.column__add-label-btn { background:transparent; border:1px dashed var(--color-divider); color:var(--color-text-muted); padding:2px 8px; border-radius:var(--radius-sm); font-size:var(--font-xs); cursor:pointer; }
+.column__add-label-btn:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index:1000; animation:fadeIn var(--t-base) var(--ease); }
+.modal { width:480px; max-width:calc(100vw - 32px); max-height:calc(100vh - 64px); background:var(--color-bg-elevated); border-radius:var(--radius-md); box-shadow:var(--shadow-lg); display:flex; flex-direction:column; overflow:hidden; animation:slideUp var(--t-base) var(--ease); }
+.modal__header { display:flex; align-items:center; justify-content:space-between; padding:var(--space-4); border-bottom:1px solid var(--color-divider); }
+.modal__title { font-size:var(--font-lg); font-weight:600; margin:0; }
+.modal__close { background:transparent; border:0; color:var(--color-text-muted); cursor:pointer; padding:4px; border-radius:var(--radius-sm); display:inline-flex; }
+.modal__close:hover { background:var(--color-bg-hover); color:var(--color-text); }
+.modal__body { padding:var(--space-4); overflow-y:auto; display:flex; flex-direction:column; gap:var(--space-3); }
+.modal__label { font-size:var(--font-sm); font-weight:500; color:var(--color-text-secondary); }
+.modal__input { width:100%; padding:8px 10px; background:var(--color-bg); border:1px solid var(--color-divider); border-radius:var(--radius-sm); color:var(--color-text); font-size:var(--font-md); font-family:inherit; box-sizing:border-box; }
+.modal__input:focus { outline:none; border-color:var(--color-primary); }
+.modal__input:disabled { opacity:0.5; cursor:not-allowed; }
+.modal__hint { font-size:var(--font-xs); margin:0; }
+.modal__sub { display:flex; flex-direction:column; gap:var(--space-2); }
+.modal__sub-title { font-size:var(--font-sm); font-weight:500; color:var(--color-text-secondary); margin:0; }
+.modal__empty { margin:0; }
+.modal__chip-list { display:flex; flex-wrap:wrap; gap:var(--space-1); }
+.modal__chip { display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 6px; background:var(--color-bg-hover); border:1px solid var(--label-color, #888); border-radius:var(--radius-sm); font-size:var(--font-xs); }
+.modal__chip-dot { width:6px; height:6px; border-radius:50%; background:var(--label-color, #888); }
+.modal__chip-rm { background:transparent; border:0; color:var(--color-text-muted); font-size:var(--font-md); line-height:1; padding:0 2px; cursor:pointer; border-radius:var(--radius-sm); }
+.modal__chip-rm:hover { color:var(--color-danger); background:var(--color-danger-soft); }
+.modal__label-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:var(--space-1); }
+.modal__label-item { display:flex; align-items:center; gap:var(--space-2); width:100%; padding:8px 10px; background:var(--color-bg); border:1px solid var(--color-divider); border-radius:var(--radius-sm); color:var(--color-text); cursor:pointer; text-align:left; font-family:inherit; font-size:var(--font-sm); transition:background var(--t-fast) var(--ease); }
+.modal__label-item:hover:not(:disabled) { background:var(--color-bg-hover); }
+.modal__label-item:disabled { opacity:0.5; cursor:not-allowed; }
+.modal__label-item--bound { opacity:0.7; }
+.modal__label-name { flex:1; }
+.modal__label-state { font-size:var(--font-xs); color:var(--color-text-muted); }
+.modal__label-state--add { color:var(--color-primary); }
+.modal__footer { display:flex; align-items:center; justify-content:space-between; padding:var(--space-3) var(--space-4); border-top:1px solid var(--color-divider); background:var(--color-bg); }
+.modal__footer-right { display:flex; gap:var(--space-2); }
+.modal__btn { display:inline-flex; align-items:center; gap:4px; padding:6px 12px; background:var(--color-bg-elevated); border:1px solid var(--color-divider); border-radius:var(--radius-sm); color:var(--color-text); font-size:var(--font-sm); cursor:pointer; font-family:inherit; transition:background var(--t-fast) var(--ease); }
+.modal__btn:hover:not(:disabled) { background:var(--color-bg-hover); }
+.modal__btn:disabled { opacity:0.5; cursor:not-allowed; }
+.modal__btn--primary { background:var(--color-primary); border-color:var(--color-primary); color:var(--color-text-inverse, #fff); }
+.modal__btn--primary:hover:not(:disabled) { filter:brightness(1.1); background:var(--color-primary); }
+.modal__btn--ghost { background:transparent; }
+.modal__btn--danger { background:var(--color-danger-soft); border-color:var(--color-danger); color:var(--color-danger); }
+.modal__btn--danger:hover:not(:disabled) { background:var(--color-danger); color:var(--color-text-inverse, #fff); }
+.modal__btn--block { width:100%; justify-content:center; }
 </style>

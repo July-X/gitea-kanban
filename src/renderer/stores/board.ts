@@ -18,16 +18,21 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
- boardColumnsList,
- issuesCreate,
- issuesList,
- issuesMoveColumn,
- issuesUpdate,
- labelsList,
+  boardColumnsCreate,
+  boardColumnsDelete,
+  boardColumnsList,
+  boardColumnsMapLabel,
+  boardColumnsUnmapLabel,
+  boardColumnsUpdate,
+  issuesCreate,
+  issuesList,
+  issuesMoveColumn,
+  issuesUpdate,
+  labelsList,
 } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type {
- ColumnDto,
+  ColumnDto,
  IssueCardDto,
  IssueLabelDto,
  ListIssuesResp,
@@ -330,34 +335,156 @@ export const useBoardStore = defineStore('board', () => {
  undoStack.value = undoStack.value.slice(0, -1);
  }
 
- function clearError(): void {
- error.value = null;
- }
+  function clearError(): void {
+  error.value = null;
+  }
 
- return {
- // state
- columns,
- issuesByColumn,
- labelsByProject,
- loading,
- loadingIssues,
- error,
- currentProjectId,
- undoStack,
- // getters
- totalIssues,
- issuesOf,
- findIssueColumnId,
- labelIdsOf,
- // actions
- loadBoard,
- refreshColumn,
- createIssue,
- moveIssue,
- closeIssue,
- pushUndo,
- canUndo,
- undoLastMove,
- clearError,
- };
+  // ============================================================
+  // ===== 列管理（v1.1 补：让 BoardView 真能建列 / 改列 / 删列 / 绑 label） =====
+  // ============================================================
+
+  /**
+   * 新建列
+   * 走 `board.columns.create` IPC（position 由后端 = max + POSITION_STEP 自动算）
+   * 成功后插入到 columns 头部（position 升序，新列位置最低在左）
+   * 失败抛 UserFacingError
+   */
+  async function createColumn(args: { projectId: string; title: string }): Promise<ColumnDto> {
+  error.value = null;
+  try {
+  const resp = await boardColumnsCreate({
+  projectId: args.projectId,
+  title: args.title,
+  position: 0, // 后端忽略（listColumns 按 position 升序 + createColumn 用 max + STEP）
+  });
+  const col = resp as ColumnDto;
+  // 追加到 columns 列表头部
+  columns.value = [col, ...columns.value];
+  // 给 issuesByColumn 加空数组
+  issuesByColumn.value = { ...issuesByColumn.value, [col.id]: [] };
+  return col;
+  } catch (e) {
+  error.value = e as UserFacingError;
+  throw e;
+  }
+  }
+
+  /**
+   * 改列名（v1.1：先只支持改名，reorder 走 v2 拖拽）
+   */
+  async function updateColumn(args: { columnId: string; title: string }): Promise<void> {
+  error.value = null;
+  try {
+  await boardColumnsUpdate({
+  columnId: args.columnId,
+  patch: { title: args.title },
+  });
+  // 同步本地
+  columns.value = columns.value.map((c) => (c.id === args.columnId ? { ...c, title: args.title } : c));
+  } catch (e) {
+  error.value = e as UserFacingError;
+  throw e;
+  }
+  }
+
+  /**
+   * 删列
+   * 二次确认由 UI 层（BoardView）触发
+   * 删完同步从 columns / issuesByColumn 移除
+   */
+  async function deleteColumn(args: { columnId: string }): Promise<void> {
+  error.value = null;
+  try {
+  await boardColumnsDelete({ columnId: args.columnId });
+  columns.value = columns.value.filter((c) => c.id !== args.columnId);
+  const next = { ...issuesByColumn.value };
+  delete next[args.columnId];
+  issuesByColumn.value = next;
+  } catch (e) {
+  error.value = e as UserFacingError;
+  throw e;
+  }
+  }
+
+  /**
+   * 绑 / 解绑 gitea label 到列
+   * mapLabel: column_label_mapping 插一行
+   * unmapLabel: 删一行
+   * 同步更新 columns[c].labels
+   *
+   * 注：后端 mapLabel 走 resolveColumn(args.columnId) 拿 projectId，不需要 caller 传
+   */
+  async function mapLabelToColumn(args: {
+  columnId: string;
+  giteaLabelId: number;
+  giteaLabelName: string;
+  }): Promise<void> {
+  error.value = null;
+  try {
+  await boardColumnsMapLabel({
+  columnId: args.columnId,
+  giteaLabelId: args.giteaLabelId,
+  giteaLabelName: args.giteaLabelName,
+  });
+  // 同步本地（push 标签 if not exists）
+  columns.value = columns.value.map((c) => {
+  if (c.id !== args.columnId) return c;
+  if (c.labels.some((l) => l.id === args.giteaLabelId)) return c;
+  return { ...c, labels: [...c.labels, { id: args.giteaLabelId, name: args.giteaLabelName, color: '' }] };
+  });
+  } catch (e) {
+  error.value = e as UserFacingError;
+  throw e;
+  }
+  }
+
+  async function unmapLabelFromColumn(args: { columnId: string; giteaLabelId: number }): Promise<void> {
+  error.value = null;
+  try {
+  await boardColumnsUnmapLabel({
+  columnId: args.columnId,
+  giteaLabelId: args.giteaLabelId,
+  });
+  columns.value = columns.value.map((c) =>
+  c.id === args.columnId
+  ? { ...c, labels: c.labels.filter((l) => l.id !== args.giteaLabelId) }
+  : c,
+  );
+  } catch (e) {
+  error.value = e as UserFacingError;
+  throw e;
+  }
+  }
+
+  return {
+  // state
+  columns,
+  issuesByColumn,
+  labelsByProject,
+  loading,
+  loadingIssues,
+  error,
+  currentProjectId,
+  undoStack,
+  // getters
+  totalIssues,
+  issuesOf,
+  findIssueColumnId,
+  labelIdsOf,
+  // actions
+  loadBoard,
+  refreshColumn,
+  createIssue,
+  moveIssue,
+  closeIssue,
+  pushUndo,
+  canUndo,
+  undoLastMove,
+  createColumn,
+  updateColumn,
+  deleteColumn,
+  mapLabelToColumn,
+  unmapLabelFromColumn,
+  clearError,
+  };
 });

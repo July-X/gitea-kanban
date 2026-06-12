@@ -197,6 +197,7 @@ export const useRepoStore = defineStore('repo', () => {
     repos,
     total,
     hasMore,
+    currentProject,
     currentProjectId,
     loading,
     error,

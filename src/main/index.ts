@@ -20,6 +20,16 @@ import { registerAllIpcHandlers, unregisterAllIpcHandlers } from './ipc/index.js
 import { initSqlite, closeSqlite } from './cache/sqlite.js';
 import { APP_NAME, APP_SINGLE_INSTANCE_LOCK_NAME } from '@shared/constants';
 
+// ===== 0. 启用 Electron 远程调试（仅 dev / unpackaged） =====
+// 监听端口：9492（与 chrome-devtools-mcp / debugger clients 通用约定）
+// 生产构建（packaged）默认不开，避免泄漏内部 Chromium DevTools。
+// 关掉方式：GITEA_KANBAN_DISABLE_REMOTE_DEBUG=1
+if (!app.isPackaged && process.env['GITEA_KANBAN_DISABLE_REMOTE_DEBUG'] !== '1') {
+  app.commandLine.appendSwitch('remote-debugging-port', '9492');
+  app.commandLine.appendSwitch('remote-allow-origins', '*');
+  logger.info({ port: 9492 }, 'electron remote debugging enabled (dev only)');
+}
+
 // ===== 1. 单实例锁（必须在 app.whenReady 之前） =====
 const gotLock = app.requestSingleInstanceLock({
   name: APP_SINGLE_INSTANCE_LOCK_NAME,
