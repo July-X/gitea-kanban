@@ -28,7 +28,7 @@
  * 历史（ADR-0002）：从 openapi-fetch +手写 raw类型改成 gitea-js PullRequest类型
  */
 
-import type { PullRequest } from 'gitea-js';
+import type { HttpResponse, PullRequest } from 'gitea-js';
 import { getGiteaClient, unwrapGitea } from './client.js';
 import type { PullDto, MergePrResult, PullState } from '../ipc/schema.js';
 
@@ -153,25 +153,47 @@ export async function mergeGiteaPull(args: {
 }): Promise<MergePrResult> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
 
-  const res = await api.repos.repoMergePullRequest(args.owner, args.repo, args.index, {
-    Do: args.method,
-    ...(args.deleteBranchAfter !== undefined ? { delete_branch_after_merge: args.deleteBranchAfter } : {}),
-    ...(args.commitMessage !== undefined ? { MergeMessageField: args.commitMessage } : {}),
-  });
-  // 合并成功时 gitea 通常 200 + 空 body；gitea-js res.data 是 void
-  // 走 ok 分支：返回基本成功标识
-  if (res.ok) {
+  try {
+    const res = await api.repos.repoMergePullRequest(args.owner, args.repo, args.index, {
+      Do: args.method,
+      ...(args.deleteBranchAfter !== undefined ? { delete_branch_after_merge: args.deleteBranchAfter } : {}),
+      ...(args.commitMessage !== undefined ? { MergeMessageField: args.commitMessage } : {}),
+    });
+    // 合并成功时 gitea 通常 200 + 空 body；gitea-js res.data 是 void
+    // 走 ok 分支：返回基本成功标识
+    if (res.ok) {
+      return {
+        sha: '',
+        merged: true,
+        message: 'merge success',
+      };
+    }
+    // 失败时 gitea-js res.data 也有内容，统一丢给 unwrapGitea 抛 IpcError
+    const raw = unwrapGitea(res, `合并 PR #${args.index}失败`) as { sha?: string; merged?: boolean; message?: string } | undefined;
     return {
-      sha: '',
-      merged: true,
-      message: 'merge success',
+      sha: raw?.sha ?? '',
+      merged: raw?.merged ?? true,
+      message: raw?.message ?? '',
     };
+  } catch (err) {
+    // gitea-js 1.23.0 在 fetch 层遇到 !ok 时**直接 throw** 修改过的 Response（HttpResponse 子类）
+    //   见 node_modules/gitea-js/dist/index.js:161-162 `if (!response.ok) throw data;`
+    // 如果不 catch，这个对象会一路冒到 IPC wrapIpc，被 catch-all 误判成 INTERNAL，
+    //   前端只能看到 "应用内部错误" + cause="[object Response]" —— 丢码又丢人话
+    // 这里把它当 HttpResponse 处理：走 unwrapGitea 复用 httpErrorToIpcError 映射
+    //   - 409 → IpcError(CONFLICT)
+    //   - 403 → IpcError(PERMISSION_DENIED)
+    //   - 404 → IpcError(NOT_FOUND)
+    //   - 422 → IpcError(VALIDATION_FAILED)
+    //   - 405 / 其他 → IpcError(GITEA_ERROR)
+    if (err && typeof err === 'object' && 'ok' in err && 'status' in err) {
+      // 类型守卫：把 unknown 当 HttpResponse 用（gitea-js throw 的就是 HttpResponse）
+      const httpErr = err as HttpResponse<unknown, unknown>;
+      // unwrapGitea 在 !ok 时一定 throw IpcError（不会 return）
+      unwrapGitea(httpErr, `合并 PR #${args.index}失败`);
+    }
+    // 非 HttpResponse 错误（程序 bug / IO 异常 / 其它）直接抛
+    //   wrapIpc 会把它 catch 成 IpcError(INTERNAL) 走通用错误路径
+    throw err;
   }
-  // 失败时 gitea-js res.data 也有内容，统一丢给 unwrapGitea 抛 IpcError
-  const raw = unwrapGitea(res, `合并 PR #${args.index}失败`) as { sha?: string; merged?: boolean; message?: string } | undefined;
-  return {
-    sha: raw?.sha ?? '',
-    merged: raw?.merged ?? true,
-    message: raw?.message ?? '',
-  };
 }

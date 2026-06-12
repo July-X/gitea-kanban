@@ -29,8 +29,8 @@ export type { IpcChannelName } from '../../shared/ipc-channels.js';
 export const UuidSchema = z.string().uuid();
 export const NonEmptyStringSchema = z.string().min(1).max(1024);
 
-/** ISO 时间戳 */
-export const IsoDateSchema = z.string().datetime();
+/** ISO 时间戳（接受带时区偏移：gitea 实际返 +08:00 / -05:00 等，**不**仅 UTC 'Z'） */
+export const IsoDateSchema = z.string().datetime({ offset: true });
 
 /** gitea URL 校验：https?://host，**不**允许任意路径前缀
  *  （允许 path，因为自托管 gitea 多在子路径：https://example.com/gitea/）
