@@ -18,13 +18,22 @@ import StatusBar from './StatusBar.vue';
 
 <template>
   <div class="shell">
+    <!--
+      HUD 背景网格（v1.1.2 落地 · tech-refine §6.1）
+      挂 .shell 根覆盖整个应用窗口（NavRail 后面也透出）——
+      NavRail / StatusBar 改半透明 + backdrop-filter，
+      让 grid 当"窗口地"全屏露出，HUD 风才完整
+    -->
+    <div class="shell__grid canvas-grid" aria-hidden="true" />
     <NavRail class="shell__nav" />
     <main class="shell__main">
-      <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
+      <div class="shell__content">
+        <router-view v-slot="{ Component }">
+          <transition name="fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
+      </div>
     </main>
     <StatusBar class="shell__status" />
   </div>
@@ -32,6 +41,7 @@ import StatusBar from './StatusBar.vue';
 
 <style scoped>
 .shell {
+  position: relative;
   display: flex;
   flex-direction: row;
   height: 100vh;
@@ -40,24 +50,68 @@ import StatusBar from './StatusBar.vue';
   background: var(--color-bg);
 }
 
+.shell__grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  /* 极弱 8% alpha · 走 --grid-color token 3 主题自适应 */
+}
+
 .shell__nav {
+  position: relative;
+  z-index: 1;
   height: 100%;
+  /* 半透明 · 让 grid 透出 · HUD 风 */
+  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的半透明 */
+.shell__nav :deep(.navrail) {
+  background: transparent;
+  border-right-color: color-mix(in srgb, var(--color-divider) 60%, transparent);
 }
 
 .shell__main {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--color-bg);
+  background: transparent;
+}
+
+.shell__content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .shell__status {
   position: absolute;
+  z-index: 2;
   bottom: 0;
   left: 0;
   right: 0;
+  /* 半透明 · 让 grid 透出 · HUD 风 */
+  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* 穿透子组件 scoped style —— 让 StatusBar 内部根元素继承 shell__status 的半透明 */
+.shell__status :deep(.statusbar) {
+  background: transparent;
+  border-top-color: color-mix(in srgb, var(--color-divider) 60%, transparent);
 }
 
 .fade-enter-active,

@@ -60,4 +60,15 @@ onBeforeUnmount(() => {
 <template>
   <AppShell />
   <Toast />
+  <!--
+    HUD 顶角装饰点阵（v1.1.2 落地 · tech-refine §6.2）
+    仅右上 + 右下，4×4 点阵 / 3px 圆点 / 主色 12% alpha
+    pointer-events: none · z-index: 1 · 不抢戏不挡点击
+  -->
+  <div class="corner-dots corner-dots--tr" aria-hidden="true">
+    <span v-for="i in 16" :key="`tr-${i}`" class="corner-dots__dot" />
+  </div>
+  <div class="corner-dots corner-dots--br" aria-hidden="true">
+    <span v-for="i in 16" :key="`br-${i}`" class="corner-dots__dot" />
+  </div>
 </template>

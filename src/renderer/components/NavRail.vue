@@ -63,8 +63,9 @@ const currentPath = computed(() => route.path);
 .navrail {
   width: var(--navrail-width);
   flex-shrink: 0;
-  background: var(--color-bg-elevated);
-  border-right: 1px solid var(--color-divider);
+  /* v1.1.2 改：半透明让 grid 透出（HUD 风），半透明由 AppShell .shell__nav 容器提供 */
+  background: transparent;
+  border-right: 1px solid color-mix(in srgb, var(--color-divider) 60%, transparent);
   padding: var(--space-3) var(--space-2);
   overflow-y: auto;
 }

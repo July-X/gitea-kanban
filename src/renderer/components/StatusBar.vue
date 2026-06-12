@@ -168,14 +168,13 @@ async function onLogoutClick(): Promise<void> {
 
 <style scoped>
 .statusbar {
-  height: var(--statusbar-height);
-  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--space-3);
-  background: var(--color-bg);
-  border-top: 1px solid var(--color-divider);
+  /* v1.1.2 改：半透明让 grid 透出（HUD 风），半透明由 AppShell .shell__status 容器提供 */
+  background: transparent;
+  border-top: 1px solid color-mix(in srgb, var(--color-divider) 60%, transparent);
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   user-select: none;
