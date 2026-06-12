@@ -93,3 +93,8 @@ mountCommandPalette();
 // void 显式忽略 Promise：失败时 store 已静默兜底（initTheme 不抛），toast 也不弹
 // （启动期"主题加载失败"会让用户感觉系统坏了 —— 设计拍板保持静默）
 void useUiStore().initTheme();
+
+// v1.1.3：mount 后调 useUiStore().initNavrail()（不阻塞 UI）
+//   - 同步读 localStorage 'gitea-kanban.navCollapsed' → 立即设 navCollapsed
+//   - 异步 IPC user.prefs.get → reconcile（跟主题同模式）
+void useUiStore().initNavrail();

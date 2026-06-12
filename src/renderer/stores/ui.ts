@@ -216,11 +216,121 @@ export const useUiStore = defineStore('ui', () => {
     }
   }
 
+  // ===== NavRail 折叠状态（v1.1.3 polish）=====
+  //
+  // 设计：
+  //   - 默认展开（224px · --navrail-width）
+  //   - 折叠态 56px（--navrail-collapsed-width · token 已定义）
+  //   - 持久化走 user.prefs（通用偏好端点 · M5 补齐 · key='ui.navrail.collapsed'）
+  //   - 启动期 reconcile 跟 theme 同模式（localStorage 同步 → IPC async reconcile）
+  //
+  // 边界（AGENTS §5.2 frontend agent）：
+  //   - ✅ 不碰 src/main/**（复用 user.prefs 现有端点）
+  //   - ✅ 不改 src/shared/ipc-types.ts（只 invoke 不增 schema）
+  //   - ✅ 不动 src/preload/**（user.prefs 已暴露）
+
+  /** NavRail 折叠状态 localStorage cache key（启动期 0 闪烁） */
+  const NAV_COLLAPSED_STORAGE_KEY = 'gitea-kanban.navCollapsed';
+
+  /** NavRail 折叠状态 sqlite prefs key（与 theme 平铺 · user.prefs 通用通道） */
+  const NAV_COLLAPSED_PREF_KEY = 'ui.navrail.collapsed';
+
+  /** NavRail 折叠状态 —— 默认 false（展开） */
+  const navCollapsed = ref<boolean>(false);
+
+  /**
+   * applyNavCollapsed —— 切换 / 设值都走这里（数据流中心化）
+   *
+   * 步骤：
+   *   1. 同步改 state（NavRail :class 立即反应）
+   *   2. 同步写 localStorage（启动期 initNavrail 用，**不**是持久化主路径）
+   *   3. 异步调 IPC user.prefs.set（不阻塞 UI）
+   *   4. 失败 → console.warn（**不**弹 toast：折叠是高频视觉操作，
+   *      弹错会严重干扰 UX；localStorage 已兜底，下次启动能恢复）
+   *
+   * 注：跟 theme 的处理有差异 —— theme 失败弹 toast 是因为"换主题没生效"用户能感知；
+   * 折叠失败用户**无感知**（DOM 已切），静默更友好。
+   */
+  async function applyNavCollapsed(collapsed: boolean): Promise<void> {
+    navCollapsed.value = collapsed;
+
+    // 2. 同步写 localStorage
+    try {
+      localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, String(collapsed));
+    } catch {
+      // localStorage 不可用（隐私模式 / quota）—— 静默
+    }
+
+    // 3. 异步持久化到 sqlite（不 await 阻塞 UI）
+    getIpcClient()
+      .invokeNested('user', 'prefs', 'set', {
+        entries: { [NAV_COLLAPSED_PREF_KEY]: collapsed },
+      })
+      .catch((err) => {
+        // 静默失败 —— localStorage 已写，下次启动能恢复
+        // 只 console.warn 留痕（dev 调试用）
+        // eslint-disable-next-line no-console
+        console.warn('[ui] navCollapsed persistence failed:', err);
+      });
+  }
+
+  /**
+   * toggleNavrail —— 给 NavRail 底部按钮绑的 action
+   * 用 next-collapsed 状态计算 → applyNavCollapsed 统一处理
+   */
+  async function toggleNavrail(): Promise<void> {
+    await applyNavCollapsed(!navCollapsed.value);
+  }
+
+  /**
+   * initNavrail —— 应用启动时调一次（main.ts mount 后）
+   *
+   * 跟 initTheme 同模式：
+   *   1. 同步：localStorage 读 → 立即设 navCollapsed（**避免闪一下展开→折叠**）
+   *   2. 异步：IPC user.prefs.get → 若不一致则 applyNavCollapsed(result)
+   *
+   * 容错：
+   * - localStorage 读不到 / 值非法 → 默认 false（展开）
+   * - IPC get 失败 / sqlite 没值 → 静默保留 localStorage 值
+   * - IPC get 拿到值与 localStorage 一致 → noop
+   */
+  async function initNavrail(): Promise<void> {
+    // 1. 同步：localStorage 兜底
+    let initial = false;
+    try {
+      const cached = localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY);
+      if (cached === 'true') initial = true;
+      else if (cached === 'false') initial = false;
+    } catch {
+      // localStorage 不可用，保持默认
+    }
+    navCollapsed.value = initial;
+
+    // 2. 异步：拉远端持久化值，reconcile
+    try {
+      const result = (await getIpcClient().invokeNested('user', 'prefs', 'get', {
+        keys: [NAV_COLLAPSED_PREF_KEY],
+      })) as Record<string, unknown> | null;
+      if (result && typeof result[NAV_COLLAPSED_PREF_KEY] === 'boolean') {
+        const persisted = result[NAV_COLLAPSED_PREF_KEY] as boolean;
+        if (persisted !== navCollapsed.value) {
+          await applyNavCollapsed(persisted);
+        }
+      }
+    } catch {
+      // 静默
+    }
+  }
+
   return {
     // state
     currentTheme,
+    navCollapsed,
     // actions
     applyTheme,
     initTheme,
+    applyNavCollapsed,
+    toggleNavrail,
+    initNavrail,
   };
 });

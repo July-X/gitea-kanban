@@ -3,16 +3,28 @@
  * NavRail —— 左侧导航栏
  *
  * 设计（03-frontend.md §2.1 / §4.1）：
- *   - 宽度 224px（var(--navrail-width)）
+ *   - 默认宽度 224px（var(--navrail-width)），折叠态 56px（--navrail-collapsed-width）
  *   - 7 个 NavItem：看板 / 时间轴 / 分支 / 合并请求 / 我的卡片 / 成员 / 设置
  *   - 选中项 = 主色背景 + 主色微光
  *   - 文字用术语翻译表（OVERRIDE §本项目专属规则 #1）—— **不**出现合并请求/合并/分支/派生 等原词
  *
  * v1 实现：7 个入口全部启用（plan_32018da5 把"即将推出"4 个灰显标记去掉）
+ * v1.1.3 polish：底部加折叠按钮（PanelLeftClose/Open）—— 折叠态只保留 icon + active 高亮
  */
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
-import { KanbanSquare, Settings, GitBranch, ListChecks, Users2, GitMerge, Timer } from 'lucide-vue-next';
+import {
+  KanbanSquare,
+  Settings,
+  GitBranch,
+  ListChecks,
+  Users2,
+  GitMerge,
+  Timer,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-vue-next';
+import { useUiStore } from '@renderer/stores/ui';
 
 interface NavItem {
   id: string;
@@ -24,6 +36,7 @@ interface NavItem {
 }
 
 const route = useRoute();
+const uiStore = useUiStore();
 
 const items: NavItem[] = [
   { id: 'board', label: '看板', icon: KanbanSquare, to: '/board' },
@@ -36,10 +49,19 @@ const items: NavItem[] = [
 ];
 
 const currentPath = computed(() => route.path);
+
+/** 折叠 / 展开按钮文案（i18n 占位 · cycle 2 接到 src/shared/i18n 文案表） */
+const toggleLabel = computed(() =>
+  uiStore.navCollapsed ? '展开侧栏' : '折叠侧栏',
+);
 </script>
 
 <template>
-  <nav class="navrail" aria-label="主导航">
+  <nav
+    class="navrail"
+    :class="{ 'navrail--collapsed': uiStore.navCollapsed }"
+    aria-label="主导航"
+  >
     <ul class="navrail__list">
       <li v-for="item in items" :key="item.id" class="navrail__item-wrap">
         <router-link
@@ -56,6 +78,22 @@ const currentPath = computed(() => route.path);
         </router-link>
       </li>
     </ul>
+    <div class="navrail__footer">
+      <button
+        type="button"
+        class="navrail__toggle"
+        :aria-label="toggleLabel"
+        :title="toggleLabel"
+        :aria-expanded="!uiStore.navCollapsed"
+        @click="uiStore.toggleNavrail()"
+      >
+        <component
+          :is="uiStore.navCollapsed ? PanelLeftOpen : PanelLeftClose"
+          :size="20"
+          :stroke-width="1.75"
+        />
+      </button>
+    </div>
   </nav>
 </template>
 
@@ -63,17 +101,27 @@ const currentPath = computed(() => route.path);
 .navrail {
   width: var(--navrail-width);
   flex-shrink: 0;
-  /* v1.1.2 改：半透明让 grid 透出（HUD 风），半透明由 AppShell .shell__nav 容器提供 */
+  display: flex;
+  flex-direction: column;
+  /* v1.1.2 半透明由 AppShell .shell__nav 容器提供；v1.1.3 折叠/展开用 width 过渡 */
   background: transparent;
-  border-right: 1px solid color-mix(in srgb, var(--color-divider) 60%, transparent);
   padding: var(--space-3) var(--space-2);
   overflow-y: auto;
+  overflow-x: hidden; /* 折叠态 label 渐隐时不要撑出横向滚动条 */
+  transition: width var(--t-slow) var(--ease-out);
+}
+
+.navrail--collapsed {
+  width: var(--navrail-collapsed-width);
 }
 
 .navrail__list {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* flex: 1 让 list 占满剩余高度，把 footer 推到底部 */
+  flex: 1;
+  min-height: 0;
 }
 
 .navrail__item {
@@ -88,7 +136,16 @@ const currentPath = computed(() => route.path);
   cursor: pointer;
   transition:
     background var(--t-fast) var(--ease),
-    color var(--t-fast) var(--ease);
+    color var(--t-fast) var(--ease),
+    padding var(--t-slow) var(--ease-out),
+    justify-content var(--t-slow) var(--ease-out);
+}
+
+.navrail--collapsed .navrail__item {
+  /* 折叠态：icon 居中 + 去掉左右 padding 让 icon 真正在 56px 内居中 */
+  justify-content: center;
+  padding: 8px 0;
+  gap: 0;
 }
 
 .navrail__item:hover {
@@ -121,5 +178,60 @@ const currentPath = computed(() => route.path);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* label 渐隐 + 宽度收 0 —— 让 icon 居中时不会出现 "看板" 半截字 */
+  transition:
+    opacity var(--t-base) var(--ease-out),
+    max-width var(--t-slow) var(--ease-out);
+  max-width: 160px; /* 约等于"合并请求"4 字宽度 · 防溢出 */
+}
+
+.navrail--collapsed .navrail__label {
+  opacity: 0;
+  max-width: 0;
+  pointer-events: none;
+}
+
+/* footer · 折叠按钮 · 始终显示（折叠态下也用来"展开回来"） */
+
+.navrail__footer {
+  margin-top: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-divider) 50%, transparent);
+  display: flex;
+  justify-content: center;
+  /* footer 本身也走过渡：折叠态 padding 收紧让按钮居中更紧凑 */
+  transition: padding var(--t-slow) var(--ease-out);
+}
+
+.navrail--collapsed .navrail__footer {
+  padding: var(--space-2) 0;
+}
+
+.navrail__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+.navrail__toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.navrail__toggle:focus-visible {
+  /* 沿用全局 button focus-visible 风格（theme.css §2.1 已配 --shadow-focus） */
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--radius-sm);
 }
 </style>
