@@ -83,9 +83,13 @@ const CODE_CATEGORY: Record<IpcErrorCodeValue, string> = {
  network_offline: '网络问题',
  gitea_error: '服务器开小差',
  validation_failed: '输入有误',
- internal: '应用出错了',
- keychain_unavailable: '本机密钥库不可用',
- keychain_access_denied: '本机密钥库拒绝访问',
+  internal: '应用出错了',
+  keychain_unavailable: '本机密钥库不可用',
+  keychain_access_denied: '本机密钥库拒绝访问',
+  theme_not_found: '主题偏好有问题',
+  invalid_theme: '主题值不合法',
+  database_unavailable: '本地数据库不可用',
+  database_write_failed: '数据库写入失败',
 };
 
 /**错误码 → 是否可恢复（引导用户重试 / 重连） */
@@ -99,9 +103,13 @@ const RECOVERABLE: Record<IpcErrorCodeValue, boolean> = {
  network_offline: true, // 网络恢复后重试
  gitea_error: true, // 服务器恢复后重试
  validation_failed: false, //改输入
- internal: true, //通用重试
- keychain_unavailable: false, //平台问题
- keychain_access_denied: true, //引导用户授权
+  internal: true, //通用重试
+  keychain_unavailable: false, //平台问题
+  keychain_access_denied: true, //引导用户授权
+  theme_not_found: true, // 重选主题即可
+  invalid_theme: false, // 用户输入错误 → 不重试
+  database_unavailable: true, // 重启可恢复
+  database_write_failed: true, // 写失败重试
 };
 
 /** 把 IpcErrorPayload 转成渲染端 UserFacingError（"人话"层） */
