@@ -13,7 +13,7 @@
  * -2026-06-11：从 src/main/ipc/schema.ts抽离（修复 preload sandbox module not found: zod）
  * -2026-06-11 ADR-0002 reset：删 board.cards.*7 个 + 加 issues.*7 个 + labels.*2 个
  *
- *端点清单（M3拍板，32 个）：
+ *端点清单（M5拍板，36 个）：
  * auth ×3 : connect / disconnect / status
  * repos ×3 : list / addProject / removeProject
  * branches ×5 : list / create / rename / delete / star
@@ -23,6 +23,7 @@
  * issues ×7 : list / get / create / update / addLabel / removeLabel / moveColumn
  * labels ×2 : list / create
  * issues.comment ×2 : list / create（注：在 issues.comment.*命名空间下；callable via issues.comment.list/create）
+ * user ×4 : prefs.get / prefs.set / undo / redo（02 §5.3.9；M5补齐）
  */
 
 export const IpcChannel = {
@@ -75,9 +76,15 @@ export const IpcChannel = {
  ISSUES_COMMENT_LIST: 'issues.comment.list',
  ISSUES_COMMENT_CREATE: 'issues.comment.create',
 
- // === labels namespace（ADR-0002：看板列绑 gitea label 用）===
- LABELS_LIST: 'labels.list',
- LABELS_CREATE: 'labels.create',
+  // === labels namespace（ADR-0002：看板列绑 gitea label 用）===
+  LABELS_LIST: 'labels.list',
+  LABELS_CREATE: 'labels.create',
+
+  // === user namespace（02-architecture.md §5.3.9；M5补齐）===
+  USER_PREFS_GET: 'user.prefs.get',
+  USER_PREFS_SET: 'user.prefs.set',
+  USER_UNDO: 'user.undo',
+  USER_REDO: 'user.redo',
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];

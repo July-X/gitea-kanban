@@ -19,25 +19,28 @@ import { registerPullsIpc, unregisterPullsIpc } from './pulls.js';
 import { registerBoardIpc, unregisterBoardIpc } from './board.js';
 import { registerIssuesIpc, unregisterIssuesIpc } from './issues.js';
 import { registerLabelsIpc, unregisterLabelsIpc } from './labels.js';
+import { registerUserIpc, unregisterUserIpc } from './user.js';
 
 export function registerAllIpcHandlers(): void {
- registerAuthIpc();
- registerReposIpc();
- registerBranchesIpc();
- registerCommitsIpc();
- registerPullsIpc();
- registerBoardIpc();
- registerIssuesIpc();
- registerLabelsIpc();
+  registerAuthIpc();
+  registerReposIpc();
+  registerBranchesIpc();
+  registerCommitsIpc();
+  registerPullsIpc();
+  registerBoardIpc();
+  registerIssuesIpc();
+  registerLabelsIpc();
+  registerUserIpc();
 }
 
 export function unregisterAllIpcHandlers(): void {
- unregisterAuthIpc();
- unregisterReposIpc();
- unregisterBranchesIpc();
- unregisterCommitsIpc();
- unregisterPullsIpc();
- unregisterBoardIpc();
- unregisterIssuesIpc();
- unregisterLabelsIpc();
+  unregisterAuthIpc();
+  unregisterReposIpc();
+  unregisterBranchesIpc();
+  unregisterCommitsIpc();
+  unregisterPullsIpc();
+  unregisterBoardIpc();
+  unregisterIssuesIpc();
+  unregisterLabelsIpc();
+  unregisterUserIpc();
 }

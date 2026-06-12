@@ -7,13 +7,13 @@
  * - IpcError reject时是 plain object（toJSON输出）
  * -不暴露 ipcRenderer / process / require
  *
- * M3状态（ADR-0002 reset）：
- * - src/main/ipc/schema.ts 注册32 个 IpcChannel（M2是30 个）：
+ * M5状态（M5 补齐 user.* 4 个）：
+ * - src/main/ipc/schema.ts 注册 36 个 IpcChannel（M3 是 32 个）：
  * auth×3, repos×3, branches×5, commits×3, pulls×4,
  * board.columns×7 (reset后从5→7，加 mapLabel/unmapLabel),
  * issues×9 (新增：list/get/create/update/addLabel/removeLabel/moveColumn + comment.list/create),
- * labels×2 (新增)
- * - 本文件暴露完整32 个 invoke + on()监听器
+ * labels×2 (新增), user×4 (M5补齐：prefs.get/set + undo/redo)
+ * - 本文件暴露完整36 个 invoke + on()监听器
  * - api.d.ts通过 `Api = typeof api`自动派生，**不**手改
  *
  * 方法签名约定（除 auth.connect历史兼容性保留 (giteaUrl, token) 双参）：
@@ -47,8 +47,9 @@ const invoke =
  * issues ×7 : list, get, create, update, addLabel, removeLabel, moveColumn
  * issues.comment ×2 : list, create
  * labels ×2 : list, create
+ * user ×4 : prefs.get, prefs.set, undo, redo
  * ─────────────────
- *合计:32 个 invoke
+ *合计:36 个 invoke
  */
 const api = {
  //===== auth namespace（AGENTS §8.2 token唯一入口）=====
@@ -126,11 +127,23 @@ const api = {
  },
  },
 
- //===== labels namespace (新增 ADR-0002)=====
- labels: {
- list: invoke(IpcChannel.LABELS_LIST),
- create: invoke(IpcChannel.LABELS_CREATE),
- },
+  //===== labels namespace (新增 ADR-0002)=====
+  labels: {
+  list: invoke(IpcChannel.LABELS_LIST),
+  create: invoke(IpcChannel.LABELS_CREATE),
+  },
+
+  //===== user namespace (M5 补齐)=====
+  //本机用户偏好（prefs）+ undo/redo（M5 空栈版，restored=0）
+  //详见 02-architecture.md §5.3.9 + src/main/ipc/user.ts
+  user: {
+  prefs: {
+  get: invoke(IpcChannel.USER_PREFS_GET),
+  set: invoke(IpcChannel.USER_PREFS_SET),
+  },
+  undo: invoke(IpcChannel.USER_UNDO),
+  redo: invoke(IpcChannel.USER_REDO),
+  },
 
  /**
  *通用 on()监听主进程事件推送

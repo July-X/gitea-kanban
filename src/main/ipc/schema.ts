@@ -795,14 +795,72 @@ export const ListLabelsRespSchema = z
 export type ListLabelsResp = z.infer<typeof ListLabelsRespSchema>;
 
 export const CreateLabelArgsSchema = z
- .object({
- projectId: NonEmptyStringSchema,
- name: NonEmptyStringSchema,
- color: z.string(),
- description: z.string().optional(),
- })
- .strict();
+  .object({
+    projectId: NonEmptyStringSchema,
+    name: NonEmptyStringSchema,
+    color: z.string(),
+    description: z.string().optional(),
+  })
+  .strict();
 export type CreateLabelArgs = z.infer<typeof CreateLabelArgsSchema>;
+
+// ============================================================
+// ===== user namespace（02-architecture.md §5.3.9；M5补齐）=====
+// ============================================================
+
+/**
+ * user.prefs.get 入参
+ *
+ * keys 限制 1-64 个；空数组 / 超限都拒（防止 caller 误用 "全表"）。
+ *
+ * 注：M5 阶段 v1 简化——userId 在 main 端从 auth.status.currentUser 取
+ * （M0 单 userId 简化：未连 gitea 时返回空 record）。
+ */
+export const UserPrefsGetArgsSchema = z
+  .object({
+    keys: z.array(z.string().min(1)).min(1).max(64),
+  })
+  .strict();
+export type UserPrefsGetArgs = z.infer<typeof UserPrefsGetArgsSchema>;
+
+/**
+ * user.prefs.get 出参
+ *
+ * 只返 caller 问的 keys（缺一个就给 caller 一个 key 不在；不像 memcached 静默返空）。
+ */
+export const UserPrefsGetResultSchema = z.record(z.string(), z.unknown());
+export type UserPrefsGetResult = z.infer<typeof UserPrefsGetResultSchema>;
+
+/**
+ * user.prefs.set 入参
+ *
+ * entries 是 Record<string, unknown>——UI 层把任何 JSON-序列化对象存这里（主题色 / 字号 / 看板布局 等）。
+ * value 在 db 里 JSON.stringify；读时 JSON.parse。
+ */
+export const UserPrefsSetArgsSchema = z
+  .object({
+    entries: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type UserPrefsSetArgs = z.infer<typeof UserPrefsSetArgsSchema>;
+
+/**
+ * user.undo 入参 / 出参 —— 当前栈实现：表层 + 队列语义（M5）
+ *
+ * 拍板：
+ * - 入参空（整个 undo 栈共享，不需 user action id）
+ * - 出参 restored = 实际恢复了多少个 state（v1 简化下永远是 0；M6 接业务时再实现真栈）
+ */
+export const UserUndoResultSchema = z
+  .object({
+    restored: z.number().int().min(0),
+  })
+  .strict();
+export type UserUndoResult = z.infer<typeof UserUndoResultSchema>;
+
+/** user.undo / user.redo 共用出参 */
+export const UserRedoResultSchema = UserUndoResultSchema;
+export type UserRedoResult = z.infer<typeof UserRedoResultSchema>;
 
 // ============================================================
 // ===== board.cards namespace（ADR-0002 reset：删除）=====
