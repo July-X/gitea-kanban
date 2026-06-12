@@ -62,16 +62,18 @@ import StatusBar from './StatusBar.vue';
   position: relative;
   z-index: 1;
   height: 100%;
-  /* 半透明 · 让 grid 透出 · HUD 风 */
-  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  /* 半透明 + **移除 backdrop-filter** —— blur 把 grid 8% alpha 弱线条糊掉看不见
+   * alpha 从 60% 降到 35% · 让 24px grid 清晰透出侧栏背景 */
+  background: color-mix(in srgb, var(--color-bg-elevated) 35%, transparent);
+  /* 强边界阴影（--shadow-navrail token · 3 主题自适应）——
+   * 三件套：深底色阴影向右 + 1px 冷白内描边 + 主色外环 glow（亮色关） */
+  box-shadow: var(--shadow-navrail);
 }
 
 /* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的半透明 */
 .shell__nav :deep(.navrail) {
   background: transparent;
-  border-right-color: color-mix(in srgb, var(--color-divider) 60%, transparent);
+  border-right-color: transparent; /* 描边让位给 box-shadow 冷白内描边 */
 }
 
 .shell__main {

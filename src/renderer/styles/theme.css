@@ -303,6 +303,10 @@
   --progress-fill-glow: 0 0 4px rgba(79, 122, 26, 0.25);
   --decor-corner-color: rgba(79, 122, 26, 0.5);
 
+  /* === 亮色主题关闭 NavRail 主色外环 glow（白底上糊 · tech-refine §14.4） ===
+   * base 阴影保留 —— 纯冷黑阴影（= --shadow-rgb = 15,26,36）足够"浮"起侧栏 */
+  --shadow-navrail-glow: 0 0 0 0 transparent;
+
   --is-light: 1;
 }
 
@@ -336,6 +340,19 @@
     0 0 24px var(--color-primary-glow);
   --shadow-focus: 0 0 0 4px var(--color-primary-soft);
   --shadow-focus-strong: 0 0 0 4px var(--color-primary-glow);
+
+  /* === NavRail 强边界阴影（侧栏从主区"浮"起 · 3 主题自动变） ===
+   * 三件套（tech-refine §2.1）：
+   *   - base：向右偏移 4px + 12px 深底色阴影 + 1px 冷白描边（暗色基础）
+   *   - glow：主色外环（暗色启用 / 亮色关闭 —— tech-refine §14.4）
+   * light 主题在专属块覆盖 --shadow-navrail-glow 为 transparent */
+  --shadow-navrail-base:
+    4px 0 12px rgba(var(--shadow-rgb), 0.5),
+    1px 0 0 rgba(220, 233, 240, 0.06);
+  --shadow-navrail-glow: 0 0 16px var(--color-primary-glow);
+  --shadow-navrail:
+    var(--shadow-navrail-base),
+    var(--shadow-navrail-glow);
 }
 
 /* ==========================================================================
