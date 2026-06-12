@@ -4,25 +4,39 @@
  *
  * 设计：
  *   - 高度 28px（var(--statusbar-height)）
- *   - 左侧：连接状态 + 当前仓库上下文 + **刷新按钮**
+ *   - 左侧：连接状态 + 当前仓库上下文 + **刷新按钮** + **主题切换按钮**
  *   - 右侧：当前用户（avatar + login）+ **退出登录**
  *   - 颜色 + 文字 + 图标三重编码（OVERRIDE §本项目专属规则 #8）
+ *
+ * 主题按钮（v1.1.2 · tech-refine §15.1 入口 1）：
+ *   - 点一下 cycle: A 暗 → C 暗 → 浅色 → A 暗
+ *   - 调用 useUiStore.applyTheme(nextThemeInCycle(currentTheme)) —— store 同步改
+ *     state/DOM/localStorage + 异步 IPC set（不阻塞 UI）
  *
  * AGENTS §8.5：离线降级不可省。gitea API 失败时**不**直接报"Network Error"，
  * 这里显著提示"当前为离线/缓存模式"。
  */
 import { computed } from 'vue';
-import { CircleCheck, CircleAlert, CircleSlash, KeyRound, Plug, RefreshCw, LogOut, User } from 'lucide-vue-next';
+import { CircleCheck, CircleAlert, CircleSlash, KeyRound, Plug, RefreshCw, LogOut, Palette, User } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useSettingsStore } from '@renderer/stores/settings';
+import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stores/ui';
 import { useRouter } from 'vue-router';
 import { showToast } from '@renderer/lib/toast';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
 const settings = useSettingsStore();
+const ui = useUiStore();
 const router = useRouter();
+
+/** 主题简称（按钮文字用，跟 LogOut 风格对称：图标 + 短文字） */
+const THEME_SHORT_LABEL: Record<string, string> = {
+  'A-dark': 'A 暗',
+  'C-dark': 'C 暗',
+  light: '浅色',
+};
 
 type ConnState = 'connected' | 'offline' | 'error' | 'unauthenticated';
 
@@ -71,6 +85,12 @@ async function onRefreshClick(): Promise<void> {
   }
 }
 
+/** 主题切换：cycle 到下一个主题（按钮文字显示当前，title 显示完整名 + 切换提示） */
+async function onThemeCycleClick(): Promise<void> {
+  const next = nextThemeInCycle(ui.currentTheme);
+  await ui.applyTheme(next);
+}
+
 /** 退出当前 gitea 账号（清 keychain + 内存），跳回 /auth */
 async function onLogoutClick(): Promise<void> {
   const url = auth.currentGiteaUrl;
@@ -110,6 +130,15 @@ async function onLogoutClick(): Promise<void> {
         @click="onRefreshClick"
       >
         <RefreshCw :size="12" :stroke-width="2" :class="{ 'statusbar__action--spin': repo.loading }" />
+      </button>
+      <button
+        type="button"
+        class="statusbar__action"
+        :title="`当前：${THEME_DISPLAY_NAME[ui.currentTheme]}（点切换）`"
+        @click="onThemeCycleClick"
+      >
+        <Palette :size="12" :stroke-width="2" aria-hidden="true" />
+        <span>{{ THEME_SHORT_LABEL[ui.currentTheme] ?? ui.currentTheme }}</span>
       </button>
     </div>
     <div class="statusbar__right">
