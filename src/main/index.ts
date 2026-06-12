@@ -15,9 +15,10 @@
 
 import { app } from 'electron';
 import { logger, upgradeLoggerToFile } from './logger.js';
-import { createMainWindow, destroyMainWindow } from './window.js';
+import { createMainWindow, destroyMainWindow, installCspHeader } from './window.js';
 import { registerAllIpcHandlers, unregisterAllIpcHandlers } from './ipc/index.js';
 import { initSqlite, closeSqlite } from './cache/sqlite.js';
+import { authStatus } from './gitea/auth.js';
 import { APP_NAME, APP_SINGLE_INSTANCE_LOCK_NAME } from '@shared/constants';
 
 // ===== 0. 启用 Electron 远程调试（仅 dev / unpackaged） =====
@@ -93,6 +94,25 @@ app.on('ready', async () => {
     logger.info('createMainWindow start');
     createMainWindow();
     logger.info('createMainWindow done');
+
+    // 2d. restore 路径补 CSP：已存账号但本次启动不会走 AUTH_CONNECT IPC →
+    // createMainWindow 内的 installCspHeader(null) 会让 img-src 缺 gitea origin
+    // → 头像 / connect 直连被拦。这里按活跃账号补一次重装；细节见
+    // src/main/window.ts expandLoopbackOrigins + src/main/ipc/auth.ts AUTH_CONNECT。
+    // 内层 try：失败只 warn，不让 boot 失败（auth 表读不出来也能进无账号空状态）。
+    try {
+      const status = await authStatus();
+      const active = status.accounts[0];
+      if (active) {
+        installCspHeader(active.giteaUrl);
+        logger.info({ giteaUrl: active.giteaUrl }, 'CSP reinstalled for restored account');
+      }
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'CSP reinstall on boot failed (non-fatal)',
+      );
+    }
   } catch (err) {
     logger.error({ err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined }, 'failed during app ready');
     app.quit();

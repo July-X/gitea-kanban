@@ -34,11 +34,14 @@ export function getMainWindow(): BrowserWindow | null {
  * 在 default session 注入 CSP header（AGENTS.md §4.7 模板）
  *
  * - default-src 'self'：默认只允许同源
- * - script-src 'self'：禁止内联 script（Vue 编译产物在 'self' 内 OK）
+ * - script-src 'self' <theme-hash>：禁止任意 inline，但白名单 index.html 唯一一段
+ *   theme bootstrap inline（v1.1.2 启动期 0 闪烁硬约束）的 sha256
  * - style-src 'self' 'unsafe-inline'：允许 CSS-in-JS / 内联 style
- * - connect-src 'self' <gitea URL>：XHR/fetch 只允许同源 + gitea 实例
- * - img-src 'self' data: https: <gitea URL>：图片允许 base64 + 任何 https + gitea 头像
+ * - connect-src 'self' <gitea origins>：XHR/fetch 只允许同源 + gitea 实例（含 loopback pair）
+ * - img-src 'self' data: https: <gitea origins>：图片允许 base64 + 任何 https + gitea 头像
  *   （2026-06-11 修复：之前只写 https:，本地 gitea http://localhost:3000 头像被拦）
+ *   （2026-06-12 修复：再展开 loopback pair —— Gitea ROOT_URL=127.0.0.1 但 app 存 localhost
+ *     时 origin 不等 → avatar 被拦；见 expandLoopbackOrigins 注释）
  *
  * 2026-06-11 修复 CSP 重装：cspInstalled 守卫**只**挡重复 webRequest 注册；
  * 真正的 CSP 拼接每次按 giteaUrl 重算（auth connect 后**重新设置**响应头）。
@@ -51,13 +54,61 @@ let cspListener:
     ) => void)
   | null = null;
 
+/**
+ * 主题 bootstrap inline script 的 SHA-256（对应 src/renderer/index.html line 49-58）。
+ *
+ * 那段 inline script 是项目**唯一**一处 inline（v1.1.2 启动期 0 闪烁硬约束，
+ * 见 index.html 顶部注释），CSP 用 hash 而不是 `'unsafe-inline'`，攻击面最小。
+ *
+ * ⚠️ 修改 index.html 那段（包括缩进 / 注释 / 换行）后此 hash 必须同步更新，
+ *    否则 dev/prod 都会被 webRequest CSP 拦掉 → 报
+ *    "Executing inline script violates the following Content Security Policy directive 'script-src 'self''"
+ *
+ * 重算（与 Chromium 报错日志里的 sha256-xxx 一致）：
+ *   1) 浏览器 DevTools console 触发后从错误里直接复制
+ *   2) 或：node -e 'crypto.createHash("sha256").update(<script-text>,"utf8").digest("base64")'
+ */
+const THEME_BOOTSTRAP_SCRIPT_HASH = "'sha256-i1rmmGAydcEzaknCTO0k9t+YU62RPNuOzzb029ZcNvM='";
+
+/**
+ * 把 giteaUrl 展开为 loopback origin 对（localhost ↔ 127.0.0.1）。
+ *
+ * Gitea 实例 `[server] ROOT_URL` 决定它**返回**的 avatar_url host —— 与用户在 app
+ * 里填的 giteaUrl 经常不一致：用户填 `http://localhost:3000`、ROOT_URL 配
+ * `http://127.0.0.1:3000` → /user.avatar_url 是 127.0.0.1:3000 → CSP origin
+ * mismatch → 头像被 `img-src` 拦（dump：`http://127.0.0.1:3000/avatars/...
+ * violates "img-src 'self' data: https:"`）。
+ *
+ * 解法：host 是 loopback 时把另一个变体也加进 allowlist。非 loopback host 原样返回。
+ * `URL.origin` 自动去掉 path/query/fragment（CSP 只看 scheme+host+port）。
+ */
+function expandLoopbackOrigins(rawUrl: string): string[] {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      const pair = new URL(rawUrl);
+      pair.hostname = host === 'localhost' ? '127.0.0.1' : 'localhost';
+      return [u.origin, pair.origin];
+    }
+    return [u.origin];
+  } catch {
+    // 解析失败 → 退回原字符串（authConnect 调用前已 zod URL 校验，这里几乎不会进）
+    return [rawUrl];
+  }
+}
+
 export function installCspHeader(giteaUrl: string | null = null): void {
-  const connectSrc = giteaUrl ? `'self' ${giteaUrl}` : "'self'";
-  // img-src：保留 https: 通配（公网 https 头像 / oauth provider logo）+ 加 giteaUrl（http://localhost:3000 等）
-  const imgSrc = giteaUrl ? `'self' data: https: ${giteaUrl}` : "'self' data: https:";
+  const giteaOrigins = giteaUrl ? expandLoopbackOrigins(giteaUrl) : [];
+  const giteaOriginList = giteaOrigins.join(' ');
+  const connectSrc = giteaOrigins.length ? `'self' ${giteaOriginList}` : "'self'";
+  // img-src：保留 https: 通配（公网 https 头像 / oauth provider logo）+ 加 gitea origins
+  const imgSrc = giteaOrigins.length
+    ? `'self' data: https: ${giteaOriginList}`
+    : "'self' data: https:";
   const csp = [
     "default-src 'self'",
-    "script-src 'self'",
+    `script-src 'self' ${THEME_BOOTSTRAP_SCRIPT_HASH}`,
     "style-src 'self' 'unsafe-inline'",
     `connect-src ${connectSrc}`,
     `img-src ${imgSrc}`,

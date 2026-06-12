@@ -11,9 +11,9 @@
         （启动期 0 闪烁硬约束；vite ESM 模块加载是异步的，达不到 theme-init 要求）
         · 安全 tradeoff：仅本项目唯一 inline script，只读 localStorage + 写 dataset.theme
         · enum 白名单（A-dark / C-dark / light），攻击面极小
-        · v2 评估收紧：走 nonce 或 hash 校验
-        · ⚠️ 生产模式 src/main/window.ts installCspHeader 注入的 webRequest CSP
-          仍写死 'self'——本 task scope 不覆盖，需 backend follow-up
+        · 2026-06-12 收口：src/main/window.ts installCspHeader 已改用 sha256 hash
+          白名单替代 'unsafe-inline'（dev/prod 同源行为；常量 THEME_BOOTSTRAP_SCRIPT_HASH）。
+          ⚠️ 修改下方 <script> 内容（含缩进 / 注释 / 换行）必须同步更新那个常量。
       - style-src 'self' 'unsafe-inline'：允许 scoped style 内联（Vite dev 模式需要）
       - img-src 'self' data: http: https:：允许头像
         · 'self' / data: = 同源 + base64
