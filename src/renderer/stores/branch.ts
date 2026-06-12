@@ -5,7 +5,8 @@
  *   - 数据源：branches.list IPC（main 端包 listGiteaBranches + 本地 starred JOIN）
  *   - setup store 风格（与 board.ts / useRepoStore / auth.ts 一致）
  *   - **不**持久化（v1 不存；star/unstar 走 branches.star IPC，**不**本地乐观更新）
- *   - 暴露 list / refresh / filter / currentSelectedItem + getByName
+ *   - 暴露 list / refresh / filter / currentSelectedName / currentSelectedItem + getByName
+ *   - 跨视图状态传递：pendingTimelineFocus（"在时间轴查看此分支"按钮用）
  *
  * 零术语：
  *   - state 字段全中文：列表 / 加载中 / 错误 / 选中的
@@ -33,7 +34,25 @@ export const useBranchStore = defineStore('branch', () => {
   const onlyStarred = ref(false);
 
   // ===== selection state（UI 状态，**不**持久化） =====
+  /**
+   * 当前选中行（按 name 引用，**不**直接存 BranchDto 引用 —— 后续 list() 刷新会
+   * 让旧引用指向旧数据，存 name 保证 selected 永远指向最新 items 里的对象）
+   *
+   * 用法：右侧 BranchDetailAside 的 `v-if` 开关、键盘 Esc 关闭
+   */
+  const currentSelectedName = ref<string | null>(null);
+  /** 旧字段保留：currentSelectedItem（兼容历史，**新**代码用 currentSelectedName） */
   const currentSelectedItem = ref<BranchDto | null>(null);
+
+  /**
+   * 跨视图状态传递：用户在 BranchesView 点"在时间轴查看此分支"时写入，
+   * TimelineView onMounted 调 `consumePendingTimelineFocus()` 读出并清空。
+   *
+   * 选 Pinia pending 而非 query / route param 的理由（见 plan §4）：
+   * router 路径都是 /timeline 不带 param，引入动态路由会影响所有 `router.push({name:'timeline'})`
+   * 调用方；Pinia pending 改动最小（1 store + 1 视图）。
+   */
+  const pendingTimelineFocus = ref<string | null>(null);
 
   // ===== getters =====
   const total = computed(() => items.value.length);
@@ -41,6 +60,11 @@ export const useBranchStore = defineStore('branch', () => {
   /** 默认分支（v1 简单：取第一项 isDefault=true；gitea 通常只一个） */
   const defaultBranch = computed<BranchDto | null>(
     () => items.value.find((b) => b.isDefault) ?? null,
+  );
+
+  /** 当前选中的分支（按 currentSelectedName 反查 items） */
+  const selectedBranch = computed<BranchDto | null>(
+    () => (currentSelectedName.value ? getByName(currentSelectedName.value) : null),
   );
 
   /** 收藏的分支（用于"仅看收藏"过滤器） */
@@ -78,6 +102,9 @@ export const useBranchStore = defineStore('branch', () => {
     if (reset) {
       items.value = [];
       currentSelectedItem.value = null;
+      // 注意：**不**清空 currentSelectedName —— 用户切 project 后再切回来时，
+      // 如果该分支仍存在，selected 状态可恢复（甚至让 consumed pending 重新生效）。
+      // 真正的关闭由 select(null) / 关 aside 显式触发。
     }
     try {
       const resp = (await branchesList({
@@ -87,6 +114,10 @@ export const useBranchStore = defineStore('branch', () => {
       })) as ListBranchesResp;
       items.value = resp.items;
       currentProjectId.value = projectId;
+      // 重新解析 selectedBranch：旧 selected name 在新 list 里可能不存在了
+      if (currentSelectedName.value && !getByName(currentSelectedName.value)) {
+        currentSelectedName.value = null;
+      }
     } catch (e) {
       error.value = e as UserFacingError;
       throw e;
@@ -108,9 +139,38 @@ export const useBranchStore = defineStore('branch', () => {
     await list(currentProjectId.value, true);
   }
 
-  /** 选中某行（**只** UI 状态，**不**调 IPC） */
-  function select(item: BranchDto | null): void {
-    currentSelectedItem.value = item;
+  /**
+   * 选中某行（**只** UI 状态，**不**调 IPC）
+   *
+   * 优先用 name 选中（currentSelectedName）—— BranchesView 点击行时
+   * 传 name，selectedBranch getter 会从 items 反查最新对象。
+   * 旧接口（传 BranchDto）保留为兼容 stub。
+   */
+  function select(itemOrName: BranchDto | string | null): void {
+    if (itemOrName === null) {
+      currentSelectedName.value = null;
+      currentSelectedItem.value = null;
+      return;
+    }
+    if (typeof itemOrName === 'string') {
+      currentSelectedName.value = itemOrName;
+      currentSelectedItem.value = getByName(itemOrName);
+    } else {
+      currentSelectedName.value = itemOrName.name;
+      currentSelectedItem.value = itemOrName;
+    }
+  }
+
+  /** 写跨视图状态："在时间轴查看此分支"——TimelineView onMounted consume */
+  function setPendingTimelineFocus(name: string): void {
+    pendingTimelineFocus.value = name;
+  }
+
+  /** 读跨视图状态并清空（TimelineView onMounted 调一次） */
+  function consumePendingTimelineFocus(): string | null {
+    const n = pendingTimelineFocus.value;
+    pendingTimelineFocus.value = null;
+    return n;
   }
 
   function clearError(): void {
@@ -127,10 +187,13 @@ export const useBranchStore = defineStore('branch', () => {
     search,
     onlyStarred,
     // selection
+    currentSelectedName,
     currentSelectedItem,
+    pendingTimelineFocus,
     // getters
     total,
     defaultBranch,
+    selectedBranch,
     starredItems,
     filteredItems,
     getByName,
@@ -138,6 +201,8 @@ export const useBranchStore = defineStore('branch', () => {
     list,
     refresh,
     select,
+    setPendingTimelineFocus,
+    consumePendingTimelineFocus,
     clearError,
   };
 });

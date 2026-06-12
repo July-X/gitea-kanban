@@ -20,6 +20,7 @@ import { register as registerVueShape } from '@antv/x6-vue-shape';
 import { GitBranch, Loader2, MapPin, Timer } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
+import { useBranchStore } from '@renderer/stores/branch';
 import { branchesList, commitsTimeline } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type {
@@ -35,6 +36,26 @@ import CommitNodeVue from '@renderer/views/timeline/CommitNode.vue';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
+const branch = useBranchStore();
+
+/** gitea 服务器 origin（task #21）—— 走用户填的地址，不再硬拼 https:// */
+const giteaUrlBase = computed<string>(() => {
+  const raw = auth.currentGiteaUrl;
+  if (raw) {
+    try {
+      return new URL(raw).origin;
+    } catch {
+      /* 解析失败退回 */
+    }
+  }
+  return activeRepo.value ? `https://${activeRepo.value.owner}` : '';
+});
+
+/** 构造 gitea 上某资源 URL：`<origin>/<owner>/<name>/<path>` */
+function giteaUrl(path: string): string {
+  if (!giteaUrlBase.value || !activeRepo.value) return '';
+  return `${giteaUrlBase.value}/${activeRepo.value.owner}/${activeRepo.value.name}/${path}`;
+}
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
@@ -109,20 +130,45 @@ async function loadBranches(): Promise<void> {
       page: 1,
     })) as ListBranchesResp;
     branches.value = resp.items;
-    // 默认选 default
-    const nextSelected = new Set<string>();
-    if (defaultBranch.value) nextSelected.add(defaultBranch.value.name);
-    // 再加一个最近活跃的非 default 分支
-    const other = resp.items.find((b) => !b.isDefault);
-    if (other) nextSelected.add(other.name);
-    selectedBranches.value = nextSelected;
-    if (nextSelected.size > 0) {
+
+    // 跨视图状态传递：用户在 BranchesView 点"在时间轴查看此分支"时
+    // 会写入 branch.pendingTimelineFocus；命中时只选该分支（覆盖默认行为）
+    const pending = branch.consumePendingTimelineFocus();
+    if (pending && resp.items.some((b) => b.name === pending)) {
+      selectedBranches.value = new Set<string>([pending]);
+    } else {
+      // 默认选 default
+      const nextSelected = new Set<string>();
+      if (defaultBranch.value) nextSelected.add(defaultBranch.value.name);
+      // 再加一个最近活跃的非 default 分支
+      const other = resp.items.find((b) => !b.isDefault);
+      if (other) nextSelected.add(other.name);
+      selectedBranches.value = nextSelected;
+    }
+    if (selectedBranches.value.size > 0) {
       await loadTimeline();
     }
   } catch (e) {
     localError.value = e as UserFacingError;
   }
 }
+
+/**
+ * 用户已在 /timeline 时从 BranchesView 点"在时间轴查看此分支"——
+ * 路由没变所以 onMounted 不会再 fire；用 watch(branch.pendingTimelineFocus) 兜底。
+ */
+watch(
+  () => branch.pendingTimelineFocus,
+  async (name) => {
+    if (!name || !activeProjectId.value) return;
+    // 重新消费：让 selectedBranches 立刻变成只含此分支并重画时间轴
+    branch.pendingTimelineFocus = null;
+    if (branches.value.some((b) => b.name === name)) {
+      selectedBranches.value = new Set<string>([name]);
+      await loadTimeline();
+    }
+  },
+);
 
 /** 加载时间轴 */
 async function loadTimeline(): Promise<void> {
@@ -201,9 +247,11 @@ function initGraph(): void {
   g.on('node:dblclick', ({ cell }) => {
     const data = cell.getData() as CommitNodeDto | undefined;
     if (data && activeRepo.value) {
-      const url = `https://${activeRepo.value.owner}/-/commit/${data.sha}`;
-      // 跳 gitea（v1 走 window.open，desktop 默认浏览器打开）
-      window.open(url, '_blank', 'noopener,noreferrer');
+      // 改用 /<owner>/<repo>/commit/<sha> 走用户填的 gitea 地址（task #21）——
+      // 旧 `/<owner>/-/commit/<sha>` 是 user-level commit 页，跨仓库找 sha，gitea 的子路径
+      // 部署也丢了
+      const url = giteaUrl(`commit/${data.sha}`);
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
     }
   });
 }
@@ -465,7 +513,9 @@ function laneLabel(id: string): string {
 .timeline__graph-wrap {
   flex: 1;
   min-width: 0;
-  background: var(--color-bg);
+  /* 透明让 AppShell 的 HUD 24px grid + 顶角点阵透出
+   * （X6 自身 background: { color: 'transparent' }，graph-wrap 不再加不透明色）
+   * 与"主区/弹窗/卡片 z-index 1+ 自然遮住 grid"硬约束一致：wrap 是"画布容器"非"阅读区" */
   position: relative;
 }
 
