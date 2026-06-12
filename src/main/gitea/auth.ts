@@ -25,11 +25,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
 import { IpcError, IpcErrorCode } from '@shared/errors';
-import { keychainSet, keychainDelete, keychainFindAccounts, keychainGet } from './keychain.js';
+import { keychainSet, keychainDelete, keychainFindAccounts } from './keychain.js';
 import { invalidateGiteaClient, clearGiteaClientCache } from './client.js';
 
 // ===== Dev-only token file fallback =====
@@ -64,20 +64,6 @@ async function persistToken(giteaUrl: string, username: string, token: string): 
     }
   }
   await keychainSet(giteaUrl, username, token);
-}
-async function readToken(giteaUrl: string, username: string): Promise<string | null> {
-  if (!app.isPackaged) {
-    try {
-      const p = devTokenPath(giteaUrl, username);
-      if (existsSync(p)) {
-        const j = JSON.parse(readFileSync(p, 'utf8')) as { token?: string };
-        return j.token ?? null;
-      }
-    } catch (err) {
-      void err;
-    }
-  }
-  return await keychainGet(giteaUrl, username);
 }
 async function clearDevToken(giteaUrl: string, username: string): Promise<void> {
   if (!app.isPackaged) {

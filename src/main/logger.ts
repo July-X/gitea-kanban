@@ -58,23 +58,8 @@ function resolveDataRoot(): string {
 
 /**
  * 计算日志目录：<dataRoot>/logs/<LOG_SUBDIR>
- *
- * 与 db 路径同根（多实例场景下 db + log 在一起方便备份/迁移）。
- * app.isReady() 之前 logger 可能被引用（早期启动日志），所以用 try/catch。
+ * （详见下面 transport 配置直接调用 resolveDataRoot；保留函数签名以维持旧调用兼容）
  */
-function resolveLogDir(): string {
-  try {
-    const dataRoot = resolveDataRoot();
-    const dir = join(dataRoot, 'logs', LOG_SUBDIR);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    return dir;
-  } catch (err) {
-    // app 还没 ready 时 / 路径解析失败 — fallback 到 tmp（pino 至少能写，不丢日志）
-    // 不用 console.error —— Electron 41 macOS GUI app stdout fd=-1 会 SonicBoom RangeError
-    void err; // swallow, fall back
-    return '/tmp/gitea-kanban-logs';
-  }
-}
 
 /** 基础 logger 选项（无 transport） */
 const baseOptions: LoggerOptions = {
@@ -155,16 +140,6 @@ export function upgradeLoggerToFile(): void {
   // 修法：upgradeLoggerToFile 已经是 no-op（logger 已经是 file destination），
   // 不要再开新 fd。保留函数签名让 index.ts 不改。
   logger.info('upgradeLoggerToFile: skipped (logger already at file destination from module init)');
-}
-
-function copyLoggerMethods(src: Logger, dst: Logger): void {
-  const methods: Array<keyof Logger> = [
-    'trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent',
-  ];
-  for (const m of methods) {
-    // @ts-expect-error pino types permit this
-    dst[m] = src[m].bind(src);
-  }
 }
 
 function cleanupOldLogs(logDir: string): void {

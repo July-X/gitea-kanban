@@ -8,7 +8,7 @@
  * - 测试用 _setSqlitePathForTest() 显式指定（**只**给 vitest 用）
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import os from 'node:os';
 import Database, { type Database as BetterSqliteDb } from 'better-sqlite3';

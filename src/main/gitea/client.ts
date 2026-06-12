@@ -34,7 +34,7 @@
 
 import { Api, type HttpResponse } from 'gitea-js';
 import { app } from 'electron';
-import { mkdirSync, writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { IpcError, IpcErrorCode } from '@shared/errors';
 import { keychainGet } from './keychain.js';
