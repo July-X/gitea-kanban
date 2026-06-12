@@ -32,3 +32,4 @@ drizzle/.snapshot/
 docs/plugin-redoc-2.yaml
 .codegraph
 .reasonix
+reasonix.toml
