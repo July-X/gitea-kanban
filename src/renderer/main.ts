@@ -22,6 +22,8 @@ import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
 import { router } from './routes';
+import { mountCommandPalette } from './lib/command-palette';
+import { useUiStore } from './stores/ui';
 
 // 全局样式（reset + 主题变量）
 import './styles/reset.css';
@@ -68,3 +70,26 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 app.mount('#app');
+
+// v1.1.2 主题切换入口 3：注册全局 ⌘K / Ctrl+K 快捷键 + 注入 dialog DOM
+// 必须在 app.use(pinia) 之后调（useUiStore 依赖 active pinia）
+// —— task spec §4 明确：本任务范畴
+mountCommandPalette();
+
+// ===== 主题启动 reconcile（v1.1.2 theme-init task · tech-refine §15.5） =====
+//
+// 启动期时序（避免 0 闪烁）：
+// 1. index.html head inline script（同步，parse-time）—— 在 <script type="module"> 之前执行
+//    → 读 localStorage 'gitea-kanban.theme' → 设 dataset.theme
+//    → CSS 在 0ms 时即拿到正确主题 token
+// 2. vite ESM fetch main.ts（异步，~100-300ms） → createApp → mount
+//    → 此时 CSS 已应用 localStorage 主题，无白屏闪
+//    · ESM 抽到外部 .ts 文件的方案不可行：fetch 是异步的，会闪
+// 3. mount 后调 useUiStore().initTheme()（不阻塞 UI）
+//    → store 同步再设一次 dataset.theme（防御：index.html inline 被 CSP 拦时兜底）
+//    → 异步 fetch preferences.theme.get → 不一致时 applyTheme 覆盖
+//    → 与后端 sqlite prefs 表 reconcile（source of truth）
+//
+// void 显式忽略 Promise：失败时 store 已静默兜底（initTheme 不抛），toast 也不弹
+// （启动期"主题加载失败"会让用户感觉系统坏了 —— 设计拍板保持静默）
+void useUiStore().initTheme();

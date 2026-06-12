@@ -1,13 +1,19 @@
 <!DOCTYPE html>
-<html lang="zh-Hans" data-theme="dark">
+<html lang="zh-Hans">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>gitea-kanban</title>
     <!--
-      CSP（02-architecture.md §9.3）
+      CSP（02-architecture.md §9.3 + design-system/pages/tech-refine.md §15.5）
       - default-src 'self'：只允许同源资源
-      - script-src 'self'：禁止 inline script（Vite 走 ESM 加载）
+      - script-src 'self' 'unsafe-inline'：v1.1.2 主题切换需要 inline bootstrap script
+        （启动期 0 闪烁硬约束；vite ESM 模块加载是异步的，达不到 theme-init 要求）
+        · 安全 tradeoff：仅本项目唯一 inline script，只读 localStorage + 写 dataset.theme
+        · enum 白名单（A-dark / C-dark / light），攻击面极小
+        · v2 评估收紧：走 nonce 或 hash 校验
+        · ⚠️ 生产模式 src/main/window.ts installCspHeader 注入的 webRequest CSP
+          仍写死 'self'——本 task scope 不覆盖，需 backend follow-up
       - style-src 'self' 'unsafe-inline'：允许 scoped style 内联（Vite dev 模式需要）
       - img-src 'self' data: http: https:：允许头像
         · 'self' / data: = 同源 + base64
@@ -18,8 +24,38 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http: https:; connect-src 'self' ws: http: https:; font-src 'self' data:"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http: https:; connect-src 'self' ws: http: https:; font-src 'self' data:"
     />
+    <!--
+      主题 bootstrap script —— v1.1.2 启动期 0 闪烁硬约束（tech-refine §15.5）
+      ============================================================
+      必须在 main.ts ESM 加载前同步执行：
+      - vite dev 模式：main.ts 模块解析 + Pinia + createApp ≈ 100-300ms 才到 initTheme
+      - 这段时间 CSS 走默认 :root 主题（A 暗）
+      - 如果用户上次切到 light/C 暗 → 闪一下默认色 → 跳到正确色
+
+      解决方案：head 内 inline script（parse-time 同步执行），
+      同步读 localStorage 'gitea-kanban.theme' → 设 documentElement.dataset.theme。
+
+      防御：
+      - try/catch 包住（localStorage 不可用 / 隐私模式 / quota 满 → 静默走默认）
+      - enum 白名单校验（不传任意字符串到 dataset.theme，防恶意注入）
+      - 不写 localStorage（启动期仅读；spec 拍板 "启动期不能写新的 localStorage key"）
+      - 不发任何 fetch / 不 import 任何 module（pure sync DOM API）
+
+      主进程 reconcile：useUiStore().initTheme() 在 main.ts mount 后异步调 IPC get，
+      与 localStorage 不一致时自动覆盖（backend prefs.theme 是 source of truth）。
+    -->
+    <script>
+      try {
+        var t = localStorage.getItem('gitea-kanban.theme');
+        if (t === 'A-dark' || t === 'C-dark' || t === 'light') {
+          document.documentElement.dataset.theme = t;
+        }
+      } catch (e) {
+        // localStorage 不可用 / 隐私模式 → 静默走默认 :root（A 暗）
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
