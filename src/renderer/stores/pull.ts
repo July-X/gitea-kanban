@@ -1,0 +1,181 @@
+/**
+ * pull store —— 当前 project 的合并请求列表（gitea /pulls）
+ *
+ * 设计（AGENTS §5.2 + plan_32018da5 c-frontend-4-views-4-stores）：
+ *   - 数据源：pulls.list IPC（main 端包 listGiteaPulls + 30s 缓存 + linkedCards JOIN）
+ *   - setup store 风格（与 board.ts / branch.ts 一致）
+ *   - **不**持久化
+ *   - 暴露 list / refresh / filter / currentSelectedItem
+ *   - 状态维度：'all' | 'open' | 'closed'；merged 走 PullDto.merged 字段
+ *     （gitea 把 merged 合并请求视为 closed）
+ *     "全部 / 开放 / 已合并 / 已关闭" 4 个 tab 拆解：
+ *       all    = 全部
+ *       open   = state==open
+ *       merged = state==closed && merged==true
+ *       closed = state==closed && merged==false
+ *
+ * 零术语：
+ *   - 状态文案："全部 / 开放 / 已合并 / 已关闭"
+ *   - 禁用原词（"合并请求 / 合并 / 变基 / 派生 / 仓库 / 分支 / 维护者"）
+ *     → 代码内标识符走 check:no-jargon.ts 白名单
+ */
+
+import { defineStore } from 'pinia';
+import { computed, ref } from 'vue';
+import { pullsList } from '@renderer/lib/ipc-client';
+import type { UserFacingError } from '@renderer/lib/ipc-client';
+import type { ListPullsResp, PullDto, PullState } from '../../main/ipc/schema.js';
+
+/** 视图层 tab 维度 */
+export type PullFilter = 'all' | 'open' | 'merged' | 'closed';
+
+export const usePullStore = defineStore('pull', () => {
+  // ===== state =====
+  const items = ref<PullDto[]>([]);
+  const loading = ref(false);
+  const error = ref<UserFacingError | null>(null);
+  const currentProjectId = ref<string | null>(null);
+
+  // ===== filter state =====
+  const filter = ref<PullFilter>('all');
+  const search = ref('');
+
+  // ===== selection state =====
+  const currentSelectedItem = ref<PullDto | null>(null);
+
+  // ===== getters =====
+  const total = computed(() => items.value.length);
+
+  /** 按 filter 拆 4 类计数（UI tab 角标用） */
+  const counts = computed(() => {
+    let open = 0;
+    let merged = 0;
+    let closed = 0;
+    for (const p of items.value) {
+      if (p.state === 'open') {
+        open++;
+      } else if (p.merged) {
+        merged++;
+      } else {
+        closed++;
+      }
+    }
+    return { all: items.value.length, open, merged, closed };
+  });
+
+  /**
+   * 过滤后的列表（filter + search）
+   * search 匹配 title / head / base 三字段（不区分大小写）
+   */
+  const filteredItems = computed<PullDto[]>(() => {
+    const q = search.value.trim().toLowerCase();
+    let arr = items.value;
+    if (filter.value !== 'all') {
+      arr = arr.filter((p) => matchFilter(p, filter.value));
+    }
+    if (!q) return arr;
+    return arr.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        p.head.ref.toLowerCase().includes(q) ||
+        p.base.ref.toLowerCase().includes(q),
+    );
+  });
+
+  /** 按 index 查合并请求 */
+  function getByIndex(index: number): PullDto | null {
+    return items.value.find((p) => p.index === index) ?? null;
+  }
+
+  // ===== actions =====
+
+  /**
+   * 加载某 project 的合并请求列表
+   * @param projectId uuid
+   * @param reset 强制刷新（默认 true；v1 不翻页）
+   */
+  async function list(projectId: string, reset = true): Promise<void> {
+    loading.value = true;
+    error.value = null;
+    if (reset) {
+      items.value = [];
+      currentSelectedItem.value = null;
+    }
+    try {
+      // A3 拍板 pulls.list 支持 state 过滤；v1 拉全量，UI 层按 merged/closed 拆
+      const resp = (await pullsList({
+        projectId,
+        state: 'all' as PullState | undefined, // gitea /pulls?state=closed 同时含 merged；'all' = 不过滤
+        limit: 100,
+        page: 1,
+      })) as ListPullsResp;
+      items.value = resp.items;
+      currentProjectId.value = projectId;
+    } catch (e) {
+      error.value = e as UserFacingError;
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /** 刷新 */
+  async function refresh(): Promise<void> {
+    if (!currentProjectId.value) {
+      throw {
+        code: 'validation_failed',
+        messageText: '输入有误：尚未选中项目',
+        hint: '请先在"看板"页选择一个仓库',
+        recoverable: false,
+      } satisfies UserFacingError;
+    }
+    await list(currentProjectId.value, true);
+  }
+
+  /** 切换 tab */
+  function setFilter(f: PullFilter): void {
+    filter.value = f;
+  }
+
+  /** 选中某行 */
+  function select(item: PullDto | null): void {
+    currentSelectedItem.value = item;
+  }
+
+  function clearError(): void {
+    error.value = null;
+  }
+
+  return {
+    // state
+    items,
+    loading,
+    error,
+    currentProjectId,
+    // filter
+    filter,
+    search,
+    // selection
+    currentSelectedItem,
+    // getters
+    total,
+    counts,
+    filteredItems,
+    getByIndex,
+    // actions
+    list,
+    refresh,
+    setFilter,
+    select,
+    clearError,
+  };
+});
+
+/** 内部 helper：判断某合并请求是否命中 filter 维度 */
+function matchFilter(p: PullDto, f: PullFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'open') return p.state === 'open';
+  if (f === 'merged') return p.state === 'closed' && p.merged;
+  // 'closed' = state==closed 但未 merged
+  return p.state === 'closed' && !p.merged;
+}

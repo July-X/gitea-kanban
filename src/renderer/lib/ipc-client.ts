@@ -174,35 +174,38 @@ export class IpcClient {
  this.api = api;
  }
 
- /**
- *通用 invoke —— 把 window.api.<namespace>.<method>(args)调到 main端,
- *错误 reject 时把 IpcErrorPayload 转成 UserFacingError 后再抛
- */
- async invoke<K extends keyof WindowApi>(
- namespace: K,
- method: string,
- args: Record<string, unknown> = {},
- ): Promise<unknown> {
- const ns = this.api[namespace] as unknown as Record<string, ((a: object) => Promise<unknown>) | undefined>;
- if (!ns || typeof ns[method] !== 'function') {
- throw {
- code: 'internal' as IpcErrorCodeValue,
- messageText: `IPC端点不存在：${String(namespace)}.${method}`,
- hint: '请刷新应用或重启',
- recoverable: false,
- } satisfies UserFacingError;
- }
- try {
- //唯一例外：auth.connect走 (giteaUrl, token) 双参而不是 (args) 单参
- if (namespace === 'auth' && method === 'connect') {
- const a = args as { giteaUrl: string; token: string };
- return await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(a.giteaUrl, a.token);
- }
- return await ns[method]!(args);
- } catch (err) {
- throw normalizeError(err);
- }
- }
+  /**
+  *通用 invoke —— 把 window.api.<namespace>.<method>(args)调到 main端,
+  *错误 reject 时把 IpcErrorPayload 转成 UserFacingError 后再抛
+  *
+  * namespace 用 string 不用 `keyof WindowApi` 约束 —— A3 等后端新增 namespace
+  * （members.*）时 WindowApi 类型**先**在 preload 加，**然后**前端 store 调。
+  * 这里放宽到 string 让前端代码能"先写后端对齐"（A3 拍板的契约驱动开发）。
+  * 运行时仍然校验 ns[method] 是函数才发，**不**会泄漏到 main。
+  */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async invoke(namespace: string, method: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ns = (this.api as unknown as Record<string, any>)[namespace];
+  if (!ns || typeof ns[method] !== 'function') {
+  throw {
+  code: 'internal' as IpcErrorCodeValue,
+  messageText: `IPC端点不存在：${namespace}.${method}`,
+  hint: '请刷新应用或重启',
+  recoverable: false,
+  } satisfies UserFacingError;
+  }
+  try {
+  //唯一例外：auth.connect走 (giteaUrl, token) 双参而不是 (args) 单参
+  if (namespace === 'auth' && method === 'connect') {
+  const a = args as { giteaUrl: string; token: string };
+  return await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(a.giteaUrl, a.token);
+  }
+  return await ns[method](args);
+  } catch (err) {
+  throw normalizeError(err);
+  }
+  }
 
  /**
  *嵌套 invoke —— 处理 `board.columns.list` 这种 namespace.sub.method 三段式
@@ -306,26 +309,57 @@ export type LaneModeArg = 'laneByA' | 'laneByB' | 'laneByC';
 
 /** 时间轴数据 */
 export function commitsTimeline(args: {
- projectId: string;
- branches: string[];
- since?: string;
- until?: string;
- maxNodes?: number;
- laneMode?: LaneModeArg;
+  projectId: string;
+  branches: string[];
+  since?: string;
+  until?: string;
+  maxNodes?: number;
+  laneMode?: LaneModeArg;
 }): Promise<unknown> {
- // 把内部 alias还原为 IPC实际接受的字面量（main端 schema = 'branch' | 'author' | 'pr'）
- const wireLaneMode: 'branch' | 'author' | 'pr' | undefined =
- args.laneMode === 'laneByA'
- ? 'branch'
- : args.laneMode === 'laneByB'
- ? 'author'
- : args.laneMode === 'laneByC'
- ? 'pr'
- : undefined;
- return getIpcClient().invoke('commits', 'timeline', {
- ...args,
- ...(wireLaneMode !== undefined ? { laneMode: wireLaneMode } : {}),
- });
+  // 把内部 alias还原为 IPC实际接受的字面量（main端 schema = 'branch' | 'author' | 'pr'）
+  const wireLaneMode: 'branch' | 'author' | 'pr' | undefined =
+  args.laneMode === 'laneByA'
+  ? 'branch'
+  : args.laneMode === 'laneByB'
+  ? 'author'
+  : args.laneMode === 'laneByC'
+  ? 'pr'
+  : undefined;
+  return getIpcClient().invoke('commits', 'timeline', {
+  ...args,
+  ...(wireLaneMode !== undefined ? { laneMode: wireLaneMode } : {}),
+  });
+}
+
+// ============================================================
+// ===== pulls.* （A3 补：前端 wrapper，让 MergesView 能调） =====
+// ============================================================
+
+/** 合并请求 state（与 src/main/ipc/schema.ts PullStateSchema 同步）
+ *
+ * a3 拍板加 'all'：前端"合并请求"页要拉全量，然后按 merged 二次过滤拆"全部 / 开放 /
+ * 已合并 / 已关闭"4 个 tab。gitea 端 /pulls?state=closed 同时含 merged，'all' 是
+ * "既含 open 也含 closed" 唯一安全的取值（gitea 默认不传=open）。
+ */
+export type PullState = 'open' | 'closed' | 'all';
+
+/** 列出某 project 的合并请求（= gitea /pulls）
+ *
+ * A3 拍板：channel = `pulls.list`；后端支持 state 过滤 + linkedCards JOIN。
+ *
+ * v1 简化：state 只接 'open' | 'closed'（gitea 把 merged 合并请求视为 closed，
+ * merged 标志走 PullDto.merged 字段；store 层按 merged 二次过滤）。
+ */
+export function pullsList(args: {
+  projectId: string;
+  state?: PullState;
+  head?: string;
+  base?: string;
+  author?: string;
+  page?: number;
+  limit?: number;
+}): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'list', args);
 }
 
 // ============================================================
@@ -378,17 +412,26 @@ export function boardColumnsUnmapLabel(args: { columnId: string; giteaLabelId: n
 // ===== issues.* （ADR-0002 reset：卡片 = gitea issue） =====
 // ============================================================
 
-/**列出某 project 的 issue（按 columnId过滤走 column_label_mapping） */
+/**列出某 project 的 issue（按 columnId过滤走 column_label_mapping）
+ *
+ * A3 扩展：支持 assignee 过滤（"我的卡片"用，传当前用户名）；
+ * 后端 schema 已加 `assignee?: string` 字段（透传到 gitea /issues?assignee=）。
+ *
+ * v1 简化：assignee 用 gitea username 字符串（不是 userId）—— main 端调
+ * gitea api.repos.repoListIssues(..., { assignee }) 时 gitea-js 自己处理。
+ */
 export function issuesList(args: {
- projectId: string;
- columnId?: string;
- state?: 'open' | 'closed' | 'all';
- labelIds?: number[];
- q?: string;
- page?: number;
- limit?: number;
+  projectId: string;
+  columnId?: string;
+  state?: 'open' | 'closed' | 'all';
+  labelIds?: number[];
+  q?: string;
+  /** gitea username 字符串（**不**是 userId）—— "我的卡片" 传当前用户 login */
+  assignee?: string;
+  page?: number;
+  limit?: number;
 }): Promise<unknown> {
- return getIpcClient().invoke('issues', 'list', args);
+  return getIpcClient().invoke('issues', 'list', args);
 }
 
 /**拿单个 issue详情 */
@@ -451,10 +494,25 @@ export function labelsList(args: { projectId: string; page?: number; limit?: num
 
 /** 新建 gitea label */
 export function labelsCreate(args: {
- projectId: string;
- name: string;
- color: string;
- description?: string;
+  projectId: string;
+  name: string;
+  color: string;
+  description?: string;
 }): Promise<unknown> {
- return getIpcClient().invoke('labels', 'create', args);
+  return getIpcClient().invoke('labels', 'create', args);
+}
+
+// ============================================================
+// ===== members.* （A3 新增：仓库成员 = gitea collaborators） =====
+// ============================================================
+
+/** 列出某 project 的成员（= gitea repo collaborators）
+ *
+ * A3 拍板：channel = `members.list`，后端 src/main/gitea/repos.ts listRepoCollaborators 包装。
+ *
+ * v1 简化：直接返 CollaboratorDto[]，**不**做分页（gitea collaborators 接口无 page 参数）。
+ * 二次过滤（按权限 / 名称）放 store 层。
+ */
+export function membersList(args: { projectId: string }): Promise<unknown> {
+  return getIpcClient().invoke('members', 'list', args);
 }

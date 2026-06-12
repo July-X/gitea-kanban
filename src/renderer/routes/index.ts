@@ -2,11 +2,11 @@
  * 路由表（Vue Router 4）
  *
  * 设计（03-frontend.md §7 + AGENTS §5.5）：
- *   - 4 个一级路由：/、/auth、/board、/timeline
+ *   - 8 个一级路由：/、/auth、/board、/timeline、/branches、/merges、/my-cards、/members、/settings
  *   - 根路径 / 重定向到 /auth（未连接时合理入口）
  *   - 用 createWebHashHistory 适配 Electron file:// 协议
  *   - 懒加载（动态 import）减小首屏 bundle
- *   - 全局守卫：未连接 + 进 /board 或 /timeline → 跳 /auth
+ *   - 全局守卫：未连接 + 进 requiresAuth 路由 → 跳 /auth
  *
  * 命名空间提醒（AGENTS §5.5 + §6）：
  *   channel 命名 = `<namespace>.<method>`（如 repos.list / board.columns.list），
@@ -37,6 +37,30 @@ const routes: RouteRecordRaw[] = [
     name: 'timeline',
     component: () => import('@renderer/views/TimelineView.vue'),
     meta: { title: '时间轴', requiresAuth: true },
+  },
+  {
+    path: '/branches',
+    name: 'branches',
+    component: () => import('@renderer/views/BranchesView.vue'),
+    meta: { title: '分支', requiresAuth: true },
+  },
+  {
+    path: '/merges',
+    name: 'merges',
+    component: () => import('@renderer/views/MergesView.vue'),
+    meta: { title: '合并请求', requiresAuth: true },
+  },
+  {
+    path: '/my-cards',
+    name: 'my-cards',
+    component: () => import('@renderer/views/MyCardsView.vue'),
+    meta: { title: '我的卡片', requiresAuth: true },
+  },
+  {
+    path: '/members',
+    name: 'members',
+    component: () => import('@renderer/views/MembersView.vue'),
+    meta: { title: '成员', requiresAuth: true },
   },
   {
     path: '/settings',

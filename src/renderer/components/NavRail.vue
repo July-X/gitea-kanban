@@ -4,11 +4,11 @@
  *
  * 设计（03-frontend.md §2.1 / §4.1）：
  *   - 宽度 224px（var(--navrail-width)）
- *   - 7 个 NavItem：我的卡片 / 所有看板 / 分支 / 合并请求 / 时间轴 / 成员 / 设置
+ *   - 7 个 NavItem：看板 / 时间轴 / 分支 / 合并请求 / 我的卡片 / 成员 / 设置
  *   - 选中项 = 主色背景 + 主色微光
- *   - 文字用术语翻译表（OVERRIDE §本项目专属规则 #1）—— **不**出现 PR/merge/branch/fork 等原词
+ *   - 文字用术语翻译表（OVERRIDE §本项目专属规则 #1）—— **不**出现合并请求/合并/分支/派生 等原词
  *
- * 当前 v1 实现只做 3 个核心入口（看板 / 时间轴 / 设置），其余入口等 M1 后续 task 补
+ * v1 实现：7 个入口全部启用（plan_32018da5 把"即将推出"4 个灰显标记去掉）
  */
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
@@ -21,8 +21,6 @@ interface NavItem {
   icon: typeof KanbanSquare;
   /** 路由名或路径 */
   to: string;
-  /** 灰显原因（权限不足 / 未实现） */
-  disabledReason?: string;
 }
 
 const route = useRoute();
@@ -30,10 +28,10 @@ const route = useRoute();
 const items: NavItem[] = [
   { id: 'board', label: '看板', icon: KanbanSquare, to: '/board' },
   { id: 'timeline', label: '时间轴', icon: Timer, to: '/timeline' },
-  { id: 'branches', label: '分支', icon: GitBranch, to: '/branches', disabledReason: '即将推出' },
-  { id: 'merges', label: '合并请求', icon: GitMerge, to: '/merges', disabledReason: '即将推出' },
-  { id: 'my-cards', label: '我的卡片', icon: ListChecks, to: '/my-cards', disabledReason: '即将推出' },
-  { id: 'members', label: '成员', icon: Users2, to: '/members', disabledReason: '即将推出' },
+  { id: 'branches', label: '分支', icon: GitBranch, to: '/branches' },
+  { id: 'merges', label: '合并请求', icon: GitMerge, to: '/merges' },
+  { id: 'my-cards', label: '我的卡片', icon: ListChecks, to: '/my-cards' },
+  { id: 'members', label: '成员', icon: Users2, to: '/members' },
   { id: 'settings', label: '设置', icon: Settings, to: '/settings' },
 ];
 
@@ -49,11 +47,7 @@ const currentPath = computed(() => route.path);
           class="navrail__item"
           :class="{
             'navrail__item--active': currentPath.startsWith(item.to),
-            'navrail__item--disabled': Boolean(item.disabledReason),
           }"
-          :aria-disabled="Boolean(item.disabledReason) || undefined"
-          :title="item.disabledReason ?? ''"
-          @click.capture="(e: MouseEvent) => { if (item.disabledReason) e.preventDefault(); }"
         >
           <span class="navrail__icon" aria-hidden="true">
             <component :is="item.icon" :size="20" :stroke-width="1.75" />
@@ -111,16 +105,6 @@ const currentPath = computed(() => route.path);
 .navrail__item--active:hover {
   background: var(--color-primary-soft);
   color: var(--color-primary);
-}
-
-.navrail__item--disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.navrail__item--disabled:hover {
-  background: transparent;
-  color: var(--color-text-secondary);
 }
 
 .navrail__icon {
