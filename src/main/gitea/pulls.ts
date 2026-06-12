@@ -58,16 +58,44 @@ function toPullDto(r: PullRequest): PullDto {
   };
 }
 
-/** 拉仓库 PR列表（分页） */
+/** gitea-js 透传的 sort 枚举（与 swagger.ListPullRequests.sort 对齐） */
+type PullSort =
+  | 'oldest'
+  | 'recentupdate'
+  | 'leastupdate'
+  | 'mostcomment'
+  | 'leastcomment'
+  | 'priority';
+
+/**
+ * 拉仓库 PR列表（分页 + 过滤 + 排序）
+ *
+ * 透传字段（与 gitea-js 1.23.0 `repoListPullRequests` + gitea 1.26 swagger 对齐）：
+ * - state     ✓ 透传（PullState | 'all' → 'open' | 'closed' | 'all'）
+ * - sort      ✓ 透传（PullSort 6 种枚举）
+ * - milestone ✓ 透传（gitea 端是 number，**不**是字符串）
+ * - labels    ✓ 透传（gitea 端是 number[] label id 数组，**不**是字符串/label name）
+ * - poster    ✓ 透传（gitea 端字段名是 poster；IPC schema 叫 author——是 gitea 端的命名，
+ *                      业务层与 IPC schema 解耦，不在 gitea 包装层做命名映射）
+ * - page/limit ✓ 透传
+ *
+ * 不透传的字段（gitea-js 没暴露 + 上游 swagger 有但 gitea-js 漏生成）：
+ * - base_branch（gitea 1.26 swagger 有,gitea-js 1.23.0 漏——要支持得 raw fetch,
+ *   v1 简化:不支持,UI 走本地 filter）
+ *
+ * v1 调用方（src/main/ipc/pulls.ts pullsListHandler）实际只传 state/page/limit;
+ * sort/milestone/labels/poster 留作 v2 高级过滤扩展
+ */
 export async function listGiteaPulls(args: {
   giteaUrl: string;
   username: string;
   owner: string;
   repo: string;
   state?: PullState | 'all';
-  sort?: string;
-  labels?: string;
-  milestone?: string;
+  sort?: PullSort;
+  milestone?: number;
+  labels?: number[];
+  poster?: string;
   page?: number;
   limit?: number;
 }): Promise<{ items: PullDto[]; hasMore: boolean }> {
@@ -77,6 +105,10 @@ export async function listGiteaPulls(args: {
 
   const res = await api.repos.repoListPullRequests(args.owner, args.repo, {
     ...(args.state !== undefined ? { state: args.state } : {}),
+    ...(args.sort !== undefined ? { sort: args.sort } : {}),
+    ...(args.milestone !== undefined ? { milestone: args.milestone } : {}),
+    ...(args.labels !== undefined ? { labels: args.labels } : {}),
+    ...(args.poster !== undefined ? { poster: args.poster } : {}),
     page,
     limit,
   });

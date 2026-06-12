@@ -19,6 +19,7 @@ import { registerPullsIpc, unregisterPullsIpc } from './pulls.js';
 import { registerBoardIpc, unregisterBoardIpc } from './board.js';
 import { registerIssuesIpc, unregisterIssuesIpc } from './issues.js';
 import { registerLabelsIpc, unregisterLabelsIpc } from './labels.js';
+import { registerMembersIpc, unregisterMembersIpc } from './members.js';
 import { registerUserIpc, unregisterUserIpc } from './user.js';
 
 export function registerAllIpcHandlers(): void {
@@ -30,6 +31,7 @@ export function registerAllIpcHandlers(): void {
   registerBoardIpc();
   registerIssuesIpc();
   registerLabelsIpc();
+  registerMembersIpc();
   registerUserIpc();
 }
 
@@ -42,5 +44,6 @@ export function unregisterAllIpcHandlers(): void {
   unregisterBoardIpc();
   unregisterIssuesIpc();
   unregisterLabelsIpc();
+  unregisterMembersIpc();
   unregisterUserIpc();
 }

@@ -333,8 +333,10 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
   });
 
   // 转 TimelinePR 形态
+  // a3 注：PullDto.state 现在含 'all'（PullStateSchema 加了 a3 'all' 字段），
+  //   但 gitea /pulls 实际只返 'open' / 'closed'；这里 narrowing 收窄到不含 'all' 的子集。
   const timelinePrs: TimelinePR[] = [...prsOpen.items, ...prsClosed.items].map((p) => {
-    const state: 'open' | 'closed' | 'merged' = p.merged ? 'merged' : p.state;
+    const state: 'open' | 'closed' | 'merged' = p.merged ? 'merged' : (p.state === 'all' ? 'open' : p.state);
     return {
       id: `pr:${proj.owner}/${proj.repo}/${p.index}`,
       index: p.index,

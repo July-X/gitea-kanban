@@ -12,7 +12,14 @@
  *   - M0 交付：auth 三个 endpoint
  *   - Plan 2 cycle 6：repos + branches 五个 endpoint
  *   - Plan 2 cycle 7：commits + pulls 八个 endpoint
- *   - Plan 2 cycle 8（本版本）：board.columns.* 5 个 + board.cards.* 7 个 + commits.timeline 1 个
+ *   - Plan 2 cycle 8：board.columns.* 5 个 + board.cards.* 7 个 + commits.timeline 1 个
+ *   - M3 reset（ADR-0002）：board.cards.* 删 7 个，加 issues.*9 + labels.*2
+ *   - M5 补齐：user.* 4 个
+ *   - a3（本任务，2026-06-12）：
+ *     · ListIssuesArgsSchema 加 `assignee?: string`（a1 gitea 包装层已透传 assigned_by；IPC 层补齐契约）
+ *     · PullStateSchema 加 'all'（前端 store 需要拉全量）
+ *     · 新增 members namespace：CollaboratorDtoSchema + ListMembersArgsSchema + ListMembersRespSchema
+ *       （出参为 `CollaboratorDto[]` 数组形态，不包 `{items, hasMore}` —— 见 schema 内注释）
  */
 
 import { z } from 'zod';
@@ -386,8 +393,11 @@ export type PullAuthorDto = z.infer<typeof PullAuthorDtoSchema>;
  * PR 状态：
  * - open / closed：来自 gitea 字段
  * - merged：单独字段，gitea 也提供
+ * - all：a3 拍板加，给前端"拉全量然后按 merged 二次过滤"的合并请求视图用
+ *   （gitea 端 /pulls?state=closed 同时含 merged；想看"全部"必须显式 'all'，
+ *    不传 = gitea 默认 'open' 行为）
  */
-export const PullStateSchema = z.enum(['open', 'closed']);
+export const PullStateSchema = z.enum(['open', 'closed', 'all']);
 export type PullState = z.infer<typeof PullStateSchema>;
 
 export const PullDtoSchema = z
@@ -656,6 +666,15 @@ export const ListIssuesArgsSchema = z
  state: IssueStateSchema.optional(),
  labelIds: z.array(z.number().int().positive()).optional(),
  q: z.string().optional(),
+ /**
+  * gitea username 字符串（**不**是 userId）—— "我的卡片"视图用。
+  * 透传到 gitea `/issues?assigned_by=<username>`。
+  * 不传 = 走原行为（不过滤 assignee，向后兼容）。
+  *
+  * a3 拍板：gitea 端不识别 'me' magic string，业务层（IPC handler / store）
+  * 拿到 'me' 后必须先 resolve 成当前连接 username 再传进来。
+  */
+ assignee: z.string().min(1).optional(),
  page: z.number().int().min(1).default(1),
  limit: z.number().int().min(1).max(100).default(50),
  })
@@ -803,6 +822,60 @@ export const CreateLabelArgsSchema = z
   })
   .strict();
 export type CreateLabelArgs = z.infer<typeof CreateLabelArgsSchema>;
+
+// ============================================================
+// ===== members namespace（a3 新增：仓库成员 = gitea repo collaborators）=====
+// ============================================================
+
+/**
+ * 仓库成员 DTO —— 字段来源：
+ * - username / avatarUrl ← gitea-js User（来自 /repos/{owner}/{repo}/collaborators）
+ * - permission           ← gitea RepoCollaboratorPermission（来自 per-user /permission 端点）
+ *                          实际值：'read' | 'write' | 'admin'（gitea 1.26 swagger）；
+ *                          旧版本可能 'pull' | 'push' | 'owner'（v1 简化不区分，前端按 string 渲染）
+ *                          'unknown' = 取权限失败（per-user 端点 403 / 404 / 5xx 降级）
+ *
+ * 出参设计：直接返 `CollaboratorDto[]`（**不**包 `{items, hasMore}` 包装）
+ * 理由（a3 拍板）：
+ *   1. 成员量 v1 < 100，包成 items+hasMore 反而给前端"分页错觉"；
+ *   2. frontend `useMemberStore.list` 已写 `as MemberDto[]`，保持对齐；
+ *   3. gitea /collaborators 端点本身**不**分页（N+1 简化见 src/main/gitea/repos.ts:152）。
+ */
+export const CollaboratorDtoSchema = z
+  .object({
+    username: NonEmptyStringSchema,
+    avatarUrl: z.string().url().optional(),
+    /**
+     * gitea 权限字符串：'read' | 'write' | 'admin' | 'unknown'。
+     * 字符串而不是 enum：gitea 历史版本字段值漂移，v1 简化不锁死。
+     */
+    permission: z.string(),
+  })
+  .strict();
+export type CollaboratorDto = z.infer<typeof CollaboratorDtoSchema>;
+
+/**
+ * members.list 入参
+ *
+ * v1 简化：只接 projectId。gitea 端 collaborators list 本身**不**支持 query / sort
+ * （gitea 1.26 swagger 验证），二次过滤（按权限 / 名称）放 store 层前端做。
+ */
+export const ListMembersArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+  })
+  .strict();
+export type ListMembersArgs = z.infer<typeof ListMembersArgsSchema>;
+
+/**
+ * members.list 出参
+ *
+ * 直接返 `CollaboratorDto[]` 数组（不包 `{items, hasMore}`，见上）。
+ * 跟 labels/issues/pulls 等"包装对象"出参不一致 —— 这是 a3 拍板的有意偏离
+ * （理由同上）；**不**走 §7.1 拍板（属于"端点形态细节"非契约变更）。
+ */
+export const ListMembersRespSchema = z.array(CollaboratorDtoSchema);
+export type ListMembersResp = z.infer<typeof ListMembersRespSchema>;
 
 // ============================================================
 // ===== user namespace（02-architecture.md §5.3.9；M5补齐）=====

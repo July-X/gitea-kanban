@@ -13,7 +13,7 @@
  * -2026-06-11：从 src/main/ipc/schema.ts抽离（修复 preload sandbox module not found: zod）
  * -2026-06-11 ADR-0002 reset：删 board.cards.*7 个 + 加 issues.*7 个 + labels.*2 个
  *
- *端点清单（M5拍板，36 个）：
+ *端点清单（a3 拍板，37 个）：
  * auth ×3 : connect / disconnect / status
  * repos ×3 : list / addProject / removeProject
  * branches ×5 : list / create / rename / delete / star
@@ -23,7 +23,10 @@
  * issues ×7 : list / get / create / update / addLabel / removeLabel / moveColumn
  * labels ×2 : list / create
  * issues.comment ×2 : list / create（注：在 issues.comment.*命名空间下；callable via issues.comment.list/create）
+ * members ×1 : list（a3 新增：仓库成员 = gitea repo collaborators；返 `CollaboratorDto[]` 数组形态）
  * user ×4 : prefs.get / prefs.set / undo / redo（02 §5.3.9；M5补齐）
+ *
+ * 历史端点计数：M5=36 → a3=37（+1 members.list）
  */
 
 export const IpcChannel = {
@@ -79,6 +82,9 @@ export const IpcChannel = {
   // === labels namespace（ADR-0002：看板列绑 gitea label 用）===
   LABELS_LIST: 'labels.list',
   LABELS_CREATE: 'labels.create',
+
+  // === members namespace（a3 新增：仓库成员 = gitea repo collaborators）===
+  MEMBERS_LIST: 'members.list',
 
   // === user namespace（02-architecture.md §5.3.9；M5补齐）===
   USER_PREFS_GET: 'user.prefs.get',

@@ -7,13 +7,14 @@
  * - IpcError reject时是 plain object（toJSON输出）
  * -不暴露 ipcRenderer / process / require
  *
- * M5状态（M5 补齐 user.* 4 个）：
- * - src/main/ipc/schema.ts 注册 36 个 IpcChannel（M3 是 32 个）：
+ * M5状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个）：
+ * - src/main/ipc/schema.ts 注册 37 个 IpcChannel（M3=32 → M5=36 → a3=37）：
  * auth×3, repos×3, branches×5, commits×3, pulls×4,
  * board.columns×7 (reset后从5→7，加 mapLabel/unmapLabel),
  * issues×9 (新增：list/get/create/update/addLabel/removeLabel/moveColumn + comment.list/create),
- * labels×2 (新增), user×4 (M5补齐：prefs.get/set + undo/redo)
- * - 本文件暴露完整36 个 invoke + on()监听器
+ * labels×2 (新增), members×1 (a3 新增：list — 仓库成员 = gitea repo collaborators),
+ * user×4 (M5补齐：prefs.get/set + undo/redo)
+ * - 本文件暴露完整37 个 invoke + on()监听器
  * - api.d.ts通过 `Api = typeof api`自动派生，**不**手改
  *
  * 方法签名约定（除 auth.connect历史兼容性保留 (giteaUrl, token) 双参）：
@@ -47,9 +48,10 @@ const invoke =
  * issues ×7 : list, get, create, update, addLabel, removeLabel, moveColumn
  * issues.comment ×2 : list, create
  * labels ×2 : list, create
+ * members ×1 : list（a3 新增；返 `CollaboratorDto[]` 数组）
  * user ×4 : prefs.get, prefs.set, undo, redo
  * ─────────────────
- *合计:36 个 invoke
+ *合计:37 个 invoke
  */
 const api = {
  //===== auth namespace（AGENTS §8.2 token唯一入口）=====
@@ -131,6 +133,13 @@ const api = {
   labels: {
   list: invoke(IpcChannel.LABELS_LIST),
   create: invoke(IpcChannel.LABELS_CREATE),
+  },
+
+  //===== members namespace (a3 新增)=====
+  //仓库成员 = gitea repo collaborators；返 `CollaboratorDto[]` 数组形态（**不**包 {items, hasMore}）
+  //前端 src/renderer/stores/member.ts useMemberStore.list 直接 `as MemberDto[]` 读
+  members: {
+  list: invoke(IpcChannel.MEMBERS_LIST),
   },
 
   //===== user namespace (M5 补齐)=====

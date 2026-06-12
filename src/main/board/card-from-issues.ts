@@ -77,6 +77,11 @@ export async function listIssuesFromGitea(args: ListIssuesArgs): Promise<ListIss
  ...(args.state !== undefined ? { state: args.state } : {}),
  ...(labelIds !== undefined && labelIds.length >0 ? { labelIds: labelIds.map(String) } : {}),
  ...(args.q !== undefined ? { q: args.q } : {}),
+ // a3 补：透传 assignee 到 gitea /issues?assigned_by=<username>（"我的卡片"用）
+ //   不传 = 走 gitea 包装层原行为（不过滤 assignee，向后兼容）
+ ...(args.assignee !== undefined && args.assignee.length > 0
+ ? { assignee: args.assignee }
+ : {}),
  page: args.page,
  limit: args.limit,
  });
