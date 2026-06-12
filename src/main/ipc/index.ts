@@ -1,14 +1,19 @@
 /**
- * IPC路由统一注册入口
+ * IPC 路由统一注册入口
  *
- *加新 namespace时：
- *1.在 src/main/ipc/schema.ts加 Zod schema + channel 常量
- *2.在 src/main/ipc/<namespace>.ts写 handler（参考 auth.ts 的 wrapIpc模式）
- *3.在本文件 import +调 register
+ * 加新 namespace 时：
+ * 1. 在 src/main/ipc/schema.ts 加 Zod schema + channel 常量
+ * 2. 在 src/main/ipc/<namespace>.ts 写 handler（参考 auth.ts 的 wrapIpc 模式）
+ * 3. 在本文件 import + 调 register
  *
- * M3 (ADR-0002 reset)改动：
+ * M3 (ADR-0002 reset) 改动：
  * - 加 registerIssuesIpc / registerLabelsIpc（新增 namespace）
- * - board.cards.*7 个端点**已删**（registerBoardIpc 只剩7 个 board.columns.*端点）
+ * - board.cards.* 7 个端点**已删**（registerBoardIpc 只剩 7 个 board.columns.* 端点）
+ *
+ * theme-ipc（v1.1.2 主题切换，2026-06-12）改动：
+ * - 加 registerPreferencesIpc（preferences.theme.get / set 2 个端点）
+ *   —— 持久化走 sqlite prefs 表（M5 已建）
+ *   —— 契约来源：design-system/pages/tech-refine.md §16
  */
 
 import { registerAuthIpc, unregisterAuthIpc } from './auth.js';
@@ -21,6 +26,7 @@ import { registerIssuesIpc, unregisterIssuesIpc } from './issues.js';
 import { registerLabelsIpc, unregisterLabelsIpc } from './labels.js';
 import { registerMembersIpc, unregisterMembersIpc } from './members.js';
 import { registerUserIpc, unregisterUserIpc } from './user.js';
+import { registerPreferencesIpc, unregisterPreferencesIpc } from './preferences.js';
 
 export function registerAllIpcHandlers(): void {
   registerAuthIpc();
@@ -33,6 +39,7 @@ export function registerAllIpcHandlers(): void {
   registerLabelsIpc();
   registerMembersIpc();
   registerUserIpc();
+  registerPreferencesIpc();
 }
 
 export function unregisterAllIpcHandlers(): void {
@@ -46,4 +53,5 @@ export function unregisterAllIpcHandlers(): void {
   unregisterLabelsIpc();
   unregisterMembersIpc();
   unregisterUserIpc();
+  unregisterPreferencesIpc();
 }

@@ -1,19 +1,21 @@
 /**
  * IPC channel 名常量（zod-free）
  *
- *唯一信息源：docs/design/02-architecture.md §5.1（端点命名）+ ADR-0002 reset
+ * 唯一信息源：docs/design/02-architecture.md §5.1（端点命名）+ ADR-0002 reset
  *
  * 为何独立此文件：
  * - sandboxed preload 不允许 runtime require external 模块（AGENTS §8.10）
- * - preload 也用这些 channel字符串 →不能 import 自带 zod 的 src/main/ipc/schema.js
- * -此文件零依赖、零运行时副作用 →既可被 sandboxed preload 单文件 CJS bundle静态包含
- *（不需 externalizeDeps），也可被 main端 schema.ts re-export
+ * - preload 也用这些 channel 字符串 → 不能 import 自带 zod 的 src/main/ipc/schema.js
+ * - 此文件零依赖、零运行时副作用 → 既可被 sandboxed preload 单文件 CJS bundle 静态包含
+ *   （不需 externalizeDeps），也可被 main 端 schema.ts re-export
  *
  * 历史：
- * -2026-06-11：从 src/main/ipc/schema.ts抽离（修复 preload sandbox module not found: zod）
- * -2026-06-11 ADR-0002 reset：删 board.cards.*7 个 + 加 issues.*7 个 + labels.*2 个
+ * - 2026-06-11：从 src/main/ipc/schema.ts 抽离（修复 preload sandbox module not found: zod）
+ * - 2026-06-11 ADR-0002 reset：删 board.cards.* 7 个 + 加 issues.* 7 个 + labels.* 2 个
+ * - 2026-06-12 theme-ipc（v1.1.2 主题切换）：加 THEME_GET / THEME_SET 2 个端点
+ *   （持久化走 sqlite prefs 表，channel 命名沿 preferences.* 而非常规 theme.* —— 见下）
  *
- *端点清单（a3 拍板，37 个）：
+ * 端点清单（theme-ipc 拍板，39 个）：
  * auth ×3 : connect / disconnect / status
  * repos ×3 : list / addProject / removeProject
  * branches ×5 : list / create / rename / delete / star
@@ -22,11 +24,18 @@
  * board.columns ×7 : list / create / update / reorder / delete / mapLabel / unmapLabel
  * issues ×7 : list / get / create / update / addLabel / removeLabel / moveColumn
  * labels ×2 : list / create
- * issues.comment ×2 : list / create（注：在 issues.comment.*命名空间下；callable via issues.comment.list/create）
+ * issues.comment ×2 : list / create（注：在 issues.comment.* 命名空间下；callable via issues.comment.list/create）
  * members ×1 : list（a3 新增：仓库成员 = gitea repo collaborators；返 `CollaboratorDto[]` 数组形态）
- * user ×4 : prefs.get / prefs.set / undo / redo（02 §5.3.9；M5补齐）
+ * user ×4 : prefs.get / prefs.set / undo / redo（02 §5.3.9；M5 补齐）
+ * preferences ×2 : theme.get / theme.set（v1.1.2 主题切换 —— §16 tech-refine.md 拍板）
  *
- * 历史端点计数：M5=36 → a3=37（+1 members.list）
+ * 命名说明（v1.1.2 主题端点）：
+ * - channel 字面量 = `'preferences.theme.get'` / `'preferences.theme.set'`
+ *   —— 走 `preferences.*` 而非 `theme.*`，理由：v1.1.2 之后还会有更多"应用级偏好"
+ *   （如通知规则 / 同步周期 / 自定义快捷键等）共享同一个 namespace，主题只是其中之一
+ * - 渲染端 API 暴露 = `window.api.preferences.theme.{get,set}`（preload 端在 theme-preload task 改）
+ *
+ * 历史端点计数：a3=37 → theme-ipc=39（+2 preferences.theme.{get,set}）
  */
 
 export const IpcChannel = {
@@ -91,6 +100,12 @@ export const IpcChannel = {
   USER_PREFS_SET: 'user.prefs.set',
   USER_UNDO: 'user.undo',
   USER_REDO: 'user.redo',
+
+  // === preferences namespace（v1.1.2 主题切换 —— design-system/pages/tech-refine.md §16）===
+  // 走 preferences.* 而非 theme.*，为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键等）留 namespace 空间。
+  // 持久化走 sqlite prefs 表（M5 已建：key='theme'，value=JSON.stringify(theme)）。
+  THEME_GET: 'preferences.theme.get',
+  THEME_SET: 'preferences.theme.set',
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];

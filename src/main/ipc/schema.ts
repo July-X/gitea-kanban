@@ -15,11 +15,17 @@
  *   - Plan 2 cycle 8：board.columns.* 5 个 + board.cards.* 7 个 + commits.timeline 1 个
  *   - M3 reset（ADR-0002）：board.cards.* 删 7 个，加 issues.*9 + labels.*2
  *   - M5 补齐：user.* 4 个
- *   - a3（本任务，2026-06-12）：
+ *   - a3（2026-06-12）：
  *     · ListIssuesArgsSchema 加 `assignee?: string`（a1 gitea 包装层已透传 assigned_by；IPC 层补齐契约）
  *     · PullStateSchema 加 'all'（前端 store 需要拉全量）
  *     · 新增 members namespace：CollaboratorDtoSchema + ListMembersArgsSchema + ListMembersRespSchema
  *       （出参为 `CollaboratorDto[]` 数组形态，不包 `{items, hasMore}` —— 见 schema 内注释）
+ *   - theme-ipc（2026-06-12，v1.1.2 主题切换）：
+ *     · 新增 preferences namespace：ThemeEnumSchema + ThemeGetArgsSchema + ThemeGetResultSchema
+ *       + ThemeSetArgsSchema + ThemeSetResultSchema
+ *     · 契约来源：design-system/pages/tech-refine.md §16.1-§16.3（user 拍板）
+ *     · 复用 IpcErrorCode 新增 4 个常量（THEME_NOT_FOUND / INVALID_THEME / DATABASE_UNAVAILABLE / DATABASE_WRITE_FAILED）
+ *     · 端点命名：channel 字面量 = 'preferences.theme.get' / 'preferences.theme.set'，走 preferences.* 而非 theme.* namespace
  */
 
 import { z } from 'zod';
@@ -934,6 +940,87 @@ export type UserUndoResult = z.infer<typeof UserUndoResultSchema>;
 /** user.undo / user.redo 共用出参 */
 export const UserRedoResultSchema = UserUndoResultSchema;
 export type UserRedoResult = z.infer<typeof UserRedoResultSchema>;
+
+// ============================================================
+// ===== preferences namespace（v1.1.2 主题切换 —— tech-refine.md §16）=====
+// ============================================================
+
+/**
+ * 主题枚举（3 选 1）
+ *
+ * 设计来源：design-system/pages/tech-refine.md §14.1
+ * - 'A-dark'：A 暗 · 苍蓝提饱和（#0E3A52 canvas）—— **默认**
+ * - 'C-dark'：C 暗 · 中性近黑（#0F1115 canvas）
+ * - 'light'： Light · 浅苍蓝（#E8F1F5 canvas）—— 主色自动用加深版 #4F7A1A 过 WCAG AA
+ *
+ * 复用：ThemeGetArgsSchema / ThemeSetArgsSchema 共享此 enum；
+ * ThemeGetResultSchema.theme / ThemeSetResultSchema.theme 也用此 enum。
+ */
+export const ThemeEnumSchema = z.enum(['A-dark', 'C-dark', 'light']);
+export type ThemeName = z.infer<typeof ThemeEnumSchema>;
+
+/** 默认主题：'A-dark' —— tech-refine.md §14.1 + §15.3（'A 暗' 是 v1 苍蓝决策精神 + 解决灰蒙） */
+export const DEFAULT_THEME: ThemeName = 'A-dark';
+
+/**
+ * preferences.theme.get 入参 —— 无参
+ *
+ * 严格用 `Record<string, never>` 而非 `z.object({})`：
+ * - `z.object({})` 实际接受任意 object（含任意 key）—— 兼容性过头
+ * - `Record<string, never>` 强制 caller 传 `{}`（TS 类型层面 + 运行时都校验）
+ *   —— Zod 文档推荐做法（https://zod.dev/?id=records）
+ */
+export const ThemeGetArgsSchema = z.object({}).strict();
+export type ThemeGetArgs = z.infer<typeof ThemeGetArgsSchema>;
+
+/**
+ * preferences.theme.get 出参
+ *
+ * changedAt：
+ * - 已设过（row 存在）→ 返 row.updatedAt 的 ISO 字符串
+ * - 未设过（首次启动）→ 返 new Date().toISOString()（synthetic；用于 analytics / 调试一致）
+ *
+ * 注：ZodIsoDateSchema 要求 `z.string().datetime({ offset: true })`；
+ * sqlite prefs.updatedAt 是 Date 对象，Drizzle `{ mode: 'timestamp' }` 转回 Date；
+ * 我们用 `.toISOString()`（'Z' UTC 后缀）—— schema 接受 ✓
+ */
+export const ThemeGetResultSchema = z
+  .object({
+    theme: ThemeEnumSchema,
+    changedAt: IsoDateSchema,
+  })
+  .strict();
+export type ThemeGetResult = z.infer<typeof ThemeGetResultSchema>;
+
+/**
+ * preferences.theme.set 入参
+ *
+ * 必填 theme 字段（3 选 1，Zod enum 严格校验）
+ *
+ * 错误处理：
+ * - VALIDATION_FAILED：theme 不在 enum 3 选 1（Zod 在 wrapIpc 入口先 reject）
+ * - DATABASE_WRITE_FAILED：sqlite write 抛异常
+ * - DATABASE_UNAVAILABLE：getDb() 抛 "sqlite not initialized"
+ */
+export const ThemeSetArgsSchema = z
+  .object({
+    theme: ThemeEnumSchema,
+  })
+  .strict();
+export type ThemeSetArgs = z.infer<typeof ThemeSetArgsSchema>;
+
+/**
+ * preferences.theme.set 出参
+ *
+ * 跟 get 一样：返 { theme, changedAt }；changedAt 是本次 set 的时间（不是之前的 updatedAt）
+ */
+export const ThemeSetResultSchema = z
+  .object({
+    theme: ThemeEnumSchema,
+    changedAt: IsoDateSchema,
+  })
+  .strict();
+export type ThemeSetResult = z.infer<typeof ThemeSetResultSchema>;
 
 // ============================================================
 // ===== board.cards namespace（ADR-0002 reset：删除）=====

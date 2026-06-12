@@ -27,6 +27,12 @@
  *   keychain_unavailable / keychain_access_denied
  *   —— 触发于 @napi-rs/keyring 在 Linux 无 dbus+无 kwallet/libsecret 时，
  *      或 Windows Credential Vault ACL 拒绝时。
+ *
+ * 来自 v1.1.2 主题切换（plan_96625ed5 theme-ipc，2026-06-12）的 4 个新增常量：
+ *   theme_not_found / invalid_theme / database_unavailable / database_write_failed
+ *   —— 用于 preferences.theme.{get,set} IPC 端点
+ *   —— 拍板来源：design-system/pages/tech-refine.md §16.1-§16.3（user 已拍板）+ 本次 plan 任务 prompt
+ *   —— AGENTS §8.8 教训对齐：plan 收口时由 orchestrator 在 AGENTS §8 加条目登记
  */
 export const IpcErrorCode = {
   // === 业务错误（02-architecture.md §5.4 原始 10 个）===
@@ -56,6 +62,33 @@ export const IpcErrorCode = {
   KEYCHAIN_UNAVAILABLE: 'keychain_unavailable',
   /** 系统 keychain 拒绝访问（Windows ACL 拒绝 / macOS Keychain 拒绝） */
   KEYCHAIN_ACCESS_DENIED: 'keychain_access_denied',
+
+  // === v1.1.2 主题切换新增（plan_96625ed5 theme-ipc）===
+  /**
+   * preferences.theme.get：row 存在但 value 不可解析（JSON 烂 / 字段不对 / 不是 enum 3 选 1）
+   * —— 跟 NOT_FOUND 区分：NOT_FOUND 是"业务实体不存在"（如 projectId 找不到）；
+   *    THEME_NOT_FOUND 是"偏好值存在但语义损坏"
+   * —— 触发条件：sqlite row 存在但 JSON.parse 失败 / parse 后 theme 字段不在 enum 3 选 1
+   */
+  THEME_NOT_FOUND: 'theme_not_found',
+  /**
+   * preferences.theme.set：theme 不是合法 3 选 1（防御代码）
+   * —— 实际不可达：Zod z.enum() 在 IPC 入口先 reject 抛 VALIDATION_FAILED
+   * —— 保留此常量供业务层 direct caller（如 store 直接调 setTheme 跳过 IPC）做断言用
+   */
+  INVALID_THEME: 'invalid_theme',
+  /**
+   * preferences.theme.get/set：db 实例未初始化（initSqlite() 未调过）
+   * —— 兜底：正常应用启动流程下不会触发（main/index.ts 启动时先 initSqlite 再 register IPC）
+   * —— 触发场景：单测 / 脚本未走标准启动流
+   */
+  DATABASE_UNAVAILABLE: 'database_unavailable',
+  /**
+   * preferences.theme.set：sqlite write 抛异常（disk full / db locked / constraint 等）
+   * —— 跟 INTERNAL 区分：INTERNAL 是"代码逻辑 bug"；DATABASE_WRITE_FAILED 是"数据层故障"
+   * —— 用户感知：渲染端 toast "设置保存失败，请重试" + 不切换主题（tech-refine.md §15.2 失败回滚）
+   */
+  DATABASE_WRITE_FAILED: 'database_write_failed',
 } as const;
 
 export type IpcErrorCodeValue = (typeof IpcErrorCode)[keyof typeof IpcErrorCode];
