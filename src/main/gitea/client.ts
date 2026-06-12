@@ -33,8 +33,29 @@
  */
 
 import { Api, type HttpResponse } from 'gitea-js';
+import { app } from 'electron';
+import { mkdirSync, writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { IpcError, IpcErrorCode } from '@shared/errors';
 import { keychainGet } from './keychain.js';
+
+// ===== Dev-only token file fallback (inlined — 避免 client.ts → auth.ts 循环依赖) =====
+function devTokenPath(giteaUrl: string, username: string): string {
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return join(app.getPath('userData'), 'dev-tokens', `${safe(giteaUrl)}__${safe(username)}.json`);
+}
+async function readToken(giteaUrl: string, username: string): Promise<string | null> {
+  if (!app.isPackaged) {
+    try {
+      const p = devTokenPath(giteaUrl, username);
+      if (existsSync(p)) {
+        const j = JSON.parse(readFileSync(p, 'utf8')) as { token?: string };
+        return j.token ?? null;
+      }
+    } catch { void 0; }
+  }
+  return await keychainGet(giteaUrl, username);
+}
 
 interface ClientEntry {
  api: Api<unknown>;
@@ -174,7 +195,7 @@ export async function getGiteaClient(
  // token是否需要刷新
  const needRefresh = !entry || !entry.token || now - entry.tokenFetchedAt > TOKEN_CACHE_TTL_MS;
  if (needRefresh) {
- const token = await keychainGet(giteaUrl, username);
+ const token = await readToken(giteaUrl, username);
  if (!token) {
  throw new IpcError({
  code: IpcErrorCode.UNAUTHENTICATED,

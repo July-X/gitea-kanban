@@ -25,9 +25,70 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { app } from 'electron';
 import { IpcError, IpcErrorCode } from '@shared/errors';
-import { keychainSet, keychainDelete, keychainFindAccounts } from './keychain.js';
+import { keychainSet, keychainDelete, keychainFindAccounts, keychainGet } from './keychain.js';
 import { invalidateGiteaClient, clearGiteaClientCache } from './client.js';
+
+// ===== Dev-only token file fallback =====
+// 2026-06-12 修复：macOS dev 模式 sandbox 限制 + @napi-rs/keyring napi helper 二进制
+// 无法访问 user keychain → auth.connect 永远返 KEYCHAIN_UNAVAILABLE
+// dev fallback: 把 token 写到 userData/dev-tokens/<service>.json (0600)
+// prod 完全不动（仍走 system keychain）。
+//
+// 安全妥协：
+// - dev only（isDev check）
+// - file 路径走 app.getPath('userData')（dev 下已经被我搬到 /tmp/gitea-kanban-dev）
+// - permission 0o600 (owner only)
+// - 不写日志
+function devTokenDir(): string {
+  return join(app.getPath('userData'), 'dev-tokens');
+}
+function devTokenPath(giteaUrl: string, username: string): string {
+  // 文件名编码：service:account 是 keychain 语义；这里同样
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return join(devTokenDir(), `${safe(giteaUrl)}__${safe(username)}.json`);
+}
+async function persistToken(giteaUrl: string, username: string, token: string): Promise<void> {
+  if (!app.isPackaged) {
+    // dev fallback path
+    try {
+      mkdirSync(devTokenDir(), { recursive: true, mode: 0o700 });
+      writeFileSync(devTokenPath(giteaUrl, username), JSON.stringify({ token, ts: Date.now() }), { mode: 0o600 });
+      return;
+    } catch (err) {
+      // fall through to keychain
+      void err;
+    }
+  }
+  await keychainSet(giteaUrl, username, token);
+}
+async function readToken(giteaUrl: string, username: string): Promise<string | null> {
+  if (!app.isPackaged) {
+    try {
+      const p = devTokenPath(giteaUrl, username);
+      if (existsSync(p)) {
+        const j = JSON.parse(readFileSync(p, 'utf8')) as { token?: string };
+        return j.token ?? null;
+      }
+    } catch (err) {
+      void err;
+    }
+  }
+  return await keychainGet(giteaUrl, username);
+}
+async function clearDevToken(giteaUrl: string, username: string): Promise<void> {
+  if (!app.isPackaged) {
+    try {
+      const p = devTokenPath(giteaUrl, username);
+      if (existsSync(p)) unlinkSync(p);
+    } catch (err) {
+      void err;
+    }
+  }
+}
 import { getDb } from '../cache/sqlite.js';
 import { giteaAccounts, giteaUser } from '../cache/schema/index.js';
 import { eq } from 'drizzle-orm';
@@ -99,8 +160,8 @@ export async function authConnect(args: ConnectArgs): Promise<ConnectResult> {
   // 1. 验证 token
   const user = await verifyToken(args.giteaUrl, args.token);
 
-  // 2. 存 keychain
-  await keychainSet(args.giteaUrl, user.login, args.token);
+  // 2. 存 token（keychain 优先；dev 模式 fallback 到 file）
+  await persistToken(args.giteaUrl, user.login, args.token);
 
   // 3. 写 SQLite
   const db = getDb();
@@ -192,10 +253,11 @@ export async function authDisconnect(args: { giteaUrl: string }): Promise<void> 
     return;
   }
 
-  // 1. 清 keychain（按 url 列所有 username）
+  // 1. 清 token（keychain + dev fallback file）
   const usernames = await keychainFindAccounts(args.giteaUrl);
   for (const u of usernames) {
     await keychainDelete(args.giteaUrl, u);
+    await clearDevToken(args.giteaUrl, u);
     invalidateGiteaClient(args.giteaUrl, u);
   }
 

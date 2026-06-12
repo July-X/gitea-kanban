@@ -70,7 +70,8 @@ function resolveLogDir(): string {
     return dir;
   } catch (err) {
     // app 还没 ready 时 / 路径解析失败 — fallback 到 tmp（pino 至少能写，不丢日志）
-    console.error('[logger] resolveLogDir failed, fallback to /tmp:', err);
+    // 不用 console.error —— Electron 41 macOS GUI app stdout fd=-1 会 SonicBoom RangeError
+    void err; // swallow, fall back
     return '/tmp/gitea-kanban-logs';
   }
 }
@@ -94,22 +95,43 @@ const baseOptions: LoggerOptions = {
  */
 function buildLogger(): Logger {
   if (isDev) {
-    // 开发模式：pino-pretty 直接写 stdout
-    return pino({
-      ...baseOptions,
-      transport: {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          translateTime: 'HH:MM:ss.l',
-          ignore: 'pid,hostname',
-        },
-      },
-    });
+    // 开发模式：直接写文件（避免 stdout fd=-1 → SonicBoom RangeError）
+    // 2026-06-12 修复：EPERM 兜底 —— macOS SIP 限制某些用户目录（~/Library / ~/.gitea-kanban）
+    // 时 Electron 写不进去；fallback 到 /tmp/gitea-kanban-logs
+    const candidates = [
+      join(resolveDataRoot(), 'logs', LOG_SUBDIR),
+      '/tmp/gitea-kanban-logs',
+    ];
+    const date = new Date().toISOString().slice(0, 10);
+    for (const logDir of candidates) {
+      try {
+        mkdirSync(logDir, { recursive: true, mode: 0o700 });
+        // 真实测试写入：EPERM 可能在 mkdir 后实际 open 才暴露
+        const probePath = join(logDir, `.probe-${process.pid}-${Date.now()}`);
+        const fd = require('node:fs').openSync(probePath, 'a');
+        require('node:fs').closeSync(fd);
+        require('node:fs').unlinkSync(probePath);
+        // 写入 OK，再正式开日志
+        const filename = join(logDir, `main-${date}.log`);
+        cleanupOldLogs(logDir);
+        return pino({
+          ...baseOptions,
+        }, pino.destination({
+          dest: filename,
+          sync: true,
+          mkdir: true,
+          mode: 0o600,
+        }));
+      } catch (err) {
+        // EPERM / EACCES —— 试下一个候选
+        void err;
+      }
+    }
+    // 全部 fallback 都拒 —— 退化到 noop logger（不死进程）
+    return pino({ ...baseOptions, level: 'silent' });
   }
   // 生产模式：先不写文件（避免文件 IO 在 ipcMain.handle 热路径上做 sync I/O）
   // 文件落盘由 app.whenReady() 之后异步开启；不阻塞主进程启动
-  // 测试覆盖这个分支：见 logger.test.ts
   return pino(baseOptions);
 }
 
@@ -127,35 +149,12 @@ export const logger: Logger = buildLogger();
  * 方便 mavis agent 通过读日志定位 UI 报错）—— dev 时同时跑 stdout + file
  */
 export function upgradeLoggerToFile(): void {
-  const logDir = resolveLogDir();
-  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const filename = join(logDir, `main-${date}.log`);
-
-  // 创建 file transport；保留 stdout（stderr 同源）方便容器化部署收集
-  // pino.destination() 同步开文件，pino transport 异步接管
-  // 这里用 pino-pretty 不带 pretty 的 file 模式：直接 JSON 行
-  // 注：roll 由外部 cron / logrotate 维护（v1 不自实现滚动——按日开启新文件，14 天后被 OS 清理）
-  // 实际保留 14 天由本进程启动时清理：
-  cleanupOldLogs(logDir);
-
-  const fileLogger = pino({
-    ...baseOptions,
-    // 不写 transport；用 pino.destination 直接落盘
-  }, pino.destination({
-    dest: filename,
-    sync: false,
-    mkdir: true,
-    mode: 0o600,
-  }));
-
-  // 把现有 logger 的 methods 重新指向 fileLogger
-  // 注意：logger 对象本身已被 import 引用，不能替换；只能 mutate 它的 level + 内部 child
-  // 简化处理：fileLogger 仅供 new code 使用，老的 logger 引用仍走 stdout
-  // 实际上 pino 支持重新 bind——这里用最简单的方案：export fileLogger 作新引用
-  // 上层已经在写 logger.info/logger.error，pino 实例的 method 是固定的；
-  // 我们**重新 export** 一个 fileLogger，但调用方还是用 logger 名字。
-  // → 妥协方案：直接重写 logger 的方法。
-  copyLoggerMethods(fileLogger, logger);
+  // 2026-06-12 修复：dev 模式 buildLogger 已经在 module top-level 直接写文件，
+  // upgradeLoggerToFile 重新开新文件 fd 可能 EPERM（~/.gitea-kanban/logs 拒写）→
+  // 会抛 EPERM 杀死 app.whenReady()。
+  // 修法：upgradeLoggerToFile 已经是 no-op（logger 已经是 file destination），
+  // 不要再开新 fd。保留函数签名让 index.ts 不改。
+  logger.info('upgradeLoggerToFile: skipped (logger already at file destination from module init)');
 }
 
 function copyLoggerMethods(src: Logger, dst: Logger): void {
@@ -179,8 +178,8 @@ function cleanupOldLogs(logDir: string): void {
         const stat = statSync(path);
         if (stat.mtimeMs < cutoff) {
           unlinkSync(path);
-          // 用 stdout 走（这个阶段 logger 可能还在切）
-          console.log(`[logger] cleaned up old log: ${name}`);
+          // 不用 console.log —— Electron 41 macOS GUI app stdout fd=-1 会 SonicBoom RangeError
+          // logger 此时可能正在初始化（不能依赖），静默即可（unlink 本身成功就够）
         }
       } catch {
         // ignore individual file errors

@@ -50,26 +50,69 @@ export function resolveDbPath(): string {
 export async function initSqlite(): Promise<void> {
   if (rawDb) return; // idempotent
 
+  // 2026-06-12 修复：macOS 用户目录 SIP 限制（~/.gitea-kanban/）时
+  // new Database() 不会立即报错，但 journal_mode=WAL 需要建 .wal/.shm 文件
+  // → 写 EPERM → 整个 pragma 失败。所以不走"open 才 fallback"逻辑
+  // 而是先 probe 写权限再 open
+
   const dbPath = resolveDbPath();
   const dbDir = join(dbPath, '..');
-  if (!existsSync(dbDir)) {
-    mkdirSync(dbDir, { recursive: true, mode: 0o700 });
+
+  // 1. probe 写权限（openSync + closeSync）
+  const fs = require('node:fs') as typeof import('node:fs');
+  let probeOk = false;
+  try {
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true, mode: 0o700 });
+    }
+    const probePath = join(dbDir, `.probe-${process.pid}`);
+    const fd = fs.openSync(probePath, 'a');
+    fs.closeSync(fd);
+    fs.unlinkSync(probePath);
+    probeOk = true;
+  } catch (err) {
+    // EPERM/EACCES：macOS SIP 限制某些用户目录 → fallback
+    logger.warn({ err, dbDir }, 'sqlite dir probe failed, falling back to /tmp/gitea-kanban');
   }
 
-  rawDb = new Database(dbPath);
+  if (!probeOk) {
+    return initSqliteWithFallback();
+  }
+
+  try {
+    rawDb = new Database(dbPath);
+  } catch (err) {
+    logger.warn({ err, dbPath }, 'sqlite open failed, trying /tmp fallback');
+    rawDb = null;
+    return initSqliteWithFallback();
+  }
+  await applyPragmasAndMigrate();
+}
+
+/** EPERM fallback：把 db 放到 /tmp/gitea-kanban（用户显式数据迁过来时改 GITEA_KANBAN_DATA_DIR） */
+async function initSqliteWithFallback(): Promise<void> {
+  const fallbackRoot = '/tmp/gitea-kanban';
+  const fallbackDir = join(fallbackRoot, 'main');
+  mkdirSync(fallbackDir, { recursive: true, mode: 0o700 });
+  const fallbackPath = join(fallbackDir, SQLITE_DB_FILENAME);
+  logger.info({ fallbackPath }, 'sqlite fallback path in use');
+  rawDb = new Database(fallbackPath);
+  await applyPragmasAndMigrate();
+}
+
+async function applyPragmasAndMigrate(): Promise<void> {
+  if (!rawDb) return;
   rawDb.pragma('journal_mode = WAL');
   rawDb.pragma('foreign_keys = ON');
   rawDb.pragma('synchronous = NORMAL');
 
   dbInstance = drizzle(rawDb, { schema });
 
-  // 跑迁移（drizzle-kit 产物在 drizzle/）
-  // 路径相对 process.cwd()；drizzle-kit generate 输出到 drizzle/
   try {
     migrate(dbInstance, { migrationsFolder: getMigrationsFolder() });
-    logger.info({ dbPath }, 'sqlite migrations applied');
+    logger.info({ dbPath: rawDb.name }, 'sqlite migrations applied');
   } catch (err) {
-    logger.fatal({ err, dbPath }, 'sqlite migration failed');
+    logger.fatal({ err, dbPath: rawDb.name }, 'sqlite migration failed');
     throw err;
   }
 }
