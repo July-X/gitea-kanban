@@ -27,6 +27,7 @@ import { registerLabelsIpc, unregisterLabelsIpc } from './labels.js';
 import { registerMembersIpc, unregisterMembersIpc } from './members.js';
 import { registerUserIpc, unregisterUserIpc } from './user.js';
 import { registerPreferencesIpc, unregisterPreferencesIpc } from './preferences.js';
+import { registerClipboardIpc, unregisterClipboardIpc } from './clipboard.js';
 
 export function registerAllIpcHandlers(): void {
   registerAuthIpc();
@@ -40,6 +41,7 @@ export function registerAllIpcHandlers(): void {
   registerMembersIpc();
   registerUserIpc();
   registerPreferencesIpc();
+  registerClipboardIpc();
 }
 
 export function unregisterAllIpcHandlers(): void {
@@ -54,4 +56,5 @@ export function unregisterAllIpcHandlers(): void {
   unregisterMembersIpc();
   unregisterUserIpc();
   unregisterPreferencesIpc();
+  unregisterClipboardIpc();
 }

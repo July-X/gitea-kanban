@@ -326,6 +326,35 @@ export const CommitCommitterDtoSchema = z
   .strict();
 export type CommitCommitterDto = z.infer<typeof CommitCommitterDtoSchema>;
 
+/**
+ * 单个文件变更（v1.1.3 · task #23）
+ *
+ * 数据来源：gitea `GET /repos/{owner}/{repo}/git/commits/{sha}` 默认返 `files[]`
+ * —— 含 `filename / status / additions / deletions / changes / previous_filename / binary_file / patch`
+ * （gitea-js 类型只暴露了 2 字段，本地 wrapper 用 RawCommitFile 强转拿到全字段，
+ *  在 toCommitDto 阶段就地解析 patch → `functions`，patch 字符串**不**进 IPC 边界）
+ *
+ * `functions` 已在 main 端按文件去重（用户拍板 C：同文件多 hunk 合并为一个 chip 集合）
+ */
+export const CommitFileChangeDtoSchema = z
+  .object({
+    filename: z.string(),
+    /** 'added' | 'modified' | 'deleted' | 'renamed' | 'binary' —— gitea 原值 */
+    status: z.string().optional(),
+    additions: z.number().int().min(0).optional(),
+    deletions: z.number().int().min(0).optional(),
+    /** gitea 端 total changes（≠ additions+deletions，因 whitespace 等），按 gitea 原值存 */
+    changes: z.number().int().min(0).optional(),
+    /** 旧名（status=renamed 时才有） */
+    previousFilename: z.string().optional(),
+    /** 是否二进制 —— gitea 端 binary_file 字段 OR status='binary'（任一为真） */
+    binary: z.boolean().optional(),
+    /** hunk 头解析出的"改动函数/方法"列表（已按文件合并去重）；二进制文件不解析 */
+    functions: z.array(z.string()).optional(),
+  })
+  .strict();
+export type CommitFileChangeDto = z.infer<typeof CommitFileChangeDtoSchema>;
+
 export const CommitDtoSchema = z
   .object({
     sha: NonEmptyStringSchema,
@@ -338,6 +367,8 @@ export const CommitDtoSchema = z
     additions: z.number().int().min(0).optional(),
     deletions: z.number().int().min(0).optional(),
     filesChanged: z.number().int().min(0).optional(),
+    /** 单条 commit 详情才返（list 端点不返）—— v1.1.3 task #23 */
+    files: z.array(CommitFileChangeDtoSchema).optional(),
     linkedCards: z.array(LinkedCardDtoSchema).optional(),
   })
   .strict();
@@ -1021,6 +1052,33 @@ export const ThemeSetResultSchema = z
   })
   .strict();
 export type ThemeSetResult = z.infer<typeof ThemeSetResultSchema>;
+
+// ============================================================
+// ===== preferences.clipboard.write（v1.1.3 提交号 / 分支名复制）=====
+// ============================================================
+//
+// 走主进程 electron.clipboard.writeText 而非 renderer 端 navigator.clipboard.writeText：
+// 1) renderer 端 navigator.clipboard 在 Electron webContents 窗口未 focus / 非用户激活时
+//    promise reject（v1.1.2 主题切换已踩过 → 改成主进程最稳）
+// 2) 主进程 clipboard 模块是系统级 API，与 webview focus 解耦，永远可靠
+// 3) 不暴露 clipboard.read / .clear —— v1 单向写即可
+//
+// 入参 text：必填、长度 [1, 8192]、UTF-8 任意字符（分支名 / sha / commit message 都包得住）
+// 出参 { ok: true }：无业务错误；写失败由 main 端 wrapIpc 兜底成 INTERNAL
+
+export const ClipboardWriteArgsSchema = z
+  .object({
+    text: z.string().min(1).max(8192),
+  })
+  .strict();
+export type ClipboardWriteArgs = z.infer<typeof ClipboardWriteArgsSchema>;
+
+export const ClipboardWriteResultSchema = z
+  .object({
+    ok: z.literal(true),
+  })
+  .strict();
+export type ClipboardWriteResult = z.infer<typeof ClipboardWriteResultSchema>;
 
 // ============================================================
 // ===== board.cards namespace（ADR-0002 reset：删除）=====

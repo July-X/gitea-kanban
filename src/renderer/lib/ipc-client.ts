@@ -322,6 +322,49 @@ export function branchesList(args: { projectId: string; query?: string; limit?: 
  return getIpcClient().invoke('branches', 'list', args);
 }
 
+/**
+ * 收藏/取消收藏某分支（v1：只更本地 starred_branches 表，**不**调 gitea）
+ *
+ * 入参契约见 StarBranchArgsSchema。后端处理：setStarred(args)
+ * （cache/branches.ts:UPSERT/DELETE）。
+ */
+export function branchesStar(args: { projectId: string; branch: string; starred: boolean }): Promise<unknown> {
+ return getIpcClient().invoke('branches', 'star', args);
+}
+
+/**
+ * 列出某 project 的 commit（gitea /repos/{owner}/{repo}/commits）
+ *
+ * 契约：ListCommitsArgsSchema
+ * - sha?: 按分支头拉（v1 简化的"按分支查提交"用此字段）
+ * - path?: 按文件路径过滤
+ * - author?: 按作者过滤（gitea username 字符串）
+ * - since/until?: ISO 时间过滤
+ * - page/limit?: 分页
+ *
+ * 出参 ListCommitsResp：{ items, total, hasMore, nextPage }。
+ *
+ * 注意：list 端点**不**返 additions/deletions/filesChanged（gitea 端 list 不含 stats）——
+ * 业务上需 stats 时调 `commitsGet`（单条接口走 /git/commits/{sha}，含 stats）。
+ */
+export function commitsList(args: {
+ projectId: string;
+ sha?: string;
+ path?: string;
+ author?: string;
+ since?: string;
+ until?: string;
+ page?: number;
+ limit?: number;
+}): Promise<unknown> {
+ return getIpcClient().invoke('commits', 'list', args);
+}
+
+/** 拿单个 commit 详情（gitea /repos/{owner}/{repo}/git/commits/{sha}，含 stats） */
+export function commitsGet(args: { projectId: string; sha: string }): Promise<unknown> {
+ return getIpcClient().invoke('commits', 'get', args);
+}
+
 // 时间轴 lane模式：与 IPC schema LaneModeSchema同步。
 //内部用 alias（'laneByA' / 'laneByB' / 'laneByC'）避开 check:no-jargon扫描。
 // IPC边界处还原为 schema 字面量（main端 schema = 'branch' | 'author' | 'pr'）。
@@ -349,6 +392,22 @@ export function commitsTimeline(args: {
   ...args,
   ...(wireLaneMode !== undefined ? { laneMode: wireLaneMode } : {}),
   });
+}
+
+// ============================================================
+// ===== preferences.* （v1.1.3 提交号 / 分支名复制）=====
+// ============================================================
+
+/** 写系统剪贴板（v1.1.3）—— 走主进程 electron.clipboard.writeText
+ *
+ * 选 IPC 而非 navigator.clipboard.writeText 的原因（task #20）：
+ * 1) Electron renderer 窗口无 focus / 非用户激活时 navigator.clipboard.writeText
+ *    promise reject，v1.1.2 主题切换踩过 → 主进程永远可靠
+ * 2) 主进程走 system clipboard API，与 webview focus 解耦
+ * 3) 沙箱合规：renderer 不直接调系统 API
+ */
+export function clipboardWrite(text: string): Promise<unknown> {
+ return getIpcClient().invoke('preferences', 'clipboard.write', { text });
 }
 
 // ============================================================

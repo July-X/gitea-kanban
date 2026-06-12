@@ -168,6 +168,11 @@ const api = {
   get: invoke(IpcChannel.THEME_GET),
   set: invoke(IpcChannel.THEME_SET),
   },
+  // v1.1.3 提交号 / 分支名复制（task #20）—— 走主进程 electron.clipboard，
+  // 绕过 navigator.clipboard 在 Electron renderer 的不稳定行为
+  clipboard: {
+  write: invoke(IpcChannel.CLIPBOARD_WRITE),
+  },
   },
 
   /**

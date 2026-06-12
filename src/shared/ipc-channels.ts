@@ -106,6 +106,9 @@ export const IpcChannel = {
   // 持久化走 sqlite prefs 表（M5 已建：key='theme'，value=JSON.stringify(theme)）。
   THEME_GET: 'preferences.theme.get',
   THEME_SET: 'preferences.theme.set',
+  // 剪贴板写入（v1.1.3 提交号复制）—— 走主进程 electron.clipboard 模块，
+  // 绕过 navigator.clipboard.writeText 在 Electron renderer 窗口无 focus / 非用户激活时的不稳定行为
+  CLIPBOARD_WRITE: 'preferences.clipboard.write',
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
