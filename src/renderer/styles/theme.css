@@ -1,81 +1,41 @@
 /* ==========================================================================
- * Gitea Kanban — 全局 CSS 变量 + 暗色主题
+ * Gitea Kanban — 三主题 token 系统（v1.1.2）
  *
  * 设计来源（SSOT）：
- *   - design-system/gitea-kanban/OVERRIDE.md（项目实际生效）
- *   - docs/design/03-frontend.md §8.2（v5 拍板的色板）
- *   - AGENTS.md §8.1 #3（v1 单主题暗色，不提供切换）
+ *   - design-system/pages/tech-refine.md §14.1-§14.4（3 主题系统 + 完整 token 矩阵）
+ *   - docs/design/wireframe/theme-tech.html（demo 截图，token 已实调过）
  *
- * 关键决策（与 OVERRIDE / 03 一致）：
- *   - 主色 = gitea 绿 #609926（贴 gitea 生态）
- *   - 强调色 = gitea 橙 #f76707
- *   - 背景 = 苍蓝梯度（#134857 canvas / #1B5868 elevated / #236479 hover / #2D7487 active）
- *   - 文字 = 冷白 #DCE9F0 / 次级 #90A4AE / 静默 #5F7A87
- *   - 状态色 = 成功 #5BC76A / 警告 #E8B954 / 危险 #F47A6B / 信息 #6FB1FF
- *   - 阴影 = 不用纯黑（暗底消失），用更深的冷蓝黑 + 1px 冷白微描边 + 主色微光
- *   - 圆角 = 6 / 8 / 12px 三档
- *   - 字号 = 11 / 13 / 14 / 16 / 20 / 24 px
- *   - 动效 = 120 / 180 / 240ms
+ * 拍板沿革（AGENTS §8.1 #3）：
+ *   - v3 / v4：浅色默认 + 暗色可切（草稿，未拍板）
+ *   - v5（2026-06-10 12:12）：v1 单主题暗色，不提供切换（**已推翻**）
+ *   - v1.1.2（2026-06-12 15:25）：**3 主题切换**（A 暗 / C 暗 / Light），默认 A 暗
+ *
+ * 关键设计：
+ *   - 主色 gitea 绿 #609926 3 主题通用（品牌色不动）
+ *   - 亮色 CTA 文字用 #4F7A1A 加深版（过 WCAG AA 4.5:1）
+ *   - shadow + glow 主题差异最大：暗色 = "深底 + inset 描边 + 主色外环"，亮色 = "纯冷黑阴影 + 无装饰"
+ *   - 主题切换走 `data-theme` 属性（A-dark / C-dark / light），`:root` 默认 = A 暗
+ *   - 主题切换瞬间平滑过渡：background-color / color 150ms ease-out
+ *   - 旧 token 名称保留为别名 → 新主题 token，**不破坏**现有 Vue 组件引用
+ *     （88 处 `-soft` / `-glow` / `-hover` / `-active` / `accent` / `danger` 等旧名引用零回归）
+ * ========================================================================== */
+
+/* ==========================================================================
+ * 通用 token（3 主题不变：边角 / 字号 / 间距 / 字体 / 动效 / 布局 / z-index）
  * ========================================================================== */
 
 :root {
-  /* === 主色：gitea 绿（冷底上鲜明） === */
-  --color-primary: #609926;
-  --color-primary-hover: #74B830;
-  --color-primary-active: #4D8A1A;
-  --color-primary-soft: rgba(96, 153, 38, 0.18);
-  --color-primary-glow: rgba(96, 153, 38, 0.32);
-
-  /* === 强调色：gitea 橙（与冷底对比强） === */
-  --color-accent: #F76707;
-  --color-accent-hover: #FF8534;
-  --color-accent-soft: rgba(247, 103, 7, 0.18);
-
-  /* === 中性文字（冷白 + 冷灰蓝） === */
-  --color-text: #DCE9F0;
-  --color-text-secondary: #90A4AE;
-  --color-text-muted: #5F7A87;
-  --color-text-inverse: #134857;
-
-  /* === 背景：苍蓝梯度 === */
-  --color-bg: #134857;            /* canvas */
-  --color-bg-elevated: #1B5868;   /* 列、卡片、抽屉 */
-  --color-bg-hover: #236479;      /* hover */
-  --color-bg-active: #2D7487;     /* pressed */
-  --color-bg-overlay: rgba(8, 24, 30, 0.7);
-
-  /* === 描边 / 分隔 === */
-  --color-border: transparent;
-  --color-divider: rgba(220, 233, 240, 0.08);
-  --color-divider-strong: rgba(220, 233, 240, 0.16);
-
-  /* === 状态色（苍蓝底上达标对比度） === */
-  --color-success: #5BC76A;
-  --color-success-soft: rgba(91, 199, 106, 0.16);
-  --color-warning: #E8B954;
-  --color-warning-soft: rgba(232, 185, 84, 0.16);
-  --color-danger: #F47A6B;
-  --color-danger-soft: rgba(244, 122, 107, 0.16);
-  --color-info: #6FB1FF;
-  --color-info-soft: rgba(111, 177, 255, 0.16);
-
-  /* === 阴影：冷黑（暗底不消失）+ 主色微光 === */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md:
-    0 4px 12px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(220, 233, 240, 0.04);
-  --shadow-lg:
-    0 8px 32px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(220, 233, 240, 0.06),
-    0 0 24px var(--color-primary-glow);
-  --shadow-focus: 0 0 0 4px var(--color-primary-soft);
-  --shadow-focus-strong: 0 0 0 4px var(--color-primary-glow);
-
-  /* === 圆角 === */
+  /* === 边角（v1.1 锐化） === */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-pill: 999px;
+  --radius-card: 6px;
+  --radius-btn: 4px;
+  --radius-input: 4px;
+  --radius-chip: 2px;
+  --radius-modal: 8px;
+  --radius-tag: 2px;
 
   /* === 间距 === */
   --space-1: 4px;
@@ -93,6 +53,15 @@
   --font-lg: 16px;
   --font-xl: 20px;
   --font-2xl: 24px;
+  --font-h1: 24px;
+  --font-h2: 18px;
+  --font-h3: 14px;
+  --font-body: 13px;
+  --font-body-sm: 12px;
+  --font-caption: 11px;
+  --font-mono: 12px;
+  --font-mono-sm: 11px;
+  --font-kpi: 36px;
 
   /* === 行高 === */
   --line-tight: 1.3;
@@ -102,15 +71,17 @@
   /* === 字体栈 === */
   --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
     'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
-    'Liberation Mono', monospace;
+  --font-mono-stack: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, 'Liberation Mono', monospace;
 
   /* === 动效（120-240ms 紧凑现代） === */
   --t-fast: 120ms;
   --t-base: 180ms;
   --t-slow: 240ms;
+  --t-theme: 150ms; /* 主题切换专用过渡 */
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --ease-out: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-theme: ease-out;
 
   /* === 布局 === */
   --navrail-width: 224px;
@@ -124,14 +95,263 @@
   --z-toast: 1000;
   --z-modal: 2000;
   --z-modal-overlay: 1999;
+
+  /* === HUD 装饰（3 主题通用） === */
+  --decor-corner-size: 6px;
+
+  /* === 进度条（3 主题通用：主色 8% 底 + 1px 描边 + 渐变填充） === */
+  --progress-track-bg: rgba(96, 153, 38, 0.08);
+  --progress-track-border: 1px solid rgba(96, 153, 38, 0.2);
+  --progress-fill-bg: linear-gradient(90deg, #609926 0%, #7cb342 100%);
 }
 
 /* ==========================================================================
- * 全局元素默认值
+ * 主题 token：默认 = A 暗（向后兼容：未设 data-theme 时也用 A 暗）
+ * ========================================================================== */
+
+:root,
+[data-theme="A-dark"] {
+  /* === 背景梯度（苍蓝提饱和） === */
+  --color-canvas: #0E3A52;     /* H201° S71% L19% */
+  --color-elevated: #135070;
+  --color-hover: #18658F;
+  --color-active: #1E7BAD;
+
+  /* === 文字 === */
+  --color-text: #C5D4DD;
+  --color-text-muted: #9AAAB6;  /* 4.5:1 ✅ */
+  --color-text-dim: #5A6975;
+
+  /* === 文字反色（用于主色 CTA 按钮上的字色） === */
+  --color-text-inverse: #0E3A52; /* 同 canvas（暗底按钮配深字） */
+
+  /* === 主色 / 状态色 === */
+  --color-primary: #609926;       /* gitea 绿（品牌色，3 主题通用） */
+  --color-warning: #f76707;       /* gitea 橙（强调色） */
+  --color-error: #E14646;
+  --color-info: #4fc4d6;
+  --color-pending: #94a3b8;
+  --color-offline: #64748b;
+
+  /* === 主色 / 强调 / 状态 派生（hover / active / soft / glow） === */
+  --color-primary-hover: #74B830;
+  --color-primary-active: #4D8A1A;
+  --color-primary-soft: rgba(96, 153, 38, 0.18);
+  --color-primary-glow: rgba(96, 153, 38, 0.32);
+
+  --color-accent: #f76707;                     /* 旧名 → 强调色 */
+  --color-accent-hover: #FF8534;
+  --color-accent-soft: rgba(247, 103, 7, 0.18);
+
+  --color-success: #609926;                    /* 旧名 → 主色（green = success = primary） */
+  --color-success-soft: rgba(96, 153, 38, 0.16);
+
+  --color-warning-soft: rgba(247, 103, 7, 0.16);
+
+  --color-danger: #E14646;                     /* 旧名 → 错误 */
+  --color-danger-soft: rgba(225, 70, 70, 0.16);
+
+  --color-info-soft: rgba(79, 196, 214, 0.16);
+
+  /* === 描边 / 分隔 === */
+  --color-border: transparent;
+  --color-divider: rgba(220, 233, 240, 0.08);
+  --color-divider-strong: rgba(220, 233, 240, 0.16);
+
+  /* === 阴影 / glow 起点 === */
+  --shadow-rgb: 10, 42, 50;                          /* 苍蓝深底 */
+  --grid-color: rgba(220, 233, 240, 0.04);
+  --kpi-glow: 0 0 8px rgba(96, 153, 38, 0.4);
+  --signal-halo: 0 0 4px rgba(96, 153, 38, 0.6);
+  --breath-glow: rgba(96, 153, 38, 0.4);
+  --breath-glow-bright: rgba(96, 153, 38, 0.8);
+  --dot-color: rgba(96, 153, 38, 0.4);
+  --progress-fill-glow: 0 0 6px rgba(96, 153, 38, 0.4);
+  --decor-corner-color: rgba(96, 153, 38, 0.3);
+
+  /* === 主题 flag（亮色判定用） === */
+  --is-light: 0;
+}
+
+/* ==========================================================================
+ * 主题 token：C 暗（中性近黑 · H220° S17% L7%）
+ * ========================================================================== */
+
+[data-theme="C-dark"] {
+  /* === 背景梯度（中性黑） === */
+  --color-canvas: #0F1115;
+  --color-elevated: #1E222A;
+  --color-hover: #2D333F;
+  --color-active: #3C4453;
+
+  /* === 文字 === */
+  --color-text: #C5D4DD;
+  --color-text-muted: #9AAAB6;
+  --color-text-dim: #5A6975;
+  --color-text-inverse: #0F1115; /* 同 canvas */
+
+  /* === 主色 / 状态色 === */
+  --color-primary: #609926;
+  --color-warning: #f76707;
+  --color-error: #db2828;            /* 略区别 A 暗的 #E14646 */
+  --color-info: #4fc4d6;
+  --color-pending: #94a3b8;
+  --color-offline: #64748b;
+
+  /* === 派生（hover / active / soft / glow） === */
+  --color-primary-hover: #74B830;
+  --color-primary-active: #4D8A1A;
+  --color-primary-soft: rgba(96, 153, 38, 0.18);
+  --color-primary-glow: rgba(96, 153, 38, 0.32);
+
+  --color-accent: #f76707;
+  --color-accent-hover: #FF8534;
+  --color-accent-soft: rgba(247, 103, 7, 0.18);
+
+  --color-success: #609926;
+  --color-success-soft: rgba(96, 153, 38, 0.16);
+
+  --color-warning-soft: rgba(247, 103, 7, 0.16);
+
+  --color-danger: #db2828;
+  --color-danger-soft: rgba(219, 40, 40, 0.16);
+
+  --color-info-soft: rgba(79, 196, 214, 0.16);
+
+  /* === 描边 / 分隔 === */
+  --color-border: transparent;
+  --color-divider: rgba(220, 233, 240, 0.08);
+  --color-divider-strong: rgba(220, 233, 240, 0.16);
+
+  /* === 阴影 / glow 起点 === */
+  --shadow-rgb: 0, 0, 0;                                   /* 中性黑 */
+  --grid-color: rgba(220, 233, 240, 0.04);
+  --kpi-glow: 0 0 8px rgba(96, 153, 38, 0.4);
+  --signal-halo: 0 0 4px rgba(96, 153, 38, 0.6);
+  --breath-glow: rgba(96, 153, 38, 0.4);
+  --breath-glow-bright: rgba(96, 153, 38, 0.8);
+  --dot-color: rgba(96, 153, 38, 0.4);
+  --progress-fill-glow: 0 0 6px rgba(96, 153, 38, 0.4);
+  --decor-corner-color: rgba(96, 153, 38, 0.3);
+
+  --is-light: 0;
+}
+
+/* ==========================================================================
+ * 主题 token：Light（浅苍蓝 · H198° S39% L94%）
+ *
+ * 亮色版规则（§14.4）：
+ *   - 主色 HSL 亮度 L 降 8-12 个百分点，保色相过 WCAG AA
+ *   - 阴影纯冷黑（无 inset 描边 / 无主色外环）
+ *   - glow 全部关（白底上糊），改实色描边
+ * ========================================================================== */
+
+[data-theme="light"] {
+  /* === 背景梯度（浅苍蓝） === */
+  --color-canvas: #E8F1F5;
+  --color-elevated: #FFFFFF;
+  --color-hover: #F1F6F9;
+  --color-active: #DDE7EC;
+
+  /* === 文字（冷调深蓝灰 · 对偶暗色 #C5D4DD） === */
+  --color-text: #0F1A24;
+  --color-text-muted: #4A5862;  /* 6.4:1 ✅ */
+  --color-text-dim: #6A7884;    /* 4.0:1 */
+  --color-text-inverse: #FFFFFF; /* 白底按钮配白字（亮色 CTA 主色加深） */
+
+  /* === 主色 / 状态色（亮色版：H 不变，L 降 8-12 档过 AA） === */
+  --color-primary: #4F7A1A;       /* vs #FFFFFF 4.50:1 ✅ */
+  --color-warning: #D85804;       /* vs #FFFFFF 3.95:1 ✅ */
+  --color-error: #C42020;         /* vs #FFFFFF 5.87:1 ✅ */
+  --color-info: #157A91;          /* vs #FFFFFF 3.79:1 ✅ */
+  --color-pending: #5A6B7A;       /* vs #FFFFFF 5.50:1 ✅ */
+  --color-offline: #4A5862;
+
+  /* === 派生（hover 回到暗色版"亮档" / active 更深 / soft 跟随新主色） === */
+  --color-primary-hover: #609926;     /* hover 提亮到原色 #609926 */
+  --color-primary-active: #3D6014;    /* active 进一步压暗 */
+  --color-primary-soft: rgba(79, 122, 26, 0.18);
+  --color-primary-glow: rgba(79, 122, 26, 0.32);
+
+  --color-accent: #D85804;                            /* 旧名 → 强调色加深版 */
+  --color-accent-hover: #f76707;                      /* hover 回到原色 #f76707 */
+  --color-accent-soft: rgba(216, 88, 4, 0.18);
+
+  --color-success: #4F7A1A;                           /* 旧名 → 主色加深版 */
+  --color-success-soft: rgba(79, 122, 26, 0.16);
+
+  --color-warning-soft: rgba(216, 88, 4, 0.16);
+
+  --color-danger: #C42020;                            /* 旧名 → 错误加深版 */
+  --color-danger-soft: rgba(196, 32, 32, 0.16);
+
+  --color-info-soft: rgba(21, 122, 145, 0.16);
+
+  /* === 描边 / 分隔（亮色用冷黑 alpha 替代暗色版的冷白 alpha） === */
+  --color-border: transparent;
+  --color-divider: rgba(15, 26, 36, 0.08);
+  --color-divider-strong: rgba(15, 26, 36, 0.16);
+
+  /* === 阴影 / glow 起点 === */
+  --shadow-rgb: 15, 26, 36;                                  /* 冷黑（亮色用纯黑阴影） */
+  --grid-color: rgba(15, 26, 36, 0.04);
+  --kpi-glow: 0 0 0 0 transparent;                            /* 不用 glow */
+  --signal-halo: 0 0 0 1px rgba(79, 122, 26, 0.3);            /* 改为实色描边 */
+  --breath-glow: rgba(79, 122, 26, 0.25);
+  --breath-glow-bright: rgba(79, 122, 26, 0.45);
+  --dot-color: rgba(79, 122, 26, 0.5);
+  --progress-fill-glow: 0 0 4px rgba(79, 122, 26, 0.25);
+  --decor-corner-color: rgba(79, 122, 26, 0.5);
+
+  --is-light: 1;
+}
+
+/* ==========================================================================
+ * 派生 token（所有主题通用 · 依赖 --shadow-rgb / --color-primary-soft / -glow）
+ * 这些是合成的"工具 token"，由主题块的值自动重新组合
+ * ========================================================================== */
+
+:root,
+[data-theme="A-dark"],
+[data-theme="C-dark"],
+[data-theme="light"] {
+  /* 旧名 → 新名 映射（背景梯度） */
+  --color-bg: var(--color-canvas);
+  --color-bg-elevated: var(--color-elevated);
+  --color-bg-hover: var(--color-hover);
+  --color-bg-active: var(--color-active);
+  --color-bg-overlay: rgba(var(--shadow-rgb), 0.7);
+
+  /* 旧名 → 新名 映射（文字 · secondary 在新系统重命名为 muted） */
+  --color-text-secondary: var(--color-text-muted);
+
+  /* 阴影（基于 --shadow-rgb 合成 · 3 主题自动变） */
+  --shadow-sm: 0 1px 2px rgba(var(--shadow-rgb), 0.3);
+  --shadow-md:
+    0 4px 12px rgba(var(--shadow-rgb), 0.45),
+    0 0 0 1px rgba(220, 233, 240, 0.04);
+  --shadow-lg:
+    0 8px 32px rgba(var(--shadow-rgb), 0.55),
+    0 0 0 1px rgba(220, 233, 240, 0.06),
+    0 0 24px var(--color-primary-glow);
+  --shadow-focus: 0 0 0 4px var(--color-primary-soft);
+  --shadow-focus-strong: 0 0 0 4px var(--color-primary-glow);
+}
+
+/* ==========================================================================
+ * 全局元素默认值 + 主题切换平滑过渡
+ *
+ * `*` 选择器加 background-color / color 150ms 过渡（§15.2 拍板）
+ * —— 主题切换时画布/卡片/文字平滑切换，避免硬切闪屏
+ * —— 子元素的更具体 transition 声明（如 button）会覆盖这里
+ * —— prefers-reduced-motion 时由下面 0.01ms 覆盖块兜底
  * ========================================================================== */
 
 * {
   box-sizing: border-box;
+  transition:
+    background-color var(--t-theme) var(--ease-theme),
+    color var(--t-theme) var(--ease-theme);
 }
 
 html,
@@ -229,7 +449,7 @@ a:hover {
 code,
 pre,
 .mono {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono-stack);
   font-feature-settings: 'cv11', 'ss01'; /* JetBrains Mono: 0 带斜线 / 1 有底杠 */
 }
 
