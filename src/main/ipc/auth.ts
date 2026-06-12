@@ -29,6 +29,7 @@ import {
   authDisconnect,
   authStatus,
 } from '../gitea/auth.js';
+import { installCspHeader } from '../window.js';
 
 /**
  * 统一包装：parse 入参 → 调 handler → 错误转 IpcError
@@ -83,11 +84,18 @@ function wrapIpc<TArgs, TResult>(
 export function registerAuthIpc(): void {
   wrapIpc(IpcChannel.AUTH_CONNECT, ConnectArgsSchema, async (args) => {
     const result = await authConnect(args);
+    // auth.connect 成功后立刻按 giteaUrl 重装 CSP（AGENTS.md §4.7 + §8.2）
+    //   之前 createMainWindow 时 installCspHeader(null) → img-src 'self' data: https:
+    //   没 gitea URL → http://127.0.0.1:3000 头像被拦
+    // 重装后 img-src 含 giteaUrl（gitea 本地服务）+ connect-src 含 giteaUrl（备用直连）
+    installCspHeader(result.account.giteaUrl);
     return result satisfies ConnectResult;
   });
 
   wrapIpc(IpcChannel.AUTH_DISCONNECT, DisconnectArgsSchema, async (args: DisconnectArgs) => {
     await authDisconnect(args);
+    // disconnect 后按 giteaUrl 重装 CSP（清掉已 disconnect 账号的 giteaUrl 白名单）
+    installCspHeader(args.giteaUrl);
     return undefined;
   });
 
