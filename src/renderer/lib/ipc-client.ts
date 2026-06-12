@@ -142,6 +142,18 @@ export function normalizeError(err: unknown): UserFacingError {
  return toUserFacingError(err);
  }
  if (err instanceof Error) {
+ // 2026-06-12 修复：Electron IPC 把 main process throw 的 plain object
+ // (IpcError.toJSON()) 包装成 Error, message = "Error invoking remote method 'xxx': [object Object]"
+ // code/hint 等自定义属性丢失——解析 message
+ const ipcMatch = err.message.match(/Error invoking remote method '([^']+)': \[object Object\]/);
+ if (ipcMatch) {
+ return {
+ code: 'internal',
+ messageText: `操作失败：${ipcMatch[1]}`,
+ hint: '请稍候重试',
+ recoverable: true,
+ };
+ }
  return {
  code: 'internal',
  messageText: `应用出错了：${err.message}`,

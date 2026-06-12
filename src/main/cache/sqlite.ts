@@ -115,6 +115,32 @@ async function applyPragmasAndMigrate(): Promise<void> {
     logger.fatal({ err, dbPath: rawDb.name }, 'sqlite migration failed');
     throw err;
   }
+
+  // Seed local-user row if missing（FK 约束：prefs.user_id → users.id）
+  // user.ts / preferences.ts 都用 LOCAL_USER_ID = 'local-user'
+  seedLocalUser();
+}
+
+/**
+ * 确保 users 表有 local-user 行（FK 约束兜底）
+ *
+ * 多处 IPC handler（user.prefs.* / preferences.theme.*）用 LOCAL_USER_ID = 'local-user' 写 prefs 表，
+ * 但 users 表 FK 引用 users.id —— 如果 users 表空（迁移只建表不 seed），
+ * prefs INSERT 会抛 SQLITE_CONSTRAINT_FOREIGNKEY → DATABASE_WRITE_FAILED。
+ *
+ * 调用时机：applyPragmasAndMigrate 之后（migration 跑完、schema 建好）
+ */
+function seedLocalUser(): void {
+  if (!rawDb) return;
+  const existing = rawDb
+    .prepare('SELECT id FROM users WHERE id = ?')
+    .get('local-user');
+  if (existing) return;
+
+  rawDb
+    .prepare('INSERT INTO users (id, display_name, created_at) VALUES (?, ?, ?)')
+    .run('local-user', 'Local User', Math.floor(Date.now() / 1000));
+  logger.info('seeded local-user row in users table');
 }
 
 function getMigrationsFolder(): string {
