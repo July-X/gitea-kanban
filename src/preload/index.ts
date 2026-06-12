@@ -7,14 +7,15 @@
  * - IpcError reject时是 plain object（toJSON输出）
  * -不暴露 ipcRenderer / process / require
  *
- * M5状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个）：
- * - src/main/ipc/schema.ts 注册 37 个 IpcChannel（M3=32 → M5=36 → a3=37）：
+ * M5状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个，theme-preload 补齐 preferences.* 2 个）：
+ * - src/main/ipc/schema.ts 注册 39 个 IpcChannel（M3=32 → M5=36 → a3=37 → theme-preload=39）：
  * auth×3, repos×3, branches×5, commits×3, pulls×4,
  * board.columns×7 (reset后从5→7，加 mapLabel/unmapLabel),
  * issues×9 (新增：list/get/create/update/addLabel/removeLabel/moveColumn + comment.list/create),
  * labels×2 (新增), members×1 (a3 新增：list — 仓库成员 = gitea repo collaborators),
- * user×4 (M5补齐：prefs.get/set + undo/redo)
- * - 本文件暴露完整37 个 invoke + on()监听器
+ * user×4 (M5补齐：prefs.get/set + undo/redo),
+ * preferences×2 (v1.1.2 主题切换：preferences.theme.get / preferences.theme.set — design-system/pages/tech-refine.md §16.3)
+ * - 本文件暴露完整39 个 invoke + on()监听器
  * - api.d.ts通过 `Api = typeof api`自动派生，**不**手改
  *
  * 方法签名约定（除 auth.connect历史兼容性保留 (giteaUrl, token) 双参）：
@@ -50,8 +51,10 @@ const invoke =
  * labels ×2 : list, create
  * members ×1 : list（a3 新增；返 `CollaboratorDto[]` 数组）
  * user ×4 : prefs.get, prefs.set, undo, redo
+ * preferences ×2 : preferences.theme.get, preferences.theme.set（v1.1.2 主题切换 —— design-system/pages/tech-refine.md §16.3；
+ * 走 preferences.* 而非 theme.*，为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键等）留 namespace 空间）
  * ─────────────────
- *合计:37 个 invoke
+ *合计:39 个 invoke
  */
 const api = {
  //===== auth namespace（AGENTS §8.2 token唯一入口）=====
@@ -154,16 +157,29 @@ const api = {
   redo: invoke(IpcChannel.USER_REDO),
   },
 
- /**
- *通用 on()监听主进程事件推送
- *
- * 设计（02-architecture.md §5.1 send/on）：
- * main → webContents.send('event:<name>', payload)
- * renderer → window.api.on('<name>', cb)
- *
- * 返回 off()用于卸载监听（避免内存泄漏）
- */
- on: (event: string, cb: (payload: unknown) => void): (() => void) => {
+  //===== preferences namespace (v1.1.2 主题切换 — design-system/pages/tech-refine.md §16.3)=====
+  //走 preferences.* 而非 theme.*：为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键等）
+  // 留 namespace 空间，主题只是其中之一（与 src/shared/ipc-channels.ts v1.1.2 命名说明一致）。
+  //渲染端调用：window.api.preferences.theme.get() / window.api.preferences.theme.set({ theme: 'A-dark' })
+  //持久化走 sqlite prefs 表（main 端 src/main/ipc/preferences.ts），无需手动传 userId。
+  // 命名说明：preferences.theme.get / preferences.theme.set 是 channel 字面量也是 window.api 调用路径。
+  preferences: {
+  theme: {
+  get: invoke(IpcChannel.THEME_GET),
+  set: invoke(IpcChannel.THEME_SET),
+  },
+  },
+
+  /**
+   *通用 on()监听主进程事件推送
+   *
+   * 设计（02-architecture.md §5.1 send/on）：
+   * main → webContents.send('event:<name>', payload)
+   * renderer → window.api.on('<name>', cb)
+   *
+   * 返回 off()用于卸载监听（避免内存泄漏）
+   */
+  on: (event: string, cb: (payload: unknown) => void): (() => void) => {
  const channel = `event:${event}`;
  const listener = (_e: IpcRendererEvent, payload: unknown) => cb(payload);
  ipcRenderer.on(channel, listener);
