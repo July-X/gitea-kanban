@@ -2,21 +2,45 @@
 /**
  * SettingsView —— 用户偏好设置面板
  *
- * 当前只装 polling interval（仓库列表自动刷新间隔）：
+ * v1.1.2 起加 "外观" 分组（入口 2，tech-refine §15.1）：
+ *   - 3 主题单选（A 暗 / C 暗 / 浅色）
+ *   - onChange 立即调 uiStore.applyTheme —— CSS 150ms 过渡 + 异步 IPC 持久化
+ *   - 不做保存按钮（点选即生效），区别于 polling interval（数值输入需要手动保存）
+ *
+ * polling interval 分组保持 v1 行为：
  *   - 默认 5 min
  *   - 30s ~ 30 min
  *   - 改完立即生效（App.vue watch 监听 + 重启 timer）
  *
  * 设计：
- *   - 单列表项 + 单按钮（保存）
  *   - 不做 i18n（v1 硬编码中文）
  *   - 数值输入框 + 步进按钮，避免自由输入整数错误
+ *   - 外观分组用 `.settings-group`（与 polling 的 `.settings__section` BEM 解耦）
  */
 import { computed, ref } from 'vue';
 import { useSettingsStore, SETTINGS_LIMITS } from '@renderer/stores/settings';
+import { useUiStore, THEME_DISPLAY_NAME, type Theme } from '@renderer/stores/ui';
 import { showToast } from '@renderer/lib/toast';
 
 const settings = useSettingsStore();
+const ui = useUiStore();
+
+/** 外观分组 3 选 1（与 tech-refine §14 token 矩阵 + §15.1 单选规格同步） */
+const themeOptions: ReadonlyArray<{ value: Theme; label: string; desc: string }> = [
+  { value: 'A-dark', label: THEME_DISPLAY_NAME['A-dark'], desc: '夜间长时间使用推荐' },
+  { value: 'C-dark', label: THEME_DISPLAY_NAME['C-dark'], desc: '专业工具风' },
+  { value: 'light', label: THEME_DISPLAY_NAME['light'], desc: '白天或打印场景' },
+];
+
+/**
+ * 主题切换 —— onChange 回调
+ *
+ * 不 await：applyTheme 内部已 fire-and-forget 持久化（localStorage + DOM 同步 / IPC 异步），
+ * UI 上**不**应该等 sqlite 写完。失败由 store 内部 toast。
+ */
+function onThemeChange(theme: Theme): void {
+  void ui.applyTheme(theme);
+}
 
 /** 编辑中的值（毫秒） */
 const draftMs = ref<number>(settings.pollingIntervalMs);
@@ -108,6 +132,33 @@ async function onSave(): Promise<void> {
       <button type="button" class="settings__save" :disabled="saving" @click="onSave">
         {{ saving ? '保存中…' : '保存' }}
       </button>
+    </section>
+
+    <section class="settings-group">
+      <h2>外观</h2>
+      <p class="settings__hint">
+        切换应用配色，点选立即生效，下次启动自动恢复。当前设置保存在本地数据库，不跨设备同步。
+      </p>
+
+      <div class="settings-group__options" role="radiogroup" aria-label="主题">
+        <label
+          v-for="opt in themeOptions"
+          :key="opt.value"
+          class="settings-group__radio"
+          :class="{ 'settings-group__radio--active': ui.currentTheme === opt.value }"
+        >
+          <input
+            type="radio"
+            name="theme"
+            :value="opt.value"
+            :checked="ui.currentTheme === opt.value"
+            class="settings-group__radio-input"
+            @change="onThemeChange(opt.value)"
+          />
+          <span class="settings-group__radio-label">{{ opt.label }}</span>
+          <span class="settings-group__radio-desc">{{ opt.desc }}</span>
+        </label>
+      </div>
     </section>
   </div>
 </template>
@@ -210,5 +261,74 @@ async function onSave(): Promise<void> {
 .settings__save:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* =====================================================================
+ * 外观分组（v1.1.2 主题切换入口 2 · tech-refine §15.1）
+ *
+ * 设计：
+ *   - 与 polling 的 `.settings__section` 同基础（圆角 / padding / divider / max-width）
+ *   - 主色装饰条（border-left: 3px solid --color-primary）区分"主题"分组的视觉权重
+ *   - BEM 解耦：单独命名 .settings-group，避免与 polling 数据类分组混用
+ *   - radio 行用 padding + border 凸显"可选项"，hover/active 用 --color-primary 强调
+ * ===================================================================== */
+.settings-group {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+.settings-group h2 {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 var(--space-2);
+}
+.settings-group__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.settings-group__radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+.settings-group__radio:hover {
+  border-color: var(--color-primary);
+}
+.settings-group__radio--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+.settings-group__radio-input {
+  /* 浏览器原生 radio，accent-color 用主题主色跟随（亮/暗自动适配） */
+  accent-color: var(--color-primary);
+  margin: 0;
+  cursor: pointer;
+}
+.settings-group__radio-label {
+  font-size: var(--font-md);
+  font-weight: 500;
+  color: var(--color-text);
+}
+.settings-group__radio-desc {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  margin-left: auto;
 }
 </style>
