@@ -848,48 +848,34 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
                             :class="{ 'branch-commit-row__file--binary': f.binary }"
                           >
                             <!--
-                              v1.1.3 · task #40 · 文件行整行可点击跳 gitea
-                              - href 走 giteaUrl('commit/${sha}')（gitea commit 整页
-                                —— 没用 #diff-{name} 锚点，因为 gitea 内部 hashDot
-                                生成非公开 API，升级会断）
-                              - 用户在新 tab 打开 commit 整页后用 Ctrl+F 找文件名
-                              - @click.stop 防御性阻断（head button @click 不在
-                                <a> 父链上，理论上不会冒泡触发，但加 stop 成本
-                                极低，避免未来重构踩坑）
-                              - 二进制文件也加链接 —— gitea commit 页有"二进制
-                                文件 X"条目；title 区分一下
+                              v1.1.3 · task #40 三修 · 去掉文件行整行跳转
+                              - 原 task #40 给了每行 `<a href="gitea commit 页">` —— 跳 gitea 跟 head hash
+                                旁的 ↗ icon 重复（同一个 commit 同一条 URL），用户视觉噪音
+                              - 现在只展示文件名 + +/-/func，纯展示，跳转走 head 旁那个 ↗ 即可
+                              - title 仍保留文件名 hover tooltip（鼠标移上去能看到全名）
                             -->
-                            <a
-                              class="branch-commit-row__file-link"
-                              :href="giteaUrl(`commit/${c.sha}`)"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              :title="f.binary ? `在 gitea 打开此 commit（${f.filename} 是二进制文件，gitea 不显示 diff）` : `在 gitea 打开此 commit ${c.shortSha}，文件名 ${f.filename}`"
-                              @click.stop
+                            <span class="branch-commit-row__file-name" :title="f.filename">
+                              <span v-if="f.status === 'renamed' && f.previousFilename" class="branch-commit-row__file-rename">
+                                {{ f.previousFilename }} → {{ f.filename }}
+                              </span>
+                              <span v-else>{{ f.filename }}</span>
+                            </span>
+                            <span v-if="!f.binary" class="branch-commit-row__file-stats">
+                              <span class="branch-commit-row__files-add">+{{ f.additions ?? 0 }}</span>
+                              <span class="branch-commit-row__files-del">-{{ f.deletions ?? 0 }}</span>
+                            </span>
+                            <span v-else class="branch-commit-row__file-tag">二进制</span>
+                            <span
+                              v-if="f.functions && f.functions.length"
+                              class="branch-commit-row__file-funcs"
                             >
-                              <span class="branch-commit-row__file-name" :title="f.filename">
-                                <span v-if="f.status === 'renamed' && f.previousFilename" class="branch-commit-row__file-rename">
-                                  {{ f.previousFilename }} → {{ f.filename }}
-                                </span>
-                                <span v-else>{{ f.filename }}</span>
-                              </span>
-                              <span v-if="!f.binary" class="branch-commit-row__file-stats">
-                                <span class="branch-commit-row__files-add">+{{ f.additions ?? 0 }}</span>
-                                <span class="branch-commit-row__files-del">-{{ f.deletions ?? 0 }}</span>
-                              </span>
-                              <span v-else class="branch-commit-row__file-tag">二进制</span>
                               <span
-                                v-if="f.functions && f.functions.length"
-                                class="branch-commit-row__file-funcs"
-                              >
-                                <span
-                                  v-for="fn in f.functions"
-                                  :key="fn"
-                                  class="branch-commit-row__file-func"
-                                  :title="fn"
-                                >{{ fn }}</span>
-                              </span>
-                            </a>
+                                v-for="fn in f.functions"
+                                :key="fn"
+                                class="branch-commit-row__file-func"
+                                :title="fn"
+                              >{{ fn }}</span>
+                            </span>
                           </li>
                         </ul>
                       </div>
@@ -1859,44 +1845,12 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   min-width: 0;
 }
 /*
- * v1.1.3 · task #40 · 文件行整行可点跳 gitea
- * - 继承 .branch-commit-row__file 的 flex 布局（li 不再是 flex —— flex 转移到 a）
- * - text-decoration/color 清零（不让浏览器默认下划线 + 蓝紫色破设计系统）
- * - hover/focus 走现有 .branches__chip 同款 token（--color-bg-hover / --shadow-focus）
- * - ::after 提示"跳外部"——用 Unicode ↗ 而非 SVG mask，避免引新图标资源
+ * v1.1.3 · task #40 三修 · 删 .branch-commit-row__file-link
+ * - 原来文件行包了 <a> 让整行可点击跳 gitea commit 页 —— 跟 head hash 旁的 ↗ icon
+ *   跳同一个 URL，重复（一个 commit 一个 URL，点哪都一样）
+ * - 现在 li 直接 flex 容器，display/align/gap 走 .branch-commit-row__file 自身的样式
+ * - hover bg / focus ring / ::after ↗ 全部删掉（没交互就不该有视觉反馈）
  */
-.branch-commit-row__file-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 3px 6px;
-  margin: -3px -6px; /* 抵消原 li 的 padding，让 hover 区域贴齐 li 边界 */
-  font-size: var(--font-xs);
-  border-radius: var(--radius-sm);
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
-}
-.branch-commit-row__file-link::after {
-  content: '↗';
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  opacity: 0;
-  transition: opacity var(--t-fast) var(--ease);
-}
-.branch-commit-row__file-link:hover {
-  background: var(--color-bg-hover);
-}
-.branch-commit-row__file-link:hover::after {
-  opacity: 1;
-}
-.branch-commit-row__file-link:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
 .branch-commit-row__file--binary {
   opacity: 0.85;
 }
