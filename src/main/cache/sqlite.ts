@@ -8,7 +8,7 @@
  * - 测试用 _setSqlitePathForTest() 显式指定（**只**给 vitest 用）
  */
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import os from 'node:os';
 import Database, { type Database as BetterSqliteDb } from 'better-sqlite3';
@@ -59,16 +59,15 @@ export async function initSqlite(): Promise<void> {
   const dbDir = join(dbPath, '..');
 
   // 1. probe 写权限（openSync + closeSync）
-  const fs = require('node:fs') as typeof import('node:fs');
   let probeOk = false;
   try {
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true, mode: 0o700 });
+    if (!existsSync(dbDir)) {
+      mkdirSync(dbDir, { recursive: true, mode: 0o700 });
     }
     const probePath = join(dbDir, `.probe-${process.pid}`);
-    const fd = fs.openSync(probePath, 'a');
-    fs.closeSync(fd);
-    fs.unlinkSync(probePath);
+    const fd = openSync(probePath, 'a');
+    closeSync(fd);
+    unlinkSync(probePath);
     probeOk = true;
   } catch (err) {
     // EPERM/EACCES：macOS SIP 限制某些用户目录 → fallback
