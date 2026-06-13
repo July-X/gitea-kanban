@@ -807,7 +807,8 @@ function formatRelative(iso: string): string {
 }
 .commit-row__meta {
   display: grid;
-  grid-template-columns: 120px 120px 80px;
+  /* 后两列 auto 缩到内容，避免 "kanban_bot" 跟 "2 天前" 中间留一大段空 */
+  grid-template-columns: 120px auto auto;
   align-items: center;
   justify-content: end;
   gap: var(--space-2);
