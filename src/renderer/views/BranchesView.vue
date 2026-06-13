@@ -1602,19 +1602,17 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
 }
 
 /*
- * v1.1.3 · task #30 · detail 内部可滚容器
+ * v1.1.3 · task #30/#41 · detail 容器
  * - 父 li（.branch-commit-row）有 overflow:hidden 防止圆角溢出
- *   → 长内容会被裁，所以 detail 内部必须自带可滚容器
- * - max-height 用 cqh 容器查询，60vh 兜底
- * - overscroll-behavior:contain 让长内容滚到底时不滚外层 commits list
- * - scrollbar-gutter:stable 滚动条出现时不抖动
+ *   → 详情内容自然撑高，actions 走 sticky bottom（CSS 1656-1666）始终贴 li 底
+ * - #41 起取消 detail-body 的 max-height 限制：
+ *   长文件清单由 .branch-commit-row__files-list 自身独立滚动，
+ *   detail-body 不再截断，自然撑开让手风琴展开高度更舒展
+ * - 文件清单独立滚而非整个 detail-body 一起滚，好处是 fullmsg / summary
+ *   不会随文件清单一起被卷走，actions 也不会被 detail-body 推下去
  */
 .branch-commit-row__detail-body {
-  max-height: 60vh;
-  max-height: 60cqh; /* container query 优先（外层 flex 列布局时 cqh 更准） */
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  /* 不再限高 —— 自然撑高 + files-list 独立滚 + actions sticky */
 }
 
 /*
@@ -1727,6 +1725,16 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   font-weight: 500;
   font-feature-settings: 'tnum';
 }
+/*
+ * v1.1.3 · task #41 · 文件清单独立滚动
+ * - 详情手风琴展开后，文件清单是数量最不可控的部分（小型 patch 1 个，大型 refactor 50+）
+ * - 把滚动边界下移到 .branch-commit-row__files-list，让 summary / fullmsg / actions
+ *   不会被长文件清单一起推走；li 整体高度 = head + summary + fullmsg + files(50cqh) + actions，
+ *   比旧的"detail-body 整体 60cqh"更舒展（50cqh 只约束文件清单，其余内容自然撑高）
+ * - cqh 优先（外层 flex 列布局时 cqh 解析 commits-list 高度，比 vh 更准）
+ * - overscroll-behavior:contain 防止滚到底时带动外层 .branches__commits-list
+ * - scrollbar-gutter:stable 滚动条出现/消失时布局不抖
+ */
 .branch-commit-row__files-list {
   list-style: none;
   padding: 0;
@@ -1734,6 +1742,11 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: 50vh;
+  max-height: 50cqh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .branch-commit-row__file {
   display: flex;
