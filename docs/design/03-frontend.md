@@ -126,16 +126,15 @@
 | V1 | 顶栏仓库下拉 | 模态 | 切换当前仓库；缓存到本地，最近 5 个置顶 |
 | V2 | 侧栏"我的卡片" | 主区 tab | 当前用户在所有看板的卡片汇总 |
 | V3 | 侧栏"所有看板" | 主区 tab | 仓库下的看板列表 + 选中后展开列 |
-| V4 | 侧栏"分支" | 主区 tab | BranchList + BranchManager |
-| V5 | 侧栏"合并请求" | 主区 tab | MergePanel |
-| V6 | 侧栏"时间轴" | 主区 tab | CommitTimeline（核心视图） |
-| V7 | 侧栏"成员" | 主区 tab | 仓库成员列表 + 角色徽章（只读） |
-| V8 | 侧栏"设置" | 主区 tab | gitea 实例 URL、PAT、缓存管理、主题 |
+| V4 | 侧栏"合并请求" | 主区 tab | MergePanel |
+| V5 | 侧栏"时间轴" | 主区 tab | CommitTimeline（核心视图；分支选择作为 BranchChips 内嵌在头部） |
+| V6 | 侧栏"成员" | 主区 tab | 仓库成员列表 + 角色徽章（只读） |
+| V7 | 侧栏"设置" | 主区 tab | gitea 实例 URL、PAT、缓存管理、主题 |
 | D1 | 新建卡片 | 模态 | 看板内的"+ 新建卡片" |
 | D2 | 卡片详情 | 抽屉 | 右侧滑出，显示标题/描述/截止日/标签/关联 commit/活动 |
 | D3 | 卡片关联选择 | 模态 | 选 commit / PR 时打开 |
 | D4 | 合并确认 | 模态 | MergePanel 中点"合并"触发，含冲突检查 |
-| D5 | 危险操作二次确认 | 模态 | 删分支/强推/重置时触发，文字说明影响 |
+| D5 | 危险操作二次确认 | 模态 | 删合并/强推/重置时触发，文字说明影响（v1.4 起删分支入口已去除，此处保留供后续接入） |
 | D6 | PAT 输入 | 模态 | 首次启动 + 设置页触发 |
 | D7 | 关于 / 帮助 | 窗口内 | 版本号、快捷键、反馈入口 |
 
@@ -154,9 +153,8 @@
 | **KanbanBoard** | Trello 式列拖拽看板 | Column / Card / CardEditor | `board:list` (repoId) → `Board[]` / `card:list` (boardId) → `Card[]` / `card:create` / `card:update` / `card:move` / `card:delete` |
 | **CardEditor** | 新建/编辑卡片 | Title / Description / DueDate / Labels / Assignees / LinkedCommits | 同上 |
 | **CardDetailDrawer** | 卡片详情右侧抽屉 | 同 CardEditor + ActivityFeed + LinkedCommits | `card:get` (id) / `card:activity` (id) / `commit:link` (cardId, sha) / `commit:unlink` |
-| **BranchList** | 分支列表 | BranchRow（保护/默认/最新 commit/作者头像） | `branch:list` (repoId) → `Branch[]` / `branch:default` |
-| **BranchManager** | 创建/删除/重命名/保护分支 | 表单 + 确认弹窗 | `branch:create` (name, from) / `branch:delete` (name) / `branch:rename` (old, new) / `branch:setProtection` |
-| **CommitTimeline** | **核心**：多分支时间轴 | LaneHeader / CommitNode / MergeEdge / LaneFilter / ZoomBar / TooltipCard | `timeline:data` (repoId, opts) → `{lanes, nodes, edges, prs}` / `timeline:diff` (sha) → 跳转用 |
+| **BranchChips**（v1.4 起） | 时间轴头部分支选择器 | BranchChip（默认/选中/截断展示，≤12 条多可滚动） | 由 CommitTimeline 内联调用 `branches.list` → `Branch[]`（不再有独立 `BranchList` 视图） |
+| **CommitTimeline** | **核心**：多分支时间轴 | BranchChips / LaneHeader / CommitNode / MergeEdge / LaneFilter / ZoomBar / TooltipCard | `branches.list` (projectId) → `Branch[]` + `timeline.data` (projectId, opts) → `{lanes, nodes, edges, prs}` / `timeline.diff` (sha) → 跳转用 |
 | **MergePanel** | 合并请求列表 + 操作 | PRRow（标题/状态/作者/源→目标/创建时间/可合并性） + MergeConfirmModal | `pr:list` (repoId, state) → `PR[]` / `pr:get` (index) / `pr:merge` / `pr:close` / `pr:checkConflict` |
 | **MemberList** | 仓库成员 | MemberRow（头像/角色/最后活跃） | `member:list` (repoId) → `Member[]` |
 | **SettingsView** | 设置 | InstanceUrlInput / PATInput / CacheManager / ThemeSwitcher | `settings:get` / `settings:set` / `cache:clear` / `cache:size` |
@@ -200,20 +198,25 @@
 - 列表项右侧 hover 显示"在浏览器中打开"（跳 gitea 原页面）
 - 选中的 repo 在主区变成"当前上下文"，所有视图都基于它
 
-### 4.3 BranchList
+### 4.3 BranchChips（v1.4 起 — 替代原独立 BranchList 视图）
 
-**目的**：列出当前仓库所有分支，提供"哪个分支最新、谁是负责人、是否被保护"的一眼洞察。
+**目的**：作为 CommitTimeline 头部内嵌组件，让用户在时间轴页面**就地选择分支**查看 commit 树，避免来回跳"分支视图"。独立 BranchList 视图 + `/branches` 路由 v1.4 起移除（功能并入此处）。
 
-**字段**（每行）：
-- 分支名（带"默认" / "受保护" 徽章）
-- 最新 commit 摘要 + 时间（"2 小时前" / "昨天 14:30"）
-- 距离默认分支的 ahead/behind 数（"领先 3 · 落后 1"）
-- 作者头像 + 名字
-- 操作：复制分支名 / 跳 gitea / 设为默认（如果有权限）
+**字段**（每个 chip）：
+- 分支名（默认分支加"默认"徽章）
+- 选中态：主色背景 + 微光
+- 截断：超过 12 个分支横向滚动（不展开下拉，避免非技术用户多一层心智）
+- hover：显示 ahead/behind 数（"领先 3 · 落后 1"）+ 最新 commit 摘要
 
 **交互**：
-- 默认按"最近提交"排序，可切到"按名称 / 按作者 / 按 ahead 落后"
-- 选中行后右侧出 BranchManager 面板（创建/删除/重命名/保护）
+- onMounted 调 `branches.list`（projectId）→ 自动选中默认分支 + 第一个非默认分支（提供"两条线对照"）；存在 pendingTimelineFocus（store 写入）则替换为该分支
+- 点 chip 切换选中态：选中 ≥1 条时调 `commits.timeline` 重拉；全部取消时主区切到空状态
+- 默认按 gitea 返回顺序（name 升序）展示，**不**再提供排序 UI（简化非技术用户操作）
+
+**与原 BranchList 的差异**：
+- 无"按 ahead/behind 排序" / "按作者筛选" / "按最近提交排序"——这些功能在 chip 视图下意义不大（chip 数量本来就被截断在 12 条内）
+- 无"选中行右侧出 BranchManager"——v1.4 不再暴露分支管理 UI（见 §4.7）
+- 收藏（star）/ 创建 / 删除 / 重命名 / 保护设置 — 全部去掉，**待后续接分支操作面板时再启用**（schema 已就绪，见 §4.7）
 
 ### 4.4 CommitTimeline（**重点**）
 
@@ -263,20 +266,26 @@
 
 **冲突处理**：v1 **不做** in-app 冲突解决——冲突时按钮禁用 + 引导"请在编辑器或 gitea 网页解决冲突后再合并"。v2 再考虑 `git CLI` 集成 + 简单 3-way merge 视图。
 
-### 4.7 BranchManager
+### 4.7 BranchManager（v1.4 起暂未挂载 — IPC schema 已就绪）
 
-**目的**：分支的创建/删除/重命名/保护设置。
+**目的**：分支的创建 / 删除 / 重命名 / 收藏 / 保护设置。v1.4 起**没有 UI 入口**（独立分支视图已去除，分支操作面板尚未实现）；后端 IPC 契约 `branches.{create, rename, delete, star}` + Zod schema 全部保留在 `src/main/ipc/schema.ts` + `src/main/ipc/branches.ts`，等后续接分支操作面板时启用（典型场景：在看板列右键菜单 / 在 CommitTimeline 行 hover 浮层添加"以此分支创建新分支 / 删除此分支"）。
 
-**字段**（表单）：
+**字段**（待 UI 接入时使用，schema 已定义）：
 - 分支名（创建时必填，校验：不含空格、不以 - 开头、不与现有重名）
 - 源分支（创建时用，从已有分支下拉选）
 - 保护选项（checkbox）："禁止强制推送" / "要求审核通过才能合并" / "限制谁能推送"（最后一项需要 gitea admin 权限）
 - 默认分支：单选（admin 可见，普通用户灰显）
+- 收藏状态（toggle — 走 `branches.star`，写入本地 `starred_branches` 表，不调 gitea）
 
-**危险操作**：
+**危险操作**（同上，schema 已定义 — 待 UI 接入时启用）：
 - 删除分支：弹 ConfirmDialog，body 写"这将删除分支 `xxx`（包含 N 次提交），删除后 X 天内 gitea 仍可在 reflog 中恢复"，要求用户在输入框打 "delete" 二次确认
 - 强制推送：同上
 - 设为默认：要求用户有 admin 权限；无权限时按钮灰显 + tooltip 说明
+
+**重命名降级**（继承 §4.7 历史决策）：
+gitea 不支持直接 rename API，v1 **不**实现"新建 + 推送 + 删旧"三步降级；UI 提示"到 gitea 页面操作"。
+
+**与原章节差异**：v1.4 起的唯一变化是"暂时不挂载 UI"——schema 和 IPC 通道全部保留，等业务方明确触发时启用。维护者可在 changelog 或 issue 里跟踪"BranchManager 接入"任务。
 
 ---
 
@@ -666,69 +675,56 @@ const { columns, cardsByColumn, loading } = storeToRefs(board);
 
 ### 7.2 路由表
 
-应用分 5 个主视图 + 设置 + 帮助（与 §2.2 入口清单 V1~V8 对应）：
+应用分 6 个主视图 + 设置 + 鉴权页（与 §2.2 入口清单 V1~V7 对应 — V1 仓库下拉是模态不带路由，D1~D7 是模态/抽屉/帮助，无独立路由）：
 
 ```ts
-// src/renderer/router/index.ts
+// src/renderer/routes/index.ts（v1.4 · 与实现同步）
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
+import { useAuthStore } from '@renderer/stores/auth';
 
 const routes: RouteRecordRaw[] = [
-  {
-    path: '/',
-    redirect: '/repo',
-  },
-  {
-    path: '/repo',
-    name: 'repo-list',
-    component: () => import('@renderer/features/repo-list/RepoListView.vue'),
-    meta: { title: '仓库列表' },
-  },
-  {
-    path: '/:projectId/board',
-    name: 'board',
-    component: () => import('@renderer/features/board/BoardView.vue'),
-    meta: { title: '看板', requiresAuth: true },
-  },
-  {
-    path: '/:projectId/timeline',
-    name: 'timeline',
-    component: () => import('@renderer/features/timeline/TimelineView.vue'),
-    meta: { title: '时间轴', requiresAuth: true },
-  },
-  {
-    path: '/:projectId/merge',
-    name: 'merge',
-    component: () => import('@renderer/features/merge/MergeView.vue'),
-    meta: { title: '合并管理', requiresAuth: true },
-  },
-  {
-    path: '/settings',
-    name: 'settings',
-    component: () => import('@renderer/features/settings/SettingsView.vue'),
-    meta: { title: '设置' },
-  },
-  {
-    path: '/:pathMatch(.*)*',
-    name: 'not-found',
-    component: () => import('@renderer/components/NotFound.vue'),
-  },
+  { path: '/', redirect: '/auth' },
+  { path: '/auth', name: 'auth', component: () => import('@renderer/views/AuthView.vue'), meta: { title: '连接 gitea' } },
+  { path: '/board', name: 'board', component: () => import('@renderer/views/BoardView.vue'), meta: { title: '看板', requiresAuth: true } },
+  { path: '/timeline', name: 'timeline', component: () => import('@renderer/views/TimelineView.vue'), meta: { title: '时间轴', requiresAuth: true } },
+  // v1.4 起移除独立 /branches 路由，分支选择作为 BranchChips 内嵌到 TimelineView
+  { path: '/merges', name: 'merges', component: () => import('@renderer/views/MergesView.vue'), meta: { title: '合并请求', requiresAuth: true } },
+  { path: '/my-cards', name: 'my-cards', component: () => import('@renderer/views/MyCardsView.vue'), meta: { title: '我的卡片', requiresAuth: true } },
+  { path: '/members', name: 'members', component: () => import('@renderer/views/MembersView.vue'), meta: { title: '成员', requiresAuth: true } },
+  { path: '/settings', name: 'settings', component: () => import('@renderer/views/SettingsView.vue'), meta: { title: '设置', requiresAuth: true } },
+  { path: '/:pathMatch(.*)*', redirect: '/board' },
 ];
 
 export const router = createRouter({
-  history: createWebHashHistory(),  // 适配 Electron file:// 协议
+  history: createWebHashHistory(),  // hash 模式适配 Electron file://
   routes,
 });
 
-// 全局守卫：未连接 gitea 时强制跳设置页
+// 全局守卫：未连接时强制进 /auth（首次进入尝试 hydrate auth state）
 router.beforeEach(async (to) => {
   if (to.meta.requiresAuth) {
     const auth = useAuthStore();
     if (!auth.isConnected) {
-      return { name: 'settings', query: { from: to.fullPath } };
+      if (auth.accounts.length === 0 && !auth.loading) {
+        try { await auth.refreshStatus(); } catch { /* 失败由 auth.error 处理 */ }
+      }
+      if (!auth.isConnected) {
+        return { name: 'auth', query: { from: to.fullPath } };
+      }
     }
   }
+  return true;
+});
+
+// 路由 title 同步到 document.title
+router.afterEach((to) => {
+  const base = 'gitea-kanban';
+  const title = typeof to.meta.title === 'string' ? to.meta.title : '';
+  document.title = title ? `${title} · ${base}` : base;
 });
 ```
+
+**projectId 路由策略**（v1.4 vs v0 设计）：v0 阶段曾规划 `/:projectId/board` / `/:projectId/timeline` 等带 projectId 的动态路由；v1.4 实现改为扁平 `/board` / `/timeline`，**当前 projectId 走 `useRepoStore().currentProjectId`（uuid）作为 IPC 主键**（board.columns.list / branches.list 等所有端点都吃这个 uuid，不读 URL）。这样路由更稳定（用户切换仓库不触发路由切换），也避免动态路由 + 守卫的复杂交互。
 
 ### 7.3 路由 + Pinia 协调
 
