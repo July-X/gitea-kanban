@@ -1652,14 +1652,26 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   box-shadow: var(--shadow-focus);
 }
 
-/* 展开后底部操作区：复制 / 跳 gitea */
+/* 展开后底部操作区：复制 / 跳 gitea
+ *
+ * v1.1.3 · task #40 · 改 sticky bottom 防止长内容（30+ 文件）撑开 li 后
+ * actions 被外层 commits-list 滚走遮挡。
+ * - position: sticky; bottom: 0 + background = 始终贴 li 底（li 视口内）
+ * - 配合 line 1479 `.branch-commit-row { overflow: hidden }`：sticky 边界 = li 边界
+ *   → li 整体被外层 list 滚走时 actions 跟着滚走（避免"按钮悬空挂在视口上"）
+ * - 顶部 box-shadow 当作"分隔线"（比 border-top + 自身背景更柔和）
+ */
 .branch-commit-row__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--color-divider);
+  padding: 8px 4px 4px;
+  position: sticky;
+  bottom: 0;
+  background: var(--color-bg-elevated);
+  z-index: 2;
+  box-shadow: 0 -1px 0 var(--color-divider);
 }
 
 .branch-commit-row__fullmsg {
