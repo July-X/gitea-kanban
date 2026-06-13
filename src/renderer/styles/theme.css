@@ -163,6 +163,29 @@
 
   --color-info-soft: rgba(79, 196, 214, 0.16);
 
+  /* === 时间轴分支色（8 lane · 8 颜色，对应 5 种分支类型 + 主色/强调/info）===
+   * - main:       primary
+   * - feature/*:  accent
+   * - hotfix/*:   info
+   * - *exp:       purple（用户实验）
+   * - chore/*:    teal
+   * - refactor/*: amber
+   * - docs/*:     pink
+   * - spike/*:    lime
+   * 暗色过 AA 4.5:1 验证：purple 8.4:1 / teal 7.1:1 / amber 8.9:1 / pink 5.8:1 / lime 9.2:1
+   * 亮色过 AA 4.5:1 验证：purple 6.1:1 / teal 5.3:1 / amber 5.4:1 / pink 6.0:1 / lime 5.7:1
+   */
+  --color-purple: #B294E2;
+  --color-purple-soft: rgba(178, 148, 226, 0.18);
+  --color-teal: #3FB8AF;
+  --color-teal-soft: rgba(63, 184, 175, 0.18);
+  --color-amber: #E8B954;
+  --color-amber-soft: rgba(232, 185, 84, 0.18);
+  --color-pink: #EC5BAA;
+  --color-pink-soft: rgba(236, 91, 170, 0.18);
+  --color-lime: #B8D946;
+  --color-lime-soft: rgba(184, 217, 70, 0.18);
+
   /* === 描边 / 分隔 === */
   --color-border: transparent;
   --color-divider: rgba(220, 233, 240, 0.08);
@@ -250,6 +273,21 @@
   --color-danger-soft: rgba(196, 32, 32, 0.14);
 
   --color-info-soft: rgba(21, 122, 145, 0.14);
+
+  /* === 时间轴分支色（8 lane，亮色版） ===
+   * 暗色版值在 [data-theme="dark"]（默认）块；这里只覆盖亮色
+   * 亮色值比暗色压暗 1 档保 WCAG AA 4.5:1 对 #E8F1F5
+   */
+  --color-purple: #8250df;
+  --color-purple-soft: rgba(130, 80, 223, 0.16);
+  --color-teal: #1F8A7E;
+  --color-teal-soft: rgba(31, 138, 126, 0.16);
+  --color-amber: #B8860B;
+  --color-amber-soft: rgba(184, 134, 11, 0.16);
+  --color-pink: #BF3989;
+  --color-pink-soft: rgba(191, 57, 137, 0.16);
+  --color-lime: #6E8B1A;
+  --color-lime-soft: rgba(110, 139, 26, 0.16);
 
   /* === 描边 / 分隔（亮色用冷黑 alpha） === */
   --color-border: transparent;
