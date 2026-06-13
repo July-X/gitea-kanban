@@ -161,7 +161,7 @@ function toggleBranch(name: string): void {
 const detailOpen = ref(false);
 const detailNode = ref<CommitNodeDto | null>(null);
 /** 完整 commit 详情缓存（sha → CommitDto）—— 含 files、functions、linkedCards
- *  v1.3 任务 #commit-detail-agg：弹窗聚合展示文件清单（之前只在 BranchesView 展开体里） */
+ *  v1.3 任务 #commit-detail-agg：弹窗聚合展示文件清单 */
 const detailDetailCache = ref<Map<string, CommitDto>>(new Map());
 const detailLoadingSet = ref<Set<string>>(new Set());
 
@@ -209,7 +209,7 @@ function detailAuthorInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || '?';
 }
 
-/** v1.3 文件清单 helpers（跟 BranchesView 一样的聚合规则） */
+/** v1.3 文件清单 helpers（聚合规则见 commit-detail 任务 #commit-detail-agg） */
 function detailFilesHasNonBinary(files: CommitFileChangeDto[]): boolean {
   return files.some((f) => !f.binary);
 }
@@ -759,7 +759,7 @@ defineExpose({
     <!-- ============================================================
          提交详情弹窗（v1.3 · 任务 #commit-detail）
          - 点 commit-row 触发 openCommitDetail → detailOpen=true
-         - 内部 3 个动作：查看卡片（穿透到 /branches）、在 gitea 打开、复制链接
+         - 内部 2 个动作：在 gitea 打开、复制链接
          - 关闭方式：只允许点右上角 × 按钮（v1.3 fix #commit-detail-close-policy）
            · 故意不绑点遮罩关闭——非技术用户容易误触外部导致内容丢失
            · 故意不绑 Esc 关闭——"只能通过关闭按钮才能关闭"
@@ -845,7 +845,7 @@ defineExpose({
 
             <!--
               v1.3 · 任务 #commit-detail-agg
-              把 BranchesView 展开体里的"完整 message + 文件清单"聚合进弹窗
+              把"完整 message + 文件清单"聚合进弹窗
               （后续会考虑移除"分支"菜单，这个弹窗就是它的接班人）
             -->
             <div class="commit-detail__files">
@@ -1406,7 +1406,7 @@ defineExpose({
   color: var(--color-text);
 }
 
-/* v1.3 · 文件清单（聚合自 BranchesView 展开体） */
+/* v1.3 · 文件清单（commit-detail 弹窗聚合展示） */
 .commit-detail__files {
   margin: 0 var(--space-4) var(--space-3);
 }

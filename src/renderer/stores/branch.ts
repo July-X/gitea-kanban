@@ -45,8 +45,8 @@ export const useBranchStore = defineStore('branch', () => {
   const currentSelectedItem = ref<BranchDto | null>(null);
 
   /**
-   * 跨视图状态传递：用户在 BranchesView 点"在时间轴查看此分支"时写入，
-   * TimelineView onMounted 调 `consumePendingTimelineFocus()` 读出并清空。
+   * 跨视图状态传递：写入方是分支相关 UI（v1.4 起唯一写入方暂未挂载——pending 留给后续分支
+   * 操作面板使用），TimelineView onMounted 调 `consumePendingTimelineFocus()` 读出并清空。
    *
    * 选 Pinia pending 而非 query / route param 的理由（见 plan §4）：
    * router 路径都是 /timeline 不带 param，引入动态路由会影响所有 `router.push({name:'timeline'})`
@@ -142,7 +142,7 @@ export const useBranchStore = defineStore('branch', () => {
   /**
    * 选中某行（**只** UI 状态，**不**调 IPC）
    *
-   * 优先用 name 选中（currentSelectedName）—— BranchesView 点击行时
+   * 优先用 name 选中（currentSelectedName）—— 分支相关 UI 点行时
    * 传 name，selectedBranch getter 会从 items 反查最新对象。
    * 旧接口（传 BranchDto）保留为兼容 stub。
    */

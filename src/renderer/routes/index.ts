@@ -2,7 +2,7 @@
  * 路由表（Vue Router 4）
  *
  * 设计（03-frontend.md §7 + AGENTS §5.5）：
- *   - 8 个一级路由：/、/auth、/board、/timeline、/branches、/merges、/my-cards、/members、/settings
+ *   - 7 个一级路由：/、/auth、/board、/timeline、/merges、/my-cards、/members、/settings
  *   - 根路径 / 重定向到 /auth（未连接时合理入口）
  *   - 用 createWebHashHistory 适配 Electron file:// 协议
  *   - 懒加载（动态 import）减小首屏 bundle
@@ -37,12 +37,6 @@ const routes: RouteRecordRaw[] = [
     name: 'timeline',
     component: () => import('@renderer/views/TimelineView.vue'),
     meta: { title: '时间轴', requiresAuth: true },
-  },
-  {
-    path: '/branches',
-    name: 'branches',
-    component: () => import('@renderer/views/BranchesView.vue'),
-    meta: { title: '分支', requiresAuth: true },
   },
   {
     path: '/merges',

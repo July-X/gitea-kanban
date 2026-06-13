@@ -4,11 +4,11 @@
  *
  * 设计（03-frontend.md §2.1 / §4.1）：
  *   - 默认宽度 224px（var(--navrail-width)），折叠态 56px（--navrail-collapsed-width）
- *   - 7 个 NavItem：看板 / 时间轴 / 分支 / 合并请求 / 我的卡片 / 成员 / 设置
+ *   - 6 个 NavItem：看板 / 时间轴 / 合并请求 / 我的卡片 / 成员 / 设置
  *   - 选中项 = 主色背景 + 主色微光
  *   - 文字用术语翻译表（OVERRIDE §本项目专属规则 #1）—— **不**出现合并请求/合并/分支/派生 等原词
  *
- * v1 实现：7 个入口全部启用（plan_32018da5 把"即将推出"4 个灰显标记去掉）
+ * v1 实现：6 个入口全部启用
  * v1.1.3 polish：底部加折叠按钮（PanelLeftClose/Open）—— 折叠态只保留 icon + active 高亮
  *
  * v1.1.3 · task #42 · dev 注解
@@ -20,7 +20,6 @@ import { useRoute } from 'vue-router';
 import {
   KanbanSquare,
   Settings,
-  GitBranch,
   ListChecks,
   Users2,
   GitMerge,
@@ -68,18 +67,6 @@ const items: NavItem[] = [
       api: 'GET /api/v1/repos/<owner>/<repo>/commits?sha=<ref>&limit=N',
       ipc: 'commits.timeline',
       notes: '按分支聚合 commit，支持跨分支横向对比（<ref> 可为分支名 / tag / sha）',
-    },
-  },
-  {
-    id: 'branches',
-    label: '分支',
-    icon: GitBranch,
-    to: '/branches',
-    devAnnotation: {
-      web: '/<owner>/<repo>/branches',
-      api: 'GET /api/v1/repos/<owner>/<repo>/branches?limit=50',
-      ipc: 'branches.list',
-      notes: '点行展开后还会按需 commits.list / commits.get 拉详情',
     },
   },
   {
