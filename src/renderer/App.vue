@@ -11,9 +11,16 @@
 import { onBeforeUnmount, onMounted, watch } from 'vue';
 import AppShell from '@renderer/components/AppShell.vue';
 import Toast from '@renderer/components/Toast.vue';
+import DevAnnotatePopover from '@renderer/components/DevAnnotatePopover.vue';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useSettingsStore } from '@renderer/stores/settings';
+
+/**
+ * 是否 dev 模式 —— Vite 编译期常量
+ * 生产构建里直接变 false，<DevAnnotatePopover v-if="isDev" /> 整段被消除
+ */
+const isDev = import.meta.env.DEV;
 
 const auth = useAuthStore();
 const repo = useRepoStore();
@@ -60,6 +67,12 @@ onBeforeUnmount(() => {
 <template>
   <AppShell />
   <Toast />
+  <!--
+    Dev 模式注解 popover（v1.1.3 · task #42）
+    - 仅 dev 显示（Vite 把 isDev 编译成 false，生产 v-if 消除）
+    - 内部订阅 lib/dev-annotate 的 annotation ref，无注解时啥也不渲染
+  -->
+  <DevAnnotatePopover v-if="isDev" />
   <!--
     HUD 顶角装饰点阵（v1.1.2 落地 · tech-refine §6.2）
     仅右上 + 右下，4×4 点阵 / 3px 圆点 / 主色 12% alpha

@@ -10,6 +10,10 @@
  *
  * v1 实现：7 个入口全部启用（plan_32018da5 把"即将推出"4 个灰显标记去掉）
  * v1.1.3 polish：底部加折叠按钮（PanelLeftClose/Open）—— 折叠态只保留 icon + active 高亮
+ *
+ * v1.1.3 · task #42 · dev 注解
+ *   - 每个 nav item 挂 v-dev-annotate，注明对应 gitea 网页 / API / 本地 IPC
+ *   - dev 启动时显示 ! 按钮，点击看数据来源；生产构建整段消失
  */
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
@@ -25,6 +29,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-vue-next';
 import { useUiStore } from '@renderer/stores/ui';
+import type { DevAnnotation } from '@renderer/lib/dev-annotate';
 
 interface NavItem {
   id: string;
@@ -33,19 +38,94 @@ interface NavItem {
   icon: typeof KanbanSquare;
   /** 路由名或路径 */
   to: string;
+  /** dev 模式注解：点击 ! 看本条目对应 gitea 网页 / API / IPC 数据来源 */
+  devAnnotation: DevAnnotation;
 }
 
 const route = useRoute();
 const uiStore = useUiStore();
 
 const items: NavItem[] = [
-  { id: 'board', label: '看板', icon: KanbanSquare, to: '/board' },
-  { id: 'timeline', label: '时间轴', icon: Timer, to: '/timeline' },
-  { id: 'branches', label: '分支', icon: GitBranch, to: '/branches' },
-  { id: 'merges', label: '合并请求', icon: GitMerge, to: '/merges' },
-  { id: 'my-cards', label: '我的卡片', icon: ListChecks, to: '/my-cards' },
-  { id: 'members', label: '成员', icon: Users2, to: '/members' },
-  { id: 'settings', label: '设置', icon: Settings, to: '/settings' },
+  {
+    id: 'board',
+    label: '看板',
+    icon: KanbanSquare,
+    to: '/board',
+    devAnnotation: {
+      web: '/<owner>/<repo>/issues',
+      api: 'GET /api/v1/repos/<owner>/<repo>/issues?state=open',
+      ipc: 'board.columns.list / board.cards.list',
+      notes: '看板列 = 本地 SQLite；卡片 = gitea issue（按 label 映射列）',
+    },
+  },
+  {
+    id: 'timeline',
+    label: '时间轴',
+    icon: Timer,
+    to: '/timeline',
+    devAnnotation: {
+      web: '/<owner>/<repo>/commits/<ref>',
+      api: 'GET /api/v1/repos/<owner>/<repo>/commits?sha=<ref>&limit=N',
+      ipc: 'commits.timeline',
+      notes: '按分支聚合 commit，支持跨分支横向对比（<ref> 可为分支名 / tag / sha）',
+    },
+  },
+  {
+    id: 'branches',
+    label: '分支',
+    icon: GitBranch,
+    to: '/branches',
+    devAnnotation: {
+      web: '/<owner>/<repo>/branches',
+      api: 'GET /api/v1/repos/<owner>/<repo>/branches?limit=50',
+      ipc: 'branches.list',
+      notes: '点行展开后还会按需 commits.list / commits.get 拉详情',
+    },
+  },
+  {
+    id: 'merges',
+    label: '合并请求',
+    icon: GitMerge,
+    to: '/merges',
+    devAnnotation: {
+      web: '/<owner>/<repo>/pulls',
+      api: 'GET /api/v1/repos/<owner>/<repo>/pulls?state=open',
+      ipc: 'pulls.list',
+    },
+  },
+  {
+    id: 'my-cards',
+    label: '我的卡片',
+    icon: ListChecks,
+    to: '/my-cards',
+    devAnnotation: {
+      web: '/issues?q=is:open+assignee:@<me>',
+      api: 'GET /api/v1/issues/search?assigned=true&state=open',
+      ipc: 'myCards.list',
+    },
+  },
+  {
+    id: 'members',
+    label: '成员',
+    icon: Users2,
+    to: '/members',
+    devAnnotation: {
+      web: '/<owner>/<repo>/collaborators',
+      api: 'GET /api/v1/repos/<owner>/<repo>/collaborators',
+      ipc: 'members.list',
+    },
+  },
+  {
+    id: 'settings',
+    label: '设置',
+    icon: Settings,
+    to: '/settings',
+    devAnnotation: {
+      web: '（无 gitea 对应页 · 本地应用设置）',
+      ipc: 'preferences.get / preferences.set / auth.list / auth.connect / auth.disconnect',
+      notes: '主题 / 轮询间隔 / 账号管理 / 危险操作（清缓存 / 重置看板）',
+    },
+  },
 ];
 
 const currentPath = computed(() => route.path);
@@ -70,6 +150,7 @@ const toggleLabel = computed(() =>
           :class="{
             'navrail__item--active': currentPath.startsWith(item.to),
           }"
+          v-dev-annotate="item.devAnnotation"
         >
           <span class="navrail__icon" aria-hidden="true">
             <component :is="item.icon" :size="20" :stroke-width="1.75" />

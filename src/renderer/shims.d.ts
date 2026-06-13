@@ -13,6 +13,8 @@
  * 用法：在 tsconfig.json 的 include 列表里包含此文件即可。
  */
 
+/// <reference types="vite/client" />
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue';
   const component: DefineComponent<Record<string, unknown>, Record<string, unknown>, unknown>;

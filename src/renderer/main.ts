@@ -29,11 +29,24 @@ import { useUiStore } from './stores/ui';
 import './styles/reset.css';
 import './styles/theme.css';
 
+// ===== Dev 模式注解插件（v1.1.3 · task #42）=====
+//
+// 给所有 v-dev-annotate 元素加 `!` 按钮 + 点击 popover 说明数据来源。
+// 条件挂载：import.meta.env.DEV 被 Vite 编译期替换为字面量 false，
+// `app.use(devAnnotate)` 整段变死代码被 rollup 摇掉。dev-annotate 模块
+// 本身仍被 import（sync，v-dev-annotate 指令需要在 mount 前注册），
+// 但 install 之外的代码（ref/computed）也很轻，整体 ~2KB 增量。
+import { devAnnotate } from './lib/dev-annotate';
+
 const app = createApp(App);
 const pinia = createPinia();
 
 app.use(pinia);
 app.use(router);
+
+if (import.meta.env.DEV) {
+  app.use(devAnnotate);
+}
 
 // ===== 全局错误处理 =====
 

@@ -523,16 +523,21 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
             · 收藏 {{ branch.starredItems.length }} 个
           </template>
         </span>
-        <button
-          type="button"
-          class="branches__refresh"
-          :disabled="branch.loading"
-          :title="'刷新'"
-          @click="onRefresh"
-        >
-          <RefreshCw :size="14" :stroke-width="2" :class="{ spin: branch.loading }" />
-          <span>{{ branch.loading ? '加载中…' : '刷新' }}</span>
-        </button>
+            <button
+              type="button"
+              class="branches__refresh"
+              :disabled="branch.loading"
+              :title="'刷新'"
+              v-dev-annotate="{
+                web: '/<owner>/<repo>/branches',
+                api: 'GET /api/v1/repos/<owner>/<repo>/branches?limit=50（force=true 绕本地缓存）',
+                ipc: 'branches.refresh',
+              }"
+              @click="onRefresh"
+            >
+              <RefreshCw :size="14" :stroke-width="2" :class="{ spin: branch.loading }" />
+              <span>{{ branch.loading ? '加载中…' : '刷新' }}</span>
+            </button>
       </div>
     </header>
 
