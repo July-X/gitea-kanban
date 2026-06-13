@@ -18,7 +18,7 @@
  *   - **不**做 ahead/behind / 设为默认（用户未拍板）
  *   - 详情 aside 内嵌 commits 分页列表（commits.list 端点已支持 sha + page + hasMore）
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   Clipboard,
@@ -425,6 +425,82 @@ watch(
   { immediate: true },
 );
 
+// ============================================================
+// 路由 query 焦点：处理 /branches?branch=...&expandCommit=...
+// （v1.3 任务 #commit-detail：TimelineView 弹窗"查看卡片"跳转过来）
+// ============================================================
+/** 待展开的 commit sha（路由 query 进来后等 commits 加载完再处理） */
+const pendingExpandSha = ref<string | null>(null);
+
+/**
+ * 应用路由 query 的"焦点"——选好分支、展开手风琴、滚到 commit
+ * 关键：先 router.replace 把 query 清掉（避免 watcher 重复触发），
+ * 再 setState 让 commits 加载完自动消费 pendingExpandSha
+ */
+function applyRouteFocus(): void {
+  const b = typeof route.query.branch === 'string' ? route.query.branch : '';
+  const sha = typeof route.query.expandCommit === 'string' ? route.query.expandCommit : '';
+  if (!sha) return;
+
+  // 清 query（replace 不留历史）
+  const next = { ...route.query };
+  delete next.branch;
+  delete next.expandCommit;
+  void router.replace({ query: next });
+
+  // 选分支（如果跟当前不同）
+  if (b && branch.selectedBranch?.name !== b) {
+    branch.select(b);
+  }
+  pendingExpandSha.value = sha;
+}
+
+onMounted(() => {
+  // 路由 query 在 onMounted 时可能还没解析完（hash 路由），
+  // 但 useRoute() 是 reactive，直接读是同步的
+  applyRouteFocus();
+});
+
+watch(
+  () => [route.query.branch, route.query.expandCommit],
+  () => {
+    // 用户从 TimelineView 弹窗"查看卡片"时到这里
+    applyRouteFocus();
+  },
+);
+
+/**
+ * commits 加载完后消费 pendingExpandSha：
+ * - 找到 sha 对应的那条 → 展开手风琴（走 toggleCommitExpand 走完整 fetch 链路）
+ * - 滚到 li（data-commit-sha 定位）
+ * - 找不到：commit 在分页后面，v1 直接放弃（toast 提示）
+ */
+watch(
+  commits,
+  async (list) => {
+    if (!pendingExpandSha.value) return;
+    if (list.length === 0) return;
+
+    const sha = pendingExpandSha.value;
+    const target = list.find((c) => c.sha === sha);
+    if (!target) {
+      // commit 不在当前页（被分页切走了），v1 暂时放弃
+      pendingExpandSha.value = null;
+      showToast({
+        type: 'warn',
+        message: '提交不在当前分支第一页',
+        description: '可点开"加载更多"或翻页后再试',
+      });
+      return;
+    }
+    pendingExpandSha.value = null;
+    await toggleCommitExpand(sha);
+    await nextTick();
+    const el = document.querySelector<HTMLElement>(`[data-commit-sha="${CSS.escape(sha)}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  },
+);
+
 function onPagePrev(): void {
   if (commitsPage.value > 1 && !commitsLoading.value) {
     void loadCommitsPage(commitsPage.value - 1);
@@ -765,6 +841,7 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
               <li
                 v-for="c in commits"
                 :key="c.sha"
+                :data-commit-sha="c.sha"
                 class="branch-commit-row"
                 :class="{ 'branch-commit-row--expanded': commitsExpanded.has(c.sha) }"
               >

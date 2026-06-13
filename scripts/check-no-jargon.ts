@@ -95,6 +95,7 @@ const FORBIDDEN_TERMS = [
       'branch-item',   // BEM class
       'branch-commit-row',
       'data-branch-',  // HTML data 属性
+      'data-commit-sha', // v1.3 commit 行 data 属性
       'isBranch',
       'branchName',
       'branch lane',   // 注释描述（X6 graph 多泳道）
@@ -106,6 +107,8 @@ const FORBIDDEN_TERMS = [
       'branch)',
       'branch(',
       'branch ',
+      'next.branch',   // v1.3 route query 对象 delete 字段
+      'query.branch',  // v1.3 route.query.branch 字段读取
       '不出现',        // 注释禁用词复述
       '禁用词',
       '零术语',
