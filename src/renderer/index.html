@@ -10,7 +10,7 @@
       - script-src 'self' 'unsafe-inline'：v1.1.2 主题切换需要 inline bootstrap script
         （启动期 0 闪烁硬约束；vite ESM 模块加载是异步的，达不到 theme-init 要求）
         · 安全 tradeoff：仅本项目唯一 inline script，只读 localStorage + 写 dataset.theme
-        · enum 白名单（A-dark / C-dark / light），攻击面极小
+        · enum 白名单（dark / light · v1.2 收敛），攻击面极小
         · 2026-06-12 收口：src/main/window.ts installCspHeader 已改用 sha256 hash
           白名单替代 'unsafe-inline'（dev/prod 同源行为；常量 THEME_BOOTSTRAP_SCRIPT_HASH）。
           ⚠️ 修改下方 <script> 内容（含缩进 / 注释 / 换行）必须同步更新那个常量。
@@ -31,8 +31,8 @@
       ============================================================
       必须在 main.ts ESM 加载前同步执行：
       - vite dev 模式：main.ts 模块解析 + Pinia + createApp ≈ 100-300ms 才到 initTheme
-      - 这段时间 CSS 走默认 :root 主题（A 暗）
-      - 如果用户上次切到 light/C 暗 → 闪一下默认色 → 跳到正确色
+      - 这段时间 CSS 走默认 :root 主题（dark）
+      - 如果用户上次切到 light → 闪一下默认色 → 跳到正确色
 
       解决方案：head 内 inline script（parse-time 同步执行），
       同步读 localStorage 'gitea-kanban.theme' → 设 documentElement.dataset.theme。
@@ -49,11 +49,11 @@
     <script>
       try {
         var t = localStorage.getItem('gitea-kanban.theme');
-        if (t === 'A-dark' || t === 'C-dark' || t === 'light') {
+        if (t === 'dark' || t === 'light') {
           document.documentElement.dataset.theme = t;
         }
       } catch (e) {
-        // localStorage 不可用 / 隐私模式 → 静默走默认 :root（A 暗）
+        // localStorage 不可用 / 隐私模式 → 静默走默认 :root（dark）
       }
     </script>
   </head>

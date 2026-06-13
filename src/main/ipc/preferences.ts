@@ -1,15 +1,15 @@
 /**
- * IPC 路由：preferences.*（v1.1.2 主题切换 —— theme-ipc 任务）
+ * IPC 路由：preferences.*（v1.2 主题切换 —— theme-ipc 任务）
  *
  * 契约：design-system/pages/tech-refine.md §16.1-§16.3
  *       端点清单 + 错误码表都在本文件 docstring 里
  *
  * 端点（2 个）：
- * - preferences.theme.get → 读 sqlite prefs 表 key='theme'；未设过返默认 'A-dark'
+ * - preferences.theme.get → 读 sqlite prefs 表 key='theme'；未设过返默认 'dark'
  * - preferences.theme.set → upsert sqlite prefs 表 key='theme'，value=JSON.stringify(theme)
  *
  * 错误码（4 个，全是 plan_96625ed5 theme-ipc 拍板新增）：
- * - THEME_NOT_FOUND          → row 存在但 value 不可解析（JSON 烂 / 字段不在 enum 3 选 1）
+ * - THEME_NOT_FOUND          → row 存在但 value 不可解析（JSON 烂 / 字段不在 enum 2 选 1）
  * - INVALID_THEME            → 防御：Zod enum 严格校验先 reject，业务层 direct caller 兜底用
  * - DATABASE_UNAVAILABLE     → getDb() 抛 "sqlite not initialized"
  * - DATABASE_WRITE_FAILED    → sqlite write 抛异常（disk full / db locked / constraint）
@@ -107,8 +107,8 @@ function wrapIpc<TArgs, TResult>(
  * 读主题偏好
  *
  * 行为分支：
- * 1. row 不存在（首次启动）→ 返 { theme: 'A-dark', changedAt: <now> } 默认值，**不**抛 NOT_FOUND
- * 2. row 存在 + JSON.parse 成功 + theme 字段在 enum 3 选 1 → 返 row 里的值
+ * 1. row 不存在（首次启动）→ 返 { theme: 'dark', changedAt: <now> } 默认值，**不**抛 NOT_FOUND
+ * 2. row 存在 + JSON.parse 成功 + theme 字段在 enum 2 选 1 → 返 row 里的值
  * 3. row 存在 + JSON.parse 失败 / theme 字段不在 enum → 抛 THEME_NOT_FOUND
  *
  * 错误：
@@ -161,7 +161,7 @@ function getTheme(_args: ThemeGetArgs): ThemeGetResult {
     });
   }
 
-  // 二次校验：parsed.theme 必须是 enum 3 选 1
+  // 二次校验：parsed.theme 必须是 enum 2 选 1
   if (
     !parsed ||
     typeof parsed !== 'object' ||
@@ -222,7 +222,7 @@ function setTheme(args: ThemeSetArgs): ThemeSetResult {
     // 业务层 direct caller 路径：直接抛 INVALID_THEME（不走 VALIDATION_FAILED）
     throw new IpcError({
       code: IpcErrorCode.INVALID_THEME,
-      message: `theme 必须是 3 选 1：'A-dark' | 'C-dark' | 'light'，收到 ${JSON.stringify(args.theme)}`,
+      message: `theme 必须是 2 选 1：'dark' | 'light'，收到 ${JSON.stringify(args.theme)}`,
       hint: '请传入合法主题',
     });
   }

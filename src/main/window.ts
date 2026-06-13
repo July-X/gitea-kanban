@@ -68,7 +68,7 @@ let cspListener:
  *   1) 浏览器 DevTools console 触发后从错误里直接复制
  *   2) 或：node -e 'crypto.createHash("sha256").update(<script-text>,"utf8").digest("base64")'
  */
-const THEME_BOOTSTRAP_SCRIPT_HASH = "'sha256-i1rmmGAydcEzaknCTO0k9t+YU62RPNuOzzb029ZcNvM='";
+const THEME_BOOTSTRAP_SCRIPT_HASH = "'sha256-rMbhPi4NswJ523U4ASP2f+qLN64S5J0P/JJN5QKCkp4='";
 
 /**
  * 把 giteaUrl 展开为 loopback origin 对（localhost ↔ 127.0.0.1）。

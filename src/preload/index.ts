@@ -157,10 +157,10 @@ const api = {
   redo: invoke(IpcChannel.USER_REDO),
   },
 
-  //===== preferences namespace (v1.1.2 主题切换 — design-system/pages/tech-refine.md §16.3)=====
+  //===== preferences namespace (v1.2 主题切换 — design-system/pages/tech-refine.md §16.3)=====
   //走 preferences.* 而非 theme.*：为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键等）
-  // 留 namespace 空间，主题只是其中之一（与 src/shared/ipc-channels.ts v1.1.2 命名说明一致）。
-  //渲染端调用：window.api.preferences.theme.get() / window.api.preferences.theme.set({ theme: 'A-dark' })
+  // 留 namespace 空间，主题只是其中之一（与 src/shared/ipc-channels.ts v1.2 命名说明一致）。
+  //渲染端调用：window.api.preferences.theme.get() / window.api.preferences.theme.set({ theme: 'dark' })
   //持久化走 sqlite prefs 表（main 端 src/main/ipc/preferences.ts），无需手动传 userId。
   // 命名说明：preferences.theme.get / preferences.theme.set 是 channel 字面量也是 window.api 调用路径。
   preferences: {

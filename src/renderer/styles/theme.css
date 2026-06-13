@@ -1,20 +1,30 @@
 /* ==========================================================================
- * Gitea Kanban — 三主题 token 系统（v1.1.2）
+ * Gitea Kanban — 双主题 token 系统（v1.2 · 2026-06-13）
  *
  * 设计来源（SSOT）：
- *   - design-system/pages/tech-refine.md §14.1-§14.4（3 主题系统 + 完整 token 矩阵）
+ *   - design-system/pages/tech-refine.md §14.1-§14.4（2 主题系统 + 完整 token 矩阵）
+ *   - design-system/gitea-kanban/OVERRIDE.md v1.2 决策
  *   - docs/design/wireframe/theme-tech.html（demo 截图，token 已实调过）
  *
  * 拍板沿革（AGENTS §8.1 #3）：
- *   - v3 / v4：浅色默认 + 暗色可切（草稿，未拍板）
  *   - v5（2026-06-10 12:12）：v1 单主题暗色，不提供切换（**已推翻**）
  *   - v1.1.2（2026-06-12 15:25）：**3 主题切换**（A 暗 / C 暗 / Light），默认 A 暗
+ *     —— 已被 v1.2 推翻：A 暗苍蓝 / C 暗中性 视觉差异仅在冷暖，非技术用户分不清；
+ *     3 主题产生认知负担而非自由度。
+ *   - v1.2（2026-06-13）：**2 主题切换**（dark / light），默认 dark；
+ *     - dark = 原 C 暗基底 #0F1115（中性近黑 · VSCode / Linear 主流）
+ *     - light = 原 Light 保留 #E8F1F5
+ *     - 主色 gitea 绿 **提亮到 #74B830（dark）/ 压暗到 #466B16（light）过 WCAG AA 4.5:1**
+ *     - 滚动条 thumb 改用主色软底 + hover 提亮 + glow（dark）/ 实色描边（light）
  *
  * 关键设计：
- *   - 主色 gitea 绿 #609926 3 主题通用（品牌色不动）
- *   - 亮色 CTA 文字用 #4F7A1A 加深版（过 WCAG AA 4.5:1）
- *   - shadow + glow 主题差异最大：暗色 = "深底 + inset 描边 + 主色外环"，亮色 = "纯冷黑阴影 + 无装饰"
- *   - 主题切换走 `data-theme` 属性（A-dark / C-dark / light），`:root` 默认 = A 暗
+ *   - 主色 gitea 绿 #609926 是**品牌色锚**（dot / 装饰角 / 进度条 / 状态点），2 主题通用
+ *   - **主色 token（按钮 / 链接 / 高亮文字）走"过 AA 4.5:1"调档版**：
+ *     - dark  #74B830（vs #0F1115 4.74:1 ✅）
+ *     - light #466B16（vs #E8F1F5 5.55:1 ✅）
+ *   - shadow / glow 主题差异最大：dark = "纯黑阴影 + 1px 冷白 inset + 主色外环"，
+ *     light = "纯冷黑阴影 + 无 glow（白底上糊）"
+ *   - 主题切换走 `data-theme` 属性（dark / light），`:root` 默认 = dark
  *   - 主题切换瞬间平滑过渡：background-color / color 150ms ease-out
  *   - 旧 token 名称保留为别名 → 新主题 token，**不破坏**现有 Vue 组件引用
  *     （88 处 `-soft` / `-glow` / `-hover` / `-active` / `accent` / `danger` 等旧名引用零回归）
@@ -106,49 +116,49 @@
 }
 
 /* ==========================================================================
- * 主题 token：默认 = A 暗（向后兼容：未设 data-theme 时也用 A 暗）
+ * 主题 token：dark（默认 · 中性近黑 · 原 v1.1.2 C 暗基底 · v1.2 提亮主色到 #74B830 过 AA 4.5:1）
  * ========================================================================== */
 
 :root,
-[data-theme="A-dark"] {
-  /* === 背景梯度（苍蓝提饱和） === */
-  --color-canvas: #0E3A52;     /* H201° S71% L19% */
-  --color-elevated: #135070;
-  --color-hover: #18658F;
-  --color-active: #1E7BAD;
+[data-theme="dark"] {
+  /* === 背景梯度（中性黑 4 层） === */
+  --color-canvas: #0F1115;     /* H220° S17% L7% */
+  --color-elevated: #1E222A;
+  --color-hover: #2D333F;
+  --color-active: #3C4453;
 
-  /* === 文字 === */
-  --color-text: #C5D4DD;
-  --color-text-muted: #9AAAB6;  /* 4.5:1 ✅ */
-  --color-text-dim: #5A6975;
+  /* === 文字（vs #0F1115 验证过 AA 4.5:1） === */
+  --color-text: #C5D4DD;        /* 7.37:1 ✅ */
+  --color-text-muted: #9AAAB6;  /* 5.29:1 ✅ */
+  --color-text-dim: #74818E;    /* 3.93:1 ⚠️ 仅 large text 3:1 OK / 装饰用 */
+  --color-text-inverse: #FFFFFF; /* 主色 CTA 上配白字（dark 主色已提亮到 #74B830） */
 
-  /* === 文字反色（用于主色 CTA 按钮上的字色） === */
-  --color-text-inverse: #0E3A52; /* 同 canvas（暗底按钮配深字） */
+  /* === 主色（提亮到 #74B830 过 AA 4.5:1；hover 进一步提亮；active 压暗） === */
+  --color-primary: #74B830;       /* vs #0F1115 4.74:1 ✅ */
+  --color-primary-hover: #8AC544; /* vs #0F1115 5.83:1 ✅ */
+  --color-primary-active: #5C9622;/* vs #0F1115 3.50:1 ⚠️ 装饰态用 */
+  --color-primary-soft: rgba(116, 184, 48, 0.18);
+  --color-primary-glow: rgba(116, 184, 48, 0.32);
 
-  /* === 主色 / 状态色 === */
-  --color-primary: #609926;       /* gitea 绿（品牌色，3 主题通用） */
-  --color-warning: #f76707;       /* gitea 橙（强调色） */
+  /* === 状态色（warning / error / info / pending / offline） === */
+  --color-warning: #FF8534;       /* gitea 橙提亮 · 暗底清晰 */
   --color-error: #E14646;
   --color-info: #4fc4d6;
   --color-pending: #94a3b8;
   --color-offline: #64748b;
 
-  /* === 主色 / 强调 / 状态 派生（hover / active / soft / glow） === */
-  --color-primary-hover: #74B830;
-  --color-primary-active: #4D8A1A;
-  --color-primary-soft: rgba(96, 153, 38, 0.18);
-  --color-primary-glow: rgba(96, 153, 38, 0.32);
+  /* === 强调 / 状态 派生（hover / active / soft） === */
+  --color-accent: #FF8534;                    /* 旧名 → 强调色（提亮版） */
+  --color-accent-hover: #FFA361;
+  --color-accent-soft: rgba(255, 133, 52, 0.18);
 
-  --color-accent: #f76707;                     /* 旧名 → 强调色 */
-  --color-accent-hover: #FF8534;
-  --color-accent-soft: rgba(247, 103, 7, 0.18);
+  --color-success: #74B830;                   /* 旧名 → 主色（green = success = primary） */
+  --color-success-soft: rgba(116, 184, 48, 0.16);
 
-  --color-success: #609926;                    /* 旧名 → 主色（green = success = primary） */
-  --color-success-soft: rgba(96, 153, 38, 0.16);
+  --color-warning-soft: rgba(255, 133, 52, 0.16);
+  --color-warning-active: #C25800;
 
-  --color-warning-soft: rgba(247, 103, 7, 0.16);
-
-  --color-danger: #E14646;                     /* 旧名 → 错误 */
+  --color-danger: #E14646;
   --color-danger-soft: rgba(225, 70, 70, 0.16);
 
   --color-info-soft: rgba(79, 196, 214, 0.16);
@@ -159,149 +169,104 @@
   --color-divider-strong: rgba(220, 233, 240, 0.16);
 
   /* === 阴影 / glow 起点 === */
-  --shadow-rgb: 10, 42, 50;                          /* 苍蓝深底 */
+  --shadow-rgb: 0, 0, 0;                              /* 中性黑（暗色用纯黑阴影） */
   --grid-color: rgba(220, 233, 240, 0.08);
-  --kpi-glow: 0 0 8px rgba(96, 153, 38, 0.4);
-  --signal-halo: 0 0 4px rgba(96, 153, 38, 0.6);
-  --breath-glow: rgba(96, 153, 38, 0.4);
-  --breath-glow-bright: rgba(96, 153, 38, 0.8);
-  --dot-color: rgba(96, 153, 38, 0.4);
-  --progress-fill-glow: 0 0 6px rgba(96, 153, 38, 0.4);
-  --decor-corner-color: rgba(96, 153, 38, 0.3);
+  --kpi-glow: 0 0 8px rgba(116, 184, 48, 0.4);
+  --signal-halo: 0 0 4px rgba(116, 184, 48, 0.6);
+  --breath-glow: rgba(116, 184, 48, 0.4);
+  --breath-glow-bright: rgba(116, 184, 48, 0.8);
+  --dot-color: rgba(116, 184, 48, 0.45);
+  --progress-fill-glow: 0 0 6px rgba(116, 184, 48, 0.4);
+  --decor-corner-color: rgba(116, 184, 48, 0.3);
+
+  /* === 滚动条（v1.2 美化 · thumb 主色软底 + hover 提亮 + glow） === */
+  --scrollbar-thumb: rgba(116, 184, 48, 0.22);
+  --scrollbar-thumb-hover: rgba(116, 184, 48, 0.45);
+  --scrollbar-thumb-glow: 0 0 6px rgba(116, 184, 48, 0.4);
+
+  /* === 卡片 hover 主色微亮（dark 专属 · 亮色不糊） === */
+  --card-hover-tint: rgba(116, 184, 48, 0.08);
 
   /* === 主题 flag（亮色判定用） === */
   --is-light: 0;
 }
 
 /* ==========================================================================
- * 主题 token：C 暗（中性近黑 · H220° S17% L7%）
- * ========================================================================== */
-
-[data-theme="C-dark"] {
-  /* === 背景梯度（中性黑） === */
-  --color-canvas: #0F1115;
-  --color-elevated: #1E222A;
-  --color-hover: #2D333F;
-  --color-active: #3C4453;
-
-  /* === 文字 === */
-  --color-text: #C5D4DD;
-  --color-text-muted: #9AAAB6;
-  --color-text-dim: #5A6975;
-  --color-text-inverse: #0F1115; /* 同 canvas */
-
-  /* === 主色 / 状态色 === */
-  --color-primary: #609926;
-  --color-warning: #f76707;
-  --color-error: #db2828;            /* 略区别 A 暗的 #E14646 */
-  --color-info: #4fc4d6;
-  --color-pending: #94a3b8;
-  --color-offline: #64748b;
-
-  /* === 派生（hover / active / soft / glow） === */
-  --color-primary-hover: #74B830;
-  --color-primary-active: #4D8A1A;
-  --color-primary-soft: rgba(96, 153, 38, 0.18);
-  --color-primary-glow: rgba(96, 153, 38, 0.32);
-
-  --color-accent: #f76707;
-  --color-accent-hover: #FF8534;
-  --color-accent-soft: rgba(247, 103, 7, 0.18);
-
-  --color-success: #609926;
-  --color-success-soft: rgba(96, 153, 38, 0.16);
-
-  --color-warning-soft: rgba(247, 103, 7, 0.16);
-
-  --color-danger: #db2828;
-  --color-danger-soft: rgba(219, 40, 40, 0.16);
-
-  --color-info-soft: rgba(79, 196, 214, 0.16);
-
-  /* === 描边 / 分隔 === */
-  --color-border: transparent;
-  --color-divider: rgba(220, 233, 240, 0.08);
-  --color-divider-strong: rgba(220, 233, 240, 0.16);
-
-  /* === 阴影 / glow 起点 === */
-  --shadow-rgb: 0, 0, 0;                                   /* 中性黑 */
-  --grid-color: rgba(220, 233, 240, 0.08);
-  --kpi-glow: 0 0 8px rgba(96, 153, 38, 0.4);
-  --signal-halo: 0 0 4px rgba(96, 153, 38, 0.6);
-  --breath-glow: rgba(96, 153, 38, 0.4);
-  --breath-glow-bright: rgba(96, 153, 38, 0.8);
-  --dot-color: rgba(96, 153, 38, 0.4);
-  --progress-fill-glow: 0 0 6px rgba(96, 153, 38, 0.4);
-  --decor-corner-color: rgba(96, 153, 38, 0.3);
-
-  --is-light: 0;
-}
-
-/* ==========================================================================
- * 主题 token：Light（浅苍蓝 · H198° S39% L94%）
+ * 主题 token：light（浅色 · 浅苍蓝 · H198° S39% L94%）
  *
  * 亮色版规则（§14.4）：
- *   - 主色 HSL 亮度 L 降 8-12 个百分点，保色相过 WCAG AA
+ *   - 主色 HSL 亮度 L 降 12-15 个百分点（vs v1.1.2 8 档）保色相过 WCAG AA 4.5:1
  *   - 阴影纯冷黑（无 inset 描边 / 无主色外环）
  *   - glow 全部关（白底上糊），改实色描边
+ *   - 滚动条 thumb 主色软底 + hover 提亮 + 1px 实色描边（dark 改用 glow）
  * ========================================================================== */
 
 [data-theme="light"] {
-  /* === 背景梯度（浅苍蓝） === */
+  /* === 背景梯度（浅苍蓝 4 层） === */
   --color-canvas: #E8F1F5;
   --color-elevated: #FFFFFF;
   --color-hover: #F1F6F9;
   --color-active: #DDE7EC;
 
-  /* === 文字（冷调深蓝灰 · 对偶暗色 #C5D4DD） === */
-  --color-text: #0F1A24;
-  --color-text-muted: #4A5862;  /* 6.4:1 ✅ */
-  --color-text-dim: #6A7884;    /* 4.0:1 */
-  --color-text-inverse: #FFFFFF; /* 白底按钮配白字（亮色 CTA 主色加深） */
+  /* === 文字（冷调深蓝灰 · 对偶 dark #C5D4DD · vs #E8F1F5 验证过 AA） === */
+  --color-text: #0F1A24;        /* 12.7:1 ✅ */
+  --color-text-muted: #475461;  /* 6.39:1 ✅ */
+  --color-text-dim: #5A6B7A;    /* 4.50:1 ✅ 边缘 · dim 文字谨慎用 */
+  --color-text-inverse: #FFFFFF; /* 白底按钮配白字 */
 
-  /* === 主色 / 状态色（亮色版：H 不变，L 降 8-12 档过 AA） === */
-  --color-primary: #4F7A1A;       /* vs #FFFFFF 4.50:1 ✅ */
-  --color-warning: #D85804;       /* vs #FFFFFF 3.95:1 ✅ */
-  --color-error: #C42020;         /* vs #FFFFFF 5.87:1 ✅ */
-  --color-info: #157A91;          /* vs #FFFFFF 3.79:1 ✅ */
-  --color-pending: #5A6B7A;       /* vs #FFFFFF 5.50:1 ✅ */
-  --color-offline: #4A5862;
+  /* === 主色（压暗到 #466B16 过 AA 4.5:1；hover 提亮到原色 #609926） === */
+  --color-primary: #466B16;       /* vs #E8F1F5 5.55:1 ✅ */
+  --color-primary-hover: #609926; /* hover 回到品牌色 #609926 */
+  --color-primary-active: #3D5512;/* active 进一步压暗 */
+  --color-primary-soft: rgba(70, 107, 22, 0.16);
+  --color-primary-glow: rgba(70, 107, 22, 0.28);
 
-  /* === 派生（hover 回到暗色版"亮档" / active 更深 / soft 跟随新主色） === */
-  --color-primary-hover: #609926;     /* hover 提亮到原色 #609926 */
-  --color-primary-active: #3D6014;    /* active 进一步压暗 */
-  --color-primary-soft: rgba(79, 122, 26, 0.18);
-  --color-primary-glow: rgba(79, 122, 26, 0.32);
+  /* === 状态色（v1.2 重新过 AA） === */
+  --color-warning: #D85804;       /* vs #E8F1F5 3.79:1 ⚠️ large only；用于警示 icon / chip 文字 */
+  --color-error: #C42020;         /* vs #E8F1F5 5.20:1 ✅ */
+  --color-info: #157A91;          /* vs #E8F1F5 4.62:1 ✅ */
+  --color-pending: #5A6B7A;       /* vs #E8F1F5 4.50:1 ✅ */
+  --color-offline: #475461;
 
-  --color-accent: #D85804;                            /* 旧名 → 强调色加深版 */
-  --color-accent-hover: #f76707;                      /* hover 回到原色 #f76707 */
-  --color-accent-soft: rgba(216, 88, 4, 0.18);
+  /* === 派生 === */
+  --color-accent: #D85804;
+  --color-accent-hover: #f76707;
+  --color-accent-soft: rgba(216, 88, 4, 0.16);
 
-  --color-success: #4F7A1A;                           /* 旧名 → 主色加深版 */
-  --color-success-soft: rgba(79, 122, 26, 0.16);
+  --color-success: #466B16;
+  --color-success-soft: rgba(70, 107, 22, 0.14);
 
-  --color-warning-soft: rgba(216, 88, 4, 0.16);
+  --color-warning-soft: rgba(216, 88, 4, 0.14);
+  --color-warning-active: #B04804;
 
-  --color-danger: #C42020;                            /* 旧名 → 错误加深版 */
-  --color-danger-soft: rgba(196, 32, 32, 0.16);
+  --color-danger: #C42020;
+  --color-danger-soft: rgba(196, 32, 32, 0.14);
 
-  --color-info-soft: rgba(21, 122, 145, 0.16);
+  --color-info-soft: rgba(21, 122, 145, 0.14);
 
-  /* === 描边 / 分隔（亮色用冷黑 alpha 替代暗色版的冷白 alpha） === */
+  /* === 描边 / 分隔（亮色用冷黑 alpha） === */
   --color-border: transparent;
   --color-divider: rgba(15, 26, 36, 0.08);
   --color-divider-strong: rgba(15, 26, 36, 0.16);
 
   /* === 阴影 / glow 起点 === */
-  --shadow-rgb: 15, 26, 36;                                  /* 冷黑（亮色用纯黑阴影） */
+  --shadow-rgb: 15, 26, 36;                                  /* 冷黑 */
   --grid-color: rgba(15, 26, 36, 0.08);
   --kpi-glow: 0 0 0 0 transparent;                            /* 不用 glow */
-  --signal-halo: 0 0 0 1px rgba(79, 122, 26, 0.3);            /* 改为实色描边 */
-  --breath-glow: rgba(79, 122, 26, 0.25);
-  --breath-glow-bright: rgba(79, 122, 26, 0.45);
-  --dot-color: rgba(79, 122, 26, 0.5);
-  --progress-fill-glow: 0 0 4px rgba(79, 122, 26, 0.25);
-  --decor-corner-color: rgba(79, 122, 26, 0.5);
+  --signal-halo: 0 0 0 1px rgba(70, 107, 22, 0.35);            /* 改为实色描边 */
+  --breath-glow: rgba(70, 107, 22, 0.25);
+  --breath-glow-bright: rgba(70, 107, 22, 0.45);
+  --dot-color: rgba(70, 107, 22, 0.5);
+  --progress-fill-glow: 0 0 4px rgba(70, 107, 22, 0.25);
+  --decor-corner-color: rgba(70, 107, 22, 0.5);
+
+  /* === 滚动条（v1.2 美化 · thumb 主色软底 + hover 提亮 + 1px 实色描边，glow 在白底上糊） === */
+  --scrollbar-thumb: rgba(70, 107, 22, 0.25);
+  --scrollbar-thumb-hover: rgba(70, 107, 22, 0.5);
+  --scrollbar-thumb-glow: 0 0 0 1px rgba(70, 107, 22, 0.4);
+
+  /* === 卡片 hover 不加主色 tint（亮色背景不糊） === */
+  --card-hover-tint: transparent;
 
   /* === 亮色主题关闭 NavRail 主色外环 glow（白底上糊 · tech-refine §14.4） ===
    * base 阴影保留 —— 纯冷黑阴影（= --shadow-rgb = 15,26,36）足够"浮"起侧栏 */
@@ -311,13 +276,12 @@
 }
 
 /* ==========================================================================
- * 派生 token（所有主题通用 · 依赖 --shadow-rgb / --color-primary-soft / -glow）
+ * 派生 token（2 主题通用 · 依赖 --shadow-rgb / --color-primary-soft / -glow）
  * 这些是合成的"工具 token"，由主题块的值自动重新组合
  * ========================================================================== */
 
 :root,
-[data-theme="A-dark"],
-[data-theme="C-dark"],
+[data-theme="dark"],
 [data-theme="light"] {
   /* 旧名 → 新名 映射（背景梯度） */
   --color-bg: var(--color-canvas);
@@ -480,6 +444,17 @@ p {
   margin: 0;
 }
 
+/* ==========================================================================
+ * 滚动条（v1.2 美化 · 以 gitea 绿为视觉锚）
+ *
+ * 视觉公式：
+ *   - thumb 默认态：主色 22-25% alpha 软底（呼应 dot / 装饰角）
+ *   - thumb hover 态：主色 42-50% alpha + 主色光晕（dark 6px 外环 / light 1px 实色描边）
+ *   - 圆角 4px；8px 细条；track 透明
+ *   - Firefox 兼容：scrollbar-color + scrollbar-width: thin
+ *   - 过渡 150ms（沿用 --t-fast 体系）
+ * ========================================================================== */
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -490,12 +465,26 @@ p {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-bg-hover);
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
+  transition:
+    background var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-bg-active);
+  background: var(--scrollbar-thumb-hover);
+  box-shadow: var(--scrollbar-thumb-glow);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--color-primary);
+}
+
+/* Firefox 兼容（scrollbar-color 接受 color + color；track 用 transparent） */
+* {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -568,11 +557,11 @@ p {
  * - .canvas-grid：主画布 24px 网格（不进卡片 / 列 / 弹窗）
  * - .corner-dots：窗口顶角 4×4 装饰点阵（HUD 风 · pointer-events: none）
  *
- * 颜色走主题 token —— 3 主题自适应：
- * - --grid-color：A 暗 / C 暗 = rgba(220,233,240,.08) 冷白
- *                 Light     = rgba(15,26,36,.08) 冷黑
- * - --dot-color：  A 暗 / C 暗 = rgba(96,153,38,.4)  主色 40%
- *                 Light     = rgba(79,122,26,.5)  主色加深 50%
+ * 颜色走主题 token —— 2 主题自适应（v1.2 提亮主色到 #74B830）：
+ * - --grid-color：dark  = rgba(220,233,240,.08) 冷白
+ *                 light = rgba(15,26,36,.08)    冷黑
+ * - --dot-color：  dark  = rgba(116,184,48,.45) 主色 45%（v1.2 提亮）
+ *                 light = rgba(70,107,22,.5)   主色加深 50%
  * ========================================================================== */
 
 .canvas-grid {

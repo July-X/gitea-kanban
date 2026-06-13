@@ -71,12 +71,12 @@ window.addEventListener('unhandledrejection', (e) => {
 
 app.mount('#app');
 
-// v1.1.2 主题切换入口 3：注册全局 ⌘K / Ctrl+K 快捷键 + 注入 dialog DOM
+// v1.2 主题切换入口 3：注册全局 ⌘K / Ctrl+K 快捷键 + 注入 dialog DOM
 // 必须在 app.use(pinia) 之后调（useUiStore 依赖 active pinia）
 // —— task spec §4 明确：本任务范畴
 mountCommandPalette();
 
-// ===== 主题启动 reconcile（v1.1.2 theme-init task · tech-refine §15.5） =====
+// ===== 主题启动 reconcile（v1.2 theme-init task · tech-refine §15.5） =====
 //
 // 启动期时序（避免 0 闪烁）：
 // 1. index.html head inline script（同步，parse-time）—— 在 <script type="module"> 之前执行

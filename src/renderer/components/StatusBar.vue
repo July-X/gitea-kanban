@@ -8,8 +8,8 @@
  *   - 右侧：当前用户（avatar + login）+ **退出登录**
  *   - 颜色 + 文字 + 图标三重编码（OVERRIDE §本项目专属规则 #8）
  *
- * 主题按钮（v1.1.2 · tech-refine §15.1 入口 1）：
- *   - 点一下 cycle: A 暗 → C 暗 → 浅色 → A 暗
+ * 主题按钮（v1.2 · tech-refine §15.1 入口 1）：
+ *   - 点一下 cycle: 暗色 → 浅色 → 暗色
  *   - 调用 useUiStore.applyTheme(nextThemeInCycle(currentTheme)) —— store 同步改
  *     state/DOM/localStorage + 异步 IPC set（不阻塞 UI）
  *
@@ -33,9 +33,8 @@ const router = useRouter();
 
 /** 主题简称（按钮文字用，跟 LogOut 风格对称：图标 + 短文字） */
 const THEME_SHORT_LABEL: Record<string, string> = {
-  'A-dark': 'A 暗',
-  'C-dark': 'C 暗',
-  light: '浅色',
+  dark: '暗',
+  light: '亮',
 };
 
 type ConnState = 'connected' | 'offline' | 'error' | 'unauthenticated';

@@ -977,21 +977,26 @@ export type UserRedoResult = z.infer<typeof UserRedoResultSchema>;
 // ============================================================
 
 /**
- * 主题枚举（3 选 1）
+ * 主题枚举（2 选 1）
  *
- * 设计来源：design-system/pages/tech-refine.md §14.1
- * - 'A-dark'：A 暗 · 苍蓝提饱和（#0E3A52 canvas）—— **默认**
- * - 'C-dark'：C 暗 · 中性近黑（#0F1115 canvas）
- * - 'light'： Light · 浅苍蓝（#E8F1F5 canvas）—— 主色自动用加深版 #4F7A1A 过 WCAG AA
+ * 设计来源：design-system/pages/tech-refine.md §14.1（v1.2 拍板）
+ * - 'dark'： 暗色 · 中性近黑（#0F1115 canvas）—— **默认**（v1.1.2 C 暗基底）
+ * - 'light'： 浅色 · 浅苍蓝（#E8F1F5 canvas）—— 主色用 #466B16 加深版过 WCAG AA 4.5:1
+ *
+ * v1.2 收敛（2026-06-13）：
+ *   - v1.1.2 的 'A-dark'（苍蓝提饱和）'C-dark'（中性近黑）视觉差异仅在冷暖，
+ *     非技术用户分不清、且 3 主题对非技术用户产生认知负担。
+ *   - A 暗 / C 暗合并为统一的 'dark'（沿用 C 暗中性近黑基底）。
+ *   - 主色 token 提亮到 #74B830（dark）/ 压暗到 #466B16（light），过 AA 4.5:1。
  *
  * 复用：ThemeGetArgsSchema / ThemeSetArgsSchema 共享此 enum；
  * ThemeGetResultSchema.theme / ThemeSetResultSchema.theme 也用此 enum。
  */
-export const ThemeEnumSchema = z.enum(['A-dark', 'C-dark', 'light']);
+export const ThemeEnumSchema = z.enum(['dark', 'light']);
 export type ThemeName = z.infer<typeof ThemeEnumSchema>;
 
-/** 默认主题：'A-dark' —— tech-refine.md §14.1 + §15.3（'A 暗' 是 v1 苍蓝决策精神 + 解决灰蒙） */
-export const DEFAULT_THEME: ThemeName = 'A-dark';
+/** 默认主题：'dark' —— v1.2 拍板（tech-refine.md §14.1 + §15.3） */
+export const DEFAULT_THEME: ThemeName = 'dark';
 
 /**
  * preferences.theme.get 入参 —— 无参

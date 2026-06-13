@@ -5,15 +5,14 @@
  *   - design-system/pages/tech-refine.md §15.1（3 入口之一：命令面板 ⌘K）
  *   - design-system/gitea-kanban/OVERRIDE.md §本项目专属规则 #1（零术语）
  *
- * 范围（task spec · 2026-06-12）：
+ * 范围（task spec · 2026-06-12 / v1.2 收敛 2026-06-13）：
  *   - 按 ⌘K (mac) / Ctrl+K (其他) 打开 / 关闭 dialog
  *   - 输入框 + 命令列表，prefix 匹配（includes · 不做 fuzzy）
  *   - Enter 触发当前选中命令；Esc 关闭；↑/↓ 移动选中
- *   - 当前 v1 只接 3 个主题命令
+ *   - 当前 v1 接 2 个主题命令（v1.2 收敛自 v1.1.2 的 3 个）
  *
  * 主题命令 label（跟 stores/ui.ts 的 THEME_DISPLAY_NAME 同步 · task spec 1:1 对齐）：
- *   - "主题: A 暗 · 苍蓝提饱和" → applyTheme('A-dark')
- *   - "主题: C 暗 · 中性近黑" → applyTheme('C-dark')
+ *   - "主题: 暗色 · 中性近黑" → applyTheme('dark')
  *   - "主题: 浅色 · 浅苍蓝"   → applyTheme('light')
  *
  * 预留扩展（v1 不做）：
@@ -75,12 +74,12 @@ export interface CommandGroup {
  * 栏 + App 主区颜色变化感知；v2 考虑加 "✓ 当前" 标记（要读 useUiStore().currentTheme）。
  */
 const THEME_COMMANDS: Command[] = (
-  ['A-dark', 'C-dark', 'light'] as const satisfies readonly Theme[]
+  ['dark', 'light'] as const satisfies readonly Theme[]
 ).map<Command>((theme) => ({
   id: `theme:${theme}`,
   section: 'theme',
   title: `主题: ${THEME_DISPLAY_NAME[theme]}`,
-  hint: theme === 'A-dark' ? '默认' : undefined,
+  hint: theme === 'dark' ? '默认' : undefined,
   run: () => {
     // applyTheme 是 async（同步改 DOM + 异步持久化 IPC）—— fire-and-forget
     // 内部已经接 toast 失败兜底（IPC set 失败时弹"主题保存失败，请重试"）
@@ -408,8 +407,8 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
 // ============================================================================
 // 样式（内联注入 <head>，避免污染 theme.css）
 //
-// 走主题 token · 3 主题自适应（A 暗 / C 暗 / Light）
-// 阴影 / 描边 / glow 跟 design-system/gitea-kanban/OVERRIDE §v1.1 决策一致
+// 走主题 token · 2 主题自适应（dark / light）
+// 阴影 / 描边 / glow 跟 design-system/gitea-kanban/OVERRIDE §v1.2 决策一致
 // ============================================================================
 
 let cssInjected = false;
@@ -424,9 +423,9 @@ function injectCSS(): void {
 
 const COMMAND_PALETTE_CSS = `
 /* ============================================================
- * 命令面板（⌘K）· v1.1.2 主题切换入口 3
+ * 命令面板（⌘K）· v1.2 主题切换入口 3
  *
- * 走主题 token，3 主题自适应（A 暗 / C 暗 / Light）
+ * 走主题 token，2 主题自适应（dark / light）
  * 注入到 <head>，**不**污染 theme.css
  * ============================================================ */
 

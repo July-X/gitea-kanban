@@ -1,13 +1,13 @@
 /**
- * ui store —— 主题切换 state + applyTheme / initTheme action（v1.1.2 cycle 2 scope）
+ * ui store —— 主题切换 state + applyTheme / initTheme action（v1.2 · 2 主题）
  *
  * 设计来源（SSOT）：design-system/pages/tech-refine.md §14-§16
- *   - §14    3 主题 token 系统（A 暗 / C 暗 / Light）—— theme.css 已落地
+ *   - §14    2 主题 token 系统（dark / light）—— theme.css 已落地
  *   - §15.1  3 入口（StatusBar cycle / Settings 外观 / 命令面板 ⌘K）→ 同一 store
  *   - §15.2  切换瞬间：localStorage 写 + DOM 改 + IPC set + 失败提示（不阻塞 UI）
  *   - §15.4  数据流：user → preload api.theme.set → main handler → sqlite → return → store applyTheme
  *   - §15.5  启动期：localStorage 同步（0ms） + IPC get 异步（50-200ms）reconcile
- *   - §16    IPC 契约：preferences.theme.{get,set}，ThemeName enum = 'A-dark' | 'C-dark' | 'light'
+ *   - §16    IPC 契约：preferences.theme.{get,set}，ThemeName enum = 'dark' | 'light'
  *
  * 150ms 过渡说明：
  *   - theme.css 的 `*` 选择器已加 `transition: background-color 150ms ease-out, color 150ms ease-out`
@@ -35,19 +35,17 @@ import { showToast } from '@renderer/lib/toast';
 // 主题枚举（与 src/main/ipc/schema.ts ThemeEnumSchema 同步 · single source of truth）
 // ============================================================================
 
-export type Theme = 'A-dark' | 'C-dark' | 'light';
+export type Theme = 'dark' | 'light';
 
-/** 默认主题（A 暗 · tech-refine §15.3 拍板） */
-export const DEFAULT_THEME: Theme = 'A-dark';
+/** 默认主题（dark · v1.2 拍板 · 桌面工具主流） */
+export const DEFAULT_THEME: Theme = 'dark';
 
 /**
- * StatusBar cycle 顺序：A → C → L → A（暗 → 暗 → 亮 → 暗）
- * 选这个是因为「暗 → 暗 → 亮 → 暗」最后回到暗感觉自然；
- * 备选 A → L → C → A 会让 cycle 撞回前一个暗色时「亮度跳变」更大。
+ * StatusBar cycle 顺序：dark → light → dark（暗 → 亮 → 暗）
+ * 2 主题 cycle 自然；v1.1.2 的 "暗→暗→亮→暗" 顺序因 A 暗 / C 暗合并而简化。
  */
 export const THEME_CYCLE_ORDER: readonly Theme[] = [
-  'A-dark',
-  'C-dark',
+  'dark',
   'light',
 ] as const;
 
@@ -56,8 +54,7 @@ export const THEME_STORAGE_KEY = 'gitea-kanban.theme';
 
 /** 主题显示名（i18n 占位 · cycle 2 接到 src/shared/i18n 文案表） */
 export const THEME_DISPLAY_NAME: Record<Theme, string> = {
-  'A-dark': 'A 暗 · 苍蓝提饱和',
-  'C-dark': 'C 暗 · 中性近黑',
+  dark: '暗色 · 中性近黑',
   light: '浅色 · 浅苍蓝',
 };
 

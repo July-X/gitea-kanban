@@ -3,7 +3,7 @@
  * SettingsView —— 用户偏好设置面板
  *
  * v1.1.2 起加 "外观" 分组（入口 2，tech-refine §15.1）：
- *   - 3 主题单选（A 暗 / C 暗 / 浅色）
+ *   - 2 主题单选（暗色 / 浅色）—— v1.2 拍板从 3 主题收敛
  *   - onChange 立即调 uiStore.applyTheme —— CSS 150ms 过渡 + 异步 IPC 持久化
  *   - 不做保存按钮（点选即生效），区别于 polling interval（数值输入需要手动保存）
  *
@@ -40,11 +40,10 @@ const repo = useRepoStore();
 const branch = useBranchStore();
 const router = useRouter();
 
-/** 外观分组 3 选 1（与 tech-refine §14 token 矩阵 + §15.1 单选规格同步） */
+/** 外观分组 2 选 1（v1.2 收敛 · 与 tech-refine §14 token 矩阵 + §15.1 单选规格同步） */
 const themeOptions: ReadonlyArray<{ value: Theme; label: string; desc: string }> = [
-  { value: 'A-dark', label: THEME_DISPLAY_NAME['A-dark'], desc: '夜间长时间使用推荐' },
-  { value: 'C-dark', label: THEME_DISPLAY_NAME['C-dark'], desc: '专业工具风' },
-  { value: 'light', label: THEME_DISPLAY_NAME['light'], desc: '白天或打印场景' },
+  { value: 'dark', label: THEME_DISPLAY_NAME.dark, desc: '夜间长时间使用推荐' },
+  { value: 'light', label: THEME_DISPLAY_NAME.light, desc: '白天或打印场景' },
 ];
 
 /**
