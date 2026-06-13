@@ -105,6 +105,17 @@ export function httpErrorToIpcError(
  cause,
  httpStatus: 404,
  });
+ case 405:
+ // gitea "Method Not Allowed" 常表示资源状态不允许该操作
+ // （如对已合并/已关闭的合并请求再调 merge）→ 走 CONFLICT
+ // 参考 src/main/gitea/pulls.ts:19-22, 168-171, 220 文档说明
+ return new IpcError({
+ code: IpcErrorCode.CONFLICT,
+ message: '操作冲突：资源状态不允许该操作（如合并请求已合并或已关闭）',
+ hint: '请刷新后查看最新状态',
+ cause,
+ httpStatus: 405,
+ });
  case 409:
  return new IpcError({
  code: IpcErrorCode.CONFLICT,

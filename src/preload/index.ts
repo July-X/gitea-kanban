@@ -7,15 +7,15 @@
  * - IpcError reject时是 plain object（toJSON输出）
  * -不暴露 ipcRenderer / process / require
  *
- * M5状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个，theme-preload 补齐 preferences.* 2 个）：
- * - src/main/ipc/schema.ts 注册 39 个 IpcChannel（M3=32 → M5=36 → a3=37 → theme-preload=39）：
+ * M6状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个，theme-preload 补齐 preferences.theme.* 2 个，clipboard 补齐 preferences.clipboard.write 1 个）：
+ * - src/main/ipc/schema.ts 注册 44 个 IpcChannel（M3=32 → M5 fix-3=36 → a3=37 → theme-preload=39 → clipboard=44）：
  * auth×3, repos×3, branches×5, commits×3, pulls×4,
  * board.columns×7 (reset后从5→7，加 mapLabel/unmapLabel),
  * issues×9 (新增：list/get/create/update/addLabel/removeLabel/moveColumn + comment.list/create),
  * labels×2 (新增), members×1 (a3 新增：list — 仓库成员 = gitea repo collaborators),
  * user×4 (M5补齐：prefs.get/set + undo/redo),
- * preferences×2 (v1.1.2 主题切换：preferences.theme.get / preferences.theme.set — design-system/pages/tech-refine.md §16.3)
- * - 本文件暴露完整39 个 invoke + on()监听器
+ * preferences×3 (v1.1.2 主题切换：preferences.theme.get / preferences.theme.set；M6补：preferences.clipboard.write — 分支/提交号复制)
+ * - 本文件暴露完整44 个 invoke + on()监听器
  * - api.d.ts通过 `Api = typeof api`自动派生，**不**手改
  *
  * 方法签名约定（除 auth.connect历史兼容性保留 (giteaUrl, token) 双参）：
@@ -51,10 +51,11 @@ const invoke =
  * labels ×2 : list, create
  * members ×1 : list（a3 新增；返 `CollaboratorDto[]` 数组）
  * user ×4 : prefs.get, prefs.set, undo, redo
- * preferences ×2 : preferences.theme.get, preferences.theme.set（v1.1.2 主题切换 —— design-system/pages/tech-refine.md §16.3；
- * 走 preferences.* 而非 theme.*，为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键等）留 namespace 空间）
+ * preferences ×3 : preferences.theme.get, preferences.theme.set（v1.1.2 主题切换 —— design-system/pages/tech-refine.md §16.3）;
+ * preferences.clipboard.write（M6 补：分支/提交号复制；commit 588da2b）
+ * 走 preferences.* 而非 theme.*，为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键 / 剪贴板等）留 namespace 空间
  * ─────────────────
- *合计:39 个 invoke
+ *合计:44 个 invoke
  */
 const api = {
  //===== auth namespace（AGENTS §8.2 token唯一入口）=====

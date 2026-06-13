@@ -18,7 +18,7 @@ import { useAuthStore } from '@renderer/stores/auth';
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/board',
+    redirect: '/auth',
   },
   {
     path: '/auth',
