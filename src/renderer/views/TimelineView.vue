@@ -1,23 +1,20 @@
 <script setup lang="ts">
 /**
- * TimelineView —— 多分支 commit 时间轴（X6@3.1.7）
+ * TimelineView —— 多分支 commit 时间轴（heatmap + 分支提交图）
  *
- * 设计（AGENTS §5.2 + 03-frontend §5 + §5.6）：
- *   - 顶部：仓库选择 + 分支多选（chips）+ 加载按钮
- *   - 主区：X6 graph（多泳道 = 多个 branch lane；commit 节点 = 圆/菱形；merge 边 = 橙色）
- *   - 节点交互：hover tooltip / 单击高亮 / 双击跳 gitea
- *   - 数据源：commits.timeline IPC（v1 拿到的数据量在 200-500 区间）
+ * 设计还原（来自 docs/design/wireframe/timeline.html · v1.2 主题方案）：
+ *   - 顶部：仓库名 + 分支 chips + 工具栏（时间范围/筛选 chips）
+ *   - 上：commit 热力图（GitHub contribution graph 风格，53 周 × 7 天 = 371 格）
+ *   - 下：分支提交图（Gitea 提交图风格，8 lane × 紧凑 6px 间距 + bridges 桥接）
+ *   - 右：分支列表 sidebar（色块 + 名称 + commit 数）
  *
- * X6 铁律（AGENTS §8.4）：
- *   - interacting.* 回调第一参 = cellView（不是 cell），要 cell 用 view.cell
- *   - 默认 graph.on('node:mouseenter', ...) 第一参 = { cell, view }
- *   - attr 处理器**不**透传 CSS 属性（cursor/pointer-events）→ 必须 CSS 写
- *   - Vue 节点用 @antv/x6-vue-shape 的 register() 注册
+ * 数据源：commits.timeline IPC（v1 拿到的数据量在 200-500 区间）
+ *   - lanes 数组决定 lane 顺序和颜色（order 0 = main）
+ *   - nodes 数组按时间戳倒序排列后作为行号
+ *   - edges 数组（parent/combined）决定分支曲线
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { Graph } from '@antv/x6';
-import { register as registerVueShape } from '@antv/x6-vue-shape';
-import { GitBranch, Loader2, MapPin, Timer } from 'lucide-vue-next';
+import { computed, onMounted, ref, watch } from 'vue';
+import { GitBranch, Loader2, RefreshCw, Timer } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
@@ -28,36 +25,35 @@ import type {
   CommitNode as CommitNodeDto,
   Lane,
   ListBranchesResp,
-  ParentEdge,
   TimelineDto,
 } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
-import CommitNodeVue from '@renderer/views/timeline/CommitNode.vue';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
 const branch = useBranchStore();
 
+const activeProjectId = computed<string | null>(() => repo.currentProjectId);
+
+const activeRepo = computed(() => {
+  const fn = repo.currentProject ? `${repo.currentProject.owner}/${repo.currentProject.name}` : null;
+  return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
+});
+
 /** gitea 服务器 origin（task #21）—— 走用户填的地址，不再硬拼 https:// */
 const giteaUrlBase = computed<string>(() => {
   const raw = auth.currentGiteaUrl;
   if (raw) {
-    try {
-      return new URL(raw).origin;
-    } catch {
-      /* 解析失败退回 */
-    }
+    try { return new URL(raw).origin; } catch { /* 解析失败退回 */ }
   }
   return activeRepo.value ? `https://${activeRepo.value.owner}` : '';
 });
 
-/** 构造 gitea 上某资源 URL：`<origin>/<owner>/<name>/<path>` */
+/** 构造 gitea 上某资源 URL */
 function giteaUrl(path: string): string {
   if (!giteaUrlBase.value || !activeRepo.value) return '';
   return `${giteaUrlBase.value}/${activeRepo.value.owner}/${activeRepo.value.name}/${path}`;
 }
-
-const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
 const branches = ref<BranchDto[]>([]);
 const selectedBranches = ref<Set<string>>(new Set());
@@ -65,68 +61,24 @@ const timeline = ref<TimelineDto | null>(null);
 const loading = ref(false);
 const localError = ref<UserFacingError | null>(null);
 
-const graphRef = shallowRef<Graph | null>(null);
-const graphContainer = ref<HTMLDivElement | null>(null);
-
-/** 当前 hover / selected 节点（用于右侧详情面板） */
-const hoveredNode = ref<CommitNodeDto | null>(null);
-const selectedNode = ref<CommitNodeDto | null>(null);
-
-/** 默认分支优先（来自 branchDto.isDefault） */
 const defaultBranch = computed(() => branches.value.find((b) => b.isDefault) ?? null);
 
-const activeRepo = computed(() => {
-  // activeProjectId 是 uuid，反查 RepoDto 走 currentProject.fullName
-  const fn = repo.currentProject ? `${repo.currentProject.owner}/${repo.currentProject.name}` : null;
-  return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
-});
-
 onMounted(async () => {
-  // 0. 注册 Vue 自定义节点（X6 节点用 SFC 渲染）
-  registerVueShape({
-    shape: 'commit-node',
-    component: CommitNodeVue,
-  });
-
-  // 1. 等仓库列表就绪
   if (repo.repos.length === 0) {
-    try {
-      await repo.loadRepos('', true);
-    } catch {
-      /* error in repo.error */
-    }
+    try { await repo.loadRepos('', true); } catch { /* error in repo.error */ }
   }
   if (!activeProjectId.value && repo.projects.length > 0) {
-    // 默认选第一个 project —— addProject 是幂等的（已存在返现有 uuid）
-    // selectProject 接收 RepoProjectDto（强类型）保证 IPC 拿到真 uuid
     const first = repo.projects[0]!;
     try {
       const project = await repo.addProject({ owner: first.owner, name: first.name });
       repo.selectProject(project);
-    } catch {
-      /* error in repo.error */
-    }
+    } catch { /* error in repo.error */ }
   }
-  // 2. 拉分支列表（内部 loadTimeline 会触发 renderGraph）
   if (activeProjectId.value) {
     await loadBranches();
   }
-  // 3. ⚠️ 关键：<div ref="graphContainer"> 在 <template v-else> 里（line 387），
-  // 只有 activeRepo && branches.length>0 && !localError 才渲染。
-  // 因此 onMounted 阶段 graphContainer.value 一定是 null（branches 异步加载、DOM 还没 patch）。
-  // initGraph() 必须在 graphContainer 真出现后调，否则 `if (!graphContainer.value) return` 直接 bail。
-  // 之前的 bug 是在 onMounted 末尾调 initGraph（graphContainer=null，silent bail），
-  // 或者先 loadBranches 再 initGraph（时机错，renderGraph 跑得比 initGraph 早）。
-  // 现在用 watch: 一旦 graphContainer 真的绑定（DOM mount 完成），就立刻 initGraph。
-  // initGraph 是幂等的（已存在就 return）；renderGraph 由 watch(() => timeline.value) 兜底触发。
 });
 
-onBeforeUnmount(() => {
-  graphRef.value?.dispose();
-  graphRef.value = null;
-});
-
-/** 拉分支列表 + 默认选 default branch + 1 个其他最近活跃分支 */
 async function loadBranches(): Promise<void> {
   if (!activeProjectId.value) return;
   try {
@@ -136,17 +88,12 @@ async function loadBranches(): Promise<void> {
       page: 1,
     })) as ListBranchesResp;
     branches.value = resp.items;
-
-    // 跨视图状态传递：用户在 BranchesView 点"在时间轴查看此分支"时
-    // 会写入 branch.pendingTimelineFocus；命中时只选该分支（覆盖默认行为）
     const pending = branch.consumePendingTimelineFocus();
     if (pending && resp.items.some((b) => b.name === pending)) {
       selectedBranches.value = new Set<string>([pending]);
     } else {
-      // 默认选 default
       const nextSelected = new Set<string>();
       if (defaultBranch.value) nextSelected.add(defaultBranch.value.name);
-      // 再加一个最近活跃的非 default 分支
       const other = resp.items.find((b) => !b.isDefault);
       if (other) nextSelected.add(other.name);
       selectedBranches.value = nextSelected;
@@ -159,24 +106,15 @@ async function loadBranches(): Promise<void> {
   }
 }
 
-/**
- * 用户已在 /timeline 时从 BranchesView 点"在时间轴查看此分支"——
- * 路由没变所以 onMounted 不会再 fire；用 watch(branch.pendingTimelineFocus) 兜底。
- */
-watch(
-  () => branch.pendingTimelineFocus,
-  async (name) => {
-    if (!name || !activeProjectId.value) return;
-    // 重新消费：让 selectedBranches 立刻变成只含此分支并重画时间轴
-    branch.pendingTimelineFocus = null;
-    if (branches.value.some((b) => b.name === name)) {
-      selectedBranches.value = new Set<string>([name]);
-      await loadTimeline();
-    }
-  },
-);
+watch(() => branch.pendingTimelineFocus, async (name) => {
+  if (!name || !activeProjectId.value) return;
+  branch.pendingTimelineFocus = null;
+  if (branches.value.some((b) => b.name === name)) {
+    selectedBranches.value = new Set<string>([name]);
+    await loadTimeline();
+  }
+});
 
-/** 加载时间轴 */
 async function loadTimeline(): Promise<void> {
   if (!activeProjectId.value) return;
   if (selectedBranches.value.size === 0) return;
@@ -190,7 +128,6 @@ async function loadTimeline(): Promise<void> {
       laneMode: 'branch',
     })) as TimelineDto;
     timeline.value = resp;
-    renderGraph(resp);
   } catch (e) {
     localError.value = e as UserFacingError;
   } finally {
@@ -198,165 +135,329 @@ async function loadTimeline(): Promise<void> {
   }
 }
 
-/** 切换分支 chip */
 function toggleBranch(name: string): void {
   const next = new Set(selectedBranches.value);
-  if (next.has(name)) {
-    next.delete(name);
-  } else {
-    next.add(name);
-  }
+  if (next.has(name)) next.delete(name);
+  else next.add(name);
   selectedBranches.value = next;
   if (next.size > 0) {
     void loadTimeline();
   } else {
     timeline.value = null;
-    graphRef.value?.clearCells();
   }
 }
 
-/** 初始化 X6 graph */
-function initGraph(): void {
-  if (!graphContainer.value) return;
-  const g = new Graph({
-    container: graphContainer.value,
-    background: { color: 'transparent' },
-    autoResize: true,
-    panning: { enabled: true, modifiers: 'shift' },
-    mousewheel: {
-      enabled: true,
-      zoomAtMousePosition: true,
-      modifiers: 'ctrl',
-    },
-    interacting: {
-      // AGENTS §8.4 铁律：interacting.* 第一参是 cellView，**不**是 cell
-      // 回调里想拿 cell 用 view.cell；这里我们 disable 移动（git graph 节点固定位置）
-      nodeMovable: false,
-      edgeMovable: false,
-      vertexMovable: false,
-      arrowheadMovable: false,
-    },
-  });
-  graphRef.value = g;
-  // AGENTS §8.4 铁律：默认 graph.on 第一参 = { cell, view }
-  g.on('node:mouseenter', ({ cell }) => {
-    const data = cell.getData() as CommitNodeDto | undefined;
-    if (data) hoveredNode.value = data;
-  });
-  g.on('node:mouseleave', () => {
-    hoveredNode.value = null;
-  });
-  g.on('node:click', ({ cell }) => {
-    const data = cell.getData() as CommitNodeDto | undefined;
-    if (data) selectedNode.value = data;
-  });
-  g.on('node:dblclick', ({ cell }) => {
-    const data = cell.getData() as CommitNodeDto | undefined;
-    if (data && activeRepo.value) {
-      // 改用 /<owner>/<repo>/commit/<sha> 走用户填的 gitea 地址（task #21）——
-      // 旧 `/<owner>/-/commit/<sha>` 是 user-level commit 页，跨仓库找 sha，gitea 的子路径
-      // 部署也丢了
-      const url = giteaUrl(`commit/${data.sha}`);
-      if (url) window.open(url, '_blank', 'noopener,noreferrer');
-    }
-  });
+function refresh(): void {
+  void loadTimeline();
 }
 
-/** 画布尺寸（X6 节点坐标 = 绝对像素，需要把后端归一化 0~1 浮点换算成像素） */
-const CANVAS_PADDING = 40; // 上下左右留白
-const LANE_HEIGHT = 90; // 每条 lane 垂直间距（后端 lane.order → y 像素）
+watch(() => activeProjectId.value, async (id) => {
+  if (id) await loadBranches();
+});
 
-function renderGraph(dto: TimelineDto): void {
-  const g = graphRef.value;
-  if (!g) return;
-  g.clearCells();
+// ============================================================
+// 数据布局计算（commit 排序 / lane 映射 / heatmap / SVG 路径）
+// ============================================================
 
-  // 取 graph 容器实测宽高作为画布基准（首次渲染时容器可能还没拿到尺寸 → 兜底 1200x600）
-  const wrap = graphContainer.value;
-  const measuredW = wrap?.clientWidth ?? 0;
-  const measuredH = wrap?.clientHeight ?? 0;
-  const canvasW = measuredW > 0 ? measuredW : 1200;
-  const canvasH = measuredH > 0 ? measuredH : 600;
+const ROW_H = 36;
+const GRAPH_W = 54; // 收窄到 8 lane 紧凑布局（54 = 5 + 7×6 + 5 padding）
 
-  // x: 后端 0~1 归一化 → 横向像素（按时间戳跨度，最早的贴左边、最晚的贴右边）
-  // y: 后端 lane.order → 纵向像素（lane 0 在最上）
-  const drawW = canvasW - CANVAS_PADDING * 2;
-  const drawH = canvasH - CANVAS_PADDING * 2;
+/** 节点按时间戳倒序（新 → 旧） */
+const sortedNodes = computed<CommitNodeDto[]>(() => {
+  if (!timeline.value) return [];
+  return [...timeline.value.nodes].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+});
 
-  // === 节点 ===
-  for (const node of dto.nodes) {
-    g.addNode({
-      id: node.id,
-      shape: 'commit-node',
-      x: CANVAS_PADDING + node.x * drawW,
-      y: CANVAS_PADDING + node.y * LANE_HEIGHT,
-      data: node,
-    });
-  }
+/** laneId → x 中心点（lane.order 0 = main @ x=5；6px 步进到 x=47） */
+const laneXMap = computed<Map<string, number>>(() => {
+  const map = new Map<string, number>();
+  if (!timeline.value) return map;
+  const lanes = [...timeline.value.lanes].sort((a, b) => a.order - b.order);
+  lanes.forEach((lane, i) => {
+    map.set(lane.id, 5 + i * 6);
+  });
+  return map;
+});
 
-  // === 边（按 kind 区分父边 / 合并边颜色） ===
-  for (const edge of dto.edges) {
-    g.addEdge({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      // 父边 = lane 色（这里用次级文字色当占位），合并边 = 强调橙
-      attrs: {
-        line: {
-          stroke: edge.kind === 'merge' ? '#F76707' : 'rgba(220, 233, 240, 0.4)',
-          strokeWidth: edge.kind === 'merge' ? 1.5 : 1,
-          targetMarker: edge.kind === 'merge' ? null : { name: 'circle', size: 4 },
-        },
-      },
-    });
-  }
+/** commitId → y 中心点（row index × 36 + 18） */
+const nodeYMap = computed<Map<string, number>>(() => {
+  const map = new Map<string, number>();
+  sortedNodes.value.forEach((n, i) => {
+    map.set(n.id, i * ROW_H + 18);
+  });
+  return map;
+});
+
+/** 主 lane（order=0） */
+const mainLane = computed<Lane | null>(() => {
+  if (!timeline.value) return null;
+  return timeline.value.lanes.find((l) => l.order === 0) ?? timeline.value.lanes[0] ?? null;
+});
+
+/** lane.label → CSS 颜色 token（按命名约定匹配） */
+function laneColorToken(laneId: string): string {
+  if (!timeline.value) return 'var(--color-text-secondary)';
+  const lane = timeline.value.lanes.find((l) => l.id === laneId);
+  if (!lane) return 'var(--color-text-secondary)';
+  const label = lane.label.toLowerCase();
+  if (label === 'main' || label.startsWith('main')) return 'var(--color-primary)';
+  if (label.startsWith('feature/') || label.startsWith('feat/')) return 'var(--color-accent)';
+  if (label.startsWith('hotfix/') || label.startsWith('fix/')) return 'var(--color-info)';
+  if (label.includes('exp')) return 'var(--color-purple)';
+  if (label.startsWith('chore/') || label.startsWith('chore')) return 'var(--color-teal)';
+  if (label.startsWith('refactor/')) return 'var(--color-amber)';
+  if (label.startsWith('docs/')) return 'var(--color-pink)';
+  if (label.startsWith('spike/')) return 'var(--color-lime)';
+  return lane.color; // fallback: 后端给的 hex
 }
 
-// 监听项目切换（路由参数）
-watch(
-  () => activeProjectId.value,
-  async (id) => {
-    if (id) {
-      await loadBranches();
+/** lane.label → soft token（pill 背景用） */
+function laneSoftToken(laneId: string): string {
+  if (!timeline.value) return 'var(--color-bg-hover)';
+  const lane = timeline.value.lanes.find((l) => l.id === laneId);
+  if (!lane) return 'var(--color-bg-hover)';
+  const label = lane.label.toLowerCase();
+  if (label === 'main' || label.startsWith('main')) return 'var(--color-primary-soft)';
+  if (label.startsWith('feature/') || label.startsWith('feat/')) return 'var(--color-accent-soft)';
+  if (label.startsWith('hotfix/') || label.startsWith('fix/')) return 'var(--color-info-soft)';
+  if (label.includes('exp')) return 'var(--color-purple-soft)';
+  if (label.startsWith('chore/') || label.startsWith('chore')) return 'var(--color-teal-soft)';
+  if (label.startsWith('refactor/')) return 'var(--color-amber-soft)';
+  if (label.startsWith('docs/')) return 'var(--color-pink-soft)';
+  if (label.startsWith('spike/')) return 'var(--color-lime-soft)';
+  return 'var(--color-bg-hover)';
+}
+
+// ============================================================
+// Heatmap
+// ============================================================
+
+interface HeatCell { date: string; count: number; level: number; }
+interface HeatWeek { cells: HeatCell[]; }
+
+const heatmap = computed(() => {
+  if (!timeline.value) return null;
+
+  // 1. 按 YYYY-MM-DD 分桶
+  const counts = new Map<string, number>();
+  for (const n of timeline.value.nodes) {
+    const d = n.timestamp.slice(0, 10);
+    counts.set(d, (counts.get(d) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+
+  // 2. 计算 53 周（371 天）的网格起点：本周日往前推 52 周
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dow = today.getDay(); // 0=Sun
+  const endSunday = new Date(today);
+  endSunday.setDate(endSunday.getDate() + (6 - dow));
+  const startSunday = new Date(endSunday);
+  startSunday.setDate(startSunday.getDate() - 52 * 7);
+
+  // 3. 生成 weeks
+  const weeks: HeatWeek[] = [];
+  const monthLabels: { week: number; label: string }[] = [];
+  let lastMonth = -1;
+  for (let w = 0; w < 53; w++) {
+    const cells: HeatCell[] = [];
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(startSunday);
+      date.setDate(startSunday.getDate() + w * 7 + d);
+      const dateStr = date.toISOString().slice(0, 10);
+      const count = counts.get(dateStr) ?? 0;
+      const level =
+        count === 0 ? 0 : count <= 2 ? 1 : count <= 5 ? 2 : count <= 10 ? 3 : 4;
+      cells.push({ date: dateStr, count, level });
     }
-  },
-);
-
-// 兜底：timeline 数据变就重画（处理 initGraph 早于 loadTimeline 完成 / project 切换 / branch chip 切换）
-// renderGraph 内部有 `if (!g) return` 保护，graphRef 还没初始化时静默跳过——首次 mount 时
-// loadTimeline 在 initGraph 之后调，所以这条 watch 通常用不到；但 onMounted 之外触发
-// （如 toggleBranch → loadTimeline）的路径上提供双保险。
-watch(
-  () => timeline.value,
-  (dto) => {
-    if (dto) renderGraph(dto);
-  },
-);
-
-// 关键兜底：graphContainer ref 在 onMounted 阶段还是 null（因为它在 <template v-else>
-// 里、branches 异步加载 + DOM 未 patch），所以 initGraph() 不能放在 onMounted 末尾。
-// 用 watch(graphContainer)：一旦 Vue 把 ref 真正绑定到 DOM 节点（DOM mount 完成 + 条件分支命中），
-// 就调 initGraph 建 X6 graph。配合 watch(timeline.value) 兜底，graph 一就绪就立刻画当前数据。
-watch(
-  graphContainer,
-  (el) => {
-    if (el && !graphRef.value) {
-      initGraph();
-      // 如果 timeline 数据已经在 loadBranches 异步过程中拿到，但 graphRef 当时为 null，
-      // 上面 initGraph 后立即补画一次
-      if (timeline.value) renderGraph(timeline.value);
+    weeks.push({ cells });
+    // 月份标签：本列第一天是几月
+    const firstDay = new Date(startSunday);
+    firstDay.setDate(startSunday.getDate() + w * 7);
+    const m = firstDay.getMonth();
+    if (m !== lastMonth) {
+      monthLabels.push({ week: w, label: `${m + 1}月` });
+      lastMonth = m;
     }
-  },
-  { flush: 'post' }, // 等待 DOM 更新后再判断（确保 <template v-else> 分支已 patch）
-);
+  }
 
-/** 简化的 lane 元信息（来自 TimelineDto.lanes，UI 用） */
-const lanes = computed<Lane[]>(() => timeline.value?.lanes ?? []);
+  // 4. 总数
+  const total = [...counts.values()].reduce((a, b) => a + b, 0);
 
-/** 把 lane id 转成对应 label（用于图左侧说明） */
-function laneLabel(id: string): string {
-  const lane = lanes.value.find((l) => l.id === id);
-  return lane?.label ?? id;
+  return {
+    weeks,
+    monthLabels,
+    total,
+  };
+});
+
+// ============================================================
+// Branch graph SVG paths
+// ============================================================
+
+interface GraphPath {
+  d: string;
+  color: string;
+  dashed?: boolean;
+  isBridge?: boolean;
+}
+
+const graphPaths = computed<GraphPath[]>(() => {
+  if (!timeline.value || sortedNodes.value.length === 0) return [];
+  const nodes = sortedNodes.value;
+  const xMap = laneXMap.value;
+  const yMap = nodeYMap.value;
+  const main = mainLane.value;
+  if (!main) return [];
+  const mainX = xMap.get(main.id) ?? 5;
+  const mainColor = laneColorToken(main.id);
+  const lastY = yMap.get(nodes[nodes.length - 1]!.id) ?? 0;
+
+  const paths: GraphPath[] = [];
+
+  // === 1. main 贯穿线（贯穿整列）===
+  paths.push({ d: `M ${mainX} 18 L ${mainX} ${lastY}`, color: mainColor });
+
+  // === 2. 每个 branch lane 的曲线 ===
+  const branchLanes = timeline.value.lanes.filter((l) => l.order > 0);
+  for (const lane of branchLanes) {
+    const laneNodes = nodes.filter((n) => n.laneId === lane.id);
+    if (laneNodes.length === 0) continue;
+    const x = xMap.get(lane.id) ?? 0;
+    const color = laneColorToken(lane.id);
+    // 第一个节点（最新）
+    const firstY = yMap.get(laneNodes[0]!.id) ?? 0;
+    // 最后一个节点（最旧）
+    const lastBranchY = yMap.get(laneNodes[laneNodes.length - 1]!.id) ?? 0;
+    // 是否合并到 main（存在 isMerge 节点 = 合并过；否则视为 unmerged）
+    const hasMerge = laneNodes.some((n) => n.isMerge);
+
+    // (a) 入口曲线：mainX at firstY+ROW_H → x at firstY
+    //     （如果第一个节点就是分支首 commit，从它下面进入 main）
+    if (firstY + ROW_H <= lastY) {
+      paths.push({
+        d: `M ${mainX} ${firstY + ROW_H} C ${mainX} ${firstY + ROW_H + 8}, ${x} ${firstY + ROW_H + 8}, ${x} ${firstY}`,
+        color,
+      });
+    }
+
+    // (b) 节点之间的垂直线
+    for (let i = 0; i < laneNodes.length - 1; i++) {
+      const y1 = yMap.get(laneNodes[i]!.id) ?? 0;
+      const y2 = yMap.get(laneNodes[i + 1]!.id) ?? 0;
+      paths.push({ d: `M ${x} ${y1} L ${x} ${y2}`, color });
+    }
+
+    // (c) 出口曲线 或 dashed 延展
+    if (hasMerge && lastBranchY - ROW_H >= 0) {
+      // 合并回 main：x at lastBranchY → mainX at lastBranchY - ROW_H
+      paths.push({
+        d: `M ${x} ${lastBranchY} C ${x} ${lastBranchY - 8}, ${mainX} ${lastBranchY - 8}, ${mainX} ${lastBranchY - ROW_H}`,
+        color,
+      });
+    } else if (!hasMerge) {
+      // 未合并：dashed 延展到列表末尾
+      paths.push({ d: `M ${x} ${lastBranchY} L ${x} ${lastY}`, color, dashed: true });
+    }
+  }
+
+  // === 3. bridges：在 exp 虚线被 chore/refactor/docs/spike 交叉处画背景色小段 ===
+  //     exp lane（order=3）虚线延展会被后续 branch lane 曲线穿过。
+  //     找穿越的 y 位置：在每条 branch curve 穿过 exp 虚线 x=expX 处加桥
+  //     简化策略：找所有与 exp lane x 接近的 crossing y
+  const expLane = branchLanes.find((l) => l.label.toLowerCase().includes('exp'));
+  if (expLane) {
+    const expX = xMap.get(expLane.id) ?? 23;
+    // 找所有穿过 expX 的非 exp 曲线 / 直线：每条 branch lane 都可能穿过
+    // 简化：遍历所有 path，估算与 expX 相交的 y
+    // 这里采用更简单的方法：基于 lane order 推算 — order 3 之后的所有 lane 都会有曲线穿过 expX
+    const laterLanes = branchLanes.filter((l) => l.order > (expLane.order ?? 3));
+    for (const lane of laterLanes) {
+      const laneNodesInOrder = nodes.filter((n) => n.laneId === lane.id);
+      if (laneNodesInOrder.length === 0) continue;
+      // 入口曲线穿过 expX 的 y ≈ enterY + ROW_H/2 + 8
+      const firstY = yMap.get(laneNodesInOrder[0]!.id) ?? 0;
+      const y1 = firstY + ROW_H + 8;
+      if (y1 > 0 && y1 < lastY) {
+        paths.push({ isBridge: true, d: '', color: 'var(--color-bg)', x: expX, y: y1 });
+      }
+      // 出口曲线：x at lastBranchY-ROW_H/2 处
+      if (laneNodesInOrder.some((n) => n.isMerge)) {
+        const lastBranchY = yMap.get(laneNodesInOrder[laneNodesInOrder.length - 1]!.id) ?? 0;
+        const y2 = lastBranchY - 8;
+        if (y2 > 0 && y2 < lastY) {
+          paths.push({ isBridge: true, d: '', color: 'var(--color-bg)', x: expX, y: y2 });
+        }
+      }
+    }
+  }
+
+  return paths;
+});
+
+// ============================================================
+// 行数据（commit row）
+// ============================================================
+
+interface CommitRow {
+  node: CommitNodeDto;
+  dotX: number;
+  rowY: number;
+  isHead: boolean;
+  isMerge: boolean;
+  branchPill: string;
+  branchPillStyle: string;
+  authorInitials: string;
+  authorColor: string;
+}
+
+const commitRows = computed<CommitRow[]>(() => {
+  if (!timeline.value) return [];
+  const xMap = laneXMap.value;
+  const yMap = nodeYMap.value;
+  return sortedNodes.value.map((n, i) => {
+    const dotX = xMap.get(n.laneId) ?? 5;
+    const rowY = i * ROW_H + 18;
+    // 分支 pill：取 branchHints[0] 或 lane.label
+    const branchPill = n.branchHints[0] ?? timeline.value!.lanes.find((l) => l.id === n.laneId)?.label ?? '';
+    const branchPillStyle = `background: ${laneSoftToken(n.laneId)}; color: ${laneColorToken(n.laneId)};`;
+    // 作者头像首字母 + 颜色
+    const authorInitials = n.author.name.slice(0, 2).toUpperCase();
+    // 用 lane color 作为 author avatar 背景（简化）
+    const authorColor = laneColorToken(n.laneId);
+    return {
+      node: n,
+      dotX,
+      rowY,
+      isHead: i === 0,
+      isMerge: n.isMerge,
+      branchPill,
+      branchPillStyle,
+      authorInitials,
+      authorColor,
+    };
+  });
+});
+
+const totalRows = computed(() => commitRows.value.length);
+
+/** 把 ISO 时间戳转成"X 天前 / X 小时前"——简化版 */
+function formatRelative(iso: string): string {
+  const t = new Date(iso).getTime();
+  const now = Date.now();
+  const diff = now - t;
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day} 天前`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo} 个月前`;
+  return `${Math.floor(mo / 12)} 年前`;
 }
 </script>
 
@@ -383,13 +484,25 @@ function laneLabel(id: string): string {
           <span class="mono">{{ b.name }}</span>
         </button>
       </div>
-      <div v-if="loading" class="timeline__loading">
-        <Loader2 :size="14" :stroke-width="2" class="spin" />
-        <span>加载中…</span>
+      <div class="timeline__actions">
+        <button
+          v-if="timeline"
+          type="button"
+          class="icon-btn"
+          :title="'刷新'"
+          :disabled="loading"
+          @click="refresh"
+        >
+          <RefreshCw :size="14" :stroke-width="1.75" :class="{ spin: loading }" />
+        </button>
+        <div v-if="loading" class="timeline__loading">
+          <Loader2 :size="14" :stroke-width="2" class="spin" />
+          <span>加载中…</span>
+        </div>
       </div>
     </header>
 
-    <!-- ============== 主区：X6 graph + 右侧详情 ============== -->
+    <!-- ============== 主区 ============== -->
     <div class="timeline__main">
       <div v-if="!activeRepo" class="timeline__placeholder">
         <EmptyState
@@ -404,33 +517,119 @@ function laneLabel(id: string): string {
         <p class="muted">{{ localError.messageText }}</p>
         <p class="muted text-xs">{{ localError.hint }}</p>
       </div>
-      <template v-else>
-        <div class="timeline__graph-wrap">
-          <div ref="graphContainer" class="timeline__graph" />
-        </div>
-        <aside class="timeline__detail" v-if="hoveredNode || selectedNode">
-          <h3 class="timeline__detail-title">
-            <MapPin :size="14" :stroke-width="2" aria-hidden="true" />
-            <span class="mono">{{ (hoveredNode ?? selectedNode)?.shortSha }}</span>
-          </h3>
-          <p class="timeline__detail-message">
-            {{ (hoveredNode ?? selectedNode)?.message }}
-          </p>
-          <div class="timeline__detail-meta">
-            <div v-if="(hoveredNode ?? selectedNode)?.isMerge" class="timeline__detail-tag">
-              合并节点
-            </div>
-            <div v-if="(hoveredNode ?? selectedNode)?.linkedCardIds.length" class="timeline__detail-tag">
-              {{ (hoveredNode ?? selectedNode)?.linkedCardIds.length }} 个关联卡片
-            </div>
-            <div v-if="(hoveredNode ?? selectedNode)?.filesChanged !== undefined" class="timeline__detail-tag">
-              {{ (hoveredNode ?? selectedNode)?.filesChanged }} 个文件
+      <template v-else-if="timeline && heatmap">
+        <!-- 上：commit 热力图 -->
+        <section class="timeline__heatmap">
+          <div class="heatmap__head">
+            <div class="heatmap__title">
+              <span class="heatmap__count">{{ heatmap.total }}</span>
+              <span class="heatmap__count-label">次提交 · 最近一年</span>
             </div>
           </div>
-          <p class="timeline__detail-author muted text-xs">
-            {{ (hoveredNode ?? selectedNode)?.author.name }} · {{ (hoveredNode ?? selectedNode)?.timestamp }}
-          </p>
-        </aside>
+          <div class="heatmap__body">
+            <div class="heatmap__months">
+              <span
+                v-for="(m, i) in heatmap.monthLabels"
+                :key="i"
+                class="heatmap__month"
+                :style="{ gridColumnStart: m.week + 1 }"
+              >{{ m.label }}</span>
+            </div>
+            <div class="heatmap__grid">
+              <div
+                v-for="(week, wi) in heatmap.weeks"
+                :key="wi"
+                class="heatmap__week"
+              >
+                <div
+                  v-for="cell in week.cells"
+                  :key="cell.date"
+                  class="heatmap__cell"
+                  :class="`heatmap__cell--lv${cell.level}`"
+                  :title="cell.count > 0 ? `${cell.count} 次提交 · ${cell.date}` : cell.date"
+                />
+              </div>
+            </div>
+            <div class="heatmap__legend">
+              <span class="heatmap__legend-label">少</span>
+              <span class="heatmap__legend-cell heatmap__cell--lv0" />
+              <span class="heatmap__legend-cell heatmap__cell--lv1" />
+              <span class="heatmap__legend-cell heatmap__cell--lv2" />
+              <span class="heatmap__legend-cell heatmap__cell--lv3" />
+              <span class="heatmap__legend-cell heatmap__cell--lv4" />
+              <span class="heatmap__legend-label">多</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 下：分支提交图 + 侧边栏 -->
+        <section class="timeline__graph-section">
+          <div class="commit-graph">
+            <div class="commit-list">
+              <div class="commit-list__inner">
+                <!-- 内嵌 SVG 画分支曲线（绝对定位在 rows 之上） -->
+                <svg
+                  class="commit-list__edges"
+                  :width="GRAPH_W"
+                  :height="totalRows * ROW_H"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    v-for="(p, i) in graphPaths"
+                    :key="i"
+                    :d="p.isBridge ? `M ${(p.x ?? 0) - 4} ${p.y} L ${(p.x ?? 0) + 4} ${p.y}` : p.d"
+                    :stroke="p.color"
+                    :stroke-width="p.isBridge ? '2.5' : '1.5'"
+                    :stroke-dasharray="p.dashed ? '4 3' : undefined"
+                    :opacity="p.dashed ? '0.55' : (p.isBridge ? '1' : '1')"
+                    stroke-linecap="round"
+                    fill="none"
+                  />
+                </svg>
+                <!-- 行 -->
+                <div
+                  v-for="row in commitRows"
+                  :key="row.node.id"
+                  class="commit-row"
+                  :class="{ 'is-head-row': row.isHead }"
+                >
+                  <div class="commit-row__graph">
+                    <div
+                      class="commit-row__dot"
+                      :class="{ 'is-combined': row.isMerge, 'is-head': row.isHead }"
+                      :style="{
+                        left: row.dotX + 'px',
+                        '--dot-color': row.authorColor,
+                        background: row.authorColor,
+                      }"
+                    />
+                  </div>
+                  <div class="commit-row__hash mono">{{ row.node.shortSha }}</div>
+                  <div class="commit-row__msg" :title="row.node.message">{{ row.node.message }}</div>
+                  <div class="commit-row__meta">
+                    <div
+                      class="commit-row__branch"
+                      :class="{ combined: row.isMerge }"
+                      :style="row.branchPillStyle"
+                    >
+                      <template v-if="row.isMerge">← {{ row.branchPill }}</template>
+                      <template v-else>{{ row.branchPill }}</template>
+                    </div>
+                    <div class="commit-row__author">
+                      <span
+                        class="commit-row__avatar"
+                        :style="{ background: row.authorColor }"
+                      >{{ row.authorInitials }}</span>
+                      <span>{{ row.node.author.name }}</span>
+                    </div>
+                    <div class="commit-row__time">{{ formatRelative(row.node.timestamp) }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </template>
     </div>
   </div>
@@ -455,20 +654,17 @@ function laneLabel(id: string): string {
   flex-shrink: 0;
   flex-wrap: wrap;
 }
-
 .timeline__title {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   color: var(--color-text-secondary);
 }
-
 .timeline__repo-name {
   font-size: var(--font-md);
   font-weight: 500;
   color: var(--color-text);
 }
-
 .timeline__branches {
   display: flex;
   align-items: center;
@@ -476,13 +672,11 @@ function laneLabel(id: string): string {
   flex-wrap: wrap;
   flex: 1;
 }
-
 .timeline__branches-label {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   margin-right: var(--space-1);
 }
-
 .branch-chip {
   display: inline-flex;
   align-items: center;
@@ -495,46 +689,22 @@ function laneLabel(id: string): string {
   cursor: pointer;
   transition: background var(--t-fast) var(--ease);
 }
+.branch-chip:hover { background: var(--color-bg-hover); color: var(--color-text); }
+.branch-chip--active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 500; }
+.branch-chip--active:hover { background: var(--color-primary-soft); color: var(--color-primary); }
 
-.branch-chip:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text);
-}
-
-.branch-chip--active {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-weight: 500;
-}
-
-.branch-chip--active:hover {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-}
-
-.timeline__loading {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-info);
-  font-size: var(--font-xs);
-}
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
+.timeline__actions { display: flex; align-items: center; gap: var(--space-2); }
+.timeline__loading { display: inline-flex; align-items: center; gap: 4px; color: var(--color-info); font-size: var(--font-xs); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 .timeline__main {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-height: 0;
+  background: var(--color-bg);
 }
-
 .timeline__placeholder {
   flex: 1;
   display: flex;
@@ -544,67 +714,164 @@ function laneLabel(id: string): string {
   gap: var(--space-2);
 }
 
-.timeline__graph-wrap {
-  flex: 1;
-  min-width: 0;
-  /* 透明让 AppShell 的 HUD 24px grid + 顶角点阵透出
-   * （X6 自身 background: { color: 'transparent' }，graph-wrap 不再加不透明色）
-   * 与"主区/弹窗/卡片 z-index 1+ 自然遮住 grid"硬约束一致：wrap 是"画布容器"非"阅读区" */
-  position: relative;
-}
-
-.timeline__graph {
-  width: 100%;
-  height: 100%;
-  min-height: 400px;
-}
-
-.timeline__detail {
-  width: 320px;
+/* ============== Heatmap ============== */
+.timeline__heatmap {
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  background: var(--color-bg-elevated);
-  border-left: 1px solid var(--color-divider);
-  overflow-y: auto;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  background: var(--color-bg);
 }
-
-.timeline__detail-title {
+.heatmap__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.heatmap__title { display: flex; align-items: baseline; gap: 6px; }
+.heatmap__count { font-size: var(--font-2xl); font-weight: 600; color: var(--color-primary); }
+.heatmap__count-label { font-size: var(--font-sm); color: var(--color-text-secondary); }
+.heatmap__body { overflow-x: auto; }
+.heatmap__months {
+  display: grid;
+  grid-template-columns: repeat(53, 12px);
+  gap: 2px;
+  margin-bottom: 4px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  height: 14px;
+}
+.heatmap__month { white-space: nowrap; }
+.heatmap__grid { display: flex; gap: 2px; }
+.heatmap__week { display: flex; flex-direction: column; gap: 2px; }
+.heatmap__cell {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+  transition: transform var(--t-fast) var(--ease);
+}
+.heatmap__cell:hover { transform: scale(1.3); }
+.heatmap__cell--lv0 { background: var(--color-bg-hover); }
+.heatmap__cell--lv1 { background: var(--color-primary-soft); }
+.heatmap__cell--lv2 { background: rgba(116, 184, 48, 0.45); }
+.heatmap__cell--lv3 { background: rgba(116, 184, 48, 0.7); }
+.heatmap__cell--lv4 { background: var(--color-primary); box-shadow: 0 0 4px var(--color-primary-glow); }
+.heatmap__legend {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-sm);
-  color: var(--color-primary);
-  font-weight: 500;
-}
-
-.timeline__detail-message {
-  font-size: var(--font-md);
-  color: var(--color-text);
-  line-height: var(--line-base);
-  word-break: break-word;
-}
-
-.timeline__detail-meta {
-  display: flex;
-  flex-wrap: wrap;
   gap: 4px;
-  margin-top: var(--space-1);
-}
-
-.timeline__detail-tag {
-  font-size: var(--font-xs);
-  background: var(--color-bg);
-  color: var(--color-text-secondary);
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-}
-
-.timeline__detail-author {
   margin-top: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--color-divider);
+  font-size: 10px;
+  color: var(--color-text-muted);
 }
+.heatmap__legend-label { padding: 0 4px; }
+.heatmap__legend-cell { width: 10px; height: 10px; border-radius: 2px; }
+
+/* ============== Commit graph + sidebar ============== */
+.timeline__graph-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.commit-graph {
+  flex: 1; min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+.commit-list { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0; scrollbar-gutter: stable; }
+.commit-list::-webkit-scrollbar { width: 10px; }
+.commit-list::-webkit-scrollbar-track { background: transparent; }
+.commit-list::-webkit-scrollbar-thumb { background: var(--color-divider); border-radius: 5px; }
+.commit-list::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+.commit-list__inner { position: relative; min-width: 880px; }
+.commit-list__edges {
+  position: absolute; top: 0; left: 0;
+  width: 54px; height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.commit-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 54px 80px 1fr 360px;
+  align-items: center;
+  height: var(--row-h, 36px);
+  padding: 0 var(--space-3) 0 0;
+  cursor: pointer;
+  transition: background-color var(--t-base) var(--ease);
+  z-index: 2;
+}
+.commit-row__meta {
+  display: grid;
+  grid-template-columns: 120px 120px 80px;
+  align-items: center;
+  justify-content: end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.commit-row:hover { background: var(--color-bg-hover); }
+.commit-row.is-head-row { background: linear-gradient(90deg, var(--color-primary-soft) 0%, transparent 70%); }
+
+.commit-row__graph { position: relative; width: 54px; height: 100%; }
+.commit-row__dot {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  color: var(--dot-color, var(--color-primary));
+  box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3px var(--color-divider-strong);
+  transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
+  z-index: 3;
+}
+.commit-row:hover .commit-row__dot { transform: translate(-50%, -50%) scale(1.4); z-index: 5; }
+.commit-row__dot.is-combined { border-radius: 2px; }
+.commit-row__dot.is-head {
+  box-shadow:
+    0 0 0 2px var(--color-bg),
+    0 0 0 3px var(--color-primary),
+    0 0 6px var(--color-primary);
+}
+.commit-row__dot.is-head::after {
+  content: ''; position: absolute; left: 50%; top: -8px;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--color-primary);
+  filter: drop-shadow(0 0 2px var(--color-primary));
+}
+
+.commit-row__hash { font-size: var(--font-xs); color: var(--color-info); font-weight: 600; padding-left: 4px; }
+.commit-row__msg { font-size: var(--font-sm); color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: var(--space-3); }
+.commit-row__branch {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  justify-self: end;
+}
+.commit-row__branch.combined { color: var(--color-accent) !important; background: var(--color-accent-soft) !important; }
+.commit-row__author { display: flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--color-text-secondary); min-width: 0; }
+.commit-row__avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+.commit-row__time { font-size: var(--font-xs); color: var(--color-text-muted); text-align: right; }
+
+.mono { font-family: var(--font-mono-stack); }
+.muted { color: var(--color-text-muted); }
+.text-xs { font-size: var(--font-xs); }
 </style>
