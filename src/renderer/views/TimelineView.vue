@@ -248,20 +248,20 @@ const heatmap = computed(() => {
   }
   if (counts.size === 0) return null;
 
-  // 2. 计算 53 周（371 天）的网格起点：本周日往前推 52 周
+  // 2. 计算 35 周（≈8 个月）的网格起点：本周日往前推 34 周
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dow = today.getDay(); // 0=Sun
   const endSunday = new Date(today);
   endSunday.setDate(endSunday.getDate() + (6 - dow));
   const startSunday = new Date(endSunday);
-  startSunday.setDate(startSunday.getDate() - 52 * 7);
+  startSunday.setDate(startSunday.getDate() - 34 * 7);
 
   // 3. 生成 weeks
   const weeks: HeatWeek[] = [];
   const monthLabels: { week: number; label: string }[] = [];
   let lastMonth = -1;
-  for (let w = 0; w < 53; w++) {
+  for (let w = 0; w < 35; w++) {
     const cells: HeatCell[] = [];
     for (let d = 0; d < 7; d++) {
       const date = new Date(startSunday);
@@ -523,7 +523,7 @@ function formatRelative(iso: string): string {
           <div class="heatmap__head">
             <div class="heatmap__title">
               <span class="heatmap__count">{{ heatmap.total }}</span>
-              <span class="heatmap__count-label">次提交 · 最近一年</span>
+              <span class="heatmap__count-label">次提交 · 最近8个月</span>
             </div>
           </div>
           <div class="heatmap__body">
@@ -732,10 +732,17 @@ function formatRelative(iso: string): string {
 .heatmap__title { display: flex; align-items: baseline; gap: 6px; }
 .heatmap__count { font-size: var(--font-2xl); font-weight: 600; color: var(--color-primary); }
 .heatmap__count-label { font-size: var(--font-sm); color: var(--color-text-secondary); }
-.heatmap__body { overflow-x: auto; }
+.heatmap__body {
+  /* 居中显示 heatmap —— 默认宽度（35 周 × 14px ≈ 490px）比容器窄，
+   * 用 flex column + align-items: center 让月标 + grid 整体居中 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: auto;
+}
 .heatmap__months {
   display: grid;
-  grid-template-columns: repeat(53, 12px);
+  grid-template-columns: repeat(35, 12px);
   gap: 2px;
   margin-bottom: 4px;
   font-size: 10px;
@@ -744,7 +751,13 @@ function formatRelative(iso: string): string {
 }
 .heatmap__month { white-space: nowrap; }
 .heatmap__grid { display: flex; gap: 2px; }
-.heatmap__week { display: flex; flex-direction: column; gap: 2px; }
+.heatmap__week {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* week 列宽 = 12px 跟 months 列宽对齐；cell 10px 在内左对齐 */
+  width: 12px;
+}
 .heatmap__cell {
   width: 10px; height: 10px;
   border-radius: 2px;
