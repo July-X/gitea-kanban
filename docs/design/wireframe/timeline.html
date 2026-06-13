@@ -296,17 +296,17 @@
       overflow: hidden;
     }
     .commit-list { position: relative; overflow: auto; padding: 0; }
-    .commit-list__inner { position: relative; min-width: 856px; }
+    .commit-list__inner { position: relative; min-width: 802px; }
     .commit-list__edges {
       position: absolute; top: 0; left: 0;
-      width: 108px; height: 100%;
+      width: 54px; height: 100%;
       pointer-events: none;
     }
 
     .commit-row {
       position: relative;
       display: grid;
-      grid-template-columns: 108px 96px 1fr 140px 140px 100px;
+      grid-template-columns: 54px 96px 1fr 140px 140px 100px;
       align-items: center;
       height: var(--row-h);
       padding: 0 var(--space-3) 0 0;
@@ -316,26 +316,26 @@
     .commit-row:hover { background: var(--color-bg-hover); }
     .commit-row.is-head-row { background: linear-gradient(90deg, var(--color-primary-soft) 0%, transparent 70%); }
 
-    .commit-row__graph { position: relative; width: 108px; height: 100%; }
+    .commit-row__graph { position: relative; width: 54px; height: 100%; }
     .commit-row__dot {
       position: absolute;
       left: var(--dot-x, 8px);
       top: 50%;
       transform: translate(-50%, -50%);
-      width: 12px; height: 12px;
+      width: 10px; height: 10px;
       border-radius: 50%;
       background: var(--dot-color, var(--color-primary));
       color: var(--dot-color);
-      box-shadow: 0 0 0 3px var(--color-bg), 0 0 0 4px var(--dot-halo);
+      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3px var(--dot-halo);
       transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
     }
-    .commit-row:hover .commit-row__dot { transform: translate(-50%, -50%) scale(1.35); z-index: 5; }
+    .commit-row:hover .commit-row__dot { transform: translate(-50%, -50%) scale(1.4); z-index: 5; }
     .commit-row__dot.is-merge { border-radius: 2px; }
-    .commit-row__dot.is-head { box-shadow: 0 0 0 3px var(--color-bg), 0 0 0 4px var(--dot-halo), 0 0 8px var(--dot-color); }
+    .commit-row__dot.is-head { box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3px var(--dot-halo), 0 0 6px var(--dot-color); }
     .commit-row__dot.is-head::after {
-      content: ''; position: absolute; left: 50%; top: -9px;
+      content: ''; position: absolute; left: 50%; top: -8px;
       transform: translateX(-50%);
-      border: 5px solid transparent;
+      border: 4px solid transparent;
       border-top-color: var(--dot-color);
       filter: drop-shadow(0 0 2px var(--dot-color));
     }
@@ -625,7 +625,7 @@
           <div class="commit-graph">
             <div class="commit-list">
               <div class="commit-list__inner">
-                <svg class="commit-list__edges" id="commitEdges" width="108" preserveAspectRatio="none"></svg>
+                <svg class="commit-list__edges" id="commitEdges" width="54" preserveAspectRatio="none"></svg>
                 <div id="commitRows"></div>
               </div>
             </div>
@@ -799,72 +799,78 @@
       // 8 条 lane：main / feature / hotfix / exp / chore / refactor / docs / spike
       // x 位置：8 / 24 / 40 / 56 / 72 / 88 / 104 / 120
       const commits = [
-        { sha: 'a1b2c3d', msg: 'refactor(时间轴): 重构热力图 + 分支提交图组件', branch: 'main', branchColor: 'main', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '2 小时前', isHead: true, isMerge: false, dotX: 8 },
-        { sha: 'b2c3d4e', msg: 'fix(时间轴): 修复日历点击 bug', branch: 'main', branchColor: 'main', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '5 小时前', isMerge: false, dotX: 8 },
-        { sha: 'c3d4e5f', msg: 'docs: 更新 AGENTS.md 主题规范', branch: 'main', branchColor: 'main', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '1 天前', isMerge: false, dotX: 8 },
-        { sha: 'd4e5f6g', msg: 'chore: 升级 better-sqlite3 到 12.x', branch: 'main', branchColor: 'main', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '2 天前', isMerge: false, dotX: 8 },
-        { sha: 'e5f6g7h', msg: 'refactor: 拆分认证模块', branch: 'main', branchColor: 'main', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '3 天前', isMerge: false, dotX: 8 },
-        { sha: 'f6g7h8i', msg: 'feat(login): 加第三方登录入口', branch: 'feature/login', branchColor: 'feature', author: '李四', avatar: 'LS', avatarBg: '#db2828', time: '4 天前', isMerge: false, dotX: 21 },
-        { sha: 'g7h8i9j', msg: 'test(login): 补登录单元测试', branch: 'feature/login', branchColor: 'feature', author: '李四', avatar: 'LS', avatarBg: '#db2828', time: '5 天前', isMerge: false, dotX: 21 },
-        { sha: 'h8i9j0k', msg: 'feat(login): 加登录表单组件', branch: 'feature/login', branchColor: 'feature', author: '李四', avatar: 'LS', avatarBg: '#db2828', time: '6 天前', isMerge: false, dotX: 21 },
-        { sha: 'i9j0k1l', msg: '合并 feature/login (#11)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '4 天前', isMerge: true, mergeFrom: 'feature/login', dotX: 8 },
-        { sha: 'j0k1l2m', msg: 'fix(safari): 修复 Safari 18 渲染问题', branch: 'hotfix/safari', branchColor: 'hotfix', author: '王五', avatar: 'WW', avatarBg: '#4fc4d6', time: '8 天前', isMerge: false, dotX: 34 },
-        { sha: 'k1l2m3n', msg: 'fix(safari): 修复 Safari 表单兼容', branch: 'hotfix/safari', branchColor: 'hotfix', author: '王五', avatar: 'WW', avatarBg: '#4fc4d6', time: '9 天前', isMerge: false, dotX: 34 },
-        { sha: 'l2m3n4o', msg: '合并 hotfix/safari (#12)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '7 天前', isMerge: true, mergeFrom: 'hotfix/safari', dotX: 8 },
-        { sha: 'm3n4o5p', msg: 'feat(exp): 实验新设计令牌', branch: 'user/alice/exp', branchColor: 'experiment', author: 'alice', avatar: 'AL', avatarBg: '#B294E2', time: '10 天前', isMerge: false, dotX: 47 },
-        { sha: 'n4o5p6q', msg: 'docs(exp): 补实验说明', branch: 'user/alice/exp', branchColor: 'experiment', author: 'alice', avatar: 'AL', avatarBg: '#B294E2', time: '11 天前', isMerge: false, dotX: 47 },
-        { sha: 'o5p6q7r', msg: 'chore(deps): 升级 typescript 到 5.4', branch: 'chore/deps', branchColor: 'chore', author: 'alice', avatar: 'AL', avatarBg: '#B294E2', time: '12 天前', isMerge: false, dotX: 60 },
-        { sha: 'p6q7r8s', msg: '合并 chore/deps (#15)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '12 天前', isMerge: true, mergeFrom: 'chore/deps', dotX: 8 },
-        { sha: 'q7r8s9t', msg: 'refactor(theme): 抽象令牌层', branch: 'refactor/theme', branchColor: 'refactor', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '15 天前', isMerge: false, dotX: 73 },
-        { sha: 'y8x7w6v', msg: '合并 refactor/theme (#17)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '15 天前', isMerge: true, mergeFrom: 'refactor/theme', dotX: 8 },
-        { sha: 'z9y8x7w', msg: 'docs(api): 补充端点文档', branch: 'docs/api', branchColor: 'docs', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '18 天前', isMerge: false, dotX: 86 },
-        { sha: 'ab1c2d3', msg: 'docs(api): 认证流程图', branch: 'docs/api', branchColor: 'docs', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '23 天前', isMerge: false, dotX: 86 },
-        { sha: 'cd2e3f4', msg: 'spike(perf): 测量渲染耗时', branch: 'spike/perf', branchColor: 'spike', author: '王五', avatar: 'WW', avatarBg: '#4fc4d6', time: '28 天前', isMerge: false, dotX: 99 },
-        { sha: 'r8s9t0u', msg: 'Initial commit', branch: 'main', branchColor: 'main', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '45 天前', isMerge: false, dotX: 8 },
+        { sha: 'a1b2c3d', msg: 'refactor(时间轴): 重构热力图 + 分支提交图组件', branch: 'main', branchColor: 'main', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '2 小时前', isHead: true, isMerge: false, dotX: 5 },
+        { sha: 'b2c3d4e', msg: 'fix(时间轴): 修复日历点击 bug', branch: 'main', branchColor: 'main', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '5 小时前', isMerge: false, dotX: 5 },
+        { sha: 'c3d4e5f', msg: 'docs: 更新 AGENTS.md 主题规范', branch: 'main', branchColor: 'main', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '1 天前', isMerge: false, dotX: 5 },
+        { sha: 'd4e5f6g', msg: 'chore: 升级 better-sqlite3 到 12.x', branch: 'main', branchColor: 'main', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '2 天前', isMerge: false, dotX: 5 },
+        { sha: 'e5f6g7h', msg: 'refactor: 拆分认证模块', branch: 'main', branchColor: 'main', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '3 天前', isMerge: false, dotX: 5 },
+        { sha: 'f6g7h8i', msg: 'feat(login): 加第三方登录入口', branch: 'feature/login', branchColor: 'feature', author: '李四', avatar: 'LS', avatarBg: '#db2828', time: '4 天前', isMerge: false, dotX: 11 },
+        { sha: 'g7h8i9j', msg: 'test(login): 补登录单元测试', branch: 'feature/login', branchColor: 'feature', author: '李四', avatar: 'LS', avatarBg: '#db2828', time: '5 天前', isMerge: false, dotX: 11 },
+        { sha: 'h8i9j0k', msg: 'feat(login): 加登录表单组件', branch: 'feature/login', branchColor: 'feature', author: '李四', avatar: 'LS', avatarBg: '#db2828', time: '6 天前', isMerge: false, dotX: 11 },
+        { sha: 'i9j0k1l', msg: '合并 feature/login (#11)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '4 天前', isMerge: true, mergeFrom: 'feature/login', dotX: 5 },
+        { sha: 'j0k1l2m', msg: 'fix(safari): 修复 Safari 18 渲染问题', branch: 'hotfix/safari', branchColor: 'hotfix', author: '王五', avatar: 'WW', avatarBg: '#4fc4d6', time: '8 天前', isMerge: false, dotX: 17 },
+        { sha: 'k1l2m3n', msg: 'fix(safari): 修复 Safari 表单兼容', branch: 'hotfix/safari', branchColor: 'hotfix', author: '王五', avatar: 'WW', avatarBg: '#4fc4d6', time: '9 天前', isMerge: false, dotX: 17 },
+        { sha: 'l2m3n4o', msg: '合并 hotfix/safari (#12)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '7 天前', isMerge: true, mergeFrom: 'hotfix/safari', dotX: 5 },
+        { sha: 'm3n4o5p', msg: 'feat(exp): 实验新设计令牌', branch: 'user/alice/exp', branchColor: 'experiment', author: 'alice', avatar: 'AL', avatarBg: '#B294E2', time: '10 天前', isMerge: false, dotX: 23 },
+        { sha: 'n4o5p6q', msg: 'docs(exp): 补实验说明', branch: 'user/alice/exp', branchColor: 'experiment', author: 'alice', avatar: 'AL', avatarBg: '#B294E2', time: '11 天前', isMerge: false, dotX: 23 },
+        { sha: 'o5p6q7r', msg: 'chore(deps): 升级 typescript 到 5.4', branch: 'chore/deps', branchColor: 'chore', author: 'alice', avatar: 'AL', avatarBg: '#B294E2', time: '12 天前', isMerge: false, dotX: 29 },
+        { sha: 'p6q7r8s', msg: '合并 chore/deps (#15)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '12 天前', isMerge: true, mergeFrom: 'chore/deps', dotX: 5 },
+        { sha: 'q7r8s9t', msg: 'refactor(theme): 抽象令牌层', branch: 'refactor/theme', branchColor: 'refactor', author: '陈杨', avatar: 'CY', avatarBg: '#0969da', time: '15 天前', isMerge: false, dotX: 35 },
+        { sha: 'y8x7w6v', msg: '合并 refactor/theme (#17)', branch: 'main', branchColor: 'main', author: 'kanban_bot', avatar: 'KB', avatarBg: '#94a3b8', time: '15 天前', isMerge: true, mergeFrom: 'refactor/theme', dotX: 5 },
+        { sha: 'z9y8x7w', msg: 'docs(api): 补充端点文档', branch: 'docs/api', branchColor: 'docs', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '18 天前', isMerge: false, dotX: 41 },
+        { sha: 'ab1c2d3', msg: 'docs(api): 认证流程图', branch: 'docs/api', branchColor: 'docs', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '23 天前', isMerge: false, dotX: 41 },
+        { sha: 'cd2e3f4', msg: 'spike(perf): 测量渲染耗时', branch: 'spike/perf', branchColor: 'spike', author: '王五', avatar: 'WW', avatarBg: '#4fc4d6', time: '28 天前', isMerge: false, dotX: 47 },
+        { sha: 'r8s9t0u', msg: 'Initial commit', branch: 'main', branchColor: 'main', author: '张三', avatar: 'ZS', avatarBg: '#609926', time: '45 天前', isMerge: false, dotX: 5 },
       ];
       const y = i => i * ROW_H + 18;
 
-      // 分支曲线 SVG paths — 8 lane × 22 行
-      // main:          x=8,   整条贯穿
-      // feature/login: x=24,  row 4 → 5,7 → 8(合并)
-      // hotfix/safari: x=40,  row 8 → 9,10 → 11(合并)
-      // user/alice/exp:x=56,  row 11 → 12,13 → 21(虚线, 未合并)
-      // chore/deps:    x=72,  row 13 → 14 → 15(合并)
-      // refactor/theme:x=88,  row 15 → 16 → 17(合并)
-      // docs/api:      x=104, row 17 → 18,19 → 21(虚线, 未合并)
-      // spike/perf:    x=120, row 19 → 20 → 21(虚线, 未合并)
+      // 分支曲线 SVG paths — 8 lane × 22 行（lane 间距 6px，超紧凑布局）
+      // main:          x=5,   整条贯穿
+      // feature/login: x=11,  row 4 → 5,7 → 8(合并)
+      // hotfix/safari: x=17,  row 8 → 9,10 → 11(合并)
+      // user/alice/exp:x=23,  row 11 → 12,13 → 21(虚线, 未合并)
+      // chore/deps:    x=29,  row 13 → 14 → 15(合并)
+      // refactor/theme:x=35,  row 15 → 16 → 17(合并)
+      // docs/api:      x=41,  row 17 → 18,19 → 21(虚线, 未合并)
+      // spike/perf:    x=47,  row 19 → 20 → 21(虚线, 未合并)
       const paths = [
         // 1) main 顶段：row 0 → 4
-        { d: `M 8 ${y(0)} L 8 ${y(4)}`, color: 'main', key: 'main1' },
+        { d: `M 5 ${y(0)} L 5 ${y(4)}`, color: 'main', key: 'main1' },
 
         // 2) feature 分支与回归
-        { d: `M 8 ${y(4)} C 8 ${y(4)+18}, 24 ${y(4)+18}, 24 ${y(5)} L 24 ${y(7)} C 24 ${y(7)+18}, 8 ${y(7)+18}, 8 ${y(8)}`, color: 'feature', key: 'feature' },
+        { d: `M 5 ${y(4)} C 5 ${y(4)+8}, 11 ${y(4)+8}, 11 ${y(5)} L 11 ${y(7)} C 11 ${y(7)+8}, 5 ${y(7)+8}, 5 ${y(8)}`, color: 'feature', key: 'feature' },
 
         // 3) hotfix 分支与回归
-        { d: `M 8 ${y(8)} C 8 ${y(8)+18}, 40 ${y(8)+18}, 40 ${y(9)} L 40 ${y(10)} C 40 ${y(10)+18}, 8 ${y(10)+18}, 8 ${y(11)}`, color: 'hotfix', key: 'hotfix' },
+        { d: `M 5 ${y(8)} C 5 ${y(8)+8}, 17 ${y(8)+8}, 17 ${y(9)} L 17 ${y(10)} C 17 ${y(10)+8}, 5 ${y(10)+8}, 5 ${y(11)}`, color: 'hotfix', key: 'hotfix' },
 
         // 4) exp 分支
-        { d: `M 8 ${y(11)} C 8 ${y(11)+18}, 56 ${y(11)+18}, 56 ${y(12)} L 56 ${y(13)}`, color: 'experiment', key: 'experiment' },
+        { d: `M 5 ${y(11)} C 5 ${y(11)+8}, 23 ${y(11)+8}, 23 ${y(12)} L 23 ${y(13)}`, color: 'experiment', key: 'experiment' },
 
-        // 5) chore/deps 分支与回归
-        { d: `M 8 ${y(13)} C 8 ${y(13)+18}, 72 ${y(13)+18}, 72 ${y(14)} C 72 ${y(14)+18}, 8 ${y(14)+18}, 8 ${y(15)}`, color: 'chore', key: 'chore' },
+        // 5) main 底段：row 11 → 21（最底层 z-order）
+        { d: `M 5 ${y(11)} L 5 ${y(commits.length - 1)}`, color: 'main', key: 'main2' },
 
-        // 6) refactor/theme 分支与回归
-        { d: `M 8 ${y(15)} C 8 ${y(15)+18}, 88 ${y(15)+18}, 88 ${y(16)} C 88 ${y(16)+18}, 8 ${y(16)+18}, 8 ${y(17)}`, color: 'refactor', key: 'refactor' },
+        // 6) exp 虚线延展（在它上面会被分支曲线交叉）
+        { d: `M 23 ${y(13)} L 23 ${y(commits.length - 1)}`, color: 'experiment', key: 'experiment-ext', dashed: true },
 
-        // 7) docs/api 分支
-        { d: `M 8 ${y(17)} C 8 ${y(17)+18}, 104 ${y(17)+18}, 104 ${y(18)} L 104 ${y(19)}`, color: 'docs', key: 'docs' },
+        // 7) Bridges：在 exp 虚线被 chore/refactor/docs/spike 交叉的 y 处画背景色小段
+        //    让分支曲线视觉上"跨过"虚线（GitLab 风格）
+        //    exp 虚线在 x=23；各分支曲线在 x≈23 处穿过此垂直线
+        { isBridge: true, x: 23, y: y(13) + 10 },  // chore 出
+        { isBridge: true, x: 23, y: y(14) + 10 },  // chore 回归
+        { isBridge: true, x: 23, y: y(15) + 10 },  // refactor 出
+        { isBridge: true, x: 23, y: y(16) + 10 },  // refactor 回归
+        { isBridge: true, x: 23, y: y(17) + 10 },  // docs 出
+        { isBridge: true, x: 23, y: y(19) + 10 },  // spike 出
 
-        // 8) spike/perf 分支
-        { d: `M 8 ${y(19)} C 8 ${y(19)+18}, 120 ${y(19)+18}, 120 ${y(20)}`, color: 'spike', key: 'spike' },
+        // 8) chore/refactor/docs/spike 曲线（在 bridges 之上，视觉"跨过"）
+        { d: `M 5 ${y(13)} C 5 ${y(13)+8}, 29 ${y(13)+8}, 29 ${y(14)} C 29 ${y(14)+8}, 5 ${y(14)+8}, 5 ${y(15)}`, color: 'chore', key: 'chore' },
+        { d: `M 5 ${y(15)} C 5 ${y(15)+8}, 35 ${y(15)+8}, 35 ${y(16)} C 35 ${y(16)+8}, 5 ${y(16)+8}, 5 ${y(17)}`, color: 'refactor', key: 'refactor' },
+        { d: `M 5 ${y(17)} C 5 ${y(17)+8}, 41 ${y(17)+8}, 41 ${y(18)} L 41 ${y(19)}`, color: 'docs', key: 'docs' },
+        { d: `M 5 ${y(19)} C 5 ${y(19)+8}, 47 ${y(19)+8}, 47 ${y(20)}`, color: 'spike', key: 'spike' },
 
-        // 9) main 底段：row 11 → 21
-        { d: `M 8 ${y(11)} L 8 ${y(commits.length - 1)}`, color: 'main', key: 'main2' },
-
-        // 10) 未合并分支虚线延展
-        { d: `M 56 ${y(13)} L 56 ${y(commits.length - 1)}`, color: 'experiment', key: 'experiment-ext', dashed: true },
-        { d: `M 104 ${y(19)} L 104 ${y(commits.length - 1)}`, color: 'docs', key: 'docs-ext', dashed: true },
-        { d: `M 120 ${y(20)} L 120 ${y(commits.length - 1)}`, color: 'spike', key: 'spike-ext', dashed: true },
+        // 9) docs/spike 虚线延展（最上面）
+        { d: `M 41 ${y(19)} L 41 ${y(commits.length - 1)}`, color: 'docs', key: 'docs-ext', dashed: true },
+        { d: `M 47 ${y(20)} L 47 ${y(commits.length - 1)}`, color: 'spike', key: 'spike-ext', dashed: true },
       ];
 
       const svgNS = 'http://www.w3.org/2000/svg';
@@ -882,14 +888,24 @@
       };
       paths.forEach(p => {
         const path = document.createElementNS(svgNS, 'path');
-        path.setAttribute('d', p.d);
-        path.setAttribute('stroke', strokeColor[p.color]);
-        path.setAttribute('stroke-width', '2');
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke-linecap', 'round');
-        if (p.dashed) {
-          path.setAttribute('stroke-dasharray', '4 3');
-          path.setAttribute('opacity', '0.55');
+        if (p.isBridge) {
+          // 桥：在交叉 y 处用背景色画一段覆盖 exp 虚线的水平短杠
+          // 8px 宽 / 2.5px stroke（按比例缩小）
+          path.setAttribute('d', `M ${p.x - 4} ${p.y} L ${p.x + 4} ${p.y}`);
+          path.setAttribute('stroke', 'var(--color-bg)');
+          path.setAttribute('stroke-width', '2.5');
+          path.setAttribute('stroke-linecap', 'round');
+          path.setAttribute('fill', 'none');
+        } else {
+          path.setAttribute('d', p.d);
+          path.setAttribute('stroke', strokeColor[p.color]);
+          path.setAttribute('stroke-width', '1.5');
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke-linecap', 'round');
+          if (p.dashed) {
+            path.setAttribute('stroke-dasharray', '4 3');
+            path.setAttribute('opacity', '0.55');
+          }
         }
         svg.appendChild(path);
       });
