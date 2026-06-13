@@ -407,7 +407,12 @@ export function commitsTimeline(args: {
  * 3) 沙箱合规：renderer 不直接调系统 API
  */
 export function clipboardWrite(text: string): Promise<unknown> {
- return getIpcClient().invoke('preferences', 'clipboard.write', { text });
+ // 调用 window.api.preferences.clipboard.write({text}) —— 三段式 path，
+ // 必须用 invokeNested('preferences', 'clipboard', 'write', ...)；
+ // 之前误用 invoke('preferences', 'clipboard.write', ...) 会把 'clipboard.write'
+ // 当成 method 名查 ns['clipboard.write'] → undefined → 抛 IpcError → catch 兜底
+ // "复制失败，请手动选择" toast（这是 commit 588da2b 引入时的 bug）
+ return getIpcClient().invokeNested('preferences', 'clipboard', 'write', { text });
 }
 
 // ============================================================

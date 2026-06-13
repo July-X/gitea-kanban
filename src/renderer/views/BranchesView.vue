@@ -1506,6 +1506,28 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  /* v1.1.3 polish（task #41 二修）：显眼滚动条
+   * - macOS dark 模式下默认滚动条透明，用户看不到外层 list 滚到哪
+   * - 显式 width:10px + token 颜色 + 圆角
+   */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-muted) transparent;
+}
+/* 显眼 webkit 滚动条 */
+.branches__commits-list::-webkit-scrollbar {
+  width: 10px;
+}
+.branches__commits-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.branches__commits-list::-webkit-scrollbar-thumb {
+  background: var(--color-text-muted);
+  border-radius: 5px;
+  opacity: 0.4;
+}
+.branches__commits-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+  opacity: 0.8;
 }
 
 .branch-commit-row {
@@ -1729,14 +1751,17 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
 }
 
 /* ============== v1.1.3 · task #23 · 单条 commit 文件清单 ============== */
-/* v1.1.3 polish（task #41）· 高度自适应
- * - 历史：line 1757-1761 写过 max-height: 50cqh + overflow-y: auto（防 50+ 文件撑死 li）
- * - 当前：用户反馈"li 标签元素展示不全"——50cqh 截断 + 暗色透明滚动条不可见，
- *   用户看不到 li 底部，误以为内容丢失
- * - 决策：去 max-height，让 li 自然撑到内容实际高度；m4java-test 实测最大 fileCount=7，
- *   单 li 高度可控；如果未来遇到 50+ 文件 commit 再退回滚动方案
- * - 仍保留 overscroll-behavior:contain + scrollbar-gutter:stable（保险）
- * - scrollbar 颜色用 --color-text-muted 暗色主题下也能看清
+/* v1.1.3 polish（task #41）· 独立滚动 + 显眼滚动条
+ * - 历史：
+ *   - v1.1.3 #41 第一次落地时去掉 max-height 改自适应，结果用户反馈"li 标签元素展示不全"
+ *     —— 实际是父 .branches__commits-list (overflow-y:auto) 截断 li，
+ *     macOS dark mode 默认滚动条透明，用户看不到 li 被截的部分
+ *   - 当前恢复 max-height，但容器 cqh 参考系 = .branches__detail 高度（line 1307
+ *     container-type:size），50cqh ≈ ~350px = 13+ 文件，足够覆盖典型 commit
+ *   - 显眼 scrollbar：显式 width:8px + 圆角 + token 颜色（暗色主题也能看清）
+ *   - files-list **自己**独立滚动（不靠 commits-list 替代）—— 这样 detail-body
+ *     自然撑高让 hand 风琴展开看起来一致，files-list 不会跟 commits-list 一起滚
+ *   - 文件数 ≤ 4 时 li 总高 < 50cqh，无滚动条出现；>4 时出现滚动条
  */
 .branch-commit-row__files {
   margin-top: 6px;
@@ -1776,12 +1801,38 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* v1.1.3 polish：去 max-height 让 li 自适应内容高度；overscroll-behavior + scrollbar-gutter
-     保留以备未来长 commit 退化；scrollbar 颜色 token 让暗色主题下也能看清 */
+  /* v1.1.3 polish（task #41 二修）：恢复 max-height + 显眼 webkit 滚动条
+   * - 第一次（commit 0789da7）去 max-height 让 li 自适应，结果 commits-list
+   *   overflow 截断 + macOS 暗色透明滚动条让用户看不到 li 底部
+   * - 这里 cqh 参考系是 .branches__detail（line 1307 container-type:size），
+   *   50cqh ≈ ~350px = 13+ 文件
+   * - scrollbar-width: thin + color token + ::-webkit-scrollbar 显式 8px 圆角，
+   *   暗色主题也能看清
+   * - overscroll-behavior:contain 防滚到底带动外层 commits-list
+   */
+  max-height: 50vh;
+  max-height: 50cqh;
+  overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--color-text-muted) transparent;
+}
+/* 显眼 webkit 滚动条（macOS Chrome / Electron 默认透明看不看见） */
+.branch-commit-row__files-list::-webkit-scrollbar {
+  width: 8px;
+}
+.branch-commit-row__files-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.branch-commit-row__files-list::-webkit-scrollbar-thumb {
+  background: var(--color-text-muted);
+  border-radius: 4px;
+  opacity: 0.4;
+}
+.branch-commit-row__files-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+  opacity: 0.8;
 }
 .branch-commit-row__file {
   display: flex;
