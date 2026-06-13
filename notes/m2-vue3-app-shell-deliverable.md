@@ -1,5 +1,8 @@
 # Notes — M2 Vue3 App Shell 交付详情
 
+> **⚠️ 本文件描述的 v1 单主题暗色（苍蓝 `#134857` 4 层底）已被 v1.1.2 推翻为 3 主题切换，又被 v1.2（2026-06-13）推翻收敛为 2 主题切换（dark 默认 / light）。**
+> 当前 dark 画布 = C 暗中性近黑 `#0F1115`（非原 v1 苍蓝），主色 token 提亮到 `#74B830` 过 WCAG AA 4.5:1。详见 `design-system/gitea-kanban/OVERRIDE.md` v1.2 段落。本文件留作 history。
+
 > Plan: `plan_373b3dd8` (M2 前端集成)
 > Task: `vue3-app-shell`
 > Worker: coder (session `mvs_7fcfc41534664d93a87c7b0a6c31d651`)

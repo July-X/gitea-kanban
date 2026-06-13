@@ -1,5 +1,8 @@
 # theme-check 收口验证（owner-takeover · plan_96625ed5 · 2026-06-12）
 
+> **⚠️ 本文件描述的 v1.1.2 3 主题（A 暗 / C 暗 / Light）已被 v1.2 推翻（2026-06-13）。**
+> 当前生效为 **2 主题（dark 默认 / light）**，A 暗与 C 暗视觉差异仅在冷暖、对非技术用户产生认知负担而被合并。详见 `design-system/gitea-kanban/OVERRIDE.md` v1.2 段落 + `design-system/pages/tech-refine.md` §14/§17。本文件留作 history。
+
 > **背景**：theme-check 是 final-integration verify-as-task（depends_on 8 个 producer 全 PASS）。
 > attempt 1 + attempt 2 都撞 15min runtime timeout, **last_deliverable_bytes=0**。
 > 同 plan_c468f469 §8.14 Case 4 模式——verify-as-task scope 9 大块装不进 15min 单 session。

@@ -214,6 +214,13 @@
   --color-text-dim: #5A6B7A;    /* 4.50:1 ✅ 边缘 · dim 文字谨慎用 */
   --color-text-inverse: #FFFFFF; /* 白底按钮配白字 */
 
+  /* === label 文字兜底（v1.2 a11y 修复 · task #7） ===
+     gitea label 调色板含大量亮色（#00b8d9 / #9b59b6 / #f76707 / #e91e63 等），
+     亮色主题下默认白字在亮 label 上糊。BoardView .card__label 走
+     color-contrast() 主路径；不支持的 Chromium 走 --label-fg 兜底。
+     dark 主题不设 --label-fg → 走 --color-text-inverse 白字（暗 label OK）。 */
+  --label-fg: #0F1A24;
+
   /* === 主色（压暗到 #466B16 过 AA 4.5:1；hover 提亮到原色 #609926） === */
   --color-primary: #466B16;       /* vs #E8F1F5 5.55:1 ✅ */
   --color-primary-hover: #609926; /* hover 回到品牌色 #609926 */

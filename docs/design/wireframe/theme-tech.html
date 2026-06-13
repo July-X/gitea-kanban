@@ -17,87 +17,38 @@
   /* === 3 主题 token 系统（v1.1 重构） === */
   /* 通用 token（3 主题共用名字，值由主题块覆盖） */
 
-  /* 主色 / 强调色：3 主题都不同（亮色版要深一档过 AA） */
+  /* 主色 / 强调色：2 主题都不同（v1.2 提亮 / 压暗到过 WCAG AA 4.5:1） */
   :root,
-  [data-theme="A-dark"],
-  [data-theme="C-dark"] {
-    /* gitea 生态主色（暗色版） */
-    --color-primary:        #609926;
-    --color-primary-bright: #7cb342;
-    --color-primary-dim:    #4a7520;
-    --color-warning:        #f76707;
-    --color-warning-bright: #ff8c2a;
-    --color-error:    #E14646;        /* v1.1 提亮，A 暗 in #0E3A52 过 3:1 */
+  [data-theme="dark"] {
+    /* gitea 生态主色（dark 版 · v1.2 提亮到 #74B830 过 AA 4.74:1） */
+    --color-primary:        #74B830;
+    --color-primary-bright: #8AC544;
+    --color-primary-dim:    #5C9622;
+    --color-warning:        #FF8534;  /* v1.2 提亮版 */
+    --color-warning-bright: #FFA361;
+    --color-error:    #E14646;
     --color-error-bright: #f56666;
     --color-info:     #4fc4d6;
     --color-pending:  #94a3b8;
     --color-offline:  #64748b;
   }
   [data-theme="light"] {
-    /* 亮色版主色：深一档过白底 4.5:1 */
-    --color-primary:        #4F7A1A;  /* vs #FFFFFF 4.50:1 */
-    --color-primary-bright: #609926;  /* 提亮版 hover 用 */
-    --color-primary-dim:    #3D6014;
-    --color-warning:        #D85804;  /* vs #FFFFFF 3.95:1 */
+    /* 亮色版主色：v1.2 压暗到 #466B16 过 AA 5.55:1（v1.1.2 的 #4F7A1A 仅 4.16:1 不及格） */
+    --color-primary:        #466B16;  /* vs #E8F1F5 5.55:1 ✅ */
+    --color-primary-bright: #609926;  /* hover 回到品牌色 */
+    --color-primary-dim:    #3D5512;
+    --color-warning:        #D85804;  /* vs #E8F1F5 3.79:1 ⚠️ large only */
     --color-warning-bright: #f76707;
-    --color-error:    #C42020;        /* vs #FFFFFF 5.87:1 */
+    --color-error:    #C42020;        /* vs #E8F1F5 5.20:1 ✅ */
     --color-error-bright: #db2828;
-    --color-info:     #157A91;        /* vs #FFFFFF 3.79:1 */
-    --color-pending:  #5A6B7A;        /* vs #FFFFFF 5.50:1 */
-    --color-offline:  #4A5862;
+    --color-info:     #157A91;        /* vs #E8F1F5 4.62:1 ✅ */
+    --color-pending:  #5A6B7A;        /* vs #E8F1F5 4.50:1 ✅ 边缘 */
+    --color-offline:  #475461;
   }
 
-  /* === 主题 1：A 暗（苍蓝提饱和）—— 默认 === */
+  /* === 主题 1：dark（中性近黑 · 原 C 暗基底）—— 默认（v1.2 收敛） === */
   :root,
-  [data-theme="A-dark"] {
-    --color-canvas:    #0E3A52;  /* H201° S71% L19% */
-    --color-elevated:  #135070;
-    --color-hover:     #18658F;
-    --color-active:    #1E7BAD;
-    --color-column:    #135070;
-    --color-lane:      #135070;
-
-    --color-text:        #C5D4DD;
-    --color-text-muted:  #9AAAB6;  /* 提亮过 4.5:1 */
-    --color-text-dim:    #5A6975;
-
-    --color-border-faint:  rgba(220, 233, 240, 0.06);
-    --color-border-soft:   rgba(220, 233, 240, 0.10);
-    --color-border-strong: rgba(220, 233, 240, 0.16);
-    --color-border-primary: rgba(96, 153, 38, 0.30);
-
-    /* 阴影起点色：苍蓝深底 */
-    --shadow-rgb: 10, 42, 50;
-    --grid-color: rgba(220, 233, 240, 0.04);
-
-    /* 阴影三件套（暗色：深底 + inset 描边 + 主色外环） */
-    --shadow-tech-sm: 0 1px 2px rgba(var(--shadow-rgb), 0.4), inset 0 0 0 1px rgba(220, 233, 240, 0.04);
-    --shadow-tech-md: 0 4px 12px rgba(var(--shadow-rgb), 0.5), inset 0 0 0 1px rgba(220, 233, 240, 0.06);
-    --shadow-tech-lg: 0 12px 32px rgba(var(--shadow-rgb), 0.6), 0 0 16px rgba(96, 153, 38, 0.12), inset 0 0 0 1px rgba(220, 233, 240, 0.08);
-
-    /* 主色 glow（暗色启用） */
-    --glow-primary:    0 0 0 1px rgba(96, 153, 38, 0.5), 0 0 12px rgba(96, 153, 38, 0.3);
-    --glow-primary-sm: 0 0 0 1px rgba(96, 153, 38, 0.3), 0 0 6px  rgba(96, 153, 38, 0.2);
-    --glow-primary-lg: 0 0 0 1px rgba(96, 153, 38, 0.7), 0 0 24px rgba(96, 153, 38, 0.4);
-    --glow-warning:    0 0 0 1px rgba(247, 103, 7, 0.5),  0 0 12px rgba(247, 103, 7, 0.3);
-    --glow-error:      0 0 0 1px rgba(225, 70, 70, 0.5),   0 0 12px rgba(225, 70, 70, 0.3);
-    --glow-info:       0 0 0 1px rgba(79, 196, 214, 0.5), 0 0 12px rgba(79, 196, 214, 0.3);
-
-    --decor-corner-color: rgba(96, 153, 38, 0.3);
-
-    /* KPI 大字发光 / 信号点 halo / 装饰点阵（v1.1.2 主题化：3 主题分别给值） */
-    --kpi-glow: 0 0 8px rgba(96, 153, 38, 0.4);
-    --signal-halo: 0 0 4px rgba(96, 153, 38, 0.6);
-    --breath-glow: rgba(96, 153, 38, 0.4);
-    --breath-glow-bright: rgba(96, 153, 38, 0.8);
-    --dot-color: rgba(96, 153, 38, 0.4);
-
-    /* 主题 flag（用来条件渲染：关掉/启用某些装饰） */
-    --is-light: 0;
-  }
-
-  /* === 主题 2：C 暗（中性近黑） === */
-  [data-theme="C-dark"] {
+  [data-theme="dark"] {
     --color-canvas:    #0F1115;  /* H220° S17% L7% */
     --color-elevated:  #1E222A;
     --color-hover:     #2D333F;
@@ -106,40 +57,45 @@
     --color-lane:      #1E222A;
 
     --color-text:        #C5D4DD;
-    --color-text-muted:  #9AAAB6;
-    --color-text-dim:    #5A6975;
+    --color-text-muted:  #9AAAB6;  /* 5.29:1 ✅ */
+    --color-text-dim:    #74818E;  /* 3.93:1 ⚠️ large only / 装饰 */
 
     --color-border-faint:  rgba(220, 233, 240, 0.06);
     --color-border-soft:   rgba(220, 233, 240, 0.10);
     --color-border-strong: rgba(220, 233, 240, 0.16);
-    --color-border-primary: rgba(96, 153, 38, 0.30);
+    --color-border-primary: rgba(116, 184, 48, 0.30);  /* v1.2 跟随主色提亮 */
 
-    --shadow-rgb: 0, 0, 0;  /* 中性黑 */
+    /* 阴影起点色：中性黑（v1.2 改 · 苍蓝提饱和被砍） */
+    --shadow-rgb: 0, 0, 0;
     --grid-color: rgba(220, 233, 240, 0.04);
 
+    /* 阴影三件套（暗色：深底 + inset 描边 + 主色外环） */
     --shadow-tech-sm: 0 1px 2px rgba(var(--shadow-rgb), 0.5), inset 0 0 0 1px rgba(220, 233, 240, 0.04);
     --shadow-tech-md: 0 4px 12px rgba(var(--shadow-rgb), 0.6), inset 0 0 0 1px rgba(220, 233, 240, 0.06);
-    --shadow-tech-lg: 0 12px 32px rgba(var(--shadow-rgb), 0.7), 0 0 16px rgba(96, 153, 38, 0.10), inset 0 0 0 1px rgba(220, 233, 240, 0.08);
+    --shadow-tech-lg: 0 12px 32px rgba(var(--shadow-rgb), 0.7), 0 0 16px rgba(116, 184, 48, 0.10), inset 0 0 0 1px rgba(220, 233, 240, 0.08);
 
-    --glow-primary:    0 0 0 1px rgba(96, 153, 38, 0.5), 0 0 12px rgba(96, 153, 38, 0.3);
-    --glow-primary-sm: 0 0 0 1px rgba(96, 153, 38, 0.3), 0 0 6px  rgba(96, 153, 38, 0.2);
-    --glow-primary-lg: 0 0 0 1px rgba(96, 153, 38, 0.7), 0 0 24px rgba(96, 153, 38, 0.4);
-    --glow-warning:    0 0 0 1px rgba(247, 103, 7, 0.5),  0 0 12px rgba(247, 103, 7, 0.3);
-    --glow-error:      0 0 0 1px rgba(219, 40, 40, 0.5),  0 0 12px rgba(219, 40, 40, 0.3);
+    /* 主色 glow（暗色启用 · v1.2 跟随主色提亮到 #74B830） */
+    --glow-primary:    0 0 0 1px rgba(116, 184, 48, 0.5), 0 0 12px rgba(116, 184, 48, 0.3);
+    --glow-primary-sm: 0 0 0 1px rgba(116, 184, 48, 0.3), 0 0 6px  rgba(116, 184, 48, 0.2);
+    --glow-primary-lg: 0 0 0 1px rgba(116, 184, 48, 0.7), 0 0 24px rgba(116, 184, 48, 0.4);
+    --glow-warning:    0 0 0 1px rgba(255, 133, 52, 0.5),  0 0 12px rgba(255, 133, 52, 0.3);
+    --glow-error:      0 0 0 1px rgba(225, 70, 70, 0.5),   0 0 12px rgba(225, 70, 70, 0.3);
     --glow-info:       0 0 0 1px rgba(79, 196, 214, 0.5), 0 0 12px rgba(79, 196, 214, 0.3);
 
-    --decor-corner-color: rgba(96, 153, 38, 0.3);
+    --decor-corner-color: rgba(116, 184, 48, 0.3);
 
-    --kpi-glow: 0 0 8px rgba(96, 153, 38, 0.4);
-    --signal-halo: 0 0 4px rgba(96, 153, 38, 0.6);
-    --breath-glow: rgba(96, 153, 38, 0.4);
-    --breath-glow-bright: rgba(96, 153, 38, 0.8);
-    --dot-color: rgba(96, 153, 38, 0.4);
+    /* KPI 大字发光 / 信号点 halo / 装饰点阵（v1.2 跟随主色提亮） */
+    --kpi-glow: 0 0 8px rgba(116, 184, 48, 0.4);
+    --signal-halo: 0 0 4px rgba(116, 184, 48, 0.6);
+    --breath-glow: rgba(116, 184, 48, 0.4);
+    --breath-glow-bright: rgba(116, 184, 48, 0.8);
+    --dot-color: rgba(116, 184, 48, 0.45);
 
+    /* 主题 flag（用来条件渲染：关掉/启用某些装饰） */
     --is-light: 0;
   }
 
-  /* === 主题 3：Light（浅苍蓝） === */
+  /* === 主题 2：light（浅色 · 浅苍蓝） === */
   [data-theme="light"] {
     --color-canvas:    #E8F1F5;  /* H198° S39% L94% */
     --color-elevated:  #FFFFFF;
@@ -148,10 +104,10 @@
     --color-column:    #FFFFFF;
     --color-lane:      #FFFFFF;
 
-    /* 文字：冷调深蓝灰（对偶暗色 #C5D4DD） */
+    /* 文字：冷调深蓝灰（对偶暗色 #C5D4DD · v1.2 dim 收紧到 #5A6B7A 过 AA 4.5:1） */
     --color-text:        #0F1A24;
-    --color-text-muted:  #4A5862;  /* 6.4:1 ✅ */
-    --color-text-dim:    #6A7884;  /* 4.0:1 */
+    --color-text-muted:  #475461;  /* 6.39:1 ✅ */
+    --color-text-dim:    #5A6B7A;  /* 4.50:1 ✅ 边缘 */
 
     /* 描边：冷黑 4-16% alpha */
     --color-border-faint:  rgba(15, 26, 36, 0.06);
@@ -937,18 +893,14 @@
 <body>
   <div class="decor-dots" aria-hidden="true"></div>
 
-  <!-- ===== 主题切换器：3 主题（A 暗 / C 暗 / Light） ===== -->
+  <!-- ===== 主题切换器：2 主题（dark / light · v1.2 收敛） ===== -->
   <div class="theme-switcher" role="toolbar" aria-label="主题切换">
     <span class="ts-label">主题</span>
-    <button class="ts-swatch active" data-theme="A-dark" title="A 暗 · 苍蓝提饱和 #0E3A52 — 默认">
-      <span class="ts-c" style="background:linear-gradient(135deg, #0E3A52 0%, #1E7BAD 100%)"></span>
-      <span class="ts-name mono">A 暗</span>
-    </button>
-    <button class="ts-swatch" data-theme="C-dark" title="C 暗 · 中性近黑 #0F1115（VSCode / Linear 风）">
+    <button class="ts-swatch active" data-theme="dark" title="暗色 · 中性近黑 #0F1115 — 默认（v1.2 沿用 v1.1.2 C 暗基底）">
       <span class="ts-c" style="background:linear-gradient(135deg, #0F1115 0%, #3C4453 100%)"></span>
-      <span class="ts-name mono">C 暗</span>
+      <span class="ts-name mono">暗色</span>
     </button>
-    <button class="ts-swatch" data-theme="light" title="Light · 浅苍蓝 #E8F1F5（v1.1 新增）">
+    <button class="ts-swatch" data-theme="light" title="浅色 · 浅苍蓝 #E8F1F5">
       <span class="ts-c" style="background:linear-gradient(135deg, #E8F1F5 0%, #FFFFFF 50%, #DDE7EC 100%); border:1px solid rgba(15,26,36,0.12)"></span>
       <span class="ts-name mono">Light</span>
     </button>
@@ -1508,7 +1460,7 @@
     <div class="page" data-page="tokens">
       <div class="section">
         <div class="section-header h-with-bar">
-          <h2 class="h2">色板 · 苍蓝四层 + gitea 生态 + v1.1 状态色</h2>
+          <h2 class="h2">色板 · 中性近黑 4 层 + gitea 生态 + v1.1 状态色（v1.2 dark 默认）</h2>
         </div>
         <div class="grid-4">
           <div class="swatch">
@@ -1677,7 +1629,7 @@
   </div>
 
   <script>
-    // === 6 个暗色底主题（HLS 转换：每层 +7% 亮度，跟当前苍蓝 4 层梯度对齐） ===
+    // === 暗色底梯度（v1.2 · 中性近黑 4 层，HLS 转换：每层 +7% 亮度） ===
     function hexToRgb(h) {
       h = h.replace('#', '');
       return [parseInt(h.slice(0,2), 16), parseInt(h.slice(2,4), 16), parseInt(h.slice(4,6), 16)];
@@ -1737,7 +1689,7 @@
     const STORAGE_KEY = 'gitea-kanban-theme';
 
     function applyTheme(key) {
-      if (!['A-dark', 'C-dark', 'light'].includes(key)) key = 'A-dark';
+      if (!['dark', 'light'].includes(key)) key = 'dark';
       document.documentElement.dataset.theme = key;
       try { localStorage.setItem(STORAGE_KEY, key); } catch (e) {}
       // 同步 active 状态
@@ -1753,7 +1705,7 @@
       });
     });
 
-    // 启动时读 localStorage，没有就保持默认 A-dark
+    // 启动时读 localStorage，没有就保持默认 dark
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) applyTheme(saved);

@@ -461,101 +461,121 @@
 
 ---
 
-# v1.1.2 主题切换（2026-06-12 user 拍板推翻 v1 单主题暗色）
+# v1.2 主题收敛（2026-06-13 user 拍板推翻 v1.1.2 三主题）
 
-> 本节是 **v1.1.2 主题切换**的完整设计稿。v1 OVERRIDE §覆盖决策表"背景"行的"v1 单主题暗色"决策被**推翻**；
-> AGENTS §8.1 v5 拍板亦同步撤回（保持 history 完整，加撤回标注）。落地期（frontend worker plan）
-> 按本节 token 矩阵 + IPC 契约实现。
+> 本节是 **v1.2 主题收敛**的完整设计稿。v1.1.2 的 3 主题系统（A 暗 / C 暗 / Light）被**推翻**：
+> 实战发现 A 暗（苍蓝）与 C 暗（中性近黑）**视觉差异仅在冷暖**——非技术用户根本分不清、
+> 且在主色外环 glow 加持下都偏向 gitea 绿主导；3 主题对非技术用户产生**认知负担**而非自由度。
+>
+> 落地期（frontend worker plan）按本节 token 矩阵 + IPC 契约实现。
 
 ---
 
-## 14. v1.1.2 主题系统
+## 14. v1.2 主题系统
 
-### 14.1 三套主题
+### 14.1 两套主题
 
 | ID | 名称 | canvas | 色相 | 文字 | 阴影 | glow | 默认 |
 |---|---|---|---|---|---|---|---|
-| `A-dark` | **A 暗 · 苍蓝提饱和** | `#0E3A52` | H201° S71% L19% | 冷调蓝灰 `#C5D4DD` | 深底 + 1px 冷白 inset + 主色外环 | 启用 | ✅ |
-| `C-dark` | **C 暗 · 中性近黑** | `#0F1115` | H220° S17% L7% | 同 A 暗 | 同 A 暗（中性黑阴影） | 启用 | — |
-| `light`  | **Light · 浅苍蓝** | `#E8F1F5` | H198° S39% L94% | 冷调深蓝灰 `#0F1A24` | 纯冷黑阴影（无 inset / 无外环） | **关** | — |
+| `dark`  | **暗色 · 中性近黑** | `#0F1115` | H220° S17% L7% | 冷调蓝灰 `#C5D4DD` | 中性黑阴影 + 1px 冷白 inset + 主色外环 | 启用 | ✅ |
+| `light` | **浅色 · 浅苍蓝** | `#E8F1F5` | H198° S39% L94% | 冷调深蓝灰 `#0F1A24` | 纯冷黑阴影（无 inset / 无外环） | **关** | — |
 
 **关键设计**：
-- **主色 gitea 绿 `#609926` 3 主题通用**（品牌色不动）—— 亮色 CTA 文字用加深版 `#4F7A1A` 过 WCAG AA 4.5:1
-- **强调色 gitea 橙 `#f76707`** 暗色通用；亮色版用 `#D85804`（白底 3.95:1）
-- **状态色 6 个**（success / warning / error / info / pending / offline）3 主题**通用语义**，亮色版用对应"暗 20%"色值
-- **shadow + glow** 主题差异最大：暗色 = "深底色 + 1px 冷白 inset + 主色外环"，亮色 = "纯冷黑阴影 + 无装饰"（glow 在白底上糊）
+- **主色 token 走"过 AA 4.5:1"调档版**（不再是品牌色 #609926 直接当文字色）：
+  - `dark`  `#74B830`（vs `#0F1115` 4.74:1 ✅）
+  - `light` `#466B16`（vs `#E8F1F5` 5.55:1 ✅）
+  - 品牌色 `#609926` 退为**视觉锚**（dot / 装饰角 / 进度条 / 状态点 / 滚动条 thumb）
+- **强调色** gitea 橙：dark 提亮 `#FF8534`，light 压暗 `#D85804`（白底 3.79:1）
+- **状态色 5 个**（warning / error / info / pending / offline）2 主题**通用语义**，亮色版用对应"暗 20%"色值
+- **shadow + glow** 主题差异最大：dark = "深底色 + 1px 冷白 inset + 主色外环"，light = "纯冷黑阴影 + 无装饰"（glow 在白底上糊）
+- **滚动条**（v1.2 新增美化）：thumb 用主色 22-25% alpha 软底 + hover 提亮到 42-50% + dark glow / light 1px 描边
 
 ### 14.2 完整 token 矩阵
 
-| Token | A 暗 | C 暗 | Light | 说明 |
-|---|---|---|---|---|
-| `--color-canvas`     | `#0E3A52` | `#0F1115` | `#E8F1F5` | 主画布底色 |
-| `--color-elevated`   | `#135070` | `#1E222A` | `#FFFFFF` | 卡片 / 列底 |
-| `--color-hover`      | `#18658F` | `#2D333F` | `#F1F6F9` | hover 态 |
-| `--color-active`     | `#1E7BAD` | `#3C4453` | `#DDE7EC` | active 态 |
-| `--color-text`       | `#C5D4DD` | `#C5D4DD` | `#0F1A24` | 主文字 |
-| `--color-text-muted` | `#9AAAB6` | `#9AAAB6` | `#4A5862` | 次要文字 |
-| `--color-text-dim`   | `#5A6975` | `#5A6975` | `#6A7884` | 占位 / 禁用 |
-| `--color-primary`    | `#609926` | `#609926` | `#4F7A1A` | 主色 CTA |
-| `--color-warning`    | `#f76707` | `#f76707` | `#D85804` | 强调色 |
-| `--color-error`      | `#E14646` | `#db2828` | `#C42020` | 错误 |
-| `--color-info`       | `#4fc4d6` | `#4fc4d6` | `#157A91` | 信息 |
-| `--color-pending`    | `#94a3b8` | `#94a3b8` | `#5A6B7A` | 等待 |
-| `--color-offline`    | `#64748b` | `#64748b` | `#4A5862` | 离线 |
-| `--shadow-rgb`       | `10, 42, 50` | `0, 0, 0` | `15, 26, 36` | 阴影起点色（rgba 用） |
-| `--grid-color`       | `rgba(220,233,240,.04)` | 同 A | `rgba(15,26,36,.04)` | 背景 grid 颜色 |
-| `--kpi-glow`         | `0 0 8px rgba(96,153,38,.4)` | 同 A | `0 0 0 0 transparent` | KPI 大字发光 |
-| `--signal-halo`      | `0 0 4px rgba(96,153,38,.6)` | 同 A | `0 0 0 1px rgba(79,122,26,.3)` | 状态点 halo |
-| `--breath-glow`      | `rgba(96,153,38,.4)` | 同 A | `rgba(79,122,26,.25)` | 呼吸动画起止色 |
-| `--dot-color`        | `rgba(96,153,38,.4)` | 同 A | `rgba(79,122,26,.5)` | 角落装饰点阵 |
-| `--progress-fill-glow` | `0 0 6px rgba(96,153,38,.4)` | 同 A | `0 0 4px rgba(79,122,26,.25)` | 进度条 fill 发光 |
-
-**对比度核查**（WCAG AA 文字 4.5:1 / 状态点 non-text 3:1）全部通过（详见 `docs/design/wireframe/theme-tech.html` 截图 + 实测）。
-
-### 14.3 不在 3 主题内变化的 token
-
-- **边角锐化** `--radius-card: 6px` / `--radius-btn: 4px` / `--radius-chip: 2px` 等 — 3 主题通用
-- **字号 / 间距** — 3 主题通用
-- **字体** Inter + JetBrains Mono + Noto Sans SC — 3 主题通用
-- **HUD 装饰元素**（装饰角 / 标题前缀条 / 键帽 / 信号灯 / KPI 大字）— 3 主题通用，颜色跟随 `--color-*` 自动变
-- **滚动条 / 卡片阴影强度 / 过渡时长** — 3 主题通用
-
-### 14.4 主色加深逻辑（亮色版 CTA 文字通用规则）
-
-| 暗色主色 | 亮色版（CTA 文字） | 亮色 vs `#FFFFFF` 对比度 | 亮色 vs `#E8F1F5` 对比度 |
+| Token | dark | light | 说明 |
 |---|---|---|---|
-| `#609926` gitea 绿 | `#4F7A1A` 加深 1 档 | 4.50:1 ✅ | 3.59:1 ✅（非文字） |
-| `#f76707` gitea 橙 | `#D85804` 加深 1 档 | 3.95:1 ✅（非文字） | 3.45:1 ✅（非文字） |
-| `#E14646` 错误红 | `#C42020` 加深 1 档 | 5.87:1 ✅ | 5.13:1 ✅ |
-| `#4fc4d6` 信息青 | `#157A91` 加深 1 档 | 3.79:1 ✅（非文字） | 3.31:1 ✅（非文字） |
+| `--color-canvas`     | `#0F1115` | `#E8F1F5` | 主画布底色 |
+| `--color-elevated`   | `#1E222A` | `#FFFFFF` | 卡片 / 列底 |
+| `--color-hover`      | `#2D333F` | `#F1F6F9` | hover 态 |
+| `--color-active`     | `#3C4453` | `#DDE7EC` | active 态 |
+| `--color-text`       | `#C5D4DD` | `#0F1A24` | 主文字（dark 7.37:1 / light 12.7:1）|
+| `--color-text-muted` | `#9AAAB6` | `#475461` | 次要文字（dark 5.29:1 / light 6.39:1）|
+| `--color-text-dim`   | `#74818E` | `#5A6B7A` | 占位 / 禁用（dark 3.93:1 ⚠️ large only / light 4.50:1）|
+| `--color-primary`    | `#74B830` | `#466B16` | 主色 CTA / 文字（**过 AA 4.5:1**）|
+| `--color-primary-hover` | `#8AC544` | `#609926` | hover 提亮 |
+| `--color-primary-active` | `#5C9622` | `#3D5512` | active 压暗 |
+| `--color-primary-soft` | `rgba(116,184,48,.18)` | `rgba(70,107,22,.16)` | 主色软底 |
+| `--color-primary-glow` | `rgba(116,184,48,.32)` | `rgba(70,107,22,.28)` | 主色光晕 |
+| `--color-warning`    | `#FF8534` | `#D85804` | 强调色（dark 提亮 / light 压暗）|
+| `--color-error`      | `#E14646` | `#C42020` | 错误 |
+| `--color-info`       | `#4fc4d6` | `#157A91` | 信息 |
+| `--color-pending`    | `#94a3b8` | `#5A6B7A` | 等待 |
+| `--color-offline`    | `#64748b` | `#475461` | 离线 |
+| `--shadow-rgb`       | `0, 0, 0` | `15, 26, 36` | 阴影起点色（rgba 用） |
+| `--grid-color`       | `rgba(220,233,240,.08)` | `rgba(15,26,36,.08)` | 背景 grid 颜色 |
+| `--kpi-glow`         | `0 0 8px rgba(116,184,48,.4)` | `0 0 0 0 transparent` | KPI 大字发光 |
+| `--signal-halo`      | `0 0 4px rgba(116,184,48,.6)` | `0 0 0 1px rgba(70,107,22,.35)` | 状态点 halo（light 用实色描边）|
+| `--breath-glow`      | `rgba(116,184,48,.4)` | `rgba(70,107,22,.25)` | 呼吸动画起止色 |
+| `--dot-color`        | `rgba(116,184,48,.45)` | `rgba(70,107,22,.5)` | 角落装饰点阵（v1.2 提亮到 45%）|
+| `--progress-fill-glow` | `0 0 6px rgba(116,184,48,.4)` | `0 0 4px rgba(70,107,22,.25)` | 进度条 fill 发光 |
+| `--scrollbar-thumb`  | `rgba(116,184,48,.22)` | `rgba(70,107,22,.25)` | **v1.2 新增** thumb 默认态 |
+| `--scrollbar-thumb-hover` | `rgba(116,184,48,.45)` | `rgba(70,107,22,.5)` | **v1.2 新增** thumb hover |
+| `--scrollbar-thumb-glow` | `0 0 6px rgba(116,184,48,.4)` | `0 0 0 1px rgba(70,107,22,.4)` | **v1.2 新增** dark glow / light 实色描边 |
+| `--card-hover-tint`  | `rgba(116,184,48,.08)` | `transparent` | **v1.2 新增** 卡片 hover 主色微亮（dark 专属）|
 
-**规则**：亮色版主色比暗色版 HSL 亮度 L **降 8-12 个百分点**（同时 sat 微调），保持色相不变，过 WCAG AA。
+**对比度核查**（WCAG AA 文字 4.5:1 / 状态点 non-text 3:1）全部通过：
+- dark `--color-text` vs canvas = 7.37:1 ✅；`--color-primary` vs canvas = 4.74:1 ✅；`--color-text-dim` vs canvas = 3.93:1 ⚠️ 仅 large text 3:1 / 装饰用
+- light 全部 ≥ 4.50:1 ✅
+
+### 14.3 不在 2 主题内变化的 token
+
+- **边角锐化** `--radius-card: 6px` / `--radius-btn: 4px` / `--radius-chip: 2px` 等 — 2 主题通用
+- **字号 / 间距** — 2 主题通用
+- **字体** Inter + JetBrains Mono + Noto Sans SC — 2 主题通用
+- **HUD 装饰元素**（装饰角 / 标题前缀条 / 键帽 / 信号灯 / KPI 大字）— 2 主题通用，颜色跟随 `--color-*` 自动变
+- **卡片阴影强度 / 过渡时长** — 2 主题通用
+- **滚动条尺寸** 8px 细 + 4px 圆角 — 2 主题通用，**thumb 颜色** 走主题 token
+
+### 14.4 主色"过 AA 4.5:1"调档逻辑
+
+| 场景 | dark | light | 备注 |
+|---|---|---|---|
+| **品牌色（视觉锚）** | `#609926` | `#609926` | 不直接当文字色；用于 dot / 装饰角 / 进度条渐变 / 滚动条 thumb |
+| **主色 token（CTA / 文字）** | `#74B830` | `#466B16` | 提亮 / 压暗到 vs canvas 4.5:1 ✅ |
+| **hover 提亮** | `#8AC544` | `#609926`（回到品牌色）| 双向：dark 进一步提亮 / light 回到品牌色 |
+| **active 压暗** | `#5C9622` | `#3D5512` | 进一步压暗 |
+
+**规则**：主色 token 必须 **vs canvas ≥ 4.5:1**；hover 提亮 / active 压暗 6-10% 亮度即可，不破坏色相。
+
+**为什么 v1.2 不再保留 v1.1.2 的"亮色用 #4F7A1A 加深 1 档"**：
+- `#4F7A1A` vs `#E8F1F5` = 4.16:1 ❌（差 0.34 不到 4.5:1）
+- v1.2 压暗到 `#466B16`（5.55:1 ✅）—— 同时 dark 版提亮到 `#74B830`（4.74:1 ✅）
 
 ---
 
-## 15. 主题切换 UX（v1.1.2 App 功能）
+## 15. 主题切换 UX（v1.2 App 功能）
 
 ### 15.1 切换入口（3 处都给）
 
 | 入口 | 用途 | 用户群 |
 |---|---|---|
-| **顶栏 StatusBar** | 一键循环切换（点按钮在 A 暗 / C 暗 / Light 之间循环） | 所有人最常用 |
-| **设置页 → 外观** | 显式单选（A 暗 / C 暗 / Light），附预览缩略图 | 想精细控制的人 |
+| **顶栏 StatusBar** | 一键循环切换（点按钮在 dark / light 之间循环） | 所有人最常用 |
+| **设置页 → 外观** | 显式单选（dark / light），附预览缩略图 | 想精细控制的人 |
 | **命令面板** `⌘K` → 输入"主题" | 键盘党 + 高级用户 | power user |
 
 ### 15.2 切换瞬间 UX
 
 - **过渡**：`transition: background-color 150ms ease-out, color 150ms ease-out`（**不能**硬切，会有"闪屏"）
-- **过渡范围**：仅 canvas / elevated / text / shadow / glow 这一组，**不动**布局、卡片位置、滚动条
+- **过渡范围**：仅 canvas / elevated / text / shadow / glow / 滚动条 thumb 这一组，**不动**布局、卡片位置、滚动条宽度
 - **保存**：点击瞬间同步写 `prefs.theme` 字段到 sqlite（不阻塞 UI）
 - **失败回滚**：写 sqlite 失败 → toast "设置保存失败，请重试" + 不切换（用户感知无变化）
 
 ### 15.3 持久化路径
 
 ```ts
-// src/main/prefs/store.ts (新加)
-// v1.1.2 — 主题偏好（user 拍板 2026-06-12 走 sqlite）
-prefs.theme: 'A-dark' | 'C-dark' | 'light'  // 默认 'A-dark'（v1 苍蓝决策精神 + 解决灰蒙）
+// src/main/prefs/store.ts (v1.1.2 加 · v1.2 收敛 enum)
+// v1.2 — 主题偏好（user 拍板 2026-06-13 收敛 3 主题为 2 主题）
+prefs.theme: 'dark' | 'light'  // 默认 'dark'（v1.1.2 C 暗基底 + 桌面工具主流）
 prefs.themeChangedAt: ISODate  // 用于 analytics / 调试
 ```
 
@@ -568,11 +588,11 @@ prefs.themeChangedAt: ISODate  // 用于 analytics / 调试
 ```
 [User 点 swatch / 命令面板 / 设置页]
     ↓
-[preload api.theme.set('A-dark')]    // contextBridge 暴露的 API
+[preload api.theme.set('dark')]    // contextBridge 暴露的 API
     ↓ (IPC invoke)
 [main/ipc/preferences.ts handler]    // preferences.setTheme
     ↓
-[prefs store.set({ theme: 'A-dark' })] // sqlite UPDATE
+[prefs store.set({ theme: 'dark' })] // sqlite UPDATE
     ↓
 [return success]
     ↓
@@ -601,9 +621,10 @@ prefs.theme 回来后如果不一致 → 重新 apply
 
 ---
 
-## 16. 主题切换 IPC 契约（v1.1.2 新增 2 端点）
+## 16. 主题切换 IPC 契约（v1.1.2 新增 2 端点 · v1.2 enum 收敛）
 
-> ⚠️ AGENTS §7.1 #2 边界 — 改 IPC 契约需 user 拍板。**user 2026-06-12 已拍板**。
+> ⚠️ AGENTS §7.1 #2 边界 — 改 IPC 契约需 user 拍板。**user 2026-06-12 已拍板 3 主题**；
+> **user 2026-06-13 拍板收敛为 2 主题**（schema enum 收紧，**端点路径不变**）。
 
 ### 16.1 `preferences.theme.get`
 
@@ -616,7 +637,7 @@ type ThemeGetRequest = Record<string, never>;  // 无参数
 
 // response（200）
 type ThemeGetResponse = {
-  theme: 'A-dark' | 'C-dark' | 'light';
+  theme: 'dark' | 'light';  // v1.2 收敛
   changedAt: string;  // ISO 8601
 };
 
@@ -630,50 +651,49 @@ type ThemeGetResponse = {
 ```ts
 // request
 type ThemeSetRequest = {
-  theme: 'A-dark' | 'C-dark' | 'light';
+  theme: 'dark' | 'light';  // v1.2 收敛
 };
 
 // response（200）
 type ThemeSetResponse = {
-  theme: 'A-dark' | 'C-dark' | 'light';
+  theme: 'dark' | 'light';
   changedAt: string;
 };
 
 // error
-// INVALID_THEME（不是合法 3 选 1）
+// INVALID_THEME（不是合法 2 选 1）
 // DATABASE_WRITE_FAILED
 // DATABASE_UNAVAILABLE
 ```
 
 ### 16.3 IPC 端点变化
 
-- **新增**：2 个端点（`preferences.theme.get` / `preferences.theme.set`）
-- **不动**：`preferences.get` / `preferences.set`（其他偏好）
+- **v1.1.2 新增**：2 个端点（`preferences.theme.get` / `preferences.theme.set`）
+- **v1.2 不动端点路径**，仅收紧 enum 2 选 1
 - **落地**：
-  - `src/main/ipc/preferences.ts` 加 2 个 handler
-  - `src/main/ipc/schema.ts` 加 2 个 Zod schema
-  - `src/shared/ipc-types.ts` 自动派生 TS 类型
-  - `src/preload/index.ts` 暴露 `window.api.theme.get()` / `window.api.theme.set()`
-  - `src/renderer/stores/ui.ts` 加 `currentTheme` state + `applyTheme` action
-  - `src/renderer/components/StatusBar.vue` 加主题按钮（cycle）
-  - `src/renderer/views/SettingsView.vue` 加"外观"分组（单选）
-  - `src/renderer/lib/command-palette.ts` 加"主题: A 暗"等命令
+  - `src/main/ipc/preferences.ts` 收紧 enum
+  - `src/main/ipc/schema.ts` `ThemeEnumSchema` 收紧
+  - `src/preload/index.ts` 注释 narrative 同步
+  - `src/renderer/stores/ui.ts` 收敛 Theme union
+  - `src/renderer/components/StatusBar.vue` 按钮文字 2 选 1
+  - `src/renderer/views/SettingsView.vue` "外观" radio 2 选 1
+  - `src/renderer/lib/command-palette.ts` 主题命令 2 选 1
+  - `src/renderer/index.html` inline bootstrap script enum 白名单收紧 + CSP sha256 同步重算
 
-### 16.4 落地任务拆分（frontend worker plan）
+### 16.4 落地任务拆分（frontend worker plan · v1.2 收敛）
 
 按 5-15 分钟单任务粒度拆：
 
-1. **theme-tokens**: 改 `src/renderer/styles/theme.css` 加 3 主题 token 块（4 层色 / 文字 / shadow / glow / status）
-2. **theme-store**: 改 `src/renderer/stores/ui.ts` 加 `currentTheme` + `applyTheme` action（150ms 过渡）
-3. **theme-preload**: 改 `src/preload/index.ts` 暴露 `window.api.theme.{get,set}`
-4. **theme-ipc**: 改 `src/main/ipc/preferences.ts` 加 2 个 handler + Zod schema
-5. **theme-statusbar**: 改 `src/renderer/components/StatusBar.vue` 加主题按钮（cycle）
-6. **theme-settings**: 改 `src/renderer/views/SettingsView.vue` 加"外观"分组
-7. **theme-command**: 改 `src/renderer/lib/command-palette.ts` 加主题命令
-8. **theme-init**: 改 `src/main/index.ts` 启动时读 prefs.theme 并设 html data-theme
-9. **theme-check**: 跑 producer 验证矩阵 4 命令（type-check / build / no-jargon / 视觉对比 3 主题）
+1. **theme-tokens-v1.2**: 改 `src/renderer/styles/theme.css` 收敛为 2 主题 token（dark 提亮主色 / light 压暗主色 / 新增 4 个滚动条 token）
+2. **theme-store-v1.2**: 改 `src/renderer/stores/ui.ts` 收敛 Theme union
+3. **theme-ipc-v1.2**: 改 `src/main/ipc/preferences.ts` + `src/main/ipc/schema.ts` 收紧 enum
+4. **theme-statusbar-v1.2**: 改 `src/renderer/components/StatusBar.vue` 按钮文字 2 选 1
+5. **theme-settings-v1.2**: 改 `src/renderer/views/SettingsView.vue` radio 2 选 1
+6. **theme-command-v1.2**: 改 `src/renderer/lib/command-palette.ts` 命令 2 选 1
+7. **theme-init-v1.2**: 改 `src/renderer/index.html` inline bootstrap + 重算 CSP sha256 hash
+8. **theme-check-v1.2**: 跑 producer 验证矩阵 4 命令（type-check / build / no-jargon / 视觉对比 2 主题）
 
-**关键依赖**：`theme-preload` 必须先于 `theme-ipc` 完成（preload 引 ipc 类型）；`theme-store` 依赖 `theme-preload`。
+**关键依赖**：`theme-ipc-v1.2` 必须先于 `theme-store-v1.2` 完成（store 引 schema enum）；`theme-init-v1.2` CSP hash 同步重算。
 
 ---
 
@@ -681,4 +701,5 @@ type ThemeSetResponse = {
 
 - **v1（2026-06-10）**：单主题暗色（不提供切换），苍蓝 `#134857` 底 — **v1.1.2 推翻**（user 2026-06-12 拍板）
 - **v1.1（2026-06-12）**：A 暗提饱和 `#0E3A52` + 主文字 `#C5D4DD`（解决灰蒙 + 文字过亮） — **v1.1.2 沿用**
-- **v1.1.2（2026-06-12）**：3 主题切换（A 暗 / C 暗 / Light），默认 A 暗，sqlite 持久化 — **当前拍板**
+- **v1.1.2（2026-06-12）**：3 主题切换（A 暗 / C 暗 / Light），默认 A 暗，sqlite 持久化 — **v1.2 推翻**（user 2026-06-13 拍板，3 主题对非技术用户产生认知负担）
+- **v1.2（2026-06-13）**：2 主题切换（dark / light），默认 dark，sqlite 持久化；主色 token 提亮到 #74B830 / 压暗到 #466B16 过 AA 4.5:1；滚动条 thumb 用主色软底 + hover 提亮 + glow（dark）/ 实色描边（light）—— **当前拍板**

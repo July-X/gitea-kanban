@@ -1,5 +1,8 @@
 # theme-command 任务交付（frontend worker · 2026-06-12）
 
+> **⚠️ 本文件描述的 v1.1.2 3 主题命令面板（⌘K：A 暗 / C 暗 / 浅色）已被 v1.2 推翻（2026-06-13）。**
+> 当前 `THEME_COMMANDS` 数组为 `['dark', 'light']`（A 暗与 C 暗合并为 dark），命令标题更新为「暗色 · 中性近黑」「浅色 · 浅苍蓝」。详见 `design-system/gitea-kanban/OVERRIDE.md` v1.2 段落。本文件留作 history。
+
 ## 落地内容
 
 落地 v1.1.2 主题切换的 **入口 3**：全局命令面板（⌘K / Ctrl+K）。

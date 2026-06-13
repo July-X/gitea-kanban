@@ -1049,8 +1049,17 @@ watch(
  font-weight:500;
  white-space: nowrap;
  background-color: var(--label-color, var(--color-bg-active));
- /*亮度低的颜色 →浅色前景；亮度高的 →深色前景（粗略） */
- color: var(--color-text-inverse);
+ /* 优先走 CSS Color 4 color-contrast()：根据 label 底色亮度自动挑白字 / 黑字，
+    保证 gitea label 调色板（亮蓝/亮红/亮绿/亮紫等）上文字都过 AA 4.5:1。
+    Electron 内置 Chromium ≥120（2023+）原生支持。 */
+ color: color-contrast(
+   var(--label-color, var(--color-bg-active)) vs
+   #FFFFFF, #0F1A24
+ );
+ /* 老 Chromium / WebView 兜底：--label-fg 在 light 主题下被覆盖为 --color-text（深色字），
+    dark 主题下不设 → 走 inverse（白字，主色 / 暗 label 上 OK）。
+    CSS 变量 fallback 链：--label-fg → --color-text-inverse → #FFF。 */
+ color: var(--label-fg, var(--color-text-inverse, #FFFFFF));
 }
 
 .card__author {

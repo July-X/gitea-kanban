@@ -1,5 +1,8 @@
 # theme-ipc — Notes (Backend)
 
+> **⚠️ 本文件描述的 v1.1.2 IPC enum（`'A-dark' | 'C-dark' | 'light'`，默认 `A-dark`）已被 v1.2 推翻（2026-06-13）。**
+> 当前 enum 收紧为 `'dark' | 'light'`，默认 `dark`（沿用原 C 暗中性近黑基底 #0F1115），端点路径（`preferences.theme.get` / `set`）不变。错误码（THEME_NOT_FOUND / INVALID_THEME / DATABASE_*）保留不变。详见 `design-system/gitea-kanban/OVERRIDE.md` v1.2 段落。本文件留作 history。
+
 ## 交付摘要
 
 落地 v1.1.2 主题切换的**后端**：2 个 IPC 端点 + Zod schema + sqlite 持久化。

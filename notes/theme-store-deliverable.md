@@ -1,5 +1,8 @@
 # theme-store 任务交付（frontend worker · 2026-06-12）
 
+> **⚠️ 本文件描述的 v1.1.2 store（`Theme = 'A-dark' | 'C-dark' | 'light'`，默认 `A-dark`，cycle 3 步）已被 v1.2 推翻（2026-06-13）。**
+> 当前 `Theme = 'dark' | 'light'`，`DEFAULT_THEME = 'dark'`，`THEME_CYCLE_ORDER = ['dark', 'light']`，`THEME_DISPLAY_NAME = { dark: '暗色 · 中性近黑', light: '浅色 · 浅苍蓝' }`。整套数据流（`applyTheme` / `initTheme` / `persistTheme` / `fetchPersistedTheme`）保留不变。详见 `design-system/gitea-kanban/OVERRIDE.md` v1.2 段落。本文件留作 history。
+
 ## 落地内容
 
 实现 v1.1.2 主题切换的 **核心 Pinia store**：`src/renderer/stores/ui.ts`（225 行）。

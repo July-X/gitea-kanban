@@ -1,5 +1,8 @@
 # StatusBar 主题切换按钮 — theme-statusbar task
 
+> **⚠️ 本文件描述的 v1.1.2 3 主题 cycle（A 暗 → C 暗 → Light）已被 v1.2 推翻（2026-06-13）。**
+> 当前 `THEME_CYCLE_ORDER = ['dark', 'light']`（A 暗 + C 暗合并为 dark，按 C 暗中性近黑基底），`THEME_SHORT_LABEL = { dark: '暗', light: '亮' }`。详见 `design-system/gitea-kanban/OVERRIDE.md` v1.2 段落。本文件留作 history。
+
 **时间**：2026-06-12 17:18（Asia/Shanghai）
 **scope**：1 个文件改 → `src/renderer/components/StatusBar.vue`（+29 / -4 行）
 **任务**：v1.1.2 cycle 2 · tech-refine §15.1 入口 1
