@@ -111,6 +111,7 @@
       "parents": 1
     }
   ],
+  "mergeIdempotencyError": "操作冲突：资源状态不允许该操作（如合并请求已合并或已关闭）",
   "pr11After": {
     "index": 11,
     "state": "closed",

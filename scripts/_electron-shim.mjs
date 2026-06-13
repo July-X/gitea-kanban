@@ -46,3 +46,5 @@ const stub = {
 };
 
 export default stub;
+// **M6 加**：ESM 命名导出（Node 20+ ESM 解析 'electron' 时走静态分析，'import { app }' 必须能拿到命名导出）
+export const { app, ipcMain, contextBridge, BrowserWindow } = stub;

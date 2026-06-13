@@ -416,13 +416,25 @@ async function main(): Promise<void> {
         });
         return { ok: false, detail: `unexpected success; merged=${result.merged}（gitea 端已 merged 应该拒绝再次 merge）` };
       } catch (e: unknown) {
-        // 期望 IpcError CONFLICT（405 "pull request is closed"）
+        // 期望 IpcError CONFLICT（gitea 405 → M6 FU3 走中文文案"操作冲突：资源状态不允许该操作"）
+        // 兼容：
+        //  - M4 旧：gitea 英文透传 "pull request is closed"
+        //  - M6 FU3："操作冲突：资源状态不允许该操作（如合并请求已合并或已关闭）"
         const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes('CONFLICT') && !msg.includes('conflict') && !msg.includes('closed') && !msg.includes('pull request is closed')) {
-          return { ok: false, detail: `expected CONFLICT, got: ${msg.slice(0, 200)}` };
+        const codeField = (e as { code?: string }).code ?? '';
+        const isConflict =
+          codeField === 'CONFLICT' ||
+          msg.includes('CONFLICT') ||
+          msg.includes('conflict') ||
+          msg.includes('closed') ||
+          msg.includes('pull request is closed') ||
+          msg.includes('操作冲突') ||  // M6 中文文案
+          msg.includes('资源状态不允许');  // M6 中文文案
+        if (!isConflict) {
+          return { ok: false, detail: `expected CONFLICT, got code=${codeField} msg=${msg.slice(0, 200)}` };
         }
         samples.mergeIdempotencyError = msg.slice(0, 200);
-        return { ok: true, detail: `IpcError raised: ${msg.slice(0, 100)}` };
+        return { ok: true, detail: `IpcError raised (${codeField || 'CONFLICT'}): ${msg.slice(0, 100)}` };
       }
     });
   }
