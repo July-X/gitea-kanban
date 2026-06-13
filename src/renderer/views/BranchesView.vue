@@ -1535,6 +1535,20 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   overflow: hidden;
+  /*
+   * v1.1.3 · task #41 三修 · flex-shrink:0 防 li 被 flex 缩成 0
+   * - 根因：父 .branches__commits-list 是 `display:flex; flex-direction:column;
+   *   flex:1; min-height:0`，li 默认 `flex:0 1 auto` → flex-shrink:1
+   * - 表现：父容器高度不够时（如窗口小 / 边栏宽），7 个 li 全部按比例缩成 21~97px，
+   *   第一个展开的 li 详情被 li 自身 overflow:hidden 截掉一半文件，
+   *   且 list.scrollHeight 也被缩成 247px（自然高度 601px），等于 list 没溢出，
+   *   `overflow-y:auto` 不触发 → 滚动条不出现
+   * - 修复：flex-shrink:0 让 li 保持自然高度，list.scrollHeight 反映实际内容，
+   *   overflow-y:auto 正常出滚动条，用户可滚到 li 详情底部
+   * - 不影响：li 自身 overflow:hidden（防圆角溢出）+ files-list 内部 50cqh 独立滚动
+   *   两条防线照常工作
+   */
+  flex-shrink: 0;
 }
 
 .branch-commit-row--expanded {
