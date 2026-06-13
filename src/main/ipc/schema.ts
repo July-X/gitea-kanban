@@ -923,8 +923,11 @@ export type ListMembersResp = z.infer<typeof ListMembersRespSchema>;
  *
  * keys 限制 1-64 个；空数组 / 超限都拒（防止 caller 误用 "全表"）。
  *
- * 注：M5 阶段 v1 简化——userId 在 main 端从 auth.status.currentUser 取
- * （M0 单 userId 简化：未连 gitea 时返回空 record）。
+ * 注：M5 阶段 v1 简化——userId 在 main 端硬编码 'local-user'（LOCAL_USER_ID）
+ * （M0 单 userId 简化：未连 gitea 时 prefs 仍可读写到 local-user 命名空间）。
+ *
+ * **M6 拍板保留**：prefs 跟 app user 走（设备级），**不**按 gitea account 切分
+ * 拍板记录：notes/m6-prefs-schema-decision.md（方案 A）
  */
 export const UserPrefsGetArgsSchema = z
   .object({

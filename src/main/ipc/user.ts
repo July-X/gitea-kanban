@@ -20,6 +20,10 @@
  *
  * 与 §8.8 教训对齐：M5 阶段不擅自引入"按 gitea_account_id 切 prefs"等新设计；
  * 等 M6+ 有具体业务接入需求 + 用户拍板后再扩展。
+ *
+ * **M6 拍板保留**：prefs 跟 app user 走（设备级），**不**跟 gitea account 走
+ * 切 gitea 账号不会切走 theme / nav 折叠；同台机器同一 app user 共享 prefs
+ * 拍板记录：notes/m6-prefs-schema-decision.md（方案 A）
  */
 
 import { ipcMain } from 'electron';
@@ -46,7 +50,8 @@ import { getDb } from '../cache/sqlite.js';
 import { prefs, undoEntries } from '../cache/schema/index.js';
 import { undoOne, redoOne } from '../board/undo.js';
 
-/** M5 简化：单本地用户（M1 多账号时按 giteaAccountId 切分） */
+/** M5 简化 / **M6 拍板保留**：单本地用户（设备级），prefs 不按 gitea account 切分
+ *  拍板记录：notes/m6-prefs-schema-decision.md（方案 A） */
 const LOCAL_USER_ID = 'local-user';
 
 /** 统一包装：parse 入参 → 调 handler → 错误转 IpcError

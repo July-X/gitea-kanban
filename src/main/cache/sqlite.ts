@@ -118,6 +118,8 @@ async function applyPragmasAndMigrate(): Promise<void> {
 
   // Seed local-user row if missing（FK 约束：prefs.user_id → users.id）
   // user.ts / preferences.ts 都用 LOCAL_USER_ID = 'local-user'
+  // **M6 拍板保留**：prefs 跟 app user（设备级），不按 gitea account 切分
+  // 见 notes/m6-prefs-schema-decision.md（方案 A）
   seedLocalUser();
 }
 
@@ -127,6 +129,9 @@ async function applyPragmasAndMigrate(): Promise<void> {
  * 多处 IPC handler（user.prefs.* / preferences.theme.*）用 LOCAL_USER_ID = 'local-user' 写 prefs 表，
  * 但 users 表 FK 引用 users.id —— 如果 users 表空（迁移只建表不 seed），
  * prefs INSERT 会抛 SQLITE_CONSTRAINT_FOREIGNKEY → DATABASE_WRITE_FAILED。
+ *
+ * **M6 拍板保留**：prefs 跟 app user 走（设备级），**不**按 gitea account 切分
+ * 拍板记录：notes/m6-prefs-schema-decision.md（方案 A）
  *
  * 调用时机：applyPragmasAndMigrate 之后（migration 跑完、schema 建好）
  */
