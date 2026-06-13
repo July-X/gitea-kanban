@@ -204,6 +204,42 @@ export function touchLastSync(args: {
     .run();
 }
 
+/**
+ * 回填 repo_projects.default_branch —— v1.1.3 timeline polish 引入
+ *
+ * 背景（2026-06-13 user 报"时间轴完全不可用"+ diagnose CDP 复现）：
+ * - 旧 addProject 写入 sqlite 时 default_branch 为 null
+ * - branchesListHandler 用 proj.defaultBranch 判定 BranchDto.isDefault
+ * - 全 null → 所有 branch 都是 isDefault=false
+ * - TimelineView 默认选 default branch 找不到 → 只勾选 1 个非 default 分支
+ * - commits.timeline IPC 只返 7 commits → X6 画 7 节点（应该是 4 分支 15 commit）
+ *
+ * 修法：reposListHandler 拉完 gitea repo 后对每个 project row 检查
+ * - if row 已有 default_branch → noop
+ * - elif gitea repo.default_branch 有值 → UPDATE 写回
+ *
+ * 幂等 + 无副作用：不破坏 IPC schema（仍保持 defaultBranch optional）。
+ */
+export function backfillDefaultBranch(args: {
+  giteaAccountId: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+}): void {
+  const db = getDb();
+  db.update(repoProjects)
+    .set({ defaultBranch: args.defaultBranch })
+    .where(
+      and(
+        eq(repoProjects.giteaAccountId, args.giteaAccountId),
+        eq(repoProjects.owner, args.owner),
+        eq(repoProjects.name, args.name),
+        isNull(repoProjects.defaultBranch),
+      ),
+    )
+    .run();
+}
+
 // ===== cache_entries（repos 资源级缓存）=====
 
 /**
