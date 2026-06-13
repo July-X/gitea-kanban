@@ -159,7 +159,7 @@ watch(() => activeProjectId.value, async (id) => {
 // 数据布局计算（commit 排序 / lane 映射 / heatmap / SVG 路径）
 // ============================================================
 
-const ROW_H = 36;
+const ROW_H = 32;
 const GRAPH_W = 54; // 收窄到 8 lane 紧凑布局（54 = 5 + 7×6 + 5 padding）
 
 /** 节点按时间戳倒序（新 → 旧） */
@@ -799,7 +799,7 @@ function formatRelative(iso: string): string {
   display: grid;
   grid-template-columns: 54px 80px 1fr 360px;
   align-items: center;
-  height: var(--row-h, 36px);
+  height: var(--row-h, 32px);
   padding: 0 var(--space-3) 0 0;
   cursor: pointer;
   transition: background-color var(--t-base) var(--ease);

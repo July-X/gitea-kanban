@@ -83,6 +83,9 @@ import StatusBar from './StatusBar.vue';
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* 让出底部状态栏高度 —— .shell__status 是 position:absolute 叠层，
+   * .shell__main 不补 padding 就会被状态栏压住最后一行（TimelineView list 519→491） */
+  padding-bottom: var(--statusbar-height);
   overflow: hidden;
   background: transparent;
 }
@@ -104,6 +107,8 @@ import StatusBar from './StatusBar.vue';
   bottom: 0;
   left: 0;
   right: 0;
+  /* 固定高度 —— 让 .shell__main 的 padding-bottom 精确匹配，list 不会被切 */
+  height: var(--statusbar-height);
   /* 半透明 · 让 grid 透出 · HUD 风 */
   background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
   backdrop-filter: blur(12px);
