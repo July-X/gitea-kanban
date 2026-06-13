@@ -83,6 +83,15 @@ CREATE TABLE `gitea_refs` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `uniq_kind` ON `gitea_refs` (`kind`,`owner`,`repo`,`ref_id`);--> statement-breakpoint
+CREATE TABLE `starred_branches` (
+	`id` text PRIMARY KEY NOT NULL,
+	`repo_project_id` text NOT NULL,
+	`branch` text NOT NULL,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`repo_project_id`) REFERENCES `repo_projects`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `uniq_repo_branch` ON `starred_branches` (`repo_project_id`,`branch`);--> statement-breakpoint
 CREATE TABLE `prefs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,

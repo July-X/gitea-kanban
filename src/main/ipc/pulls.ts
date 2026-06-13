@@ -52,6 +52,7 @@ import {
   invalidatePullsCache,
 } from '../cache/pulls.js';
 import { invalidateCommitsCache } from '../cache/commits.js';
+import { invalidateBranchesCache } from '../cache/branches.js';
 import {
   getLinkedCardsForPulls,
   getLinkedCardsForPull,
@@ -313,10 +314,11 @@ async function pullsMergeHandler(args: MergePrArgs): Promise<MergePrResult> {
     commitMessage: args.commitMessage,
   });
 
-  // 合并成功后失效 pulls + commits 两个资源缓存
+  // 合并成功后失效 pulls + commits + branches 三个资源缓存
   // —— 合并后 PR 状态变、head 分支前进、可能多出新 commit
   invalidatePullsCache(args.projectId);
   invalidateCommitsCache(args.projectId);
+  invalidateBranchesCache(args.projectId);
 
   logger.info({ op, latencyMs: Date.now() - start, sha: result.sha, merged: result.merged }, 'ipc done');
   return result;

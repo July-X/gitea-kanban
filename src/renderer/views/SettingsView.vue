@@ -30,12 +30,14 @@ import { useSettingsStore, SETTINGS_LIMITS } from '@renderer/stores/settings';
 import { useUiStore, THEME_DISPLAY_NAME, type Theme } from '@renderer/stores/ui';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
+import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
 
 const settings = useSettingsStore();
 const ui = useUiStore();
 const auth = useAuthStore();
 const repo = useRepoStore();
+const branch = useBranchStore();
 const router = useRouter();
 
 /** 外观分组 2 选 1（v1.2 收敛 · 与 tech-refine §14 token 矩阵 + §15.1 单选规格同步） */
@@ -196,7 +198,9 @@ async function onUpdateAccount(): Promise<void> {
     } catch {
       /* repo.error 由 toast 兜底，下面覆盖 */
     }
-    // 3) 跳到 /board —— BoardView mount 时重拉 columns
+    // 3) 清掉分支 store 的旧 selected（可能在新 gitea 上不存在）
+    branch.select(null);
+    // 4) 跳到 /board —— BoardView mount 时重拉 columns
     void router.push('/board');
     accountModalOpen.value = false;
     showToast({

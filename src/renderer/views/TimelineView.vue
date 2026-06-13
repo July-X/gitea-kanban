@@ -12,27 +12,23 @@
  *   - lanes 数组决定 lane 顺序和颜色（order 0 = main）
  *   - nodes 数组按时间戳倒序排列后作为行号
  *   - edges 数组（parent/combined）决定分支曲线
- *
- * ★ 2026-06-13 临时 stub（"分支"菜单移除步骤）
- *   - "分支"菜单 + branches.* IPC + useBranchStore 整个被移除
- *   - TimelineView 暂时保留：commit 详情弹窗（含文件清单聚合）功能已稳定，用户希望保留
- *   - 但分支选择 / commits.timeline IPC 也连带失效（IPC 还没删，下一步处理时间轴时一起删）
- *   - 这里临时把 branches 链全部 stub 化（type-check 过即可），Template 里分支 chip / DAG / heatmap 暂不渲染
- *   - 实际下一步：TimelineView 整体改写（"去除时间轴功能"），弹窗组件化迁出
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Clipboard, ExternalLink, GitBranch, Loader2, RefreshCw, Timer } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
-import { commitsGet, commitsTimeline } from '@renderer/lib/ipc-client';
+import { useBranchStore } from '@renderer/stores/branch';
+import { branchesList, commitsGet, commitsTimeline } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
 import type {
+  BranchDto,
   CommitDto,
   CommitNode as CommitNodeDto,
   CommitFileChangeDto,
   Lane,
+  ListBranchesResp,
   TimelineDto,
 } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
@@ -42,6 +38,7 @@ const router = useRouter();
 
 const auth = useAuthStore();
 const repo = useRepoStore();
+const branch = useBranchStore();
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
@@ -65,15 +62,7 @@ function giteaUrl(path: string): string {
   return `${giteaUrlBase.value}/${activeRepo.value.owner}/${activeRepo.value.name}/${path}`;
 }
 
-// ===== branches 链临时 stub（下一步整体改写 TimelineView 时彻底清掉）=====
-interface BranchStub {
-  name: string;
-  sha: string;
-  protected: boolean;
-  isDefault: boolean;
-  starred: boolean;
-}
-const branches = ref<BranchStub[]>([]);
+const branches = ref<BranchDto[]>([]);
 const selectedBranches = ref<Set<string>>(new Set());
 const timeline = ref<TimelineDto | null>(null);
 const loading = ref(false);
@@ -92,12 +81,46 @@ onMounted(async () => {
       repo.selectProject(project);
     } catch { /* error in repo.error */ }
   }
-  // ★ 不再调 loadBranches（branches.* IPC 已删）；分支数据等下一步 TimelineView 整体改写
+  if (activeProjectId.value) {
+    await loadBranches();
+  }
 });
 
 async function loadBranches(): Promise<void> {
-  // ★ no-op stub：branches.* IPC 已删, 这里什么都不做
+  if (!activeProjectId.value) return;
+  try {
+    const resp = (await branchesList({
+      projectId: activeProjectId.value,
+      limit: 50,
+      page: 1,
+    })) as ListBranchesResp;
+    branches.value = resp.items;
+    const pending = branch.consumePendingTimelineFocus();
+    if (pending && resp.items.some((b) => b.name === pending)) {
+      selectedBranches.value = new Set<string>([pending]);
+    } else {
+      const nextSelected = new Set<string>();
+      if (defaultBranch.value) nextSelected.add(defaultBranch.value.name);
+      const other = resp.items.find((b) => !b.isDefault);
+      if (other) nextSelected.add(other.name);
+      selectedBranches.value = nextSelected;
+    }
+    if (selectedBranches.value.size > 0) {
+      await loadTimeline();
+    }
+  } catch (e) {
+    localError.value = e as UserFacingError;
+  }
 }
+
+watch(() => branch.pendingTimelineFocus, async (name) => {
+  if (!name || !activeProjectId.value) return;
+  branch.pendingTimelineFocus = null;
+  if (branches.value.some((b) => b.name === name)) {
+    selectedBranches.value = new Set<string>([name]);
+    await loadTimeline();
+  }
+});
 
 async function loadTimeline(): Promise<void> {
   if (!activeProjectId.value) return;
@@ -220,21 +243,6 @@ async function onDetailCopyLink(n: CommitNodeDto): Promise<void> {
   } catch {
     showToast({ type: 'warn', message: '复制失败，请手动选择' });
   }
-}
-
-/**
- * 详情弹窗里"查看卡片"（穿透到分支视图）
- * - 带 linkedCardIds 时：先在分支视图选好分支、展开此 commit（手风琴）——
- *   卡片清单在 commit 展开体里能看到（branch-commit-row__detail-body 的卡片关联区）
- * - 路由 query 同时给 branch + expandCommit，BranchesView 监听这两个参数自己展开
- */
-function onDetailViewCards(n: CommitNodeDto): void {
-  const branchName = n.branchHints[0] ?? activeRepo.value?.defaultBranch ?? '';
-  detailOpen.value = false;
-  void router.push({
-    name: 'branches',
-    query: { branch: branchName, expandCommit: n.sha },
-  });
 }
 
 function refresh(): void {
@@ -901,11 +909,6 @@ defineExpose({
               <button
                 type="button"
                 class="commit-detail__btn commit-detail__btn--primary"
-                @click="onDetailViewCards(detailNode)"
-              >查看卡片</button>
-              <button
-                type="button"
-                class="commit-detail__btn"
                 @click="onDetailOpenInGitea(detailNode)"
               >
                 <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />

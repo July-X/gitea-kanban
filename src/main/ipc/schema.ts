@@ -208,6 +208,86 @@ export const RemoveProjectArgsSchema = z
 export type RemoveProjectArgs = z.infer<typeof RemoveProjectArgsSchema>;
 
 // ============================================================
+// ===== branches namespace（02-architecture.md §5.3.2）=====
+// ============================================================
+
+export const BranchLastCommitDtoSchema = z
+  .object({
+    sha: NonEmptyStringSchema,
+    message: z.string(),
+    author: z.string(),
+    date: IsoDateSchema,
+  })
+  .strict();
+export type BranchLastCommitDto = z.infer<typeof BranchLastCommitDtoSchema>;
+
+export const BranchDtoSchema = z
+  .object({
+    name: NonEmptyStringSchema,
+    sha: NonEmptyStringSchema,
+    protected: z.boolean(),
+    isDefault: z.boolean(),
+    starred: z.boolean().default(false),
+    lastCommit: BranchLastCommitDtoSchema.optional(),
+  })
+  .strict();
+export type BranchDto = z.infer<typeof BranchDtoSchema>;
+
+export const ListBranchesArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    query: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    page: z.number().int().min(1).default(1),
+  })
+  .strict();
+export type ListBranchesArgs = z.infer<typeof ListBranchesArgsSchema>;
+
+export const ListBranchesRespSchema = z
+  .object({
+    items: z.array(BranchDtoSchema),
+    total: z.number().int().min(0),
+    hasMore: z.boolean(),
+  })
+  .strict();
+export type ListBranchesResp = z.infer<typeof ListBranchesRespSchema>;
+
+export const CreateBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    newBranch: NonEmptyStringSchema,
+    fromBranch: NonEmptyStringSchema,
+  })
+  .strict();
+export type CreateBranchArgs = z.infer<typeof CreateBranchArgsSchema>;
+
+export const RenameBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    oldName: NonEmptyStringSchema,
+    newName: NonEmptyStringSchema,
+  })
+  .strict();
+export type RenameBranchArgs = z.infer<typeof RenameBranchArgsSchema>;
+
+export const DeleteBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    branch: NonEmptyStringSchema,
+  })
+  .strict();
+export type DeleteBranchArgs = z.infer<typeof DeleteBranchArgsSchema>;
+
+export const StarBranchArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    branch: NonEmptyStringSchema,
+    starred: z.boolean(),
+  })
+  .strict();
+export type StarBranchArgs = z.infer<typeof StarBranchArgsSchema>;
+
+// ============================================================
 // ===== commits namespace（02-architecture.md §5.3.3）=====
 // ============================================================
 

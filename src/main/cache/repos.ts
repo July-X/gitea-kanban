@@ -205,18 +205,16 @@ export function touchLastSync(args: {
 }
 
 /**
-* 回填 repo_projects.default_branch —— v1.1.3 timeline polish 引入
-  *
-  * 背景（2026-06-13 user 报"时间轴完全不可用"+ diagnose CDP 复现）：
-  * - 旧 addProject 写入 sqlite 时 default_branch 为 null
-  * - "分支"菜单的 list handler 用 proj.defaultBranch 判定 BranchDto.isDefault
-  *   （★ 2026-06-13 "分支"菜单移除，branches.* IPC + BranchDto 全部删除——
-  *    default_branch 字段保留，仍被 repo_projects 用来记仓库默认分支名）
-  * - 全 null → 所有 branch 都是 isDefault=false
-  * - TimelineView 默认选 default branch 找不到 → 只勾选 1 个非 default 分支
-  * - commits.timeline IPC 只返 7 commits → X6 画 7 节点（应该是 4 分支 15 commit）
-  *
-  * 修法：reposListHandler 拉完 gitea repo 后对每个 project row 检查
+ * 回填 repo_projects.default_branch —— v1.1.3 timeline polish 引入
+ *
+ * 背景（2026-06-13 user 报"时间轴完全不可用"+ diagnose CDP 复现）：
+ * - 旧 addProject 写入 sqlite 时 default_branch 为 null
+ * - branchesListHandler 用 proj.defaultBranch 判定 BranchDto.isDefault
+ * - 全 null → 所有 branch 都是 isDefault=false
+ * - TimelineView 默认选 default branch 找不到 → 只勾选 1 个非 default 分支
+ * - commits.timeline IPC 只返 7 commits → X6 画 7 节点（应该是 4 分支 15 commit）
+ *
+ * 修法：reposListHandler 拉完 gitea repo 后对每个 project row 检查
  * - if row 已有 default_branch → noop
  * - elif gitea repo.default_branch 有值 → UPDATE 写回
  *

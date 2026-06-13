@@ -153,11 +153,9 @@ async function reposListHandler(args: ListReposArgs): Promise<ListReposResp> {
 
   // 5. 写回本地 lastSyncAt（成功的 list 算一次同步）
   //    + 顺手 backfill defaultBranch（v1.1.3 timeline polish 发现 sqlite 里 default_branch 为空，
-  //    导致所有 BranchDto.isDefault = false，"分支"菜单选不出 default 分支；
+  //    导致所有 BranchDto.isDefault = false，branches.list 选不出 default 分支；
   //    TimelineView 默认勾选只命中 1 个非 default 分支 → commits.timeline IPC 只返 7 commits，
-  //    用户感觉"时间轴画得零零散散，完全不可用"。
-  //    ★ 2026-06-13 "分支"菜单移除，branches.* IPC + BranchDto 全部删除——
-  //      defaultBranch backfill 仍保留（repo_projects.default_branch 字段还在）。）
+  //    用户感觉"时间轴画得零零散散，完全不可用"）。
   for (const item of giteaResult.items) {
     const proj = projectMap.get(`${item.owner}/${item.name}`);
     if (proj) {
