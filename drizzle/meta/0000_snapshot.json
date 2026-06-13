@@ -574,67 +574,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "starred_branches": {
-      "name": "starred_branches",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "repo_project_id": {
-          "name": "repo_project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "branch": {
-          "name": "branch",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "uniq_repo_branch": {
-          "name": "uniq_repo_branch",
-          "columns": [
-            "repo_project_id",
-            "branch"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "starred_branches_repo_project_id_repo_projects_id_fk": {
-          "name": "starred_branches_repo_project_id_repo_projects_id_fk",
-          "tableFrom": "starred_branches",
-          "tableTo": "repo_projects",
-          "columnsFrom": [
-            "repo_project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "prefs": {
       "name": "prefs",
       "columns": {

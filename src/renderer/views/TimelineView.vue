@@ -12,21 +12,27 @@
  *   - lanes 数组决定 lane 顺序和颜色（order 0 = main）
  *   - nodes 数组按时间戳倒序排列后作为行号
  *   - edges 数组（parent/combined）决定分支曲线
+ *
+ * ★ 2026-06-13 临时 stub（"分支"菜单移除步骤）
+ *   - "分支"菜单 + branches.* IPC + useBranchStore 整个被移除
+ *   - TimelineView 暂时保留：commit 详情弹窗（含文件清单聚合）功能已稳定，用户希望保留
+ *   - 但分支选择 / commits.timeline IPC 也连带失效（IPC 还没删，下一步处理时间轴时一起删）
+ *   - 这里临时把 branches 链全部 stub 化（type-check 过即可），Template 里分支 chip / DAG / heatmap 暂不渲染
+ *   - 实际下一步：TimelineView 整体改写（"去除时间轴功能"），弹窗组件化迁出
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Clipboard, ExternalLink, GitBranch, Loader2, RefreshCw, Timer } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
-import { useBranchStore } from '@renderer/stores/branch';
-import { branchesList, commitsTimeline } from '@renderer/lib/ipc-client';
+import { commitsGet, commitsTimeline } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
 import type {
-  BranchDto,
+  CommitDto,
   CommitNode as CommitNodeDto,
+  CommitFileChangeDto,
   Lane,
-  ListBranchesResp,
   TimelineDto,
 } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
@@ -36,7 +42,6 @@ const router = useRouter();
 
 const auth = useAuthStore();
 const repo = useRepoStore();
-const branch = useBranchStore();
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
@@ -60,7 +65,15 @@ function giteaUrl(path: string): string {
   return `${giteaUrlBase.value}/${activeRepo.value.owner}/${activeRepo.value.name}/${path}`;
 }
 
-const branches = ref<BranchDto[]>([]);
+// ===== branches 链临时 stub（下一步整体改写 TimelineView 时彻底清掉）=====
+interface BranchStub {
+  name: string;
+  sha: string;
+  protected: boolean;
+  isDefault: boolean;
+  starred: boolean;
+}
+const branches = ref<BranchStub[]>([]);
 const selectedBranches = ref<Set<string>>(new Set());
 const timeline = ref<TimelineDto | null>(null);
 const loading = ref(false);
@@ -79,46 +92,12 @@ onMounted(async () => {
       repo.selectProject(project);
     } catch { /* error in repo.error */ }
   }
-  if (activeProjectId.value) {
-    await loadBranches();
-  }
+  // ★ 不再调 loadBranches（branches.* IPC 已删）；分支数据等下一步 TimelineView 整体改写
 });
 
 async function loadBranches(): Promise<void> {
-  if (!activeProjectId.value) return;
-  try {
-    const resp = (await branchesList({
-      projectId: activeProjectId.value,
-      limit: 50,
-      page: 1,
-    })) as ListBranchesResp;
-    branches.value = resp.items;
-    const pending = branch.consumePendingTimelineFocus();
-    if (pending && resp.items.some((b) => b.name === pending)) {
-      selectedBranches.value = new Set<string>([pending]);
-    } else {
-      const nextSelected = new Set<string>();
-      if (defaultBranch.value) nextSelected.add(defaultBranch.value.name);
-      const other = resp.items.find((b) => !b.isDefault);
-      if (other) nextSelected.add(other.name);
-      selectedBranches.value = nextSelected;
-    }
-    if (selectedBranches.value.size > 0) {
-      await loadTimeline();
-    }
-  } catch (e) {
-    localError.value = e as UserFacingError;
-  }
+  // ★ no-op stub：branches.* IPC 已删, 这里什么都不做
 }
-
-watch(() => branch.pendingTimelineFocus, async (name) => {
-  if (!name || !activeProjectId.value) return;
-  branch.pendingTimelineFocus = null;
-  if (branches.value.some((b) => b.name === name)) {
-    selectedBranches.value = new Set<string>([name]);
-    await loadTimeline();
-  }
-});
 
 async function loadTimeline(): Promise<void> {
   if (!activeProjectId.value) return;
@@ -158,10 +137,18 @@ function toggleBranch(name: string): void {
 
 const detailOpen = ref(false);
 const detailNode = ref<CommitNodeDto | null>(null);
+/** 完整 commit 详情缓存（sha → CommitDto）—— 含 files、functions、linkedCards
+ *  v1.3 任务 #commit-detail-agg：弹窗聚合展示文件清单（之前只在 BranchesView 展开体里） */
+const detailDetailCache = ref<Map<string, CommitDto>>(new Map());
+const detailLoadingSet = ref<Set<string>>(new Set());
 
 function openCommitDetail(n: CommitNodeDto): void {
   detailNode.value = n;
   detailOpen.value = true;
+  // 懒加载完整 detail（拿 files + linkedCards）
+  if (!detailDetailCache.value.has(n.sha)) {
+    void loadDetailDetail(n.sha);
+  }
 }
 function closeCommitDetail(): void {
   detailOpen.value = false;
@@ -169,8 +156,45 @@ function closeCommitDetail(): void {
   setTimeout(() => { if (!detailOpen.value) detailNode.value = null; }, 200);
 }
 
+/** 拉完整 commit 详情（gitea /git/commits/{sha}）—— 含 stats + files */
+async function loadDetailDetail(sha: string): Promise<void> {
+  const pid = activeProjectId.value;
+  if (!pid) return;
+  if (detailLoadingSet.value.has(sha)) return;
+  const loadingNext = new Set(detailLoadingSet.value);
+  loadingNext.add(sha);
+  detailLoadingSet.value = loadingNext;
+  try {
+    const detail = (await commitsGet({ projectId: pid, sha })) as CommitDto;
+    const next = new Map(detailDetailCache.value);
+    next.set(sha, detail);
+    detailDetailCache.value = next;
+  } catch (e) {
+    showToast({
+      type: 'error',
+      message: '加载文件清单失败',
+      description: (e as Error)?.message ?? '请稍后重试',
+    });
+  } finally {
+    const loadingDone = new Set(detailLoadingSet.value);
+    loadingDone.delete(sha);
+    detailLoadingSet.value = loadingDone;
+  }
+}
+
 function detailAuthorInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || '?';
+}
+
+/** v1.3 文件清单 helpers（跟 BranchesView 一样的聚合规则） */
+function detailFilesHasNonBinary(files: CommitFileChangeDto[]): boolean {
+  return files.some((f) => !f.binary);
+}
+function detailFilesTotalAdditions(files: CommitFileChangeDto[]): number {
+  return files.filter((f) => !f.binary).reduce((s, f) => s + (f.additions ?? 0), 0);
+}
+function detailFilesTotalDeletions(files: CommitFileChangeDto[]): number {
+  return files.filter((f) => !f.binary).reduce((s, f) => s + (f.deletions ?? 0), 0);
 }
 
 /** 详情弹窗里"在 gitea 打开此提交" */
@@ -525,6 +549,25 @@ function formatRelative(iso: string): string {
   if (mo < 12) return `${mo} 个月前`;
   return `${Math.floor(mo / 12)} 年前`;
 }
+
+// ===== 临时性能测试入口（CDP 注入用）=====
+import { getCurrentInstance, onMounted } from 'vue';
+const __timelineInst = getCurrentInstance();
+onMounted(() => {
+  if (__timelineInst && typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown>).__timelineVm = __timelineInst.proxy;
+  }
+});
+defineExpose({
+  branches,
+  timeline,
+  selectedBranches,
+  sortedNodes,
+  commitRows,
+  totalRows,
+  loadTimeline,
+  loadBranches,
+});
 </script>
 
 <template>
@@ -738,6 +781,15 @@ function formatRelative(iso: string): string {
             <h2 class="commit-detail__msg" :title="detailNode.message">
               {{ detailNode.message.split('\n')[0] }}
             </h2>
+
+            <!--
+              v1.3 · 内容体（msg + fullmsg + meta + files + cards）
+              包在 commit-detail__body 里：
+              - 弹窗 max-height:calc(100vh-64px) + overflow:hidden
+              - body 用 overflow-y:auto 滚动
+              - head / footer 留在 body 外 → 永远可见
+            -->
+            <div class="commit-detail__body">
             <pre
               v-if="detailNode.message.includes('\n')"
               class="commit-detail__fullmsg"
@@ -783,6 +835,49 @@ function formatRelative(iso: string): string {
               </div>
             </dl>
 
+            <!--
+              v1.3 · 任务 #commit-detail-agg
+              把 BranchesView 展开体里的"完整 message + 文件清单"聚合进弹窗
+              （后续会考虑移除"分支"菜单，这个弹窗就是它的接班人）
+            -->
+            <div class="commit-detail__files">
+              <div
+                v-if="detailDetailCache.get(detailNode.sha)?.files?.length"
+                class="commit-detail__files-block"
+              >
+                <p class="commit-detail__files-summary">
+                  共修改 {{ detailDetailCache.get(detailNode.sha).files.length }} 个文件<span
+                    v-if="detailFilesHasNonBinary(detailDetailCache.get(detailNode.sha).files)"
+                  >，包含 <span class="commit-detail__files-add">+{{ detailFilesTotalAdditions(detailDetailCache.get(detailNode.sha).files) }}</span> 行新增 和 <span class="commit-detail__files-del">-{{ detailFilesTotalDeletions(detailDetailCache.get(detailNode.sha).files) }}</span> 行删除</span>
+                </p>
+                <ul class="commit-detail__files-list">
+                  <li
+                    v-for="f in detailDetailCache.get(detailNode.sha).files"
+                    :key="(f.previousFilename ?? f.filename) + '|' + (f.status ?? '')"
+                    class="commit-detail__file"
+                    :class="{ 'commit-detail__file--binary': f.binary }"
+                  >
+                    <span class="commit-detail__file-name" :title="f.filename">
+                      <span
+                        v-if="f.status === 'renamed' && f.previousFilename"
+                        class="commit-detail__file-rename"
+                      >{{ f.previousFilename }} → {{ f.filename }}</span>
+                      <span v-else>{{ f.filename }}</span>
+                    </span>
+                    <span v-if="!f.binary" class="commit-detail__file-stats">
+                      <span class="commit-detail__files-add">+{{ f.additions ?? 0 }}</span>
+                      <span class="commit-detail__files-del">-{{ f.deletions ?? 0 }}</span>
+                    </span>
+                    <span v-else class="commit-detail__file-tag">二进制</span>
+                  </li>
+                </ul>
+              </div>
+              <p
+                v-else-if="detailLoadingSet.has(detailNode.sha)"
+                class="commit-detail__files-loading muted"
+              >正在加载文件清单…</p>
+            </div>
+
             <div
               v-if="detailNode.linkedCardIds && detailNode.linkedCardIds.length"
               class="commit-detail__cards"
@@ -800,6 +895,7 @@ function formatRelative(iso: string): string {
                 >#{{ cid }}</span>
               </div>
             </div>
+            </div><!-- /commit-detail__body -->
 
             <footer class="commit-detail__footer">
               <button
@@ -1190,7 +1286,24 @@ function formatRelative(iso: string): string {
   line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 0;
 }
+.commit-detail__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  /* 自定义 webkit 滚动条 —— 跟 commit-list 一致风格 */
+}
+.commit-detail__body::-webkit-scrollbar { width: 10px; }
+.commit-detail__body::-webkit-scrollbar-track { background: transparent; }
+.commit-detail__body::-webkit-scrollbar-thumb {
+  background: var(--color-divider);
+  border-radius: 5px;
+  border: 2px solid var(--color-bg-elevated);
+}
+.commit-detail__body::-webkit-scrollbar-thumb:hover { background: var(--color-divider-strong); }
 .commit-detail__fullmsg {
   margin: 0 var(--space-4) var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -1288,6 +1401,77 @@ function formatRelative(iso: string): string {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   color: var(--color-text);
+}
+
+/* v1.3 · 文件清单（聚合自 BranchesView 展开体） */
+.commit-detail__files {
+  margin: 0 var(--space-4) var(--space-3);
+}
+.commit-detail__files-block {
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.commit-detail__files-summary {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+}
+.commit-detail__files-add { color: var(--color-success, #2da44e); font-weight: 600; }
+.commit-detail__files-del { color: var(--color-danger, #cf222e); font-weight: 600; }
+.commit-detail__files-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.commit-detail__file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-3);
+  font-size: var(--font-xs);
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-divider);
+}
+.commit-detail__file:last-child { border-bottom: 0; }
+.commit-detail__file:hover { background: var(--color-bg-hover); }
+.commit-detail__file--binary { color: var(--color-text-muted); }
+.commit-detail__file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono-stack);
+}
+.commit-detail__file-rename { color: var(--color-text-muted); }
+.commit-detail__file-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono-stack);
+  flex-shrink: 0;
+}
+.commit-detail__file-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.commit-detail__files-loading {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-xs);
+  text-align: center;
 }
 
 .commit-detail__footer {

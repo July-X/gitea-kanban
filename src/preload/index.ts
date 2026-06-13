@@ -79,15 +79,6 @@ const api = {
  removeProject: invoke(IpcChannel.REPOS_REMOVE_PROJECT),
  },
 
- //===== branches namespace =====
- branches: {
- list: invoke(IpcChannel.BRANCHES_LIST),
- create: invoke(IpcChannel.BRANCHES_CREATE),
- rename: invoke(IpcChannel.BRANCHES_RENAME),
- delete: invoke(IpcChannel.BRANCHES_DELETE),
- star: invoke(IpcChannel.BRANCHES_STAR),
- },
-
  //===== commits namespace =====
  commits: {
  list: invoke(IpcChannel.COMMITS_LIST),

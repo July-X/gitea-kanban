@@ -317,21 +317,6 @@ export function reposRemoveProject(args: { projectId: string }): Promise<unknown
  return getIpcClient().invoke('repos', 'removeProject', args);
 }
 
-/**列出某 project 的分支 */
-export function branchesList(args: { projectId: string; query?: string; limit?: number; page?: number }): Promise<unknown> {
- return getIpcClient().invoke('branches', 'list', args);
-}
-
-/**
- * 收藏/取消收藏某分支（v1：只更本地 starred_branches 表，**不**调 gitea）
- *
- * 入参契约见 StarBranchArgsSchema。后端处理：setStarred(args)
- * （cache/branches.ts:UPSERT/DELETE）。
- */
-export function branchesStar(args: { projectId: string; branch: string; starred: boolean }): Promise<unknown> {
- return getIpcClient().invoke('branches', 'star', args);
-}
-
 /**
  * 列出某 project 的 commit（gitea /repos/{owner}/{repo}/commits）
  *

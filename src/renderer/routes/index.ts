@@ -39,12 +39,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '时间轴', requiresAuth: true },
   },
   {
-    path: '/branches',
-    name: 'branches',
-    component: () => import('@renderer/views/BranchesView.vue'),
-    meta: { title: '分支', requiresAuth: true },
-  },
-  {
     path: '/merges',
     name: 'merges',
     component: () => import('@renderer/views/MergesView.vue'),

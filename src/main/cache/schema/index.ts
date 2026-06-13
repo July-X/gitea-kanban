@@ -12,11 +12,13 @@
  *5. column_label_mapping —— 列 ↔ gitea label 多对多映射
  *6. card_issue_link ——派生缓存：gitea issue 被哪条列"看到"（v1 可选保留）
  *7. gitea_refs ——关联的 git 对象（commit / pr / branch / issue）
- *8. starred_branches ——收藏分支
- *9. prefs —— 用户偏好（key-value）
- *10. undo_entries ——撤销栈
- *11. cache_entries ——通用缓存元数据
- *12. hook_deliveries —— webhook delivery 去重（v2启用）
+ *8. prefs —— 用户偏好（key-value）
+ *9. undo_entries ——撤销栈
+ *10. cache_entries ——通用缓存元数据
+ *11. hook_deliveries —— webhook delivery 去重（v2启用）
+
+ * 2026-06-13 移除：
+ * - starred_branches —— "分支"菜单被废止后, 收藏分支的本地表一并删除
  *
  *基础设施表2 张（**不**计入业务表）：
  * - gitea_user —— denormalized gitea /user 信息（首屏快取）
@@ -41,7 +43,6 @@ export * from './boardColumns';
 export * from './columnLabelMapping';
 export * from './cardIssueLink';
 export * from './giteaRefs';
-export * from './starredBranches';
 export * from './prefs';
 export * from './undoEntries';
 export * from './cacheEntries';

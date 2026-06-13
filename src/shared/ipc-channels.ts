@@ -51,13 +51,6 @@ export const IpcChannel = {
  REPOS_ADD_PROJECT: 'repos.addProject',
  REPOS_REMOVE_PROJECT: 'repos.removeProject',
 
- // === branches namespace（02-architecture.md §5.3.2）===
- BRANCHES_LIST: 'branches.list',
- BRANCHES_CREATE: 'branches.create',
- BRANCHES_RENAME: 'branches.rename',
- BRANCHES_DELETE: 'branches.delete',
- BRANCHES_STAR: 'branches.star',
-
  // === commits namespace（02-architecture.md §5.3.3 + §5.3.4）===
  COMMITS_LIST: 'commits.list',
  COMMITS_GET: 'commits.get',

@@ -18,7 +18,6 @@
 
 import { registerAuthIpc, unregisterAuthIpc } from './auth.js';
 import { registerReposIpc, unregisterReposIpc } from './repos.js';
-import { registerBranchesIpc, unregisterBranchesIpc } from './branches.js';
 import { registerCommitsIpc, unregisterCommitsIpc } from './commits.js';
 import { registerPullsIpc, unregisterPullsIpc } from './pulls.js';
 import { registerBoardIpc, unregisterBoardIpc } from './board.js';
@@ -32,7 +31,6 @@ import { registerClipboardIpc, unregisterClipboardIpc } from './clipboard.js';
 export function registerAllIpcHandlers(): void {
   registerAuthIpc();
   registerReposIpc();
-  registerBranchesIpc();
   registerCommitsIpc();
   registerPullsIpc();
   registerBoardIpc();
@@ -47,7 +45,6 @@ export function registerAllIpcHandlers(): void {
 export function unregisterAllIpcHandlers(): void {
   unregisterAuthIpc();
   unregisterReposIpc();
-  unregisterBranchesIpc();
   unregisterCommitsIpc();
   unregisterPullsIpc();
   unregisterBoardIpc();
