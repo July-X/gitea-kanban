@@ -14,12 +14,14 @@
  *   - edges 数组（parent/combined）决定分支曲线
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitBranch, Loader2, RefreshCw, Timer } from 'lucide-vue-next';
+import { useRoute, useRouter } from 'vue-router';
+import { Clipboard, ExternalLink, GitBranch, Loader2, RefreshCw, Timer } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
 import { branchesList, commitsTimeline } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
+import { showToast } from '@renderer/lib/toast';
 import type {
   BranchDto,
   CommitNode as CommitNodeDto,
@@ -28,6 +30,9 @@ import type {
   TimelineDto,
 } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
+
+const route = useRoute();
+const router = useRouter();
 
 const auth = useAuthStore();
 const repo = useRepoStore();
@@ -145,6 +150,67 @@ function toggleBranch(name: string): void {
   } else {
     timeline.value = null;
   }
+}
+
+// ============================================================
+// 提交详情弹窗（v1.3 需求：点击 commit-row 弹窗 + 穿透到分支视图）
+// ============================================================
+
+const detailOpen = ref(false);
+const detailNode = ref<CommitNodeDto | null>(null);
+
+function openCommitDetail(n: CommitNodeDto): void {
+  detailNode.value = n;
+  detailOpen.value = true;
+}
+function closeCommitDetail(): void {
+  detailOpen.value = false;
+  // 保留 detailNode 一帧让过渡动画播完再清，避免内容突变
+  setTimeout(() => { if (!detailOpen.value) detailNode.value = null; }, 200);
+}
+
+function detailAuthorInitial(name: string): string {
+  return name.trim().charAt(0).toUpperCase() || '?';
+}
+
+/** 详情弹窗里"在 gitea 打开此提交" */
+function onDetailOpenInGitea(n: CommitNodeDto): void {
+  const url = giteaUrl(`commit/${n.sha}`);
+  if (!url) {
+    showToast({ type: 'warn', message: '未配置 gitea 地址' });
+    return;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/** 详情弹窗里"复制链接"（复制 gitea commit URL，非 sha） */
+async function onDetailCopyLink(n: CommitNodeDto): Promise<void> {
+  const url = giteaUrl(`commit/${n.sha}`);
+  if (!url) {
+    showToast({ type: 'warn', message: '未配置 gitea 地址' });
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast({ type: 'success', message: `已复制 ${n.shortSha} 的链接`, duration: 1500 });
+  } catch {
+    showToast({ type: 'warn', message: '复制失败，请手动选择' });
+  }
+}
+
+/**
+ * 详情弹窗里"查看卡片"（穿透到分支视图）
+ * - 带 linkedCardIds 时：先在分支视图选好分支、展开此 commit（手风琴）——
+ *   卡片清单在 commit 展开体里能看到（branch-commit-row__detail-body 的卡片关联区）
+ * - 路由 query 同时给 branch + expandCommit，BranchesView 监听这两个参数自己展开
+ */
+function onDetailViewCards(n: CommitNodeDto): void {
+  const branchName = n.branchHints[0] ?? activeRepo.value?.defaultBranch ?? '';
+  detailOpen.value = false;
+  void router.push({
+    name: 'branches',
+    query: { branch: branchName, expandCommit: n.sha },
+  });
 }
 
 function refresh(): void {
@@ -593,6 +659,12 @@ function formatRelative(iso: string): string {
                   :key="row.node.id"
                   class="commit-row"
                   :class="{ 'is-head-row': row.isHead }"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="`查看提交 ${row.node.shortSha} 详情`"
+                  @click="openCommitDetail(row.node)"
+                  @keydown.enter.prevent="openCommitDetail(row.node)"
+                  @keydown.space.prevent="openCommitDetail(row.node)"
                 >
                   <div class="commit-row__graph">
                     <div
@@ -632,6 +704,137 @@ function formatRelative(iso: string): string {
         </section>
       </template>
     </div>
+
+    <!-- ============================================================
+         提交详情弹窗（v1.3 · 任务 #commit-detail）
+         - 点 commit-row 触发 openCommitDetail → detailOpen=true
+         - 内部 3 个动作：查看卡片（穿透到 /branches）、在 gitea 打开、复制链接
+         - Esc 关闭、点遮罩关闭
+         ============================================================ -->
+    <Teleport to="body">
+      <Transition name="commit-detail">
+        <div
+          v-if="detailOpen && detailNode"
+          class="commit-detail-overlay"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="`提交 ${detailNode.shortSha} 详情`"
+          @click.self="closeCommitDetail"
+          @keydown.esc="closeCommitDetail"
+        >
+          <div class="commit-detail" @click.stop>
+            <header class="commit-detail__head">
+              <div class="commit-detail__head-left">
+                <code class="commit-detail__hash mono">{{ detailNode.sha.slice(0, 12) }}</code>
+                <span v-if="detailNode.isHead" class="commit-detail__head-badge">HEAD</span>
+              </div>
+              <div class="commit-detail__head-right">
+                <span class="commit-detail__time">{{ formatRelative(detailNode.timestamp) }}</span>
+                <span class="commit-detail__time-sep">·</span>
+                <span class="commit-detail__author-name">{{ detailNode.author.name }}</span>
+              </div>
+            </header>
+
+            <h2 class="commit-detail__msg" :title="detailNode.message">
+              {{ detailNode.message.split('\n')[0] }}
+            </h2>
+            <pre
+              v-if="detailNode.message.includes('\n')"
+              class="commit-detail__fullmsg"
+            >{{ detailNode.message }}</pre>
+
+            <dl class="commit-detail__meta">
+              <div class="commit-detail__meta-row">
+                <dt>作者</dt>
+                <dd>
+                  <span class="commit-detail__avatar">
+                    <img
+                      v-if="detailNode.author.avatarUrl"
+                      :src="detailNode.author.avatarUrl"
+                      :alt="detailNode.author.name"
+                      class="commit-detail__avatar-img"
+                      @error="($event.target as HTMLImageElement).style.display='none'"
+                    />
+                    <span v-else class="commit-detail__avatar-fallback">
+                      {{ detailAuthorInitial(detailNode.author.name) }}
+                    </span>
+                  </span>
+                  <span class="commit-detail__author-name-text">{{ detailNode.author.name }}</span>
+                </dd>
+              </div>
+              <div class="commit-detail__meta-row">
+                <dt>改动</dt>
+                <dd>
+                  <span class="commit-detail__stat-add">+{{ detailNode.additions ?? 0 }}</span>
+                  <span class="commit-detail__stat-sep">/</span>
+                  <span class="commit-detail__stat-del">-{{ detailNode.deletions ?? 0 }}</span>
+                  <span class="commit-detail__stat-files">· {{ detailNode.filesChanged ?? '—' }} 个文件</span>
+                </dd>
+              </div>
+              <div v-if="detailNode.branchHints.length" class="commit-detail__meta-row">
+                <dt>分支</dt>
+                <dd>
+                  <span
+                    v-for="b in detailNode.branchHints"
+                    :key="b"
+                    class="commit-detail__branch-chip"
+                  >{{ b }}</span>
+                </dd>
+              </div>
+            </dl>
+
+            <div
+              v-if="detailNode.linkedCardIds && detailNode.linkedCardIds.length"
+              class="commit-detail__cards"
+            >
+              <div class="commit-detail__cards-title">
+                关联 {{ detailNode.linkedCardIds.length }} 张卡片：
+                <span class="commit-detail__cards-msg">{{ detailNode.message.split('\n')[0] }}</span>
+              </div>
+              <div class="commit-detail__cards-ids">
+                编号
+                <span
+                  v-for="cid in detailNode.linkedCardIds"
+                  :key="cid"
+                  class="commit-detail__card-id mono"
+                >#{{ cid }}</span>
+              </div>
+            </div>
+
+            <footer class="commit-detail__footer">
+              <button
+                type="button"
+                class="commit-detail__btn commit-detail__btn--primary"
+                @click="onDetailViewCards(detailNode)"
+              >查看卡片</button>
+              <button
+                type="button"
+                class="commit-detail__btn"
+                @click="onDetailOpenInGitea(detailNode)"
+              >
+                <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
+                在 gitea 打开
+              </button>
+              <button
+                type="button"
+                class="commit-detail__btn"
+                @click="onDetailCopyLink(detailNode)"
+              >
+                <Clipboard :size="14" :stroke-width="2" aria-hidden="true" />
+                复制链接
+              </button>
+            </footer>
+
+            <button
+              type="button"
+              class="commit-detail__close"
+              aria-label="关闭"
+              @click="closeCommitDetail"
+            >×</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -888,4 +1091,254 @@ function formatRelative(iso: string): string {
 .mono { font-family: var(--font-mono-stack); }
 .muted { color: var(--color-text-muted); }
 .text-xs { font-size: var(--font-xs); }
+
+/* ============== Commit Detail Dialog（v1.3 任务 #commit-detail）============== */
+.commit-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, #000 50%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.commit-detail {
+  position: relative;
+  width: 540px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-divider);
+}
+.commit-detail__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  font-size: 22px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.commit-detail__close:hover { background: var(--color-bg-hover); color: var(--color-text); }
+
+.commit-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+  gap: var(--space-3);
+}
+.commit-detail__head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.commit-detail__hash {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+.commit-detail__head-badge {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.5px;
+}
+.commit-detail__head-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.commit-detail__time-sep { opacity: 0.5; }
+
+.commit-detail__msg {
+  margin: 0;
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  font-size: var(--font-md);
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.commit-detail__fullmsg {
+  margin: 0 var(--space-4) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.commit-detail__meta {
+  margin: 0 var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.commit-detail__meta-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+}
+.commit-detail__meta-row dt {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+}
+.commit-detail__meta-row dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--color-text);
+}
+.commit-detail__avatar {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-primary);
+  color: #fff;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.commit-detail__avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.commit-detail__stat-add { color: var(--color-success, #2da44e); font-weight: 600; }
+.commit-detail__stat-del { color: var(--color-danger, #cf222e); font-weight: 600; }
+.commit-detail__stat-sep { color: var(--color-text-muted); margin: 0 2px; }
+.commit-detail__stat-files { color: var(--color-text-secondary); }
+.commit-detail__branch-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text);
+  font-family: var(--font-mono-stack);
+}
+
+.commit-detail__cards {
+  margin: 0 var(--space-4) var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-success-soft, color-mix(in srgb, var(--color-primary) 12%, transparent));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  border-radius: var(--radius-md);
+}
+.commit-detail__cards-title {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+.commit-detail__cards-msg { color: var(--color-text-secondary); }
+.commit-detail__cards-ids {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.commit-detail__card-id {
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+
+.commit-detail__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-bg);
+}
+.commit-detail__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.commit-detail__btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-divider-strong);
+}
+.commit-detail__btn--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  font-weight: 500;
+}
+.commit-detail__btn--primary:hover {
+  background: var(--color-primary);
+  filter: brightness(1.08);
+  border-color: var(--color-primary);
+}
+
+/* Transition：淡入淡出（commit-detail name） */
+.commit-detail-enter-active,
+.commit-detail-leave-active {
+  transition: opacity var(--t-base) var(--ease);
+}
+.commit-detail-enter-active .commit-detail,
+.commit-detail-leave-active .commit-detail {
+  transition: transform var(--t-base) var(--ease), opacity var(--t-base) var(--ease);
+}
+.commit-detail-enter-from,
+.commit-detail-leave-to {
+  opacity: 0;
+}
+.commit-detail-enter-from .commit-detail,
+.commit-detail-leave-to .commit-detail {
+  transform: translateY(8px) scale(0.98);
+  opacity: 0;
+}
 </style>
