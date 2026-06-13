@@ -1481,6 +1481,15 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   gap: 4px;
 }
 
+/*
+ * v1.1.3 · task #42 · 让 cqh 解析到外层 commits list 的实际高度
+ * - .branch-commit-row__files-list 用 max-height: 50cqh 限制文件清单的滚动边界
+ * - cqh 是 container query height，必须有 ancestor 声明 container-type 才会解析到该容器，
+ *   否则默认解析到 viewport（≈ vh），50cqh 就成了"50% 视口"，根本撑不出滚动条
+ * - 这里是文件清单真正该参考的高度（commits-list 的可见高度），所以把 commits-list
+ *   标成 size 容器查询：flex:1; min-height:0 保证它有确定的渲染高度，
+ *   加 container-type:size 不影响布局（只让它成为 containment context）
+ */
 .branches__commits-list {
   list-style: none;
   margin: 0;
@@ -1491,6 +1500,7 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  container-type: size;
 }
 
 .branch-commit-row {
