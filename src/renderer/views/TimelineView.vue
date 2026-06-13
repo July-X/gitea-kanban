@@ -160,7 +160,7 @@ watch(() => activeProjectId.value, async (id) => {
 // ============================================================
 
 const ROW_H = 32;
-const GRAPH_W = 54; // 收窄到 8 lane 紧凑布局（54 = 5 + 7×6 + 5 padding）
+const GRAPH_W = 100; // 8 lane 间距 12px（5 + 7×12 + 7 padding ≈ 100）
 
 /** 节点按时间戳倒序（新 → 旧） */
 const sortedNodes = computed<CommitNodeDto[]>(() => {
@@ -170,13 +170,13 @@ const sortedNodes = computed<CommitNodeDto[]>(() => {
   );
 });
 
-/** laneId → x 中心点（lane.order 0 = main @ x=5；6px 步进到 x=47） */
+/** laneId → x 中心点（lane.order 0 = main @ x=5；12px 步进到 x=89） */
 const laneXMap = computed<Map<string, number>>(() => {
   const map = new Map<string, number>();
   if (!timeline.value) return map;
   const lanes = [...timeline.value.lanes].sort((a, b) => a.order - b.order);
   lanes.forEach((lane, i) => {
-    map.set(lane.id, 5 + i * 6);
+    map.set(lane.id, 5 + i * 12);
   });
   return map;
 });
@@ -369,7 +369,7 @@ const graphPaths = computed<GraphPath[]>(() => {
   //     简化策略：找所有与 exp lane x 接近的 crossing y
   const expLane = branchLanes.find((l) => l.label.toLowerCase().includes('exp'));
   if (expLane) {
-    const expX = xMap.get(expLane.id) ?? 23;
+    const expX = xMap.get(expLane.id) ?? 41;
     // 找所有穿过 expX 的非 exp 曲线 / 直线：每条 branch lane 都可能穿过
     // 简化：遍历所有 path，估算与 expX 相交的 y
     // 这里采用更简单的方法：基于 lane order 推算 — order 3 之后的所有 lane 都会有曲线穿过 expX
@@ -810,7 +810,7 @@ function formatRelative(iso: string): string {
 .commit-row {
   position: relative;
   display: grid;
-  grid-template-columns: 54px 80px 1fr 360px;
+  grid-template-columns: 100px 80px 1fr 360px;
   align-items: center;
   height: var(--row-h, 32px);
   padding: 0 var(--space-3) 0 0;
@@ -830,7 +830,7 @@ function formatRelative(iso: string): string {
 .commit-row:hover { background: var(--color-bg-hover); }
 .commit-row.is-head-row { background: linear-gradient(90deg, var(--color-primary-soft) 0%, transparent 70%); }
 
-.commit-row__graph { position: relative; width: 54px; height: 100%; }
+.commit-row__graph { position: relative; width: 100px; height: 100%; }
 .commit-row__dot {
   position: absolute;
   top: 50%;
