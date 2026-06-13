@@ -107,12 +107,18 @@ onMounted(async () => {
       /* error in repo.error */
     }
   }
-  // 2. 拉分支列表
+  // 2. 拉分支列表（内部 loadTimeline 会触发 renderGraph）
   if (activeProjectId.value) {
     await loadBranches();
   }
-  // 3. 创建 X6 graph（容器先准备好）
-  initGraph();
+  // 3. ⚠️ 关键：<div ref="graphContainer"> 在 <template v-else> 里（line 387），
+  // 只有 activeRepo && branches.length>0 && !localError 才渲染。
+  // 因此 onMounted 阶段 graphContainer.value 一定是 null（branches 异步加载、DOM 还没 patch）。
+  // initGraph() 必须在 graphContainer 真出现后调，否则 `if (!graphContainer.value) return` 直接 bail。
+  // 之前的 bug 是在 onMounted 末尾调 initGraph（graphContainer=null，silent bail），
+  // 或者先 loadBranches 再 initGraph（时机错，renderGraph 跑得比 initGraph 早）。
+  // 现在用 watch: 一旦 graphContainer 真的绑定（DOM mount 完成），就立刻 initGraph。
+  // initGraph 是幂等的（已存在就 return）；renderGraph 由 watch(() => timeline.value) 兜底触发。
 });
 
 onBeforeUnmount(() => {
@@ -314,6 +320,34 @@ watch(
       await loadBranches();
     }
   },
+);
+
+// 兜底：timeline 数据变就重画（处理 initGraph 早于 loadTimeline 完成 / project 切换 / branch chip 切换）
+// renderGraph 内部有 `if (!g) return` 保护，graphRef 还没初始化时静默跳过——首次 mount 时
+// loadTimeline 在 initGraph 之后调，所以这条 watch 通常用不到；但 onMounted 之外触发
+// （如 toggleBranch → loadTimeline）的路径上提供双保险。
+watch(
+  () => timeline.value,
+  (dto) => {
+    if (dto) renderGraph(dto);
+  },
+);
+
+// 关键兜底：graphContainer ref 在 onMounted 阶段还是 null（因为它在 <template v-else>
+// 里、branches 异步加载 + DOM 未 patch），所以 initGraph() 不能放在 onMounted 末尾。
+// 用 watch(graphContainer)：一旦 Vue 把 ref 真正绑定到 DOM 节点（DOM mount 完成 + 条件分支命中），
+// 就调 initGraph 建 X6 graph。配合 watch(timeline.value) 兜底，graph 一就绪就立刻画当前数据。
+watch(
+  graphContainer,
+  (el) => {
+    if (el && !graphRef.value) {
+      initGraph();
+      // 如果 timeline 数据已经在 loadBranches 异步过程中拿到，但 graphRef 当时为 null，
+      // 上面 initGraph 后立即补画一次
+      if (timeline.value) renderGraph(timeline.value);
+    }
+  },
+  { flush: 'post' }, // 等待 DOM 更新后再判断（确保 <template v-else> 分支已 patch）
 );
 
 /** 简化的 lane 元信息（来自 TimelineDto.lanes，UI 用） */
