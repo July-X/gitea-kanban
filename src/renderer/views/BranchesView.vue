@@ -794,6 +794,25 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
                       :aria-label="`复制提交号 ${c.shortSha}`"
                       @click="onCopyCommitHash(c, $event)"
                     >{{ c.shortSha }}</button>
+                    <!--
+                      复制 / 在 gitea 打开两个动作只保留 icon，塞在 hash 旁边
+                      （v1.1.3 之前在 detail-body 底部 line 886-905，是冗余的——
+                      head hash 已经是 button 能复制；gitea 跳转太靠下用户找不到）
+                    -->
+                    <button
+                      type="button"
+                      class="branch-commit-row__icon-btn"
+                      :title="`复制完整提交号 ${c.sha}`"
+                      :aria-label="`复制提交号 ${c.shortSha}`"
+                      @click="onCopyCommitHash(c, $event)"
+                    ><Clipboard :size="12" :stroke-width="2" aria-hidden="true" /></button>
+                    <button
+                      type="button"
+                      class="branch-commit-row__icon-btn"
+                      :title="`在 gitea 打开此提交 ${c.shortSha}`"
+                      :aria-label="`在 gitea 打开提交 ${c.shortSha}`"
+                      @click="onOpenCommitInGitea(c, $event)"
+                    ><ExternalLink :size="12" :stroke-width="2" aria-hidden="true" /></button>
                     · {{ relativeTime(c.date) }}
                   </span>
                 </button>
@@ -882,27 +901,11 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
                         关联卡片：{{ c.linkedCards.map((lc) => lc.columnName).join('、') }}
                       </p>
                     </div>
-                    <!-- actions 区留在 detail-body 外 —— 永远可见，固定在 detail 底部 -->
-                    <div class="branch-commit-row__actions">
-                      <button
-                        type="button"
-                        class="branches__chip"
-                        :title="`复制完整提交号 ${c.sha}`"
-                        @click="onCopyCommitHash(c, $event)"
-                      >
-                        <Clipboard :size="13" :stroke-width="2" aria-hidden="true" />
-                        <span>复制完整提交号</span>
-                      </button>
-                      <button
-                        type="button"
-                        class="branches__chip"
-                        :title="`在 gitea 打开此提交 ${c.shortSha}`"
-                        @click="onOpenCommitInGitea(c, $event)"
-                      >
-                        <ExternalLink :size="13" :stroke-width="2" aria-hidden="true" />
-                        <span>在 gitea 打开</span>
-                      </button>
-                    </div>
+                    <!--
+                      actions 区已移到 head hash 旁边（v1.1.3 精简）：
+                      复制 + 在 gitea 打开都改成 icon-only 紧贴 hash。
+                      detail-body 末尾留 linkedCards 提示 + 文件加载占位即可。
+                    -->
                   </div>
                 </Transition>
               </li>
@@ -1683,26 +1686,36 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   box-shadow: var(--shadow-focus);
 }
 
-/* 展开后底部操作区：复制 / 跳 gitea
- *
- * v1.1.3 · task #40 · 改 sticky bottom 防止长内容（30+ 文件）撑开 li 后
- * actions 被外层 commits-list 滚走遮挡。
- * - position: sticky; bottom: 0 + background = 始终贴 li 底（li 视口内）
- * - 配合 line 1479 `.branch-commit-row { overflow: hidden }`：sticky 边界 = li 边界
- *   → li 整体被外层 list 滚走时 actions 跟着滚走（避免"按钮悬空挂在视口上"）
- * - 顶部 box-shadow 当作"分隔线"（比 border-top + 自身背景更柔和）
+/* v1.1.3 polish：head hash 旁边的 icon-only 复制 / 跳 gitea 按钮
+ * - 跟 .branch-commit-row__sha 同色 + 同 hover 反馈（语义一致：都触发 hash 相关动作）
+ * - padding 0 + 4px 让按钮尽量小（跟 inline text 同一 baseline）
+ * - focus-visible 走全局 --shadow-focus token
+ * - 默认 opacity 0.6 让 inline 行不显拥挤；hover 提到 1
  */
-.branch-commit-row__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 8px;
-  padding: 8px 4px 4px;
-  position: sticky;
-  bottom: 0;
-  background: var(--color-bg-elevated);
-  z-index: 2;
-  box-shadow: 0 -1px 0 var(--color-divider);
+.branch-commit-row__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 2px;
+  opacity: 0.6;
+  vertical-align: -1px;
+}
+
+.branch-commit-row__icon-btn:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+  opacity: 1;
+}
+
+.branch-commit-row__icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  opacity: 1;
 }
 
 .branch-commit-row__fullmsg {
@@ -1716,6 +1729,15 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
 }
 
 /* ============== v1.1.3 · task #23 · 单条 commit 文件清单 ============== */
+/* v1.1.3 polish（task #41）· 高度自适应
+ * - 历史：line 1757-1761 写过 max-height: 50cqh + overflow-y: auto（防 50+ 文件撑死 li）
+ * - 当前：用户反馈"li 标签元素展示不全"——50cqh 截断 + 暗色透明滚动条不可见，
+ *   用户看不到 li 底部，误以为内容丢失
+ * - 决策：去 max-height，让 li 自然撑到内容实际高度；m4java-test 实测最大 fileCount=7，
+ *   单 li 高度可控；如果未来遇到 50+ 文件 commit 再退回滚动方案
+ * - 仍保留 overscroll-behavior:contain + scrollbar-gutter:stable（保险）
+ * - scrollbar 颜色用 --color-text-muted 暗色主题下也能看清
+ */
 .branch-commit-row__files {
   margin-top: 6px;
   padding-top: 6px;
@@ -1754,11 +1776,12 @@ const commitEndIdx = computed(() => commitStartIdx.value + commits.value.length 
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 50vh;
-  max-height: 50cqh;
-  overflow-y: auto;
+  /* v1.1.3 polish：去 max-height 让 li 自适应内容高度；overscroll-behavior + scrollbar-gutter
+     保留以备未来长 commit 退化；scrollbar 颜色 token 让暗色主题下也能看清 */
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-muted) transparent;
 }
 .branch-commit-row__file {
   display: flex;
