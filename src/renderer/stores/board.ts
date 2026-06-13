@@ -29,6 +29,7 @@ import {
   issuesMoveColumn,
   issuesUpdate,
   labelsList,
+  getIpcClient,
 } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type {
@@ -38,15 +39,16 @@ import type {
  ListIssuesResp,
 } from '../../main/ipc/schema.js';
 
-/**撤销栈单条记录（前端 UI 层纯 ref，**不**持久化） */
-interface UndoEntry {
- issueIndex: number;
- fromColumnId: string;
- toColumnId: string;
- ts: number;
-}
-
-const UNDO_STACK_LIMIT =20;
+/** undo / redo 栈深度（来自 main 端 src/main/board/undo.ts）
+ *
+ *  M6 undo-by-project：单一 source of truth 在 main 进程；渲染端**不**维护本地栈
+ *  - undoSize: 当前 projectId 的 undo 栈深度（>0 时可点撤销）
+ *  - redoSize: 当前 projectId 的 redo 栈深度（>0 时可点重做）
+ *  - 切 project 时 loadUndoStatus(projectId) 重新拉
+ *  - moveIssue / undo / redo 后 loadUndoStatus(projectId) 重新拉
+ */
+const undoSize = ref(0);
+const redoSize = ref(0);
 
 export const useBoardStore = defineStore('board', () => {
  // ===== state =====
@@ -58,9 +60,8 @@ export const useBoardStore = defineStore('board', () => {
  const error = ref<UserFacingError | null>(null);
  /**记录上一次加载的 projectId，避免切 project残留旧数据 */
  const currentProjectId = ref<string | null>(null);
- /**换列撤销栈（纯前端 UI ref；后端 undo端点 M3 未提供） */
- const undoStack = ref<UndoEntry[]>([]);
-
+ /**换列撤销栈（M6 undo-by-project：main 端为 single source of truth）
+ *  保留占位以避免改动其他位置；UI 通过 undoSize / redoSize 显示状态 */
  // ===== getters =====
  /**所有 issue 总数（跨列累加） */
  const totalIssues = computed(() =>
@@ -257,13 +258,9 @@ export const useBoardStore = defineStore('board', () => {
  };
  try {
  await issuesMoveColumn(args);
- //记录撤销栈
- pushUndo({
- issueIndex: args.issueIndex,
- fromColumnId: args.fromColumnId,
- toColumnId: args.toColumnId,
- ts: Date.now(),
- });
+ // M6 undo-by-project：main 端会自己 pushUndo（src/main/board/move-card.ts:184）
+ // 渲染端只刷新按钮状态
+ await loadUndoStatus(args.projectId);
  } catch (e) {
  //失败回滚
  issuesByColumn.value = {
@@ -312,27 +309,55 @@ export const useBoardStore = defineStore('board', () => {
  }
  }
 
- // =====撤销栈（纯前端 UI 层） =====
+ // =====撤销 / 重做（M6 undo-by-project：main 端为 single source of truth） =====
 
- function pushUndo(entry: UndoEntry): void {
- undoStack.value = [...undoStack.value, entry].slice(-UNDO_STACK_LIMIT);
+ /** 拉当前 projectId 的栈深度（UI 灰化按钮用） */
+ async function loadUndoStatus(projectId: string): Promise<void> {
+ const result = (await getIpcClient().invoke('user', 'undoStatus', { projectId })) as {
+ undoSize: number;
+ redoSize: number;
+ };
+ undoSize.value = result.undoSize;
+ redoSize.value = result.redoSize;
  }
 
  function canUndo(): boolean {
- return undoStack.value.length >0;
+ return undoSize.value >0;
  }
 
- /**撤销最近一次换列 */
+ function canRedo(): boolean {
+ return redoSize.value >0;
+ }
+
+ /** 撤销最近一次换列（M6 undo-by-project） */
  async function undoLastMove(projectId: string): Promise<void> {
- const entry = undoStack.value[undoStack.value.length -1];
- if (!entry) return;
- await moveIssue({
- projectId,
- issueIndex: entry.issueIndex,
- fromColumnId: entry.toColumnId,
- toColumnId: entry.fromColumnId,
- });
- undoStack.value = undoStack.value.slice(0, -1);
+ // main 端弹 undo 栈 → 派发 reverse（即 swap from/to 的 moveIssueColumn）→ 推 redo
+ // UI 只需：调 IPC → 等返回 → 刷新栈深度 → 重新拉看板（issue 实际位置变了）
+ const result = (await getIpcClient().invoke('user', 'undo', { projectId })) as {
+ restored: number;
+ undoSize: number;
+ redoSize: number;
+ };
+ undoSize.value = result.undoSize;
+ redoSize.value = result.redoSize;
+ if (result.restored >0) {
+ // 重新拉 columns + issues（issue label 实际变了）
+ await loadBoard(projectId);
+ }
+ }
+
+ /** 重做（M6 undo-by-project） */
+ async function redoLastMove(projectId: string): Promise<void> {
+ const result = (await getIpcClient().invoke('user', 'redo', { projectId })) as {
+ restored: number;
+ undoSize: number;
+ redoSize: number;
+ };
+ undoSize.value = result.undoSize;
+ redoSize.value = result.redoSize;
+ if (result.restored >0) {
+ await loadBoard(projectId);
+ }
  }
 
   function clearError(): void {
@@ -465,7 +490,8 @@ export const useBoardStore = defineStore('board', () => {
   loadingIssues,
   error,
   currentProjectId,
-  undoStack,
+  undoSize,
+  redoSize,
   // getters
   totalIssues,
   issuesOf,
@@ -477,9 +503,11 @@ export const useBoardStore = defineStore('board', () => {
   createIssue,
   moveIssue,
   closeIssue,
-  pushUndo,
+  loadUndoStatus,
   canUndo,
+  canRedo,
   undoLastMove,
+  redoLastMove,
   createColumn,
   updateColumn,
   deleteColumn,

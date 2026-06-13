@@ -112,46 +112,80 @@ function getHandler(op: UndoOp): OpHandler {
   return h;
 }
 
-/** IPC user.undo handler 内部：弹 undo 栈顶部 + 派发 reverse */
-export async function undoOne(): Promise<{ restored: number; op?: UndoOp }> {
-  let entry: UndoEntry | undefined;
-  let fromProjectId: string | undefined;
-  for (const [projectId, stack] of undoStacks) {
-    if (stack.length > 0) {
-      entry = stack.pop();
-      fromProjectId = projectId;
-      break;
+/** IPC user.undo handler 内部：弹 undo 栈顶部 + 派发 reverse
+ *
+ *  args.projectId 可选：提供时只弹该 project 的栈（防跨看板误撤销）；未提供时返 0（安全默认）
+ *  返回的 undoSize / redoSize 是**操作后**的栈深度（供 UI 按钮灰化用，免一次 roundtrip）
+ */
+export async function undoOne(args?: { projectId?: string }): Promise<{
+  restored: number;
+  op?: UndoOp;
+  undoSize: number;
+  redoSize: number;
+}> {
+  if (args?.projectId) {
+    const stack = undoStacks.get(args.projectId);
+    const entry = stack?.pop();
+    if (!entry) {
+      return {
+        restored: 0,
+        undoSize: undoStackSize(args.projectId),
+        redoSize: redoStackSize(args.projectId),
+      };
     }
+    const redo = getOrCreate(redoStacks, args.projectId);
+    pushBounded(redo, entry);
+    const handler = getHandler(entry.op);
+    await handler.reverse(entry.reverseArgs);
+    return {
+      restored: 1,
+      op: entry.op,
+      undoSize: undoStackSize(args.projectId),
+      redoSize: redoStackSize(args.projectId),
+    };
   }
-  if (!entry || !fromProjectId) {
-    return { restored: 0 };
-  }
-  const redo = getOrCreate(redoStacks, fromProjectId);
-  pushBounded(redo, entry);
-  const handler = getHandler(entry.op);
-  await handler.reverse(entry.reverseArgs);
-  return { restored: 1, op: entry.op };
+  // 无 projectId → 安全默认：返 0（不跨看板撤销；上层必须传 projectId）
+  return { restored: 0, undoSize: 0, redoSize: 0 };
 }
 
-/** IPC user.redo handler 内部：弹 redo 栈顶部 + 派发 forward */
-export async function redoOne(): Promise<{ restored: number; op?: UndoOp }> {
-  let entry: UndoEntry | undefined;
-  let fromProjectId: string | undefined;
-  for (const [projectId, stack] of redoStacks) {
-    if (stack.length > 0) {
-      entry = stack.pop();
-      fromProjectId = projectId;
-      break;
+/** IPC user.redo handler 内部：弹 redo 栈顶部 + 派发 forward
+ *  同 undoOne：projectId 可选；未提供时返 0 */
+export async function redoOne(args?: { projectId?: string }): Promise<{
+  restored: number;
+  op?: UndoOp;
+  undoSize: number;
+  redoSize: number;
+}> {
+  if (args?.projectId) {
+    const stack = redoStacks.get(args.projectId);
+    const entry = stack?.pop();
+    if (!entry) {
+      return {
+        restored: 0,
+        undoSize: undoStackSize(args.projectId),
+        redoSize: redoStackSize(args.projectId),
+      };
     }
+    const undo = getOrCreate(undoStacks, args.projectId);
+    pushBounded(undo, entry);
+    const handler = getHandler(entry.op);
+    await handler.forward(entry.forwardArgs);
+    return {
+      restored: 1,
+      op: entry.op,
+      undoSize: undoStackSize(args.projectId),
+      redoSize: redoStackSize(args.projectId),
+    };
   }
-  if (!entry || !fromProjectId) {
-    return { restored: 0 };
-  }
-  const undo = getOrCreate(undoStacks, fromProjectId);
-  pushBounded(undo, entry);
-  const handler = getHandler(entry.op);
-  await handler.forward(entry.forwardArgs);
-  return { restored: 1, op: entry.op };
+  return { restored: 0, undoSize: 0, redoSize: 0 };
+}
+
+/** IPC user.undoStatus handler 内部：返当前 projectId 的栈深度（UI 灰化用） */
+export function undoStatus(projectId: string): { undoSize: number; redoSize: number } {
+  return {
+    undoSize: undoStackSize(projectId),
+    redoSize: redoStackSize(projectId),
+  };
 }
 
 /** 测试辅助：清空所有栈（vitest 跨用例隔离用） */

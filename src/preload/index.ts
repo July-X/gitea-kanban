@@ -7,15 +7,15 @@
  * - IpcError reject时是 plain object（toJSON输出）
  * -不暴露 ipcRenderer / process / require
  *
- * M6状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个，theme-preload 补齐 preferences.theme.* 2 个，clipboard 补齐 preferences.clipboard.write 1 个）：
- * - src/main/ipc/schema.ts 注册 44 个 IpcChannel（M3=32 → M5 fix-3=36 → a3=37 → theme-preload=39 → clipboard=44）：
+ * M6状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个，theme-preload 补齐 preferences.theme.* 2 个，clipboard 补齐 preferences.clipboard.write 1 个，undo-by-project 补齐 user.undoStatus 1 个）：
+ * - src/main/ipc/schema.ts 注册 45 个 IpcChannel（M3=32 → M5 fix-3=36 → a3=37 → theme-preload=39 → clipboard=44 → undo-by-project=45）：
  * auth×3, repos×3, branches×5, commits×3, pulls×4,
  * board.columns×7 (reset后从5→7，加 mapLabel/unmapLabel),
  * issues×9 (新增：list/get/create/update/addLabel/removeLabel/moveColumn + comment.list/create),
  * labels×2 (新增), members×1 (a3 新增：list — 仓库成员 = gitea repo collaborators),
- * user×4 (M5补齐：prefs.get/set + undo/redo),
+ * user×5 (M5补齐：prefs.get/set + undo/redo；M6 undo-by-project：undoStatus),
  * preferences×3 (v1.1.2 主题切换：preferences.theme.get / preferences.theme.set；M6补：preferences.clipboard.write — 分支/提交号复制)
- * - 本文件暴露完整44 个 invoke + on()监听器
+ * - 本文件暴露完整45 个 invoke + on()监听器
  * - api.d.ts通过 `Api = typeof api`自动派生，**不**手改
  *
  * 方法签名约定（除 auth.connect历史兼容性保留 (giteaUrl, token) 双参）：
@@ -50,12 +50,12 @@ const invoke =
  * issues.comment ×2 : list, create
  * labels ×2 : list, create
  * members ×1 : list（a3 新增；返 `CollaboratorDto[]` 数组）
- * user ×4 : prefs.get, prefs.set, undo, redo
+ * user ×5 : prefs.get, prefs.set, undo, redo, undoStatus（M6 undo-by-project：栈深度查询）
  * preferences ×3 : preferences.theme.get, preferences.theme.set（v1.1.2 主题切换 —— design-system/pages/tech-refine.md §16.3）;
  * preferences.clipboard.write（M6 补：分支/提交号复制；commit 588da2b）
  * 走 preferences.* 而非 theme.*，为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键 / 剪贴板等）留 namespace 空间
  * ─────────────────
- *合计:44 个 invoke
+ *合计:45 个 invoke
  */
 const api = {
  //===== auth namespace（AGENTS §8.2 token唯一入口）=====
@@ -147,8 +147,9 @@ const api = {
   },
 
   //===== user namespace (M5 补齐)=====
-  //本机用户偏好（prefs）+ undo/redo（M5 空栈版，restored=0）
-  //详见 02-architecture.md §5.3.9 + src/main/ipc/user.ts
+  //本机用户偏好（prefs）+ undo/redo（M6 真栈版，按 projectId 弹栈）
+  //详见 02-architecture.md §5.3.9 + src/main/ipc/user.ts + src/main/board/undo.ts
+  //M6 undo-by-project：args = { projectId }，防跨看板误撤销
   user: {
   prefs: {
   get: invoke(IpcChannel.USER_PREFS_GET),
@@ -156,6 +157,8 @@ const api = {
   },
   undo: invoke(IpcChannel.USER_UNDO),
   redo: invoke(IpcChannel.USER_REDO),
+  //栈深度查询（UI 灰化按钮用）—— M6 undo-by-project 加
+  undoStatus: invoke(IpcChannel.USER_UNDO_STATUS),
   },
 
   //===== preferences namespace (v1.2 主题切换 — design-system/pages/tech-refine.md §16.3)=====

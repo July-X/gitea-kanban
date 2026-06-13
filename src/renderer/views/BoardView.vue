@@ -25,6 +25,7 @@ import {
  Package,
  Plus,
  RotateCcw,
+ RotateCw,
  Search,
  Tag,
  Trash2,
@@ -315,6 +316,16 @@ async function undoLastMove(): Promise<void> {
  }
 }
 
+/**重做最近一次换列 */
+async function redoLastMove(): Promise<void> {
+ try {
+ await board.redoLastMove(activeProjectId.value!);
+ showToast({ type: 'success', message: '已重做换列' });
+ } catch {
+ /* error */
+ }
+}
+
 onMounted(async () => {
  //1.拉仓库列表
  try {
@@ -329,6 +340,26 @@ onMounted(async () => {
  } catch {
  /* error */
  }
+ //3. M6 undo-by-project：拉栈深度（UI 灰化按钮用）
+ try {
+ await board.loadUndoStatus(activeProjectId.value);
+ } catch {
+ /* error */
+ }
+ }
+});
+
+//监听 activeProjectId 变化（切仓库时重拉栈深度）
+watch(activeProjectId, async (newId) => {
+ if (newId) {
+ try {
+ await board.loadUndoStatus(newId);
+ } catch {
+ /* error */
+ }
+ } else {
+ // 清空栈深度（避免旧 project 状态残留）
+ await board.loadUndoStatus('');
  }
 });
 
@@ -367,11 +398,22 @@ watch(
  type="button"
  class="board__undo-btn"
  :disabled="board.loading"
- :title="`撤销最近一次换列（共 ${board.undoStack.length}步可撤销）`"
+ :title="`撤销最近一次换列（共 ${board.undoSize}步可撤销）`"
  @click="undoLastMove"
  >
  <RotateCcw :size="14" :stroke-width="2" />
  <span>撤销</span>
+ </button>
+ <button
+ v-if="board.canRedo()"
+ type="button"
+ class="board__redo-btn"
+ :disabled="board.loading"
+ :title="`重做最近一次换列（共 ${board.redoSize}步可重做）`"
+ @click="redoLastMove"
+ >
+ <RotateCw :size="14" :stroke-width="2" />
+ <span>重做</span>
  </button>
  <span class="board__counter">
  <Package :size="14" :stroke-width="2" aria-hidden="true" />
@@ -788,6 +830,30 @@ watch(
 }
 
 .board__undo-btn:disabled {
+ opacity:0.4;
+ cursor: not-allowed;
+}
+
+/** 重做按钮（M6 undo-by-project 落地）—— 视觉沿用 undo 按钮（warning 色），仅文案不同 */
+.board__redo-btn {
+ display: inline-flex;
+ align-items: center;
+ gap:4px;
+ padding:4px10px;
+ background: var(--color-warning-soft);
+ color: var(--color-warning);
+ border-radius: var(--radius-sm);
+ font-size: var(--font-xs);
+ cursor: pointer;
+ transition: background var(--t-fast) var(--ease);
+}
+
+.board__redo-btn:hover:not(:disabled) {
+ background: var(--color-warning);
+ color: var(--color-text-inverse);
+}
+
+.board__redo-btn:disabled {
  opacity:0.4;
  cursor: not-allowed;
 }

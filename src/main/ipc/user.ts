@@ -34,21 +34,23 @@ import {
   IpcChannel,
   UserPrefsGetArgsSchema,
   UserPrefsSetArgsSchema,
+  UserUndoArgsSchema,
+  UserRedoArgsSchema,
+  UserUndoStatusArgsSchema,
   type UserPrefsGetArgs,
   type UserPrefsGetResult,
   type UserPrefsSetArgs,
+  type UserUndoArgs,
+  type UserRedoArgs,
   type UserUndoResult,
   type UserRedoResult,
+  type UserUndoStatusArgs,
+  type UserUndoStatusResult,
 } from './schema.js';
-import { z } from 'zod';
-
-/** user.undo / user.redo 无入参，但走 wrapIpc 统一处理时需要一个 schema
- *  拍板 = 02 §5.3.9 签名：`() => Promise<{ restored: number }>`，无 args */
-const EmptyArgsSchema = z.object({}).strict();
 import { logger } from '../logger.js';
 import { getDb } from '../cache/sqlite.js';
 import { prefs, undoEntries } from '../cache/schema/index.js';
-import { undoOne, redoOne } from '../board/undo.js';
+import { undoOne, redoOne, undoStatus } from '../board/undo.js';
 
 /** M5 简化 / **M6 拍板保留**：单本地用户（设备级），prefs 不按 gitea account 切分
  *  拍板记录：notes/m6-prefs-schema-decision.md（方案 A） */
@@ -177,29 +179,40 @@ function setPrefs(args: UserPrefsSetArgs): void {
 // ============================================================
 
 /**
- * undo —— M6 落地
+ * undo —— M6 落地（按 projectId 弹栈）
  *
  * pop in-memory undo 栈（src/main/board/undo.ts）→ 派发 reverse → 推 redo 栈
  * 当前支持 op = 'issues.moveColumn'（move-card.ts:moveIssueColumn 成功时 push）
  *
- * 栈空时返 { restored: 0 }（与 M5 简化版行为兼容）
+ * args.projectId 必传（不传 → 安全默认 restored=0，避免跨看板误撤销）
+ * 栈空时返 { restored: 0, undoSize: 0, redoSize: 0 }
  *
  * 反向操作失败时：
  * - 抛出 IpcError（被 wrapIpc 捕获序列化后到渲染端）
  * - redo 栈上**仍**有该 entry（未消费）→ 用户重试
  */
-async function undo(): Promise<UserUndoResult> {
-  return await undoOne();
+async function undo(args: UserUndoArgs): Promise<UserUndoResult> {
+  return await undoOne(args);
 }
 
 /**
- * redo —— M6 落地
+ * redo —— M6 落地（按 projectId 弹栈）
  *
  * pop in-memory redo 栈 → 派发 forward → 推 undo 栈
- * 栈空时返 { restored: 0 }
+ * 栈空时返 { restored: 0, undoSize: 0, redoSize: 0 }
  */
-async function redo(): Promise<UserRedoResult> {
-  return await redoOne();
+async function redo(args: UserRedoArgs): Promise<UserRedoResult> {
+  return await redoOne(args);
+}
+
+/**
+ * undoStatus —— M6 落地（栈深度查询）
+ *
+ * 返当前 projectId 的 undo / redo 栈深度，UI 灰化按钮用
+ * 不修改栈
+ */
+function getUndoStatus(args: UserUndoStatusArgs): UserUndoStatusResult {
+  return undoStatus(args.projectId);
 }
 
 // ============================================================
@@ -209,8 +222,9 @@ async function redo(): Promise<UserRedoResult> {
 export function registerUserIpc(): void {
   wrapIpc(IpcChannel.USER_PREFS_GET, UserPrefsGetArgsSchema, getPrefs);
   wrapIpc(IpcChannel.USER_PREFS_SET, UserPrefsSetArgsSchema, setPrefs);
-  wrapIpc(IpcChannel.USER_UNDO, EmptyArgsSchema, () => undo());
-  wrapIpc(IpcChannel.USER_REDO, EmptyArgsSchema, () => redo());
+  wrapIpc(IpcChannel.USER_UNDO, UserUndoArgsSchema, undo);
+  wrapIpc(IpcChannel.USER_REDO, UserRedoArgsSchema, redo);
+  wrapIpc(IpcChannel.USER_UNDO_STATUS, UserUndoStatusArgsSchema, getUndoStatus);
 }
 
 export function unregisterUserIpc(): void {
@@ -218,9 +232,10 @@ export function unregisterUserIpc(): void {
   ipcMain.removeHandler(IpcChannel.USER_PREFS_SET);
   ipcMain.removeHandler(IpcChannel.USER_UNDO);
   ipcMain.removeHandler(IpcChannel.USER_REDO);
+  ipcMain.removeHandler(IpcChannel.USER_UNDO_STATUS);
 }
 
 // 暴露业务函数供单测 / 集成测试直接调（不走 IPC）
-export const _testHelpers = { getPrefs, setPrefs, undo, redo, LOCAL_USER_ID };
+export const _testHelpers = { getPrefs, setPrefs, undo, redo, getUndoStatus, LOCAL_USER_ID };
 // 引用 undoEntries 抑制 unused 警告（M5 阶段业务侧未实际 push，但保留 schema）
 void undoEntries;

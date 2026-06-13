@@ -15,8 +15,9 @@
  * - 2026-06-12 theme-ipc（v1.1.2 主题切换）：加 THEME_GET / THEME_SET 2 个端点
  *   （持久化走 sqlite prefs 表，channel 命名沿 preferences.* 而非常规 theme.* —— 见下）
  * - 2026-06-13 clipboard：加 CLIPBOARD_WRITE 1 个端点（preferences.clipboard.write，分支/提交号复制）
+ * - 2026-06-13 undo-by-project（M6 落地）：加 USER_UNDO_STATUS 1 个端点（栈深度查询；UI 灰化按钮用）
  *
- * 端点清单（M6 拍板，44 个）：
+ * 端点清单（M6 拍板，45 个）：
  * auth ×3 : connect / disconnect / status
  * repos ×3 : list / addProject / removeProject
  * branches ×5 : list / create / rename / delete / star
@@ -27,7 +28,7 @@
  * labels ×2 : list / create
  * issues.comment ×2 : list / create（注：在 issues.comment.* 命名空间下；callable via issues.comment.list/create）
  * members ×1 : list（a3 新增：仓库成员 = gitea repo collaborators；返 `CollaboratorDto[]` 数组形态）
- * user ×4 : prefs.get / prefs.set / undo / redo（02 §5.3.9；M5 补齐）
+ * user ×5 : prefs.get / prefs.set / undo / redo / undoStatus（M5 +4；M6 undo-by-project +1）
  * preferences ×3 : theme.get / theme.set（v1.1.2 主题切换 —— §16 tech-refine.md 拍板）/ clipboard.write（M6 补：分支/提交号复制）
  *
  * 命名说明（v1.1.2 主题端点）：
@@ -36,7 +37,7 @@
  *   （如通知规则 / 同步周期 / 自定义快捷键 / 剪贴板等）共享同一个 namespace，主题只是其中之一
  * - 渲染端 API 暴露 = `window.api.preferences.{theme,clipboard}.{get,set,write}`（preload 端在 theme-preload / clipboard task 改）
  *
- * 历史端点计数：M3=32 → M5 fix-3=36（+4 user.prefs）→ a3=37（+1 members）→ theme-ipc=39（+2 preferences.theme）→ clipboard=44（+1 preferences.clipboard.write）
+ * 历史端点计数：M3=32 → M5 fix-3=36（+4 user.prefs）→ a3=37（+1 members）→ theme-ipc=39（+2 preferences.theme）→ clipboard=44（+1 preferences.clipboard.write）→ undo-by-project=45（+1 user.undoStatus）
  */
 
 export const IpcChannel = {
@@ -96,11 +97,12 @@ export const IpcChannel = {
   // === members namespace（a3 新增：仓库成员 = gitea repo collaborators）===
   MEMBERS_LIST: 'members.list',
 
-  // === user namespace（02-architecture.md §5.3.9；M5补齐）===
+  // === user namespace（02-architecture.md §5.3.9；M5补齐 + M6 undo-by-project）===
   USER_PREFS_GET: 'user.prefs.get',
   USER_PREFS_SET: 'user.prefs.set',
   USER_UNDO: 'user.undo',
   USER_REDO: 'user.redo',
+  USER_UNDO_STATUS: 'user.undoStatus',
 
   // === preferences namespace（v1.1.2 主题切换 —— design-system/pages/tech-refine.md §16）===
   // 走 preferences.* 而非 theme.*，为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键等）留 namespace 空间。

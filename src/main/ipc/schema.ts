@@ -958,15 +958,38 @@ export const UserPrefsSetArgsSchema = z
 export type UserPrefsSetArgs = z.infer<typeof UserPrefsSetArgsSchema>;
 
 /**
- * user.undo 入参 / 出参 —— 当前栈实现：表层 + 队列语义（M5）
+ * user.undo / user.redo 入参（M6 落地：按 projectId 弹栈）
  *
- * 拍板：
- * - 入参空（整个 undo 栈共享，不需 user action id）
- * - 出参 restored = 实际恢复了多少个 state（v1 简化下永远是 0；M6 接业务时再实现真栈）
+ * - projectId 可选；提供时**只**弹该 project 的栈（防跨看板误撤销）
+ * - 未提供时：返 restored=0（**不**弹任意栈——安全默认；上层必须传）
+ * - 拍板：notes/m6-undo-redo-deliverable.md §4
+ */
+export const UserUndoArgsSchema = z
+  .object({
+    projectId: z.string().min(1).optional(),
+  })
+  .strict();
+export type UserUndoArgs = z.infer<typeof UserUndoArgsSchema>;
+
+/** user.redo 入参与 undo 同形 */
+export const UserRedoArgsSchema = UserUndoArgsSchema;
+export type UserRedoArgs = z.infer<typeof UserRedoArgsSchema>;
+
+/**
+ * user.undo / user.redo 出参（M6 落地：操作后栈深度回传）
+ *
+ * 字段：
+ * - restored  : 实际恢复了多少个 state（0 或 1）
+ * - op        : 操作的 op 类型（restored=1 时有；restored=0 时缺省）
+ * - undoSize  : **操作后** undo 栈深度（UI 灰化按钮用，免一次 roundtrip）
+ * - redoSize  : **操作后** redo 栈深度（同上）
  */
 export const UserUndoResultSchema = z
   .object({
-    restored: z.number().int().min(0),
+    restored: z.number().int().min(0).max(1),
+    op: z.string().min(1).optional(),
+    undoSize: z.number().int().min(0),
+    redoSize: z.number().int().min(0),
   })
   .strict();
 export type UserUndoResult = z.infer<typeof UserUndoResultSchema>;
@@ -974,6 +997,26 @@ export type UserUndoResult = z.infer<typeof UserUndoResultSchema>;
 /** user.undo / user.redo 共用出参 */
 export const UserRedoResultSchema = UserUndoResultSchema;
 export type UserRedoResult = z.infer<typeof UserRedoResultSchema>;
+
+/**
+ * user.undoStatus 入参 / 出参 —— 栈深度查询（UI 灰化按钮用）
+ *
+ * 设计：独立端点而非塞进 undo/redo 返参里——mount / 切 project / 拖拽后都要拉一次
+ */
+export const UserUndoStatusArgsSchema = z
+  .object({
+    projectId: z.string().min(1),
+  })
+  .strict();
+export type UserUndoStatusArgs = z.infer<typeof UserUndoStatusArgsSchema>;
+
+export const UserUndoStatusResultSchema = z
+  .object({
+    undoSize: z.number().int().min(0),
+    redoSize: z.number().int().min(0),
+  })
+  .strict();
+export type UserUndoStatusResult = z.infer<typeof UserUndoStatusResultSchema>;
 
 // ============================================================
 // ===== preferences namespace（v1.1.2 主题切换 —— tech-refine.md §16）=====

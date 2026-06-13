@@ -18,6 +18,7 @@ import {
   redoStackSize,
   undoOne,
   redoOne,
+  undoStatus,
   registerUndoHandler,
   _resetStacks,
   _snapshotStacks,
@@ -81,7 +82,7 @@ forwardCalls = [];
 reverseCalls = [];
 
 pushUndo('issues.moveColumn', 'p1', { from: 'a', to: 'b' }, { from: 'b', to: 'a' });
-const r1 = await undoOne();
+const r1 = await undoOne({ projectId: 'p1' });
 assert(r1.restored === 1, 'undo 第一次 restored=1');
 assert(undoStackSize('p1') === 0, 'undo 后 undo 栈 = 0');
 assert(redoStackSize('p1') === 1, 'undo 后 redo 栈 = 1');
@@ -100,12 +101,12 @@ forwardCalls = [];
 reverseCalls = [];
 const r2 = await redoOne();
 assert(r2.restored === 0, 'redo 栈空时返 restored=0');
-const r3 = await undoOne();
+const r3 = await undoOne({ projectId: 'p1' });
 assert(r3.restored === 1, 'undo 又弹出');
 assert(undoStackSize('p1') === 0, 'undo 后 undo 栈 = 0');
 assert(redoStackSize('p1') === 1, 'undo 后 redo 栈 = 1');
 assert(reverseCalls.length === 1, 'undo 触发 reverse');
-const r4 = await redoOne();
+const r4 = await redoOne({ projectId: 'p1' });
 assert(r4.restored === 1, 'redo 弹出 1');
 assert(forwardCalls.length === 1, 'redo 触发 forward');
 assert(
@@ -151,7 +152,7 @@ _resetStacks();
 let threw = false;
 try {
   pushUndo('issues.moveColumn', 'p1', { x: 1 }, { x: -1 });
-  await undoOne();
+  await undoOne({ projectId: 'p1' });
 } catch (e) {
   threw = true;
   const msg = e instanceof Error ? e.message : String(e);
@@ -164,6 +165,73 @@ try {
   );
 }
 assert(threw, '未注册 handler 时 undoOne 抛错');
+
+console.log('\n--- 8. 跨 projectId 不互撤（M6 undo-by-project） ---');
+_resetStacks();
+registerUndoHandler('issues.moveColumn', {
+  forward: async () => ({}),
+  reverse: async () => ({}),
+});
+pushUndo('issues.moveColumn', 'p1', { x: 1 }, { x: -1 });
+pushUndo('issues.moveColumn', 'p2', { x: 2 }, { x: -2 });
+// 弹 p1：只动 p1，p2 不动
+const r8 = await undoOne({ projectId: 'p1' });
+assert(r8.restored === 1, 'undo(p1) restored=1');
+assert(undoStackSize('p1') === 0, 'p1 栈清空');
+assert(undoStackSize('p2') === 1, 'p2 栈仍 = 1（**不**跨撤）');
+assert(r8.undoSize === 0, '回返 undoSize = 0');
+assert(r8.redoSize === 1, '回返 redoSize = 1（p1 推入 redo）');
+// 弹 p2：独立
+const r8b = await undoOne({ projectId: 'p2' });
+assert(r8b.restored === 1, 'undo(p2) restored=1');
+assert(undoStackSize('p2') === 0, 'p2 栈清空');
+assert(r8b.undoSize === 0, 'p2 undoSize = 0');
+assert(r8b.redoSize === 1, 'p2 redoSize = 1');
+
+console.log('\n--- 9. 无 projectId 走安全默认（restored=0，不跨看板） ---');
+_resetStacks();
+registerUndoHandler('issues.moveColumn', {
+  forward: async () => ({}),
+  reverse: async () => ({}),
+});
+pushUndo('issues.moveColumn', 'p1', { x: 1 }, { x: -1 });
+const r9 = await undoOne();
+assert(r9.restored === 0, '无 projectId → restored=0（安全默认）');
+assert(undoStackSize('p1') === 1, 'p1 栈**不**被跨撤（仍 = 1）');
+const r9b = await undoOne({ projectId: undefined });
+assert(r9b.restored === 0, '显式 projectId=undefined 也走安全默认');
+
+console.log('\n--- 10. undoStatus 栈深度查询 ---');
+_resetStacks();
+registerUndoHandler('issues.moveColumn', {
+  forward: async () => ({}),
+  reverse: async () => ({}),
+});
+assert(
+  JSON.stringify(undoStatus('p1')) === JSON.stringify({ undoSize: 0, redoSize: 0 }),
+  '空栈 undoStatus(空) = {0,0}',
+);
+pushUndo('issues.moveColumn', 'p1', { x: 1 }, { x: -1 });
+pushUndo('issues.moveColumn', 'p1', { x: 2 }, { x: -2 });
+const s = undoStatus('p1');
+assert(s.undoSize === 2, '2 push 后 undoSize = 2');
+assert(s.redoSize === 0, 'redoSize = 0');
+await undoOne({ projectId: 'p1' });
+const s2 = undoStatus('p1');
+assert(s2.undoSize === 1, 'undo 后 undoSize = 1');
+assert(s2.redoSize === 1, 'undo 后 redoSize = 1');
+
+console.log('\n--- 11. 操作后栈深度回传（免一次 roundtrip） ---');
+_resetStacks();
+registerUndoHandler('issues.moveColumn', {
+  forward: async () => ({}),
+  reverse: async () => ({}),
+});
+pushUndo('issues.moveColumn', 'p1', { x: 1 }, { x: -1 });
+const r11 = await undoOne({ projectId: 'p1' });
+assert(r11.undoSize === 0, 'undoOne 返 undoSize = 0（操作后）');
+assert(r11.redoSize === 1, 'undoOne 返 redoSize = 1（操作后）');
+assert(r11.op === 'issues.moveColumn', 'undoOne 返 op 字段');
 
 console.log(`\n[verify-undoStack] ${pass} pass · ${fail} fail`);
 if (fail > 0) {
