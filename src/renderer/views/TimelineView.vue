@@ -709,7 +709,9 @@ function formatRelative(iso: string): string {
          提交详情弹窗（v1.3 · 任务 #commit-detail）
          - 点 commit-row 触发 openCommitDetail → detailOpen=true
          - 内部 3 个动作：查看卡片（穿透到 /branches）、在 gitea 打开、复制链接
-         - Esc 关闭、点遮罩关闭
+         - 关闭方式：只允许点右上角 × 按钮（v1.3 fix #commit-detail-close-policy）
+           · 故意不绑点遮罩关闭——非技术用户容易误触外部导致内容丢失
+           · 故意不绑 Esc 关闭——"只能通过关闭按钮才能关闭"
          ============================================================ -->
     <Teleport to="body">
       <Transition name="commit-detail">
@@ -719,10 +721,8 @@ function formatRelative(iso: string): string {
           role="dialog"
           aria-modal="true"
           :aria-label="`提交 ${detailNode.shortSha} 详情`"
-          @click.self="closeCommitDetail"
-          @keydown.esc="closeCommitDetail"
         >
-          <div class="commit-detail" @click.stop>
+          <div class="commit-detail">
             <header class="commit-detail__head">
               <div class="commit-detail__head-left">
                 <code class="commit-detail__hash mono">{{ detailNode.sha.slice(0, 12) }}</code>
@@ -1139,7 +1139,12 @@ function formatRelative(iso: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
+  /*
+   * v1.3 fix #commit-detail-close-policy
+   * 右边多留 36px = 28px(×按钮宽度) + 8px(×按钮 right 偏移)
+   * 防止 head-right 里的"时间 · 作者"被右上角 × 按钮遮挡
+   */
+  padding: var(--space-3) calc(var(--space-4) + 36px) var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-divider);
   gap: var(--space-3);
 }
