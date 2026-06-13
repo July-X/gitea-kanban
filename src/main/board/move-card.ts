@@ -15,6 +15,11 @@
  * - **不**直接调 gitea API（走 src/main/gitea/issues.ts包装）
  * - **不**存"卡片位置"本地（位置在 gitea端 label上）
  * - **不**改 schema / IpcErrorCode / IPC端点清单
+ *
+ * M6 undo/redo 接入：
+ * - 成功时 pushUndo（src/main/board/undo.ts）记一条 op='issues.moveColumn'
+ * - reverseArgs = swap from/to（moveIssueColumn 对称，反向即同函数换参）
+ * - 失败 / 部分回滚 不入栈
  */
 
 import { eq, and, asc } from 'drizzle-orm';
@@ -24,6 +29,7 @@ import { columnLabelMapping } from '../cache/schema/columnLabelMapping.js';
 import { IpcError, IpcErrorCode } from '@shared/errors';
 import type { MoveIssueColumnArgs, IssueCardDto } from '../ipc/schema.js';
 import { resolveProject } from './resolveProject.js';
+import { pushUndo, registerUndoHandler } from './undo.js';
 import {
  removeGiteaIssueLabel,
  addGiteaIssueLabel,
@@ -166,11 +172,36 @@ export async function moveIssueColumn(args: MoveIssueColumnArgs): Promise<IssueC
  }
 
  //6. 返回最新 issue（gitea端）
- return await getGiteaIssue({
+ const result = await getGiteaIssue({
  giteaUrl: proj.giteaUrl,
  username: proj.username,
  owner: proj.owner,
  repo: proj.repo,
  index: args.issueIndex,
  });
+
+ //7. push undo（M6）：reverse = 互换 from/to（moveIssueColumn 对称）
+ pushUndo(
+ 'issues.moveColumn',
+ args.projectId,
+ args,
+ { ...args, fromColumnId: args.toColumnId, toColumnId: args.fromColumnId },
+ );
+
+ return result;
 }
+
+/** M6 undo/redo：注册 moveIssueColumn 的 forward/reverse handler
+ *
+ *  设计：undo.ts 不 import 业务侧（避免 electron/sqlite 链路）；
+ *  业务侧自己调 registerUndoHandler 把 handler 注入。
+ *  moveIssueColumn 对称（reverse = swap from/to），所以 forward = reverse = moveIssueColumn 自身。
+ *
+ *  模块加载即注册（move-card.ts 在 IPC 启动期已被 import 进来）—— 不需要在 bootstrap 再调一次。
+ */
+registerUndoHandler('issues.moveColumn', {
+ // 包装为 (args: unknown) => ...，类型断言回 MoveIssueColumnArgs
+ // （OpHandler 故意用 unknown 走弱耦合；moveIssueColumn 自己会做 zod / DB 校验）
+ forward: (args) => moveIssueColumn(args as MoveIssueColumnArgs),
+ reverse: (args) => moveIssueColumn(args as MoveIssueColumnArgs),
+});

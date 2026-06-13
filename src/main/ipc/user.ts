@@ -6,20 +6,20 @@
  * 端点：
  * - user.prefs.get  → 读 prefs 表（按 userId + keys 过滤）
  * - user.prefs.set  → upsert prefs 表（JSON.stringify value）
- * - user.undo       → pop undo_entries 表最新一条（M5 简化：栈空，返 restored=0）
- * - user.redo       → 同 undo（M5 简化：栈空，返 restored=0）
+ * - user.undo       → pop undo 栈 + reverse（M6 落地：真栈，业务侧已接 issues.moveColumn）
+ * - user.redo       → pop redo 栈 + forward（同上）
  *
  * 流程：wrapIpc(Zod parse) → 调业务函数 → 错误转 IpcError
  *
- * 边界（M5 拍板）：
+ * 边界：
  * - **不**改 schema / IpcErrorCode / IPC 端点清单
  * - **不**碰 src/renderer/**
  * - **不**触发 gitea HTTP（user prefs 是本地）
  * - M5 简化：单本地用户（userId = 'local-user'）；未连 gitea 也能写 prefs
- * - M5 简化：undo / redo 走"空栈 version"（restored=0）；M6 接业务时再实现真栈
+ * - M6 落地：undo / redo 真栈（src/main/board/undo.ts），in-memory 不入 DB
  *
- * 与 §8.8 教训对齐：M5 阶段不擅自引入"按 gitea_account_id 切 prefs"或"实现 undo 栈"等新设计；
- * 等 M6 有具体业务接入需求 + 用户拍板后再扩展。
+ * 与 §8.8 教训对齐：M5 阶段不擅自引入"按 gitea_account_id 切 prefs"等新设计；
+ * 等 M6+ 有具体业务接入需求 + 用户拍板后再扩展。
  */
 
 import { ipcMain } from 'electron';
@@ -44,6 +44,7 @@ const EmptyArgsSchema = z.object({}).strict();
 import { logger } from '../logger.js';
 import { getDb } from '../cache/sqlite.js';
 import { prefs, undoEntries } from '../cache/schema/index.js';
+import { undoOne, redoOne } from '../board/undo.js';
 
 /** M5 简化：单本地用户（M1 多账号时按 giteaAccountId 切分） */
 const LOCAL_USER_ID = 'local-user';
@@ -167,34 +168,33 @@ function setPrefs(args: UserPrefsSetArgs): void {
 }
 
 // ============================================================
-// ===== undo / redo 业务函数（M5 简化：空栈 version） =====
+// ===== undo / redo 业务函数（M6 落地：真栈） =====
 // ============================================================
 
 /**
- * undo —— M5 简化版
+ * undo —— M6 落地
  *
- * undo_entries 表存在（schema/undoEntries.ts），但**当前没有业务调用方**往里 push（M5 阶段
- * issues.move / board.columns.* 等都不接栈——M6 接业务时再实现真栈）。
+ * pop in-memory undo 栈（src/main/board/undo.ts）→ 派发 reverse → 推 redo 栈
+ * 当前支持 op = 'issues.moveColumn'（move-card.ts:moveIssueColumn 成功时 push）
  *
- * 当前行为：直接返 `{ restored: 0 }`，不读 undo_entries 表
- * （避免渲染端误以为真实现了撤销，把 UI 行为错误归因到本端点）。
+ * 栈空时返 { restored: 0 }（与 M5 简化版行为兼容）
  *
- * 未来扩展点（M6+）：
- * - pop undo_entries 按 createdAt DESC LIMIT 1
- * - 按 op 字段路由到对应恢复函数（card.move → reverse move）
- * - 同步 push 一条 redo_entries（或用 status 字段区分 undo/redo 栈）
+ * 反向操作失败时：
+ * - 抛出 IpcError（被 wrapIpc 捕获序列化后到渲染端）
+ * - redo 栈上**仍**有该 entry（未消费）→ 用户重试
  */
-function undo(): UserUndoResult {
-  // M5 简化：不读表（业务调用方未实现 push），不删 row
-  // 返 restored=0 让 UI 显示"已撤销 0 项"是事实陈述而非错误
-  return { restored: 0 };
+async function undo(): Promise<UserUndoResult> {
+  return await undoOne();
 }
 
 /**
- * redo —— 同 undo（空栈 version）
+ * redo —— M6 落地
+ *
+ * pop in-memory redo 栈 → 派发 forward → 推 undo 栈
+ * 栈空时返 { restored: 0 }
  */
-function redo(): UserRedoResult {
-  return { restored: 0 };
+async function redo(): Promise<UserRedoResult> {
+  return await redoOne();
 }
 
 // ============================================================
