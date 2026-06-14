@@ -21,7 +21,7 @@
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ExternalLink, XCircle, Pencil } from 'lucide-vue-next';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -65,16 +65,27 @@ const tabs: { id: PullFilter; label: string }[] = [
 
 // ===== 合并二次确认状态 =====
 
-/** 合并方式选项（人话映射，与 MergeMethodSchema 对齐：gitea swagger 实际支持 4 种） */
-const mergeMethods: { value: MergeMethod; label: string; hint: string }[] = [
-  { value: 'merge', label: '普通合并', hint: '保留所有提交历史' },
-  { value: 'rebase', label: '变基', hint: '重写历史，单一线性' },
-  { value: 'rebase-merge', label: '变基+合并', hint: '重写历史 + 保留合并提交' },
-  { value: 'squash', label: '压缩', hint: 'N 个提交合成 1 个' },
+/**
+ * 合并方式选项（人话映射，与 MergeMethodSchema 对齐：gitea swagger 实际支持 4 种）
+ *
+ * A-3 P2 · B5 修法（2026-06-14）：
+ * - 普通合并保留并**默认**选中，hint 改更"人话"
+ * - 高级方式（变基/变基+合并/压缩）默认折叠在"高级选项" disclosure 下
+ *   PM 看不到默认不点 → 不会被技术术语吓到
+ * - 4 种 hint 文案统一为"动作 + 影响"两段式（不再纯技术）
+ */
+const mergeMethods: { value: MergeMethod; label: string; hint: string; advanced?: boolean }[] = [
+  { value: 'merge', label: '普通合并', hint: '保留所有提交历史（推荐，最安全）' },
+  { value: 'rebase', label: '变基', hint: '重排历史提交（⚠️ 会改写分支历史，慎用）', advanced: true },
+  { value: 'rebase-merge', label: '变基 + 合并', hint: '重排后再合并（⚠️ 会改写历史）', advanced: true },
+  { value: 'squash', label: '压缩', hint: '把多个提交合成 1 个（⚠️ 会丢掉中间提交信息）', advanced: true },
 ];
 
-/** 当前选中的合并方式 */
+/** 当前选中的合并方式（A-3 P2：默认走普通合并，避免 PM 被迫选高级） */
 const selectedMethod = ref<MergeMethod>('merge');
+
+/** 高级选项 disclosure 开关（A-3 P2 · B5 修法，默认收起） */
+const showAdvancedMethods = ref(false);
 
 /** 当前正在合并的合并请求（null = 没在合并） */
 const mergingPull = ref<PullDto | null>(null);
@@ -505,20 +516,9 @@ function formatRelative(iso: string | undefined): string {
       </div>
       <div class="merges__topbar-right">
         <span class="merges__counter">共 {{ pull.total }} 个</span>
-        <div class="merges__merge-method">
-          <label class="merges__merge-method-label" for="default-merge-method">合并方式：</label>
-          <select
-            id="default-merge-method"
-            v-model="selectedMethod"
-            class="merges__merge-method-select"
-          >
-            <option
-              v-for="m in mergeMethods"
-              :key="m.value"
-              :value="m.value"
-            >{{ m.label }}</option>
-          </select>
-        </div>
+        <span class="merges__merge-method-hint muted" title="每次合并的默认方式，可在确认时改">
+          默认：{{ mergeMethods.find((m) => m.value === selectedMethod)?.label }}
+        </span>
         <button
           type="button"
           class="merges__refresh"
@@ -893,9 +893,10 @@ function formatRelative(iso: string | undefined): string {
       <!-- 合并方式选择 slot：放在 description 后面、确认按钮前面 -->
       <div class="merge-confirm__methods">
         <p class="merge-confirm__methods-title">选择合并方式：</p>
+        <!-- A-3 P2 · B5 修法：默认只显示普通合并，高级方式折叠 -->
         <div class="merge-confirm__method-list">
           <label
-            v-for="m in mergeMethods"
+            v-for="m in mergeMethods.filter((x) => !x.advanced || showAdvancedMethods)"
             :key="m.value"
             class="merge-confirm__method"
             :class="{ 'merge-confirm__method--active': selectedMethod === m.value }"
@@ -910,6 +911,25 @@ function formatRelative(iso: string | undefined): string {
             <span class="merge-confirm__method-hint">{{ m.hint }}</span>
           </label>
         </div>
+        <!-- A-3 P2：高级方式 disclosure 开关 -->
+        <button
+          v-if="!showAdvancedMethods"
+          type="button"
+          class="merge-confirm__advanced-toggle"
+          @click="showAdvancedMethods = true"
+        >
+          <ChevronDown :size="12" :stroke-width="2" aria-hidden="true" />
+          <span>高级选项（变基 / 压缩）</span>
+        </button>
+        <button
+          v-else
+          type="button"
+          class="merge-confirm__advanced-toggle"
+          @click="showAdvancedMethods = false"
+        >
+          <ChevronUp :size="12" :stroke-width="2" aria-hidden="true" />
+          <span>收起高级选项</span>
+        </button>
         <!-- squash 需要输入 commitMessage -->
         <div v-if="needsCommitMessage(selectedMethod)" class="merge-confirm__message">
           <label class="merge-confirm__message-label" for="squash-msg">合并提交信息（必填）：</label>
@@ -1002,26 +1022,11 @@ function formatRelative(iso: string | undefined): string {
   font-feature-settings: 'tnum';
 }
 
-.merges__merge-method {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+/* A-3 P2 · B5 修法：顶栏只显示"默认：xxx" 提示文字，4 种合并方式不再
+ * 用 select 全展开，避免 PM 默认看到所有技术选项 */
+.merges__merge-method-hint {
   font-size: var(--font-xs);
-}
-
-.merges__merge-method-label {
-  color: var(--color-text-muted);
   white-space: nowrap;
-}
-
-.merges__merge-method-select {
-  padding: 2px 6px;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-xs);
-  color: var(--color-text);
-  cursor: pointer;
 }
 
 .merges__refresh {
@@ -1587,6 +1592,26 @@ function formatRelative(iso: string | undefined): string {
 .merge-confirm__method-hint {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
+}
+
+/* A-3 P2 · B5 修法：高级方式 disclosure 按钮 */
+.merge-confirm__advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--space-2);
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.merge-confirm__advanced-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }
 
 .merge-confirm__message {
