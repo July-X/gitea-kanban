@@ -127,7 +127,7 @@ async function loadPulls(): Promise<void> {
     await pull.list(activeProjectId.value, true);
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '加载失败' });
+    showToast({ type: 'error', message: err.messageText ?? '加载失败', persistent: true });
   }
 }
 
@@ -137,7 +137,7 @@ async function onRefresh(): Promise<void> {
     showToast({ type: 'success', message: `已刷新，共 ${pull.total} 条` });
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '刷新失败' });
+    showToast({ type: 'error', message: err.messageText ?? '刷新失败', persistent: true });
   }
 }
 
@@ -197,11 +197,11 @@ async function performMerge(): Promise<void> {
     if (result.merged) {
       showToast({ type: 'success', message: `#${p.index} 合并成功` });
     } else {
-      showToast({ type: 'error', message: `#${p.index} 合并未完成：${result.message || '未知原因'}` });
+      showToast({ type: 'error', message: `#${p.index} 合并未完成：${result.message || '未知原因'}`, persistent: true });
     }
   } catch (e) {
     const err = e as { messageText?: string; hint?: string };
-    showToast({ type: 'error', message: err.messageText ?? '合并失败' });
+    showToast({ type: 'error', message: err.messageText ?? '合并失败', persistent: true });
   } finally {
     merging.value = false;
     mergingPull.value = null;
@@ -311,7 +311,7 @@ async function createNewLabel(): Promise<void> {
     showToast({ type: 'success', message: `标签 "${newLabel.name}" 已创建` });
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '创建标签失败' });
+    showToast({ type: 'error', message: err.messageText ?? '创建标签失败', persistent: true });
   } finally {
     creatingLabel.value = false;
   }
@@ -367,11 +367,28 @@ async function saveAttrs(p: PullDto): Promise<void> {
     }));
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
-    errors.push(`评审人: ${err.messageText ?? err.message ?? '失败'}`);
+    const msg = err.messageText ?? err.message ?? '失败';
+    // 特殊处理：组织账号评审人业务错
+    if (msg.includes("can't be doer") || msg.includes('Organization')) {
+      errors.push(`评审人: 组织账号不能作评审人（gitea 限制）`);
+    } else {
+      errors.push(`评审人: ${msg}`);
+    }
   }
 
   if (errors.length > 0) {
-    showToast({ type: 'error', message: `部分失败：${errors.join('; ')}` });
+    // 业务错 → persistent toast（不自动消失，必须用户点击关闭）
+    // 性能错（networks/服务器故障）→ 短暂 toast
+    const isBusinessError = errors.some(e =>
+      e.includes('不能') || e.includes('不能作') || e.includes('限制')
+      || e.includes('VAL') || e.includes('失败')
+    );
+    showToast({
+      type: 'error',
+      message: `部分失败：${errors.join('; ')}`,
+      description: '点击任意处关闭提示',
+      persistent: isBusinessError,
+    });
   } else {
     showToast({ type: 'success', message: `#${p.index} 属性已更新` });
     closeAttrEditor();
@@ -402,7 +419,7 @@ async function performClose(): Promise<void> {
     }
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '关闭失败' });
+    showToast({ type: 'error', message: err.messageText ?? '关闭失败', persistent: true });
   } finally {
     closing.value = false;
     closingPull.value = null;

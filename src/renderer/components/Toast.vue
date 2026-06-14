@@ -22,9 +22,9 @@ function onDismiss(): void {
         v-if="toast"
         :key="toast.message"
         class="toast"
-        :class="`toast--${toast.type}`"
+        :class="`toast--${toast.type} ${toast.persistent ? 'toast--persistent' : ''}`"
         role="status"
-        aria-live="polite"
+        :aria-live="toast.persistent ? 'assertive' : 'polite'"
         @click="onDismiss"
       >
         <span class="toast__icon" aria-hidden="true">
@@ -33,6 +33,7 @@ function onDismiss(): void {
         <div class="toast__body">
           <div class="toast__message">{{ toast.message }}</div>
           <div v-if="toast.description" class="toast__description">{{ toast.description }}</div>
+          <div v-if="toast.persistent" class="toast__hint">点击任意处关闭</div>
         </div>
         <button
           type="button"
@@ -99,6 +100,18 @@ function onDismiss(): void {
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
   line-height: var(--line-base);
+}
+
+.toast__hint {
+  margin-top: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.toast--persistent {
+  border-left-width: 4px;
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-danger-soft);
 }
 
 .toast__close {

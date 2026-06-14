@@ -17,22 +17,36 @@ export interface ToastState {
   message: string;
   description?: string;
   duration: number;
+  /** true = 不自动消失，必须用户点击关闭（用于错误提示） */
+  persistent?: boolean;
 }
 
 export const toast = ref<ToastState | null>(null);
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 
-export function showToast(state: Omit<ToastState, 'duration'> & { duration?: number }): void {
+/**
+ * showToast —— 全局提示
+ *
+ * duration：
+ *   - 0 或 undefined = 用默认 3000ms
+ *   - 正数 = 多少毫秒后自动消失
+ *   - 负数 = 不自动消失
+ *
+ * persistent（推荐用这个）：true = 必须用户点击关闭（用于错误/重要提示）
+ */
+export function showToast(state: Omit<ToastState, 'duration'> & { duration?: number; persistent?: boolean }): void {
   if (timer) {
     clearTimeout(timer);
     timer = null;
   }
+  const isPersistent = state.persistent === true;
   toast.value = {
     type: state.type,
     message: state.message,
     ...(state.description !== undefined ? { description: state.description } : {}),
-    duration: state.duration ?? 3000,
+    duration: state.duration ?? (isPersistent ? -1 : 3000),
+    persistent: isPersistent,
   };
   if (toast.value.duration > 0) {
     timer = setTimeout(() => {
