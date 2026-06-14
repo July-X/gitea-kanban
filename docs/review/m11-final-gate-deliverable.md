@@ -245,5 +245,39 @@ e02af7d (我) chore(test): seed-kanban-demo.ts 扩 PR/branch/commit 数据
 
 ## 状态
 
-VERDICT: **DEGRADED**（commit 1-7 内容全部正确 / 4 件套 3 件过 1 件 fail（数据污染非代码问题）/
-git status 干净 / commit 历史规范中文无 trailer / 事故链已完整记录 / M12 follow-up 列清）
+VERDICT: **PARTIAL**（commit 1-12 + reset 脚本 2bf2a2f 内容全部正确 / 4 件套 3 件过 1 件 fail（e2e W3 因 gitea API 限制无法收敛 baseline，已透明记录）/ git status 干净 / commit 历史规范中文无 trailer / 事故链已完整记录 / M12 follow-up 列清）
+
+---
+
+## M11 收口操作（user 拍板选项 C：透明 PARTIAL）
+
+**reset 脚本落地**（commit 2bf2a2f）：`scripts/reset-gitea-demo.ts` 已入仓，跑过 1 次实际清理：
+- 关闭 22 个 [mock] PRs（state: open → closed）
+- 删除 29 个 mock 分支（pr-* / feature-pr-*）
+- 保留 main + feature-* + develop 不动
+
+**reset 后 demo gitea 状态**（部分恢复 baseline）：
+- PR total 25（state=all）—— 2 closed merged baseline + 23 closed mock（gitea API 不能删 closed PR）
+- Branches 6 —— main + feature-kanban + feature-merge + develop + 2 个 timeline-test-*（保留）
+- main HEAD = 80b139f "Merge pull request '[mock] 草稿状态测试 #054477-2'"（含 seed commits，gitea API 不能 force push default branch）
+
+**e2e W3 baseline vs reset 后状态不可调和**：
+```
+[step 1] expected 2 PR, got 25
+[step 3] totalCommits=27, expected 15
+```
+
+**根本限制**：gitea REST API 不能删 closed PR + 不能 force push to default branch。
+**彻底恢复 baseline 路径**：user 在 docker 容器内手动 `git reset --hard <M9 baseline sha> + push -f main` —— M11 不强制要求，留 M12 决策。
+
+---
+
+## M11 后续方向（user 2026-06-14 16:39 决策）
+
+**不再追加开发计划，立即收敛功能 bug + 优化设计体验**。意味着：
+- M12 "补 W5 pulls e2e / pulls 单测 / MergesView 单测"等加测任务**暂缓**
+- M12 "reset 工具 + cdp-seed-timeline-data.mjs 硬编码 token"**已落 commit 2bf2a2f**，剩下彻底恢复 main baseline 留 user docker 操作
+- 进入 **bug fixing / UI 优化模式** —— 单 owner-takeover 路径，user 报 bug 我修 + commit
+- 每个 bug fix 完跑 4 件套 + 报告 commit hash
+
+**M11 算正式收口**，VERDICT PARTIAL 是 transparent 真实状态（不是 PASS 假装）。
