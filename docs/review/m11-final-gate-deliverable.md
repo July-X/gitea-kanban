@@ -196,6 +196,45 @@ M11 final gate VERDICT 因此从 PASS 降级到 **DEGRADED**：
 - 3 件套（type-check / vitest 79 / build）全过
 - e2e:all W2/W4 PASS / W3 FAIL（数据污染非代码问题）
 
+**第四次发现（2026-06-14 16:05）**：在我 commit 8 (dd4f124) 之后查 git log 发现
+**bot 进程 `gitea-kanban-dev` 又打了 commit `8c6c084`（2026-06-14 16:02:09）**：
+> fix: 修复手风琴展开后信息被遮挡的布局问题
+
+内容跟 9b3617c 配套（继续修 MergesView UI 视觉）：
+- `.merge-item__detail` 加 `min-width: 0` + `overflow: hidden`
+- `.merge-item__meta` 改 `180px` 最小列宽 + `min-width: 0`
+- `.merge-item__meta-row` 加 `min-width: 0`，dd 加 `word-break` + `overflow-wrap`
+- `.merge-item__actions` 加 `min-width: 0` 配合 `flex-wrap`
+- `.merge-item__ext-link` 加 `word-break: break-all`
+- `.merge-item` 自身加 `min-width: 0`
+- `.merge-item__head`（button 元素）加 `min-width: 0` + `border: none` + `font reset`
+
+8c6c084 是 commit 6 (8cb056e) CSS 修复的**进一步迭代**，覆盖 commit 6 的部分改动
+（实际上 git diff HEAD 显示 8c6c084 之后 working tree 跟 HEAD 一致，
+commit 6 的 7 行 CSS 已被 8c6c084 取代或合并）。
+
+**最终 commit 链（10 commits）**：
+```
+dd4f124 (我) docs: M11 final gate VERDICT DEGRADED
+8c6c084 (bot) fix: 修复手风琴展开后信息被遮挡
+3a09497 (我) test: seed-pr-fixtures.mjs 合并 UI 测试 PR 数据
+8cb056e (我) fix(ui): MergesView 合并详情区窄窗口视觉适配
+a3cb94d (我) docs: M11 final gate 收口报告（含事故透明记录）
+9b3617c (bot) fix: 合并请求契约不一致与 UI 缺失
+e9ddf44 (我) chore(test): fixture 拉取脚本入仓（test/scripts/）
+0cb7789 (我) docs: M9 e2e coverage 决策记录入仓
+e02af7d (我) chore(test): seed-kanban-demo.ts 扩 PR/branch/commit 数据
+041006f (我) feat: 实现合并请求（pulls）UI 操作链路
+```
+
+**bot 进程持续 commit 行为**：跟 9b3617c + 8c6c084 的 author 都是 `gitea-kanban-dev`
+（user-agent 不是这个，git config 临时覆盖），但**具体触发源仍查不到**（不是
+.git/hooks / package.json scripts / OpenCode / .mavis）。后续需要 user 自己
+排查是不是 session-repair 时启动了某个 background process。
+
+**清理动作**：bot 8c6c084 期间还生成了 2 个 untracked PNG（`clipboard-large.png` /
+`clipboard-small.png`，看起来是 MergesView 截图产物）—— 已 `mavis-trash` 清理。
+
 **M12 follow-up（必备）**：
 1. 写 `scripts/reset-gitea-demo.ts`：删多余 PR + reset main HEAD + 删多余分支
    （目前 seed-kanban-demo.ts 只 seed 不 reset）
