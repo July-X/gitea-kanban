@@ -670,8 +670,6 @@ function formatDate(iso: string | undefined): string {
   border-radius: var(--radius-md);
   transition: background var(--t-fast) var(--ease);
   overflow: hidden;
-  /* grid/flex 子项需要这个才能被父容器压缩 */
-  min-width: 0;
 }
 
 .merge-item:hover {
@@ -700,9 +698,6 @@ function formatDate(iso: string | undefined): string {
   background: transparent;
   text-align: left;
   cursor: pointer;
-  /* button 元素需要这个 flex 标题才能被压缩 */
-  min-width: 0;
-  /* 重置 button 浏览器默认样式 */
   border: none;
   font-family: inherit;
   color: inherit;
@@ -768,27 +763,29 @@ function formatDate(iso: string | undefined): string {
   padding: var(--space-3);
   border-top: 1px solid var(--color-divider);
   background: var(--color-bg);
-  /* 防止子 grid/flex 内容把 detail 横向撑出父容器 */
-  min-width: 0;
-  /* 不出横向滚动条——让内容向下换行 */
-  overflow: hidden;
 }
 
+/* meta 区使用 2 列定宽布局（响应式：< 600px 降为 1 列）
+ * 不使用 auto-fit 避免在中间宽度出现 3 列拥挤；
+ * 2 列 是信息密度 + 可读性的最佳平衡。 */
 .merge-item__meta {
   display: grid;
-  /* 7 个 meta 项：2 列紧凑布局（窄窗口 1 列自动堆） */
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2) var(--space-4);
   margin: 0;
-  /* grid 子项也是 min-content 默认可撑爆列，加 min-width: 0 */
-  min-width: 0;
+  padding: 0;
+}
+
+@media (max-width: 600px) {
+  .merge-item__meta {
+    grid-template-columns: 1fr;
+  }
 }
 
 .merge-item__meta-row {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* flex item 需要这个才能被 grid 压缩 */
   min-width: 0;
 }
 
@@ -803,9 +800,10 @@ function formatDate(iso: string | undefined): string {
   font-size: var(--font-sm);
   color: var(--color-text);
   margin: 0;
-  /* 长 branch 名字需要断行，不能横着撑出去 */
-  word-break: break-word;
+  /* 长 branch 名字可以断行 */
+  word-break: break-all;
   overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 /* ===== 操作区 ===== */
@@ -813,14 +811,11 @@ function formatDate(iso: string | undefined): string {
 .merge-item__actions {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2);
   margin-top: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-divider);
-  /* 窄窗口时允许换行（防止按钮被裁） */
-  flex-wrap: wrap;
-  /* 防止按钮组本身被父容器裁 */
-  min-width: 0;
 }
 
 .merge-item__btn {
@@ -865,10 +860,7 @@ function formatDate(iso: string | undefined): string {
   border-radius: var(--radius-sm);
   transition: background var(--t-fast) var(--ease);
   text-decoration: none;
-  /* 防止 wrap 时长 url 撑出去 */
-  word-break: break-all;
-  min-width: 0;
-  /* wrap 时不再用 auto 推到右边，让其自然排到下一行第一个位置 */
+  margin-left: auto;
 }
 
 .merge-item__ext-link:hover {
