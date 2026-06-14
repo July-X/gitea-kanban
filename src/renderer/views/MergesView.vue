@@ -233,6 +233,12 @@ const availableLabels = ref<{ name: string; color: string }[]>([]);
 /** 可用成员列表 */
 const availableMembers = ref<string[]>([]);
 
+/** 新建标签相关 state */
+const showNewLabelInput = ref(false);
+const newLabelName = ref('');
+const newLabelColor = ref('#fbca04');
+const creatingLabel = ref(false);
+
 /** 打开属性编辑器 */
 async function openAttrEditor(p: PullDto): Promise<void> {
   editingPull.value = p;
@@ -275,40 +281,84 @@ function toggleReviewer(name: string): void {
   else editingReviewers.value.push(name);
 }
 
-/** 保存属性 */
+/** 创建新标签（同步到 gitea） */
+async function createNewLabel(): Promise<void> {
+  if (!activeProjectId.value || !newLabelName.value.trim()) return;
+  creatingLabel.value = true;
+  try {
+    // 去掉 # 前缀
+    const color = newLabelColor.value.replace(/^#/, '');
+    const newLabel = await window.api.labels.create({
+      projectId: activeProjectId.value,
+      name: newLabelName.value.trim(),
+      color,
+    }) as { name: string; color: string };
+    // 立即加到可用列表和已选列表
+    availableLabels.value = [...availableLabels.value, { name: newLabel.name, color: newLabel.color }];
+    if (!editingLabels.value.includes(newLabel.name)) {
+      editingLabels.value = [...editingLabels.value, newLabel.name];
+    }
+    // 隐藏输入框 + 重置
+    showNewLabelInput.value = false;
+    newLabelName.value = '';
+    showToast({ type: 'success', message: `标签 "${newLabel.name}" 已创建` });
+  } catch (e) {
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: err.messageText ?? '创建标签失败' });
+  } finally {
+    creatingLabel.value = false;
+  }
+}
+
+/** 保存属性（逐字段尝试，一个失败不影响其他） */
 async function saveAttrs(p: PullDto): Promise<void> {
   if (!activeProjectId.value) return;
+  const errors: string[] = [];
+
+  // 1. 更新标签（替换所有标签）
   try {
-    // 更新标签
     await window.api.pulls.updateLabels({
       projectId: activeProjectId.value,
       index: p.index,
       labels: editingLabels.value,
     });
-    // 更新指派人
-    if (editingAssignee.value) {
-      await window.api.pulls.updateAssignee({
-        projectId: activeProjectId.value,
-        index: p.index,
-        assignee: editingAssignee.value,
-      });
-    }
-    // 更新评审人
-    if (editingReviewers.value.length > 0) {
-      await window.api.pulls.updateReviewers({
-        projectId: activeProjectId.value,
-        index: p.index,
-        reviewers: editingReviewers.value,
-      });
-    }
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    errors.push(`标签: ${err.messageText ?? err.message ?? '失败'}`);
+  }
+
+  // 2. 更新指派人（空串 = 清除指派人）
+  try {
+    await window.api.pulls.updateAssignee({
+      projectId: activeProjectId.value,
+      index: p.index,
+      assignee: editingAssignee.value,
+    });
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    errors.push(`指派人: ${err.messageText ?? err.message ?? '失败'}`);
+  }
+
+  // 3. 更新评审人
+  try {
+    await window.api.pulls.updateReviewers({
+      projectId: activeProjectId.value,
+      index: p.index,
+      reviewers: editingReviewers.value,
+    });
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    errors.push(`评审人: ${err.messageText ?? err.message ?? '失败'}`);
+  }
+
+  if (errors.length > 0) {
+    showToast({ type: 'error', message: `部分失败：${errors.join('; ')}` });
+  } else {
     showToast({ type: 'success', message: `#${p.index} 属性已更新` });
     closeAttrEditor();
-    // 刷新列表
-    await pull.refresh();
-  } catch (e) {
-    const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '更新失败' });
   }
+  // 始终刷新列表（部分成功也能看到最新状态）
+  await pull.refresh();
 }
 
 /** 点击关闭按钮 → 弹二次确认 */
@@ -727,7 +777,37 @@ function formatRelative(iso: string | undefined): string {
           <div class="attr-editor">
             <!-- 标签选择 -->
             <div class="attr-editor__section">
-              <label class="attr-editor__label">标签：</label>
+              <div class="attr-editor__label-row">
+                <label class="attr-editor__label">标签：</label>
+                <button
+                  type="button"
+                  class="attr-editor__add-btn"
+                  @click="showNewLabelInput = !showNewLabelInput"
+                  :title="'新建标签'"
+                >+ 新建</button>
+              </div>
+              <!-- 新建标签输入框（默认隐藏） -->
+              <div v-if="showNewLabelInput" class="attr-editor__new-label">
+                <input
+                  v-model="newLabelName"
+                  type="text"
+                  class="attr-editor__new-label-input"
+                  placeholder="标签名"
+                  autocomplete="off"
+                />
+                <input
+                  v-model="newLabelColor"
+                  type="color"
+                  class="attr-editor__new-label-color"
+                  title="标签颜色"
+                />
+                <button
+                  type="button"
+                  class="attr-editor__new-label-confirm"
+                  :disabled="!newLabelName.trim()"
+                  @click="createNewLabel"
+                >{{ creatingLabel ? '创建中…' : '创建' }}</button>
+              </div>
               <div class="attr-editor__tags">
                 <label
                   v-for="label in availableLabels"
@@ -1564,6 +1644,70 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.attr-editor__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.attr-editor__add-btn {
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.attr-editor__add-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.attr-editor__new-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+}
+
+.attr-editor__new-label-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+.attr-editor__new-label-input:focus { outline: none; }
+
+.attr-editor__new-label-color {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.attr-editor__new-label-confirm {
+  padding: 2px 8px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.attr-editor__new-label-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .attr-editor__label {
