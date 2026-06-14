@@ -1,5 +1,6 @@
 /**
  * LocalStore —— electron-store 之上的一层包装
+ * (touch v5)
  *
  * 为什么不直接用 electron-store：
  * 1. `store.store` getter 每次访问从磁盘读（v1 IPC 大量是同步风格，IO 不可接受）

@@ -14,6 +14,7 @@
  */
 
 import { app } from 'electron';
+// (touch)
 import { logger, upgradeLoggerToFile } from './logger.js';
 import { createMainWindow, destroyMainWindow, installCspHeader } from './window.js';
 import { registerAllIpcHandlers, unregisterAllIpcHandlers } from './ipc/index.js';

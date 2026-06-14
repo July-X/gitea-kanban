@@ -28,6 +28,7 @@
     "db:studio": "drizzle-kit studio",
     "check:no-jargon": "tsx scripts/check-no-jargon.ts",
     "verify:state-consistency": "tsx scripts/verify-state-consistency.ts",
+    "verify:state-consistency": "tsx scripts/verify-state-consistency.ts",
     "rebuild:native": "bash scripts/rebuild-native.sh",
     "e2e:w2": "node scripts/_e2e-runner.mjs scripts/e2e-verify-w2.ts",
     "e2e:w3": "node scripts/_e2e-runner.mjs scripts/e2e-verify-w3.ts",

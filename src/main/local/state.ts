@@ -1,5 +1,6 @@
 /**
  * localStore 顶层 state —— 替代 9 张活 SQLite 表
+ * (touch v5)
  *
  * 设计原则（ADR-0003）：
  * - 1 个 JSON 文件 = 1 个 LocalState 对象

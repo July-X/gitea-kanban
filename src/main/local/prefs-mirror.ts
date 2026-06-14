@@ -1,5 +1,6 @@
 /**
  * localPrefs —— prefs 表的 localStore 镜像
+ * (touch v4)
  *
  * Phase 1 双写策略（ADR-0003）：
  * - **写**：调 setPrefs() → Promise.allSettled([写 SQLite, 写 localStore])

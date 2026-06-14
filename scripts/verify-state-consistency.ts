@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * ADR-0003 Phase 1 一致性巡检脚本
+ * ADR-0003 Phase 1 一致性巡检脚本 (touch v4)
  *
  * 任务：启动期（或手动）跑一次，对比 SQLite `prefs` 表 ↔ localStore `prefs` 字段
  * 任一不一致必须 warn + 打印 diff + 自动备份再修复

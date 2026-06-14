@@ -1,5 +1,5 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban
+# AGENTS.md — gitea-kanban (touch v4)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
