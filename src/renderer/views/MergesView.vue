@@ -760,11 +760,14 @@ function formatDate(iso: string | undefined): string {
   padding: var(--space-3);
   border-top: 1px solid var(--color-divider);
   background: var(--color-bg);
+  /* 防止子 grid/flex 内容把 detail 横向撑出父容器 */
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .merge-item__meta {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--space-2) var(--space-4);
   margin: 0;
 }
@@ -797,6 +800,8 @@ function formatDate(iso: string | undefined): string {
   margin-top: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-divider);
+  /* 窄窗口时允许换行（防止按钮被裁） */
+  flex-wrap: wrap;
 }
 
 .merge-item__btn {
@@ -841,7 +846,7 @@ function formatDate(iso: string | undefined): string {
   border-radius: var(--radius-sm);
   transition: background var(--t-fast) var(--ease);
   text-decoration: none;
-  margin-left: auto;
+  /* wrap 时不再用 auto 推到右边，让其自然排到下一行第一个位置 */
 }
 
 .merge-item__ext-link:hover {
