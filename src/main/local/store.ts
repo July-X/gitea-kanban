@@ -181,7 +181,15 @@ export class LocalStore<T extends object> {
       this.retryDelay = 0; // 成功后清零
       log.debug({ file: this.file, bytes: snapshot.length }, 'localStore: flushed');
     } catch (err) {
-      // 失败：log + 退避重试（保留 dirty 状态）
+      // 失败：清理残留 tmp 文件 + 退避重试（保留 dirty 状态）
+      try {
+        const { unlink } = await import('node:fs/promises');
+        await unlink(tmp).catch(() => {
+          // tmp 不存在 / 已删 = 忽略
+        });
+      } catch {
+        // unlink 自身失败 = 忽略（tmp 可能正被另一进程持有）
+      }
       this.retryDelay = Math.min(
         this.retryDelay === 0 ? 200 : this.retryDelay * 2,
         FLUSH_RETRY_MAX_MS,

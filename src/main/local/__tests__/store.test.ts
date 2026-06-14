@@ -28,10 +28,17 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  // 每个 case 清理自己造的 file
+  // 每个 case 清理自己造的 file + 所有 .tmp.*（写盘失败残留兜底）
   for (const f of ['a.json', 'b.json', 'c.json', 'corrupt.json', 'fail.json']) {
     const p = join(TMP_DIR, f);
     if (existsSync(p)) rmSync(p, { force: true });
+  }
+  // 清 .tmp.* 残留（之前的 case 写盘失败可能留）
+  const { readdirSync } = await import('node:fs');
+  if (existsSync(TMP_DIR)) {
+    for (const f of readdirSync(TMP_DIR)) {
+      if (f.includes('.tmp.')) rmSync(join(TMP_DIR, f), { force: true });
+    }
   }
   // 留 1ms 让 pino async flush 完
   await new Promise((r) => setTimeout(r, 10));

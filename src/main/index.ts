@@ -22,6 +22,7 @@ import { initSqlite, closeSqlite } from './cache/sqlite.js';
 import { initLocalStore, closeLocalStore } from './local/state.js';
 import { bootstrapAllFromSqlite } from './local/bootstrap.js';
 import { authStatus } from './gitea/auth.js';
+import { getSyncRunner } from './sync/runner.js';
 import { APP_NAME, APP_SINGLE_INSTANCE_LOCK_NAME } from '@shared/constants';
 
 // ===== 0. 启用 Electron 远程调试（仅 dev / unpackaged） =====
@@ -109,6 +110,12 @@ app.on('ready', async () => {
     registerAllIpcHandlers();
     logger.info('IPC handlers registered');
 
+    // 2b-bis. 启动 SyncRunner（ADR-0003 Phase 3）
+    //   启动期自动 loadQueue 恢复 + 跑一次（处理上次崩留下的 pending）
+    logger.info('SyncRunner start');
+    await getSyncRunner().start();
+    logger.info('SyncRunner started');
+
     // 2c. 创建主窗口
     logger.info('createMainWindow start');
     createMainWindow();
@@ -156,7 +163,9 @@ app.on('before-quit', () => {
   unregisterAllIpcHandlers();
   destroyMainWindow();
   // closeLocalStore 先于 closeSqlite：保证 last write 不丢
-  void closeLocalStore().finally(() => closeSqlite());
+  void closeLocalStore()
+    .then(() => getSyncRunner().stop())
+    .finally(() => closeSqlite());
 });
 
 // 未捕获异常 → 静默兜底（不调 logger.fatal — logger 可能已坏：SonicBoom fd=-1 会循环 RangeError）
