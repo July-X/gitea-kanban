@@ -26,7 +26,6 @@
  *   这是 schema 跟 gitea 实际响应不兼容的已知 bug（W3 task scope 之外，**不**在 W3 修）
  *   业务函数 toPullDto 已 fallback (r.created_at ?? new Date(0).toISOString())，实际数据 OK
  *   改 schema 是 worker 不能自决的事（AGENTS §7.1 拍板清单 #2），需 escalate
- *   末尾 §[Z1-Z4] 段独立跑 Zod.parse 失败率，输出"已知 issue"清单
  *
  * 不调 ipcMain.handle（依赖 electron 模块 + 注册到 main 进程；不启 electron 就不能跑）
  * 不用 vitest（§8.12 plan 收口教训：vitest ABI 切回 node，dev 不能跑）
@@ -43,11 +42,6 @@
  * - 任务 prompt 假设 "main 6 commits"，但 gitea 端可能已 merge 过 PR #11（plan_2f3810f0 之前 plan 可能已 merge）——
  *   脚本自适应（baseline N + 1 验证），不假设具体 N
  */
-import {
-  PullDtoSchema,
-  TimelineDtoSchema,
-  ListPullsRespSchema,
-} from '../src/main/ipc/schema.js';
 import {
   listGiteaPulls,
   getGiteaPull,
@@ -72,9 +66,7 @@ if (!KB_TOKEN) {
 
 let pass = 0;
 let fail = 0;
-let knownIssue = 0;
 const failures: string[] = [];
-const knownIssues: string[] = [];
 const samples: Record<string, unknown> = {};
 
 interface StepCheck {
@@ -102,37 +94,6 @@ async function check(name: string, fn: () => Promise<StepCheck>): Promise<void> 
       console.log(`     ${e.stack.split('\n').slice(0, 3).join('\n     ')}`);
     }
   }
-}
-
-/**
- * 已知 issue 检查 helper（M9 task 2 修复后语义）
- *
- * 修复前：non-catch / catch 两路径都 `knownIssue++`——把"schema parse 成功（意外通过）"也
- *   算 known-issue。3 个 [Z] 检查永远归 known-issue 桶，无法体现 fix。
- *
- * 修复后（M9 task 2, owner 拍板授权）：
- * - non-catch 路径（schema parse 成功 = "意外通过"）→ `pass++` + 打印 (fix 确认)
- *   → schema 已修，"意外通过"是真 PASS，数字归 pass
- * - catch 路径（schema parse 拒 = 真 Zod 错，或 fn 本身 throw）→ `fail++` + 打印 (threw)
- *   → 守住 regression：如果未来 schema 退化，Zod 拒会被报为 fail，e2e exit code 1
- *
- * 配合的 §[Z1-Z4] audit 段 (line 492-563) 一字未动——audit 段判定逻辑保留，**只**改
- * helper 计数语义。两者完全独立：audit 段决定"Zod 是否拒"，helper 决定"计数如何归类"。
- */
-function knownIssueCheck(name: string, fn: () => Promise<{ issue: string; detail: string }>): Promise<void> {
-  return fn()
-    .then(({ detail }) => {
-      // non-catch：schema parse 成功 = 真 fix 确认。
-      // `issue` 字段保留作 schema bug 类别描述（catch 路径用 e.message），此路径不消费。
-      pass++;
-      console.log(`  ✅ ${name} (fix 确认): ${detail}`);
-    })
-    .catch((e: unknown) => {
-      fail++;
-      const msg = e instanceof Error ? e.message : String(e);
-      failures.push(`${name}: ${msg}`);
-      console.log(`  ❌ ${name} (threw): ${msg.slice(0, 200)}`);
-    });
 }
 
 async function main(): Promise<void> {
@@ -505,79 +466,6 @@ async function main(): Promise<void> {
     return { ok: true, detail: `merged=${p.merged} (idempotent)` };
   });
 
-  // ===== [Z1-Z4] 已知 schema 契约 issue：单独跑 Zod.parse 报告 =====
-  console.log('\n[Z1-Z4] schema 契约已知 issue 审计（不阻塞业务验证）');
-  await knownIssueCheck('Z1: PullDtoSchema.parse(listPullsResp) 失败', async () => {
-    const r = await listGiteaPulls({
-      giteaUrl: URL, username: KB_USER, owner: REPO_OWNER, repo: REPO_NAME,
-      state: 'all', limit: 50,
-    });
-    const wrap = { items: r.items, total: r.items.length, hasMore: r.hasMore };
-    try {
-      ListPullsRespSchema.parse(wrap);
-      return { issue: '意外通过（schema bug 已被修？）', detail: '请检查 IsoDateSchema' };
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
-      return {
-        issue: 'IsoDateSchema = z.string().datetime() 不接受 gitea 实际返的 +08:00 偏移格式',
-        detail: `ZodError: ${msg}`,
-      };
-    }
-  });
-  await knownIssueCheck('Z2: PullDtoSchema.parse(getPull(11)) 失败', async () => {
-    const p = await getGiteaPull({
-      giteaUrl: URL, username: KB_USER, owner: REPO_OWNER, repo: REPO_NAME, index: 11,
-    });
-    try {
-      PullDtoSchema.parse(p);
-      return { issue: '意外通过', detail: '请检查 PullDtoSchema' };
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
-      return {
-        issue: '同上：PullDtoSchema.createdAt/updatedAt 字段 IsoDateSchema 不接受 +08:00',
-        detail: `ZodError: ${msg}`,
-      };
-    }
-  });
-  await knownIssueCheck('Z3: TimelineDtoSchema.parse(timeline) 失败', async () => {
-    const branches = ['main', 'feature-kanban', 'feature-merge', 'develop'];
-    const commitsByBranch: Record<string, Awaited<ReturnType<typeof listGiteaCommits>>['items']> = {};
-    for (const b of branches) {
-      const r = await listGiteaCommits({
-        giteaUrl: URL, username: KB_USER, owner: REPO_OWNER, repo: REPO_NAME, sha: b, limit: 50,
-      });
-      commitsByBranch[b] = r.items;
-    }
-    const openPrs = await listGiteaPulls({ giteaUrl: URL, username: KB_USER, owner: REPO_OWNER, repo: REPO_NAME, state: 'open', limit: 100 });
-    const closedPrs = await listGiteaPulls({ giteaUrl: URL, username: KB_USER, owner: REPO_OWNER, repo: REPO_NAME, state: 'closed', limit: 100 });
-    const allPrs = [...openPrs.items, ...closedPrs.items];
-    const timelinePrs = allPrs.map((p) => ({
-      id: `pr:${REPO_OWNER}/${REPO_NAME}/${p.index}`,
-      index: p.index,
-      title: p.title,
-      state: (p.merged ? 'merged' : p.state) as 'open' | 'closed' | 'merged',
-      head: p.head.ref,
-      base: p.base.ref,
-      author: { name: p.author.username, ...(p.author.avatarUrl ? { avatarUrl: p.author.avatarUrl } : {}) },
-      url: `${URL}/${REPO_OWNER}/${REPO_NAME}/pulls/${p.index}`,
-      ...(p.merged && p.updatedAt ? { mergedAt: p.updatedAt } : {}),
-    }));
-    const timeline = buildTimeline({
-      args: { projectId: PROJECT_ID, branches, laneMode: 'branch', maxNodes: 500 },
-      commitsByBranch, pulls: timelinePrs, linkedCardIdsBySha: new Map(),
-    });
-    try {
-      TimelineDtoSchema.parse(timeline);
-      return { issue: '意外通过', detail: '请检查 TimelineDtoSchema' };
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
-      return {
-        issue: '同上：TimelineDtoSchema nodes[].timestamp + prs[].mergedAt 字段 IsoDateSchema 不接受 +08:00',
-        detail: `ZodError: ${msg}`,
-      };
-    }
-  });
-
   // ===== 写 sample 到 notes 目录（便于 owner review）=====
   const fs = await import('node:fs');
   const path = await import('node:path');
@@ -587,14 +475,10 @@ async function main(): Promise<void> {
   console.log(`\nSamples written: ${samplePath}`);
 
   // ===== summary =====
-  console.log(`\nResult: ${pass} pass / ${fail} fail / ${knownIssue} known-issue`);
+  console.log(`\nResult: ${pass} pass / ${fail} fail`);
   if (failures.length) {
     console.log('\nFailures:');
     failures.forEach((f) => console.log('  - ' + f));
-  }
-  if (knownIssues.length) {
-    console.log('\nKnown issues (schema contract, out of W3 scope):');
-    knownIssues.forEach((m) => console.log('  ⚠️ ' + m));
   }
 
   // ===== cleanup =====
