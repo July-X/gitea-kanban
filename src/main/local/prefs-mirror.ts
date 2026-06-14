@@ -8,7 +8,7 @@
  * - **读**：仍走 SQLite（Phase 1 不切读路径）
  * - **初始化**：initPrefsMirror() 启动期从 SQLite SELECT 一次全量 → 灌进 localStore
  *
- * Phase 2 切读路径：getPrefs() 优先读 localStore，fallback 读 SQLite
+ * Phase 2 切读路径：getPrefs() 优先读 localStore（**不** fallback SQLite）
  * Phase 3 删 SQLite：删 setPrefs 中的 SQLite 分支
  *
  * 边界：

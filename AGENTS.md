@@ -94,7 +94,13 @@ gitea-kanban/
 │   │   ├── local/               # ADR-0003 Phase 1：localStore（替代 9 张活 SQLite 表）
 │   │   │   ├── store.ts         #   LocalStore 抽象（原子写 + debounce flush + 重试退避）
 │   │   │   ├── state.ts         #   顶层 LocalState TS interface + 单例
-│   │   │   └── prefs-mirror.ts  #   prefs 双写层（SQLite ↔ localStore）
+│   │   │   ├── prefs-mirror.ts  #   prefs 双写层（SQLite ↔ localStore）
+│   │   │   ├── accounts.ts      #   Phase 2 业务接口：accounts（替代 gitea_accounts + gitea_user）
+│   │   │   ├── projects.ts      #   Phase 2 业务接口：repo_projects
+│   │   │   ├── columns.ts       #   Phase 2 业务接口：board_columns
+│   │   │   ├── label-maps.ts    #   Phase 2 业务接口：column_label_mapping
+│   │   │   ├── starred-branches.ts # Phase 2 业务接口：starred_branches
+│   │   │   └── bootstrap.ts     #   启动期全表 bootstrap（SQLite → localStore）
 │   │   ├── ipc/                 # IPC handler（按 namespace 分文件）
 │   │   │   ├── index.ts         # 统一注册入口
 │   │   │   ├── schema.ts        # 所有 IPC 的 Zod schema
