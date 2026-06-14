@@ -15,58 +15,50 @@
  * - **不**直接调 gitea（走 src/main/gitea/issues.ts）
  */
 
-import { eq, asc } from 'drizzle-orm';
-import { getDb } from '../cache/sqlite.js';
-import { columnLabelMapping } from '../cache/schema/columnLabelMapping.js';
-import { boardColumns } from '../cache/schema/boardColumns.js';
 import type { ListIssuesArgs, ListIssuesResp, IssueCardDto } from '../ipc/schema.js';
 import { resolveProject } from './resolveProject.js';
 import { listGiteaIssues } from '../gitea/issues.js';
+import { getLocalStore } from '../local/state.js';
+import { findColumnByIdWithStore } from '../local/columns.js';
+import { listLabelMapsByColumnWithStore } from '../local/label-maps.js';
 
 /**
- * 按入参过滤后拉 issue列表
+ * 按入参过滤后拉 issue 列表
  *
- *关键逻辑：
- * - columnId给定 →拿 column_label_mapping绑的 label ids → gitea按 labels过滤
- * -columnId 未给 → 不按 label过滤（仅按 state / q）
- * -返回结果含 isPullRequest标记（看板只展示 isPullRequest=false）
+ * 关键逻辑：
+ * - columnId 给定 → 拿 column_label_mapping 绑的 label ids → gitea 按 labels 过滤
+ * - columnId 未给 → 不按 label 过滤（仅按 state / q）
+ * - 返回结果含 isPullRequest 标记（看板只展示 isPullRequest=false）
+ *
+ * ADR-0003 Phase 2：columnLabelMapping 改读 localStore
  */
 export async function listIssuesFromGitea(args: ListIssuesArgs): Promise<ListIssuesResp> {
- const db = getDb();
- const proj = resolveProject(args.projectId);
+  const proj = resolveProject(args.projectId);
 
- let labelIds: number[] | undefined = args.labelIds;
+  let labelIds: number[] | undefined = args.labelIds;
 
- if (args.columnId !== undefined) {
- //1.拿列绑的 labels
- const col = db
- .select()
- .from(boardColumns)
- .where(eq(boardColumns.id, args.columnId))
- .all()[0];
- if (!col) {
- //列不存在 →返空列表
- return { items: [], hasMore: false };
- }
- if (col.repoProjectId !== args.projectId) {
- //列不属于该 project →返空
- return { items: [], hasMore: false };
- }
+  if (args.columnId !== undefined) {
+    // 1. 拿列绑的 labels
+    const state = getLocalStore().get();
+    const col = findColumnByIdWithStore(state, args.columnId);
+    if (!col) {
+      // 列不存在 → 返空列表
+      return { items: [], hasMore: false };
+    }
+    if (col.projectId !== args.projectId) {
+      // 列不属于该 project → 返空
+      return { items: [], hasMore: false };
+    }
 
- const mappings = db
- .select()
- .from(columnLabelMapping)
- .where(eq(columnLabelMapping.columnId, args.columnId))
- .orderBy(asc(columnLabelMapping.createdAt))
- .all();
+    const mappings = listLabelMapsByColumnWithStore(state, args.columnId);
 
- if (mappings.length ===0) {
- //列没绑 label →返空（前端提示"请先绑 label"）
- return { items: [], hasMore: false };
- }
+    if (mappings.length === 0) {
+      // 列没绑 label → 返空（前端提示"请先绑 label"）
+      return { items: [], hasMore: false };
+    }
 
- labelIds = mappings.map((m) => Number(m.giteaLabelId));
- }
+    labelIds = mappings.map((m) => Number(m.giteaLabelId));
+  }
 
  //2.调 gitea list issues
  const result = await listGiteaIssues({
