@@ -1,19 +1,15 @@
 /**
- * localPrefs —— prefs 表的 localStore 镜像
+ * localPrefs —— prefs 的 localStore 入口
  * (touch v4)
  *
- * Phase 1 双写策略（ADR-0003）：
- * - **写**：调 setPrefs() → Promise.allSettled([写 SQLite, 写 localStore])
- *   任一失败 log，但**不**抛错（Phase 1 验证期允许 localStore 失败）
- * - **读**：仍走 SQLite（Phase 1 不切读路径）
- * - **初始化**：initPrefsMirror() 启动期从 SQLite SELECT 一次全量 → 灌进 localStore
- *
- * Phase 2 切读路径：getPrefs() 优先读 localStore（**不** fallback SQLite）
- * Phase 3 删 SQLite：删 setPrefs 中的 SQLite 分支
+ * ADR-0003 Phase 3 状态：
+ * - **写**：setPrefsWithMirror 单写 localStore（删 Phase 1 双写）
+ * - **读**：getPrefs 走 localStore（Phase 2 切，Phase 3 保留）
+ * - **初始化**：bootstrapPrefsFromSqlite 启动期从 SQLite SELECT 灌进 localStore
+ *   （Phase 5 删 SQLite 后这个函数整体删）
  *
  * 边界：
  * - **不**改 IPC 端点签名（`user.prefs.get/set`）
- * - **不**改 prefs 表 schema
  * - **不**碰 token / keychain
  */
 
@@ -32,7 +28,7 @@ const LOCAL_USER_ID = 'local-user';
  *
  * 用途：
  * - 首次部署：localStore 是空的，从 SQLite 灌入
- * - Phase 2 切读路径后：每次启动做一次 reconcile（localStore 跟 SQLite 对齐）
+ * - Phase 3 后：每次启动做一次 reconcile（localStore 跟 SQLite 对齐，给 verify-state-consistency 兜底）
  *
  * **幂等**：重复调安全（mutate 是覆盖写）
  */
@@ -70,63 +66,33 @@ export async function bootstrapPrefsFromSqlite(): Promise<void> {
 }
 
 /**
- * 双写 prefs
+ * 写 prefs（**单写 localStore**，ADR-0003 Phase 3）
  *
  * 调用方（src/main/ipc/user.ts setPrefs）传 entries
- * 行为：同步写 SQLite（source of truth） + 异步写 localStore（best-effort 镜像）
+ * 行为：**只**写 localStore。Phase 3 后 localStore 是唯一 source of truth。
+ *
+ * 历史：
+ * - Phase 1：双写（SQLite source of truth + localStore best-effort 镜像）
+ * - Phase 2：读切 localStore，写仍双写（SQLite 兜底）
+ * - Phase 3：去双写（删 SQLite 写分支；Phase 5 删 SQLite 整体后，函数保留）
+ *
+ * 离线语义：
+ * - prefs 是**纯本地** op——不调 gitea，dispatch 自动识别（offlineApply 缺省 = execute）
+ * - 见 src/main/sync/queue.ts dispatch()
  */
 export async function setPrefsWithMirror(entries: Record<string, unknown>): Promise<void> {
-  // 1. 写 SQLite（source of truth）—— 走原逻辑
-  writeSqlitePrefs(entries);
-
-  // 2. 写 localStore（best-effort）—— 失败 log 不抛
-  try {
-    const store = getLocalStore();
-    store.mutate((s) => {
-      s.prefs = { ...s.prefs, ...entries };
-    });
-    logger.debug({ keys: Object.keys(entries) }, 'prefs mirror: written to localStore');
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), keys: Object.keys(entries) },
-      'prefs mirror: localStore write failed; sqlite is still authoritative',
-    );
-  }
-}
-
-/**
- * 内部：原 SQLite 写 prefs 逻辑（从 src/main/ipc/user.ts setPrefs 拆出来）
- *
- * 抽到这个文件是为了让双写策略集中维护；调用方改 import
- */
-function writeSqlitePrefs(entries: Record<string, unknown>): void {
   if (Object.keys(entries).length === 0) return;
-  const db = getDb();
-  const now = new Date();
-  db.transaction((tx) => {
-    for (const [key, value] of Object.entries(entries)) {
-      const jsonStr = JSON.stringify(value);
-      const updated = tx
-        .update(prefs)
-        .set({ value: jsonStr, updatedAt: now })
-        .where(and(eq(prefs.userId, LOCAL_USER_ID), eq(prefs.key, key)))
-        .run();
-      if (updated.changes === 0) {
-        // 没行 → 插入；这里需要 id + key（schema 要求 text PRIMARY KEY）
-        // 但原 user.ts setPrefs 用 randomUUID；这里复用同模式
-        const id = `prefs-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        tx.insert(prefs)
-          .values({ id, userId: LOCAL_USER_ID, key, value: jsonStr, updatedAt: now })
-          .run();
-      }
-    }
+  const store = getLocalStore();
+  store.mutate((s) => {
+    s.prefs = { ...s.prefs, ...entries };
   });
+  logger.debug({ keys: Object.keys(entries) }, 'setPrefs: written to localStore');
 }
 
 /**
- * 读 prefs（**Phase 1 仍走 SQLite**，Phase 2 切 localStore）
+ * 读 prefs（**Phase 2 切 localStore**，Phase 3 保留）
  *
- * 这里暴露一个查询函数，供 verify-state-consistency 脚本使用
+ * 这里暴露一个查询函数，供 verify-state-consistency 脚本对比
  */
 export function readSqlitePrefs(keys: string[]): Record<string, unknown> {
   if (keys.length === 0) return {};
