@@ -4,6 +4,7 @@
 .mavis/
 .opencode/
 .claude/
+.pnpm-store/
 
 # 构建产物
 node_modules/
