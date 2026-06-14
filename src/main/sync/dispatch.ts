@@ -34,16 +34,18 @@ import { enqueueEntry, type QueueEntry } from './queue.js';
 
 /**
  * OpHandler：每个写 op 在注册时给一对执行入口
+ *
+ * execute 可以是 sync 或 async 函（dispatch 内部会包成 Promise）
  */
 export interface OpHandler<TArgs, TResult> {
-  /** 永远执行：调 gitea（如果需要）+ 改 localStore + 返结果 */
-  execute(args: TArgs): Promise<TResult>;
+  /** 永远执行：调 gitea（如果需要）+ 改 localStore + 返结果。sync / async 都行。 */
+  execute(args: TArgs): TResult | Promise<TResult>;
   /**
    * 离线预应用：仅改 localStore + 返预测结果
    * 缺省：调 execute（纯本地 op 不实现这个）
    * 不可离线写：不实现 + dispatch 返 OFFLINE_WRITE_UNAVAILABLE
    */
-  offlineApply?(args: TArgs): TResult;
+  offlineApply?(args: TArgs): TResult | Promise<TResult>;
 }
 
 const registry = new Map<string, OpHandler<unknown, unknown>>();
@@ -104,7 +106,7 @@ export async function dispatch<TArgs, TResult>(
 
   // 试 execute；网络错误 → fallback offlineApply（如有）
   try {
-    const result = await (handler.execute as (a: unknown) => Promise<unknown>)(args);
+    const result = await (handler.execute as (a: unknown) => unknown)(args);
     return { mode: 'online', result: result as TResult };
   } catch (err) {
     if (!isNetworkOffline(err) || !handler.offlineApply) {
@@ -116,7 +118,7 @@ export async function dispatch<TArgs, TResult>(
       { op, err: err instanceof Error ? err.message : String(err) },
       'dispatch: gitea unreachable, falling back to offlineApply',
     );
-    const optimistic = (handler.offlineApply as (a: unknown) => unknown)(args);
+    const optimistic = await (handler.offlineApply as (a: unknown) => unknown)(args);
     const entry = await enqueueEntry({ op, payload: args });
     return { mode: 'offline', result: optimistic as TResult, entryId: entry.id };
   }

@@ -42,11 +42,12 @@ import {
 } from '../gitea/branches.js';
 import {
   listStarredBranches,
-  setStarred,
+  setStarred as _setStarred,
   getBranchesCache,
   setBranchesCache,
   invalidateBranchesCache,
 } from '../cache/branches.js';
+import { dispatch, registerOp } from '../sync/dispatch.js';
 import { repoProjects } from '../cache/schema/repoProjects.js';
 import { giteaAccounts } from '../cache/schema/giteaAccounts.js';
 import { eq } from 'drizzle-orm';
@@ -258,8 +259,8 @@ async function branchesRenameHandler(args: RenameBranchArgs): Promise<BranchDto>
   // 同步 starred_branches 里的 branch 名字（重命名后 starred 应该跟过去）
   // —— gitea 上重命名是新建+删旧，但我们的 starred 记录要改名
   // 简化：直接 upsert 新名 + 删旧名
-  setStarred({ projectId: args.projectId, branch: args.newName, starred: true });
-  setStarred({ projectId: args.projectId, branch: args.oldName, starred: false });
+  _setStarred({ projectId: args.projectId, branch: args.newName, starred: true });
+  _setStarred({ projectId: args.projectId, branch: args.oldName, starred: false });
 
   logger.info({ op, latencyMs: Date.now() - start, oldName: args.oldName, newName: args.newName }, 'ipc done');
   return { ...renamed, isDefault: false };
@@ -298,7 +299,7 @@ async function branchesDeleteHandler(args: DeleteBranchArgs): Promise<void> {
   invalidateBranchesCache(args.projectId);
 
   // 同步删除 starred 记录
-  setStarred({ projectId: args.projectId, branch: args.branch, starred: false });
+  _setStarred({ projectId: args.projectId, branch: args.branch, starred: false });
 
   logger.info({ op, latencyMs: Date.now() - start, branch: args.branch }, 'ipc done');
 }
@@ -309,13 +310,19 @@ async function branchesStarHandler(args: StarBranchArgs): Promise<void> {
   const start = Date.now();
   const op = 'branches.star';
   logger.info({ op, args: { projectId: args.projectId, branch: args.branch, starred: args.starred } }, 'ipc start');
-  setStarred(args);
+  // ADR-0003 Phase 3：走 dispatch（纯本地 op，仅改 localStore.starredBranches）
+  await dispatch('branches.star', args);
   logger.info({ op, latencyMs: Date.now() - start }, 'ipc done');
 }
 
 // ===== 注册 =====
 
 export function registerBranchesIpc(): void {
+  // ADR-0003 Phase 3：注册 op（纯本地，缺省 offlineApply = execute）
+  registerOp<StarBranchArgs, void>('branches.star', {
+    execute: _setStarred,
+  });
+
   wrapIpc(IpcChannel.BRANCHES_LIST, ListBranchesArgsSchema, branchesListHandler);
   wrapIpc(IpcChannel.BRANCHES_CREATE, CreateBranchArgsSchema, branchesCreateHandler);
   wrapIpc(IpcChannel.BRANCHES_RENAME, RenameBranchArgsSchema, branchesRenameHandler);

@@ -51,6 +51,7 @@ import { logger } from '../logger.js';
 import { getDb } from '../cache/sqlite.js';
 import { prefs } from '../cache/schema/index.js';
 import { setPrefsWithMirror } from '../local/prefs-mirror.js';
+import { dispatch, registerOp } from '../sync/dispatch.js';
 import { undoOne, redoOne, undoStatus } from '../board/undo.js';
 
 /** M5 简化 / **M6 拍板保留**：单本地用户（设备级），prefs 不按 gitea account 切分
@@ -137,13 +138,13 @@ function getPrefs(args: UserPrefsGetArgs): UserPrefsGetResult {
 }
 
 /**
- * 写 prefs（upsert 语义）—— ADR-0003 Phase 1 双写
+ * 写 prefs（ADR-0003 Phase 3 走 dispatch）
  *
- * 内部走 setPrefsWithMirror：同步写 SQLite（source of truth） + 异步写 localStore（镜像）
- * 业务函数签名保持 void（IPC 不感知双写细节）
+ * 内部走 dispatch('user.prefs.set', { entries })：execute = setPrefsWithMirror
+ * 单写 localStore（删 Phase 1 双写）
  */
 async function setPrefs(args: UserPrefsSetArgs): Promise<void> {
-  await setPrefsWithMirror(args.entries);
+  await dispatch('user.prefs.set', { entries: args.entries });
 }
 
 // ============================================================
@@ -192,6 +193,13 @@ function getUndoStatus(args: UserUndoStatusArgs): UserUndoStatusResult {
 // ============================================================
 
 export function registerUserIpc(): void {
+  // ADR-0003 Phase 3：注册 op（纯本地）
+  registerOp<{ entries: Record<string, unknown> }, void>('user.prefs.set', {
+    execute: async ({ entries }) => {
+      await setPrefsWithMirror(entries);
+    },
+  });
+
   wrapIpc(IpcChannel.USER_PREFS_GET, UserPrefsGetArgsSchema, getPrefs);
   wrapIpc(IpcChannel.USER_PREFS_SET, UserPrefsSetArgsSchema, setPrefs);
   wrapIpc(IpcChannel.USER_UNDO, UserUndoArgsSchema, undo);

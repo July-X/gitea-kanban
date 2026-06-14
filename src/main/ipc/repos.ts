@@ -32,14 +32,15 @@ import {
 import { listGiteaRepos } from '../gitea/repos.js';
 import {
   findProjectsByOwnerName,
-  addProject as cacheAddProject,
-  removeProject as cacheRemoveProject,
+  addProject as _cacheAddProject,
+  removeProject as _cacheRemoveProject,
   getReposCache,
   setReposCache,
   touchLastSync,
   backfillDefaultBranch,
 } from '../cache/repos.js';
 import { getLocalStore } from '../local/state.js';
+import { dispatch, registerOp } from '../sync/dispatch.js';
 import { logger } from '../logger.js';
 
 /** 统一包装：parse → handler → error → IpcError */
@@ -204,8 +205,9 @@ async function reposAddProjectHandler(args: AddProjectArgs): Promise<RepoProject
   // 1. 校验 gitea_account 存在
   resolveGiteaAccount(args.giteaAccountId);
 
-  // 2. 本地 INSERT
-  const project = cacheAddProject(args);
+  // 2. 写 localStore（ADR-0003 Phase 3：走 dispatch，纯本地 op）
+  //   业务函数是同步的，wrap 成 async execute 以匹配 OpHandler.execute 签名
+  const { result: project } = await dispatch<AddProjectArgs, RepoProjectDto>('repos.addProject', args);
 
   logger.info({ op, latencyMs: Date.now() - start, projectId: project.id }, 'ipc done');
   return project;
@@ -217,13 +219,22 @@ async function reposRemoveProjectHandler(args: RemoveProjectArgs): Promise<void>
   const start = Date.now();
   const op = 'repos.removeProject';
   logger.info({ op, args }, 'ipc start');
-  cacheRemoveProject(args.projectId);
+  await dispatch('repos.removeProject', args);
   logger.info({ op, latencyMs: Date.now() - start }, 'ipc done');
 }
 
 // ===== 注册 =====
 
 export function registerReposIpc(): void {
+  // ADR-0003 Phase 3：注册 op 到 dispatch（纯本地 op，缺省 offlineApply = execute）
+  //   业务函数是 sync，wrap 成 async execute 满足 OpHandler.execute 签名（返 Promise）
+  registerOp<AddProjectArgs, RepoProjectDto>('repos.addProject', {
+    execute: async (a) => _cacheAddProject(a),
+  });
+  registerOp<RemoveProjectArgs, void>('repos.removeProject', {
+    execute: async (a) => _cacheRemoveProject(a.projectId),
+  });
+
   wrapIpc(IpcChannel.REPOS_LIST, ListReposArgsSchema, reposListHandler);
   wrapIpc(IpcChannel.REPOS_ADD_PROJECT, AddProjectArgsSchema, reposAddProjectHandler);
   wrapIpc(IpcChannel.REPOS_REMOVE_PROJECT, RemoveProjectArgsSchema, reposRemoveProjectHandler);
