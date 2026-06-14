@@ -49,7 +49,7 @@ import {
 } from './schema.js';
 import { logger } from '../logger.js';
 import { getDb } from '../cache/sqlite.js';
-import { prefs, undoEntries } from '../cache/schema/index.js';
+import { prefs } from '../cache/schema/index.js';
 import { setPrefsWithMirror } from '../local/prefs-mirror.js';
 import { undoOne, redoOne, undoStatus } from '../board/undo.js';
 
@@ -209,5 +209,3 @@ export function unregisterUserIpc(): void {
 
 // 暴露业务函数供单测 / 集成测试直接调（不走 IPC）
 export const _testHelpers = { getPrefs, setPrefs, undo, redo, getUndoStatus, LOCAL_USER_ID };
-// 引用 undoEntries 抑制 unused 警告（M5 阶段业务侧未实际 push，但保留 schema）
-void undoEntries;

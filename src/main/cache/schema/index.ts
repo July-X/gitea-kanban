@@ -39,10 +39,8 @@ export * from './giteaUser';
 export * from './repoProjects';
 export * from './boardColumns';
 export * from './columnLabelMapping';
-export * from './cardIssueLink';
-export * from './giteaRefs';
+// ADR-0003 Phase 2 drop: cardIssueLink / giteaRefs / undoEntries / hookDeliveries
+//   都是死表（零业务调用方 / 注释自述 v1 可选 / M6 切 in-memory 后已废 / 注释自述 v2 启用）
 export * from './starredBranches';
 export * from './prefs';
-export * from './undoEntries';
 export * from './cacheEntries';
-export * from './hookDeliveries';

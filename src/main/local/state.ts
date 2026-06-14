@@ -18,7 +18,12 @@
  * - starred_branches      → starredBranches[]
  * - prefs                 → prefs (Record<string, unknown>)
  *
- * 砍掉的（不写入 state）：cardIssueLink / giteaRefs / undoEntries / hookDeliveries
+ * Phase 2 砍掉的（不写入 state，也不在 SQLite）：cardIssueLink / giteaRefs / undoEntries / hookDeliveries
+ *   - cardIssueLink: ADR-0002 §"派生缓存"自述 v1 可选保留，零业务调用方
+ *   - giteaRefs: 0 业务调用方
+ *   - undoEntries: M6 切 in-memory 栈（src/main/board/undo.ts），schema 留作纪念 → 删
+ *   - hookDeliveries: schema 自述 v2 启用（webhook server），v1 没接
+ *   详见 ADR-0003 §"不决事项"+ commit history。
  */
 
 import { LocalStore, resolveStatePath } from './store.js';
