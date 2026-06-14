@@ -32,6 +32,7 @@ import type {
   TimelineDto,
 } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
+import Tooltip from '@renderer/components/Tooltip.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -782,25 +783,27 @@ function formatRelative(iso: string): string {
             <header class="commit-detail__head">
               <div class="commit-detail__head-left">
                 <code class="commit-detail__hash mono">{{ detailNode.sha.slice(0, 12) }}</code>
-                <button
-                  type="button"
-                  class="commit-detail__hash-copy"
-                  :aria-label="`复制版本号 ${detailNode.shortSha}`"
-                  :title="`复制版本号 ${detailNode.shortSha}`"
-                  @click="onDetailCopySha(detailNode)"
-                >
-                  <Clipboard :size="12" :stroke-width="2" aria-hidden="true" />
-                </button>
+                <Tooltip :text="`复制版本号 ${detailNode.shortSha}`">
+                  <button
+                    type="button"
+                    class="commit-detail__hash-copy"
+                    :aria-label="`复制版本号 ${detailNode.shortSha}`"
+                    @click="onDetailCopySha(detailNode)"
+                  >
+                    <Clipboard :size="12" :stroke-width="2" aria-hidden="true" />
+                  </button>
+                </Tooltip>
                 <span class="commit-detail__head-divider" aria-hidden="true"></span>
-                <button
-                  type="button"
-                  class="commit-detail__hash-link"
-                  aria-label="在 gitea 打开此提交"
-                  title="在 gitea 打开此提交"
-                  @click="onDetailOpenInGitea(detailNode)"
-                >
-                  <ExternalLink :size="12" :stroke-width="2" aria-hidden="true" />
-                </button>
+                <Tooltip text="在 gitea 打开此提交">
+                  <button
+                    type="button"
+                    class="commit-detail__hash-link"
+                    aria-label="在 gitea 打开此提交"
+                    @click="onDetailOpenInGitea(detailNode)"
+                  >
+                    <ExternalLink :size="12" :stroke-width="2" aria-hidden="true" />
+                  </button>
+                </Tooltip>
                 <span v-if="detailNode.isHead" class="commit-detail__head-badge">HEAD</span>
               </div>
               <div class="commit-detail__head-right">
