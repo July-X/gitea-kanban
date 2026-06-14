@@ -21,7 +21,7 @@
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitMerge, RefreshCw, Search, ChevronDown, ChevronRight, ExternalLink } from 'lucide-vue-next';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ExternalLink } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -244,6 +244,22 @@ function formatDate(iso: string | undefined): string {
     return iso;
   }
 }
+
+/** 相对时间（"3 小时前" 风格）—— 仿 gitea <relative-time> */
+function formatRelative(iso: string | undefined): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso ?? '';
+  const diff = Date.now() - t;
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day} 天前`;
+  return formatDate(iso);
+}
 </script>
 
 <template>
@@ -341,34 +357,128 @@ function formatDate(iso: string | undefined): string {
           'merge-item--closed': p.state === 'closed' && !p.merged,
         }"
       >
-        <button
-          type="button"
-          class="merge-item__head"
-          :aria-expanded="expanded.has(p.index)"
-          @click="toggleExpand(p.index)"
-        >
-          <span class="merge-item__chev" aria-hidden="true">
-            <ChevronDown v-if="expanded.has(p.index)" :size="14" :stroke-width="2" />
-            <ChevronRight v-else :size="14" :stroke-width="2" />
-          </span>
-          <span class="merge-item__index mono">#{{ p.index }}</span>
-          <span :class="badgeClass(p)">{{ badgeText(p) }}</span>
-          <span class="merge-item__title">{{ p.title }}</span>
-          <span class="merge-item__author muted">{{ p.author.username }}</span>
-        </button>
+        <!-- 模仿 gitea /pulls 列表布局：
+             [leading: 状态图标] [main: 标题 + #index + 时间/作者 + 分支流向] [trailing: 操作按钮] -->
+        <div class="merge-item__leading" aria-hidden="true">
+          <GitPullRequestArrow
+            v-if="!p.merged && !p.draft && p.state === 'open'"
+            :size="16"
+            :stroke-width="2"
+            class="merge-item__icon merge-item__icon--open"
+          />
+          <GitPullRequestArrow
+            v-else-if="p.merged"
+            :size="16"
+            :stroke-width="2"
+            class="merge-item__icon merge-item__icon--merged"
+          />
+          <GitPullRequestArrow
+            v-else-if="p.draft"
+            :size="16"
+            :stroke-width="2"
+            class="merge-item__icon merge-item__icon--draft"
+          />
+          <GitPullRequestArrow
+            v-else
+            :size="16"
+            :stroke-width="2"
+            class="merge-item__icon merge-item__icon--closed"
+          />
+        </div>
+        <div class="merge-item__main">
+          <div class="merge-item__header">
+            <a
+              :href="giteaPullUrl(p)"
+              target="_blank"
+              rel="noopener"
+              class="merge-item__title"
+              :title="p.title"
+            >{{ p.title }}</a>
+            <span :class="badgeClass(p)" class="merge-item__badge">{{ badgeText(p) }}</span>
+            <button
+              type="button"
+              class="merge-item__expand"
+              :aria-expanded="expanded.has(p.index)"
+              :aria-label="expanded.has(p.index) ? '收起详情' : '展开详情'"
+              @click="toggleExpand(p.index)"
+            >
+              <ChevronDown v-if="expanded.has(p.index)" :size="14" :stroke-width="2" />
+              <ChevronRight v-else :size="14" :stroke-width="2" />
+            </button>
+          </div>
+          <div class="merge-item__body">
+            <a
+              :href="giteaPullUrl(p)"
+              target="_blank"
+              rel="noopener"
+              class="merge-item__index mono"
+            >#{{ p.index }}</a>
+            <span class="merge-item__meta-line">
+              <span class="merge-item__meta-text">打开于 {{ formatRelative(p.createdAt) }}</span>
+              <span class="merge-item__meta-text">由</span>
+              <a
+                v-if="activeRepo"
+                :href="`${auth.currentGiteaUrl.replace(/\\/$/, '')}/${activeRepo.owner}`"
+                target="_blank"
+                rel="noopener"
+                class="merge-item__author-link"
+              >{{ p.author.username }}</a>
+              <span v-else class="merge-item__author">{{ p.author.username }}</span>
+            </span>
+            <!-- 分支流向（base << head），照搬 gitea /pulls 列表 -->
+            <div class="merge-item__branches">
+              <a
+                :href="`${auth.currentGiteaUrl.replace(/\\/$/, '')}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.base.ref}`"
+                target="_blank"
+                rel="noopener"
+                class="merge-item__branch"
+                :title="p.base.ref"
+              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.base.ref }}</a>
+              <span class="merge-item__branch-arrow" aria-hidden="true">←</span>
+              <a
+                :href="`${auth.currentGiteaUrl.replace(/\\/$/, '')}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.head.ref}`"
+                target="_blank"
+                rel="noopener"
+                class="merge-item__branch"
+                :title="p.head.ref"
+              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.head.ref }}</a>
+            </div>
+          </div>
+        </div>
+        <!-- trailing: 操作按钮（不展开就能直接看到，符合 gitea 把操作放到行内） -->
+        <div class="merge-item__trailing">
+          <button
+            v-if="p.state === 'open' && !p.draft"
+            type="button"
+            class="merge-item__btn merge-item__btn--merge"
+            :disabled="p.hasConflicts || !p.mergeable || merging"
+            :title="p.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !p.mergeable ? '当前不可合并' : '合并此请求'"
+            @click="requestMerge(p)"
+          >
+            <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
+            <span>{{ merging && mergingPull?.index === p.index ? '合并中…' : '合并' }}</span>
+          </button>
+          <span
+            v-if="p.hasConflicts && p.state === 'open'"
+            class="merge-item__conflict-hint"
+            :title="'此合并请求存在冲突，请先在 gitea 页面解决'"
+          >有冲突</span>
+          <a
+            :href="giteaPullUrl(p)"
+            target="_blank"
+            rel="noopener"
+            class="merge-item__ext-link"
+            :title="'在 gitea 中打开 #' + p.index"
+          >
+            <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
+          </a>
+        </div>
+        <!-- 展开区：补充 meta + 二次确认才弹窗的入口（合并已在 trailing） -->
         <div v-if="expanded.has(p.index)" class="merge-item__detail">
           <dl class="merge-item__meta">
             <div class="merge-item__meta-row">
               <dt>作者</dt>
               <dd>{{ p.author.username }}</dd>
-            </div>
-            <div class="merge-item__meta-row">
-              <dt>来源</dt>
-              <dd class="mono">{{ p.head.ref }}</dd>
-            </div>
-            <div class="merge-item__meta-row">
-              <dt>目标</dt>
-              <dd class="mono">{{ p.base.ref }}</dd>
             </div>
             <div class="merge-item__meta-row">
               <dt>创建</dt>
@@ -387,37 +497,6 @@ function formatDate(iso: string | undefined): string {
               <dd>{{ p.mergeable ? '是' : '否' }}</dd>
             </div>
           </dl>
-          <!-- 操作区 -->
-          <div class="merge-item__actions">
-            <!-- 合并按钮：仅开放且可合并时显示 -->
-            <button
-              v-if="p.state === 'open' && !p.draft"
-              type="button"
-              class="merge-item__btn merge-item__btn--merge"
-              :disabled="p.hasConflicts || !p.mergeable || merging"
-              :title="p.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !p.mergeable ? '当前不可合并' : '合并此请求'"
-              @click.stop="requestMerge(p)"
-            >
-              <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
-              <span>{{ merging && mergingPull?.index === p.index ? '合并中…' : '合并' }}</span>
-            </button>
-            <!-- 有冲突时提示 -->
-            <span v-if="p.hasConflicts && p.state === 'open'" class="merge-item__conflict-hint">
-              有冲突，请先在 gitea 解决
-            </span>
-            <!-- 跳 gitea 链接 -->
-            <a
-              :href="giteaPullUrl(p)"
-              target="_blank"
-              rel="noopener"
-              class="merge-item__ext-link"
-              :title="'在 gitea 中打开 #' + p.index"
-              @click.stop
-            >
-              <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
-              <span>在 gitea 中打开</span>
-            </a>
-          </div>
         </div>
       </li>
     </ul>
@@ -684,6 +763,12 @@ function formatDate(iso: string | undefined): string {
    * 完全看不见。设 flex-shrink: 0 让 item 保持完整高度，
    * 容器才触发 overflow-y: auto 滚动。 */
   flex-shrink: 0;
+  /* 模仿 gitea /pulls 列表的 .flex-item 三块布局：leading | main | trailing */
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
 }
 
 .merge-item:hover {
@@ -703,80 +788,245 @@ function formatDate(iso: string | undefined): string {
   opacity: 0.85;
 }
 
-.merge-item__head {
+/* ===== leading: 状态图标（gitea octicon-git-pull-request 风格） ===== */
+
+.merge-item__leading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.merge-item__icon--open {
+  color: var(--color-success);
+}
+.merge-item__icon--merged {
+  color: var(--color-accent);
+}
+.merge-item__icon--draft {
+  color: var(--color-warning);
+}
+.merge-item__icon--closed {
+  color: var(--color-text-muted);
+}
+
+/* ===== main: 标题 + meta + body（gitea .flex-item-main） ===== */
+
+.merge-item__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.merge-item__header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3);
-  width: 100%;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  border: none;
-  font-family: inherit;
-  color: inherit;
-}
-
-.merge-item__chev {
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.merge-item__index {
-  font-size: var(--font-xs);
-  color: var(--color-text-muted);
-  font-weight: 600;
-  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .merge-item__title {
-  flex: 1;
-  font-size: var(--font-sm);
+  font-size: var(--font-md);
   color: var(--color-text);
-  font-weight: 500;
+  font-weight: 600;
+  text-decoration: none;
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.merge-item__author {
-  font-size: var(--font-xs);
-  flex-shrink: 0;
+.merge-item__title:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
 }
 
-.merge-badge {
+.merge-item__badge {
   font-size: var(--font-xs);
   padding: 1px 8px;
   border-radius: var(--radius-pill);
   font-weight: 500;
   flex-shrink: 0;
 }
-
 .merge-badge--open {
   background: var(--color-success-soft);
   color: var(--color-success);
 }
-
 .merge-badge--merged {
   background: var(--color-accent-soft);
   color: var(--color-accent);
 }
-
 .merge-badge--closed {
   background: var(--color-bg-active);
   color: var(--color-text-secondary);
 }
-
 .merge-badge--draft {
   background: var(--color-warning-soft);
   color: var(--color-warning);
   border: 1px solid var(--color-warning);
 }
 
-.merge-item__detail {
-  padding: var(--space-3);
-  border-top: 1px solid var(--color-divider);
+.merge-item__expand {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.merge-item__expand:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+}
+
+.merge-item__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.merge-item__index {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+.merge-item__index:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.merge-item__meta-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.merge-item__meta-text {
+  color: var(--color-text-muted);
+}
+
+.merge-item__author-link,
+.merge-item__author {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+.merge-item__author-link:hover {
+  text-decoration: underline;
+}
+
+/* 分支流向（gitea .branches 块） */
+.merge-item__branches {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.merge-item__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
   background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-item__branch:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.merge-item__branch-arrow {
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+/* ===== trailing: 操作按钮（gitea 把操作放行内） ===== */
+
+.merge-item__trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.merge-item__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--color-divider);
+}
+.merge-item__btn--merge {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-color: var(--color-primary);
+}
+.merge-item__btn--merge:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+.merge-item__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.merge-item__conflict-hint {
+  font-size: var(--font-xs);
+  color: var(--color-warning);
+  padding: 2px 6px;
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-sm);
+}
+
+.merge-item__ext-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast) var(--ease);
+  text-decoration: none;
+}
+.merge-item__ext-link:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* ===== 展开区：保留 meta 详细（gitea 合并请求详情页的属性块） ===== */
+
+.merge-item__detail {
+  grid-column: 1 / -1;
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--color-divider);
+  margin-top: var(--space-3);
 }
 
 /* meta 区使用 2 列定宽布局（响应式：< 600px 降为 1 列）
@@ -822,65 +1072,7 @@ function formatDate(iso: string | undefined): string {
 
 /* ===== 操作区 ===== */
 
-.merge-item__actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-divider);
-}
-
-.merge-item__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-xs);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--t-fast) var(--ease);
-}
-
-.merge-item__btn--merge {
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-}
-
-.merge-item__btn--merge:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-}
-
-.merge-item__btn--merge:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.merge-item__conflict-hint {
-  font-size: var(--font-xs);
-  color: var(--color-warning);
-}
-
-.merge-item__ext-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  font-size: var(--font-xs);
-  color: var(--color-text-secondary);
-  background: transparent;
-  border-radius: var(--radius-sm);
-  transition: background var(--t-fast) var(--ease);
-  text-decoration: none;
-  margin-left: auto;
-}
-
-.merge-item__ext-link:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text);
-}
+/* (trailing/btn/conflict-hint/ext-link 已在前面 .merge-item__trailing 段定义) */
 
 /* ===== 合并确认弹窗内嵌 ===== */
 
