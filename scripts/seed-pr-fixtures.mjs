@@ -79,16 +79,22 @@ async function createBranch(branchName, fromBranch = 'main') {
   });
 }
 
+/** 路径编码：保留 / 作为目录分隔符 */
+function encPath(p) {
+  return p.split('/').map(encodeURIComponent).join('/');
+}
+
 /** 在指定分支创建/更新一个文件（每次一个 commit）
  *
- * gitea contents API：POST 同一路径 + 带 sha = update；POST 不带 sha = create。
- * 本实现：先 GET 拿 sha（带 5xx 重试），拿到走 update，拿不到走 create。
+ * gitea contents API：
+ *   - 创建：POST /contents/{path} (CreateFileOptions，无 sha)
+ *   - 更新：PUT  /contents/{path} (UpdateFileOptions，必须 sha)
  */
 async function writeFileOnBranch(branch, path, content, message) {
   const b64 = Buffer.from(content, 'utf8').toString('base64');
   // 1) 先 GET 查 sha
   let sha = undefined;
-  const getPath = `/api/v1/repos/${OWNER}/${REPO}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
+  const getPath = `/api/v1/repos/${OWNER}/${REPO}/contents/${encPath(path)}?ref=${encodeURIComponent(branch)}`;
   const existing = await fetchJson(getPath).catch((e) => {
     if (e.message?.includes('404')) return null;
     throw e;
@@ -101,24 +107,13 @@ async function writeFileOnBranch(branch, path, content, message) {
     author: { email: 'pr-mock@example.com', name: 'PR Mock Bot' },
   };
   if (sha) body.sha = sha;
-  // POST 后 422 "already exists" 兜底：gitea 1.26 contents API 偶发竞态
-  // （POST 实际已成功创建文件但返回 422）。如遇 422 + 文件已存在，视为成功。
-  try {
-    return await fetchJson(
-      `/api/v1/repos/${OWNER}/${REPO}/contents/${encodeURIComponent(path)}`,
-      'POST',
-      body,
-    );
-  } catch (e) {
-    if (e.message?.includes('422')) {
-      // 二次校验：文件是否已存在且内容正确
-      const check = await fetchJson(getPath).catch(() => null);
-      if (check?.sha) {
-        return check;
-      }
-    }
-    throw e;
-  }
+  // 有 SHA = 更新用 PUT，无 SHA = 创建用 POST
+  const method = sha ? 'PUT' : 'POST';
+  return await fetchJson(
+    `/api/v1/repos/${OWNER}/${REPO}/contents/${encPath(path)}`,
+    method,
+    body,
+  );
 }
 
 /** 创建合并请求 */
