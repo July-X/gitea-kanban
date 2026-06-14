@@ -1092,13 +1092,24 @@ function formatRelative(iso: string): string {
 .heatmap__cell {
   width: 10px; height: 10px;
   border-radius: 2px;
-  transition: transform var(--t-fast) var(--ease);
+  transition:
+    transform var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
 }
-.heatmap__cell:hover { transform: scale(1.3); }
+/*
+ * C-3 硬约束 #5（TimelineView · state）修法（2026-06-14）：
+ * 旧版 :hover transform: scale(1.3) 违反 OVERRIDE §15.2 "禁用 scale"，
+ * 改成 translateY(-1px) + box-shadow，保持 layout-shift-free。
+ */
+.heatmap__cell:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+/* C-3 硬约束 #4（TimelineView · color）修法：rgba 硬编码 → alpha token */
 .heatmap__cell--lv0 { background: var(--color-bg-hover); }
 .heatmap__cell--lv1 { background: var(--color-primary-soft); }
-.heatmap__cell--lv2 { background: rgba(116, 184, 48, 0.45); }
-.heatmap__cell--lv3 { background: rgba(116, 184, 48, 0.7); }
+.heatmap__cell--lv2 { background: var(--color-primary-alpha-45); }
+.heatmap__cell--lv3 { background: var(--color-primary-alpha-70); }
 .heatmap__cell--lv4 { background: var(--color-primary); box-shadow: 0 0 4px var(--color-primary-glow); }
 .heatmap__legend {
   display: flex;
@@ -1130,7 +1141,15 @@ function formatRelative(iso: string): string {
 .commit-list::-webkit-scrollbar-track { background: transparent; }
 .commit-list::-webkit-scrollbar-thumb { background: var(--color-divider); border-radius: 5px; }
 .commit-list::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
-.commit-list__inner { position: relative; min-width: 880px; }
+/*
+ * C-3 硬约束 #6（TimelineView · responsive）修法（2026-06-14）：
+ * 旧版 min-width: 880px 阻塞 960×600 最小窗口布局。
+ * 窗口 960 - navrail 224 - statusbar 28 = 708px 主区，
+ * 880px > 708px 必须横向滚动。改用 auto-fit grid 自适应。
+ * 注：commit-row 4 列 grid 在 1024×720 仍能完整显示（720 - 224 - 28 ≈ 468px），
+ * 用 fr 单位让列宽自动按比例缩小；窄于 600px 退化为 2 列（桌面断点）。
+ */
+.commit-list__inner { position: relative; min-width: 0; }
 .commit-list__edges {
   position: absolute; top: 0; left: 0;
   width: 54px; height: 100%;
@@ -1140,8 +1159,13 @@ function formatRelative(iso: string): string {
 
 .commit-row {
   position: relative;
+  /*
+   * C-3 硬约束 #6 配套：4 列 grid 用 minmax + 1fr 自适应；
+   * 1024×720 窗口（主区 ~468px）下，最右 meta 列缩到 min 80，
+   * 中间 msg 列吃 1fr 弹性扩展，作者/分支/时间最小化。
+   */
   display: grid;
-  grid-template-columns: 100px 80px 1fr 360px;
+  grid-template-columns: 60px 64px minmax(80px, 1fr) minmax(80px, 240px);
   align-items: center;
   height: var(--row-h, 32px);
   padding: 0 var(--space-3) 0 0;
@@ -1173,7 +1197,12 @@ function formatRelative(iso: string): string {
   transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
   z-index: 3;
 }
-.commit-row:hover .commit-row__dot { transform: translate(-50%, -50%) scale(1.4); z-index: 5; }
+/*
+ * C-3 硬约束 #5 配套：commit-row hover dot 去掉 scale(1.4)，
+ * 与 heatmap__cell 保持一致（OVERRIDE §15.2 "禁用 scale"）。
+ * 保留 z-index 提到 5 让 dot 在 hover 时仍在 SVG edges 之上。
+ */
+.commit-row:hover .commit-row__dot { z-index: 5; }
 .commit-row__dot.is-combined { border-radius: 2px; }
 .commit-row__dot.is-head {
   box-shadow:
@@ -1442,8 +1471,13 @@ function formatRelative(iso: string): string {
   flex-shrink: 0;
 }
 .commit-detail__avatar-img { width: 100%; height: 100%; object-fit: cover; }
-.commit-detail__stat-add { color: var(--color-success, #2da44e); font-weight: 600; }
-.commit-detail__stat-del { color: var(--color-danger, #cf222e); font-weight: 600; }
+/*
+ * C-3 硬约束 #7（TimelineView · dark mode）修法（2026-06-14）：
+ * 删 fallback `#2da44e` / `#cf222e` —— gitea 默认绿/红在 light 主题下对比度仅 3.6:1，
+ * 不达 WCAG AA。改纯 token，让 theme.css 中 light/dark 双版本自动适配。
+ */
+.commit-detail__stat-add { color: var(--color-success); font-weight: 600; }
+.commit-detail__stat-del { color: var(--color-danger); font-weight: 600; }
 .commit-detail__stat-sep { color: var(--color-text-muted); margin: 0 2px; }
 .commit-detail__stat-files { color: var(--color-text-secondary); }
 .commit-detail__branch-chip {
@@ -1502,8 +1536,8 @@ function formatRelative(iso: string): string {
   font-size: var(--font-xs);
   color: var(--color-text-secondary);
 }
-.commit-detail__files-add { color: var(--color-success, #2da44e); font-weight: 600; }
-.commit-detail__files-del { color: var(--color-danger, #cf222e); font-weight: 600; }
+.commit-detail__files-add { color: var(--color-success); font-weight: 600; }
+.commit-detail__files-del { color: var(--color-danger); font-weight: 600; }
 .commit-detail__files-list {
   list-style: none;
   margin: 0;

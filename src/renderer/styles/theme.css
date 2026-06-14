@@ -139,6 +139,12 @@
   --color-primary-active: #5C9622;/* vs #0F1115 3.50:1 ⚠️ 装饰态用 */
   --color-primary-soft: rgba(116, 184, 48, 0.18);
   --color-primary-glow: rgba(116, 184, 48, 0.32);
+  /* === 主色 alpha 分档（C-3 硬约束 #4/#7 修法 · 2026-06-14）===
+   * 旧硬编码 rgba(116,184,48,0.45) / 0.7 改 token 化；
+   * 让 light 主题能自动切到 #466B16 系列，避免主题切换失效 */
+  --color-primary-alpha-22: rgba(116, 184, 48, 0.22);
+  --color-primary-alpha-45: rgba(116, 184, 48, 0.45);
+  --color-primary-alpha-70: rgba(116, 184, 48, 0.7);
 
   /* === 状态色（warning / error / info / pending / offline） === */
   --color-warning: #FF8534;       /* gitea 橙提亮 · 暗底清晰 */
@@ -250,6 +256,11 @@
   --color-primary-active: #3D5512;/* active 进一步压暗 */
   --color-primary-soft: rgba(70, 107, 22, 0.16);
   --color-primary-glow: rgba(70, 107, 22, 0.28);
+  /* === 主色 alpha 分档（C-3 硬约束 #4/#7 修法 · 2026-06-14）===
+   * 亮色版走 #466B16 调 alpha，对 #E8F1F5 全档过 AA 4.5:1 */
+  --color-primary-alpha-22: rgba(70, 107, 22, 0.22);
+  --color-primary-alpha-45: rgba(70, 107, 22, 0.45);
+  --color-primary-alpha-70: rgba(70, 107, 22, 0.7);
 
   /* === 状态色（v1.2 重新过 AA） === */
   --color-warning: #D85804;       /* vs #E8F1F5 3.79:1 ⚠️ large only；用于警示 icon / chip 文字 */
