@@ -265,6 +265,16 @@ async function onDetailCopyLink(n: CommitNodeDto): Promise<void> {
   }
 }
 
+/** 详情弹窗里"复制版本号"（复制完整 sha，便于 checkout / 引用） */
+async function onDetailCopySha(n: CommitNodeDto): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(n.sha);
+    showToast({ type: 'success', message: `已复制版本号 ${n.shortSha}`, duration: 1500 });
+  } catch {
+    showToast({ type: 'warn', message: '复制失败，请手动选择' });
+  }
+}
+
 function refresh(): void {
   void loadTimeline();
 }
@@ -779,6 +789,15 @@ function formatRelative(iso: string): string {
             <header class="commit-detail__head">
               <div class="commit-detail__head-left">
                 <code class="commit-detail__hash mono">{{ detailNode.sha.slice(0, 12) }}</code>
+                <button
+                  type="button"
+                  class="commit-detail__hash-copy"
+                  :aria-label="`复制版本号 ${detailNode.shortSha}`"
+                  :title="`复制版本号 ${detailNode.shortSha}`"
+                  @click="onDetailCopySha(detailNode)"
+                >
+                  <Clipboard :size="12" :stroke-width="2" aria-hidden="true" />
+                </button>
                 <span v-if="detailNode.isHead" class="commit-detail__head-badge">HEAD</span>
               </div>
               <div class="commit-detail__head-right">
@@ -1262,6 +1281,28 @@ function formatRelative(iso: string): string {
   background: var(--color-primary-soft);
   padding: 2px 8px;
   border-radius: var(--radius-sm);
+}
+.commit-detail__hash-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.commit-detail__hash-copy:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-primary);
+}
+.commit-detail__hash-copy:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 .commit-detail__head-badge {
   font-size: var(--font-xs);
