@@ -80,7 +80,28 @@ node scripts/cdp-measure-ipc.mjs
 - 输出：`{ ms, nodes, error }`。
 - 用途：判断慢是不是主进程 / 网络请求导致。
 
-### 2.6 捕获 Performance Trace
+### 2.6 给 Gitea demo 注入测试分支
+
+```bash
+# 默认创建 timeline-test-<timestamp> 分支，30 个 commit
+node scripts/cdp-seed-timeline-data.mjs
+
+# 自定义分支前缀和 commit 数量
+node scripts/cdp-seed-timeline-data.mjs my-perf-branch 50
+```
+
+- 在 `kanban_demo/m4java-test` 仓库创建一个新分支，并基于 main 生成指定数量的 commit。
+- 需要 Gitea demo 已启动（`cd giteaDemo && docker compose up -d`）。
+- 环境变量：
+  - `GITEA_URL`：默认 `http://localhost:3000`
+  - `GITEA_TOKEN`：默认脚本里已填入给 `kanban_demo` 生成的 token；如果 token 过期，可到容器内执行：
+    ```bash
+    docker compose exec -u git server gitea admin user generate-access-token --username kanban_demo --token-name cdp-test-token --scopes all --raw
+    ```
+- 用途：给 TimelineView 提供真实、可重复的测试分支，验证“点击多个分支后”的性能。
+- **注意**：测试数据会保留在 Gitea 中，不会自动删除。
+
+### 2.7 捕获 Performance Trace
 
 ```bash
 node scripts/cdp-trace-timeline-v2.mjs
