@@ -2,7 +2,13 @@
 <html lang="zh-Hans">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      PC-only 约束（user 2026-06-14 拍板）：
+      不设 viewport meta 的 mobile 设置（width=device-width 等），
+      Electron desktop 窗口不依赖 viewport meta，移动适配一律不做。
+      桌面窗口最小/推荐尺寸见 src/main/window.ts + design-system/gitea-kanban/OVERRIDE.md
+      §"响应式断点"（最小 800×600、推荐 1280×800、可拖拽至 4K）。
+    -->
     <title>gitea-kanban</title>
     <!--
       CSP（02-architecture.md §9.3 + design-system/pages/tech-refine.md §15.5）
