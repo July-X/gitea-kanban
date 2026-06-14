@@ -499,32 +499,29 @@ export const CreatePullArgsSchema = z
 export type CreatePullArgs = z.infer<typeof CreatePullArgsSchema>;
 
 /**
- * PR 合并方式（02-architecture.md §5.3.6）
+ * PR 合并方式（02-architecture.md §5.3.6 + gitea 1.26 swagger）
  *
- * 用户友好映射（Zod .describe 加在 source schema 上，使 `MergeMethodSchema.description` 可读）：
- *   - 'merge'         → "普通合并（保留所有提交历史）"
- *   - 'rebase'        → "变基后快进（重写历史，单一线性）"
- *   - 'rebase-merge'  → "变基后 merge commit（重写历史 + 保留 merge commit）"
- *   - 'squash'        → "压缩为单提交（合并请求内 N 个提交合成 1 个）"
- *   - 'squash-merge'  → gitea 字段：等同 squash + 显式 merge commit
+ * gitea `Do` 字段实际枚举（gitea-js 1.23.0 派生自 swagger）：
+ *   'merge' | 'rebase' | 'rebase-merge' | 'squash' | 'fast-forward-only' | 'manually-merged'
+ *   —— gitea swagger 本身**没有** 'squash-merge' 这个字面量；UI 上"压缩 + 保留合并提交" 走 'rebase-merge' 的不同变体或 'squash' + 后处理
  *
- * 业务规则（02-architecture §5.3.6）：
- *   - method='squash' / 'squash-merge' → commitMessage 必填（Zod refine 强制）
- *   - deleteBranchAfter：仅作参数透传（不主动调 branches.delete —— UI 走双确认在 UI 层统一实现）
+ * 业务侧支持 4 种（前端暴露 4 个选项，'fast-forward-only' / 'manually-merged' 暂不开放给用户）：
+ *   - 'merge'        → "普通合并（保留所有提交历史）"
+ *   - 'rebase'       → "变基后快进（重写历史，单一线性）"
+ *   - 'rebase-merge' → "变基后 merge commit（重写历史 + 保留 merge commit）"
+ *   - 'squash'       → "压缩为单提交（合并请求内 N 个提交合成 1 个）"
  */
 export const MergeMethodSchema = z.enum([
   'merge',
   'rebase',
   'rebase-merge',
   'squash',
-  'squash-merge',
 ]).describe(
   [
     'merge        → "普通合并（保留所有提交历史）"',
     'rebase       → "变基后快进（重写历史，单一线性）"',
     'rebase-merge → "变基后 merge commit（重写历史 + 保留 merge commit）"',
     'squash       → "压缩为单提交（合并请求内 N 个提交合成 1 个）"',
-    'squash-merge → "压缩 + 显式 merge commit（等同 squash + 保留 merge commit）"',
   ].join('\n'),
 );
 export type MergeMethod = z.infer<typeof MergeMethodSchema>;
@@ -540,13 +537,13 @@ export const MergePrArgsSchema = z
   .strict()
   .refine(
     (a) => {
-      if (a.method === 'squash' || a.method === 'squash-merge') {
+      if (a.method === 'squash') {
         return typeof a.commitMessage === 'string' && a.commitMessage.length > 0;
       }
       return true;
     },
     {
-      message: 'method=squash / squash-merge 时 commitMessage 必填',
+      message: 'method=squash 时 commitMessage 必填',
       path: ['commitMessage'],
     },
   );

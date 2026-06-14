@@ -163,7 +163,7 @@ export const usePullStore = defineStore('pull', () => {
     draft?: boolean;
   }): Promise<PullDto> {
     const dto = (await pullsCreate(args)) as PullDto;
-    // 新 PR 加到列表头部
+    // 新合并请求加到列表头部
     items.value.unshift(dto);
     return dto;
   }
@@ -176,11 +176,10 @@ export const usePullStore = defineStore('pull', () => {
    *   - 'rebase'       → 变基
    *   - 'rebase-merge' → 变基+合并
    *   - 'squash'       → 压缩
-   *   - 'squash-merge' → 压缩+合并
    *
    * @returns 合并结果（含 sha / merged / message）
    */
-  async function merge(args: {
+  async function mergePull(args: {
     projectId: string;
     index: number;
     method: MergeMethod;
@@ -226,7 +225,7 @@ export const usePullStore = defineStore('pull', () => {
     select,
     get,
     create,
-    merge,
+    mergePull,
     clearError,
   };
 });

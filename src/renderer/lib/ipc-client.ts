@@ -464,24 +464,23 @@ export function pullsCreate(args: {
 }
 
 /**
- * 合并 PR（**危险操作**，UI 层必须二次确认）
+ * 合并合并请求（**危险操作**，UI 层必须二次确认）
  *
- * 合并方式（MergeMethodSchema）：
+ * 合并方式（MergeMethodSchema，与 gitea 1.26 swagger 一致）：
  *   - 'merge'        → 普通合并（保留所有提交历史）
  *   - 'rebase'       → 变基后快进（重写历史，单一线性）
  *   - 'rebase-merge' → 变基后 merge commit
  *   - 'squash'       → 压缩为单提交
- *   - 'squash-merge' → 压缩 + 显式 merge commit
  *
  * 业务规则：
- *   - method='squash' / 'squash-merge' 时 commitMessage 必填
+ *   - method='squash' 时 commitMessage 必填
  *   - deleteBranchAfter 仅透传给 gitea（不主动调 branches.delete）
  *   - 合并到主线分支（如 main）时 UI 层额外二次确认
  */
 export function pullsMerge(args: {
   projectId: string;
   index: number;
-  method: 'merge' | 'rebase' | 'rebase-merge' | 'squash' | 'squash-merge';
+  method: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
   deleteBranchAfter?: boolean;
   commitMessage?: string;
 }): Promise<unknown> {

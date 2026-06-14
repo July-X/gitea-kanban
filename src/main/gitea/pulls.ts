@@ -180,19 +180,15 @@ export async function mergeGiteaPull(args: {
   owner: string;
   repo: string;
   index: number;
-  method: 'merge' | 'rebase' | 'rebase-merge' | 'squash' | 'squash-merge';
+  method: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
   deleteBranchAfter?: boolean;
   commitMessage?: string;
 }): Promise<MergePrResult> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
 
   try {
-    // gitea-js 1.23 PullMergeStyle enum 不含 'squash-merge'（UI 层语义："压缩 + 显式 merge commit"）
-    // gitea 1.x 实际把 'squash' 当成 "squash + auto merge commit"，业务上等价，调用前映射
-    const styleForGitea: 'merge' | 'rebase' | 'rebase-merge' | 'squash' | 'fast-forward-only' | 'manually-merged' =
-      args.method === 'squash-merge' ? 'squash' : args.method;
     const res = await api.repos.repoMergePullRequest(args.owner, args.repo, args.index, {
-      Do: styleForGitea,
+      Do: args.method,
       ...(args.deleteBranchAfter !== undefined ? { delete_branch_after_merge: args.deleteBranchAfter } : {}),
       ...(args.commitMessage !== undefined ? { MergeMessageField: args.commitMessage } : {}),
     });

@@ -52,19 +52,18 @@ const tabs: { id: PullFilter; label: string }[] = [
 
 // ===== 合并二次确认状态 =====
 
-/** 合并方式选项（人话映射） */
+/** 合并方式选项（人话映射，与 MergeMethodSchema 对齐：gitea swagger 实际支持 4 种） */
 const mergeMethods: { value: MergeMethod; label: string; hint: string }[] = [
   { value: 'merge', label: '普通合并', hint: '保留所有提交历史' },
   { value: 'rebase', label: '变基', hint: '重写历史，单一线性' },
   { value: 'rebase-merge', label: '变基+合并', hint: '重写历史 + 保留合并提交' },
   { value: 'squash', label: '压缩', hint: 'N 个提交合成 1 个' },
-  { value: 'squash-merge', label: '压缩+合并', hint: '压缩 + 保留合并提交' },
 ];
 
 /** 当前选中的合并方式 */
 const selectedMethod = ref<MergeMethod>('merge');
 
-/** 当前正在合并的 PR（null = 没在合并） */
+/** 当前正在合并的合并请求（null = 没在合并） */
 const mergingPull = ref<PullDto | null>(null);
 const merging = ref(false);
 const squashMessage = ref('');
@@ -147,7 +146,7 @@ function isMainBranch(refName: string): boolean {
 
 /** 需要 squash commitMessage */
 function needsCommitMessage(method: MergeMethod): boolean {
-  return method === 'squash' || method === 'squash-merge';
+  return method === 'squash';
 }
 
 /** 点击合并按钮 → 弹二次确认 */
@@ -166,7 +165,7 @@ async function performMerge(): Promise<void> {
   confirmMergeOpen.value = false;
   merging.value = true;
   try {
-    const result = await pull.merge({
+    const result = await pull.mergePull({
       projectId: activeProjectId.value,
       index: p.index,
       method: selectedMethod.value,
@@ -446,7 +445,7 @@ function formatDate(iso: string | undefined): string {
             <span class="merge-confirm__method-hint">{{ m.hint }}</span>
           </label>
         </div>
-        <!-- squash / squash-merge 需要输入 commitMessage -->
+        <!-- squash 需要输入 commitMessage -->
         <div v-if="needsCommitMessage(selectedMethod)" class="merge-confirm__message">
           <label class="merge-confirm__message-label" for="squash-msg">合并提交信息（必填）：</label>
           <input

@@ -33,8 +33,8 @@ const ROOT = join(__dirname, '..');
 const FORBIDDEN_TERMS = [
   // 严格匹配：\b 边界
   { term: 'PR', desc: '合并请求的英文缩写', except: ['不出现', '禁用词', '零术语', '**不**出现', 'UI 文本'] },  // 注释禁用词复述
-  { term: 'merge', desc: '合并', except: ['mergeMethod', 'merge-', "'merge'", 'isMerge', 'edge.kind', 'commit-node--', '不出现', '禁用词', '零术语', '**不**出现', 'merge 边', 'UI 文本'] },  // 字段名 / BEM / edge kind 字面量 / 运行时引用 / 注释禁用词复述
-  { term: 'rebase', desc: '变基', except: ['不出现', '禁用词', '零术语', '**不**出现', 'UI 文本'] },
+  { term: 'merge', desc: '合并', except: ['mergeMethod', 'merge-', "'merge'", 'isMerge', 'edge.kind', 'commit-node--', '不出现', '禁用词', '零术语', '**不**出现', 'merge 边', 'UI 文本', "'merge'", 'merge,', 'merge)', 'merge.', 'merge |', '| merge', 'merge ', 'rebase-merge', 'squash-merge'] },  // 字段名 / BEM / edge kind 字面量 / 运行时引用 / 注释禁用词复述 / 组合词 rebase-merge / squash-merge
+  { term: 'rebase', desc: '变基', except: ['不出现', '禁用词', '零术语', '**不**出现', 'UI 文本', "'rebase", 'rebase-', 'rebase ', 'rebase,', 'rebase)', 'rebase.'] },
   { term: 'fork', desc: '派生（v2 考虑）', except: ['不出现', '禁用词', '零术语', '**不**出现', 'UI 文本'] },
   // repo: 除了"repos"是 endpoint namespace 外,渲染端代码里还有合法的
   // 类型名 / 变量名 / IPC schema 字段名('owner'/'repo'/'refId' 三元组 / RepoDto 等)、
