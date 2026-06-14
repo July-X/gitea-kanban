@@ -250,12 +250,12 @@ async function openAttrEditor(p: PullDto): Promise<void> {
   // 加载可用标签和成员
   if (activeProjectId.value) {
     try {
-      const labelsResp = await window.api.labels.list({ projectId: activeProjectId.value }) as { items: { name: string; color: string }[] };
+      const labelsResp = await window.api.labels.list(toPlain({ projectId: String(activeProjectId.value) })) as { items: { name: string; color: string }[] };
       availableLabels.value = labelsResp.items ?? [];
     } catch { /* 忽略 */ }
     try {
       // members.list 返回直接是数组（不是 {items}）
-      const membersResp = await window.api.members.list({ projectId: activeProjectId.value }) as { username: string }[];
+      const membersResp = await window.api.members.list(toPlain({ projectId: String(activeProjectId.value) })) as { username: string }[];
       availableMembers.value = (membersResp ?? []).map(m => m.username);
     } catch { /* 忽略 */ }
   }
@@ -288,11 +288,11 @@ async function createNewLabel(): Promise<void> {
   try {
     // 去掉 # 前缀
     const color = newLabelColor.value.replace(/^#/, '');
-    const newLabel = await window.api.labels.create({
-      projectId: activeProjectId.value,
+    const newLabel = await window.api.labels.create(toPlain({
+      projectId: String(activeProjectId.value),
       name: newLabelName.value.trim(),
       color,
-    }) as { name: string; color: string };
+    })) as { name: string; color: string };
     // 立即加到可用列表和已选列表
     availableLabels.value = [...availableLabels.value, { name: newLabel.name, color: newLabel.color }];
     if (!editingLabels.value.includes(newLabel.name)) {
@@ -310,18 +310,29 @@ async function createNewLabel(): Promise<void> {
   }
 }
 
+/** 把任意对象深拷贝成可被 structured clone 的纯 plain object
+ *
+ * Vue 3 ref/computed 在跨 contextBridge 时会被结构化克隆
+ * → "An object could not be cloned"
+ * 用 JSON parse/stringify 强制展开成 plain data
+ */
+function toPlain<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v));
+}
+
 /** 保存属性（逐字段尝试，一个失败不影响其他） */
 async function saveAttrs(p: PullDto): Promise<void> {
   if (!activeProjectId.value) return;
+  const projectId = String(activeProjectId.value); // 显式解 ref
   const errors: string[] = [];
 
   // 1. 更新标签（替换所有标签）
   try {
-    await window.api.pulls.updateLabels({
-      projectId: activeProjectId.value,
+    await window.api.pulls.updateLabels(toPlain({
+      projectId,
       index: p.index,
       labels: editingLabels.value,
-    });
+    }));
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     errors.push(`标签: ${err.messageText ?? err.message ?? '失败'}`);
@@ -329,11 +340,11 @@ async function saveAttrs(p: PullDto): Promise<void> {
 
   // 2. 更新指派人（空串 = 清除指派人）
   try {
-    await window.api.pulls.updateAssignee({
-      projectId: activeProjectId.value,
+    await window.api.pulls.updateAssignee(toPlain({
+      projectId,
       index: p.index,
       assignee: editingAssignee.value,
-    });
+    }));
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     errors.push(`指派人: ${err.messageText ?? err.message ?? '失败'}`);
@@ -341,11 +352,11 @@ async function saveAttrs(p: PullDto): Promise<void> {
 
   // 3. 更新评审人
   try {
-    await window.api.pulls.updateReviewers({
-      projectId: activeProjectId.value,
+    await window.api.pulls.updateReviewers(toPlain({
+      projectId,
       index: p.index,
       reviewers: editingReviewers.value,
-    });
+    }));
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     errors.push(`评审人: ${err.messageText ?? err.message ?? '失败'}`);
