@@ -29,7 +29,7 @@ import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
 import { IpcError, IpcErrorCode } from '@shared/errors';
-import { keychainSet, keychainDelete, keychainFindAccounts } from './keychain.js';
+import { keychainSet, keychainDelete } from './keychain.js';
 import { invalidateGiteaClient, clearGiteaClientCache } from './client.js';
 
 // ===== Dev-only token file fallback =====
@@ -78,6 +78,8 @@ async function clearDevToken(giteaUrl: string, username: string): Promise<void> 
 import { getDb } from '../cache/sqlite.js';
 import { giteaAccounts, giteaUser } from '../cache/schema/index.js';
 import { eq } from 'drizzle-orm';
+import { getLocalStore } from '../local/state.js';
+import { logger } from '../logger.js';
 import type {
   ConnectArgs,
   ConnectResult,
@@ -137,9 +139,12 @@ async function verifyToken(giteaUrl: string, token: string): Promise<UserDto> {
   };
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
+// 修 2026-06-14：现在两处都直接从 localStore.accounts 推 username，不需要
+//   keychainFindAccounts 反查（而且 keychain 是 source of truth，user 切了 token
+//   它会不同步）—— 用 localStore 更稳定。
+// function nowIso() {
+//   return new Date().toISOString();
+// }
 
 /** auth.connect：调一次 /user，存 keychain，写 SQLite */
 export async function authConnect(args: ConnectArgs): Promise<ConnectResult> {
@@ -149,70 +154,128 @@ export async function authConnect(args: ConnectArgs): Promise<ConnectResult> {
   // 2. 存 token（keychain 优先；dev 模式 fallback 到 file）
   await persistToken(args.giteaUrl, user.login, args.token);
 
-  // 3. 写 SQLite
-  const db = getDb();
-  const accountId = randomUUID();
   const now = new Date();
+  const nowEpochMs = now.getTime();
+  const keychainService = `gitea-kanban@${args.giteaUrl}`;
 
-  // upsert gitea_accounts（同一 giteaUrl+username 幂等）
-  const existing = db
-    .select()
-    .from(giteaAccounts)
-    .where(eq(giteaAccounts.giteaUrl, args.giteaUrl))
-    .all()
-    .find((r) => r.username === user.login);
-
+  // 3a. 写 localStore（ADR-0003 Phase 2 双写：localStore 是 source of truth for accounts）
+  //     upsert by (giteaUrl, username) → 走 localStore state.accounts.find
   let finalAccountId: string;
-  if (existing) {
-    finalAccountId = existing.id;
-    db.update(giteaAccounts)
-      .set({ keychainService: `gitea-kanban@${args.giteaUrl}` })
-      .where(eq(giteaAccounts.id, existing.id))
-      .run();
+  let finalAccountCreatedAt: number;
+  const store = getLocalStore();
+  const stateNow = store.get();
+  const existingLocal = stateNow.accounts.find(
+    (a) => a.giteaUrl === args.giteaUrl && a.username === user.login,
+  );
+  if (existingLocal) {
+    finalAccountId = existingLocal.id;
+    finalAccountCreatedAt = existingLocal.createdAt;
+    store.mutate((s) => {
+      const idx = s.accounts.findIndex((a) => a.id === finalAccountId);
+      if (idx >= 0) {
+        s.accounts[idx] = {
+          ...s.accounts[idx]!,
+          keychainService,
+        };
+      }
+    });
   } else {
-    db.insert(giteaAccounts)
-      .values({
-        id: accountId,
+    finalAccountId = randomUUID();
+    finalAccountCreatedAt = nowEpochMs;
+    store.mutate((s) => {
+      s.accounts.push({
+        id: finalAccountId,
         giteaUrl: args.giteaUrl,
         username: user.login,
-        keychainService: `gitea-kanban@${args.giteaUrl}`,
-        createdAt: now,
-      })
-      .run();
-    finalAccountId = accountId;
+        keychainService,
+        createdAt: nowEpochMs,
+        userInfo: null, // 下面 upsert
+      });
+    });
   }
 
-  // upsert gitea_user（denormalized user info）
-  const existingUser = db
-    .select()
-    .from(giteaUser)
-    .where(eq(giteaUser.giteaAccountId, finalAccountId))
-    .all()[0];
-  if (existingUser) {
-    db.update(giteaUser)
-      .set({
-        giteaUserId: user.id,
-        login: user.login,
-        fullName: user.fullName ?? null,
-        email: user.email ?? null,
-        avatarUrl: user.avatarUrl ?? null,
-        updatedAt: now,
-      })
-      .where(eq(giteaUser.id, existingUser.id))
-      .run();
-  } else {
-    db.insert(giteaUser)
-      .values({
-        id: randomUUID(),
-        giteaAccountId: finalAccountId,
-        giteaUserId: user.id,
-        login: user.login,
-        fullName: user.fullName ?? null,
-        email: user.email ?? null,
-        avatarUrl: user.avatarUrl ?? null,
-        updatedAt: now,
-      })
-      .run();
+  // upsert userInfo（denormalized 进同 account）
+  store.mutate((s) => {
+    const idx = s.accounts.findIndex((a) => a.id === finalAccountId);
+    if (idx >= 0) {
+      s.accounts[idx] = {
+        ...s.accounts[idx]!,
+        userInfo: {
+          giteaUserId: user.id,
+          login: user.login,
+          ...(user.fullName ? { fullName: user.fullName } : {}),
+          ...(user.email ? { email: user.email } : {}),
+          ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
+          updatedAt: nowEpochMs,
+        },
+      };
+    }
+  });
+
+  // 3b. 写 SQLite（Phase 2 双写期：保持 SQLite 写，让 Phase 3 切读路径后能完整对比）
+  //     best-effort：失败 log 不抛（localStore 已落，SQLite 写失败下次启动 bootstrap 会修补）
+  try {
+    const db = getDb();
+    // upsert gitea_accounts
+    const existing = db
+      .select()
+      .from(giteaAccounts)
+      .where(eq(giteaAccounts.giteaUrl, args.giteaUrl))
+      .all()
+      .find((r) => r.username === user.login);
+    if (existing) {
+      db.update(giteaAccounts)
+        .set({ keychainService })
+        .where(eq(giteaAccounts.id, existing.id))
+        .run();
+    } else {
+      db.insert(giteaAccounts)
+        .values({
+          id: finalAccountId,
+          giteaUrl: args.giteaUrl,
+          username: user.login,
+          keychainService,
+          createdAt: now,
+        })
+        .run();
+    }
+    // upsert gitea_user
+    const existingUser = db
+      .select()
+      .from(giteaUser)
+      .where(eq(giteaUser.giteaAccountId, finalAccountId))
+      .all()[0];
+    if (existingUser) {
+      db.update(giteaUser)
+        .set({
+          giteaUserId: user.id,
+          login: user.login,
+          fullName: user.fullName ?? null,
+          email: user.email ?? null,
+          avatarUrl: user.avatarUrl ?? null,
+          updatedAt: now,
+        })
+        .where(eq(giteaUser.id, existingUser.id))
+        .run();
+    } else {
+      db.insert(giteaUser)
+        .values({
+          id: randomUUID(),
+          giteaAccountId: finalAccountId,
+          giteaUserId: user.id,
+          login: user.login,
+          fullName: user.fullName ?? null,
+          email: user.email ?? null,
+          avatarUrl: user.avatarUrl ?? null,
+          updatedAt: now,
+        })
+        .run();
+    }
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), giteaUrl: args.giteaUrl, username: user.login },
+      'authConnect: SQLite write failed (non-fatal in Phase 2 dual-write; localStore is authoritative)',
+    );
   }
 
   // 4. 返回结果（**不**含 token）
@@ -220,71 +283,88 @@ export async function authConnect(args: ConnectArgs): Promise<ConnectResult> {
     id: finalAccountId,
     giteaUrl: args.giteaUrl,
     username: user.login,
-    createdAt: existing?.createdAt?.toISOString?.() ?? nowIso(),
+    createdAt: new Date(finalAccountCreatedAt).toISOString(),
   };
   return { account: accountDto, user };
 }
 
-/** auth.disconnect：清 keychain + 删 gitea_accounts（级联） */
+/** auth.disconnect：清 keychain + 删 gitea_accounts（级联）
+ *  ADR-0003 Phase 2：双写期，localStore 同步删（SQLite 仍删给 Phase 3 兜底） */
 export async function authDisconnect(args: { giteaUrl: string }): Promise<void> {
-  const db = getDb();
-  const rows = db
-    .select()
-    .from(giteaAccounts)
-    .where(eq(giteaAccounts.giteaUrl, args.giteaUrl))
-    .all();
+  // 1. 取所有 username 用于清 keychain + 删 localStore
+  const store = getLocalStore();
+  const stateNow = store.get();
+  const targetAccounts = stateNow.accounts.filter((a) => a.giteaUrl === args.giteaUrl);
 
-  if (rows.length === 0) {
+  if (targetAccounts.length === 0) {
     // 没连过 = 静默成功
     return;
   }
 
-  // 1. 清 token（keychain + dev fallback file）
-  const usernames = await keychainFindAccounts(args.giteaUrl);
+  // 2. 清 token（keychain + dev fallback file）
+  const usernames = targetAccounts.map((a) => a.username);
   for (const u of usernames) {
     await keychainDelete(args.giteaUrl, u);
     await clearDevToken(args.giteaUrl, u);
     invalidateGiteaClient(args.giteaUrl, u);
   }
 
-  // 2. 删 SQLite accounts（外键 cascade 会自动删 gitea_user / repo_projects / ...）
-  for (const r of rows) {
-    db.delete(giteaAccounts).where(eq(giteaAccounts.id, r.id)).run();
+  // 3. 删 localStore accounts（**不**级联 repo_projects / columns / labelMaps / starredBranches
+  //    —— 它们是项目实体，跨 account 共享不常见但保留语义；Phase 3 改 schema 时一起处理）
+  const removeIds = new Set(targetAccounts.map((a) => a.id));
+  store.mutate((s) => {
+    s.accounts = s.accounts.filter((a) => !removeIds.has(a.id));
+  });
+
+  // 4. 删 SQLite accounts（外键 cascade 会自动删 gitea_user / repo_projects 等）
+  //    Phase 2 双写期 best-effort：失败 log 不抛（localStore 已删，SQLite 写失败下次启动
+  //    bootstrap 会修补 —— 但 accounts 已被用户断开，bootstrap 不会重新加；需要人工介入）
+  try {
+    const db = getDb();
+    for (const id of removeIds) {
+      db.delete(giteaAccounts).where(eq(giteaAccounts.id, id)).run();
+    }
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), giteaUrl: args.giteaUrl, count: removeIds.size },
+      'authDisconnect: SQLite delete failed (localStore is authoritative in Phase 2)',
+    );
   }
 }
 
-/** auth.status：纯读 SQLite，**不**读 keychain / **不**调 gitea */
+/** auth.status：纯读 localStore，**不**读 keychain / **不**调 gitea（ADR-0003 Phase 2）
+ *
+ * 历史：v1 走 SQLite（accounts + gitea_user 两张表 JOIN）；
+ * Phase 2 accounts + userInfo 已经在 localStore denormalize，**不**走 SQLite。
+ *
+ * 边界：返回结构与 v1 完全一致（accounts[] + currentUser），渲染端零变化。
+ */
 export async function authStatus(): Promise<StatusResult> {
-  const db = getDb();
-  const accountRows = db.select().from(giteaAccounts).all();
+  const state = getLocalStore().get();
 
-  if (accountRows.length === 0) {
+  if (state.accounts.length === 0) {
     return { accounts: [], currentUser: null };
   }
 
   // M0 简化：第一个 account 作为 currentUser（M1 多账号时由渲染端选）
-  const firstAccount = accountRows[0]!;
-  const userRow = db
-    .select()
-    .from(giteaUser)
-    .where(eq(giteaUser.giteaAccountId, firstAccount.id))
-    .all()[0];
+  const firstAccount = state.accounts[0]!;
+  const firstUserInfo = firstAccount.userInfo;
 
-  const accounts: GiteaAccountDto[] = accountRows.map((r) => ({
-    id: r.id,
-    giteaUrl: r.giteaUrl,
-    username: r.username,
-    createdAt: r.createdAt.toISOString(),
+  const accounts: GiteaAccountDto[] = state.accounts.map((a) => ({
+    id: a.id,
+    giteaUrl: a.giteaUrl,
+    username: a.username,
+    createdAt: new Date(a.createdAt).toISOString(),
   }));
 
   let currentUser: UserDto | null = null;
-  if (userRow) {
+  if (firstUserInfo) {
     currentUser = {
-      id: userRow.giteaUserId,
-      login: userRow.login,
-      ...(userRow.fullName ? { fullName: userRow.fullName } : {}),
-      ...(userRow.email ? { email: userRow.email } : {}),
-      ...(userRow.avatarUrl ? { avatarUrl: userRow.avatarUrl } : {}),
+      id: firstUserInfo.giteaUserId,
+      login: firstUserInfo.login,
+      ...(firstUserInfo.fullName ? { fullName: firstUserInfo.fullName } : {}),
+      ...(firstUserInfo.email ? { email: firstUserInfo.email } : {}),
+      ...(firstUserInfo.avatarUrl ? { avatarUrl: firstUserInfo.avatarUrl } : {}),
     };
   }
 
