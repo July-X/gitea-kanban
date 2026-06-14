@@ -250,21 +250,6 @@ function onDetailOpenInGitea(n: CommitNodeDto): void {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-/** 详情弹窗里"复制链接"（复制 gitea commit URL，非 sha） */
-async function onDetailCopyLink(n: CommitNodeDto): Promise<void> {
-  const url = giteaUrl(`commit/${n.sha}`);
-  if (!url) {
-    showToast({ type: 'warn', message: '未配置 gitea 地址' });
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(url);
-    showToast({ type: 'success', message: `已复制 ${n.shortSha} 的链接`, duration: 1500 });
-  } catch {
-    showToast({ type: 'warn', message: '复制失败，请手动选择' });
-  }
-}
-
 /** 详情弹窗里"复制版本号"（复制完整 sha，便于 checkout / 引用） */
 async function onDetailCopySha(n: CommitNodeDto): Promise<void> {
   try {
@@ -798,6 +783,15 @@ function formatRelative(iso: string): string {
                 >
                   <Clipboard :size="12" :stroke-width="2" aria-hidden="true" />
                 </button>
+                <span class="commit-detail__head-divider" aria-hidden="true"></span>
+                <button
+                  type="button"
+                  class="commit-detail__hash-link"
+                  @click="onDetailOpenInGitea(detailNode)"
+                >
+                  <ExternalLink :size="12" :stroke-width="2" aria-hidden="true" />
+                  在 gitea 打开
+                </button>
                 <span v-if="detailNode.isHead" class="commit-detail__head-badge">HEAD</span>
               </div>
               <div class="commit-detail__head-right">
@@ -925,25 +919,6 @@ function formatRelative(iso: string): string {
               </div>
             </div>
             </div><!-- /commit-detail__body -->
-
-            <footer class="commit-detail__footer">
-              <button
-                type="button"
-                class="commit-detail__btn commit-detail__btn--primary"
-                @click="onDetailOpenInGitea(detailNode)"
-              >
-                <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
-                在 gitea 打开
-              </button>
-              <button
-                type="button"
-                class="commit-detail__btn"
-                @click="onDetailCopyLink(detailNode)"
-              >
-                <Clipboard :size="14" :stroke-width="2" aria-hidden="true" />
-                复制链接
-              </button>
-            </footer>
 
             <button
               type="button"
@@ -1304,6 +1279,38 @@ function formatRelative(iso: string): string {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
 }
+.commit-detail__head-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-divider);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.commit-detail__hash-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--color-primary);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: none;
+  transition: color var(--t-fast) var(--ease);
+}
+.commit-detail__hash-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.commit-detail__hash-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
 .commit-detail__head-badge {
   font-size: var(--font-xs);
   font-weight: 600;
@@ -1520,43 +1527,7 @@ function formatRelative(iso: string): string {
   text-align: center;
 }
 
-.commit-detail__footer {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--color-divider);
-  background: var(--color-bg);
-}
-.commit-detail__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  font-size: var(--font-sm);
-  cursor: pointer;
-  font-family: inherit;
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
-}
-.commit-detail__btn:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-divider-strong);
-}
-.commit-detail__btn--primary {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #fff;
-  font-weight: 500;
-}
-.commit-detail__btn--primary:hover {
-  background: var(--color-primary);
-  filter: brightness(1.08);
-  border-color: var(--color-primary);
-}
+/* 提交详情弹窗的 footer / 卡片式按钮已移除（v1.5 · 动作上移到 head 区） */
 
 /* Transition：淡入淡出（commit-detail name） */
 .commit-detail-enter-active,
