@@ -29,11 +29,16 @@ let timer: ReturnType<typeof setTimeout> | null = null;
  * showToast —— 全局提示
  *
  * duration：
- *   - 0 或 undefined = 用默认 3000ms
+ *   - 0 或 undefined = 用默认（success=3000ms，error=persistent）
  *   - 正数 = 多少毫秒后自动消失
  *   - 负数 = 不自动消失
  *
  * persistent（推荐用这个）：true = 必须用户点击关闭（用于错误/重要提示）
+ *
+ * 设计原则：错误**不**应自动消失（用户可能错过）
+ *  - 业务错（"评审人不能是组织"、"无权限"）→ 用户需要知道**为什么失败 + 怎么修**
+ *  - 系统错（网络断开、500）→ 用户需要**决定**重试时机
+ * success 是 3s 自动消失（轻量提示，确认"做完了"）
  */
 export function showToast(state: Omit<ToastState, 'duration'> & { duration?: number; persistent?: boolean }): void {
   if (timer) {
@@ -41,12 +46,15 @@ export function showToast(state: Omit<ToastState, 'duration'> & { duration?: num
     timer = null;
   }
   const isPersistent = state.persistent === true;
+  // error 类型默认 persistent（除非显式传 duration）
+  const defaultDuration = isPersistent ? -1 : (state.type === 'error' ? -1 : 3000);
+  const duration = state.duration ?? defaultDuration;
   toast.value = {
     type: state.type,
     message: state.message,
     ...(state.description !== undefined ? { description: state.description } : {}),
-    duration: state.duration ?? (isPersistent ? -1 : 3000),
-    persistent: isPersistent,
+    duration,
+    persistent: duration < 0,
   };
   if (toast.value.duration > 0) {
     timer = setTimeout(() => {

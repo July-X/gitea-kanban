@@ -127,7 +127,7 @@ async function loadPulls(): Promise<void> {
     await pull.list(activeProjectId.value, true);
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '加载失败', persistent: true });
+    showToast({ type: 'error', message: err.messageText ?? '加载失败', description: '点击关闭', persistent: true });
   }
 }
 
@@ -137,7 +137,7 @@ async function onRefresh(): Promise<void> {
     showToast({ type: 'success', message: `已刷新，共 ${pull.total} 条` });
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '刷新失败', persistent: true });
+    showToast({ type: 'error', message: err.messageText ?? '刷新失败', description: '点击关闭', persistent: true });
   }
 }
 
@@ -197,11 +197,11 @@ async function performMerge(): Promise<void> {
     if (result.merged) {
       showToast({ type: 'success', message: `#${p.index} 合并成功` });
     } else {
-      showToast({ type: 'error', message: `#${p.index} 合并未完成：${result.message || '未知原因'}`, persistent: true });
+      showToast({ type: 'error', message: `#${p.index} 合并未完成：${result.message || '未知原因'}`, description: '点击关闭', persistent: true });
     }
   } catch (e) {
     const err = e as { messageText?: string; hint?: string };
-    showToast({ type: 'error', message: err.messageText ?? '合并失败', persistent: true });
+    showToast({ type: 'error', message: err.messageText ?? '合并失败', description: '点击关闭', persistent: true });
   } finally {
     merging.value = false;
     mergingPull.value = null;
@@ -311,7 +311,7 @@ async function createNewLabel(): Promise<void> {
     showToast({ type: 'success', message: `标签 "${newLabel.name}" 已创建` });
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '创建标签失败', persistent: true });
+    showToast({ type: 'error', message: err.messageText ?? '创建标签失败', description: '点击关闭', persistent: true });
   } finally {
     creatingLabel.value = false;
   }
@@ -419,7 +419,7 @@ async function performClose(): Promise<void> {
     }
   } catch (e) {
     const err = e as { messageText?: string };
-    showToast({ type: 'error', message: err.messageText ?? '关闭失败', persistent: true });
+    showToast({ type: 'error', message: err.messageText ?? '关闭失败', description: '点击关闭', persistent: true });
   } finally {
     closing.value = false;
     closingPull.value = null;
