@@ -91,6 +91,10 @@ gitea-kanban/
 │   │   ├── window.ts            # BrowserWindow + CSP
 │   │   ├── logger.ts            # pino 日志
 │   │   ├── config.ts            # 默认配置
+│   │   ├── local/               # ADR-0003 Phase 1：localStore（替代 9 张活 SQLite 表）
+│   │   │   ├── store.ts         #   LocalStore 抽象（原子写 + debounce flush + 重试退避）
+│   │   │   ├── state.ts         #   顶层 LocalState TS interface + 单例
+│   │   │   └── prefs-mirror.ts  #   prefs 双写层（SQLite ↔ localStore）
 │   │   ├── ipc/                 # IPC handler（按 namespace 分文件）
 │   │   │   ├── index.ts         # 统一注册入口
 │   │   │   ├── schema.ts        # 所有 IPC 的 Zod schema
@@ -169,6 +173,7 @@ pnpm lint:fix
 pnpm format            # prettier --write "src/**/*.{ts,tsx,json,css,md}"
 pnpm format:check
 pnpm check:no-jargon   # 零术语检查（**没跑过不准 merge**）
+pnpm verify:state-consistency  # ADR-0003 Phase 1：SQLite prefs ↔ localStore prefs 对比（--auto-repair / --sandbox）
 
 # 数据库
 pnpm db:generate       # drizzle-kit generate
@@ -264,14 +269,21 @@ pnpm rebuild:native
 
 ### 6.3 数据模型
 
-SQLite 共 **12 张业务表 + 2 张基础设施表**（ADR-0002 reset 后）：
+**v1 现状（SQLite 14 张表，ADR-0003 Phase 1 双写期）**：
 
-业务表：`users`、`gitea_accounts`、`repo_projects`、`board_columns`、`column_label_mapping`、`card_issue_link`、`gitea_refs`、`starred_branches`、`prefs`、`undo_entries`。
-基础设施表：`cache_entries`、`hook_deliveries`、`giteaUser`。
+业务表 12 张：`users`、`gitea_accounts`、`repo_projects`、`board_columns`、`column_label_mapping`、`card_issue_link`、`gitea_refs`、`starred_branches`、`prefs`、`undo_entries`。
+基础设施表 2 张：`cache_entries`、`hook_deliveries`、`giteaUser`。
+
+> **2026-06-14 盘点**：14 张表里 `cardIssueLink` / `giteaRefs` / `undoEntries` / `hookDeliveries` 4 张是**死表**（零业务调用方，schema/index.ts 自述 v1 可选保留）。`undo_entries` M6 切 in-memory 栈后已废。
+>
+> **ADR-0003 迁移目标**：从 better-sqlite3 切到 electron-store + 文件缓存 + 同步队列。9 张活表 → 1 个 state.json + 1 个 cache/ 目录 + 1 个 queue.jsonl。**当前 Phase 1 = 双写 + 一致性巡检，不删 SQLite**。Phase 2 切读路径，Phase 3 删 SQLite + 上离线写。
+>
+> 详见 `docs/adr/0003-local-store-electron-store.md`。
 
 核心设计：
 - **看板列**是 gitea-kanban 本地概念，存 `board_columns`。
 - **卡片 = Gitea issue**，本地不存卡片实体，通过 `column_label_mapping` 把列映射到 Gitea label；issue 带这个 label 就属于该列。
+- **本地业务态**在 Phase 1 双写 SQLite + localStore（`src/main/local/state.ts`）；Phase 3 删 SQLite 后只走 localStore。
 
 ### 6.4 Gitea 集成
 
@@ -438,6 +450,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 | 前端设计 | `docs/design/03-frontend.md` | UI/UX、路由、状态管理 |
 | keychain 选型 | `docs/adr/0001-keychain.md` | 为什么用 @napi-rs/keyring |
 | board 数据模型 reset | `docs/adr/0002-board-data-source-reset.md` | 为什么卡片 = Gitea issue |
+| **本地存储迁移 + 同步队列** | `docs/adr/0003-local-store-electron-store.md` | **ADR-0003**：SQLite → electron-store + queue.jsonl；**当前 Phase 1 双写期** |
 | 设计系统（生效） | `design-system/gitea-kanban/OVERRIDE.md` | 颜色、字体、零术语、二次确认 |
 | 科技感精修 token | `design-system/pages/tech-refine.md` | v1.1/v1.2 具体 token |
 | 本文件 | `AGENTS.md` | agent 入口规范 |

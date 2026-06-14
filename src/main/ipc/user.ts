@@ -27,7 +27,6 @@
  */
 
 import { ipcMain } from 'electron';
-import { randomUUID } from 'node:crypto';
 import { eq, and, inArray } from 'drizzle-orm';
 import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
 import {
@@ -50,6 +49,7 @@ import {
 import { logger } from '../logger.js';
 import { getDb } from '../cache/sqlite.js';
 import { prefs, undoEntries } from '../cache/schema/index.js';
+import { setPrefsWithMirror } from '../local/prefs-mirror.js';
 import { undoOne, redoOne, undoStatus } from '../board/undo.js';
 
 /** M5 简化 / **M6 拍板保留**：单本地用户（设备级），prefs 不按 gitea account 切分
@@ -136,42 +136,13 @@ function getPrefs(args: UserPrefsGetArgs): UserPrefsGetResult {
 }
 
 /**
- * 写 prefs（upsert 语义）
+ * 写 prefs（upsert 语义）—— ADR-0003 Phase 1 双写
  *
- * 每次调用清空 caller 传的 keys 然后 insert 全量新值——简单粗暴但 v1 OK。
- * 若 caller 只想改部分 key，应把已有 keys 先 get 再 set。
+ * 内部走 setPrefsWithMirror：同步写 SQLite（source of truth） + 异步写 localStore（镜像）
+ * 业务函数签名保持 void（IPC 不感知双写细节）
  */
-function setPrefs(args: UserPrefsSetArgs): void {
-  const db = getDb();
-  const entries = Object.entries(args.entries);
-  if (entries.length === 0) {
-    // 空 entries = 空操作（不抛错；调用方可能用来 ping）
-    return;
-  }
-
-  const now = new Date();
-  db.transaction((tx) => {
-    for (const [key, value] of entries) {
-      const jsonStr = JSON.stringify(value);
-      // upsert: 先尝试 update，再判断是否需要 insert
-      const updated = tx
-        .update(prefs)
-        .set({ value: jsonStr, updatedAt: now })
-        .where(and(eq(prefs.userId, LOCAL_USER_ID), eq(prefs.key, key)))
-        .run();
-      if (updated.changes === 0) {
-        tx.insert(prefs)
-          .values({
-            id: randomUUID(),
-            userId: LOCAL_USER_ID,
-            key,
-            value: jsonStr,
-            updatedAt: now,
-          })
-          .run();
-      }
-    }
-  });
+async function setPrefs(args: UserPrefsSetArgs): Promise<void> {
+  await setPrefsWithMirror(args.entries);
 }
 
 // ============================================================

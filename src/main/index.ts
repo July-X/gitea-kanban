@@ -18,6 +18,8 @@ import { logger, upgradeLoggerToFile } from './logger.js';
 import { createMainWindow, destroyMainWindow, installCspHeader } from './window.js';
 import { registerAllIpcHandlers, unregisterAllIpcHandlers } from './ipc/index.js';
 import { initSqlite, closeSqlite } from './cache/sqlite.js';
+import { initLocalStore, closeLocalStore } from './local/state.js';
+import { bootstrapPrefsFromSqlite } from './local/prefs-mirror.js';
 import { authStatus } from './gitea/auth.js';
 import { APP_NAME, APP_SINGLE_INSTANCE_LOCK_NAME } from '@shared/constants';
 
@@ -85,6 +87,22 @@ app.on('ready', async () => {
     await initSqlite();
     logger.info('sqlite initialized');
 
+    // 2a-bis. 初始化 localStore（ADR-0003 Phase 1：双写期，SQLite 仍是 source of truth）
+    logger.info('initLocalStore start');
+    await initLocalStore();
+    logger.info('localStore initialized');
+
+    // 2a-ter. 灌 prefs mirror：启动期把 SQLite 的 prefs 同步到 localStore
+    // 失败只 warn，不影响启动（Phase 1 验证期允许 localStore 失败）
+    try {
+      await bootstrapPrefsFromSqlite();
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'prefs mirror bootstrap failed (non-fatal in Phase 1)',
+      );
+    }
+
     // 2b. 注册 IPC
     logger.info('registerAllIpcHandlers start');
     registerAllIpcHandlers();
@@ -136,7 +154,8 @@ app.on('before-quit', () => {
   logger.info('app quitting');
   unregisterAllIpcHandlers();
   destroyMainWindow();
-  closeSqlite();
+  // closeLocalStore 先于 closeSqlite：保证 last write 不丢
+  void closeLocalStore().finally(() => closeSqlite());
 });
 
 // 未捕获异常 → 静默兜底（不调 logger.fatal — logger 可能已坏：SonicBoom fd=-1 会循环 RangeError）
