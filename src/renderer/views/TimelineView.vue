@@ -13,7 +13,7 @@
  *   - nodes 数组按时间戳倒序排列后作为行号
  *   - edges 数组（parent/combined）决定分支曲线
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Clipboard, ExternalLink, GitBranch, Loader2, RefreshCw, Timer } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -196,6 +196,25 @@ function closeCommitDetail(): void {
   // 保留 detailNode 一帧让过渡动画播完再清，避免内容突变
   setTimeout(() => { if (!detailOpen.value) detailNode.value = null; }, 200);
 }
+
+/**
+ * Esc 关闭提交详情弹窗（A-3 P1 · B1 修法）
+ * - watch detailOpen → add/remove window listener，避免常驻监听
+ * - 仅在 detailOpen=true 时拦截 Esc，避免干扰其他弹窗（gitea-confirm 等）
+ */
+function onDetailEsc(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && detailOpen.value) {
+    e.preventDefault();
+    closeCommitDetail();
+  }
+}
+watch(detailOpen, (open) => {
+  if (open) window.addEventListener('keydown', onDetailEsc);
+  else window.removeEventListener('keydown', onDetailEsc);
+});
+onUnmounted(() => {
+  window.removeEventListener('keydown', onDetailEsc);
+});
 
 /** 拉完整 commit 详情（gitea /git/commits/{sha}）—— 含 stats + files */
 async function loadDetailDetail(sha: string): Promise<void> {
@@ -763,9 +782,12 @@ function formatRelative(iso: string): string {
          提交详情弹窗（v1.3 · 任务 #commit-detail）
          - 点 commit-row 触发 openCommitDetail → detailOpen=true
          - 内部 2 个动作：在 gitea 打开、复制链接
-         - 关闭方式：只允许点右上角 × 按钮（v1.3 fix #commit-detail-close-policy）
-           · 故意不绑点遮罩关闭——非技术用户容易误触外部导致内容丢失
-           · 故意不绑 Esc 关闭——"只能通过关闭按钮才能关闭"
+         - 关闭方式（A-3 P1 · B1 修法 · 2026-06-14）：
+           · 点空白遮罩（@click.self）关闭
+           · 按 Esc 关闭（onDetailEsc 全局监听）
+           · 点右上角 × 按钮关闭（保留）
+           旧版 v1.3 故意不绑 backdrop/Esc 是因为 PM 找不到关，反而
+           成了"PM 以为应用卡了"的阻塞痛点。
          ============================================================ -->
     <Teleport to="body">
       <Transition name="commit-detail">
@@ -775,6 +797,7 @@ function formatRelative(iso: string): string {
           role="dialog"
           aria-modal="true"
           :aria-label="`提交 ${detailNode.shortSha} 详情`"
+          @click.self="closeCommitDetail"
         >
           <div class="commit-detail">
             <header class="commit-detail__head">
