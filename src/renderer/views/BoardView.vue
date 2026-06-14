@@ -502,13 +502,16 @@ watch(
  <span class="column__label-text">{{ col.labels.map((l) => l.name).join(' · ') }}</span>
  </div>
  </header>
- <ul class="column__cards">
- <li
- v-for="issue in board.issuesOf(col.id)"
- :key="issue.id"
- class="card"
- :class="{ 'card--closed': issue.state === 'closed' }"
- >
+  <ul class="column__cards">
+  <li
+  v-for="issue in board.issuesOf(col.id)"
+  :key="issue.id"
+  class="card"
+  :class="{ 'card--closed': issue.state === 'closed' }"
+  tabindex="0"
+  role="article"
+  :aria-label="`议题 #${issue.index}：${issue.title}`"
+  >
  <div class="card__head">
  <span class="card__index mono">#{{ issue.index }}</span>
  <span v-if="issue.state === 'closed'" class="card__state">已关闭</span>
@@ -1134,17 +1137,29 @@ watch(
 }
 
 .card__actions {
- position: absolute;
- top:4px;
- right:4px;
- display: flex;
- gap:2px;
- opacity:0;
- transition: opacity var(--t-fast) var(--ease);
+  position: absolute;
+  top:4px;
+  right:4px;
+  display: flex;
+  gap:2px;
+  opacity:0;
+  transition: opacity var(--t-fast) var(--ease);
 }
 
-.card:hover .card__actions {
- opacity:1;
+/*
+ * C-3 硬约束 #1（BoardView · state）修法（2026-06-14）：
+ * hover-only → hover + :focus-within，让键盘 Tab 进入卡片后
+ * 换列 / 删除按钮也能可见可操作（解决 a11y blocker）
+ */
+.card:hover .card__actions,
+.card:focus-within .card__actions {
+  opacity:1;
+}
+
+/* C-3 硬约束 #1 配套：卡片本身 keyboard focus 视觉反馈 */
+.card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .card__action {
