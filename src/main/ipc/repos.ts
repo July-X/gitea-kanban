@@ -39,9 +39,7 @@ import {
   touchLastSync,
   backfillDefaultBranch,
 } from '../cache/repos.js';
-import { giteaAccounts } from '../cache/schema/giteaAccounts.js';
-import { eq } from 'drizzle-orm';
-import { getDb } from '../cache/sqlite.js';
+import { getLocalStore } from '../local/state.js';
 import { logger } from '../logger.js';
 
 /** 统一包装：parse → handler → error → IpcError */
@@ -90,22 +88,19 @@ function wrapIpc<TArgs, TResult>(
  * 解析 giteaAccountId → (giteaUrl, username)
  *
  * 内部辅助：gitea API 调用需要 (giteaUrl, username) 而不是 account.id
+ * ADR-0003 Phase 2：走 localStore
  */
 function resolveGiteaAccount(giteaAccountId: string): { giteaUrl: string; username: string } {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(giteaAccounts)
-    .where(eq(giteaAccounts.id, giteaAccountId))
-    .all()[0];
-  if (!row) {
+  const state = getLocalStore().get();
+  const acc = state.accounts.find((a) => a.id === giteaAccountId);
+  if (!acc) {
     throw new IpcError({
       code: IpcErrorCode.NOT_FOUND,
       message: 'gitea 账户不存在',
       hint: '请先在 设置 → 账户 连接 gitea',
     });
   }
-  return { giteaUrl: row.giteaUrl, username: row.username };
+  return { giteaUrl: acc.giteaUrl, username: acc.username };
 }
 
 /** 构造 cache key —— 同一 giteaAccountId + 过滤 + 分页 = 同一份缓存 */

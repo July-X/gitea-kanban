@@ -11,18 +11,28 @@
  * - **不**碰 token / keychain
  * - **不**调 gitea API
  * - **不**修改表结构（13 业务表 + 1 denorm 缓存表已拍板）
+ *
+ * ADR-0003 Phase 2 改造：业务态（repo_projects）走 localStore 优先；Gitea 缓存
+ * （cache_entries）继续走 SQLite。本期不切 Gitea 缓存层（cache-aside 模式，
+ * cache_entries 是 cache 加速不是 source of truth，Phase 3 不动它）。
+ *
+ * 双写策略：localStore 写失败抛（IPC 业务错误）；SQLite 写失败 best-effort
+ * log（Phase 2 兜底，localStore 是 source of truth）。
  */
 
 import { randomUUID } from 'node:crypto';
-import { eq, and, sql, isNull } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 // 注：isNull 在 cache_entries (nullable) 列上查询时使用——
 // drizzle `eq(col, null)` 编译成 SQL `col = NULL`（永远 false）；
 // SQLite 的 NULL 比较必须用 `IS NULL`，所以 isNull 是必需的。
 import { getDb } from './sqlite.js';
 import { repoProjects } from './schema/repoProjects.js';
 import { cacheEntries } from './schema/cacheEntries.js';
-import { giteaAccounts } from './schema/giteaAccounts.js';
 import type { RepoProjectDto } from '../ipc/schema.js';
+import { getLocalStore } from '../local/state.js';
+import { findProjectWithStore, findProjectsByOwnerNameWithStore } from '../local/projects.js';
+import { findAccountByIdWithStore } from '../local/accounts.js';
+import { logger } from '../logger.js';
 
 const CACHE_RESOURCE = 'repos';
 /** repos.list 缓存 TTL：5 min（任务 prompt §关键约束 4） */
@@ -30,77 +40,47 @@ export const REPOS_LIST_TTL_SECONDS = 5 * 60;
 
 /**
  * 内部：根据 (giteaAccountId, owner, name) 找 repo_projects 行
+ * ADR-0003 Phase 2：走 localStore 优先
  */
 export function findProject(
   giteaAccountId: string,
   owner: string,
   name: string,
 ): RepoProjectDto | null {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(repoProjects)
-    .where(
-      and(
-        eq(repoProjects.giteaAccountId, giteaAccountId),
-        eq(repoProjects.owner, owner),
-        eq(repoProjects.name, name),
-      ),
-    )
-    .all()[0];
-  if (!row) return null;
-  return projectRowToDto(row);
+  return projectRowToDto(
+    findProjectWithStore(getLocalStore().get(), { giteaAccountId, owner, name }),
+  );
 }
 
 /**
  * 内部：列一个 giteaAccountId 下所有 repo_projects 行
+ * ADR-0003 Phase 2：走 localStore
  */
 export function listProjectsForAccount(giteaAccountId: string): RepoProjectDto[] {
-  const db = getDb();
-  const rows = db
-    .select()
-    .from(repoProjects)
-    .where(eq(repoProjects.giteaAccountId, giteaAccountId))
-    .all();
-  return rows.map(projectRowToDto);
+  const projects = getLocalStore()
+    .get()
+    .projects.filter((p) => p.giteaAccountId === giteaAccountId);
+  return projects.map((p) => projectRowToDto(p)!);
 }
 
 /**
  * 批量查 (owner, name) → 命中列表
  *
  * 用于 repos.list 渲染时把 gitea 返回的仓库跟本地项目状态 JOIN
- * —— 一次 SQL，避免 N+1
+ * —— 一次 map filter，避免 N+1
+ * ADR-0003 Phase 2：走 localStore
  */
 export function findProjectsByOwnerName(
   giteaAccountId: string,
   pairs: ReadonlyArray<{ owner: string; name: string }>,
 ): Map<string, RepoProjectDto> {
-  if (pairs.length === 0) return new Map();
-  const db = getDb();
-  // 拼成 OR 条件：drizzle 的 inArray 只能单一字段
-  // 这里 owner+name 联合查，用 sql 模板
-  const ownerNamePairs = pairs.map((p) => ({ owner: p.owner, name: p.name }));
-  const rows = db
-    .select()
-    .from(repoProjects)
-    .where(
-      and(
-        eq(repoProjects.giteaAccountId, giteaAccountId),
-        // (owner, name) in (val1, val2, ...)
-        sql`(${repoProjects.owner}, ${repoProjects.name}) in (${sql.join(
-          ownerNamePairs.map(
-            (p) => sql`(${p.owner}, ${p.name})`,
-          ),
-          sql`, `,
-        )})`,
-      ),
-    )
-    .all();
-  const map = new Map<string, RepoProjectDto>();
-  for (const r of rows) {
-    map.set(`${r.owner}/${r.name}`, projectRowToDto(r));
+  const m = findProjectsByOwnerNameWithStore(getLocalStore().get(), giteaAccountId, pairs);
+  const out = new Map<string, RepoProjectDto>();
+  for (const [k, v] of m) {
+    const dto = projectRowToDto(v);
+    if (dto) out.set(k, dto);
   }
-  return map;
+  return out;
 }
 
 /**
@@ -112,6 +92,8 @@ export function findProjectsByOwnerName(
  *
  * 必须提供 giteaUrl（gitea 仓库元数据）以便在 defaultBranch 为 null 时
  * 后续从 gitea 拉一次填上；v1 简化为 null（可由后续 sync 任务补全）
+ *
+ * ADR-0003 Phase 2：localStore 写优先（source of truth），SQLite 镜像（best-effort）
  */
 export function addProject(args: {
   giteaAccountId: string;
@@ -119,71 +101,106 @@ export function addProject(args: {
   name: string;
   defaultBranch?: string | null;
 }): RepoProjectDto {
-  const db = getDb();
-  const existing = findProject(args.giteaAccountId, args.owner, args.name);
-  if (existing) return existing;
-
-  // 校验 gitea_accounts 存在（避免 FK 失败）
-  const acc = db
-    .select()
-    .from(giteaAccounts)
-    .where(eq(giteaAccounts.id, args.giteaAccountId))
-    .all()[0];
-  if (!acc) {
+  // 1. 检查 gitea_account 存在（用 localStore）
+  const store = getLocalStore();
+  const stateNow = store.get();
+  if (!findAccountByIdWithStore(stateNow, args.giteaAccountId)) {
     throw new Error(
       `gitea_accounts row not found: ${args.giteaAccountId}（先调 auth.connect）`,
     );
   }
 
-  const now = new Date();
-  const id = randomUUID();
-  db.insert(repoProjects)
-    .values({
-      id,
-      giteaAccountId: args.giteaAccountId,
-      owner: args.owner,
-      name: args.name,
-      defaultBranch: args.defaultBranch ?? null,
-      lastSyncAt: now,
-      createdAt: now,
-    })
-    .run();
+  // 2. 幂等：localStore 已存在
+  const existingLocal = findProjectWithStore(stateNow, {
+    giteaAccountId: args.giteaAccountId,
+    owner: args.owner,
+    name: args.name,
+  });
+  if (existingLocal) return projectRowToDto(existingLocal)!;
 
-  // 失效 repos 缓存（addProject 是写操作）
+  // 3. 写 localStore
+  const nowEpochMs = Date.now();
+  const id = randomUUID();
+  const createdRow = {
+    id,
+    giteaAccountId: args.giteaAccountId,
+    owner: args.owner,
+    name: args.name,
+    defaultBranch: args.defaultBranch ?? null,
+    lastSyncAt: nowEpochMs,
+    createdAt: nowEpochMs,
+  };
+  store.mutate((s) => {
+    s.projects.push(createdRow);
+  });
+
+  // 4. 失效 repos 缓存（addProject 是写操作）
   invalidateReposCache(args.giteaAccountId);
 
-  const row = db
-    .select()
-    .from(repoProjects)
-    .where(eq(repoProjects.id, id))
-    .all()[0]!;
-  return projectRowToDto(row);
+  // 5. 写 SQLite 镜像（best-effort）
+  try {
+    const db = getDb();
+    db.insert(repoProjects)
+      .values({
+        id,
+        giteaAccountId: args.giteaAccountId,
+        owner: args.owner,
+        name: args.name,
+        defaultBranch: args.defaultBranch ?? null,
+        lastSyncAt: new Date(nowEpochMs),
+        createdAt: new Date(nowEpochMs),
+      })
+      .run();
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), id, giteaAccountId: args.giteaAccountId },
+      'addProject: SQLite insert failed (non-fatal in Phase 2 dual-write)',
+    );
+  }
+
+  return projectRowToDto(createdRow)!;
 }
 
 /**
  * 取消"项目" —— 删 repo_projects 行
  *
  * gitea 那边不动（用户到 gitea 页面处理，或保留为不活跃仓库）
+ *
+ * ADR-0003 Phase 2：localStore 删优先，SQLite 镜像
  */
 export function removeProject(projectId: string): void {
-  const db = getDb();
-  const existing = db
-    .select()
-    .from(repoProjects)
-    .where(eq(repoProjects.id, projectId))
-    .all()[0];
-  if (!existing) {
+  const store = getLocalStore();
+  const stateNow = store.get();
+  const existingLocal = stateNow.projects.find((p) => p.id === projectId);
+  if (!existingLocal) {
     // 幂等：不存在 = 静默成功
     return;
   }
-  db.delete(repoProjects).where(eq(repoProjects.id, projectId)).run();
 
-  // 失效 repos 缓存
-  invalidateReposCache(existing.giteaAccountId);
+  // 1. 删 localStore（**不**级联 columns / labelMaps / starredBranches —— 项目实体，跨 project
+  //    共享不常见但保留语义；Phase 3 改 schema 时一起处理）
+  store.mutate((s) => {
+    s.projects = s.projects.filter((p) => p.id !== projectId);
+  });
+
+  // 2. 失效 repos 缓存
+  invalidateReposCache(existingLocal.giteaAccountId);
+
+  // 3. 删 SQLite（best-effort）
+  try {
+    const db = getDb();
+    db.delete(repoProjects).where(eq(repoProjects.id, projectId)).run();
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), projectId },
+      'removeProject: SQLite delete failed (non-fatal in Phase 2 dual-write)',
+    );
+  }
 }
 
 /**
  * 更新 lastSyncAt —— repos.list 拉取后调用，标记"刚同步过"
+ * ADR-0003 Phase 2：走 localStore
  */
 export function touchLastSync(args: {
   giteaAccountId: string;
@@ -191,17 +208,38 @@ export function touchLastSync(args: {
   name: string;
   when?: Date;
 }): void {
-  const db = getDb();
-  db.update(repoProjects)
-    .set({ lastSyncAt: args.when ?? new Date() })
-    .where(
-      and(
-        eq(repoProjects.giteaAccountId, args.giteaAccountId),
-        eq(repoProjects.owner, args.owner),
-        eq(repoProjects.name, args.name),
-      ),
-    )
-    .run();
+  const store = getLocalStore();
+  const whenMs = (args.when ?? new Date()).getTime();
+  store.mutate((s) => {
+    const idx = s.projects.findIndex(
+      (p) =>
+        p.giteaAccountId === args.giteaAccountId &&
+        p.owner === args.owner &&
+        p.name === args.name,
+    );
+    if (idx >= 0) {
+      s.projects[idx] = { ...s.projects[idx]!, lastSyncAt: whenMs };
+    }
+  });
+  // SQLite 镜像（best-effort）
+  try {
+    const db = getDb();
+    db.update(repoProjects)
+      .set({ lastSyncAt: args.when ?? new Date() })
+      .where(
+        and(
+          eq(repoProjects.giteaAccountId, args.giteaAccountId),
+          eq(repoProjects.owner, args.owner),
+          eq(repoProjects.name, args.name),
+        ),
+      )
+      .run();
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      'touchLastSync: SQLite update failed (non-fatal)',
+    );
+  }
 }
 
 /**
@@ -219,6 +257,8 @@ export function touchLastSync(args: {
  * - elif gitea repo.default_branch 有值 → UPDATE 写回
  *
  * 幂等 + 无副作用：不破坏 IPC schema（仍保持 defaultBranch optional）。
+ *
+ * ADR-0003 Phase 2：localStore 优先
  */
 export function backfillDefaultBranch(args: {
   giteaAccountId: string;
@@ -226,18 +266,38 @@ export function backfillDefaultBranch(args: {
   name: string;
   defaultBranch: string;
 }): void {
-  const db = getDb();
-  db.update(repoProjects)
-    .set({ defaultBranch: args.defaultBranch })
-    .where(
-      and(
-        eq(repoProjects.giteaAccountId, args.giteaAccountId),
-        eq(repoProjects.owner, args.owner),
-        eq(repoProjects.name, args.name),
-        isNull(repoProjects.defaultBranch),
-      ),
-    )
-    .run();
+  const store = getLocalStore();
+  store.mutate((s) => {
+    const idx = s.projects.findIndex(
+      (p) =>
+        p.giteaAccountId === args.giteaAccountId &&
+        p.owner === args.owner &&
+        p.name === args.name,
+    );
+    if (idx < 0) return;
+    if (s.projects[idx]!.defaultBranch !== null) return; // 已有 → noop
+    s.projects[idx] = { ...s.projects[idx]!, defaultBranch: args.defaultBranch };
+  });
+  // SQLite 镜像（best-effort）
+  try {
+    const db = getDb();
+    db.update(repoProjects)
+      .set({ defaultBranch: args.defaultBranch })
+      .where(
+        and(
+          eq(repoProjects.giteaAccountId, args.giteaAccountId),
+          eq(repoProjects.owner, args.owner),
+          eq(repoProjects.name, args.name),
+          isNull(repoProjects.defaultBranch),
+        ),
+      )
+      .run();
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      'backfillDefaultBranch: SQLite update failed (non-fatal)',
+    );
+  }
 }
 
 // ===== cache_entries（repos 资源级缓存）=====
@@ -339,24 +399,34 @@ export function invalidateReposCache(_giteaAccountId?: string): void {
 
 // ===== helper =====
 
-type ProjectRow = {
+/**
+ * 接受 SQLite row（Date）或 localStore row（number epoch ms）→ RepoProjectDto
+ *
+ * ADR-0003 Phase 2：cache/repos.ts 改走 localStore，row 形状变了。
+ * - SQLite：createdAt/lastSyncAt 是 Date
+ * - localStore：createdAt/lastSyncAt 是 number epoch ms（参考 src/main/local/state.ts RepoProject）
+ *
+ * RepoProjectDto 输出要求 ISO date string，所以两种来源都归一化。
+ *
+ * null 入参 → null（用于 findProject 之类的"找不到"路径）
+ */
+function projectRowToDto(row: {
   id: string;
   giteaAccountId: string;
   owner: string;
   name: string;
   defaultBranch: string | null;
-  lastSyncAt: Date | null;
-  createdAt: Date;
-};
-
-function projectRowToDto(row: ProjectRow): RepoProjectDto {
+  lastSyncAt: Date | number | null;
+  createdAt: Date | number;
+} | null): RepoProjectDto | null {
+  if (!row) return null;
   return {
     id: row.id,
     giteaAccountId: row.giteaAccountId,
     owner: row.owner,
     name: row.name,
     defaultBranch: row.defaultBranch,
-    lastSyncAt: row.lastSyncAt ? row.lastSyncAt.toISOString() : null,
-    createdAt: row.createdAt.toISOString(),
+    lastSyncAt: row.lastSyncAt ? new Date(row.lastSyncAt).toISOString() : null,
+    createdAt: new Date(row.createdAt).toISOString(),
   };
 }
