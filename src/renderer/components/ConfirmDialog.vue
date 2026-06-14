@@ -92,6 +92,8 @@ function onKeydown(e: KeyboardEvent): void {
           <h2 class="dialog__title">{{ props.title }}</h2>
         </header>
         <p class="dialog__description">{{ props.description }}</p>
+        <!-- 默认 slot：在 description 和确认按钮之间插入自定义内容 -->
+        <slot />
         <div v-if="props.confirmKeyword" class="dialog__keyword">
           <label class="dialog__keyword-label">
             请输入 <code class="mono">{{ props.confirmKeyword }}</code> 以确认操作

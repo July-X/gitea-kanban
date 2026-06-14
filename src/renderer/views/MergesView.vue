@@ -248,6 +248,7 @@ async function openAttrEditor(p: PullDto): Promise<void> {
       availableLabels.value = labelsResp.items ?? [];
     } catch { /* 忽略 */ }
     try {
+      // members.list 返回直接是数组（不是 {items}）
       const membersResp = await window.api.members.list({ projectId: activeProjectId.value }) as { username: string }[];
       availableMembers.value = (membersResp ?? []).map(m => m.username);
     } catch { /* 忽略 */ }
