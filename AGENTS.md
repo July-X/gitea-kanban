@@ -388,6 +388,108 @@ pnpm rebuild:native
 - userData 改到 `/tmp/gitea-kanban-dev`
 - 单实例锁默认跳过（可用 `GITEA_KANBAN_SKIP_SINGLETON=0` 强制启用）
 
+### 8.7 启动调试与 CDP 排查（**重要踩坑沉淀**）
+
+`pnpm dev` 或 `pnpm preview` 跑不起来时，按以下顺序排查。**不要**凭直觉去看 stdout——日志在文件里。
+
+#### 8.7.1 日志位置
+
+主进程 pino logger 在 dev / preview 模式（`isDev = !app.isPackaged`，`electron-vite preview` 跑的是 out/main/index.js，`isPackaged=false`）走**文件 transport**：
+
+```
+${GITEA_KANBAN_DATA_DIR}/logs/main/main-YYYY-MM-DD.log
+```
+
+默认 `~/.gitea-kanban/logs/main/main-YYYY-MM-DD.log`（dev 模式 userData 改为 `/tmp/gitea-kanban-dev`，但日志目录仍走 `GITEA_KANBAN_DATA_DIR`）。
+
+**stdout 不会输出 pino 日志**——这是 2026-06-14 启动排查时踩的坑：用 `tee /tmp/electron-preview.log` 看不到任何 pino 行，以为主进程没进 ready 块，事实是 logger 早就写了文件。
+
+排查启动问题**第一件事**：
+
+```bash
+# 设独立 data dir 避免污染真实数据
+export GITEA_KANBAN_DATA_DIR=/tmp/gitea-kanban-debug
+rm -rf "$GITEA_KANBAN_DATA_DIR"
+pnpm preview   # 或 pnpm dev
+# 看日志
+ls "$GITEA_KANBAN_DATA_DIR/logs/main/"
+tail -50 "$GITEA_KANBAN_DATA_DIR/logs/main/main-"*.log
+```
+
+#### 8.7.2 主进程崩溃常见原因（按出现频率排序）
+
+1. **`better-sqlite3` ABI 不匹配**（`NODE_MODULE_VERSION 141 vs 145`）—— `pnpm install --ignore-scripts` 会跳过 `rebuild-native.sh` postinstall。**修法**：`bash scripts/rebuild-native.sh`（编给 Electron ABI 145）
+2. **CSP 拒绝加载渲染端**（`THEME_BOOTSTRAP_SCRIPT_HASH` 不匹配）—— `src/renderer/index.html` 的 theme bootstrap inline script 改了但 `src/main/window.ts` line 71 的 hash 没同步
+3. **`app.setPath('userData', ...)` 写入受限**（macOS SIP）—— dev 模式已 hard-code `/tmp/gitea-kanban-dev`；如自定义路径走 `GITEA_KANBAN_DATA_DIR`
+4. **electron-store 11 + ajv schema 校验失败**（Phase 3 才会出现）—— 不传 schema 即可关闭
+
+#### 8.7.3 CDP 远程调试连接
+
+dev / preview 模式默认开远程调试端口 9492。连接方式：
+
+```bash
+# 1. 后台跑 dev / preview
+pnpm dev  # 或 pnpm preview
+
+# 2. 确认端口在听
+lsof -iTCP:9492  # macOS / Linux
+# 或
+curl -s http://127.0.0.1:9492/json/version
+# 返 {"Browser":"..."} 即活
+
+# 3. 通过 chrome-devtools-mcp 连（VS Code / Cursor）
+# MCP 配置里 browserUrl 设 http://127.0.0.1:9492
+
+# 4. 直接 curl 拿 DevTools 目标列表
+curl -s http://127.0.0.1:9492/json/list
+# 返 Array<{ id, title, url, ... }>，每个就是 Renderer 进程
+
+# 5. 拿到 webSocketDebuggerUrl 直接 attach
+# 例：ws://127.0.0.1:9492/devtools/page/<id>
+```
+
+#### 8.7.4 常见误区
+
+- **不要用 `tee` 抓 pino 日志**——logger 走 file transport，tee 看不到
+- **不要用 `timeout 10 electron .`**——macOS 容器没 `timeout` 命令；用 `&` 后台 + `kill`
+- **不要把 `lsof` 当成检查进程的标准**——容器里 `ps` 可能被禁；用 `/proc/<pid>` 或 `lsof -iTCP:9492` 反查端口
+- **不要用 `pgrep -f electron` 杀进程**——会误杀 chrome-devtools-mcp 自身；用 `pkill -9 -f "gitea-kanban" || pkill -9 -f "out/main"`
+- **preview 模式 `app.isPackaged` 是 false**（因为 out/main 是 unbundled），所以 logger 走 isDev 分支（写文件）；不是 bug
+
+#### 8.7.5 完整端到端调试模板
+
+```bash
+# 1. 清环境
+pkill -9 -f "gitea-kanban" 2>/dev/null || true
+pkill -9 -f "out/main" 2>/dev/null || true
+rm -rf /tmp/gitea-kanban-debug
+mkdir -p /tmp/gitea-kanban-debug
+
+# 2. 跑（后台 + 拉 CDP）
+GITEA_KANBAN_DATA_DIR=/tmp/gitea-kanban-debug \
+  ELECTRON_ENABLE_LOGGING=1 \
+  node_modules/.bin/electron out/main/index.js \
+  > /tmp/electron-stdout.log 2>&1 &
+echo "pid=$!"
+
+# 3. 等 8 秒（vite 编译在 preview 模式省了；纯跑产物）
+sleep 8
+
+# 4. 三路看
+echo "--- 1. CDP 端口 ---"
+lsof -iTCP:9492 2>&1 | head -3
+echo "--- 2. 主进程日志（pino file transport）---"
+tail -40 /tmp/gitea-kanban-debug/logs/main/main-*.log 2>&1
+echo "--- 3. stdout/stderr（Electron 自身输出）---"
+tail -20 /tmp/electron-stdout.log
+```
+
+诊断矩阵：
+- 1 没东西 + 2 有 `failed during app ready` + 3 啥都没 → 主进程在 `app.on('ready')` 块内崩（看 2 找根因）
+- 1 没东西 + 2 没东西 + 3 啥都没 → pino file transport 没启（异常环境，logger 退化 silent）；改用 `pino.destination(1)` 强制 stdout
+- 1 活着 + 2 显示 createMainWindow done + 3 没东西 → 渲染端**没崩**，可能 IPC 异常；走 CDP 抓 console
+- 1 活着 + 3 有 `Renderer process gone` → 渲染端崩（preload 错 / CSP 拦 / IPC schema 错），用 CDP attach 抓 console
+
 ---
 
 ## 9. 关键产品约束
@@ -444,6 +546,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 8. **X6 回调签名**：`interacting.*` 回调第一参数是 `cellView`，默认事件回调第一参数是 `{ cell, view }`；不要想当然用 `getData()`。
 9. **Edit 工具残段**：StrReplaceFile 的 `oldString` 尽量包整个函数或大段；替换后 `git diff` 确认无重复行。
 10. **不要跨边界**：渲染端不写 `src/main/**`、不改 `src/shared/ipc-types.ts`；主进程不写 Vue 组件 / CSS。
+11. **启动排查 + CDP 调试**：详见 §8.7。**关键提醒**：(a) pino 在 dev/preview 模式走 file transport 不是 stdout，tee 看不到；(b) `pnpm install --ignore-scripts` 会跳过 `rebuild-native.sh` postinstall，better-sqlite3 ABI 141 vs 145 报 `ERR_DLOPEN_FAILED`；(c) CDP 远程调试端口 9492 在 dev / preview 模式自动开，连接用 `http://127.0.0.1:9492/json/list` 拿 Renderer 列表。
 
 ---
 

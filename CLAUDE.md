@@ -106,6 +106,10 @@
 - 不要加 `Co-Authored-By`
 - 当前单分支 `master`
 
+## 启动调试与 CDP（详见 AGENTS.md §8.7）
+
+启动问题**第一件事**去看 `${GITEA_KANBAN_DATA_DIR}/logs/main/main-*.log`——pino 在 dev/preview 走 file transport，**stdout 没有**。常见根因：better-sqlite3 ABI 141/145 不匹配（`pnpm install --ignore-scripts` 跳过 rebuild-native.sh）。CDP 远程调试端口 9492 在 dev/preview 自动开，用 `http://127.0.0.1:9492/json/list` 拿 Renderer 列表。
+
 ## 实际工作提醒
 
 - 任何开始前，先确认当前上下文是否已经有相关实现或历史决策
