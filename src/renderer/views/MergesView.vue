@@ -34,6 +34,17 @@ const repo = useRepoStore();
 const pull = usePullStore();
 const auth = useAuthStore();
 
+/** 去掉 URL 末尾的 `/` 字符（gitea URL 拼接用）
+ *
+ * 为什么不用 template 里的 inline regex literal：
+ * Vue 3 SFC compiler 在 attribute expression 里 parse regex literal 时
+ * 对 `\\` 转义处理不一致，写 `/\\/$/` 会触发 "Invalid regular expression flag"。
+ * 抽成函数 + string method 是最稳的写法。
+ */
+function stripTrailingSlash(s: string): string {
+  return s.endsWith('/') ? s.slice(0, -1) : s;
+}
+
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
 const activeRepo = computed<RepoDto | null>(() => {
@@ -418,17 +429,17 @@ function formatRelative(iso: string | undefined): string {
               <span class="merge-item__meta-text">由</span>
               <a
                 v-if="activeRepo"
-                :href="`${auth.currentGiteaUrl.replace(/\\/$/, '')}/${activeRepo.owner}`"
+                :href="`${stripTrailingSlash(auth.currentGiteaUrl)}/${activeRepo.owner}`"
                 target="_blank"
                 rel="noopener"
                 class="merge-item__author-link"
               >{{ p.author.username }}</a>
               <span v-else class="merge-item__author">{{ p.author.username }}</span>
             </span>
-            <!-- 分支流向（base << head），照搬 gitea /pulls 列表 -->
+            <!-- 分支流向（base ← head），照搬 gitea /pulls 列表 -->
             <div class="merge-item__branches">
               <a
-                :href="`${auth.currentGiteaUrl.replace(/\\/$/, '')}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.base.ref}`"
+                :href="`${stripTrailingSlash(auth.currentGiteaUrl)}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.base.ref}`"
                 target="_blank"
                 rel="noopener"
                 class="merge-item__branch"
@@ -436,7 +447,7 @@ function formatRelative(iso: string | undefined): string {
               ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.base.ref }}</a>
               <span class="merge-item__branch-arrow" aria-hidden="true">←</span>
               <a
-                :href="`${auth.currentGiteaUrl.replace(/\\/$/, '')}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.head.ref}`"
+                :href="`${stripTrailingSlash(auth.currentGiteaUrl)}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.head.ref}`"
                 target="_blank"
                 rel="noopener"
                 class="merge-item__branch"
