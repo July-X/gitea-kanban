@@ -204,7 +204,7 @@ function permissionClass(m: MemberDto): string {
           v-model="member.search"
           type="text"
           class="members__search-input"
-          placeholder="按用户名搜索"
+          placeholder="按姓名 / 用户名搜索"
           autocomplete="off"
           spellcheck="false"
         />
@@ -251,7 +251,11 @@ function permissionClass(m: MemberDto): string {
         </div>
         <div class="member-card__body">
           <div class="member-card__name-wrap">
-            <span class="member-card__name">{{ m.username }}</span>
+            <!-- A-3 P3 · W7 修法：有 fullName 时显示「张三（zhang.s）」让 PM 一眼认出 -->
+            <span class="member-card__name">
+              <template v-if="m.fullName">{{ m.fullName }}<span class="member-card__name-username muted">（{{ m.username }}）</span></template>
+              <template v-else>{{ m.username }}</template>
+            </span>
             <span :class="permissionClass(m)">{{ permissionLabel(m) }}</span>
           </div>
           <div class="member-card__meta muted">
@@ -533,6 +537,12 @@ function permissionClass(m: MemberDto): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A-3 P3 · W7 修法：用户名括号里的弱化显示 */
+.member-card__name-username {
+  font-weight: 400;
+  font-size: var(--font-xs);
 }
 
 .member-card__meta {

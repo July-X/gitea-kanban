@@ -932,6 +932,14 @@ export const CollaboratorDtoSchema = z
     username: NonEmptyStringSchema,
     avatarUrl: z.string().url().optional(),
     /**
+     * gitea 用户真名（来自 /repos/{owner}/{repo}/collaborators 返回的 User.full_name）。
+     *
+     * A-3 P3 · W7 修法（2026-06-14）：非破坏性新增 optional 字段——
+     * 旧客户端忽略 fullName 不受影响；新客户端用 fullName 做"按姓名搜索"。
+     * 旧版 gitea 实例 full_name 可能为空字符串 → main 端过滤掉，不下发。
+     */
+    fullName: z.string().min(1).optional(),
+    /**
      * gitea 权限字符串：'read' | 'write' | 'admin' | 'unknown'。
      * 字符串而不是 enum：gitea 历史版本字段值漂移，v1 简化不锁死。
      */

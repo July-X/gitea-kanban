@@ -25,13 +25,18 @@ export type MemberFilter = 'all' | 'admin' | 'write' | 'read';
 /** 单个成员 DTO（A3 拍板，src/main/ipc/schema.ts CollaboratorDto）
  *
  * 注：v1 渲染端**不**引 schema 的具体类型（避免前端硬绑 main 端内部类型）；
- * 字段就 username / avatarUrl / permission 三个，runtime 校验。
+ * 字段就 username / avatarUrl / permission / fullName（v1.2+），runtime 校验。
  * gitea permission 字段实际值可能为 'read' | 'write' | 'admin'（v8 API 文档），
  * 旧版本可能为 'pull' | 'push' | 'owner'，v1 简化只处理新值。
+ *
+ * A-3 P3 · W7 修法（2026-06-14）：加 fullName 用于"按姓名搜索"，
+ * 旧 gitea 实例 fullName 不存在 → undefined，search 退化为按 username 匹配。
  */
 export interface MemberDto {
   username: string;
   avatarUrl?: string;
+  /** gitea user.full_name，可选（旧版 gitea 无此字段） */
+  fullName?: string;
   /** gitea 'read' | 'write' | 'admin' */
   permission: 'read' | 'write' | 'admin' | string;
 }
@@ -72,7 +77,14 @@ export const useMemberStore = defineStore('member', () => {
       arr = arr.filter((m) => m.permission === filter.value);
     }
     if (!q) return arr;
-    return arr.filter((m) => m.username.toLowerCase().includes(q));
+    // A-3 P3 · W7 修法：双字段匹配——按 username **或** fullName 搜
+    // fullName 可能 undefined（旧版 gitea）→ optional chain 兜底
+    return arr.filter((m) => {
+      if (m.username.toLowerCase().includes(q)) return true;
+      const fn = m.fullName?.toLowerCase();
+      if (fn && fn.includes(q)) return true;
+      return false;
+    });
   });
 
   function getByUsername(username: string): MemberDto | null {

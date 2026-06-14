@@ -220,6 +220,8 @@ export async function listRepoCollaborators(args: {
     return {
       username,
       ...(u.avatar_url ? { avatarUrl: u.avatar_url } : {}),
+      // A-3 P3 · W7 修法：full_name 非空才下发（旧 gitea 可能为空，schema 验证过滤）
+      ...(u.full_name ? { fullName: u.full_name } : {}),
       permission: permByLogin.get(username) ?? 'unknown',
     };
   });
