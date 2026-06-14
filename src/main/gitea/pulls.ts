@@ -36,8 +36,9 @@ import type { PullDto, MergePrResult, PullState } from '../ipc/schema.js';
 function toPullDto(r: PullRequest): PullDto {
   // gitea-js 用 number 字段（仓库内递增编号），不用 id
   const number = r.number ?? r.id ?? 0;
-  // undefined mergeable 视为 true（gitea 还在加载）
-  const mergeable = r.mergeable !== false;
+  // mergeable 三值逻辑：true=可合并 / false=有冲突 / undefined=计算中
+  // 计算 中 视为不可合并（避免用户误以为无冲突后点合并却失败）
+  const mergeable = r.mergeable === true;
   return {
     index: number,
     title: r.title ?? '',
@@ -179,15 +180,19 @@ export async function mergeGiteaPull(args: {
   owner: string;
   repo: string;
   index: number;
-  method: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
+  method: 'merge' | 'rebase' | 'rebase-merge' | 'squash' | 'squash-merge';
   deleteBranchAfter?: boolean;
   commitMessage?: string;
 }): Promise<MergePrResult> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
 
   try {
+    // gitea-js 1.23 PullMergeStyle enum 不含 'squash-merge'（UI 层语义："压缩 + 显式 merge commit"）
+    // gitea 1.x 实际把 'squash' 当成 "squash + auto merge commit"，业务上等价，调用前映射
+    const styleForGitea: 'merge' | 'rebase' | 'rebase-merge' | 'squash' | 'fast-forward-only' | 'manually-merged' =
+      args.method === 'squash-merge' ? 'squash' : args.method;
     const res = await api.repos.repoMergePullRequest(args.owner, args.repo, args.index, {
-      Do: args.method,
+      Do: styleForGitea,
       ...(args.deleteBranchAfter !== undefined ? { delete_branch_after_merge: args.deleteBranchAfter } : {}),
       ...(args.commitMessage !== undefined ? { MergeMessageField: args.commitMessage } : {}),
     });

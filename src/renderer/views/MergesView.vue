@@ -5,7 +5,7 @@
  * 设计（AGENTS §5.2 + 03-frontend §4.5 + plan_32018da5）：
  *   - 顶栏：仓库名 + tab 切换（全部 / 开放 / 已合并 / 已关闭）+ 搜索 + 刷新
  *   - 主体：合并请求列表（卡片化：标题 / 编号 / 作者 / 状态徽章 / 合并状态 / 创建时间）
- *   - 详情：点行展开（不跳 gitea web）—— **v1 简化** 用 inline 详情
+ *   - 详情：点行展开（不跳 gitea web）—— inline 详情 + 合并操作 + 跳 gitea 链接
  *   - 数据：pulls.list IPC → usePullStore
  *
  * 零术语：
@@ -15,18 +15,19 @@
  *   - 状态徽章：开放（绿）/ 已合并（紫）/ 已关闭（灰）/ 草稿（橙边）
  *   - 卡片左侧：state 色边（OVERRIDE §"lane / 列卡片化"）
  *
- * v1 简化：
- *   - **不**做合并操作（v1 只读；要合并走 gitea web；v2 加合并按钮 + 二次确认）
- *   - **不**做时间线展示
- *   - 点行展开 → 抽屉（v1 inline 折叠实现，不开 modal）
+ * 危险操作（AGENTS §8.3 + 02-architecture §7.3）：
+ *   - 合并操作需二次确认（ConfirmDialog）
+ *   - 合并到主线分支额外警告
+ *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitMerge, RefreshCw, Search, ChevronDown, ChevronRight } from 'lucide-vue-next';
+import { GitMerge, RefreshCw, Search, ChevronDown, ChevronRight, ExternalLink } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { showToast } from '@renderer/lib/toast';
 import EmptyState from '@renderer/components/EmptyState.vue';
-import type { PullDto, RepoDto } from '../../main/ipc/schema.js';
+import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
+import type { PullDto, RepoDto, MergeMethod } from '../../main/ipc/schema.js';
 
 const repo = useRepoStore();
 const pull = usePullStore();
@@ -48,6 +49,28 @@ const tabs: { id: PullFilter; label: string }[] = [
   { id: 'merged', label: '已合并' },
   { id: 'closed', label: '已关闭' },
 ];
+
+// ===== 合并二次确认状态 =====
+
+/** 合并方式选项（人话映射） */
+const mergeMethods: { value: MergeMethod; label: string; hint: string }[] = [
+  { value: 'merge', label: '普通合并', hint: '保留所有提交历史' },
+  { value: 'rebase', label: '变基', hint: '重写历史，单一线性' },
+  { value: 'rebase-merge', label: '变基+合并', hint: '重写历史 + 保留合并提交' },
+  { value: 'squash', label: '压缩', hint: 'N 个提交合成 1 个' },
+  { value: 'squash-merge', label: '压缩+合并', hint: '压缩 + 保留合并提交' },
+];
+
+/** 当前选中的合并方式 */
+const selectedMethod = ref<MergeMethod>('merge');
+
+/** 当前正在合并的 PR（null = 没在合并） */
+const mergingPull = ref<PullDto | null>(null);
+const merging = ref(false);
+const squashMessage = ref('');
+
+/** 二次确认弹窗开关 */
+const confirmMergeOpen = ref(false);
 
 onMounted(async () => {
   if (repo.repos.length === 0) {
@@ -108,6 +131,81 @@ function toggleExpand(idx: number): void {
   else next.add(idx);
   expanded.value = next;
 }
+
+/** 生成 gitea web 链接 */
+function giteaPullUrl(p: PullDto): string {
+  if (!activeRepo.value) return '#';
+  const base = activeRepo.value.url?.replace(/\/+$/, '') ?? `https://${activeRepo.value.fullName}`;
+  return `${base}/pulls/${p.index}`;
+}
+
+/** 判断目标分支是否是主线分支（需要额外警告） */
+function isMainBranch(refName: string): boolean {
+  const mainNames = ['main', 'master', 'trunk', 'develop'];
+  return mainNames.includes(refName.toLowerCase());
+}
+
+/** 需要 squash commitMessage */
+function needsCommitMessage(method: MergeMethod): boolean {
+  return method === 'squash' || method === 'squash-merge';
+}
+
+/** 点击合并按钮 → 弹二次确认 */
+function requestMerge(p: PullDto): void {
+  if (p.hasConflicts || !p.mergeable) return;
+  mergingPull.value = p;
+  selectedMethod.value = 'merge';
+  squashMessage.value = '';
+  confirmMergeOpen.value = true;
+}
+
+/** 二次确认 → 执行合并 */
+async function performMerge(): Promise<void> {
+  const p = mergingPull.value;
+  if (!p || !activeProjectId.value) return;
+  confirmMergeOpen.value = false;
+  merging.value = true;
+  try {
+    const result = await pull.merge({
+      projectId: activeProjectId.value,
+      index: p.index,
+      method: selectedMethod.value,
+      commitMessage: needsCommitMessage(selectedMethod.value) ? squashMessage.value : undefined,
+    });
+    if (result.merged) {
+      showToast({ type: 'success', message: `#${p.index} 合并成功` });
+    } else {
+      showToast({ type: 'error', message: `#${p.index} 合并未完成：${result.message || '未知原因'}` });
+    }
+  } catch (e) {
+    const err = e as { messageText?: string; hint?: string };
+    showToast({ type: 'error', message: err.messageText ?? '合并失败' });
+  } finally {
+    merging.value = false;
+    mergingPull.value = null;
+  }
+}
+
+/** 取消合并确认 */
+function cancelMerge(): void {
+  confirmMergeOpen.value = false;
+  mergingPull.value = null;
+}
+
+/** 生成二次确认描述文案 */
+const confirmDescription = computed(() => {
+  const p = mergingPull.value;
+  if (!p) return '';
+  const methodInfo = mergeMethods.find((m) => m.value === selectedMethod.value);
+  const methodLabel = methodInfo?.label ?? selectedMethod.value;
+  const methodHint = methodInfo?.hint ?? '';
+  let desc = `将把 #${p.index}「${p.title}」以「${methodLabel}」方式合并到 ${p.base.ref}。`;
+  if (methodHint) desc += `\n\n方式说明：${methodHint}`;
+  if (isMainBranch(p.base.ref)) {
+    desc += '\n\n⚠️ 目标是主线分支，将影响所有协作者的工作流。';
+  }
+  return desc;
+});
 
 /** 状态徽章中文 + 颜色 class */
 function badgeClass(p: PullDto): string {
@@ -282,9 +380,86 @@ function formatDate(iso: string | undefined): string {
               <dd>{{ p.mergeable ? '是' : '否' }}</dd>
             </div>
           </dl>
+          <!-- 操作区 -->
+          <div class="merge-item__actions">
+            <!-- 合并按钮：仅开放且可合并时显示 -->
+            <button
+              v-if="p.state === 'open' && !p.draft"
+              type="button"
+              class="merge-item__btn merge-item__btn--merge"
+              :disabled="p.hasConflicts || !p.mergeable || merging"
+              :title="p.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !p.mergeable ? '当前不可合并' : '合并此请求'"
+              @click.stop="requestMerge(p)"
+            >
+              <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
+              <span>{{ merging && mergingPull?.index === p.index ? '合并中…' : '合并' }}</span>
+            </button>
+            <!-- 有冲突时提示 -->
+            <span v-if="p.hasConflicts && p.state === 'open'" class="merge-item__conflict-hint">
+              有冲突，请先在 gitea 解决
+            </span>
+            <!-- 跳 gitea 链接 -->
+            <a
+              :href="giteaPullUrl(p)"
+              target="_blank"
+              rel="noopener"
+              class="merge-item__ext-link"
+              :title="'在 gitea 中打开 #' + p.index"
+              @click.stop
+            >
+              <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
+              <span>在 gitea 中打开</span>
+            </a>
+          </div>
         </div>
       </li>
     </ul>
+
+    <!-- ============== 合并二次确认弹窗 ============== -->
+    <ConfirmDialog
+      :open="confirmMergeOpen"
+      title="确认合并"
+      :description="confirmDescription"
+      confirm-label="我了解风险，仍要合并"
+      :danger="isMainBranch(mergingPull?.base.ref ?? '')"
+      @update:open="confirmMergeOpen = $event"
+      @confirm="performMerge"
+      @cancel="cancelMerge"
+    >
+      <!-- 合并方式选择 slot：放在 description 后面、确认按钮前面 -->
+      <div class="merge-confirm__methods">
+        <p class="merge-confirm__methods-title">选择合并方式：</p>
+        <div class="merge-confirm__method-list">
+          <label
+            v-for="m in mergeMethods"
+            :key="m.value"
+            class="merge-confirm__method"
+            :class="{ 'merge-confirm__method--active': selectedMethod === m.value }"
+          >
+            <input
+              v-model="selectedMethod"
+              type="radio"
+              :value="m.value"
+              class="merge-confirm__radio"
+            />
+            <span class="merge-confirm__method-label">{{ m.label }}</span>
+            <span class="merge-confirm__method-hint">{{ m.hint }}</span>
+          </label>
+        </div>
+        <!-- squash / squash-merge 需要输入 commitMessage -->
+        <div v-if="needsCommitMessage(selectedMethod)" class="merge-confirm__message">
+          <label class="merge-confirm__message-label" for="squash-msg">合并提交信息（必填）：</label>
+          <input
+            id="squash-msg"
+            v-model="squashMessage"
+            type="text"
+            class="merge-confirm__message-input"
+            placeholder="请输入合并提交信息"
+            autocomplete="off"
+          />
+        </div>
+      </div>
+    </ConfirmDialog>
   </div>
 </template>
 
@@ -612,6 +787,146 @@ function formatDate(iso: string | undefined): string {
   font-size: var(--font-sm);
   color: var(--color-text);
   margin: 0;
+}
+
+/* ===== 操作区 ===== */
+
+.merge-item__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+}
+
+.merge-item__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.merge-item__btn--merge {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.merge-item__btn--merge:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.merge-item__btn--merge:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.merge-item__conflict-hint {
+  font-size: var(--font-xs);
+  color: var(--color-warning);
+}
+
+.merge-item__ext-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast) var(--ease);
+  text-decoration: none;
+  margin-left: auto;
+}
+
+.merge-item__ext-link:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* ===== 合并确认弹窗内嵌 ===== */
+
+.merge-confirm__methods {
+  margin-top: var(--space-3);
+}
+
+.merge-confirm__methods-title {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.merge-confirm__method-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.merge-confirm__method {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.merge-confirm__method:hover {
+  background: var(--color-bg-hover);
+}
+
+.merge-confirm__method--active {
+  background: var(--color-primary-soft);
+}
+
+.merge-confirm__radio {
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.merge-confirm__method-label {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.merge-confirm__method-hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.merge-confirm__message {
+  margin-top: var(--space-3);
+}
+
+.merge-confirm__message-label {
+  display: block;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.merge-confirm__message-input {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-divider);
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
+.merge-confirm__message-input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
 }
 
 .spin {

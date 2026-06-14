@@ -22,9 +22,9 @@
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { pullsList } from '@renderer/lib/ipc-client';
+import { pullsList, pullsGet, pullsCreate, pullsMerge } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
-import type { ListPullsResp, PullDto, PullState } from '../../main/ipc/schema.js';
+import type { ListPullsResp, PullDto, PullState, MergeMethod } from '../../main/ipc/schema.js';
 
 /** 视图层 tab 维度 */
 export type PullFilter = 'all' | 'open' | 'merged' | 'closed';
@@ -142,6 +142,63 @@ export const usePullStore = defineStore('pull', () => {
     currentSelectedItem.value = item;
   }
 
+  /** 拿单个合并请求详情 */
+  async function get(projectId: string, index: number): Promise<PullDto> {
+    const dto = (await pullsGet({ projectId, index })) as PullDto;
+    // 更新本地 items 中对应条目（如果存在）
+    const idx = items.value.findIndex((p) => p.index === index);
+    if (idx >= 0) {
+      items.value[idx] = { ...dto };
+    }
+    return dto;
+  }
+
+  /** 创建合并请求 */
+  async function create(args: {
+    projectId: string;
+    head: string;
+    base: string;
+    title: string;
+    body?: string;
+    draft?: boolean;
+  }): Promise<PullDto> {
+    const dto = (await pullsCreate(args)) as PullDto;
+    // 新 PR 加到列表头部
+    items.value.unshift(dto);
+    return dto;
+  }
+
+  /**
+   * 合并合并请求（**危险操作**，调用前 UI 必须弹二次确认）
+   *
+   * 合并方式人话映射：
+   *   - 'merge'        → 普通合并
+   *   - 'rebase'       → 变基
+   *   - 'rebase-merge' → 变基+合并
+   *   - 'squash'       → 压缩
+   *   - 'squash-merge' → 压缩+合并
+   *
+   * @returns 合并结果（含 sha / merged / message）
+   */
+  async function merge(args: {
+    projectId: string;
+    index: number;
+    method: MergeMethod;
+    deleteBranchAfter?: boolean;
+    commitMessage?: string;
+  }): Promise<{ sha: string; merged: boolean; message: string }> {
+    const result = (await pullsMerge(args)) as { sha: string; merged: boolean; message: string };
+    // 合并成功后刷新列表（缓存已在主进程失效，重新拉取拿最新状态）
+    if (result.merged && currentProjectId.value) {
+      try {
+        await list(currentProjectId.value, true);
+      } catch {
+        // 刷新失败不影响合并结果
+      }
+    }
+    return result;
+  }
+
   function clearError(): void {
     error.value = null;
   }
@@ -167,6 +224,9 @@ export const usePullStore = defineStore('pull', () => {
     refresh,
     setFilter,
     select,
+    get,
+    create,
+    merge,
     clearError,
   };
 });

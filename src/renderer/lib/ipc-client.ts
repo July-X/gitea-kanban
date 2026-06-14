@@ -446,6 +446,48 @@ export function pullsList(args: {
   return getIpcClient().invoke('pulls', 'list', args);
 }
 
+/** 拿单个合并请求详情 */
+export function pullsGet(args: { projectId: string; index: number }): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'get', args);
+}
+
+/** 创建合并请求 */
+export function pullsCreate(args: {
+  projectId: string;
+  head: string;
+  base: string;
+  title: string;
+  body?: string;
+  draft?: boolean;
+}): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'create', args);
+}
+
+/**
+ * 合并 PR（**危险操作**，UI 层必须二次确认）
+ *
+ * 合并方式（MergeMethodSchema）：
+ *   - 'merge'        → 普通合并（保留所有提交历史）
+ *   - 'rebase'       → 变基后快进（重写历史，单一线性）
+ *   - 'rebase-merge' → 变基后 merge commit
+ *   - 'squash'       → 压缩为单提交
+ *   - 'squash-merge' → 压缩 + 显式 merge commit
+ *
+ * 业务规则：
+ *   - method='squash' / 'squash-merge' 时 commitMessage 必填
+ *   - deleteBranchAfter 仅透传给 gitea（不主动调 branches.delete）
+ *   - 合并到主线分支（如 main）时 UI 层额外二次确认
+ */
+export function pullsMerge(args: {
+  projectId: string;
+  index: number;
+  method: 'merge' | 'rebase' | 'rebase-merge' | 'squash' | 'squash-merge';
+  deleteBranchAfter?: boolean;
+  commitMessage?: string;
+}): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'merge', args);
+}
+
 // ============================================================
 // ===== board.columns.* （ADR-0002 reset 后7 个端点） =====
 // ============================================================

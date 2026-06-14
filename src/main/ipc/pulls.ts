@@ -205,7 +205,7 @@ async function pullsListHandler(args: ListPullsArgs): Promise<ListPullsResp> {
 
   const resp: ListPullsResp = {
     items,
-    total: items.length,
+    total: giteaResult.hasMore ? items.length + 1 : items.length, // hasMore 时 total 至少比当前页多 1
     hasMore: giteaResult.hasMore,
   };
 

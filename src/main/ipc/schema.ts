@@ -517,13 +517,14 @@ export const MergeMethodSchema = z.enum([
   'rebase',
   'rebase-merge',
   'squash',
+  'squash-merge',
 ]).describe(
   [
     'merge        → "普通合并（保留所有提交历史）"',
     'rebase       → "变基后快进（重写历史，单一线性）"',
     'rebase-merge → "变基后 merge commit（重写历史 + 保留 merge commit）"',
     'squash       → "压缩为单提交（合并请求内 N 个提交合成 1 个）"',
-    'squash-merge → gitea 字段：等同 squash + 显式 merge commit',
+    'squash-merge → "压缩 + 显式 merge commit（等同 squash + 保留 merge commit）"',
   ].join('\n'),
 );
 export type MergeMethod = z.infer<typeof MergeMethodSchema>;
@@ -538,12 +539,12 @@ export const MergePrArgsSchema = z
   })
   .strict()
   .refine(
- (a) => {
- if (a.method === 'squash') {
- return typeof a.commitMessage === 'string' && a.commitMessage.length >0;
- }
- return true;
- },
+    (a) => {
+      if (a.method === 'squash' || a.method === 'squash-merge') {
+        return typeof a.commitMessage === 'string' && a.commitMessage.length > 0;
+      }
+      return true;
+    },
     {
       message: 'method=squash / squash-merge 时 commitMessage 必填',
       path: ['commitMessage'],
@@ -553,7 +554,8 @@ export type MergePrArgs = z.infer<typeof MergePrArgsSchema>;
 
 export const MergePrResultSchema = z
   .object({
-    sha: NonEmptyStringSchema,
+    /** 合并后的 commit SHA（gitea 合并成功时可能返回空 body，此时为空字符串） */
+    sha: z.string(),
     merged: z.boolean(),
     message: z.string(),
   })
