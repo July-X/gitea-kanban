@@ -670,6 +670,12 @@ function formatDate(iso: string | undefined): string {
   border-radius: var(--radius-md);
   transition: background var(--t-fast) var(--ease);
   overflow: hidden;
+  /* 关键：父 .merges__list 是 flex column，
+   * 子 item 默认 flex-shrink: 1 会让每个 item 被等比压缩。
+   * 43 个 item 共 1870px head 高，容器 622px 会被压缩到每个 15px——
+   * 完全看不见。设 flex-shrink: 0 让 item 保持完整高度，
+   * 容器才触发 overflow-y: auto 滚动。 */
+  flex-shrink: 0;
 }
 
 .merge-item:hover {
