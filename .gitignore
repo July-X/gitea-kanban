@@ -17,6 +17,9 @@ coverage/
 .tmp/
 .cache/
 
+# 时间轴视觉调参过程截图（M6 调参草稿，不入仓）
+notes/cap_*.png
+
 # e2e bundle 产物（worker esbuild 自动生成，跑完可重建）
 scripts/.e2e-verify-*.bundled.mjs
 
