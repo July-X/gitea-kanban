@@ -22,7 +22,7 @@
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { pullsList, pullsGet, pullsCreate, pullsMerge } from '@renderer/lib/ipc-client';
+import { pullsList, pullsGet, pullsCreate, pullsMerge, pullsClose } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListPullsResp, PullDto, PullState, MergeMethod } from '../../main/ipc/schema.js';
 
@@ -198,6 +198,29 @@ export const usePullStore = defineStore('pull', () => {
     return result;
   }
 
+  /**
+   * 关闭合并请求（不合并，直接关闭）—— **危险操作**，调用前 UI 必须弹二次确认
+   *
+   * 对应 gitea PATCH /pulls/{index} {state: 'closed'}
+   * 关闭后合并请求状态变为 closed，不可再合并（除非 reopen）。
+   */
+  async function closePull(args: {
+    projectId: string;
+    index: number;
+    reason?: string;
+  }): Promise<{ closed: boolean }> {
+    const result = (await pullsClose(args)) as { closed: boolean };
+    // 关闭后刷新列表
+    if (result.closed && currentProjectId.value) {
+      try {
+        await list(currentProjectId.value, true);
+      } catch {
+        // 刷新失败不影响关闭结果
+      }
+    }
+    return result;
+  }
+
   function clearError(): void {
     error.value = null;
   }
@@ -226,6 +249,7 @@ export const usePullStore = defineStore('pull', () => {
     get,
     create,
     mergePull,
+    closePull,
     clearError,
   };
 });

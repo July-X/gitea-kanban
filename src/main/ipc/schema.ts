@@ -568,6 +568,47 @@ export const MergePrResultSchema = z
   .strict();
 export type MergePrResult = z.infer<typeof MergePrResultSchema>;
 
+/** 关闭合并请求（不合并，直接关闭）—— 对应 gitea PATCH /pulls/{index} {state: 'closed'} */
+export const ClosePrArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    index: z.number().int().positive(),
+    /** 关闭原因（可选，传给 gitea 的 comment body） */
+    reason: z.string().optional(),
+  })
+  .strict();
+export type ClosePrArgs = z.infer<typeof ClosePrArgsSchema>;
+
+/** 更新合并请求标签 —— 对应 gitea PUT /issues/{index}/labels */
+export const UpdatePullLabelsArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    index: z.number().int().positive(),
+    labels: z.array(z.string()),
+  })
+  .strict();
+export type UpdatePullLabelsArgs = z.infer<typeof UpdatePullLabelsArgsSchema>;
+
+/** 更新合并请求指派人 —— 对应 gitea PATCH /issues/{index} {assignee} */
+export const UpdatePullAssigneeArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    index: z.number().int().positive(),
+    assignee: z.string(),
+  })
+  .strict();
+export type UpdatePullAssigneeArgs = z.infer<typeof UpdatePullAssigneeArgsSchema>;
+
+/** 更新合并请求评审人 —— 对应 gitea POST /pulls/{index}/requested_reviewers */
+export const UpdatePullReviewersArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    index: z.number().int().positive(),
+    reviewers: z.array(z.string()),
+  })
+  .strict();
+export type UpdatePullReviewersArgs = z.infer<typeof UpdatePullReviewersArgsSchema>;
+
 // ============================================================
 // ===== board.columns namespace（ADR-0002 +02-architecture §5.3.7）=====
 // ============================================================

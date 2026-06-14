@@ -32,12 +32,20 @@ import {
   GetPullArgsSchema,
   CreatePullArgsSchema,
   MergePrArgsSchema,
+  ClosePrArgsSchema,
+  UpdatePullLabelsArgsSchema,
+  UpdatePullAssigneeArgsSchema,
+  UpdatePullReviewersArgsSchema,
   type ListPullsArgs,
   type ListPullsResp,
   type GetPullArgs,
   type CreatePullArgs,
   type MergePrArgs,
   type MergePrResult,
+  type ClosePrArgs,
+  type UpdatePullLabelsArgs,
+  type UpdatePullAssigneeArgs,
+  type UpdatePullReviewersArgs,
   type PullDto,
 } from './schema.js';
 import {
@@ -45,6 +53,10 @@ import {
   getGiteaPull,
   createGiteaPull,
   mergeGiteaPull,
+  closeGiteaPull,
+  updatePullLabels,
+  updatePullAssignee,
+  updatePullReviewers,
 } from '../gitea/pulls.js';
 import {
   getPullsCache,
@@ -324,6 +336,94 @@ async function pullsMergeHandler(args: MergePrArgs): Promise<MergePrResult> {
   return result;
 }
 
+// ===== pulls.close（关闭合并请求，不合并）=====
+
+async function pullsCloseHandler(args: ClosePrArgs): Promise<{ closed: boolean }> {
+  const start = Date.now();
+  const op = 'pulls.close';
+  logger.info({ op, args: { projectId: args.projectId, index: args.index } }, 'ipc start');
+
+  const proj = resolveProject(args.projectId);
+
+  const result = await closeGiteaPull({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    index: args.index,
+    reason: args.reason,
+  });
+
+  // 关闭后失效 pulls 缓存（PR 状态从 open → closed）
+  invalidatePullsCache(args.projectId);
+
+  logger.info({ op, latencyMs: Date.now() - start, closed: result.closed }, 'ipc done');
+  return result;
+}
+
+// ===== pulls.updateLabels =====
+
+async function pullsUpdateLabelsHandler(args: UpdatePullLabelsArgs): Promise<void> {
+  const start = Date.now();
+  const op = 'pulls.updateLabels';
+  logger.info({ op, args: { projectId: args.projectId, index: args.index, labels: args.labels } }, 'ipc start');
+
+  const proj = resolveProject(args.projectId);
+  await updatePullLabels({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    index: args.index,
+    labels: args.labels,
+  });
+
+  invalidatePullsCache(args.projectId);
+  logger.info({ op, latencyMs: Date.now() - start }, 'ipc done');
+}
+
+// ===== pulls.updateAssignee =====
+
+async function pullsUpdateAssigneeHandler(args: UpdatePullAssigneeArgs): Promise<void> {
+  const start = Date.now();
+  const op = 'pulls.updateAssignee';
+  logger.info({ op, args: { projectId: args.projectId, index: args.index, assignee: args.assignee } }, 'ipc start');
+
+  const proj = resolveProject(args.projectId);
+  await updatePullAssignee({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    index: args.index,
+    assignee: args.assignee,
+  });
+
+  invalidatePullsCache(args.projectId);
+  logger.info({ op, latencyMs: Date.now() - start }, 'ipc done');
+}
+
+// ===== pulls.updateReviewers =====
+
+async function pullsUpdateReviewersHandler(args: UpdatePullReviewersArgs): Promise<void> {
+  const start = Date.now();
+  const op = 'pulls.updateReviewers';
+  logger.info({ op, args: { projectId: args.projectId, index: args.index, reviewers: args.reviewers } }, 'ipc start');
+
+  const proj = resolveProject(args.projectId);
+  await updatePullReviewers({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    index: args.index,
+    reviewers: args.reviewers,
+  });
+
+  invalidatePullsCache(args.projectId);
+  logger.info({ op, latencyMs: Date.now() - start }, 'ipc done');
+}
+
 // ===== 注册 =====
 
 export function registerPullsIpc(): void {
@@ -331,6 +431,10 @@ export function registerPullsIpc(): void {
   wrapIpc(IpcChannel.PULLS_GET, GetPullArgsSchema, pullsGetHandler);
   wrapIpc(IpcChannel.PULLS_CREATE, CreatePullArgsSchema, pullsCreateHandler);
   wrapIpc(IpcChannel.PULLS_MERGE, MergePrArgsSchema, pullsMergeHandler);
+  wrapIpc(IpcChannel.PULLS_CLOSE, ClosePrArgsSchema, pullsCloseHandler);
+  wrapIpc(IpcChannel.PULLS_UPDATE_LABELS, UpdatePullLabelsArgsSchema, pullsUpdateLabelsHandler);
+  wrapIpc(IpcChannel.PULLS_UPDATE_ASSIGNEE, UpdatePullAssigneeArgsSchema, pullsUpdateAssigneeHandler);
+  wrapIpc(IpcChannel.PULLS_UPDATE_REVIEWERS, UpdatePullReviewersArgsSchema, pullsUpdateReviewersHandler);
 }
 
 export function unregisterPullsIpc(): void {
@@ -338,4 +442,8 @@ export function unregisterPullsIpc(): void {
   ipcMain.removeHandler(IpcChannel.PULLS_GET);
   ipcMain.removeHandler(IpcChannel.PULLS_CREATE);
   ipcMain.removeHandler(IpcChannel.PULLS_MERGE);
+  ipcMain.removeHandler(IpcChannel.PULLS_CLOSE);
+  ipcMain.removeHandler(IpcChannel.PULLS_UPDATE_LABELS);
+  ipcMain.removeHandler(IpcChannel.PULLS_UPDATE_ASSIGNEE);
+  ipcMain.removeHandler(IpcChannel.PULLS_UPDATE_REVIEWERS);
 }

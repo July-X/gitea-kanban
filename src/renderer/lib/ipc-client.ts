@@ -487,6 +487,47 @@ export function pullsMerge(args: {
   return getIpcClient().invoke('pulls', 'merge', args);
 }
 
+/**
+ * 关闭合并请求（不合并，直接关闭）—— UI 层应二次确认
+ *
+ * 对应 gitea PATCH /pulls/{index} {state: 'closed'}
+ * 关闭后合并请求状态变为 closed，不可再合并（除非 reopen）。
+ */
+export function pullsClose(args: {
+  projectId: string;
+  index: number;
+  reason?: string;
+}): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'close', args);
+}
+
+/** 更新合并请求标签（替换所有标签） */
+export function pullsUpdateLabels(args: {
+  projectId: string;
+  index: number;
+  labels: string[];
+}): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'updateLabels', args);
+}
+
+/** 更新合并请求指派人 */
+export function pullsUpdateAssignee(args: {
+  projectId: string;
+  index: number;
+  assignee: string;
+}): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'updateAssignee', args);
+}
+
+/** 更新合并请求评审人（添加） */
+export function pullsUpdateReviewers(args: {
+  projectId: string;
+  index: number;
+  reviewers: string[];
+}): Promise<unknown> {
+  return getIpcClient().invoke('pulls', 'updateReviewers', args);
+}
+
 // ============================================================
 // ===== board.columns.* （ADR-0002 reset 后7 个端点） =====
 // ============================================================

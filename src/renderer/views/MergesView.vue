@@ -21,7 +21,7 @@
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ExternalLink } from 'lucide-vue-next';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ExternalLink, XCircle, Pencil } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -80,6 +80,10 @@ const selectedMethod = ref<MergeMethod>('merge');
 const mergingPull = ref<PullDto | null>(null);
 const merging = ref(false);
 const squashMessage = ref('');
+
+/** 当前正在关闭的合并请求（null = 没在关闭） */
+const closingPull = ref<PullDto | null>(null);
+const closing = ref(false);
 
 /** 二次确认弹窗开关 */
 const confirmMergeOpen = ref(false);
@@ -209,6 +213,144 @@ function cancelMerge(): void {
   confirmMergeOpen.value = false;
   mergingPull.value = null;
 }
+
+// ===== 关闭合并请求（不合并） =====
+
+/** 二次确认弹窗开关（关闭用） */
+const confirmCloseOpen = ref(false);
+
+// ===== 属性编辑器 =====
+
+/** 属性编辑器状态 */
+const attrEditorOpen = ref(false);
+const editingPull = ref<PullDto | null>(null);
+const editingLabels = ref<string[]>([]);
+const editingAssignee = ref('');
+const editingReviewers = ref<string[]>([]);
+
+/** 可用标签列表（从 store 或 IPC 获取） */
+const availableLabels = ref<{ name: string; color: string }[]>([]);
+/** 可用成员列表 */
+const availableMembers = ref<string[]>([]);
+
+/** 打开属性编辑器 */
+async function openAttrEditor(p: PullDto): Promise<void> {
+  editingPull.value = p;
+  editingLabels.value = (p.labels ?? []).map(l => l.name);
+  editingAssignee.value = p.assignee?.username ?? '';
+  editingReviewers.value = (p.reviewers ?? []).map(r => r.username);
+  attrEditorOpen.value = true;
+
+  // 加载可用标签和成员
+  if (activeProjectId.value) {
+    try {
+      const labelsResp = await window.api.labels.list({ projectId: activeProjectId.value }) as { items: { name: string; color: string }[] };
+      availableLabels.value = labelsResp.items ?? [];
+    } catch { /* 忽略 */ }
+    try {
+      const membersResp = await window.api.members.list({ projectId: activeProjectId.value }) as { username: string }[];
+      availableMembers.value = (membersResp ?? []).map(m => m.username);
+    } catch { /* 忽略 */ }
+  }
+}
+
+/** 关闭属性编辑器 */
+function closeAttrEditor(): void {
+  attrEditorOpen.value = false;
+  editingPull.value = null;
+}
+
+/** 切换标签选择 */
+function toggleLabel(name: string): void {
+  const idx = editingLabels.value.indexOf(name);
+  if (idx >= 0) editingLabels.value.splice(idx, 1);
+  else editingLabels.value.push(name);
+}
+
+/** 切换评审人选择 */
+function toggleReviewer(name: string): void {
+  const idx = editingReviewers.value.indexOf(name);
+  if (idx >= 0) editingReviewers.value.splice(idx, 1);
+  else editingReviewers.value.push(name);
+}
+
+/** 保存属性 */
+async function saveAttrs(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  try {
+    // 更新标签
+    await window.api.pulls.updateLabels({
+      projectId: activeProjectId.value,
+      index: p.index,
+      labels: editingLabels.value,
+    });
+    // 更新指派人
+    if (editingAssignee.value) {
+      await window.api.pulls.updateAssignee({
+        projectId: activeProjectId.value,
+        index: p.index,
+        assignee: editingAssignee.value,
+      });
+    }
+    // 更新评审人
+    if (editingReviewers.value.length > 0) {
+      await window.api.pulls.updateReviewers({
+        projectId: activeProjectId.value,
+        index: p.index,
+        reviewers: editingReviewers.value,
+      });
+    }
+    showToast({ type: 'success', message: `#${p.index} 属性已更新` });
+    closeAttrEditor();
+    // 刷新列表
+    await pull.refresh();
+  } catch (e) {
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: err.messageText ?? '更新失败' });
+  }
+}
+
+/** 点击关闭按钮 → 弹二次确认 */
+function requestClose(p: PullDto): void {
+  closingPull.value = p;
+  confirmCloseOpen.value = true;
+}
+
+/** 二次确认 → 执行关闭 */
+async function performClose(): Promise<void> {
+  const p = closingPull.value;
+  if (!p || !activeProjectId.value) return;
+  confirmCloseOpen.value = false;
+  closing.value = true;
+  try {
+    const result = await pull.closePull({
+      projectId: activeProjectId.value,
+      index: p.index,
+    });
+    if (result.closed) {
+      showToast({ type: 'success', message: `#${p.index} 已关闭` });
+    }
+  } catch (e) {
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: err.messageText ?? '关闭失败' });
+  } finally {
+    closing.value = false;
+    closingPull.value = null;
+  }
+}
+
+/** 取消关闭确认 */
+function cancelClose(): void {
+  confirmCloseOpen.value = false;
+  closingPull.value = null;
+}
+
+/** 关闭确认描述文案 */
+const closeConfirmDescription = computed(() => {
+  const p = closingPull.value;
+  if (!p) return '';
+  return `将关闭 #${p.index}「${p.title}」。\n\n关闭后此合并请求将不再可合并，需要在 gitea 页面重新打开。`;
+});
 
 /** 生成二次确认描述文案 */
 const confirmDescription = computed(() => {
@@ -510,6 +652,18 @@ function formatRelative(iso: string | undefined): string {
             <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
             <span>{{ merging && mergingPull?.index === p.index ? '合并中…' : '合并' }}</span>
           </button>
+          <!-- 关闭合并请求（不合并，直接关闭）—— 对应 gitea 关闭操作 -->
+          <button
+            v-if="p.state === 'open'"
+            type="button"
+            class="merge-item__btn merge-item__btn--close"
+            :disabled="closing"
+            :title="'关闭此合并请求（不合并）'"
+            @click="requestClose(p)"
+          >
+            <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
+            <span>{{ closing && closingPull?.index === p.index ? '关闭中…' : '关闭' }}</span>
+          </button>
           <span
             v-if="p.hasConflicts && p.state === 'open'"
             class="merge-item__conflict-hint"
@@ -549,7 +703,88 @@ function formatRelative(iso: string | undefined): string {
               <dd>{{ p.mergeable ? '是' : '否' }}</dd>
             </div>
           </dl>
+          <!-- 编辑属性按钮 -->
+          <button
+            type="button"
+            class="merge-item__edit-attrs"
+            @click="openAttrEditor(p)"
+          >
+            <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
+            <span>编辑属性</span>
+          </button>
         </div>
+        <!-- 属性编辑弹窗 -->
+        <ConfirmDialog
+          :open="attrEditorOpen && editingPull?.index === p.index"
+          title="编辑属性"
+          :description="`编辑 #${p.index} 的标签、指派人、评审人`"
+          confirm-label="保存"
+          @update:open="attrEditorOpen = $event"
+          @confirm="saveAttrs(p)"
+          @cancel="closeAttrEditor"
+        >
+          <div class="attr-editor">
+            <!-- 标签选择 -->
+            <div class="attr-editor__section">
+              <label class="attr-editor__label">标签：</label>
+              <div class="attr-editor__tags">
+                <label
+                  v-for="label in availableLabels"
+                  :key="label.name"
+                  class="attr-editor__tag"
+                  :class="{ 'attr-editor__tag--selected': editingLabels.includes(label.name) }"
+                  :style="{ '--tag-color': '#' + label.color, '--tag-bg': '#' + label.color + '22' }"
+                >
+                  <input
+                    type="checkbox"
+                    :value="label.name"
+                    :checked="editingLabels.includes(label.name)"
+                    class="attr-editor__checkbox"
+                    @change="toggleLabel(label.name)"
+                  />
+                  <span>{{ label.name }}</span>
+                </label>
+              </div>
+            </div>
+            <!-- 指派人 -->
+            <div class="attr-editor__section">
+              <label class="attr-editor__label" for="attr-assignee">指派人：</label>
+              <select
+                id="attr-assignee"
+                v-model="editingAssignee"
+                class="attr-editor__select"
+              >
+                <option value="">未指派</option>
+                <option
+                  v-for="member in availableMembers"
+                  :key="member"
+                  :value="member"
+                >{{ member }}</option>
+              </select>
+            </div>
+            <!-- 评审人 -->
+            <div class="attr-editor__section">
+              <label class="attr-editor__label">评审人：</label>
+              <div class="attr-editor__tags">
+                <label
+                  v-for="member in availableMembers"
+                  :key="member"
+                  class="attr-editor__tag"
+                  :class="{ 'attr-editor__tag--selected': editingReviewers.includes(member) }"
+                >
+                  <input
+                    type="checkbox"
+                    :value="member"
+                    :checked="editingReviewers.includes(member)"
+                    class="attr-editor__checkbox"
+                    @change="toggleReviewer(member)"
+                  />
+                  <span>{{ member }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </ConfirmDialog>
       </li>
     </ul>
 
@@ -598,6 +833,18 @@ function formatRelative(iso: string | undefined): string {
         </div>
       </div>
     </ConfirmDialog>
+
+    <!-- ============== 关闭二次确认弹窗 ============== -->
+    <ConfirmDialog
+      :open="confirmCloseOpen"
+      title="确认关闭"
+      :description="closeConfirmDescription"
+      confirm-label="确认关闭"
+      :danger="true"
+      @update:open="confirmCloseOpen = $event"
+      @confirm="performClose"
+      @cancel="cancelClose"
+    />
   </div>
 </template>
 
@@ -1102,6 +1349,14 @@ function formatRelative(iso: string | undefined): string {
   background: var(--color-primary-hover);
   border-color: var(--color-primary-hover);
 }
+.merge-item__btn--close {
+  background: transparent;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+.merge-item__btn--close:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+}
 .merge-item__btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1269,5 +1524,83 @@ function formatRelative(iso: string | undefined): string {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* ===== 编辑属性按钮 ===== */
+
+.merge-item__edit-attrs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  margin-top: var(--space-2);
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.merge-item__edit-attrs:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* ===== 属性编辑器弹窗内容 ===== */
+
+.attr-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.attr-editor__section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attr-editor__label {
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.attr-editor__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.attr-editor__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--tag-bg, var(--color-bg));
+  border: 1px solid var(--tag-color, var(--color-divider));
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.attr-editor__tag--selected {
+  background: var(--tag-color, var(--color-primary));
+  color: var(--color-text-inverse);
+}
+.attr-editor__checkbox {
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.attr-editor__select {
+  padding: 4px 8px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  color: var(--color-text);
 }
 </style>

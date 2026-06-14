@@ -243,3 +243,100 @@ export async function mergeGiteaPull(args: {
     throw err;
   }
 }
+
+/**
+ * 关闭合并请求（不合并，直接关闭）—— 对应 gitea PATCH /pulls/{index} {state: 'closed'}
+ *
+ * gitea 1.26 支持 PATCH /repos/{owner}/{repo}/pulls/{index} 修改 PR 状态。
+ * gitea-js 的 repoEditPull 可以改 state。
+ */
+export async function closeGiteaPull(args: {
+  giteaUrl: string;
+  username: string;
+  owner: string;
+  repo: string;
+  index: number;
+  reason?: string;
+}): Promise<{ closed: boolean }> {
+  const { api } = await getGiteaClient(args.giteaUrl, args.username);
+
+  try {
+    // PATCH /repos/{owner}/{repo}/pulls/{index} {state: 'closed'}
+    const res = await api.repos.repoEditPullRequest(args.owner, args.repo, args.index, {
+      state: 'closed',
+    });
+    if (res.ok) {
+      return { closed: true };
+    }
+    unwrapGitea(res, `关闭 PR #${args.index}失败`);
+    return { closed: true };
+  } catch (err: unknown) {
+    if (err && typeof err === 'object' && 'ok' in err && 'status' in err) {
+      const httpErr = err as HttpResponse<unknown, unknown>;
+      unwrapGitea(httpErr, `关闭 PR #${args.index}失败`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * 更新合并请求标签 —— 对应 gitea PUT /issues/{index}/labels
+ *
+ * gitea 把 PR 视为 issue 的子类型，标签操作走 issue API。
+ */
+export async function updatePullLabels(args: {
+  giteaUrl: string;
+  username: string;
+  owner: string;
+  repo: string;
+  index: number;
+  labels: string[];
+}): Promise<void> {
+  const { api } = await getGiteaClient(args.giteaUrl, args.username);
+  const res = await api.repos.issueReplaceLabels(args.owner, args.repo, args.index, {
+    labels: args.labels,
+  });
+  if (!res.ok) {
+    unwrapGitea(res, `更新 PR #${args.index}标签失败`);
+  }
+}
+
+/**
+ * 更新合并请求指派人 —— 对应 gitea PATCH /issues/{index} {assignee}
+ */
+export async function updatePullAssignee(args: {
+  giteaUrl: string;
+  username: string;
+  owner: string;
+  repo: string;
+  index: number;
+  assignee: string;
+}): Promise<void> {
+  const { api } = await getGiteaClient(args.giteaUrl, args.username);
+  const res = await api.repos.issueEditIssue(args.owner, args.repo, args.index, {
+    assignee: args.assignee,
+  });
+  if (!res.ok) {
+    unwrapGitea(res, `更新 PR #${args.index}指派人失败`);
+  }
+}
+
+/**
+ * 更新合并请求评审人 —— 对应 gitea POST /pulls/{index}/requested_reviewers
+ */
+export async function updatePullReviewers(args: {
+  giteaUrl: string;
+  username: string;
+  owner: string;
+  repo: string;
+  index: number;
+  reviewers: string[];
+}): Promise<void> {
+  const { api } = await getGiteaClient(args.giteaUrl, args.username);
+  const res = await api.repos.repoCreatePullReviewRequests(args.owner, args.repo, args.index, {
+    reviewers: args.reviewers,
+  });
+  if (!res.ok) {
+    unwrapGitea(res, `更新 PR #${args.index}评审人失败`);
+  }
+}

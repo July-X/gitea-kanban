@@ -68,6 +68,10 @@ export const IpcChannel = {
  PULLS_GET: 'pulls.get',
  PULLS_CREATE: 'pulls.create',
  PULLS_MERGE: 'pulls.merge',
+ PULLS_CLOSE: 'pulls.close',
+ PULLS_UPDATE_LABELS: 'pulls.updateLabels',
+ PULLS_UPDATE_ASSIGNEE: 'pulls.updateAssignee',
+ PULLS_UPDATE_REVIEWERS: 'pulls.updateReviewers',
 
  // === board.columns namespace（ADR-0002 reset）===
  BOARD_COLUMNS_LIST: 'board.columns.list',

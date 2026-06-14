@@ -101,6 +101,10 @@ const api = {
  get: invoke(IpcChannel.PULLS_GET),
  create: invoke(IpcChannel.PULLS_CREATE),
  merge: invoke(IpcChannel.PULLS_MERGE),
+ close: invoke(IpcChannel.PULLS_CLOSE),
+ updateLabels: invoke(IpcChannel.PULLS_UPDATE_LABELS),
+ updateAssignee: invoke(IpcChannel.PULLS_UPDATE_ASSIGNEE),
+ updateReviewers: invoke(IpcChannel.PULLS_UPDATE_REVIEWERS),
  },
 
  //===== board.columns namespace (ADR-0002 reset 后 board.cards.*已删)=====
