@@ -33,7 +33,6 @@ function onDismiss(): void {
         <div class="toast__body">
           <div class="toast__message">{{ toast.message }}</div>
           <div v-if="toast.description" class="toast__description">{{ toast.description }}</div>
-          <div v-if="toast.persistent" class="toast__hint">点击任意处关闭</div>
         </div>
         <button
           type="button"
@@ -93,6 +92,9 @@ function onDismiss(): void {
   font-weight: 500;
   color: var(--color-text);
   line-height: var(--line-tight);
+  /* 多行消息（gitea 真实原因 + 字段名）可保留换行 */
+  white-space: pre-line;
+  word-break: break-word;
 }
 
 .toast__description {
@@ -100,13 +102,6 @@ function onDismiss(): void {
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
   line-height: var(--line-base);
-}
-
-.toast__hint {
-  margin-top: var(--space-2);
-  font-size: var(--font-xs);
-  color: var(--color-text-muted);
-  font-style: italic;
 }
 
 .toast--persistent {

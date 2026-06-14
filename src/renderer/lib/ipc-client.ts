@@ -112,13 +112,22 @@ const RECOVERABLE: Record<IpcErrorCodeValue, boolean> = {
   database_write_failed: true, // 写失败重试
 };
 
-/** 把 IpcErrorPayload 转成渲染端 UserFacingError（"人话"层） */
+/** 把 IpcErrorPayload 转成渲染端 UserFacingError（"人话"层）
+ *
+ * 错误文案组装（从重到轻）：
+ *   1. payload.cause（gitea 真实消息）—— **优先**（用户最想知道"具体错在哪"）
+ *   2. payload.message（IpcError 中文摘要）
+ *   3. payload.hint（操作建议）
+ */
 export function toUserFacingError(payload: IpcErrorPayload): UserFacingError {
  const code = payload.code;
  const category = CODE_CATEGORY[code] ?? '出错了';
  const hint = payload.hint ?? '请稍候重试';
- // 主消息 =类别前缀 +原始 message（message本身就是 i18n key形式的人话）
- const messageText = `${category}：${payload.message}`;
+ // gitea 真实消息（如"Organization can't be doer to add reviewer"）放在最前
+ // 这是用户最想知道的具体原因
+ const giteaCause = payload.cause ? `\n[${code}] ${payload.cause}` : '';
+ // 主消息：中文摘要 + gitea 真实消息
+ const messageText = `${category}：${payload.message}${giteaCause}`;
  return {
  code,
  messageText,
