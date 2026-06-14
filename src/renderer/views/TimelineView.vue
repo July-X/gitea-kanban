@@ -22,6 +22,7 @@ import { useBranchStore } from '@renderer/stores/branch';
 import { branchesList, commitsGet, commitsTimeline } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
+import { useBranchLoadDebounce } from '@renderer/composables/useBranchLoadDebounce';
 import type {
   BranchDto,
   CommitDto,
@@ -107,7 +108,7 @@ async function loadBranches(): Promise<void> {
       selectedBranches.value = nextSelected;
     }
     if (selectedBranches.value.size > 0) {
-      await loadTimeline();
+      await debounce.flush();
     }
   } catch (e) {
     localError.value = e as UserFacingError;
@@ -119,21 +120,20 @@ watch(() => branch.pendingTimelineFocus, (name) => {
   branch.pendingTimelineFocus = null;
   if (branches.value.some((b) => b.name === name)) {
     selectedBranches.value = new Set<string>([name]);
-    scheduleLoadTimeline();
+    debounce.schedule();
   }
 });
 
-/** 防抖 timer：快速切换多个分支时合并为一次 loadTimeline */
-let loadTimelineTimer: ReturnType<typeof setTimeout> | null = null;
-
+/**
+ * 加载时间轴数据（active project + selected branches）
+ *
+ * 早期返回短路：
+ * - 无 active project → 不打 gitea
+ * - 无 selected branches → 不打 gitea（toggleBranch 把集合清空时已经 cancel 计时器）
+ */
 async function loadTimeline(): Promise<void> {
   if (!activeProjectId.value) return;
   if (selectedBranches.value.size === 0) return;
-  // 取消正在 pending 的防抖调用，避免重复请求
-  if (loadTimelineTimer) {
-    clearTimeout(loadTimelineTimer);
-    loadTimelineTimer = null;
-  }
   loading.value = true;
   localError.value = null;
   try {
@@ -151,13 +151,13 @@ async function loadTimeline(): Promise<void> {
   }
 }
 
-function scheduleLoadTimeline(delayMs = 250): void {
-  if (loadTimelineTimer) clearTimeout(loadTimelineTimer);
-  loadTimelineTimer = setTimeout(() => {
-    loadTimelineTimer = null;
-    void loadTimeline();
-  }, delayMs);
-}
+/**
+ * 分支切换防抖器（封装 setTimeout + clearTimeout 逻辑，行为见 useBranchLoadDebounce.ts）
+ * - debounce.schedule()  ⇔  toggleBranch 加分支后 250ms 才拉一次
+ * - debounce.flush()     ⇔  refresh() / loadBranches() 主动立即拉（同时取消 pending）
+ * - debounce.cancel()    ⇔  toggleBranch 取消最后一个分支时清 timer + 不拉
+ */
+const debounce = useBranchLoadDebounce(loadTimeline);
 
 function toggleBranch(name: string): void {
   const next = new Set(selectedBranches.value);
@@ -165,12 +165,9 @@ function toggleBranch(name: string): void {
   else next.add(name);
   selectedBranches.value = next;
   if (next.size > 0) {
-    scheduleLoadTimeline();
+    debounce.schedule();
   } else {
-    if (loadTimelineTimer) {
-      clearTimeout(loadTimelineTimer);
-      loadTimelineTimer = null;
-    }
+    debounce.cancel();
     timeline.value = null;
   }
 }
@@ -262,7 +259,7 @@ async function onDetailCopySha(n: CommitNodeDto): Promise<void> {
 }
 
 function refresh(): void {
-  void loadTimeline();
+  void debounce.flush();
 }
 
 watch(() => activeProjectId.value, async (id) => {
