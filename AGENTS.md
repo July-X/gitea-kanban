@@ -267,21 +267,35 @@ pnpm rebuild:native
 
 ### 6.3 数据模型
 
-**v1 现状（SQLite 14 张表，ADR-0003 Phase 1 双写期）**：
+**v1.2 现状（ADR-0003 Phase 3 完结：业务表全走 localStore，SQLite 仅 Gitea 缓存层）**：
 
-业务表 12 张：`users`、`gitea_accounts`、`repo_projects`、`board_columns`、`column_label_mapping`、`card_issue_link`、`gitea_refs`、`starred_branches`、`prefs`、`undo_entries`。
-基础设施表 2 张：`cache_entries`、`hook_deliveries`、`giteaUser`。
+业务态 7 张表（**全部**迁到 localStore.state.json）：
+- `users`（1 行 seed `local-user`）
+- `gitea_accounts` + `gitea_user` denormalize 进 `accounts[]` + `accounts[].userInfo`
+- `repo_projects` → `projects[]`
+- `board_columns` → `columns[]`
+- `column_label_mapping` → `labelMaps[]`
+- `starred_branches` → `starredBranches[]`
+- `prefs` → `prefs` (Record<string, unknown>)
 
-> **2026-06-14 盘点**：14 张表里 `cardIssueLink` / `giteaRefs` / `undoEntries` / `hookDeliveries` 4 张是**死表**（零业务调用方，schema/index.ts 自述 v1 可选保留）。`undo_entries` M6 切 in-memory 栈后已废。
+基础设施 1 张表（**唯一**保留在 SQLite）：
+- `cache_entries`（Gitea 资源级缓存：repos / branches / commits / pulls / timeline 5 资源）
+
+> **2026-06-14 Phase 3 完结**：ADR-0003 三阶段全部落地
+> - **Phase 1**：localStore 基础设施 + prefs 双写 + 一致性巡检（commit `8ffa951`）
+> - **Phase 2**：业务表全走 localStore 读 + 5 个 commit 切读路径（`79f761d`~`d214a0e`）
+> - **Phase 3**：写 op dispatch 统一入口 + 同步队列 + 删 drizzle-kit + 删 8 张业务表 schema + 删业务层 SQLite 镜像（`93e9659`~`372017e`）
 >
-> **ADR-0003 迁移目标**：从 better-sqlite3 切到 electron-store + 文件缓存 + 同步队列。9 张活表 → 1 个 state.json + 1 个 cache/ 目录 + 1 个 queue.jsonl。**当前 Phase 1 = 双写 + 一致性巡检，不删 SQLite**。Phase 2 切读路径，Phase 3 删 SQLite + 上离线写。
+> 净行数：~700 行 SQLite 业务表代码 + 工具链删除；Gitea 缓存层仍走 SQLite（cache-aside 模式不切）
 >
 > 详见 `docs/adr/0003-local-store-electron-store.md`。
 
 核心设计：
-- **看板列**是 gitea-kanban 本地概念，存 `board_columns`。
-- **卡片 = Gitea issue**，本地不存卡片实体，通过 `column_label_mapping` 把列映射到 Gitea label；issue 带这个 label 就属于该列。
-- **本地业务态**在 Phase 1 双写 SQLite + localStore（`src/main/local/state.ts`）；Phase 3 删 SQLite 后只走 localStore。
+- **看板列**是 gitea-kanban 本地概念，存 `localStore.state.columns[]`。
+- **卡片 = Gitea issue**，本地不存卡片实体，通过 `state.labelMaps` 把列映射到 Gitea label；issue 带这个 label 就属于该列。
+- **本地业务态** = `state.json`（`src/main/local/state.ts`）；崩恢复靠 localStore.atomic write。
+- **Gitea 缓存层** = `kanban.db.cache_entries`（`src/main/cache/sqlite.ts` raw SQL 建表，drizzle schema 跟业务态解耦）。
+- **同步队列** = `${DATA_DIR}/queue.jsonl`（`src/main/sync/queue.ts` + `runner.ts`）—— append-only + 崩恢复 + 30 天 GC。
 
 ### 6.4 Gitea 集成
 
