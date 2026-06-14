@@ -593,6 +593,12 @@ function formatRelative(iso: string | undefined): string {
           'merge-item--merged': p.merged,
           'merge-item--closed': p.state === 'closed' && !p.merged,
         }"
+        role="button"
+        tabindex="0"
+        :aria-expanded="expanded.has(p.index)"
+        @click="toggleExpand(p.index)"
+        @keydown.enter="toggleExpand(p.index)"
+        @keydown.space.prevent="toggleExpand(p.index)"
       >
         <!-- 模仿 gitea /pulls 列表布局：
              [leading: 状态图标] [main: 标题 + #index + 时间/作者 + 分支流向] [trailing: 操作按钮] -->
@@ -624,24 +630,8 @@ function formatRelative(iso: string | undefined): string {
         </div>
         <div class="merge-item__main">
           <div class="merge-item__header">
-            <a
-              :href="giteaPullUrl(p)"
-              target="_blank"
-              rel="noopener"
-              class="merge-item__title"
-              :title="p.title"
-            >{{ p.title }}</a>
+            <span class="merge-item__title" :title="p.title">{{ p.title }}</span>
             <span :class="badgeClass(p)" class="merge-item__badge">{{ badgeText(p) }}</span>
-            <button
-              type="button"
-              class="merge-item__expand"
-              :aria-expanded="expanded.has(p.index)"
-              :aria-label="expanded.has(p.index) ? '收起详情' : '展开详情'"
-              @click="toggleExpand(p.index)"
-            >
-              <ChevronDown v-if="expanded.has(p.index)" :size="14" :stroke-width="2" />
-              <ChevronRight v-else :size="14" :stroke-width="2" />
-            </button>
           </div>
           <div class="merge-item__body">
             <a
@@ -649,36 +639,24 @@ function formatRelative(iso: string | undefined): string {
               target="_blank"
               rel="noopener"
               class="merge-item__index mono"
+              @click.stop
             >#{{ p.index }}</a>
             <span class="merge-item__meta-line">
               <span class="merge-item__meta-text">打开于 {{ formatRelative(p.createdAt) }}</span>
               <span class="merge-item__meta-text">由</span>
-              <a
-                v-if="activeRepo"
-                :href="`${stripTrailingSlash(auth.currentGiteaUrl)}/${activeRepo.owner}`"
-                target="_blank"
-                rel="noopener"
-                class="merge-item__author-link"
-              >{{ p.author.username }}</a>
-              <span v-else class="merge-item__author">{{ p.author.username }}</span>
+              <span class="merge-item__author">{{ p.author.username }}</span>
             </span>
             <!-- 分支流向（base ← head），照搬 gitea /pulls 列表 -->
             <div class="merge-item__branches">
-              <a
-                :href="`${stripTrailingSlash(auth.currentGiteaUrl)}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.base.ref}`"
-                target="_blank"
-                rel="noopener"
+              <span
                 class="merge-item__branch"
                 :title="p.base.ref"
-              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.base.ref }}</a>
+              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.base.ref }}</span>
               <span class="merge-item__branch-arrow" aria-hidden="true">←</span>
-              <a
-                :href="`${stripTrailingSlash(auth.currentGiteaUrl)}/${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}/src/branch/${p.head.ref}`"
-                target="_blank"
-                rel="noopener"
+              <span
                 class="merge-item__branch"
                 :title="p.head.ref"
-              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.head.ref }}</a>
+              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.head.ref }}</span>
             </div>
             <!-- 标签 + 里程碑 + 指派人 + 评审人（gitea 合并请求属性块） -->
             <div class="merge-item__attrs">
@@ -717,7 +695,7 @@ function formatRelative(iso: string | undefined): string {
             class="merge-item__btn merge-item__btn--merge"
             :disabled="p.hasConflicts || !p.mergeable || merging"
             :title="p.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !p.mergeable ? '当前不可合并' : '合并此请求'"
-            @click="requestMerge(p)"
+            @click.stop="requestMerge(p)"
           >
             <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
             <span>{{ merging && mergingPull?.index === p.index ? '合并中…' : '合并' }}</span>
@@ -729,7 +707,7 @@ function formatRelative(iso: string | undefined): string {
             class="merge-item__btn merge-item__btn--close"
             :disabled="closing"
             :title="'关闭此合并请求（不合并）'"
-            @click="requestClose(p)"
+            @click.stop="requestClose(p)"
           >
             <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
             <span>{{ closing && closingPull?.index === p.index ? '关闭中…' : '关闭' }}</span>
@@ -745,6 +723,7 @@ function formatRelative(iso: string | undefined): string {
             rel="noopener"
             class="merge-item__ext-link"
             :title="'在 gitea 中打开 #' + p.index"
+            @click.stop
           >
             <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
           </a>
@@ -777,7 +756,7 @@ function formatRelative(iso: string | undefined): string {
           <button
             type="button"
             class="merge-item__edit-attrs"
-            @click="openAttrEditor(p)"
+            @click.stop="openAttrEditor(p)"
           >
             <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
             <span>编辑属性</span>
@@ -1183,6 +1162,9 @@ function formatRelative(iso: string | undefined): string {
   border-radius: var(--radius-md);
   transition: background var(--t-fast) var(--ease);
   overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  /* 关键：父 .merges__list 是 flex column，
   /* 关键：父 .merges__list 是 flex column，
    * 子 item 默认 flex-shrink: 1 会让每个 item 被等比压缩。
    * 43 个 item 共 1870px head 高，容器 622px 会被压缩到每个 15px——
@@ -1199,6 +1181,10 @@ function formatRelative(iso: string | undefined): string {
 
 .merge-item:hover {
   background: var(--color-bg-hover);
+}
+.merge-item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .merge-item--open {
