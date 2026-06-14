@@ -104,12 +104,28 @@ async function check(name: string, fn: () => Promise<StepCheck>): Promise<void> 
   }
 }
 
+/**
+ * 已知 issue 检查 helper（M9 task 2 修复后语义）
+ *
+ * 修复前：non-catch / catch 两路径都 `knownIssue++`——把"schema parse 成功（意外通过）"也
+ *   算 known-issue。3 个 [Z] 检查永远归 known-issue 桶，无法体现 fix。
+ *
+ * 修复后（M9 task 2, owner 拍板授权）：
+ * - non-catch 路径（schema parse 成功 = "意外通过"）→ `pass++` + 打印 (fix 确认)
+ *   → schema 已修，"意外通过"是真 PASS，数字归 pass
+ * - catch 路径（schema parse 拒 = 真 Zod 错，或 fn 本身 throw）→ `fail++` + 打印 (threw)
+ *   → 守住 regression：如果未来 schema 退化，Zod 拒会被报为 fail，e2e exit code 1
+ *
+ * 配合的 §[Z1-Z4] audit 段 (line 492-563) 一字未动——audit 段判定逻辑保留，**只**改
+ * helper 计数语义。两者完全独立：audit 段决定"Zod 是否拒"，helper 决定"计数如何归类"。
+ */
 function knownIssueCheck(name: string, fn: () => Promise<{ issue: string; detail: string }>): Promise<void> {
   return fn()
-    .then(({ issue, detail }) => {
-      knownIssue++;
-      knownIssues.push(`${name}: ${issue}`);
-      console.log(`  ⚠️  ${name} (known issue): ${detail}`);
+    .then(({ detail }) => {
+      // non-catch：schema parse 成功 = 真 fix 确认。
+      // `issue` 字段保留作 schema bug 类别描述（catch 路径用 e.message），此路径不消费。
+      pass++;
+      console.log(`  ✅ ${name} (fix 确认): ${detail}`);
     })
     .catch((e: unknown) => {
       fail++;
