@@ -25,14 +25,14 @@ import { eq, and, isNull } from 'drizzle-orm';
 // 注：isNull 在 cache_entries (nullable) 列上查询时使用——
 // drizzle `eq(col, null)` 编译成 SQL `col = NULL`（永远 false）；
 // SQLite 的 NULL 比较必须用 `IS NULL`，所以 isNull 是必需的。
+// 注：Phase 3 业务表 repo_projects 已迁 localStore，下面 import 删；drizzle eq/isNull 仅
+// 给 Gitea 缓存层（cache_entries）和 backfillDefaultBranch 的 NULL 校验用
 import { getDb } from './sqlite.js';
-import { repoProjects } from './schema/repoProjects.js';
 import { cacheEntries } from './schema/cacheEntries.js';
 import type { RepoProjectDto } from '../ipc/schema.js';
 import { getLocalStore } from '../local/state.js';
 import { findProjectWithStore, findProjectsByOwnerNameWithStore } from '../local/projects.js';
 import { findAccountByIdWithStore } from '../local/accounts.js';
-import { logger } from '../logger.js';
 
 const CACHE_RESOURCE = 'repos';
 /** repos.list 缓存 TTL：5 min（任务 prompt §关键约束 4） */
@@ -137,27 +137,6 @@ export function addProject(args: {
   // 4. 失效 repos 缓存（addProject 是写操作）
   invalidateReposCache(args.giteaAccountId);
 
-  // 5. 写 SQLite 镜像（best-effort）
-  try {
-    const db = getDb();
-    db.insert(repoProjects)
-      .values({
-        id,
-        giteaAccountId: args.giteaAccountId,
-        owner: args.owner,
-        name: args.name,
-        defaultBranch: args.defaultBranch ?? null,
-        lastSyncAt: new Date(nowEpochMs),
-        createdAt: new Date(nowEpochMs),
-      })
-      .run();
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), id, giteaAccountId: args.giteaAccountId },
-      'addProject: SQLite insert failed (non-fatal in Phase 2 dual-write)',
-    );
-  }
-
   return projectRowToDto(createdRow)!;
 }
 
@@ -186,16 +165,6 @@ export function removeProject(projectId: string): void {
   // 2. 失效 repos 缓存
   invalidateReposCache(existingLocal.giteaAccountId);
 
-  // 3. 删 SQLite（best-effort）
-  try {
-    const db = getDb();
-    db.delete(repoProjects).where(eq(repoProjects.id, projectId)).run();
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), projectId },
-      'removeProject: SQLite delete failed (non-fatal in Phase 2 dual-write)',
-    );
-  }
 }
 
 /**
@@ -221,25 +190,6 @@ export function touchLastSync(args: {
       s.projects[idx] = { ...s.projects[idx]!, lastSyncAt: whenMs };
     }
   });
-  // SQLite 镜像（best-effort）
-  try {
-    const db = getDb();
-    db.update(repoProjects)
-      .set({ lastSyncAt: args.when ?? new Date() })
-      .where(
-        and(
-          eq(repoProjects.giteaAccountId, args.giteaAccountId),
-          eq(repoProjects.owner, args.owner),
-          eq(repoProjects.name, args.name),
-        ),
-      )
-      .run();
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err) },
-      'touchLastSync: SQLite update failed (non-fatal)',
-    );
-  }
 }
 
 /**
@@ -278,26 +228,6 @@ export function backfillDefaultBranch(args: {
     if (s.projects[idx]!.defaultBranch !== null) return; // 已有 → noop
     s.projects[idx] = { ...s.projects[idx]!, defaultBranch: args.defaultBranch };
   });
-  // SQLite 镜像（best-effort）
-  try {
-    const db = getDb();
-    db.update(repoProjects)
-      .set({ defaultBranch: args.defaultBranch })
-      .where(
-        and(
-          eq(repoProjects.giteaAccountId, args.giteaAccountId),
-          eq(repoProjects.owner, args.owner),
-          eq(repoProjects.name, args.name),
-          isNull(repoProjects.defaultBranch),
-        ),
-      )
-      .run();
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err) },
-      'backfillDefaultBranch: SQLite update failed (non-fatal)',
-    );
-  }
 }
 
 // ===== cache_entries（repos 资源级缓存）=====

@@ -1,10 +1,9 @@
 /**
- * 看板列业务层（ADR-0002 reset + ADR-0003 Phase 2 切 localStore）
+ * 看板列业务层（ADR-0002 reset + ADR-0003 Phase 2 切 localStore + Phase 3 删 SQLite）
  *
  * 职责（docs/adr/0002-board-data-source-reset.md + 02-architecture §5.3.7）：
  * - 7 个 IPC handler 调用的纯业务函数（不接 wrapIpc 包装 —— wrapIpc 在 ipc/board.ts）
- * - 数据库 CRUD：list / create / update / reorder / delete
- * - mapLabel / unmapLabel：column ↔ gitea label 多对多映射（columnLabelMapping 表）
+ * - **纯 localStore**：列/列-标签映射都改 localStore
  * - 撤销栈写入：每次写操作调 recordUndo（M6 已切 in-memory）
  * - 顺序用浮点 position 避免全表重写（POS=1024）
  *
@@ -15,10 +14,8 @@
  * - **不**做 columns 的 cache_entries 缓存（业务类型变更频繁）
  * - **不**调 gitea API
  *
- * ADR-0003 Phase 2 改造：
- * - 业务态（board_columns + column_label_mapping）走 localStore 优先
- * - SQLite 镜像（best-effort，Phase 2 兜底）
- * - repo_projects 校验改用 state.projects（cross-table 关联）
+ * ADR-0003 Phase 3：业务态走 localStore，**没有** SQLite 镜像分支
+ * （删了 SQLite 双写后，写操作只改 localStore；崩恢复靠 localStore.atomic write）
  *
  * 顺序策略：
  * - create：取最大 position + 1024 作 position（保持 0/1024/2048... 间隔）
@@ -31,10 +28,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { eq, and } from 'drizzle-orm';
-import { getDb } from '../cache/sqlite.js';
-import { boardColumns } from '../cache/schema/boardColumns.js';
-import { columnLabelMapping } from '../cache/schema/columnLabelMapping.js';
 import { IpcError, IpcErrorCode } from '@shared/errors';
 import type { ColumnDto, CreateBoardColumnArgs, UpdateBoardColumnArgs } from '../ipc/schema.js';
 import { getLocalStore } from '../local/state.js';
@@ -49,14 +42,13 @@ import {
   findLabelMapByColumnAndLabelWithStore,
   listLabelMapsByColumnWithStore,
 } from '../local/label-maps.js';
-import { logger } from '../logger.js';
 
 /** position 间隔 */
 export const POSITION_STEP = 1024;
 
 /**
  * 通过 projectId 校验项目存在
- * ADR-0003 Phase 2：走 localStore（state.projects）
+ * ADR-0003 Phase 3：走 localStore
  */
 export function projectExists(projectId: string): boolean {
   return getLocalStore()
@@ -66,7 +58,6 @@ export function projectExists(projectId: string): boolean {
 
 /**
  * 通过 columnId 拿 (projectId)
- * ADR-0003 Phase 2：走 localStore
  */
 function resolveColumn(columnId: string): { projectId: string } {
   const col = findColumnByIdWithStore(getLocalStore().get(), columnId);
@@ -82,7 +73,6 @@ function resolveColumn(columnId: string): { projectId: string } {
 
 /**
  * 单列 DTO 转换（含绑定的 gitea labels）
- * ADR-0003 Phase 2：col 是 localStore BoardColumn（number epoch ms）
  */
 function toColumnDto(
   col: { id: string; projectId: string; title: string; position: number; createdAt: number },
@@ -110,7 +100,7 @@ function listColumnLabels(columnId: string): Array<{ id: number; name: string; c
 
 /**
  * 拿某 project 下全部列 + 绑定的 labels
- * ADR-0003 Phase 2：localStore 优先
+ * ADR-0003 Phase 3：localStore only
  */
 export function listColumns(projectId: string): ColumnDto[] {
   const cols = listColumnsByProjectWithStore(getLocalStore().get(), projectId);
@@ -120,7 +110,6 @@ export function listColumns(projectId: string): ColumnDto[] {
 // ============================================================
 // ===== create =====
 export function createColumn(args: CreateBoardColumnArgs): ColumnDto {
-  // 找最大 position，新列 = max + POSITION_STEP（避免覆盖）
   const maxPos = maxColumnPositionByProjectWithStore(getLocalStore().get(), args.projectId);
   const newPosition = maxPos + POSITION_STEP;
 
@@ -138,26 +127,6 @@ export function createColumn(args: CreateBoardColumnArgs): ColumnDto {
     s.columns.push(createdRow);
   });
 
-  // SQLite 镜像（best-effort）
-  try {
-    getDb()
-      .insert(boardColumns)
-      .values({
-        id,
-        repoProjectId: args.projectId,
-        title: args.title,
-        position: newPosition,
-        createdAt: new Date(nowEpochMs),
-      })
-      .run();
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), id, projectId: args.projectId },
-      'createColumn: SQLite insert failed (non-fatal in Phase 2)',
-    );
-  }
-
-  // 返回新 DTO（labels=空）
   return toColumnDto(createdRow, []);
 }
 
@@ -184,26 +153,6 @@ export function updateColumn(args: UpdateBoardColumnArgs): ColumnDto {
     };
   });
 
-  // SQLite 镜像（best-effort）
-  try {
-    const db = getDb();
-    const patch: Record<string, unknown> = {};
-    if (args.patch.title !== undefined) patch.title = args.patch.title;
-    if (args.patch.position !== undefined) patch.position = args.patch.position;
-    if (Object.keys(patch).length > 0) {
-      db.update(boardColumns)
-        .set(patch)
-        .where(eq(boardColumns.id, args.columnId))
-        .run();
-    }
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), columnId: args.columnId },
-      'updateColumn: SQLite update failed (non-fatal)',
-    );
-  }
-
-  // 返回新 DTO
   const refreshed = findColumnByIdWithStore(store.get(), args.columnId)!;
   return toColumnDto(refreshed, listColumnLabels(args.columnId));
 }
@@ -218,7 +167,6 @@ export function updateColumn(args: UpdateBoardColumnArgs): ColumnDto {
  */
 export function reorderColumns(args: { projectId: string; orderedIds: string[] }): void {
   const store = getLocalStore();
-  // 校验：orderedIds 必须**完整**覆盖该 project 所有列 id
   const existing = columnIdsByProjectWithStore(store.get(), args.projectId).sort();
   const inputSorted = [...args.orderedIds].sort();
   if (existing.length !== inputSorted.length || existing.some((id, i) => id !== inputSorted[i])) {
@@ -229,7 +177,6 @@ export function reorderColumns(args: { projectId: string; orderedIds: string[] }
     });
   }
 
-  // 逐行 mutate（localStore 是 in-memory，单线程 mutate 即原子）
   store.mutate((s) => {
     for (let idx = 0; idx < args.orderedIds.length; idx++) {
       const id = args.orderedIds[idx]!;
@@ -240,31 +187,12 @@ export function reorderColumns(args: { projectId: string; orderedIds: string[] }
       }
     }
   });
-
-  // SQLite 镜像（best-effort；事务批量 UPDATE）
-  try {
-    const db = getDb();
-    db.transaction((tx) => {
-      for (let idx = 0; idx < args.orderedIds.length; idx++) {
-        tx.update(boardColumns)
-          .set({ position: (idx + 1) * POSITION_STEP })
-          .where(eq(boardColumns.id, args.orderedIds[idx]!))
-          .run();
-      }
-    });
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), projectId: args.projectId },
-      'reorderColumns: SQLite update failed (non-fatal)',
-    );
-  }
 }
 
 // ============================================================
 // ===== delete =====
 /**
- * 删除列（labelMaps **不**级联删——labelMaps 跨列共享保留语义，
- * Phase 3 改 schema 时一起处理）
+ * 删除列（labelMaps **不**级联删——labelMaps 跨列共享保留语义）
  */
 export function deleteColumn(args: { columnId: string }): void {
   resolveColumn(args.columnId);
@@ -272,15 +200,6 @@ export function deleteColumn(args: { columnId: string }): void {
     s.columns = s.columns.filter((c) => c.id !== args.columnId);
     s.labelMaps = s.labelMaps.filter((m) => m.columnId !== args.columnId);
   });
-  // SQLite 镜像（best-effort；columnLabelMapping FK CASCADE 旧行为由 SQLite 处理）
-  try {
-    getDb().delete(boardColumns).where(eq(boardColumns.id, args.columnId)).run();
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), columnId: args.columnId },
-      'deleteColumn: SQLite delete failed (non-fatal)',
-    );
-  }
 }
 
 // ============================================================
@@ -299,7 +218,6 @@ export function mapLabel(args: {
   const store = getLocalStore();
   const { projectId } = resolveColumn(args.columnId);
 
-  // 检查同一 label 是否已绑别列
   const conflict = findLabelMapByProjectAndLabelWithStore(store.get(), {
     projectId,
     giteaLabelId: String(args.giteaLabelId),
@@ -313,7 +231,6 @@ export function mapLabel(args: {
     });
   }
 
-  // upsert：同 (columnId, giteaLabelId) 直接跳过
   const existing = findLabelMapByColumnAndLabelWithStore(store.get(), {
     columnId: args.columnId,
     giteaLabelId: String(args.giteaLabelId),
@@ -330,28 +247,8 @@ export function mapLabel(args: {
     store.mutate((s) => {
       s.labelMaps.push(newMap);
     });
-    // SQLite 镜像（best-effort）
-    try {
-      getDb()
-        .insert(columnLabelMapping)
-        .values({
-          id: newMap.id,
-          columnId: newMap.columnId,
-          repoProjectId: projectId,
-          giteaLabelId: newMap.giteaLabelId,
-          giteaLabelName: newMap.giteaLabelName,
-          createdAt: new Date(newMap.createdAt),
-        })
-        .run();
-    } catch (err) {
-      logger.error(
-        { err: err instanceof Error ? err.message : String(err), id: newMap.id },
-        'mapLabel: SQLite insert failed (non-fatal)',
-      );
-    }
   }
 
-  // 返回新 DTO
   const refreshed = findColumnByIdWithStore(store.get(), args.columnId)!;
   return toColumnDto(refreshed, listColumnLabels(args.columnId));
 }
@@ -368,24 +265,6 @@ export function unmapLabel(args: { columnId: string; giteaLabelId: number }): Co
         !(m.columnId === args.columnId && m.giteaLabelId === String(args.giteaLabelId)),
     );
   });
-
-  // SQLite 镜像（best-effort）
-  try {
-    getDb()
-      .delete(columnLabelMapping)
-      .where(
-        and(
-          eq(columnLabelMapping.columnId, args.columnId),
-          eq(columnLabelMapping.giteaLabelId, String(args.giteaLabelId)),
-        ),
-      )
-      .run();
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), columnId: args.columnId, giteaLabelId: args.giteaLabelId },
-      'unmapLabel: SQLite delete failed (non-fatal)',
-    );
-  }
 
   const refreshed = findColumnByIdWithStore(store.get(), args.columnId)!;
   return toColumnDto(refreshed, listColumnLabels(args.columnId));

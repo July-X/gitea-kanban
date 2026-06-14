@@ -1,46 +1,17 @@
 /**
- * Drizzle schema barrel ——12 张业务表 +4 张基础设施表（ADR-0002 reset）
+ * Gitea 缓存层 schema（ADR-0003 Phase 3 业务表剥离后）
  *
- *实体关系：docs/design/02-architecture.md §4.1 + docs/adr/0002-board-data-source-reset.md
- * DDL： drizzle/0001_reset_board_data_source.sql
+ * 业务表（users / giteaAccounts / giteaUser / repoProjects / boardColumns /
+ * columnLabelMapping / starredBranches / prefs）已**全部**迁到 localStore。
+ * 剩下的 Gitea 缓存层（cache-aside 模式）仍在 SQLite（Phase 3b 单独切到
+ * 文件 JSON 缓存）。
  *
- * 表清单（业务实体12 张）：
- *1. users —— 本地用户
- *2. gitea_accounts —— gitea 实例 + username（**不**含 token）
- *3. repo_projects —— 项目映射（每个加为"项目"的仓库一行）
- *4. board_columns —— gitea-kanban 本地看板列（**直接挂** repo_projects，无 boards 中间层）
- *5. column_label_mapping —— 列 ↔ gitea label 多对多映射
- *6. card_issue_link ——派生缓存：gitea issue 被哪条列"看到"（v1 可选保留）
- *7. gitea_refs ——关联的 git 对象（commit / pr / branch / issue）
- *8. starred_branches ——收藏分支
- *9. prefs —— 用户偏好（key-value）
- *10. undo_entries ——撤销栈
- *11. cache_entries ——通用缓存元数据
- *12. hook_deliveries —— webhook delivery 去重（v2启用）
+ * 当前 schema：
+ * - cacheEntries —— 通用资源级缓存（repos / branches / commits / pulls / timeline）
  *
- *基础设施表2 张（**不**计入业务表）：
- * - gitea_user —— denormalized gitea /user 信息（首屏快取）
- *
- * 注：原02 §4.1 ER 图把 gitea_user隐含在 gitea_accounts 里，但02 §5.3.9 的 UserDTO 是实时从 gitea拉，
- *存 denorm 表主要是为 auth.status 不读 keychain也能拿到 user 信息。**结构**没变设计，是表的补充。
- *
- * 历史（ADR-00022026-06-11）：
- * -删 boards（boards 与 repo_projects1:1重复，无意义中间层）
- * -删 cards（gitea issue 即卡片，存本地是 denormalize）
- * -删 card_links（label 即关联，无需额外表）
- * -改 board_columns：直接挂 repoProjectId，删 wipLimit / hideMergedPr
- * - 加 column_label_mapping：列 ↔ gitea label 多对多
- * - 加 card_issue_link：派生缓存（v1 可选保留）
+ * 边界（任务 prompt §严格边界）：
+ * - **不**碰 IPC 契约
+ * - **不**碰 src/renderer/**
+ * - **不**改 Gitea 集成
  */
-
-export * from './users';
-export * from './giteaAccounts';
-export * from './giteaUser';
-export * from './repoProjects';
-export * from './boardColumns';
-export * from './columnLabelMapping';
-// ADR-0003 Phase 2 drop: cardIssueLink / giteaRefs / undoEntries / hookDeliveries
-//   都是死表（零业务调用方 / 注释自述 v1 可选 / M6 切 in-memory 后已废 / 注释自述 v2 启用）
-export * from './starredBranches';
-export * from './prefs';
-export * from './cacheEntries';
+export * from './cacheEntries.js';

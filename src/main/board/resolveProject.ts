@@ -1,10 +1,7 @@
 /**
- * board 业务层通用 helper：通过 projectId 拿到 (giteaUrl, username, owner, repo)
+ * board 业务层通用 helper：通过 projectId 拿到 (giteaUrl, username, owner, repo, defaultBranch)
  *
- * 当前各 IPC handler（branches / commits / pulls / issues）都自带 resolveProject；
- * 抽到 board/move-card.ts 是因为 IPC handler 内是 private，board 业务层需要自己 resolve
- *
- * ADR-0003 Phase 2：走 localStore
+ * ADR-0003 Phase 3：走 localStore；返 defaultBranch（branches.ts 用来判 isDefault）
  */
 import { IpcError, IpcErrorCode } from '@shared/errors';
 import { getLocalStore } from '../local/state.js';
@@ -16,6 +13,7 @@ export function resolveProject(projectId: string): {
   username: string;
   owner: string;
   repo: string;
+  defaultBranch: string | null;
 } {
   const state = getLocalStore().get();
   const proj = findProjectByIdWithStore(state, projectId);
@@ -39,5 +37,6 @@ export function resolveProject(projectId: string): {
     username: acc.username,
     owner: proj.owner,
     repo: proj.name,
+    defaultBranch: proj.defaultBranch,
   };
 }

@@ -75,11 +75,7 @@ async function clearDevToken(giteaUrl: string, username: string): Promise<void> 
     }
   }
 }
-import { getDb } from '../cache/sqlite.js';
-import { giteaAccounts, giteaUser } from '../cache/schema/index.js';
-import { eq } from 'drizzle-orm';
 import { getLocalStore } from '../local/state.js';
-import { logger } from '../logger.js';
 import type {
   ConnectArgs,
   ConnectResult,
@@ -212,71 +208,8 @@ export async function authConnect(args: ConnectArgs): Promise<ConnectResult> {
     }
   });
 
-  // 3b. 写 SQLite（Phase 2 双写期：保持 SQLite 写，让 Phase 3 切读路径后能完整对比）
-  //     best-effort：失败 log 不抛（localStore 已落，SQLite 写失败下次启动 bootstrap 会修补）
-  try {
-    const db = getDb();
-    // upsert gitea_accounts
-    const existing = db
-      .select()
-      .from(giteaAccounts)
-      .where(eq(giteaAccounts.giteaUrl, args.giteaUrl))
-      .all()
-      .find((r) => r.username === user.login);
-    if (existing) {
-      db.update(giteaAccounts)
-        .set({ keychainService })
-        .where(eq(giteaAccounts.id, existing.id))
-        .run();
-    } else {
-      db.insert(giteaAccounts)
-        .values({
-          id: finalAccountId,
-          giteaUrl: args.giteaUrl,
-          username: user.login,
-          keychainService,
-          createdAt: now,
-        })
-        .run();
-    }
-    // upsert gitea_user
-    const existingUser = db
-      .select()
-      .from(giteaUser)
-      .where(eq(giteaUser.giteaAccountId, finalAccountId))
-      .all()[0];
-    if (existingUser) {
-      db.update(giteaUser)
-        .set({
-          giteaUserId: user.id,
-          login: user.login,
-          fullName: user.fullName ?? null,
-          email: user.email ?? null,
-          avatarUrl: user.avatarUrl ?? null,
-          updatedAt: now,
-        })
-        .where(eq(giteaUser.id, existingUser.id))
-        .run();
-    } else {
-      db.insert(giteaUser)
-        .values({
-          id: randomUUID(),
-          giteaAccountId: finalAccountId,
-          giteaUserId: user.id,
-          login: user.login,
-          fullName: user.fullName ?? null,
-          email: user.email ?? null,
-          avatarUrl: user.avatarUrl ?? null,
-          updatedAt: now,
-        })
-        .run();
-    }
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), giteaUrl: args.giteaUrl, username: user.login },
-      'authConnect: SQLite write failed (non-fatal in Phase 2 dual-write; localStore is authoritative)',
-    );
-  }
+  // 3b. SQLite 镜像已删（ADR-0003 Phase 3：业务表全走 localStore）
+
 
   // 4. 返回结果（**不**含 token）
   const accountDto: GiteaAccountDto = {
@@ -317,19 +250,7 @@ export async function authDisconnect(args: { giteaUrl: string }): Promise<void> 
   });
 
   // 4. 删 SQLite accounts（外键 cascade 会自动删 gitea_user / repo_projects 等）
-  //    Phase 2 双写期 best-effort：失败 log 不抛（localStore 已删，SQLite 写失败下次启动
-  //    bootstrap 会修补 —— 但 accounts 已被用户断开，bootstrap 不会重新加；需要人工介入）
-  try {
-    const db = getDb();
-    for (const id of removeIds) {
-      db.delete(giteaAccounts).where(eq(giteaAccounts.id, id)).run();
-    }
-  } catch (err) {
-    logger.error(
-      { err: err instanceof Error ? err.message : String(err), giteaUrl: args.giteaUrl, count: removeIds.size },
-      'authDisconnect: SQLite delete failed (localStore is authoritative in Phase 2)',
-    );
-  }
+  // SQLite accounts 镜像已删（ADR-0003 Phase 3：业务表全走 localStore）
 }
 
 /** auth.status：纯读 localStore，**不**读 keychain / **不**调 gitea（ADR-0003 Phase 2）

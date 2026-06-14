@@ -20,7 +20,6 @@ import { createMainWindow, destroyMainWindow, installCspHeader } from './window.
 import { registerAllIpcHandlers, unregisterAllIpcHandlers } from './ipc/index.js';
 import { initSqlite, closeSqlite } from './cache/sqlite.js';
 import { initLocalStore, closeLocalStore } from './local/state.js';
-import { bootstrapAllFromSqlite } from './local/bootstrap.js';
 import { authStatus } from './gitea/auth.js';
 import { getSyncRunner } from './sync/runner.js';
 import { APP_NAME, APP_SINGLE_INSTANCE_LOCK_NAME } from '@shared/constants';
@@ -89,21 +88,10 @@ app.on('ready', async () => {
     await initSqlite();
     logger.info('sqlite initialized');
 
-    // 2a-bis. 初始化 localStore（ADR-0003 Phase 1：双写期，SQLite 仍是 source of truth）
+    // 2a-bis. 初始化 localStore（ADR-0003 Phase 3：localStore 是唯一 source of truth）
     logger.info('initLocalStore start');
     await initLocalStore();
     logger.info('localStore initialized');
-
-    // 2a-ter. 灌全表 mirror：启动期把 SQLite 的 6 张业务表同步到 localStore
-    // 失败只 warn，不影响启动（Phase 2 验证期允许 bootstrap 部分失败）
-    try {
-      await bootstrapAllFromSqlite();
-    } catch (err) {
-      logger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
-        'bootstrap all from sqlite failed (non-fatal in Phase 2)',
-      );
-    }
 
     // 2b. 注册 IPC
     logger.info('registerAllIpcHandlers start');

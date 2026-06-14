@@ -28,7 +28,6 @@
 
 import { ipcMain } from 'electron';
 // (touch)
-import { eq, and, inArray } from 'drizzle-orm';
 import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
 import {
   IpcChannel,
@@ -48,9 +47,7 @@ import {
   type UserUndoStatusResult,
 } from './schema.js';
 import { logger } from '../logger.js';
-import { getDb } from '../cache/sqlite.js';
-import { prefs } from '../cache/schema/index.js';
-import { setPrefsWithMirror } from '../local/prefs-mirror.js';
+import { getLocalStore } from '../local/state.js';
 import { dispatch, registerOp } from '../sync/dispatch.js';
 import { undoOne, redoOne, undoStatus } from '../board/undo.js';
 
@@ -115,23 +112,12 @@ function wrapIpc<TArgs, TResult>(
  * 不抛 NOT_FOUND：未设置 ≠ 不存在；UI 层默认空即可。
  */
 function getPrefs(args: UserPrefsGetArgs): UserPrefsGetResult {
-  const db = getDb();
-  const rows = db
-    .select({ key: prefs.key, value: prefs.value })
-    .from(prefs)
-    .where(and(eq(prefs.userId, LOCAL_USER_ID), inArray(prefs.key, args.keys)))
-    .all();
-
+  // ADR-0003 Phase 3：读 localStore（prefs 表已删）
+  const state = getLocalStore().get();
   const result: UserPrefsGetResult = {};
-  for (const row of rows) {
-    try {
-      result[row.key] = JSON.parse(row.value);
-    } catch {
-      // 烂数据：跳过这一条（不影响其他 key）
-      logger.warn(
-        { key: row.key, userId: LOCAL_USER_ID },
-        'prefs row has invalid JSON value; skipping',
-      );
+  for (const key of args.keys) {
+    if (key in state.prefs) {
+      result[key] = state.prefs[key];
     }
   }
   return result;
@@ -196,7 +182,12 @@ export function registerUserIpc(): void {
   // ADR-0003 Phase 3：注册 op（纯本地）
   registerOp<{ entries: Record<string, unknown> }, void>('user.prefs.set', {
     execute: async ({ entries }) => {
-      await setPrefsWithMirror(entries);
+      if (Object.keys(entries).length === 0) return;
+      const store = getLocalStore();
+      store.mutate((s) => {
+        s.prefs = { ...s.prefs, ...entries };
+      });
+      logger.debug({ keys: Object.keys(entries) }, 'prefs: written to localStore');
     },
   });
 

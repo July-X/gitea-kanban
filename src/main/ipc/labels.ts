@@ -8,7 +8,7 @@
  */
 
 import { ipcMain } from 'electron';
-import { eq } from 'drizzle-orm';
+import { resolveProject } from "../board/resolveProject.js";
 import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
 import {
  IpcChannel,
@@ -20,9 +20,6 @@ import {
  type LabelDto,
 } from './schema.js';
 import { logger } from '../logger.js';
-import { getDb } from '../cache/sqlite.js';
-import { repoProjects } from '../cache/schema/repoProjects.js';
-import { giteaAccounts } from '../cache/schema/giteaAccounts.js';
 import {
  listGiteaLabels,
  createGiteaLabel,
@@ -68,43 +65,6 @@ function wrapIpc<TArgs, TResult>(
  throw i.toJSON();
  }
  });
-}
-
-function resolveProject(projectId: string): {
- giteaUrl: string;
- username: string;
- owner: string;
- repo: string;
-} {
- const db = getDb();
- const row = db
- .select()
- .from(repoProjects)
- .where(eq(repoProjects.id, projectId))
- .all()[0];
- if (!row) {
- throw new IpcError({
- code: IpcErrorCode.NOT_FOUND,
- message: '项目不存在',
- });
- }
- const acc = db
- .select()
- .from(giteaAccounts)
- .where(eq(giteaAccounts.id, row.giteaAccountId))
- .all()[0];
- if (!acc) {
- throw new IpcError({
- code: IpcErrorCode.NOT_FOUND,
- message: 'gitea账户不存在',
- });
- }
- return {
- giteaUrl: acc.giteaUrl,
- username: acc.username,
- owner: row.owner,
- repo: row.name,
- };
 }
 
 async function listLabelsHandler(args: ListLabelsArgs): Promise<ListLabelsResp> {

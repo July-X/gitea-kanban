@@ -6,6 +6,7 @@
  * - members.list → 列仓库成员（gitea /repos/{owner}/{repo}/collaborators + per-user permission）
  *
  * 关键设计（a3 拍板）：
+import { resolveProject } from "../board/resolveProject.js";
  * - 出参 = `CollaboratorDto[]` 数组，**不**包 `{items, hasMore}`（frontend `useMemberStore.list`
  *   已写 `as MemberDto[]` 直读数组；保持对齐；见 schema.ts ListMembersRespSchema 注释）
  * - v1 不缓存（gitea 端 /collaborators 不分页，单次拉 N+1 permission；命中 < 100 / repo，
@@ -17,7 +18,6 @@
  */
 
 import { ipcMain } from 'electron';
-import { eq } from 'drizzle-orm';
 import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
 import {
   IpcChannel,
@@ -26,10 +26,8 @@ import {
   type ListMembersResp,
 } from './schema.js';
 import { logger } from '../logger.js';
-import { getDb } from '../cache/sqlite.js';
-import { repoProjects } from '../cache/schema/repoProjects.js';
-import { giteaAccounts } from '../cache/schema/giteaAccounts.js';
 import { listRepoCollaborators } from '../gitea/repos.js';
+import { resolveProject } from '../board/resolveProject.js';
 
 /** 统一包装：与其它 IPC handler 一致 */
 function wrapIpc<TArgs, TResult>(
@@ -74,45 +72,6 @@ function wrapIpc<TArgs, TResult>(
 }
 
 /** 通过 projectId 找到 (giteaUrl, username, owner, repo) */
-function resolveProject(projectId: string): {
-  giteaUrl: string;
-  username: string;
-  owner: string;
-  repo: string;
-} {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(repoProjects)
-    .where(eq(repoProjects.id, projectId))
-    .all()[0];
-  if (!row) {
-    throw new IpcError({
-      code: IpcErrorCode.NOT_FOUND,
-      message: '项目不存在',
-      hint: '请先在仓库列表中重新添加该仓库为项目',
-    });
-  }
-  const acc = db
-    .select()
-    .from(giteaAccounts)
-    .where(eq(giteaAccounts.id, row.giteaAccountId))
-    .all()[0];
-  if (!acc) {
-    throw new IpcError({
-      code: IpcErrorCode.NOT_FOUND,
-      message: 'gitea 账户不存在（项目孤儿）',
-      hint: '请重新连接 gitea 账户',
-    });
-  }
-  return {
-    giteaUrl: acc.giteaUrl,
-    username: acc.username,
-    owner: row.owner,
-    repo: row.name,
-  };
-}
-
 // ============================================================
 // ===== members.list handler =====
 // ============================================================

@@ -36,8 +36,8 @@
 | 时间轴 | **AntV X6 3.1.7** + **@antv/x6-vue-shape** | 图编辑引擎 + Vue 官方桥 |
 | 图标 | **lucide-vue-next** | |
 | 校验 | **Zod 3.23.8** | IPC 边界强制校验 |
-| 本地数据库 | **better-sqlite3 12.10.0** + **Drizzle ORM 0.45.2** | 文件路径见 §8.2 |
-| 数据库迁移 | **drizzle-kit 0.31.10** | 产物在 `drizzle/` |
+| 本地存储 | **electron-store 11.0.2**（业务态）+ **better-sqlite3 12.10.0 + Drizzle ORM 0.45.2**（Gitea 缓存层，Phase 3 唯一保留） | 业务态 → localStore.state.json；Gitea 缓存 → cache_entries（SQLite） |
+| 同步队列 | **queue.jsonl**（append-only，JSONL） | 离线写 op 持久化（ADR-0003 Phase 3） |
 | Gitea 客户端 | **gitea-js 1.23.0** | swagger 生成 TS client（ADR-0002） |
 | 密钥存储 | **@napi-rs/keyring 1.3.0** | 替代已归档的 keytar（ADR-0001） |
 | 日志 | **pino 9.5.0** + pino-pretty | 主进程唯一日志出口 |
@@ -179,20 +179,12 @@ pnpm lint:fix
 pnpm format            # prettier --write "src/**/*.{ts,tsx,json,css,md}"
 pnpm format:check
 pnpm check:no-jargon   # 零术语检查（**没跑过不准 merge**）
-pnpm verify:state-consistency  # ADR-0003 Phase 1：SQLite prefs ↔ localStore prefs 对比（--auto-repair / --sandbox）
-
-# 数据库
-pnpm db:generate       # drizzle-kit generate
-pnpm db:migrate        # tsx scripts/migrate.ts
-pnpm db:seed           # tsx scripts/seed-kanban-demo.ts
-pnpm db:studio         # drizzle-kit studio
 
 # native binding（better-sqlite3 对齐 Electron ABI）
 pnpm rebuild:native
 ```
 
 ### 本地开发首次 setup
-
 1. `nvm use` 或保证 Node >= 20
 2. `pnpm install`
 3. `pnpm rebuild:native`（postinstall 会自动跑，如失败可手动再跑）

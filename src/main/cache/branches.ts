@@ -1,27 +1,25 @@
 /**
- * 分支（starred_branches + branches 缓存）本地层
+ * 分支（starred_branches 业务态 + branches Gitea 缓存）本地层
  *
- * 职责（02-architecture.md §5.3.2 / §6.3）：
- * - branches.list 列表缓存 1 min（写在 cache_entries 表）
- * - branches.star / unstar：纯本地 starred_branches UPSERT/DELETE
+ * 职责（02-architecture.md §5.3.2 + ADR-0003 Phase 3）：
+ * - branches.list 列表缓存 1 min（写在 cache_entries 表，Gitea 缓存层）
+ * - branches.star / unstar：纯本地 starred_branches（**走 localStore**，Phase 3 删 SQLite 镜像）
  * - 写操作（create / rename / delete）失效 'branches' 缓存
  *
  * 关键约束：
  * - **不**调 gitea API（gitea 调用在 src/main/gitea/branches.ts）
  * - **不**修改表结构
  *
- * ADR-0003 Phase 2：starred_branches 走 localStore 优先；gitea 缓存（cache_entries）
- * 继续走 SQLite（cache-aside 模式，本期不切）。
+ * ADR-0003 Phase 3：业务态 starred_branches 走 localStore（**无** SQLite 镜像）；
+ *   gitea 缓存层（cache_entries）继续走 SQLite（Phase 3b 单独切）
  */
 
 import { randomUUID } from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from './sqlite.js';
-import { starredBranches } from './schema/starredBranches.js';
 import { cacheEntries } from './schema/cacheEntries.js';
 import { getLocalStore } from '../local/state.js';
 import { listStarredBranchesWithStore } from '../local/starred-branches.js';
-import { logger } from '../logger.js';
 
 const CACHE_RESOURCE = 'branches';
 /** branches.list 缓存 TTL：1 min（任务 prompt §关键约束 4） */
@@ -64,26 +62,9 @@ export function setStarred(args: {
       store.mutate((s) => {
         s.starredBranches.push(newRow);
       });
-      // SQLite 镜像（best-effort）
-      try {
-        getDb()
-          .insert(starredBranches)
-          .values({
-            id: newRow.id,
-            repoProjectId: args.projectId,
-            branch: args.branch,
-            createdAt: new Date(newRow.createdAt),
-          })
-          .run();
-      } catch (err) {
-        logger.error(
-          { err: err instanceof Error ? err.message : String(err), id: newRow.id },
-          'setStarred: SQLite insert failed (non-fatal in Phase 2)',
-        );
-      }
     }
   } else {
-    // 删除：localStore 优先
+    // 删除：localStore
     const existingLocal = store
       .get()
       .starredBranches.find(
@@ -95,23 +76,6 @@ export function setStarred(args: {
           (s) => !(s.projectId === args.projectId && s.branch === args.branch),
         );
       });
-    }
-    // SQLite 镜像（best-effort）
-    try {
-      getDb()
-        .delete(starredBranches)
-        .where(
-          and(
-            eq(starredBranches.repoProjectId, args.projectId),
-            eq(starredBranches.branch, args.branch),
-          ),
-        )
-        .run();
-    } catch (err) {
-      logger.error(
-        { err: err instanceof Error ? err.message : String(err), projectId: args.projectId, branch: args.branch },
-        'setStarred: SQLite delete failed (non-fatal in Phase 2)',
-      );
     }
   }
   // star 是本地操作；不失效 gitea 资源缓存（gitea 不知道这回事）

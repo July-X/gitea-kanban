@@ -1,11 +1,21 @@
 /**
  * better-sqlite3 单例 + Drizzle ORM
  *
- * 铁律（02-architecture.md §9.3 路径遍历防护）：
- * - DB 路径**永远**来自 app.getPath('userData') 或 GITEA_KANBAN_DATA_DIR 环境变量
- *   —— 不接受任何用户输入的绝对路径
- * - 不存在则建（mkdir 0700）
+ * ADR-0003 Phase 3 后职责：
+ * - **仅**承担 Gitea 缓存层（cache-aside 模式）
+ * - 业务表（prefs / gitea_accounts / ...）已**全部**迁到 localStore.state.json
+ *
+ * 路径策略（AGENTS §8.2）：
+ * - 环境变量 GITEA_KANBAN_DATA_DIR（绝对路径）→ 优先
+ * - 兜底 ~/.gitea-kanban/kanban.db
+ * - macOS SIP 限制时 fallback /tmp/gitea-kanban/main/kanban.db
+ *
+ * 边界：
+ * - **不**做业务表 CRUD（业务表已迁 localStore）
+ * - **不**接受用户输入的绝对路径（白名单：env 或 ~/.gitea-kanban）
  * - 测试用 _setSqlitePathForTest() 显式指定（**只**给 vitest 用）
+ *
+ * 后续 Phase 3b 切到文件 JSON 缓存时本文件整体可删（届时 better-sqlite3 也走）。
  */
 
 import { existsSync, mkdirSync, openSync, closeSync, unlinkSync } from 'node:fs';
@@ -13,7 +23,6 @@ import { join, isAbsolute } from 'node:path';
 import os from 'node:os';
 import Database, { type Database as BetterSqliteDb } from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { logger } from '../logger.js';
 import { SQLITE_DB_FILENAME } from '@shared/constants';
 import * as schema from './schema/index.js';
@@ -46,19 +55,19 @@ export function resolveDbPath(): string {
   return join(dataDir, SQLITE_DB_FILENAME);
 }
 
-/** 应用启动时调用：开库 + 跑迁移 */
+/**
+ * 应用启动时调用：开库 + 跑 Gitea 缓存层建表（cacheEntries 唯一）
+ *
+ * 注意：业务表（9 张）已**全部**迁到 localStore —— 这里只建 cacheEntries
+ * 业务表迁移的 drizzle/ 目录已删
+ */
 export async function initSqlite(): Promise<void> {
   if (rawDb) return; // idempotent
 
-  // 2026-06-12 修复：macOS 用户目录 SIP 限制（~/.gitea-kanban/）时
-  // new Database() 不会立即报错，但 journal_mode=WAL 需要建 .wal/.shm 文件
-  // → 写 EPERM → 整个 pragma 失败。所以不走"open 才 fallback"逻辑
-  // 而是先 probe 写权限再 open
-
+  // 2026-06-12 修复：macOS 用户目录 SIP 限制时先 probe 再 open
   const dbPath = resolveDbPath();
   const dbDir = join(dbPath, '..');
 
-  // 1. probe 写权限（openSync + closeSync）
   let probeOk = false;
   try {
     if (!existsSync(dbDir)) {
@@ -70,7 +79,6 @@ export async function initSqlite(): Promise<void> {
     unlinkSync(probePath);
     probeOk = true;
   } catch (err) {
-    // EPERM/EACCES：macOS SIP 限制某些用户目录 → fallback
     logger.warn({ err, dbDir }, 'sqlite dir probe failed, falling back to /tmp/gitea-kanban');
   }
 
@@ -85,10 +93,10 @@ export async function initSqlite(): Promise<void> {
     rawDb = null;
     return initSqliteWithFallback();
   }
-  await applyPragmasAndMigrate();
+  applyPragmasAndInitSchema();
 }
 
-/** EPERM fallback：把 db 放到 /tmp/gitea-kanban（用户显式数据迁过来时改 GITEA_KANBAN_DATA_DIR） */
+/** EPERM fallback：把 db 放到 /tmp/gitea-kanban */
 async function initSqliteWithFallback(): Promise<void> {
   const fallbackRoot = '/tmp/gitea-kanban';
   const fallbackDir = join(fallbackRoot, 'main');
@@ -96,65 +104,45 @@ async function initSqliteWithFallback(): Promise<void> {
   const fallbackPath = join(fallbackDir, SQLITE_DB_FILENAME);
   logger.info({ fallbackPath }, 'sqlite fallback path in use');
   rawDb = new Database(fallbackPath);
-  await applyPragmasAndMigrate();
+  applyPragmasAndInitSchema();
 }
 
-async function applyPragmasAndMigrate(): Promise<void> {
+/**
+ * 设置 pragmas + 建 Gitea 缓存层 schema
+ *
+ * 业务表已迁 localStore；这里只建 cacheEntries（Gitea 缓存层）
+ * 用 better-sqlite3 raw exec 而非 drizzle migrate（业务 drizzle 迁移已删）
+ */
+function applyPragmasAndInitSchema(): void {
   if (!rawDb) return;
   rawDb.pragma('journal_mode = WAL');
   rawDb.pragma('foreign_keys = ON');
   rawDb.pragma('synchronous = NORMAL');
 
+  // cacheEntries 表 DDL（Gitea 缓存层唯一保留的表）
+  // 注：用 raw SQL 而非 drizzle 迁移（drizzle-kit 已删，业务表 drizzle schema 已删）
+  // schema：payload TEXT + ttl_seconds INTEGER（与 cacheEntries.ts 保持一致）
+  rawDb.exec(`
+    CREATE TABLE IF NOT EXISTS cache_entries (
+      id TEXT PRIMARY KEY,
+      repo_project_id TEXT,
+      resource TEXT NOT NULL,
+      key TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL,
+      ttl_seconds INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_res_key
+      ON cache_entries (repo_project_id, resource, key);
+    CREATE INDEX IF NOT EXISTS idx_fetched
+      ON cache_entries (fetched_at);
+  `);
+
   dbInstance = drizzle(rawDb, { schema });
-
-  try {
-    migrate(dbInstance, { migrationsFolder: getMigrationsFolder() });
-    logger.info({ dbPath: rawDb.name }, 'sqlite migrations applied');
-  } catch (err) {
-    logger.fatal({ err, dbPath: rawDb.name }, 'sqlite migration failed');
-    throw err;
-  }
-
-  // Seed local-user row if missing（FK 约束：prefs.user_id → users.id）
-  // user.ts / preferences.ts 都用 LOCAL_USER_ID = 'local-user'
-  // **M6 拍板保留**：prefs 跟 app user（设备级），不按 gitea account 切分
-  // 见 notes/m6-prefs-schema-decision.md（方案 A）
-  seedLocalUser();
+  logger.info({ dbPath: rawDb.name }, 'sqlite (cache layer) ready');
 }
 
-/**
- * 确保 users 表有 local-user 行（FK 约束兜底）
- *
- * 多处 IPC handler（user.prefs.* / preferences.theme.*）用 LOCAL_USER_ID = 'local-user' 写 prefs 表，
- * 但 users 表 FK 引用 users.id —— 如果 users 表空（迁移只建表不 seed），
- * prefs INSERT 会抛 SQLITE_CONSTRAINT_FOREIGNKEY → DATABASE_WRITE_FAILED。
- *
- * **M6 拍板保留**：prefs 跟 app user 走（设备级），**不**按 gitea account 切分
- * 拍板记录：notes/m6-prefs-schema-decision.md（方案 A）
- *
- * 调用时机：applyPragmasAndMigrate 之后（migration 跑完、schema 建好）
- */
-function seedLocalUser(): void {
-  if (!rawDb) return;
-  const existing = rawDb
-    .prepare('SELECT id FROM users WHERE id = ?')
-    .get('local-user');
-  if (existing) return;
-
-  rawDb
-    .prepare('INSERT INTO users (id, display_name, created_at) VALUES (?, ?, ?)')
-    .run('local-user', 'Local User', Math.floor(Date.now() / 1000));
-  logger.info('seeded local-user row in users table');
-}
-
-function getMigrationsFolder(): string {
-  // 开发：cwd = 项目根
-  // 生产：asar 内；electron-vite 把 drizzle/ 复制到 out/...，需要 locate
-  // 简化：cwd/drizzle（M0 测试覆盖；生产 asar 路径后续 Plan 14 调）
-  return join(process.cwd(), 'drizzle');
-}
-
-/** 取 drizzle instance（业务代码用） */
+/** 取 drizzle instance（Gitea 缓存层业务代码用） */
 export function getDb(): BetterSQLite3Database<typeof schema> {
   if (!dbInstance) {
     throw new Error('sqlite not initialized; call initSqlite() first');
@@ -172,7 +160,7 @@ export function closeSqlite(): void {
   }
 }
 
-/** 取 raw better-sqlite3 instance（迁移 / integrity check 用） */
+/** 取 raw better-sqlite3 instance（integrity check 等维护操作） */
 export function getRawDb(): BetterSqliteDb {
   if (!rawDb) {
     throw new Error('sqlite not initialized');
@@ -180,7 +168,7 @@ export function getRawDb(): BetterSqliteDb {
   return rawDb;
 }
 
-/** 测试用：显式注入 db 路径（必须是绝对路径，且仅在 initSqlite 前调） */
+/** 测试用：显式注入 db 路径 */
 export function _setSqlitePathForTest(path: string): void {
   if (rawDb) {
     throw new Error('cannot change db path after initSqlite()');
@@ -197,5 +185,5 @@ export async function _resetSqliteForTest(): Promise<void> {
   testDbPath = null;
 }
 
-/** 重新导出 schema，方便业务层 import */
+/** 重新导出 schema */
 export { schema };

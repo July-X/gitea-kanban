@@ -44,10 +44,7 @@ import {
 import { getPullsCache, setPullsCache, PULLS_LIST_TTL_SECONDS } from '../cache/pulls.js';
 import { getTimelineCache, setTimelineCache, makeTimelineCacheKey } from '../cache/timeline.js';
 import { buildTimeline } from '../gitea/timeline.js';
-import { repoProjects } from '../cache/schema/repoProjects.js';
-import { giteaAccounts } from '../cache/schema/giteaAccounts.js';
-import { eq } from 'drizzle-orm';
-import { getDb } from '../cache/sqlite.js';
+import { resolveProject } from '../board/resolveProject.js';
 import { logger } from '../logger.js';
 
 /** 统一包装：parse → handler → error → IpcError（与 branches.ts / repos.ts 保持一致） */
@@ -92,45 +89,7 @@ function wrapIpc<TArgs, TResult>(
   });
 }
 
-/** 通过 projectId 找到 (giteaUrl, username, owner, repo) */
-function resolveProject(projectId: string): {
-  giteaUrl: string;
-  username: string;
-  owner: string;
-  repo: string;
-} {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(repoProjects)
-    .where(eq(repoProjects.id, projectId))
-    .all()[0];
-  if (!row) {
-    throw new IpcError({
-      code: IpcErrorCode.NOT_FOUND,
-      message: '项目不存在',
-      hint: '请先在仓库列表中重新添加该仓库为项目',
-    });
-  }
-  const acc = db
-    .select()
-    .from(giteaAccounts)
-    .where(eq(giteaAccounts.id, row.giteaAccountId))
-    .all()[0];
-  if (!acc) {
-    throw new IpcError({
-      code: IpcErrorCode.NOT_FOUND,
-      message: 'gitea 账户不存在（项目孤儿）',
-      hint: '请重新连接 gitea 账户',
-    });
-  }
-  return {
-    giteaUrl: acc.giteaUrl,
-    username: acc.username,
-    owner: row.owner,
-    repo: row.name,
-  };
-}
+/** 通过 projectId 找到 (giteaUrl, username, owner, repo) —— ADR-0003 Phase 3 统一调 board/resolveProject.ts */
 
 /** 带缓存的拉取 PR 列表（供 commits.timeline 复用 pulls.list 缓存逻辑） */
 async function listGiteaPullsCached(
