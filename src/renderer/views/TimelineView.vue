@@ -113,18 +113,26 @@ async function loadBranches(): Promise<void> {
   }
 }
 
-watch(() => branch.pendingTimelineFocus, async (name) => {
+watch(() => branch.pendingTimelineFocus, (name) => {
   if (!name || !activeProjectId.value) return;
   branch.pendingTimelineFocus = null;
   if (branches.value.some((b) => b.name === name)) {
     selectedBranches.value = new Set<string>([name]);
-    await loadTimeline();
+    scheduleLoadTimeline();
   }
 });
+
+/** 防抖 timer：快速切换多个分支时合并为一次 loadTimeline */
+let loadTimelineTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function loadTimeline(): Promise<void> {
   if (!activeProjectId.value) return;
   if (selectedBranches.value.size === 0) return;
+  // 取消正在 pending 的防抖调用，避免重复请求
+  if (loadTimelineTimer) {
+    clearTimeout(loadTimelineTimer);
+    loadTimelineTimer = null;
+  }
   loading.value = true;
   localError.value = null;
   try {
@@ -142,14 +150,26 @@ async function loadTimeline(): Promise<void> {
   }
 }
 
+function scheduleLoadTimeline(delayMs = 250): void {
+  if (loadTimelineTimer) clearTimeout(loadTimelineTimer);
+  loadTimelineTimer = setTimeout(() => {
+    loadTimelineTimer = null;
+    void loadTimeline();
+  }, delayMs);
+}
+
 function toggleBranch(name: string): void {
   const next = new Set(selectedBranches.value);
   if (next.has(name)) next.delete(name);
   else next.add(name);
   selectedBranches.value = next;
   if (next.size > 0) {
-    void loadTimeline();
+    scheduleLoadTimeline();
   } else {
+    if (loadTimelineTimer) {
+      clearTimeout(loadTimelineTimer);
+      loadTimelineTimer = null;
+    }
     timeline.value = null;
   }
 }
@@ -558,24 +578,6 @@ function formatRelative(iso: string): string {
   return `${Math.floor(mo / 12)} 年前`;
 }
 
-// ===== 临时性能测试入口（CDP 注入用）=====
-import { getCurrentInstance, onMounted } from 'vue';
-const __timelineInst = getCurrentInstance();
-onMounted(() => {
-  if (__timelineInst && typeof window !== 'undefined') {
-    (window as unknown as Record<string, unknown>).__timelineVm = __timelineInst.proxy;
-  }
-});
-defineExpose({
-  branches,
-  timeline,
-  selectedBranches,
-  sortedNodes,
-  commitRows,
-  totalRows,
-  loadTimeline,
-  loadBranches,
-});
 </script>
 
 <template>

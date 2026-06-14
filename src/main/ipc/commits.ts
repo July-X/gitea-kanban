@@ -30,15 +30,18 @@ import {
   type TimelineArgs,
   type TimelineDto,
   type TimelinePR,
+  type PullDto,
 } from './schema.js';
 import { listGiteaCommits, getGiteaCommit } from '../gitea/commits.js';
 import { listGiteaPulls } from '../gitea/pulls.js';
 import {
   getCommitsCache,
   setCommitsCache,
+  COMMITS_LIST_TTL_SECONDS,
   getLinkedCardsForCommits,
   getLinkedCardsForCommit,
 } from '../cache/commits.js';
+import { getPullsCache, setPullsCache, PULLS_LIST_TTL_SECONDS } from '../cache/pulls.js';
 import { getTimelineCache, setTimelineCache, makeTimelineCacheKey } from '../cache/timeline.js';
 import { buildTimeline } from '../gitea/timeline.js';
 import { repoProjects } from '../cache/schema/repoProjects.js';
@@ -129,6 +132,39 @@ function resolveProject(projectId: string): {
   };
 }
 
+/** 带缓存的拉取 PR 列表（供 commits.timeline 复用 pulls.list 缓存逻辑） */
+async function listGiteaPullsCached(
+  projectId: string,
+  proj: { giteaUrl: string; username: string; owner: string; repo: string },
+  state: 'open' | 'closed',
+  limit: number,
+): Promise<{ items: PullDto[]; hasMore: boolean }> {
+  const cacheKey = `state=${state}|page=1|limit=${limit}`;
+  const cached = getPullsCache({ projectId, cacheKey });
+  if (cached) {
+    try {
+      return JSON.parse(cached) as { items: PullDto[]; hasMore: boolean };
+    } catch {
+      // 缓存损坏 = miss
+    }
+  }
+  const r = await listGiteaPulls({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    state,
+    limit,
+  });
+  setPullsCache({
+    projectId,
+    cacheKey,
+    payload: JSON.stringify(r),
+    ttlSeconds: PULLS_LIST_TTL_SECONDS,
+  });
+  return r;
+}
+
 function makeListCacheKey(args: ListCommitsArgs): string {
   return [
     `project=${args.projectId}`,
@@ -139,6 +175,23 @@ function makeListCacheKey(args: ListCommitsArgs): string {
     `until=${args.until ?? ''}`,
     `page=${args.page}`,
     `limit=${args.limit}`,
+  ].join('|');
+}
+
+/** commits.timeline 内部按分支缓存的 key */
+function makeBranchCommitsCacheKey(
+  projectId: string,
+  branch: string,
+  since: string | undefined,
+  until: string | undefined,
+  limit: number,
+): string {
+  return [
+    `project=${projectId}`,
+    `sha=${branch}`,
+    `since=${since ?? ''}`,
+    `until=${until ?? ''}`,
+    `limit=${limit}`,
   ].join('|');
 }
 
@@ -296,9 +349,26 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
   // 2. resolve project
   const proj = resolveProject(args.projectId);
 
-  // 3. 对每个 branch 拉 commits
+  // 3. 对每个 branch 拉 commits，优先命中分支级缓存（避免重复选择同一分支时反复请求 gitea）
   const commitsByBranch: Record<string, CommitDto[]> = {};
   for (const branch of args.branches) {
+    const branchCacheKey = makeBranchCommitsCacheKey(
+      args.projectId,
+      branch,
+      args.since,
+      args.until,
+      args.maxNodes,
+    );
+    const cachedBranch = getCommitsCache({ projectId: args.projectId, cacheKey: branchCacheKey });
+    if (cachedBranch) {
+      try {
+        const parsed = JSON.parse(cachedBranch) as { items: CommitDto[] };
+        commitsByBranch[branch] = parsed.items;
+        continue;
+      } catch {
+        // 缓存损坏 = miss，继续走 gitea
+      }
+    }
     const r = await listGiteaCommits({
       giteaUrl: proj.giteaUrl,
       username: proj.username,
@@ -311,26 +381,18 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
       limit: args.maxNodes, // 拉够 maxNodes 即可（任务 prompt §关键约束 12）
     });
     commitsByBranch[branch] = r.items;
+    setCommitsCache({
+      projectId: args.projectId,
+      cacheKey: branchCacheKey,
+      payload: JSON.stringify({ items: r.items }),
+      ttlSeconds: COMMITS_LIST_TTL_SECONDS,
+    });
   }
 
   // 4. 拉 PR 列表（state='all' 拿全 + 改 state 适配 schema 限制）
   // 02 §5.3.5 PullStateSchema 只接受 'open' | 'closed' → 拆两次合并
-  const prsOpen = await listGiteaPulls({
-    giteaUrl: proj.giteaUrl,
-    username: proj.username,
-    owner: proj.owner,
-    repo: proj.repo,
-    state: 'open',
-    limit: 100,
-  });
-  const prsClosed = await listGiteaPulls({
-    giteaUrl: proj.giteaUrl,
-    username: proj.username,
-    owner: proj.owner,
-    repo: proj.repo,
-    state: 'closed',
-    limit: 100,
-  });
+  const prsOpen = await listGiteaPullsCached(args.projectId, proj, 'open', 100);
+  const prsClosed = await listGiteaPullsCached(args.projectId, proj, 'closed', 100);
 
   // 转 TimelinePR 形态
   // a3 注：PullDto.state 现在含 'all'（PullStateSchema 加了 a3 'all' 字段），

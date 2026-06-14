@@ -1,5 +1,5 @@
 /**
- * commit / PR 缓存 + linkedCards 查询（v1 stub）
+ * commit / PR 缓存 + linkedCards 查询
  *
  * 职责（02-architecture.md §4.2 + §5.3.3 + §5.3.5 + §5.3.8）：
  * - 缓存 TTL 助手（commits 2 min / 5 min；pulls 30s）
@@ -14,6 +14,22 @@
  *
  * v2 决策：linkedCards 功能要么彻底砍（commit 跟卡片无强关联），要么改成"commit 跟 PR 关联"——待 v2 评估
  */
+
+import { randomUUID } from 'node:crypto';
+import { eq, and } from 'drizzle-orm';
+import { getDb } from './sqlite.js';
+import { cacheEntries } from './schema/cacheEntries.js';
+
+const CACHE_RESOURCE = 'commits';
+
+/** v1：commit list 缓存 TTL 2 min */
+export const COMMITS_LIST_TTL_SECONDS = 2 * 60;
+/** v1：commit get 缓存 TTL 5 min */
+export const COMMITS_GET_TTL_SECONDS = 5 * 60;
+
+// ============================================================
+// ===== linkedCards（v1 stub）=====
+// ============================================================
 
 /** v1 stub：linkedCards 查询永远返空 Map（commit 跟卡片没有直接关联） */
 export function getLinkedCardsForCommits(_args: {
@@ -48,24 +64,90 @@ export function getLinkedCardsForPull(_args: {
   return [];
 }
 
-/** v1 stub：commits 资源缓存键。v1 不做缓存（按 ADR-0002 v1 简化），但 IPC 端约定 key 形状不变 */
-export const COMMITS_LIST_TTL_SECONDS = 2 * 60;
-export const COMMITS_GET_TTL_SECONDS = 5 * 60;
+// ============================================================
+// ===== cache_entries（commits 资源级缓存）=====
+// ============================================================
 
-/** v1 stub：commits 缓存读 / 写 / 失效都 no-op */
-export function getCommitsCache(_args: { projectId: string; cacheKey: string }): string | null {
-  return null;
+/** 读 commits 缓存 */
+export function getCommitsCache(args: { projectId: string; cacheKey: string }): string | null {
+  const db = getDb();
+  const row = db
+    .select()
+    .from(cacheEntries)
+    .where(
+      and(
+        eq(cacheEntries.repoProjectId, args.projectId),
+        eq(cacheEntries.resource, CACHE_RESOURCE),
+        eq(cacheEntries.key, args.cacheKey),
+      ),
+    )
+    .all()[0];
+  if (!row) return null;
+  const fetchedAt = row.fetchedAt instanceof Date ? row.fetchedAt.getTime() : new Date(row.fetchedAt).getTime();
+  const ageSeconds = (Date.now() - fetchedAt) / 1000;
+  if (ageSeconds > row.ttlSeconds) {
+    return null;
+  }
+  return row.payload;
 }
 
-export function setCommitsCache(_args: {
+/** 写 commits 缓存 */
+export function setCommitsCache(args: {
   projectId: string;
   cacheKey: string;
   payload: string;
   ttlSeconds?: number;
 }): void {
-  // no-op v1
+  const db = getDb();
+  const ttl = args.ttlSeconds ?? COMMITS_LIST_TTL_SECONDS;
+  const existing = db
+    .select()
+    .from(cacheEntries)
+    .where(
+      and(
+        eq(cacheEntries.repoProjectId, args.projectId),
+        eq(cacheEntries.resource, CACHE_RESOURCE),
+        eq(cacheEntries.key, args.cacheKey),
+      ),
+    )
+    .all()[0];
+  if (existing) {
+    db.update(cacheEntries)
+      .set({
+        payload: args.payload,
+        fetchedAt: new Date(),
+        ttlSeconds: ttl,
+      })
+      .where(eq(cacheEntries.id, existing.id))
+      .run();
+  } else {
+    db.insert(cacheEntries)
+      .values({
+        id: randomUUID(),
+        repoProjectId: args.projectId,
+        resource: CACHE_RESOURCE,
+        key: args.cacheKey,
+        payload: args.payload,
+        fetchedAt: new Date(),
+        ttlSeconds: ttl,
+      })
+      .run();
+  }
 }
 
-export function invalidateCommitsCache(_projectId?: string): void {
-  // no-op v1
+/** 失效 commits 资源的所有缓存条目 */
+export function invalidateCommitsCache(projectId?: string): void {
+  const db = getDb();
+  if (projectId) {
+    db.delete(cacheEntries)
+      .where(
+        and(
+          eq(cacheEntries.resource, CACHE_RESOURCE),
+          eq(cacheEntries.repoProjectId, projectId),
+        ),
+      )
+      .run();
+  } else {
+    db.delete(cacheEntries).where(eq(cacheEntries.resource, CACHE_RESOURCE)).run();
+  }
 }
