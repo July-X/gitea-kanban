@@ -323,6 +323,9 @@ export async function updatePullAssignee(args: {
 
 /**
  * 更新合并请求评审人 —— 对应 gitea POST /pulls/{index}/requested_reviewers
+ *
+ * gitea 1.x 限制：评审人不能是组织账号（Organization can't be doer to add reviewer）
+ * 调用方传入的 reviewers 应是个人用户名，不能是组织。
  */
 export async function updatePullReviewers(args: {
   giteaUrl: string;
@@ -333,10 +336,18 @@ export async function updatePullReviewers(args: {
   reviewers: string[];
 }): Promise<void> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
-  const res = await api.repos.repoCreatePullReviewRequests(args.owner, args.repo, args.index, {
-    reviewers: args.reviewers,
-  });
-  if (!res.ok) {
+  try {
+    const res = await api.repos.repoCreatePullReviewRequests(args.owner, args.repo, args.index, {
+      reviewers: args.reviewers,
+    });
+    if (res.ok) return;
     unwrapGitea(res, `更新 PR #${args.index}评审人失败`);
+  } catch (err: unknown) {
+    // gitea-js 失败时直接 throw HttpResponse，必须走 unwrapGitea 映射错误码
+    if (err && typeof err === 'object' && 'ok' in err && 'status' in err) {
+      const httpErr = err as HttpResponse<unknown, unknown>;
+      unwrapGitea(httpErr, `更新 PR #${args.index}评审人失败`);
+    }
+    throw err;
   }
 }

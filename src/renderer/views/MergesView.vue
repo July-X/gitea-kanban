@@ -233,6 +233,9 @@ const availableLabels = ref<{ name: string; color: string }[]>([]);
 /** 可用成员列表 */
 const availableMembers = ref<string[]>([]);
 
+/** 不可作评审人的成员（gitea 1.x 限制：组织账号不能作评审人） */
+const nonReviewableMembers = ref<Set<string>>(new Set());
+
 /** 新建标签相关 state */
 const showNewLabelInput = ref(false);
 const newLabelName = ref('');
@@ -257,6 +260,10 @@ async function openAttrEditor(p: PullDto): Promise<void> {
       // members.list 返回直接是数组（不是 {items}）
       const membersResp = await window.api.members.list(toPlain({ projectId: String(activeProjectId.value) })) as { username: string }[];
       availableMembers.value = (membersResp ?? []).map(m => m.username);
+      // 识别组织账号（gitea 1.x 限制：组织不能作评审人，但可以作指派人）
+      nonReviewableMembers.value = new Set(membersResp
+        .filter((m: { login_type?: string; username: string }) => m.login_type === 'Organization' || m.login_type === 'organization')
+        .map((m: { username: string }) => m.username));
     } catch { /* 忽略 */ }
   }
 }
@@ -350,12 +357,13 @@ async function saveAttrs(p: PullDto): Promise<void> {
     errors.push(`指派人: ${err.messageText ?? err.message ?? '失败'}`);
   }
 
-  // 3. 更新评审人
+  // 3. 更新评审人（过滤掉组织账号——gitea 1.x 不允许）
+  const validReviewers = editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r));
   try {
     await window.api.pulls.updateReviewers(toPlain({
       projectId,
       index: p.index,
-      reviewers: editingReviewers.value,
+      reviewers: validReviewers,
     }));
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
@@ -856,22 +864,27 @@ function formatRelative(iso: string | undefined): string {
             </div>
             <!-- 评审人 -->
             <div class="attr-editor__section">
-              <label class="attr-editor__label">评审人：</label>
+              <label class="attr-editor__label">评审人：<span class="attr-editor__hint" v-if="nonReviewableMembers.size > 0">（组织账号不可作评审人）</span></label>
               <div class="attr-editor__tags">
                 <label
                   v-for="member in availableMembers"
                   :key="member"
                   class="attr-editor__tag"
-                  :class="{ 'attr-editor__tag--selected': editingReviewers.includes(member) }"
+                  :class="{
+                    'attr-editor__tag--selected': editingReviewers.includes(member),
+                    'attr-editor__tag--disabled': nonReviewableMembers.has(member),
+                  }"
+                  :title="nonReviewableMembers.has(member) ? '组织账号不能作评审人' : ''"
                 >
                   <input
                     type="checkbox"
                     :value="member"
                     :checked="editingReviewers.includes(member)"
+                    :disabled="nonReviewableMembers.has(member)"
                     class="attr-editor__checkbox"
                     @change="toggleReviewer(member)"
                   />
-                  <span>{{ member }}</span>
+                  <span>{{ member }}{{ nonReviewableMembers.has(member) ? ' (组织)' : '' }}</span>
                 </label>
               </div>
             </div>
@@ -1752,9 +1765,22 @@ function formatRelative(iso: string | undefined): string {
   background: var(--tag-color, var(--color-primary));
   color: var(--color-text-inverse);
 }
+.attr-editor__tag--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.attr-editor__hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
 .attr-editor__checkbox {
   margin: 0;
   accent-color: var(--color-primary);
+}
+.attr-editor__checkbox:disabled {
+  cursor: not-allowed;
 }
 
 .attr-editor__select {
