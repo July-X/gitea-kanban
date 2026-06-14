@@ -14,13 +14,13 @@
  */
 
 import { app } from 'electron';
-// (touch)
+// (touch v3)
 import { logger, upgradeLoggerToFile } from './logger.js';
 import { createMainWindow, destroyMainWindow, installCspHeader } from './window.js';
 import { registerAllIpcHandlers, unregisterAllIpcHandlers } from './ipc/index.js';
 import { initSqlite, closeSqlite } from './cache/sqlite.js';
 import { initLocalStore, closeLocalStore } from './local/state.js';
-import { bootstrapPrefsFromSqlite } from './local/prefs-mirror.js';
+import { bootstrapAllFromSqlite } from './local/bootstrap.js';
 import { authStatus } from './gitea/auth.js';
 import { APP_NAME, APP_SINGLE_INSTANCE_LOCK_NAME } from '@shared/constants';
 
@@ -93,14 +93,14 @@ app.on('ready', async () => {
     await initLocalStore();
     logger.info('localStore initialized');
 
-    // 2a-ter. 灌 prefs mirror：启动期把 SQLite 的 prefs 同步到 localStore
-    // 失败只 warn，不影响启动（Phase 1 验证期允许 localStore 失败）
+    // 2a-ter. 灌全表 mirror：启动期把 SQLite 的 6 张业务表同步到 localStore
+    // 失败只 warn，不影响启动（Phase 2 验证期允许 bootstrap 部分失败）
     try {
-      await bootstrapPrefsFromSqlite();
+      await bootstrapAllFromSqlite();
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err) },
-        'prefs mirror bootstrap failed (non-fatal in Phase 1)',
+        'bootstrap all from sqlite failed (non-fatal in Phase 2)',
       );
     }
 
