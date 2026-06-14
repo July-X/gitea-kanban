@@ -326,6 +326,14 @@ function laneColorToken(laneId: string): string {
   return lane.color; // fallback: 后端给的 hex
 }
 
+/** 分支名 → chip 样式（与外部 commit-row__branch pill 视觉一致） */
+function branchChipStyle(name: string): string {
+  if (!timeline.value) return '';
+  const lane = timeline.value.lanes.find((l) => l.label === name);
+  if (!lane) return `background: var(--color-bg-hover); color: var(--color-text);`;
+  return `background: ${laneSoftToken(lane.id)}; color: ${laneColorToken(lane.id)};`;
+}
+
 /** lane.label → soft token（pill 背景用） */
 function laneSoftToken(laneId: string): string {
   if (!timeline.value) return 'var(--color-bg-hover)';
@@ -787,10 +795,11 @@ function formatRelative(iso: string): string {
                 <button
                   type="button"
                   class="commit-detail__hash-link"
+                  aria-label="在 gitea 打开此提交"
+                  title="在 gitea 打开此提交"
                   @click="onDetailOpenInGitea(detailNode)"
                 >
                   <ExternalLink :size="12" :stroke-width="2" aria-hidden="true" />
-                  在 gitea 打开
                 </button>
                 <span v-if="detailNode.isHead" class="commit-detail__head-badge">HEAD</span>
               </div>
@@ -853,6 +862,7 @@ function formatRelative(iso: string): string {
                     v-for="b in detailNode.branchHints"
                     :key="b"
                     class="commit-detail__branch-chip"
+                    :style="branchChipStyle(b)"
                   >{{ b }}</span>
                 </dd>
               </div>
@@ -1418,13 +1428,12 @@ function formatRelative(iso: string): string {
 .commit-detail__stat-files { color: var(--color-text-secondary); }
 .commit-detail__branch-chip {
   display: inline-block;
-  padding: 1px 8px;
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-divider);
+  padding: 2px 8px;
   border-radius: var(--radius-sm);
   font-size: var(--font-xs);
-  color: var(--color-text);
+  font-weight: 500;
   font-family: var(--font-mono-stack);
+  /* 背景 / 文字色由 :style 绑定（与外部 commit-row__branch pill 一致） */
 }
 
 .commit-detail__cards {
