@@ -1555,6 +1555,9 @@ function formatRelative(iso: string | undefined): string {
   flex-direction: column;
   gap: var(--space-3);
   margin-top: var(--space-3);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: var(--space-2);
 }
 
 .attr-editor__section {
@@ -1573,6 +1576,9 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 2px;
 }
 
 .attr-editor__tag {
