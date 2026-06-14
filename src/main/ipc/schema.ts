@@ -452,6 +452,15 @@ export const PullDtoSchema = z
     mergeable: z.boolean(),
     hasConflicts: z.boolean(),
     linkedCards: z.array(LinkedCardDtoSchema).optional(),
+    // ===== v1.1 补充字段（对齐 gitea PR 详情页属性块） =====
+    labels: z.array(z.object({ id: z.number(), name: z.string(), color: z.string() })).optional(),
+    milestone: z.object({ id: z.number(), title: z.string() }).nullable().optional(),
+    assignee: z.object({ username: z.string() }).nullable().optional(),
+    assignees: z.array(z.object({ username: z.string() })).optional(),
+    reviewers: z.array(z.object({ username: z.string() })).optional(),
+    mergedBy: z.object({ username: z.string() }).nullable().optional(),
+    commentsCount: z.number().int().optional(),
+    body: z.string().optional(),
   })
   .strict();
 export type PullDto = z.infer<typeof PullDtoSchema>;

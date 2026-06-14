@@ -277,7 +277,102 @@ async function main() {
   console.log('\n测试方法：');
   console.log('  1. pnpm dev 打开应用');
   console.log('  2. 进入"合并请求"页（左侧栏）');
-  console.log('  3. 切换 tab: 全部 / 开放 / 已合并 / 已关闭');
+  console.log('  3. 切换 tab: 全部 / 待合并 / 已合并 / 已关闭');
+
+  // ===== 6) pr-closed-rejected：因冲突被关闭（驳回） =====
+  // 造一个有冲突的 PR，然后直接关闭它（模拟人工驳回）
+  const rejectBranch = `pr-closed-rejected-${SUFFIX}`;
+  const rejectFile = `${dir}/reject-test.md`;
+  await writeFileOnBranch('main', rejectFile, `# Reject baseline\nline 2\nline 3\n`, `chore(seed): reject baseline (${SUFFIX})`);
+  await createBranch(rejectBranch, 'main');
+  await writeFileOnBranch(rejectBranch, rejectFile, `# Reject baseline\nPR change on line 2 (conflict!)\nline 3\n`, `feat(pr): reject change (${SUFFIX})`);
+  await writeFileOnBranch('main', rejectFile, `# Reject baseline\nmain change on line 2\nline 3\n`, `chore(seed): main changes line 2 (${SUFFIX})`);
+  const pr6 = await createPR({
+    head: rejectBranch,
+    base: 'main',
+    title: `[mock] 已驳回 — 冲突未解决被关闭 #${SUFFIX}-6`,
+    body: '**验证场景**：冲突未解决 → 被人工关闭\n\n预期：\n- 状态徽章"已关闭"（灰色）\n- 无合并按钮\n- 详情区显示"冲突: 有冲突"',
+  });
+  // 通过 gitea API 关闭这个 PR（模拟驳回）
+  await fetchJson(`/api/v1/repos/${OWNER}/${REPO}/pulls/${pr6.number}`, 'PATCH', { state: 'closed' });
+  console.log(`  [6] created PR #${pr6.number}  ${pr6.title}  (CLOSED/rejected)`);
+
+  // ===== 7) pr-with-labels：带标签的 PR =====
+  const labelBranch = `pr-with-labels-${SUFFIX}`;
+  await createBranch(labelBranch);
+  await writeFileOnBranch(
+    labelBranch,
+    `${dir}/labeled-feature.md`,
+    `# Labeled Feature\n\nThis PR has labels, milestone, assignee.\n`,
+    `feat: labeled feature (${SUFFIX})`,
+  );
+  const pr7 = await createPR({
+    head: labelBranch,
+    base: 'main',
+    title: `[mock] 带标签/指派/里程碑 — 完整属性 #${SUFFIX}-7`,
+    body: '**验证场景**：完整属性展示\n\n预期：\n- 标签色块显示（bug=红、feature=蓝、needs-review=黄）\n- 指派人图标\n- 里程碑图标\n- 评审人图标\n- 评论数',
+  });
+  // 给 PR 打标签（先确保标签存在）
+  const labelsToCreate = [
+    { name: 'bug', color: 'd73a4a' },
+    { name: 'feature', color: '0075ca' },
+    { name: 'needs-review', color: 'fbca04' },
+  ];
+  for (const lb of labelsToCreate) {
+    try {
+      await fetchJson(`/api/v1/repos/${OWNER}/${REPO}/labels`, 'POST', lb);
+    } catch {
+      // 标签已存在
+    }
+  }
+  // 给 PR 加标签
+  await fetchJson(`/api/v1/repos/${OWNER}/${REPO}/issues/${pr7.number}/labels`, 'POST', {
+    labels: labelsToCreate.map(l => l.name),
+  });
+  // 给 PR 加评论（增加评论数）
+  await fetchJson(`/api/v1/repos/${OWNER}/${REPO}/issues/${pr7.number}/comments`, 'POST', {
+    body: '这个 PR 需要代码评审，请 @kanban_bot 看一下。',
+  });
+  console.log(`  [7] created PR #${pr7.number}  ${pr7.title}  (with labels/comments)`);
+
+  // ===== 8) pr-merged-already：已被合并的 PR（验证"已合并"状态） =====
+  const mergedBranch = `pr-merged-${SUFFIX}`;
+  await createBranch(mergedBranch);
+  await writeFileOnBranch(
+    mergedBranch,
+    `${dir}/merged-feature.md`,
+    `# Merged Feature\n\nThis PR was merged.\n`,
+    `feat: merged feature (${SUFFIX})`,
+  );
+  const pr8 = await createPR({
+    head: mergedBranch,
+    base: 'main',
+    title: `[mock] 已合并测试 — 验证"已合并"状态 #${SUFFIX}-8`,
+    body: '**验证场景**：已合并\n\n预期：\n- 状态徽章"已合并"（紫色）\n- 无合并按钮\n- 详情区显示合并人',
+  });
+  // 合并这个 PR
+  try {
+    await fetchJson(`/api/v1/repos/${OWNER}/${REPO}/pulls/${pr8.number}/merge`, 'POST', {
+      Do: 'merge',
+      MergeMessageField: `Merge PR #${pr8.number}: ${pr8.title}`,
+    });
+    console.log(`  [8] created PR #${pr8.number}  ${pr8.title}  (MERGED)`);
+  } catch (e) {
+    console.log(`  [8] created PR #${pr8.number}  ${pr8.title}  (merge failed: ${e.message?.slice(0, 80)})`);
+  }
+
+  console.log(`\n✓ 完成 — 创建了 8+ 个 PR（含冲突驳回/标签属性/已合并）`);
+  console.log('\n测试方法：');
+  console.log('  1. pnpm dev 打开应用');
+  console.log('  2. 进入"合并请求"页（左侧栏）');
+  console.log('  3. 切换 tab: 全部 / 待合并 / 已合并 / 已关闭');
+  console.log('  4. 点开 PR 看详情区：标签色块、指派人、里程碑、评审人、评论数');
+  console.log('  5. 验证冲突 PR：合并按钮 disabled + 红色"有冲突"提示');
+  console.log('  6. 验证已驳回 PR：状态"已关闭"，无合并按钮');
+  console.log('  7. 验证已合并 PR：状态"已合并"紫色徽章');
+  console.log('\n清理：');
+  console.log(`  - 所有 PR 真实落库，测试后去 gitea 页面手动 close / 删分支`);
+  console.log(`  - URL: ${GITEA_URL}/${OWNER}/${REPO}/pulls`);
   console.log('  4. 点开 PR 看详情区：合并按钮、跳 gitea 链接、冲突状态');
   console.log('  5. 点合并按钮：选 4 种方式 → 二次确认 → 真实合并（合并到 main 需输入"我了解风险"）');
   console.log('\n清理：');

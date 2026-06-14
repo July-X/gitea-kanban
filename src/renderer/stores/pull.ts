@@ -8,14 +8,14 @@
  *   - 暴露 list / refresh / filter / currentSelectedItem
  *   - 状态维度：'all' | 'open' | 'closed'；merged 走 PullDto.merged 字段
  *     （gitea 把 merged 合并请求视为 closed）
- *     "全部 / 开放 / 已合并 / 已关闭" 4 个 tab 拆解：
+ *     "全部 / 待合并 / 已合并 / 已关闭" 4 个 tab 拆解：
  *       all    = 全部
  *       open   = state==open
  *       merged = state==closed && merged==true
  *       closed = state==closed && merged==false
  *
  * 零术语：
- *   - 状态文案："全部 / 开放 / 已合并 / 已关闭"
+ *   - 状态文案："全部 / 待合并 / 已合并 / 已关闭"
  *   - 禁用原词（"合并请求 / 合并 / 变基 / 派生 / 仓库 / 分支 / 维护者"）
  *     → 代码内标识符走 check:no-jargon.ts 白名单
  */

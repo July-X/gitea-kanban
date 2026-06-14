@@ -56,6 +56,19 @@ function toPullDto(r: PullRequest): PullDto {
     mergeable,
     // 关键映射：gitea mergeable=false → 我们 hasConflicts=true
     hasConflicts: !mergeable,
+    // ===== v1.1 补充字段 =====
+    labels: (r.labels ?? []).map(l => ({
+      id: l.id ?? 0,
+      name: l.name ?? '',
+      color: l.color ?? '#ccc',
+    })),
+    milestone: r.milestone ? { id: r.milestone.id ?? 0, title: r.milestone.title ?? '' } : null,
+    assignee: r.assignee ? { username: r.assignee.login ?? '' } : null,
+    assignees: (r.assignees ?? []).map(a => ({ username: a.login ?? '' })),
+    reviewers: (r.requested_reviewers ?? []).map(u => ({ username: u.login ?? '' })),
+    mergedBy: r.merged_by ? { username: r.merged_by.login ?? '' } : null,
+    commentsCount: r.comments ?? 0,
+    body: r.body ?? '',
   };
 }
 

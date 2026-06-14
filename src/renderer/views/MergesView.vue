@@ -3,16 +3,16 @@
  * MergesView —— 仓库合并请求列表
  *
  * 设计（AGENTS §5.2 + 03-frontend §4.5 + plan_32018da5）：
- *   - 顶栏：仓库名 + tab 切换（全部 / 开放 / 已合并 / 已关闭）+ 搜索 + 刷新
+ *   - 顶栏：仓库名 + tab 切换（全部 / 待合并 / 已合并 / 已关闭）+ 搜索 + 刷新
  *   - 主体：合并请求列表（卡片化：标题 / 编号 / 作者 / 状态徽章 / 合并状态 / 创建时间）
  *   - 详情：点行展开（不跳 gitea web）—— inline 详情 + 合并操作 + 跳 gitea 链接
  *   - 数据：pulls.list IPC → usePullStore
  *
  * 零术语：
  *   - UI 文本**不**出现 PR / merge / rebase 原词
- *     - "合并请求" / "合并" / "变基" / "开放" / "已合并" / "已关闭" / "草稿"
+ *     - "合并请求" / "合并" / "变基" / "待合并" / "已合并" / "已关闭" / "草稿"
  *     - 禁用词在文案里**不**出现
- *   - 状态徽章：开放（绿）/ 已合并（紫）/ 已关闭（灰）/ 草稿（橙边）
+ *   - 状态徽章：待合并（绿）/ 已合并（紫）/ 已关闭（灰）/ 草稿（橙边）
  *   - 卡片左侧：state 色边（OVERRIDE §"lane / 列卡片化"）
  *
  * 危险操作（AGENTS §8.3 + 02-architecture §7.3）：
@@ -55,10 +55,10 @@ const activeRepo = computed<RepoDto | null>(() => {
 /** 展开的合并请求 index Set（UI 状态，**不**持久化） */
 const expanded = ref<Set<number>>(new Set());
 
-/** tab 列表：全部 / 开放 / 已合并 / 已关闭 */
+/** tab 列表：全部 / 待合并 / 已合并 / 已关闭 */
 const tabs: { id: PullFilter; label: string }[] = [
   { id: 'all', label: '全部' },
-  { id: 'open', label: '开放' },
+  { id: 'open', label: '待合并' },
   { id: 'merged', label: '已合并' },
   { id: 'closed', label: '已关闭' },
 ];
@@ -235,7 +235,7 @@ function badgeClass(p: PullDto): string {
 
 function badgeText(p: PullDto): string {
   if (p.draft) return '草稿';
-  if (p.state === 'open') return '开放';
+  if (p.state === 'open') return '待合并';
   if (p.merged) return '已合并';
   return '已关闭';
 }
@@ -286,6 +286,20 @@ function formatRelative(iso: string | undefined): string {
       </div>
       <div class="merges__topbar-right">
         <span class="merges__counter">共 {{ pull.total }} 个</span>
+        <div class="merges__merge-method">
+          <label class="merges__merge-method-label" for="default-merge-method">合并方式：</label>
+          <select
+            id="default-merge-method"
+            v-model="selectedMethod"
+            class="merges__merge-method-select"
+          >
+            <option
+              v-for="m in mergeMethods"
+              :key="m.value"
+              :value="m.value"
+            >{{ m.label }}</option>
+          </select>
+        </div>
         <button
           type="button"
           class="merges__refresh"
@@ -454,6 +468,33 @@ function formatRelative(iso: string | undefined): string {
                 :title="p.head.ref"
               ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.head.ref }}</a>
             </div>
+            <!-- 标签 + 里程碑 + 指派人 + 评审人（gitea 合并请求属性块） -->
+            <div class="merge-item__attrs">
+              <span
+                v-for="label in (p.labels ?? [])"
+                :key="label.id"
+                class="merge-item__label"
+                :style="{ '--label-color': '#' + label.color, '--label-bg': '#' + label.color + '22' }"
+              >{{ label.name }}</span>
+              <span
+                v-if="p.milestone"
+                class="merge-item__milestone"
+                :title="p.milestone.title"
+              >🎯 {{ p.milestone.title }}</span>
+              <span
+                v-if="p.assignee"
+                class="merge-item__assignee"
+              >👤 {{ p.assignee.username }}</span>
+              <span
+                v-for="reviewer in (p.reviewers ?? [])"
+                :key="reviewer.username"
+                class="merge-item__reviewer"
+              >👁 {{ reviewer.username }}</span>
+              <span
+                v-if="(p.commentsCount ?? 0) > 0"
+                class="merge-item__comments"
+              >💬 {{ p.commentsCount }}</span>
+            </div>
           </div>
         </div>
         <!-- trailing: 操作按钮（不展开就能直接看到，符合 gitea 把操作放到行内） -->
@@ -621,6 +662,28 @@ function formatRelative(iso: string | undefined): string {
 
 .merges__counter {
   font-feature-settings: 'tnum';
+}
+
+.merges__merge-method {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-xs);
+}
+
+.merges__merge-method-label {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.merges__merge-method-select {
+  padding: 2px 6px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text);
+  cursor: pointer;
 }
 
 .merges__refresh {
@@ -970,6 +1033,41 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__branch-arrow {
   color: var(--color-text-muted);
   font-size: 14px;
+}
+
+/* 属性块：标签 + 里程碑 + 指派人 + 评审人（gitea 合并请求属性块） */
+.merge-item__attrs {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: var(--font-xs);
+}
+
+.merge-item__label {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--label-bg, var(--color-bg));
+  color: var(--label-color, var(--color-text));
+  border: 1px solid var(--label-color, var(--color-divider));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.merge-item__milestone,
+.merge-item__assignee,
+.merge-item__reviewer,
+.merge-item__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 /* ===== trailing: 操作按钮（gitea 把操作放行内） ===== */

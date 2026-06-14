@@ -421,7 +421,7 @@ export function clipboardWrite(text: string): Promise<unknown> {
 
 /** 合并请求 state（与 src/main/ipc/schema.ts PullStateSchema 同步）
  *
- * a3 拍板加 'all'：前端"合并请求"页要拉全量，然后按 merged 二次过滤拆"全部 / 开放 /
+ * a3 拍板加 'all'：前端"合并请求"页要拉全量，然后按 merged 二次过滤拆"全部 / 待合并 /
  * 已合并 / 已关闭"4 个 tab。gitea 端 /pulls?state=closed 同时含 merged，'all' 是
  * "既含 open 也含 closed" 唯一安全的取值（gitea 默认不传=open）。
  */
