@@ -24,6 +24,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { GitMerge, RefreshCw, Search, ChevronDown, ChevronRight, ExternalLink } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
+import { useAuthStore } from '@renderer/stores/auth';
 import { showToast } from '@renderer/lib/toast';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
@@ -31,6 +32,7 @@ import type { PullDto, RepoDto, MergeMethod } from '../../main/ipc/schema.js';
 
 const repo = useRepoStore();
 const pull = usePullStore();
+const auth = useAuthStore();
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
@@ -131,11 +133,17 @@ function toggleExpand(idx: number): void {
   expanded.value = next;
 }
 
-/** 生成 gitea web 链接 */
+/** 生成 gitea web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
+ *
+ * 不用 RepoDto.url 字段——schema 里没这个字段，
+ * 硬拼会得到 "https://kanban demo/m4java-test" 这种带空格的非法 URL。
+ * 用 useAuthStore.currentGiteaUrl + 当前 activeRepo.owner/name 拼接。
+ */
 function giteaPullUrl(p: PullDto): string {
   if (!activeRepo.value) return '#';
-  const base = activeRepo.value.url?.replace(/\/+$/, '') ?? `https://${activeRepo.value.fullName}`;
-  return `${base}/pulls/${p.index}`;
+  const giteaUrl = (auth.currentGiteaUrl || '').replace(/\/+$/, '');
+  if (!giteaUrl) return '#';
+  return `${giteaUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/pulls/${p.index}`;
 }
 
 /** 判断目标分支是否是主线分支（需要额外警告） */
