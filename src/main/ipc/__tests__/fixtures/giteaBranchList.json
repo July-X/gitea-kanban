@@ -1,0 +1,218 @@
+[
+  {
+    "name": "timeline-test-1781397142497",
+    "commit": {
+      "id": "4e7f7ec7b4db947bd123d69e38888bf6a8af2be8",
+      "message": "test: add timeline-test-1781397142497 file 29\n",
+      "url": "http://localhost:3000/kanban_demo/m4java-test/commit/4e7f7ec7b4db947bd123d69e38888bf6a8af2be8",
+      "author": {
+        "name": "CDP Test Bot",
+        "email": "cdp-test@example.com",
+        "username": ""
+      },
+      "committer": {
+        "name": "CDP Test Bot",
+        "email": "cdp-test@example.com",
+        "username": ""
+      },
+      "verification": {
+        "verified": false,
+        "reason": "gpg.error.not_signed_commit",
+        "signature": "",
+        "signer": null,
+        "payload": ""
+      },
+      "timestamp": "2026-06-14T08:33:41+08:00",
+      "added": null,
+      "removed": null,
+      "modified": null
+    },
+    "protected": false,
+    "required_approvals": 0,
+    "enable_status_check": false,
+    "status_check_contexts": [],
+    "user_can_push": true,
+    "user_can_merge": true,
+    "effective_branch_protection_name": ""
+  },
+  {
+    "name": "timeline-perf-test-1781396162610",
+    "commit": {
+      "id": "75128f187848944fa08a3170e0a77d338b0f20f7",
+      "message": "test: add timeline-perf-test-1781396162610 file 24\n",
+      "url": "http://localhost:3000/kanban_demo/m4java-test/commit/75128f187848944fa08a3170e0a77d338b0f20f7",
+      "author": {
+        "name": "CDP Test Bot",
+        "email": "cdp-test@example.com",
+        "username": ""
+      },
+      "committer": {
+        "name": "CDP Test Bot",
+        "email": "cdp-test@example.com",
+        "username": ""
+      },
+      "verification": {
+        "verified": false,
+        "reason": "gpg.error.not_signed_commit",
+        "signature": "",
+        "signer": null,
+        "payload": ""
+      },
+      "timestamp": "2026-06-14T08:16:49+08:00",
+      "added": null,
+      "removed": null,
+      "modified": null
+    },
+    "protected": false,
+    "required_approvals": 0,
+    "enable_status_check": false,
+    "status_check_contexts": [],
+    "user_can_push": true,
+    "user_can_merge": true,
+    "effective_branch_protection_name": ""
+  },
+  {
+    "name": "main",
+    "commit": {
+      "id": "37bb9a8d68c33f353e66fb5c346ae13105277a76",
+      "message": "看板 UI 改稿（feature-kanban → main） (#11)\n\n[e2e-w3] squash merge PR #11 (feature-kanban → main)\n",
+      "url": "http://localhost:3000/kanban_demo/m4java-test/commit/37bb9a8d68c33f353e66fb5c346ae13105277a76",
+      "author": {
+        "name": "kanban_bot",
+        "email": "kanban_bot@local.dev",
+        "username": "kanban_bot"
+      },
+      "committer": {
+        "name": "kanban_bot",
+        "email": "kanban_bot@local.dev",
+        "username": "kanban_bot"
+      },
+      "verification": {
+        "verified": false,
+        "reason": "gpg.error.not_signed_commit",
+        "signature": "",
+        "signer": null,
+        "payload": ""
+      },
+      "timestamp": "2026-06-11T20:16:55+08:00",
+      "added": null,
+      "removed": null,
+      "modified": null
+    },
+    "protected": false,
+    "required_approvals": 0,
+    "enable_status_check": false,
+    "status_check_contexts": [],
+    "user_can_push": true,
+    "user_can_merge": true,
+    "effective_branch_protection_name": ""
+  },
+  {
+    "name": "feature-merge",
+    "commit": {
+      "id": "7a2bf143ddab1edf900a15dbea99d712c3b1fd59",
+      "message": "docs(merge): 补合并决策树文档\n",
+      "url": "http://localhost:3000/kanban_demo/m4java-test/commit/7a2bf143ddab1edf900a15dbea99d712c3b1fd59",
+      "author": {
+        "name": "kanban_bot",
+        "email": "kanban_bot@local.dev",
+        "username": "kanban_bot"
+      },
+      "committer": {
+        "name": "kanban_bot",
+        "email": "kanban_bot@local.dev",
+        "username": "kanban_bot"
+      },
+      "verification": {
+        "verified": false,
+        "reason": "gpg.error.not_signed_commit",
+        "signature": "",
+        "signer": null,
+        "payload": ""
+      },
+      "timestamp": "2026-06-11T20:00:11+08:00",
+      "added": null,
+      "removed": null,
+      "modified": null
+    },
+    "protected": false,
+    "required_approvals": 0,
+    "enable_status_check": false,
+    "status_check_contexts": [],
+    "user_can_push": true,
+    "user_can_merge": true,
+    "effective_branch_protection_name": ""
+  },
+  {
+    "name": "feature-kanban",
+    "commit": {
+      "id": "c23c6ee07f55a2d0525f9f112ee0a1564af50f32",
+      "message": "docs(kanban): 补 README 看板用法\n",
+      "url": "http://localhost:3000/kanban_demo/m4java-test/commit/c23c6ee07f55a2d0525f9f112ee0a1564af50f32",
+      "author": {
+        "name": "kanban_bot",
+        "email": "kanban_bot@local.dev",
+        "username": "kanban_bot"
+      },
+      "committer": {
+        "name": "kanban_bot",
+        "email": "kanban_bot@local.dev",
+        "username": "kanban_bot"
+      },
+      "verification": {
+        "verified": false,
+        "reason": "gpg.error.not_signed_commit",
+        "signature": "",
+        "signer": null,
+        "payload": ""
+      },
+      "timestamp": "2026-06-11T20:00:04+08:00",
+      "added": null,
+      "removed": null,
+      "modified": null
+    },
+    "protected": false,
+    "required_approvals": 0,
+    "enable_status_check": false,
+    "status_check_contexts": [],
+    "user_can_push": true,
+    "user_can_merge": true,
+    "effective_branch_protection_name": ""
+  },
+  {
+    "name": "develop",
+    "commit": {
+      "id": "680b925b31239f4942587933cb0fc5278c12a448",
+      "message": "Initial commit\n",
+      "url": "http://localhost:3000/kanban_demo/m4java-test/commit/680b925b31239f4942587933cb0fc5278c12a448",
+      "author": {
+        "name": "m4java",
+        "email": "m4java@test.com",
+        "username": "m4java"
+      },
+      "committer": {
+        "name": "m4java",
+        "email": "m4java@test.com",
+        "username": "m4java"
+      },
+      "verification": {
+        "verified": false,
+        "reason": "gpg.error.not_signed_commit",
+        "signature": "",
+        "signer": null,
+        "payload": ""
+      },
+      "timestamp": "2026-06-11T08:28:31+08:00",
+      "added": null,
+      "removed": null,
+      "modified": null
+    },
+    "protected": false,
+    "required_approvals": 0,
+    "enable_status_check": false,
+    "status_check_contexts": [],
+    "user_can_push": true,
+    "user_can_merge": true,
+    "effective_branch_protection_name": ""
+  }
+]

@@ -1,0 +1,112 @@
+{
+  "url": "http://localhost:3000/api/v1/repos/kanban_demo/m4java-test/git/commits/37bb9a8d68c33f353e66fb5c346ae13105277a76",
+  "sha": "37bb9a8d68c33f353e66fb5c346ae13105277a76",
+  "created": "2026-06-11T20:16:55+08:00",
+  "html_url": "http://localhost:3000/kanban_demo/m4java-test/commit/37bb9a8d68c33f353e66fb5c346ae13105277a76",
+  "commit": {
+    "url": "http://localhost:3000/api/v1/repos/kanban_demo/m4java-test/git/commits/37bb9a8d68c33f353e66fb5c346ae13105277a76",
+    "author": {
+      "name": "kanban_bot",
+      "email": "kanban_bot@local.dev",
+      "date": "2026-06-11T20:16:55+08:00"
+    },
+    "committer": {
+      "name": "kanban_bot",
+      "email": "kanban_bot@local.dev",
+      "date": "2026-06-11T20:16:55+08:00"
+    },
+    "message": "看板 UI 改稿（feature-kanban → main） (#11)\n\n[e2e-w3] squash merge PR #11 (feature-kanban → main)\n",
+    "tree": {
+      "url": "http://localhost:3000/api/v1/repos/kanban_demo/m4java-test/git/trees/37bb9a8d68c33f353e66fb5c346ae13105277a76",
+      "sha": "37bb9a8d68c33f353e66fb5c346ae13105277a76",
+      "created": "2026-06-11T20:16:55+08:00"
+    },
+    "verification": {
+      "verified": false,
+      "reason": "gpg.error.not_signed_commit",
+      "signature": "",
+      "signer": null,
+      "payload": ""
+    }
+  },
+  "author": {
+    "id": 4,
+    "login": "kanban_bot",
+    "login_name": "",
+    "source_id": 0,
+    "full_name": "",
+    "email": "4+kanban_bot@noreply.localhost",
+    "avatar_url": "http://localhost:3000/avatars/2835a86b80ad0954d2f5ea0942eba30e",
+    "html_url": "http://localhost:3000/kanban_bot",
+    "language": "",
+    "is_admin": false,
+    "last_login": "0001-01-01T00:00:00Z",
+    "created": "2026-06-11T09:01:06+08:00",
+    "restricted": false,
+    "active": false,
+    "prohibit_login": false,
+    "location": "",
+    "website": "",
+    "description": "",
+    "visibility": "private",
+    "followers_count": 0,
+    "following_count": 0,
+    "starred_repos_count": 1,
+    "username": "kanban_bot"
+  },
+  "committer": {
+    "id": 4,
+    "login": "kanban_bot",
+    "login_name": "",
+    "source_id": 0,
+    "full_name": "",
+    "email": "4+kanban_bot@noreply.localhost",
+    "avatar_url": "http://localhost:3000/avatars/2835a86b80ad0954d2f5ea0942eba30e",
+    "html_url": "http://localhost:3000/kanban_bot",
+    "language": "",
+    "is_admin": false,
+    "last_login": "0001-01-01T00:00:00Z",
+    "created": "2026-06-11T09:01:06+08:00",
+    "restricted": false,
+    "active": false,
+    "prohibit_login": false,
+    "location": "",
+    "website": "",
+    "description": "",
+    "visibility": "private",
+    "followers_count": 0,
+    "following_count": 0,
+    "starred_repos_count": 1,
+    "username": "kanban_bot"
+  },
+  "parents": [
+    {
+      "url": "http://localhost:3000/api/v1/repos/kanban_demo/m4java-test/git/commits/7b5da349033a5648295e4bcbb45ab42d1984f6df",
+      "sha": "7b5da349033a5648295e4bcbb45ab42d1984f6df",
+      "created": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "files": [
+    {
+      "filename": "notes/kanban-demo/docs-kanban-补-readme-看板用法.md",
+      "status": "added"
+    },
+    {
+      "filename": "notes/kanban-demo/feat-kanban-加列容器组件.md",
+      "status": "added"
+    },
+    {
+      "filename": "notes/kanban-demo/feat-kanban-加卡片渲染.md",
+      "status": "added"
+    },
+    {
+      "filename": "notes/kanban-demo/refactor-kanban-提取-usecolumnlayout-hook.md",
+      "status": "added"
+    }
+  ],
+  "stats": {
+    "total": 20,
+    "additions": 20,
+    "deletions": 0
+  }
+}
