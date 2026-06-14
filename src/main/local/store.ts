@@ -25,7 +25,8 @@
  */
 
 import { writeFile, readFile, mkdir, rename } from 'node:fs/promises';
-import { dirname, join, isAbsolute } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, join, basename, isAbsolute } from 'node:path';
 import os from 'node:os';
 import { pino } from 'pino';
 
@@ -166,9 +167,9 @@ export class LocalStore<T extends object> {
     if (!this.dirty || !this.cache) return;
 
     this.flushing = true;
+    const tmp = `${this.file}.tmp.${process.pid}.${Date.now()}`;
     try {
       const snapshot = JSON.stringify(this.cache, null, 2);
-      const tmp = `${this.file}.tmp.${process.pid}.${Date.now()}`;
 
       // 确保目录存在
       await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
@@ -181,14 +182,20 @@ export class LocalStore<T extends object> {
       this.retryDelay = 0; // 成功后清零
       log.debug({ file: this.file, bytes: snapshot.length }, 'localStore: flushed');
     } catch (err) {
-      // 失败：清理残留 tmp 文件 + 退避重试（保留 dirty 状态）
+      // 失败：清理残留 tmp 文件（best effort，tmp 不存在 / unlink 失败都忽略）
       try {
         const { unlink } = await import('node:fs/promises');
-        await unlink(tmp).catch(() => {
-          // tmp 不存在 / 已删 = 忽略
-        });
+        const { readdirSync } = await import('node:fs');
+        if (existsSync(dirname(this.file))) {
+          const stalePrefix = `${basename(this.file)}.tmp.${process.pid}.`;
+          for (const f of readdirSync(dirname(this.file))) {
+            if (f.startsWith(stalePrefix)) {
+              await unlink(join(dirname(this.file), f)).catch(() => {});
+            }
+          }
+        }
       } catch {
-        // unlink 自身失败 = 忽略（tmp 可能正被另一进程持有）
+        // 清理本身失败 = 忽略
       }
       this.retryDelay = Math.min(
         this.retryDelay === 0 ? 200 : this.retryDelay * 2,
