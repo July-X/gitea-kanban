@@ -9,6 +9,9 @@
  * 关键约束：
  * - **不**调 gitea API（gitea 调用在 src/main/gitea/branches.ts）
  * - **不**修改表结构
+ *
+ * ADR-0003 Phase 2：starred_branches 走 localStore 优先；gitea 缓存（cache_entries）
+ * 继续走 SQLite（cache-aside 模式，本期不切）。
  */
 
 import { randomUUID } from 'node:crypto';
@@ -16,6 +19,9 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from './sqlite.js';
 import { starredBranches } from './schema/starredBranches.js';
 import { cacheEntries } from './schema/cacheEntries.js';
+import { getLocalStore } from '../local/state.js';
+import { listStarredBranchesWithStore } from '../local/starred-branches.js';
+import { logger } from '../logger.js';
 
 const CACHE_RESOURCE = 'branches';
 /** branches.list 缓存 TTL：1 min（任务 prompt §关键约束 4） */
@@ -25,57 +31,88 @@ export const BRANCHES_LIST_TTL_SECONDS = 1 * 60;
  * 列一个 project 下所有 starred 分支名
  *
  * 用于 branches.list 渲染时把 gitea 返回的分支跟本地 starred 状态 JOIN
+ * ADR-0003 Phase 2：走 localStore
  */
 export function listStarredBranches(projectId: string): Set<string> {
-  const db = getDb();
-  const rows = db
-    .select()
-    .from(starredBranches)
-    .where(eq(starredBranches.repoProjectId, projectId))
-    .all();
-  return new Set(rows.map((r) => r.branch));
+  return listStarredBranchesWithStore(getLocalStore().get(), projectId);
 }
 
 /**
  * star / unstar 切换 —— UPSERT 或 DELETE
+ * ADR-0003 Phase 2：localStore 写优先，SQLite 镜像（best-effort）
  */
 export function setStarred(args: {
   projectId: string;
   branch: string;
   starred: boolean;
 }): void {
-  const db = getDb();
+  const store = getLocalStore();
   if (args.starred) {
-    // upsert：存在就 nothing，不存在就 insert
-    const existing = db
-      .select()
-      .from(starredBranches)
-      .where(
-        and(
-          eq(starredBranches.repoProjectId, args.projectId),
-          eq(starredBranches.branch, args.branch),
-        ),
-      )
-      .all()[0];
+    // upsert：localStore 已存在就 nothing，不存在就 push
+    const existing = store
+      .get()
+      .starredBranches.some(
+        (s) => s.projectId === args.projectId && s.branch === args.branch,
+      );
     if (!existing) {
-      db.insert(starredBranches)
-        .values({
-          id: randomUUID(),
-          repoProjectId: args.projectId,
-          branch: args.branch,
-          createdAt: new Date(),
-        })
-        .run();
+      const newRow = {
+        id: randomUUID(),
+        projectId: args.projectId,
+        branch: args.branch,
+        createdAt: Date.now(),
+      };
+      store.mutate((s) => {
+        s.starredBranches.push(newRow);
+      });
+      // SQLite 镜像（best-effort）
+      try {
+        getDb()
+          .insert(starredBranches)
+          .values({
+            id: newRow.id,
+            repoProjectId: args.projectId,
+            branch: args.branch,
+            createdAt: new Date(newRow.createdAt),
+          })
+          .run();
+      } catch (err) {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err), id: newRow.id },
+          'setStarred: SQLite insert failed (non-fatal in Phase 2)',
+        );
+      }
     }
   } else {
-    db.delete(starredBranches)
-      .where(
-        and(
-          eq(starredBranches.repoProjectId, args.projectId),
-          eq(starredBranches.branch, args.branch),
-        ),
-      )
-      .run();
+    // 删除：localStore 优先
+    const existingLocal = store
+      .get()
+      .starredBranches.find(
+        (s) => s.projectId === args.projectId && s.branch === args.branch,
+      );
+    if (existingLocal) {
+      store.mutate((s) => {
+        s.starredBranches = s.starredBranches.filter(
+          (s) => !(s.projectId === args.projectId && s.branch === args.branch),
+        );
+      });
+    }
+    // SQLite 镜像（best-effort）
+    try {
+      getDb()
+        .delete(starredBranches)
+        .where(
+          and(
+            eq(starredBranches.repoProjectId, args.projectId),
+            eq(starredBranches.branch, args.branch),
+          ),
+        )
+        .run();
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), projectId: args.projectId, branch: args.branch },
+        'setStarred: SQLite delete failed (non-fatal in Phase 2)',
+      );
+    }
   }
   // star 是本地操作；不失效 gitea 资源缓存（gitea 不知道这回事）
   // 但 branches.list 缓存需要失效（star 状态变了）
