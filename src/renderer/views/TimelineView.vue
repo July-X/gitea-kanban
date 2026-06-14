@@ -1299,27 +1299,24 @@ function formatRelative(iso: string): string {
 .commit-detail__hash-link {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   padding: 0;
   background: transparent;
   border: 0;
-  color: var(--color-primary);
-  font-size: var(--font-sm);
-  font-weight: 500;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
   cursor: pointer;
-  font-family: inherit;
-  text-decoration: none;
-  transition: color var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 .commit-detail__hash-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1px;
+  background: var(--color-bg-hover);
+  color: var(--color-primary);
 }
 .commit-detail__hash-link:focus-visible {
   outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
+  outline-offset: 1px;
 }
 .commit-detail__head-badge {
   font-size: var(--font-xs);
