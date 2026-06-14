@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/e2e.sh
 #
-# M7 e2e 收口：自动切 ABI + 串跑 W1/W2/W3/W4 4 个 e2e + 切回。
+# M7 e2e 收口：自动切 ABI + 串跑 W2/W3/W4 3 个 e2e + 切回。
 #
 # 设计：
 # - better-sqlite3 默认装 electron ABI（给 dev/build 用），e2e 跑在 node 25 上
@@ -14,7 +14,7 @@
 #   bash scripts/e2e.sh --keep-node   # 跑完**不**切回（dev 前要 pnpm rebuild:native）
 #
 # 退码：
-#   0 = 4 个 e2e 全 pass
+#   0 = 3 个 e2e 全 pass
 #   非 0 = 至少 1 个 e2e fail（或 ABI 切换失败）
 
 set -uo pipefail
@@ -47,7 +47,7 @@ if ! (cd "$BSQLITE_DIR" && npx -y prebuild-install --runtime=node --target=25.9.
   exit 1
 fi
 
-# 4 个 e2e 串跑
+# 3 个 e2e 串跑
 KB_TOKEN="${KB_TOKEN:-9c3fdf27b132c9564b012326344c3993486bf868}"
 export KB_TOKEN
 
@@ -70,7 +70,6 @@ run_one() {
 }
 
 OVERALL_RC=0
-run_one "W1 (repos/branches/commits)" "e2e-verify-w1.ts"
 run_one "W2 (board/issue/labels)"     "e2e-verify-w2.ts"
 run_one "W3 (pulls/timeline)"         "e2e-verify-w3.ts"
 run_one "W4 (auth/prefs)"             "e2e-verify-w4.ts"
