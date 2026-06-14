@@ -154,7 +154,57 @@ pnpm type-check && pnpm exec vitest run && pnpm exec electron-vite build && bash
 - commit 1 4 件套 final gate 在 15:18 跑过 PASS 仍然有效（彼时 working tree 跟 HEAD 一致）
 - 本 commit 5 之前 15:43 复跑 4 件套再次 PASS，确认 baseline 稳定
 
+## 二次事故（2026-06-14 15:43-15:55）
+
+**症状**：a3cb94d commit 后再次 git status 发现 working tree 多出
+- `M src/renderer/views/MergesView.vue`（+7 行 CSS）
+- `?? scripts/seed-pr-fixtures.mjs`（untracked）
+
+且 git reflog 里多出 commit `9b3617c (gitea-kanban-dev, 15:23)`，
+a3cb94d 的 parent = 9b3617c，不是直接父级 e9ddf44。
+
+**根因**：9b3617c 是某个进程用临时 git config
+（`user.name=gitea-kanban-dev user.email=dev@gitea-kanban.local`）打的 commit，
+内容是 **删 squash-merge + 重做 MergesView UI（4 种合并方式）+ 修 ipc-client + 修 store + 修 schema**
+—— 跟我修复 type-check 的判断一致（squash-merge 不应加）。该进程还顺带改了
+MergesView 7 行 CSS 修复（窄窗口防撑出 / flex-wrap / grid 响应）+ 写了
+`scripts/seed-pr-fixtures.mjs`（合并 UI 测试 PR 数据脚本，未 commit）。
+
+**根因追溯**：搜遍仓库 (.git/hooks/ 全 sample / .harness/AGENTS.md / package.json hooks /
+.opencode/ / .mavis/) **未找到 gitea-kanban-dev 自动 commit 触发源**。可能是
+session-repair 守护进程、CI hook、或 user 手动跑某个工具。
+
+**user 指引**："有测试脚本，你看下仓库内的脚本" — 指 `scripts/seed-pr-fixtures.mjs`，
+正是 9b3617c 配套的测试数据源（5+1 种 PR 类型：clean / draft / conflict / 2file-conflict /
+multi-commits / target-develop）。
+
+**修复**：
+- commit 6 (8cb056e)：入仓 7 行 MergesView CSS 修复（fix: ui 视觉适配）
+- commit 7 (3a09497)：入仓 `scripts/seed-pr-fixtures.mjs`（test: seed 脚本）
+  - 同时**修硬编码 token**（删 `process.env.GITEA_TOKEN ?? '<hardcoded>'` 的 fallback，
+    改 env 必传；与 commit 4 (e9ddf44) `_pull-gitea-fixtures.mjs` 规矩一致）
+
+**第三次事故（2026-06-14 16:00）**：e2e:all 跑 W3 FAIL —
+`expected 2 PR, got 25` + `totalCommits=25, expected 15`。
+gitea demo 数据被污染：`HEAD = 3c2a6fb "chore(seed): conflict-B baseline (797525)"`
+—— `seed-pr-fixtures.mjs` line 212 的 commit message。**某个进程跑过 seed script，
+生成了 6 个 PR + 多个 commit 灌进 demo gitea，e2e W3 baseline（M9 拍的"2 PR / 15 commits"）
+不再适用**。
+
+**这不是 commit 7 内容问题**（seed script 本身正确），是 demo 数据被外部污染。
+M11 final gate VERDICT 因此从 PASS 降级到 **DEGRADED**：
+- 3 件套（type-check / vitest 79 / build）全过
+- e2e:all W2/W4 PASS / W3 FAIL（数据污染非代码问题）
+
+**M12 follow-up（必备）**：
+1. 写 `scripts/reset-gitea-demo.ts`：删多余 PR + reset main HEAD + 删多余分支
+   （目前 seed-kanban-demo.ts 只 seed 不 reset）
+2. 跑 `pnpm exec tsx scripts/reset-gitea-demo.ts` 重置 demo 数据
+3. 重跑 e2e:all 确认 W3 PASS
+4. 顺手统一修 `scripts/cdp-seed-timeline-data.mjs` 第 20 行硬编码 token
+   （commit 4 + commit 7 都改了 dev token 硬编码，cdp-seed-timeline-data.mjs 漏了）
+
 ## 状态
 
-VERDICT: **PASS**（4 件套全过 / git status 干净 / commit 历史规范中文无 trailer /
-owner-takeover 单 owner 路径 4 commits 收口 / 安全 token 修复 / 事故已透明记录并修复）
+VERDICT: **DEGRADED**（commit 1-7 内容全部正确 / 4 件套 3 件过 1 件 fail（数据污染非代码问题）/
+git status 干净 / commit 历史规范中文无 trailer / 事故链已完整记录 / M12 follow-up 列清）
