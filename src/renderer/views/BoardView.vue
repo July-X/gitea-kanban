@@ -574,10 +574,10 @@ watch(
  </section>
  </div>
 
- <!-- ==============换列目标菜单（v1按钮式） ============== -->
- <Teleport to="body">
- <div v-if="moveMenu.open" class="move-menu-overlay" @click.self="closeMoveMenu">
- <div class="move-menu" role="dialog" aria-label="选择目标列">
+  <!-- ==============换列目标菜单（v1按钮式） ============== -->
+  <Teleport to="body">
+  <div v-if="moveMenu.open" class="move-menu-overlay" @click.self="closeMoveMenu">
+  <div class="move-menu" role="dialog" aria-modal="true" aria-label="选择目标列">
  <header class="move-menu__header">
  <span class="move-menu__title">把 #{{ moveMenu.issue?.index }}挪到…</span>
  <button type="button" class="move-menu__close" @click="closeMoveMenu">
@@ -626,7 +626,7 @@ watch(
 <!-- v1.1: 新增列弹窗 -->
 <Teleport to="body">
 <div v-if="showCreateColumn" class="modal-overlay" @click.self="closeCreateColumn">
-<div class="modal" role="dialog" aria-label="新增列">
+<div class="modal" role="dialog" aria-modal="true" aria-label="新增列">
 <header class="modal__header">
 <h2 class="modal__title">新增列</h2>
 <button type="button" class="modal__close" @click="closeCreateColumn">
@@ -651,7 +651,7 @@ watch(
 <!-- v1.1: 列设置弹窗 -->
 <Teleport to="body">
 <div v-if="showColumnMenu.open" class="modal-overlay" @click.self="closeColumnMenu">
-<div class="modal" role="dialog" :aria-label="'设置列 ' + (showColumnMenu.column && showColumnMenu.column.title)">
+<div class="modal" role="dialog" aria-modal="true" :aria-label="'设置列 ' + (showColumnMenu.column && showColumnMenu.column.title)">
 <header class="modal__header">
 <h2 class="modal__title">设置列</h2>
 <button type="button" class="modal__close" @click="closeColumnMenu">
@@ -693,7 +693,7 @@ watch(
 <!-- v1.1: 绑 label picker -->
 <Teleport to="body">
 <div v-if="showBindLabel" class="modal-overlay" @click.self="closeBindLabelPicker">
-<div class="modal" role="dialog" aria-label="绑定标签">
+<div class="modal" role="dialog" aria-modal="true" aria-label="绑定标签">
 <header class="modal__header">
 <h2 class="modal__title">绑定标签到 {{ showColumnMenu.column ? showColumnMenu.column.title : '' }}</h2>
 <button type="button" class="modal__close" @click="closeBindLabelPicker">
