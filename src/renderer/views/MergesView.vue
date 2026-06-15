@@ -1896,18 +1896,18 @@ function formatRelative(iso: string | undefined): string {
 
 .merge-item__detail {
   grid-column: 1 / -1;
-  /* v1.5.3：左右 padding 跟主行一致（var(--space-4) = 16px），detail 不顶到 merge-item 边缘 */
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  /* v1.5.8：紧凑留白 5px，评论区尽可能饱满
+   *  - detail 自身 padding 5px（你要求）
+   *  - min-height 440 → 380px（少空白）
+   *  - 内部各子块 padding/gap 同步收紧 */
+  padding: 5px var(--space-4) var(--space-4);
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
-  /* v1.5.7：单 PR 展开时 detail 高度 = max(min-height, 内容)
-   *  - min-height 440px 是兜底——确保评论区至少有 ~340px 可见（440 - 60 meta - 40 header - 12 gap）
-   *  - max-height 900px 限制多 PR 展开时整页不超高
-   *  - 内部 flex: 1 1 0 链让评论区 grow 到底，溢出时 list/input 自身 overflow:auto 滚动 */
+  /* v1.5.7：min-height 兜底（评论区至少 380 - 60 meta - 40 header ≈ 280px 可见） */
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  min-height: 440px;
+  gap: var(--space-2);
+  min-height: 380px;
   max-height: min(90vh, 900px);
   overflow: hidden;
 }
@@ -2158,11 +2158,9 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comments {
   display: flex;
   flex-direction: column;
-  gap: 12px;                    /* v1.5：每个子块之间 12px 间距，不再挤 */
+  gap: 6px;                     /* v1.5.8：12 → 6，评论区子块紧凑 */
   min-width: 0;
   min-height: 0;
-  /* v1.5.5：不写 height: 100%（父 detail max-height 是约束，flex item 拿不到确定高度）
-   *  改用 flex: 1 1 0 配合父的 min-height: 0，flex item 才会真正占满父可用空间 */
   flex: 1 1 0;
 }
 
@@ -2170,13 +2168,13 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comments-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;   /* v1.5：左右两端对齐，不再 margin-left: auto hack */
+  justify-content: space-between;
   gap: 8px;
   font-size: var(--font-sm);
   font-weight: 600;
   color: var(--color-text);
   flex-shrink: 0;
-  padding-bottom: 8px;
+  padding-bottom: 5px;          /* v1.5.8：8 → 5 */
   border-bottom: 1px solid var(--color-divider-soft);
 }
 
@@ -2224,13 +2222,9 @@ function formatRelative(iso: string | undefined): string {
 /* ===== v1.5 主体：左 50% 历史 / 右 50% 输入框 ===== */
 .merge-item__comments-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;   /* v1.5：左历史 / 右输入各 50% */
-  /* v1.5.6：单行 1fr 撑满 grid 容器
-   *  - grid 容器有 flex: 1 1 0 + min-height: 0（flex parent 给高度）
-   *  - 1fr 在显式高度的 grid 容器中 = grid 容器高度
-   *  - 列 item 默认 align-self: stretch 占满行高 */
+  grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr;
-  gap: 12px;
+  gap: 6px;                     /* v1.5.8：12 → 6 */
   flex: 1 1 0;
   min-height: 0;
 }
@@ -2285,16 +2279,14 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: var(--space-3);       /* v1.5：space-2 → space-3，评论之间呼吸更大 */
+  padding: 5px;                 /* v1.5.8：12 → 5，5px 留白 */
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);            /* v1.5：space-2 → space-3，气泡之间不挤 */
-  /* v1.5：列内子元素（grid 1fr 列），撑满左列高度；max-height 由父 .merge-item__detail 限 */
+  gap: 5px;                     /* v1.5.8：12 → 5 */
   flex: 1 1 0;
   min-height: 0;
   max-height: 100%;
   overflow-y: auto;
-  /* 自定义滚动条样式（webkit only） */
   scrollbar-width: thin;
   scrollbar-color: var(--color-divider) transparent;
   background: var(--color-bg);
@@ -2422,18 +2414,17 @@ function formatRelative(iso: string | undefined): string {
   line-height: 1.5;
 }
 
-/* 发评论输入区（v1.5.5） */
+/* 发评论输入区（v1.5.8 紧凑 5px 留白） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: var(--space-3);
+  gap: 5px;                     /* v1.5.8：8 → 5 */
+  padding: 5px;                 /* v1.5.8：12 → 5 */
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   min-width: 0;
   min-height: 0;
-  /* grid item stretch，列高 = grid 行高；内部 textarea flex 1 撑满 */
   overflow: hidden;
 }
 
@@ -2512,8 +2503,8 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--space-2);
-  padding-top: 6px;             /* v1.5：与 textarea 之间视觉分隔 */
+  gap: 5px;                     /* v1.5.8：8 → 5 */
+  padding-top: 5px;             /* v1.5.8：6 → 5 */
   border-top: 1px solid var(--color-divider-soft);
 }
 .merge-item__comment-counter {
