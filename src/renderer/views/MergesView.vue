@@ -886,126 +886,139 @@ function formatRelative(iso: string | undefined): string {
             <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
           </a>
         </div>
-        <!-- 展开区：补充 meta + 二次确认才弹窗的入口（合并已在 trailing） -->
+        <!-- 展开区：左 meta + 右 comments 两栏 grid（左 1 / 右 2） -->
         <div v-if="expanded.has(p.index)" class="merge-item__detail">
-          <dl class="merge-item__meta">
-            <div class="merge-item__meta-row">
-              <dt>作者</dt>
-              <dd>{{ p.author.username }}</dd>
-            </div>
-            <div class="merge-item__meta-row">
-              <dt>创建</dt>
-              <dd>{{ formatDate(p.createdAt) }}</dd>
-            </div>
-            <div class="merge-item__meta-row">
-              <dt>更新</dt>
-              <dd>{{ formatDate(p.updatedAt) }}</dd>
-            </div>
-            <div class="merge-item__meta-row">
-              <dt>冲突</dt>
-              <dd>{{ p.hasConflicts ? '有冲突' : '无冲突' }}</dd>
-            </div>
-            <div class="merge-item__meta-row">
-              <dt>可合并</dt>
-              <dd>{{ p.mergeable ? '是' : '否' }}</dd>
-            </div>
-          </dl>
-          <!-- 编辑属性按钮 -->
-          <button
-            type="button"
-            class="merge-item__edit-attrs"
-            @click.stop="openAttrEditor(p)"
-          >
-            <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
-            <span>编辑属性</span>
-          </button>
-        </div>
-        <!-- ===== 合并请求对话（评论区）=====
-             策略：展开时 loadComments 拉一次；发送后 fetchComments 重拉拿权威数据。
-             数据源走 issues.comment.list/create（gitea 共享 comments 端点，合并请求也走这个）。 -->
-        <div v-if="expanded.has(p.index)" class="merge-item__detail merge-item__comments">
-          <div class="merge-item__comments-header">
-            <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
-            <span class="merge-item__comments-title">
-              对话
-              <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
-                ({{ getPanel(p.index).items.length }})
-              </span>
-            </span>
+          <!-- ===== 左栏：元数据 + 编辑属性 ===== -->
+          <div class="merge-item__detail-left">
+            <dl class="merge-item__meta">
+              <div class="merge-item__meta-row">
+                <dt>作者</dt>
+                <dd>{{ p.author.username }}</dd>
+              </div>
+              <div class="merge-item__meta-row">
+                <dt>创建</dt>
+                <dd>{{ formatDate(p.createdAt) }}</dd>
+              </div>
+              <div class="merge-item__meta-row">
+                <dt>更新</dt>
+                <dd>{{ formatDate(p.updatedAt) }}</dd>
+              </div>
+              <div class="merge-item__meta-row">
+                <dt>冲突</dt>
+                <dd>{{ p.hasConflicts ? '有冲突' : '无冲突' }}</dd>
+              </div>
+              <div class="merge-item__meta-row">
+                <dt>可合并</dt>
+                <dd>{{ p.mergeable ? '是' : '否' }}</dd>
+              </div>
+            </dl>
+            <!-- 编辑属性按钮 -->
             <button
               type="button"
-              class="merge-item__comments-refresh"
-              :disabled="getPanel(p.index).loading"
-              :title="'刷新对话'"
-              @click.stop="fetchComments(p)"
+              class="merge-item__edit-attrs"
+              @click.stop="openAttrEditor(p)"
             >
-              <RefreshCw
-                :size="12"
-                :stroke-width="2"
-                :class="{ spin: getPanel(p.index).loading }"
-                aria-hidden="true"
-              />
-              <span>{{ getPanel(p.index).loading ? '加载中…' : '刷新' }}</span>
+              <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
+              <span>编辑属性</span>
             </button>
           </div>
-          <!-- 加载态 -->
-          <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
-            <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
-            <span>正在加载对话…</span>
-          </div>
-          <!-- 错误态 -->
-          <div v-else-if="getPanel(p.index).error && getPanel(p.index).items.length === 0" class="merge-item__comments-error" role="alert">
-            <span>{{ getPanel(p.index).error }}</span>
-            <button type="button" class="merge-item__comments-retry" @click.stop="fetchComments(p)">重试</button>
-          </div>
-          <!-- 空态：暂无评论 + 提示用户第一条由谁起 -->
-          <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
-            暂无对话，发起第一条评论开始讨论吧
-          </div>
-          <!-- 评论列表 -->
-          <ul v-else class="merge-item__comment-list">
-            <li
-              v-for="c in getPanel(p.index).items"
-              :key="c.id"
-              class="merge-item__comment"
-              :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
-            >
-              <div class="merge-item__comment-meta">
-                <span class="merge-item__comment-author">{{ c.author.username }}</span>
-                <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
-                <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
+          <!-- ===== 右栏：合并请求对话（评论区）=====
+               策略：展开时 loadComments 拉一次；发送后 fetchComments 重拉拿权威数据。
+               数据源走 issues.comment.list/create（gitea 共享 comments 端点，合并请求也走这个）。 -->
+          <div class="merge-item__detail-right">
+            <div class="merge-item__comments">
+              <div class="merge-item__comments-header">
+                <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
+                <span class="merge-item__comments-title">
+                  对话
+                  <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
+                    ({{ getPanel(p.index).items.length }})
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="merge-item__comments-refresh"
+                  :disabled="getPanel(p.index).loading"
+                  :title="'刷新对话'"
+                  @click.stop="fetchComments(p)"
+                >
+                  <RefreshCw
+                    :size="12"
+                    :stroke-width="2"
+                    :class="{ spin: getPanel(p.index).loading }"
+                    aria-hidden="true"
+                  />
+                  <span>{{ getPanel(p.index).loading ? '加载中…' : '刷新' }}</span>
+                </button>
               </div>
-              <!-- markdown-it + DOMPurify 渲染的 HTML（src/renderer/lib/markdown.ts 已 sanitize） -->
-              <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
-            </li>
-          </ul>
-          <!-- 发评论输入区 -->
-          <div class="merge-item__comment-compose">
-            <textarea
-              class="merge-item__comment-input"
-              :value="getDraft(p.index)"
-              @input="setDraft(p.index, ($event.target as HTMLTextAreaElement).value)"
-              @keydown="onCommentKeydown(p, $event)"
-              :placeholder="'发条评论给 #'+p.index+'（Enter 发送，⌘/Ctrl+Enter 也行）'"
-              :disabled="getPanel(p.index).posting"
-              rows="2"
-              maxlength="65535"
-              spellcheck="false"
-            ></textarea>
-            <div class="merge-item__comment-actions">
-              <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
-                {{ getDraft(p.index).length }} / 65535
-              </span>
-              <button
-                type="button"
-                class="merge-item__comment-send"
-                :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
-                :title="'发送评论'"
-                @click.stop="postComment(p)"
-              >
-                <Send :size="12" :stroke-width="2" aria-hidden="true" />
-                <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
-              </button>
+              <!-- 加载态 -->
+              <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
+                <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
+                <span>正在加载对话…</span>
+              </div>
+              <!-- 错误态 -->
+              <div v-else-if="getPanel(p.index).error && getPanel(p.index).items.length === 0" class="merge-item__comments-error" role="alert">
+                <span>{{ getPanel(p.index).error }}</span>
+                <button type="button" class="merge-item__comments-retry" @click.stop="fetchComments(p)">重试</button>
+              </div>
+              <!-- 空态：暂无评论 + 提示用户第一条由谁起 -->
+              <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
+                暂无对话，发起第一条评论开始讨论吧
+              </div>
+              <!-- 评论列表：气泡聊天布局 + 滚动 -->
+              <ul v-else class="merge-item__comment-list">
+                <li
+                  v-for="c in getPanel(p.index).items"
+                  :key="c.id"
+                  class="merge-item__comment"
+                  :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
+                >
+                  <!-- 头像圈（首字母） -->
+                  <div
+                    class="merge-item__comment-avatar"
+                    :title="c.author.username"
+                    aria-hidden="true"
+                  >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
+                  <div class="merge-item__comment-bubble">
+                    <div class="merge-item__comment-meta">
+                      <span class="merge-item__comment-author">{{ c.author.username }}</span>
+                      <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
+                      <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
+                    </div>
+                    <!-- markdown-it + DOMPurify 渲染的 HTML（src/renderer/lib/markdown.ts 已 sanitize） -->
+                    <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
+                  </div>
+                </li>
+              </ul>
+              <!-- 发评论输入区 -->
+              <div class="merge-item__comment-compose">
+                <textarea
+                  class="merge-item__comment-input"
+                  :value="getDraft(p.index)"
+                  @input="setDraft(p.index, ($event.target as HTMLTextAreaElement).value)"
+                  @keydown="onCommentKeydown(p, $event)"
+                  :placeholder="'发条评论给 #'+p.index+'（Enter 发送，⌘/Ctrl+Enter 也行）'"
+                  :disabled="getPanel(p.index).posting"
+                  rows="2"
+                  maxlength="65535"
+                  spellcheck="false"
+                ></textarea>
+                <div class="merge-item__comment-actions">
+                  <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
+                    {{ getDraft(p.index).length }} / 65535
+                  </span>
+                  <button
+                    type="button"
+                    class="merge-item__comment-send"
+                    :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
+                    :title="'发送评论'"
+                    @click.stop="postComment(p)"
+                  >
+                    <Send :size="12" :stroke-width="2" aria-hidden="true" />
+                    <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1458,7 +1471,11 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding-top: 2px;
+  /* v1.3：去 padding-top 2px，让 icon 与 main 垂直居中对齐（不再贴首行） */
+  padding: 0;
+  /* 让 icon 与 main 第一行基线对齐 —— main 第一行是 header (font-md 600),
+   * icon 16px 在 main 高度 ~40px 容器里垂直居中即可 */
+  align-self: center;
 }
 
 .merge-item__icon--open {
@@ -1551,7 +1568,9 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
+  /* v1.3 · task #25 调整：gap 缩小,让顶部"创建 / 冲突"等行更紧凑,
+   * 把右半空间让给展开后的评论区 */
+  gap: 2px var(--space-2);
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   min-width: 0;
@@ -1570,7 +1589,7 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__meta-line {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 2px;
   flex-wrap: wrap;
 }
 
@@ -1734,37 +1753,57 @@ function formatRelative(iso: string | undefined): string {
   padding: var(--space-3) 0 0;
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
+  /* v1.3 · task #25 调整：左 meta / 右 comments 两栏，左 1 / 右 2
+   * 评论多时右侧能拿到 60%+ 宽度，评论长期挂着不挤；
+   * < 700px 降为单列堆叠（meta 在上，评论在下，评论全宽）。 */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: start;
 }
 
-/* meta 区使用 2 列定宽布局（响应式：< 600px 降为 1 列）
- * 不使用 auto-fit 避免在中间宽度出现 3 列拥挤；
- * 2 列 是信息密度 + 可读性的最佳平衡。 */
+@media (max-width: 700px) {
+  .merge-item__detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.merge-item__detail-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.merge-item__detail-right {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* meta 区使用单列紧凑布局（v1.3：左栏只占 1/3，多列会挤） */
 .merge-item__meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   margin: 0;
   padding: 0;
 }
 
-@media (max-width: 600px) {
-  .merge-item__meta {
-    grid-template-columns: 1fr;
-  }
-}
-
 .merge-item__meta-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
+  font-size: var(--font-xs);
 }
 
 .merge-item__meta-row dt {
-  font-size: var(--font-xs);
   color: var(--color-text-muted);
   font-weight: 500;
   margin: 0;
+  flex-shrink: 0;
+  min-width: 36px;
 }
 
 .merge-item__meta-row dd {
@@ -1775,6 +1814,7 @@ function formatRelative(iso: string | undefined): string {
   word-break: break-all;
   overflow-wrap: anywhere;
   min-width: 0;
+  flex: 1 1 0;
 }
 
 /* ===== 操作区 ===== */
@@ -1910,16 +1950,21 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
 }
 
-/* ===== 合并请求对话区（v1.2 · task #25）=====
+/* ===== 合并请求对话区（v1.3 · task #25 改）=====
  *
- * 复用 .merge-item__detail 的视觉（border-top + padding-top），
- * 但用第二层缩进与"编辑属性"区区分 —— gitea 同样把合并请求对话放详情下方。
- * 评论主体 markdown 走 .md-body 全局 class（其它视图复用）。 */
+ * 移到右栏：占 detail 的 2/3 宽度。
+ * 评论布局 = 聊天气泡：他人评论靠左 + 头像在左；"我"评论靠右 + 头像在右。
+ * 评论列表固定 max-height + overflow-y: auto（数据多了支持滚动）。
+ *
+ * 设计参考：gitea 评论右栏、微信聊天风格。
+ */
 
 .merge-item__comments {
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px dashed var(--color-divider);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
 }
 
 .merge-item__comments-header {
@@ -1929,7 +1974,8 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   font-weight: 600;
   color: var(--color-text);
-  margin-bottom: var(--space-2);
+  margin-bottom: 4px;
+  flex-shrink: 0;
 }
 
 .merge-item__comments-title {
@@ -2001,28 +2047,110 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text-inverse);
 }
 
+/* ===== 气泡聊天列表（v1.3 重做）===== */
+
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--space-2);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-
-.merge-item__comment {
-  padding: var(--space-2) var(--space-3);
+  /* 滚动条核心：固定 max-height + overflow-y:auto */
+  max-height: 360px;
+  overflow-y: auto;
+  /* 自定义滚动条样式（webkit only） */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-divider) transparent;
   background: var(--color-bg);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
-  /* 左 border 留空，给 --self 高亮用 */
-  border-left-width: 3px;
-  border-left-color: var(--color-divider);
 }
+
+.merge-item__comment-list::-webkit-scrollbar {
+  width: 6px;
+}
+.merge-item__comment-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.merge-item__comment-list::-webkit-scrollbar-thumb {
+  background: var(--color-divider);
+  border-radius: 3px;
+}
+.merge-item__comment-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* 单条评论 li：横向 flex，avatar + bubble
+ * 默认 = 他人：左对齐
+ * --self = 我：右对齐（reverse + 行内交换顺序） */
+.merge-item__comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
 .merge-item__comment--self {
-  border-left-color: var(--color-primary);
+  /* "我" 的评论整条反序，让头像+气泡都贴右 */
+  flex-direction: row-reverse;
+}
+
+/* 头像圈（首字母） */
+.merge-item__comment-avatar {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-divider);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+.merge-item__comment--self .merge-item__comment-avatar {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+/* 气泡容器 */
+.merge-item__comment-bubble {
+  max-width: 78%;
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: 10px;
+  position: relative;
+  /* 默认（他人）—— 小尖角在左上角 */
+}
+.merge-item__comment-bubble::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: -5px;
+  width: 8px;
+  height: 8px;
+  background: var(--color-bg-elevated);
+  border-left: 1px solid var(--color-divider);
+  border-bottom: 1px solid var(--color-divider);
+  transform: rotate(45deg);
+}
+.merge-item__comment--self .merge-item__comment-bubble {
   background: var(--color-primary-soft, var(--color-bg-elevated));
+  border-color: var(--color-primary);
+}
+.merge-item__comment--self .merge-item__comment-bubble::before {
+  left: auto;
+  right: -5px;
+  background: var(--color-primary-soft, var(--color-bg-elevated));
+  border-left: none;
+  border-bottom: none;
+  border-right: 1px solid var(--color-primary);
+  border-top: 1px solid var(--color-primary);
 }
 
 .merge-item__comment-meta {
@@ -2056,6 +2184,7 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
   word-break: break-word;
   overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 
 /* 发评论输入区 */
@@ -2063,11 +2192,11 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: var(--space-2);
   padding: var(--space-2);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
+  flex-shrink: 0;
 }
 .merge-item__comment-input {
   width: 100%;
