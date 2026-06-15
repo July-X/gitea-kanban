@@ -2,33 +2,22 @@
  * 仓库（repo_projects）本地缓存层
  *
  * 职责（02-architecture.md §5.3.1 / §6.3）：
- * - repos.list 列表缓存 5 min（写在 cache_entries 表）
- * - repos.addProject / removeProject：写 repo_projects 本地表，**不**调 gitea
- * - isProject / lastSyncAt 通过 repo_projects JOIN 计算
+ * - repos.list 列表缓存 5 min（写在文件 KV，见 ./file-store.ts）
+ * - repos.addProject / removeProject：写 repo_projects 本地表（localStore），**不**调 gitea
+ * - isProject / lastSyncAt 通过 localStore.projects 计算
  * - 写操作（addProject / removeProject）失效 'repos' 缓存
  *
  * 关键约束：
  * - **不**碰 token / keychain
  * - **不**调 gitea API
- * - **不**修改表结构（13 业务表 + 1 denorm 缓存表已拍板）
  *
- * ADR-0003 Phase 2 改造：业务态（repo_projects）走 localStore 优先；Gitea 缓存
- * （cache_entries）继续走 SQLite。本期不切 Gitea 缓存层（cache-aside 模式，
- * cache_entries 是 cache 加速不是 source of truth，Phase 3 不动它）。
- *
- * 双写策略：localStore 写失败抛（IPC 业务错误）；SQLite 写失败 best-effort
- * log（Phase 2 兜底，localStore 是 source of truth）。
+ * 存储（ADR-0003 完结态）：
+ * - 业务态 repo_projects → localStore（source of truth）
+ * - Gitea 缓存（repos 列表）→ 文件 KV（cache/repos/<accountId>__<key>.json）
  */
 
 import { randomUUID } from 'node:crypto';
-import { eq, and, isNull } from 'drizzle-orm';
-// 注：isNull 在 cache_entries (nullable) 列上查询时使用——
-// drizzle `eq(col, null)` 编译成 SQL `col = NULL`（永远 false）；
-// SQLite 的 NULL 比较必须用 `IS NULL`，所以 isNull 是必需的。
-// 注：Phase 3 业务表 repo_projects 已迁 localStore，下面 import 删；drizzle eq/isNull 仅
-// 给 Gitea 缓存层（cache_entries）和 backfillDefaultBranch 的 NULL 校验用
-import { getDb } from './sqlite.js';
-import { cacheEntries } from './schema/cacheEntries.js';
+import { getCache, setCache, invalidateCache } from './file-store.js';
 import type { RepoProjectDto } from '../ipc/schema.js';
 import { getLocalStore } from '../local/state.js';
 import { findProjectWithStore, findProjectsByOwnerNameWithStore } from '../local/projects.js';
@@ -40,7 +29,7 @@ export const REPOS_LIST_TTL_SECONDS = 5 * 60;
 
 /**
  * 内部：根据 (giteaAccountId, owner, name) 找 repo_projects 行
- * ADR-0003 Phase 2：走 localStore 优先
+ * ADR-0003：走 localStore
  */
 export function findProject(
   giteaAccountId: string,
@@ -54,7 +43,7 @@ export function findProject(
 
 /**
  * 内部：列一个 giteaAccountId 下所有 repo_projects 行
- * ADR-0003 Phase 2：走 localStore
+ * ADR-0003：走 localStore
  */
 export function listProjectsForAccount(giteaAccountId: string): RepoProjectDto[] {
   const projects = getLocalStore()
@@ -68,7 +57,7 @@ export function listProjectsForAccount(giteaAccountId: string): RepoProjectDto[]
  *
  * 用于 repos.list 渲染时把 gitea 返回的仓库跟本地项目状态 JOIN
  * —— 一次 map filter，避免 N+1
- * ADR-0003 Phase 2：走 localStore
+ * ADR-0003：走 localStore
  */
 export function findProjectsByOwnerName(
   giteaAccountId: string,
@@ -93,7 +82,7 @@ export function findProjectsByOwnerName(
  * 必须提供 giteaUrl（gitea 仓库元数据）以便在 defaultBranch 为 null 时
  * 后续从 gitea 拉一次填上；v1 简化为 null（可由后续 sync 任务补全）
  *
- * ADR-0003 Phase 2：localStore 写优先（source of truth），SQLite 镜像（best-effort）
+ * ADR-0003：写 localStore（source of truth）
  */
 export function addProject(args: {
   giteaAccountId: string;
@@ -145,7 +134,7 @@ export function addProject(args: {
  *
  * gitea 那边不动（用户到 gitea 页面处理，或保留为不活跃仓库）
  *
- * ADR-0003 Phase 2：localStore 删优先，SQLite 镜像
+ * ADR-0003：删 localStore
  */
 export function removeProject(projectId: string): void {
   const store = getLocalStore();
@@ -169,7 +158,7 @@ export function removeProject(projectId: string): void {
 
 /**
  * 更新 lastSyncAt —— repos.list 拉取后调用，标记"刚同步过"
- * ADR-0003 Phase 2：走 localStore
+ * ADR-0003：走 localStore
  */
 export function touchLastSync(args: {
   giteaAccountId: string;
@@ -208,7 +197,7 @@ export function touchLastSync(args: {
  *
  * 幂等 + 无副作用：不破坏 IPC schema（仍保持 defaultBranch optional）。
  *
- * ADR-0003 Phase 2：localStore 优先
+ * ADR-0003：走 localStore
  */
 export function backfillDefaultBranch(args: {
   giteaAccountId: string;
@@ -239,79 +228,21 @@ export function backfillDefaultBranch(args: {
  *
  * @returns payload 字符串（JSON）；null = 缓存未命中或已过期
  */
-export function getReposCache(args: {
-  giteaAccountId: string;
-  cacheKey: string;
-}): string | null {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(cacheEntries)
-    .where(
-      and(
-        isNull(cacheEntries.repoProjectId),
-        eq(cacheEntries.resource, CACHE_RESOURCE),
-        eq(cacheEntries.key, args.cacheKey),
-      ),
-    )
-    .all()[0];
-  if (!row) return null;
-
-  const fetchedAt = row.fetchedAt instanceof Date ? row.fetchedAt.getTime() : new Date(row.fetchedAt).getTime();
-  const ageSeconds = (Date.now() - fetchedAt) / 1000;
-  if (ageSeconds > row.ttlSeconds) {
-    return null;
-  }
-  return row.payload;
+export function getReposCache(args: { giteaAccountId: string; cacheKey: string }): string | null {
+  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.giteaAccountId, key: args.cacheKey });
 }
 
 /**
  * 写 repos 缓存
  */
-export function setReposCache(args: {
-  giteaAccountId: string;
-  cacheKey: string;
-  payload: string;
-  ttlSeconds?: number;
-}): void {
-  const db = getDb();
-  const ttl = args.ttlSeconds ?? REPOS_LIST_TTL_SECONDS;
-  const now = new Date();
-  // upsert: 按 (repoProjectId, resource, key) 查
-  // repos 资源级缓存 repoProjectId 始终为 null（账号级）—— 用 isNull 才能命中
-  const existing = db
-    .select()
-    .from(cacheEntries)
-    .where(
-      and(
-        isNull(cacheEntries.repoProjectId),
-        eq(cacheEntries.resource, CACHE_RESOURCE),
-        eq(cacheEntries.key, args.cacheKey),
-      ),
-    )
-    .all()[0];
-  if (existing) {
-    db.update(cacheEntries)
-      .set({
-        payload: args.payload,
-        fetchedAt: now,
-        ttlSeconds: ttl,
-      })
-      .where(eq(cacheEntries.id, existing.id))
-      .run();
-  } else {
-    db.insert(cacheEntries)
-      .values({
-        id: randomUUID(),
-        repoProjectId: null,
-        resource: CACHE_RESOURCE,
-        key: args.cacheKey,
-        payload: args.payload,
-        fetchedAt: now,
-        ttlSeconds: ttl,
-      })
-      .run();
-  }
+export function setReposCache(args: { giteaAccountId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+  setCache({
+    resource: CACHE_RESOURCE,
+    projectId: args.giteaAccountId,
+    key: args.cacheKey,
+    payload: args.payload,
+    ttlSeconds: args.ttlSeconds ?? REPOS_LIST_TTL_SECONDS,
+  });
 }
 
 /**
@@ -319,24 +250,23 @@ export function setReposCache(args: {
  *
  * 触发：addProject / removeProject 之后
  *
- * 备注：cacheEntries.repoProjectId 是 nullable + 没强制 FK；
- * repos 资源用 cacheKey 而不是 projectId 索引（账号级缓存）
+ * 备注：repos 是账号级缓存（projectId 维度实际是 giteaAccountId）；
+ * 传 giteaAccountId 仅清该账号；缺省清整个 resource。
  */
-export function invalidateReposCache(_giteaAccountId?: string): void {
-  const db = getDb();
-  db.delete(cacheEntries).where(eq(cacheEntries.resource, CACHE_RESOURCE)).run();
+export function invalidateReposCache(giteaAccountId?: string): void {
+  invalidateCache({ resource: CACHE_RESOURCE, projectId: giteaAccountId });
 }
 
 // ===== helper =====
 
 /**
- * 接受 SQLite row（Date）或 localStore row（number epoch ms）→ RepoProjectDto
+ * localStore row（number epoch ms）→ RepoProjectDto
  *
- * ADR-0003 Phase 2：cache/repos.ts 改走 localStore，row 形状变了。
- * - SQLite：createdAt/lastSyncAt 是 Date
- * - localStore：createdAt/lastSyncAt 是 number epoch ms（参考 src/main/local/state.ts RepoProject）
+ * ADR-0003：cache/repos.ts 走 localStore，createdAt/lastSyncAt 是 number epoch ms
+ * （参考 src/main/local/state.ts RepoProject）。
  *
- * RepoProjectDto 输出要求 ISO date string，所以两种来源都归一化。
+ * 类型签名保留 `Date | number` 兼容，归一化逻辑 `new Date(x).toISOString()` 对两种
+ * 入参都正确；RepoProjectDto 输出要求 ISO date string。
  *
  * null 入参 → null（用于 findProject 之类的"找不到"路径）
  */

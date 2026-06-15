@@ -1,7 +1,7 @@
 /**
  * Timeline 缓存层（02-architecture.md §5.3.4 + §6.2）
  *
- * 职责：把 commits.timeline 的归一化 TimelineDTO 写进 cache_entries
+ * 职责：把 commits.timeline 的归一化 TimelineDto 写进文件 KV（见 ./file-store.ts）
  * - key 构造（任务 prompt §关键约束 13）：projectId + branches (sorted) + since/until + laneMode + maxNodes
  * - TTL：30s（与 pulls 一致，任务 prompt §commits.timeline 步骤 9 缓存段）
  * - 写操作（pulls.merge）触发的"timeline 失效"由调用方处理（这里不主动失效）
@@ -12,11 +12,8 @@
  * - **不**做截断（截断在 buildTimeline）
  */
 
-import { randomUUID } from 'node:crypto';
-import { eq, and } from 'drizzle-orm';
-import { getDb } from './sqlite.js';
-import { cacheEntries } from './schema/cacheEntries.js';
-import type { TimelineArgs, TimelineDto } from '../ipc/schema.js';
+import { getCache, setCache, invalidateCache } from './file-store.js';
+import type { TimelineArgs } from '../ipc/schema.js';
 
 const CACHE_RESOURCE = 'timeline';
 /** commits.timeline 缓存 TTL：30s（与 pulls 同步） */
@@ -45,85 +42,27 @@ export function makeTimelineCacheKey(args: TimelineArgs): string {
 
 /** 读 timeline 缓存 */
 export function getTimelineCache(args: { projectId: string; cacheKey: string }): string | null {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(cacheEntries)
-    .where(
-      and(
-        eq(cacheEntries.repoProjectId, args.projectId),
-        eq(cacheEntries.resource, CACHE_RESOURCE),
-        eq(cacheEntries.key, args.cacheKey),
-      ),
-    )
-    .all()[0];
-  if (!row) return null;
-  const fetchedAt = row.fetchedAt instanceof Date ? row.fetchedAt.getTime() : new Date(row.fetchedAt).getTime();
-  const ageSeconds = (Date.now() - fetchedAt) / 1000;
-  if (ageSeconds > row.ttlSeconds) {
-    return null;
-  }
-  return row.payload;
+  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.projectId, key: args.cacheKey });
 }
 
 /** 写 timeline 缓存 */
-export function setTimelineCache(args: {
-  projectId: string;
-  cacheKey: string;
-  payload: TimelineDto;
-  ttlSeconds?: number;
-}): void {
-  const db = getDb();
-  const ttl = args.ttlSeconds ?? TIMELINE_TTL_SECONDS;
-  const existing = db
-    .select()
-    .from(cacheEntries)
-    .where(
-      and(
-        eq(cacheEntries.repoProjectId, args.projectId),
-        eq(cacheEntries.resource, CACHE_RESOURCE),
-        eq(cacheEntries.key, args.cacheKey),
-      ),
-    )
-    .all()[0];
-  if (existing) {
-    db.update(cacheEntries)
-      .set({ payload: JSON.stringify(args.payload), fetchedAt: new Date(), ttlSeconds: ttl })
-      .where(eq(cacheEntries.id, existing.id))
-      .run();
-  } else {
-    db.insert(cacheEntries)
-      .values({
-        id: randomUUID(),
-        repoProjectId: args.projectId,
-        resource: CACHE_RESOURCE,
-        key: args.cacheKey,
-        payload: JSON.stringify(args.payload),
-        fetchedAt: new Date(),
-        ttlSeconds: ttl,
-      })
-      .run();
-  }
+export function setTimelineCache(args: { projectId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+  setCache({
+    resource: CACHE_RESOURCE,
+    projectId: args.projectId,
+    key: args.cacheKey,
+    payload: args.payload,
+    ttlSeconds: args.ttlSeconds ?? TIMELINE_TTL_SECONDS,
+  });
 }
 
 /**
  * 失效 timeline 资源的所有缓存条目
  *
  * 触发：commits.timeline 主动刷新（UI 按钮）；pulls.merge 完成后（写操作失效，02 §6.3.4）
- * 由调用方（ipc/commits.ts / ipc/pulls.ts）显式调用
+ * 由调用方（ipc/commits.ts / ipc/pulls.ts）显式调用。
+ * 传 projectId 仅清该项目；缺省清整个 resource。
  */
 export function invalidateTimelineCache(projectId?: string): void {
-  const db = getDb();
-  if (projectId) {
-    db.delete(cacheEntries)
-      .where(
-        and(
-          eq(cacheEntries.resource, CACHE_RESOURCE),
-          eq(cacheEntries.repoProjectId, projectId),
-        ),
-      )
-      .run();
-  } else {
-    db.delete(cacheEntries).where(eq(cacheEntries.resource, CACHE_RESOURCE)).run();
-  }
+  invalidateCache({ resource: CACHE_RESOURCE, projectId });
 }

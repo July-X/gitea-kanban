@@ -1,7 +1,7 @@
 /**
- * FileStore —— Gitea 缓存层文件 KV（替代 SQLite cache_entries）
+ * FileStore —— Gitea 缓存层文件 KV
  *
- * 职责（ADR-0003 Phase 3b）：
+ * 职责（ADR-0003 完结态）：
  * - 5 个 resource（repos / branches / commits / pulls / timeline）缓存读写
  * - TTL 过期处理（mtime vs now 算 age）
  * - 启动期 LRU GC（按 mtime 倒序删到 LRU_BUDGET_BYTES 内）
@@ -43,10 +43,8 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, readFileSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { isAbsolute } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { pino } from 'pino';
-import { logger } from '../logger.js';
 
 const log = pino({ name: 'cache-file-store', level: process.env['LOG_LEVEL'] ?? 'info' });
 
@@ -230,7 +228,7 @@ export function invalidateCache(args: { resource: string; projectId?: string }):
  *
  * 扫整个 cache/ 目录，按 mtime 倒序（最新优先），删到总大小 ≤ LRU_BUDGET_BYTES
  *
- * 时机：app.ready 后 initSqlite 旧位置；或 SyncRunner.start 之前
+ * 时机：app.ready 后 localStore 初始化之后（见 src/main/index.ts 启动序列）
  * 频次：v1 仅启动期 + 写时按 mtime 自然（不主动）→ 简单
  */
 export function gcCache(args: { budgetBytes?: number } = {}): {

@@ -4,8 +4,7 @@
 # - allowBuilds 是 key-value 形式（pnpm 10 是 onlyBuiltDependencies 数组）
 # - 任何带 native binding / postinstall 的包都必须显式列出，否则被 ignore-builds
 #
-# 本项目：
-# - better-sqlite3: 原生 C++ 编译，需要 prebuild 或本地 node-gyp
+# 本项目（ADR-0003 完结：better-sqlite3 / drizzle 已移除，无 native C++ 依赖）：
 # - electron: Electron 二进制安装（@electron/rebuild 会处理）
 # - @napi-rs/keyring*: NAPI prebuild，不需要 build
 #
@@ -15,11 +14,9 @@ packages:
   - "."
 
 # 允许 native build 的包白名单
-# - better-sqlite3: 原生 C++ 编译，需要 prebuild 或本地 node-gyp
 # - electron: Electron 二进制安装（@electron/rebuild 会处理）
 # - esbuild: postinstall 选 platform-specific prebuild binary（pnpm 11 缺它会 ERR）
 allowBuilds:
-  better-sqlite3: true
   electron: true
   # electron-winstaller: electron-builder 的 Windows 打包器子依赖（macOS 用不上）
   # pnpm 11.5+ 把 "set this to true or false" 字面量写进 lockfile 是 install 时的占位符

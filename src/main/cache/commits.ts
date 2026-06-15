@@ -15,11 +15,7 @@
  * v2 决策：linkedCards 功能要么彻底砍（commit 跟卡片无强关联），要么改成"commit 跟 PR 关联"——待 v2 评估
  */
 
-import { randomUUID } from 'node:crypto';
-import { eq, and } from 'drizzle-orm';
-import { getDb } from './sqlite.js';
-import { cacheEntries } from './schema/cacheEntries.js';
-
+import { getCache, setCache, invalidateCache } from './file-store.js';
 const CACHE_RESOURCE = 'commits';
 
 /** v1：commit list 缓存 TTL 2 min */
@@ -65,89 +61,26 @@ export function getLinkedCardsForPull(_args: {
 }
 
 // ============================================================
-// ===== cache_entries（commits 资源级缓存）=====
+// ===== commits 资源级缓存（文件 KV）=====
 // ============================================================
 
 /** 读 commits 缓存 */
 export function getCommitsCache(args: { projectId: string; cacheKey: string }): string | null {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(cacheEntries)
-    .where(
-      and(
-        eq(cacheEntries.repoProjectId, args.projectId),
-        eq(cacheEntries.resource, CACHE_RESOURCE),
-        eq(cacheEntries.key, args.cacheKey),
-      ),
-    )
-    .all()[0];
-  if (!row) return null;
-  const fetchedAt = row.fetchedAt instanceof Date ? row.fetchedAt.getTime() : new Date(row.fetchedAt).getTime();
-  const ageSeconds = (Date.now() - fetchedAt) / 1000;
-  if (ageSeconds > row.ttlSeconds) {
-    return null;
-  }
-  return row.payload;
+  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.projectId, key: args.cacheKey });
 }
 
 /** 写 commits 缓存 */
-export function setCommitsCache(args: {
-  projectId: string;
-  cacheKey: string;
-  payload: string;
-  ttlSeconds?: number;
-}): void {
-  const db = getDb();
-  const ttl = args.ttlSeconds ?? COMMITS_LIST_TTL_SECONDS;
-  const existing = db
-    .select()
-    .from(cacheEntries)
-    .where(
-      and(
-        eq(cacheEntries.repoProjectId, args.projectId),
-        eq(cacheEntries.resource, CACHE_RESOURCE),
-        eq(cacheEntries.key, args.cacheKey),
-      ),
-    )
-    .all()[0];
-  if (existing) {
-    db.update(cacheEntries)
-      .set({
-        payload: args.payload,
-        fetchedAt: new Date(),
-        ttlSeconds: ttl,
-      })
-      .where(eq(cacheEntries.id, existing.id))
-      .run();
-  } else {
-    db.insert(cacheEntries)
-      .values({
-        id: randomUUID(),
-        repoProjectId: args.projectId,
-        resource: CACHE_RESOURCE,
-        key: args.cacheKey,
-        payload: args.payload,
-        fetchedAt: new Date(),
-        ttlSeconds: ttl,
-      })
-      .run();
-  }
+export function setCommitsCache(args: { projectId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+  setCache({
+    resource: CACHE_RESOURCE,
+    projectId: args.projectId,
+    key: args.cacheKey,
+    payload: args.payload,
+    ttlSeconds: args.ttlSeconds ?? COMMITS_LIST_TTL_SECONDS,
+  });
 }
 
-/** 失效 commits 资源的所有缓存条目 */
+/** 失效 commits 资源的所有缓存条目。传 projectId 仅清该项目；缺省清整个 resource。 */
 export function invalidateCommitsCache(projectId?: string): void {
-  const db = getDb();
-  if (projectId) {
-    db.delete(cacheEntries)
-      .where(
-        and(
-          eq(cacheEntries.resource, CACHE_RESOURCE),
-          eq(cacheEntries.repoProjectId, projectId),
-        ),
-      )
-      .run();
-  } else {
-    db.delete(cacheEntries).where(eq(cacheEntries.resource, CACHE_RESOURCE)).run();
-  }
+  invalidateCache({ resource: CACHE_RESOURCE, projectId });
 }

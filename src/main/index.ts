@@ -6,7 +6,7 @@
  *   1. app.requestSingleInstanceLock() —— 第二实例进 IPC 给已有实例
  *   2. app.whenReady() 之后：
  *      a. 升级 logger 到 file transport
- *      b. 初始化 sqlite（建表 / 跑迁移）
+ *      b. 初始化 localStore（state.json）+ SyncRunner
  *      c. 注册所有 IPC handler
  *      d. 创建主窗口
  *   3. 监听 window-all-closed（macOS 保留 dock）
@@ -18,7 +18,6 @@ import { app } from 'electron';
 import { logger, upgradeLoggerToFile } from './logger.js';
 import { createMainWindow, destroyMainWindow, installCspHeader } from './window.js';
 import { registerAllIpcHandlers, unregisterAllIpcHandlers } from './ipc/index.js';
-import { initSqlite, closeSqlite } from './cache/sqlite.js';
 import { initLocalStore, closeLocalStore } from './local/state.js';
 import { authStatus } from './gitea/auth.js';
 import { getSyncRunner } from './sync/runner.js';
@@ -83,15 +82,17 @@ app.on('ready', async () => {
     upgradeLoggerToFile();
     logger.info({ version: app.getVersion(), isPackaged: app.isPackaged }, 'app ready');
 
-    // 2a. 初始化 sqlite
-    logger.info('initSqlite start');
-    await initSqlite();
-    logger.info('sqlite initialized');
-
-    // 2a-bis. 初始化 localStore（ADR-0003 Phase 3：localStore 是唯一 source of truth）
+    // 2a. 初始化 localStore（ADR-0003：localStore 是唯一 source of truth，业务态全在此）
     logger.info('initLocalStore start');
     await initLocalStore();
     logger.info('localStore initialized');
+
+    // 2a-bis. Gitea 缓存层启动期 LRU GC（file-store.ts，按 mtime 删到 50MB 预算内）
+    //   纯文件系统操作，无 DB 依赖；放 localStore 之后、IPC 之前
+    // import 在调用处按需（避免冷启开销）
+    const { gcCache } = await import('./cache/file-store.js');
+    gcCache();
+    logger.info('cache gc done');
 
     // 2b. 注册 IPC
     logger.info('registerAllIpcHandlers start');
@@ -150,10 +151,8 @@ app.on('before-quit', () => {
   logger.info('app quitting');
   unregisterAllIpcHandlers();
   destroyMainWindow();
-  // closeLocalStore 先于 closeSqlite：保证 last write 不丢
-  void closeLocalStore()
-    .then(() => getSyncRunner().stop())
-    .finally(() => closeSqlite());
+  // closeLocalStore 保证 last write 落盘；SyncRunner stop 保证 queue 状态持久化
+  void closeLocalStore().then(() => getSyncRunner().stop());
 });
 
 // 未捕获异常 → 静默兜底（不调 logger.fatal — logger 可能已坏：SonicBoom fd=-1 会循环 RangeError）

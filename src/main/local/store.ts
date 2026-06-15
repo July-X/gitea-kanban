@@ -215,14 +215,9 @@ export class LocalStore<T extends object> {
 /**
  * 工具：拼出 state.json 的完整路径
  *
- * 路径策略：与 src/main/cache/sqlite.ts 的 `resolveDbPath` 保持完全一致
+ * 路径策略：
  * - 优先 ${GITEA_KANBAN_DATA_DIR}/state.json
  * - 兜底 ~/.gitea-kanban/state.json
- *
- * 这里**独立实现**而不 import resolveDbPath：
- * - sqlite.ts 顶层 import electron.app，测试时炸
- * - 两边必须 100% 走同路径策略；本函数是 sqlite.ts resolveDbPath 的精简版
- *   （只取 dirname(kanban.db) 拼 state.json，**不**读 SQLITE_DB_FILENAME 常量）
  *
  * **不**接受用户输入的绝对路径（AGENTS §8.4）
  */

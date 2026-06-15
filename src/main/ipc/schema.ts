@@ -1138,8 +1138,7 @@ export type ThemeGetResult = z.infer<typeof ThemeGetResultSchema>;
  *
  * 错误处理：
  * - VALIDATION_FAILED：theme 不在 enum 3 选 1（Zod 在 wrapIpc 入口先 reject）
- * - DATABASE_WRITE_FAILED：sqlite write 抛异常
- * - DATABASE_UNAVAILABLE：getDb() 抛 "sqlite not initialized"
+ * - INTERNAL：localStore.mutate 写盘失败（rare；原子写 + 重试退避）
  */
 export const ThemeSetArgsSchema = z
   .object({

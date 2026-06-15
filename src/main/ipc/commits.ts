@@ -391,8 +391,8 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
   // 6. buildTimeline 归一化
   const dto = buildTimeline({ args, commitsByBranch, pulls: timelinePrs, linkedCardIdsBySha });
 
-  // 7. 写缓存
-  setTimelineCache({ projectId: args.projectId, cacheKey, payload: dto });
+  // 7. 写缓存（payload 统一为 JSON 字符串，cache 层不关心业务类型）
+  setTimelineCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(dto) });
 
   logger.info(
     { op, latencyMs: Date.now() - start, totalCommits: dto.totalCommits, nodes: dto.nodes.length, truncated: dto.truncated },

@@ -10,9 +10,6 @@ export const APP_SINGLE_INSTANCE_LOCK_NAME = 'io.gitea-kanban.app.single-instanc
 /** 应用主窗口名（DevTools / 日志标识用） */
 export const APP_NAME = 'gitea-kanban';
 
-/** SQLite 文件名（落在 $GITEA_KANBAN_DATA_DIR 或 ~/.gitea-kanban 下，详见 AGENTS §8.15） */
-export const SQLITE_DB_FILENAME = 'kanban.db';
-
 /** logs 子目录（$GITEA_KANBAN_DATA_DIR/logs/<dir> 或 ~/.gitea-kanban/logs/<dir>，详见 AGENTS §8.15） */
 export const LOG_SUBDIR = 'main';
 

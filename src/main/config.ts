@@ -3,7 +3,7 @@
  *
  * 职责：
  * - 提供默认值（gitea URL、轮询间隔等）
- * - 不持久化——持久化在 store/prefs.ts + SQLite
+ * - 不持久化——持久化在 localStore（state.json 的 prefs 子键）
  * - 不接用户输入（避免路径遍历，AGENTS.md §9.3）
  */
 
@@ -25,8 +25,6 @@ export interface AppConfig {
   tokenCacheTtlMs: number;
   /** 应用名（IPC channel 前缀 / 日志 tag） */
   appName: string;
-  /** sqlite 文件名（落在 $GITEA_KANBAN_DATA_DIR 或 ~/.gitea-kanban 下，详见 AGENTS §8.15） */
-  sqliteFilename: string;
   /** 是否开发模式 */
   isDev: boolean;
 }
@@ -44,7 +42,6 @@ export function loadConfig(): AppConfig {
     cacheTtlDefaultSeconds: CACHE_TTL_DEFAULT_SECONDS,
     tokenCacheTtlMs: 5 * 60 * 1000,
     appName: 'gitea-kanban',
-    sqliteFilename: 'kanban.db',
     isDev: !isPackaged(),
   };
 }

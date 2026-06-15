@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -106,7 +106,6 @@ describe('getCache 健壮性', () => {
 
   it('JSON 损坏 → null（不当错抛）', () => {
     const dir = join(TMP_DIR, 'cache', 'r');
-    const { mkdirSync } = require('node:fs');
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, 'p__k.json'), '{ not valid json', { mode: 0o600 });
     expect(getCache({ resource: 'r', projectId: 'p', key: 'k' })).toBeNull();
