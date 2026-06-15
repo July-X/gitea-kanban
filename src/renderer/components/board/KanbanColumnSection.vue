@@ -7,7 +7,7 @@
  * - 与 ColumnHeader / ColumnMenu / MoveColumnPicker 解耦：
  *   · 列头渲染委托给 ColumnHeader
  *   · 列设置弹窗由父组件管理（BoardView 持有 showColumnMenu），本组件**只**emit 'open-settings'
- *   · 拖拽事件（onEnd / onCardKeydown）由父组件传入回调
+ *   · 拖拽事件（onEnd）由父组件传入回调
  *   · 新建议题输入框 + 换列 / 删除按钮 emit 到父
  *
  * 通信：props + emit（不直接调 store）
@@ -17,28 +17,23 @@
  *   - props.loading          : store.loading
  *   - props.isOverLimit      : 超限标志（视觉）
  *   - props.overLimitTooltip : 超限提示文案
- *   - props.keyboardPickedIssueId : 键盘拖拽中拾起的 issue.id（null = 无）
- *   - props.keyboardHoveredColumnId : 键盘拖拽时当前 hover 的列 id
  *   - props.dragOptions      : vue-draggable-plus options
  *
  *   - emit('open-settings')           : 父组件打开列设置弹窗
  *   - emit('drag-end', evt)           : 父组件接住 vue-draggable-plus onEnd
- *   - emit('card-keydown', payload)   : 父组件接住卡片键盘事件
  *   - emit('update:newIssueDraft', v) : 列内输入双向
  *   - emit('create-issue')            : 列内创建
  *   - emit('open-move-menu', payload) : 卡片点"换列"按钮
  *   - emit('request-delete-issue', payload) : 卡片点"关闭"按钮
+ *
+ * 历史：v1.3 引入过键盘拖拽 props（keyboardPickedIssueId / keyboardHoveredColumnId）
+ * + card-keydown emit + card--picked / column__cards--drag-target class；v1.3.1 撤回。
+ * 卡片 tabindex="0" + role="article" 保留（驱动 .card:focus-within 视觉反馈）。
  */
 import { ChevronDown, Plus, Tag } from 'lucide-vue-next';
 import { VueDraggable } from 'vue-draggable-plus';
 import type { ColumnDto, IssueCardDto } from '../../../main/ipc/schema.js';
 import ColumnHeader from '@renderer/components/board/ColumnHeader.vue';
-
-interface CardKeydownPayload {
-  issue: IssueCardDto;
-  fromColumnId: string;
-  evt: KeyboardEvent;
-}
 
 interface Props {
   column: ColumnDto;
@@ -47,8 +42,6 @@ interface Props {
   loading: boolean;
   isOverLimit: boolean;
   overLimitTooltip: string;
-  keyboardPickedIssueId: number | null;
-  keyboardHoveredColumnId: string | null;
   dragOptions: Record<string, unknown>;
 }
 
@@ -57,7 +50,6 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (e: 'open-settings'): void;
   (e: 'drag-end', evt: unknown): void;
-  (e: 'card-keydown', payload: CardKeydownPayload): void;
   (e: 'update:newIssueDraft', value: string): void;
   (e: 'create-issue'): void;
   (e: 'open-move-menu', payload: { issue: IssueCardDto; fromColumnId: string }): void;
@@ -97,10 +89,7 @@ const emit = defineEmits<{
     <VueDraggable
       v-if="props.column.labels.length > 0 && props.issues.length > 0"
       v-bind="props.dragOptions"
-      :class="[
-        'column__cards',
-        { 'column__cards--drag-target': props.keyboardHoveredColumnId === props.column.id },
-      ]"
+      class="column__cards"
       :data-column-id="props.column.id"
       @end="(evt) => emit('drag-end', evt)"
       tag="ul"
@@ -111,15 +100,12 @@ const emit = defineEmits<{
         class="card"
         :class="{
           'card--closed': issue.state === 'closed',
-          'card--picked':
-            props.keyboardPickedIssueId !== null && props.keyboardPickedIssueId === issue.id,
         }"
         :data-issue-index="issue.index"
         :data-column-id="props.column.id"
         tabindex="0"
         role="article"
         :aria-label="`议题 #${issue.index}：${issue.title}`"
-        @keydown="(e) => emit('card-keydown', { issue, fromColumnId: props.column.id, evt: e })"
       >
         <div class="card__head">
           <span class="card__index mono">#{{ issue.index }}</span>

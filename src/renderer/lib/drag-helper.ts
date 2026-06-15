@@ -1,9 +1,9 @@
 /**
- * drag-helper —— 看板拖拽的纯函数 / 键盘导航适配层
+ * drag-helper —— 看板鼠标拖拽（vue-draggable-plus）的纯函数适配层
  *
- * 用途（Task A · kanban-drag-replace）：
- * - 封装 `vue-draggable-plus` adapter 的关键映射（拖拽事件 → board.moveIssue 参数）
- * - 暴露 `keyDownToColumn`（键盘 Space 拾起 + 方向键选列 + Space 放下）供单元测试覆盖
+ * 用途（plan_25cc4562 Task A + v1.3.1 撤回键盘双模后）：
+ * - 封装 `vue-draggable-plus` onEnd 事件 → board.moveIssue 入参
+ * - 提供 `isFinishColumnByTitle`（拖到"已完成"列 = 二次确认 + 关闭 gitea issue）
  *
  * 设计约束（AGENTS.md §9.1 + OVERRIDE.md §本项目专属规则 #1）：
  * - **零术语**：本文件不写 UI 文本，纯函数 + 内部类型名
@@ -13,9 +13,14 @@
  *
  * 列内排序 v1 **不**接后端（gitea label 不存 position；store 端按 index 升序展示），
  * 拖拽仅为视觉占位。moveIssue 永远 append 到目标列末尾。
+ *
+ * 历史：v1.3 引入键盘双模（Space 拾起 / 方向键 / Space 放下），但 PM/设计师/运营等
+ * 非技术受众几乎全部走鼠标路径，键盘双模的测试成本与 UX 价值不匹配。
+ * v1.3.1 撤回键盘相关代码：`keyDownToColumn` / `KeyboardDragState` / `makeIdleKeyboardDrag`
+ * 整个删除；保留鼠标拖拽路径（vue-draggable-plus）。
  */
 
-import type { IssueCardDto, ColumnDto } from '../../main/ipc/schema.js';
+import type { ColumnDto } from '../../main/ipc/schema.js';
 
 /** 拖拽结果（BoardView 用此触发 moveIssue） */
 export interface DragMoveIntent {
@@ -23,11 +28,6 @@ export interface DragMoveIntent {
   fromColumnId: string;
   toColumnId: string;
 }
-
-/** 键盘拖拽状态机（BoardView 持有） */
-export type KeyboardDragState =
-  | { kind: 'idle' }
-  | { kind: 'picked'; issue: IssueCardDto; fromColumnId: string; hoveredColumnId: string };
 
 /** drag end 事件（vue-draggable-plus SortableEvent 精简版，纯函数只关心这 4 个） */
 export interface DragEndEvent {
@@ -58,52 +58,6 @@ export function mapDragEndToMoveIntent(event: DragEndEvent): DragMoveIntent | nu
 }
 
 /**
- * 键盘导航映射：方向键 → 目标列 id
- *
- * 规则：
- * - ArrowLeft / ArrowUp：上一列（循环：第 0 列的左 = 末尾列）
- * - ArrowRight / ArrowDown：下一列（循环：末尾列的右 = 第 0 列）
- * - Home：第 0 列
- * - End：末尾列
- * - 其他键：返回 null（不处理）
- * - 列列表为空：返回 null
- *
- * 与"列在 UI 上从左到右"对齐（ArrowRight = 视觉上的"右一列"）。
- *
- * @param columns 当前所有可拖目标列（不含"未分类"section——v1.3 不允许跨入）
- * @param currentColumnId 当前 hover 的列 id
- * @param key 浏览器 KeyboardEvent.key 字面
- */
-export function keyDownToColumn(
-  columns: Pick<ColumnDto, 'id'>[],
-  currentColumnId: string,
-  key: string,
-): string | null {
-  if (columns.length === 0) return null;
-  const idx = columns.findIndex((c) => c.id === currentColumnId);
-  // currentColumnId 不在列列表里（防御：列刚被删除）
-  const safeIdx = idx === -1 ? 0 : idx;
-  switch (key) {
-    case 'ArrowLeft':
-    case 'ArrowUp': {
-      const next = (safeIdx - 1 + columns.length) % columns.length;
-      return columns[next]!.id;
-    }
-    case 'ArrowRight':
-    case 'ArrowDown': {
-      const next = (safeIdx + 1) % columns.length;
-      return columns[next]!.id;
-    }
-    case 'Home':
-      return columns[0]!.id;
-    case 'End':
-      return columns[columns.length - 1]!.id;
-    default:
-      return null;
-  }
-}
-
-/**
  * 判断列是否是"已完成"语义（拖到该列 = 二次确认 + 关闭 gitea issue）
  *
  * 与 BoardView 旧版 isFinishColumn 行为一致：
@@ -113,13 +67,6 @@ export function keyDownToColumn(
 export function isFinishColumnByTitle(title: string): boolean {
   const t = title.trim().toLowerCase();
   return t === '已完成' || t === 'done' || t === 'closed' || t.includes('完成');
-}
-
-/**
- * 初始键盘拖拽状态。
- */
-export function makeIdleKeyboardDrag(): KeyboardDragState {
-  return { kind: 'idle' };
 }
 
 /**

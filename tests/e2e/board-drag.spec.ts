@@ -1,15 +1,17 @@
 /**
- * 看板真拖拽（vue-draggable-plus）+ 键盘拖拽 端到端验证（plan_25cc4562 Task A）
+ * 看板真拖拽（vue-draggable-plus）端到端验证（plan_25cc4562 Task A · v1.3.1 撤回键盘双模后）
  *
  * **策略说明**（与同目录 board-unassigned.spec.ts 一致）：
  * - @vue/test-utils 的 mount() 需要 happy-dom/jsdom（**未**装）
  * - 项目约定：e2e spec 走"store + IPC mock + lib helper"路径，**不**挂 Vue 组件
- * - 此 spec 覆盖 3 个 e2e 用例 + 1 个补充：
+ * - 此 spec 覆盖 2 个 e2e 用例 + 1 个补充：
  *
  * - 用例 1：跨列拖动 → 走 `mapDragEndToMoveIntent` 生成的 intent 调 store.moveIssue → IPC 调过 + args 对
  * - 用例 2：拖到"已完成"列 → `isFinishColumnByTitle` 命中 → 二次确认逻辑触发 → 确认后 moveIssue + issuesUpdate
- * - 用例 3：键盘 Space 拾起 + 方向键 + Space 放下 → 走 `keyDownToColumn` 选列 → moveIssue 调过
- * - 补充 4：列内排序（同列拖动）v1 **不**调后端
+ * - 补充 3：列内排序（同列拖动）v1 **不**调后端
+ *
+ * 历史：v1.3 引入过"键盘 Space 拾起 + 方向键 + Space 放下"用例 3（依赖 keyDownToColumn +
+ * makeIdleKeyboardDrag）；v1.3.1 撤回键盘双模后用例 3 整体删除。
  *
  * 跨端到端覆盖：
  * - drag-helper（纯函数单测在 src/renderer/lib/__tests__/drag-helper.test.ts）
@@ -79,9 +81,7 @@ import { useBoardStore } from '@renderer/stores/board';
 import { useRepoStore } from '@renderer/stores/repo';
 import {
   isFinishColumnByTitle,
-  keyDownToColumn,
   mapDragEndToMoveIntent,
-  makeIdleKeyboardDrag,
 } from '@renderer/lib/drag-helper';
 import type { ColumnDto, IssueCardDto, IssueLabelDto, RepoDto } from '../../main/ipc/schema.js';
 
@@ -295,85 +295,7 @@ describe('BoardView · 真拖拽换列（plan_25cc4562 Task A）', () => {
     expect(board.issuesOf('c-done')[0]!.index).toBe(42);
   });
 
-  it('用例 3：键盘 Space 拾起 + 方向键 + Space 放下 → 跨列移动', async () => {
-    // 2 列：To Do + In Progress
-    const colTodo = makeCol('c-todo', 'To Do', [LABEL_TODO]);
-    const colDoing = makeCol('c-doing', 'In Progress', [LABEL_DOING]);
-    mocks.boardColumnsList.mockResolvedValue([colTodo, colDoing]);
-    mocks.labelsList.mockResolvedValue({ items: [LABEL_TODO, LABEL_DOING], hasMore: false });
-    const issue = makeIssue(99, [LABEL_TODO]);
-    mocks.issuesList.mockResolvedValue({ items: [issue], hasMore: false });
-
-    const board = useBoardStore();
-    await board.loadBoard(PROJECT_ID);
-
-    // ===== 模拟组件 onCardKeydown 状态机 =====
-    // 状态机（BoardView 内的 keyboardDrag ref）：
-    //   idle → Space → picked (hoveredColumnId = fromColumnId)
-    //   picked → ArrowLeft/Right → 切 hoveredColumnId
-    //   picked → Space → 放下（performDragMove）
-    //   picked → Esc → 取消
-    const allColumns = board.columns;
-    const keyboardDrag: { current: ReturnType<typeof makeIdleKeyboardDrag> | { kind: 'picked'; issue: IssueCardDto; fromColumnId: string; hoveredColumnId: string } } = {
-      current: makeIdleKeyboardDrag(),
-    };
-
-    // 1. Space 拾起
-    const spaceEvent: { key: string } = { key: ' ' };
-    if (keyboardDrag.current.kind === 'idle' && (spaceEvent.key === ' ' || spaceEvent.key === 'Space')) {
-      keyboardDrag.current = {
-        kind: 'picked',
-        issue,
-        fromColumnId: 'c-todo',
-        hoveredColumnId: 'c-todo', // 默认 hover 在 from 列
-      };
-    }
-    expect(keyboardDrag.current.kind).toBe('picked');
-    expect((keyboardDrag.current as { hoveredColumnId: string }).hoveredColumnId).toBe('c-todo');
-
-    // 2. ArrowRight 切到 c-doing
-    const nextCol = keyDownToColumn(
-      allColumns,
-      (keyboardDrag.current as { hoveredColumnId: string }).hoveredColumnId,
-      'ArrowRight',
-    );
-    expect(nextCol).toBe('c-doing');
-    keyboardDrag.current = {
-      ...(keyboardDrag.current as { kind: 'picked'; issue: IssueCardDto; fromColumnId: string; hoveredColumnId: string }),
-      hoveredColumnId: nextCol!,
-    };
-
-    // 3. Space 放下 → 走 performDragMove 路径 → store.moveIssue
-    const picked = keyboardDrag.current as { kind: 'picked'; issue: IssueCardDto; fromColumnId: string; hoveredColumnId: string };
-    if (picked.kind === 'picked' && (spaceEvent.key === ' ' || spaceEvent.key === 'Space')) {
-      const toColumnId = picked.hoveredColumnId;
-      const from = picked.fromColumnId;
-      const movedIssue = picked.issue;
-      keyboardDrag.current = makeIdleKeyboardDrag();
-      // performDragMove 内部：isFinishColumn 检查 → 否则 store.moveIssue
-      expect(isFinishColumnByTitle(colDoing.title)).toBe(false); // 不弹二次确认
-      await board.moveIssue({
-        projectId: PROJECT_ID,
-        issueIndex: movedIssue.index,
-        fromColumnId: from,
-        toColumnId,
-      });
-    }
-
-    // 校验：状态机回 idle + IPC 调过 + store 状态
-    expect(keyboardDrag.current).toEqual({ kind: 'idle' });
-    expect(mocks.issuesMoveColumn).toHaveBeenCalledWith({
-      projectId: PROJECT_ID,
-      issueIndex: 99,
-      fromColumnId: 'c-todo',
-      toColumnId: 'c-doing',
-    });
-    expect(board.issuesOf('c-todo').length).toBe(0);
-    expect(board.issuesOf('c-doing').length).toBe(1);
-    expect(board.issuesOf('c-doing')[0]!.index).toBe(99);
-  });
-
-  it('补充 4：列内排序（同列拖动）v1 **不**调后端', async () => {
+  it('补充 3：列内排序（同列拖动）v1 **不**调后端', async () => {
     // 1 列：To Do，2 个 issue
     const colTodo = makeCol('c-todo', 'To Do', [LABEL_TODO]);
     mocks.boardColumnsList.mockResolvedValue([colTodo]);

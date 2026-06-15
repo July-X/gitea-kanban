@@ -22,9 +22,8 @@ import { computed, ref } from 'vue';
 import { Plus } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
-import type { ColumnDto, IssueCardDto, RepoDto } from '../../main/ipc/schema.js';
+import type { RepoDto } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
-import { showToast } from '@renderer/lib/toast';
 // 全局样式（Teleport 后 .modal-overlay / .move-menu-overlay / .column__settings-btn 等）
 import '@renderer/components/board/board-modals.css';
 // 子组件
@@ -38,7 +37,6 @@ import UnassignedSection from '@renderer/components/board/UnassignedSection.vue'
 // composables
 import { useColumnManager } from '@renderer/composables/useColumnManager';
 import { useBoardCardActions } from '@renderer/composables/useBoardCardActions';
-import { useKanbanKeyboardDrag } from '@renderer/composables/useKanbanKeyboardDrag';
 import { useKanbanMouseDrag } from '@renderer/composables/useKanbanMouseDrag';
 import { useBoardBootstrap } from '@renderer/composables/useBoardBootstrap';
 import { useBoardActions } from '@renderer/composables/useBoardActions';
@@ -108,38 +106,13 @@ const {
   performFinishMove,
 } = useBoardCardActions();
 
-// ===== 拖拽（v1.3 · plan_25cc4562 Task A） =====
+// ===== 拖拽（v1.3 · plan_25cc4562 Task A · v1.3.1 撤回键盘双模） =====
+// 鼠标拖拽（vue-draggable-plus）：保留为唯一拖拽路径
 const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
   getColumnIssues: (columnId) => board.issuesOf(columnId),
   onMove: (issue, fromColumnId, toColumnId) => {
     void performDragMove(issue, fromColumnId, toColumnId, activeProjectId.value);
   },
-});
-// 键盘拖拽（抽到 useKanbanKeyboardDrag composable，BoardView 只接 onDrop + 提示）
-const {
-  keyboardDrag,
-  keyboardHoveredColumnId,
-  onCardKeydown: rawOnCardKeydown,
-} = useKanbanKeyboardDrag({
-  getColumns: () => board.columns,
-  onDrop: (issue, fromColumnId, toColumnId) => {
-    void performDragMove(issue, fromColumnId, toColumnId, activeProjectId.value);
-  },
-  onPicked: () => {
-    showToast({ type: 'info', message: '已拾起这张卡片：方向键选列，Space 放下，Esc 取消' });
-  },
-});
-// KanbanColumnSection emit('card-keydown', payload) → useKanbanKeyboardDrag 期望 (issue, fromColumnId, evt) 三个独立参数
-function onCardKeydown(payload: {
-  issue: IssueCardDto;
-  fromColumnId: string;
-  evt: KeyboardEvent;
-}): void {
-  rawOnCardKeydown(payload.issue, payload.fromColumnId, payload.evt);
-}
-const keyboardPickedIssueId = computed<number | null>(() => {
-  const k = keyboardDrag.value;
-  return k.kind === 'picked' ? k.issue.id : null;
 });
 </script>
 
@@ -191,12 +164,9 @@ const keyboardPickedIssueId = computed<number | null>(() => {
         :loading="board.loading"
         :is-over-limit="isColumnOverLimit(col)"
         :over-limit-tooltip="wipOverLimitTooltip(col)"
-        :keyboard-picked-issue-id="keyboardPickedIssueId"
-        :keyboard-hovered-column-id="keyboardHoveredColumnId"
         :drag-options="columnDragOptions(col)"
         @open-settings="openColumnMenu(col)"
         @drag-end="(evt) => onColumnDragEnd(col, evt)"
-        @card-keydown="onCardKeydown"
         @update:new-issue-draft="(v) => (newIssueDrafts[col.id] = v)"
         @create-issue="createIssueInColumn(col)"
         @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
@@ -208,18 +178,6 @@ const keyboardPickedIssueId = computed<number | null>(() => {
         :loading="board.loading"
         @request-assign="openAssignMenu"
       />
-      <div
-        v-if="keyboardDrag.kind === 'picked'"
-        class="board__drag-banner"
-        role="status"
-        aria-live="polite"
-      >
-        <span class="board__drag-banner-text">
-          已拾起 #{{ keyboardDrag.issue.index }}「{{ keyboardDrag.issue.title }}」
-          → 当前目标列：<strong>{{ board.columns.find((c) => c.id === keyboardDrag.hoveredColumnId)?.title ?? '?' }}</strong>
-        </span>
-        <span class="board__drag-banner-hint muted">方向键切列 · Space 放下 · Esc 取消</span>
-      </div>
     </div>
 
     <!-- 弹窗 / 菜单 收口 -->

@@ -1,30 +1,23 @@
 /**
- * drag-helper 单元测试（Task A · kanban-drag-replace）
+ * drag-helper 单元测试（Task A · kanban-drag-replace · v1.3.1 撤回键盘双模后）
  *
  * 测试目标：
  * - mapDragEndToMoveIntent：
  *   * 同列 → null
  *   * 跨列 → DragMoveIntent
- * - keyDownToColumn：
- *   * ArrowRight / ArrowLeft 循环
- *   * ArrowUp / ArrowDown 等同 Left / Right
- *   * Home / End 跳首尾
- *   * 不在 columns 里的 currentColumnId 走 fallback（第 0 列）
- *   * 空 columns → null
- *   * 未知键 → null
  * - isFinishColumnByTitle：中文 / 英文 / 子串
- * - makeIdleKeyboardDrag：返回 idle
  * - columnDragOptions：返回 Sortable config（group / ghost class / scroll sensitivity）
  * - extractDragEndFromEvent：从 SortableEvent 抽出三元组；dataset 缺失返 null
+ *
+ * 历史：v1.3 引入过 keyDownToColumn + makeIdleKeyboardDrag + KeyboardDragState 测试；
+ * v1.3.1 撤回键盘双模后这两个 describe 整体删除。
  *
  * 环境：node（composable 是纯函数，**不**挂 Vue 组件）
  */
 import { describe, it, expect } from 'vitest';
 import {
   mapDragEndToMoveIntent,
-  keyDownToColumn,
   isFinishColumnByTitle,
-  makeIdleKeyboardDrag,
   columnDragOptions,
   extractDragEndFromEvent,
 } from '@renderer/lib/drag-helper';
@@ -46,68 +39,6 @@ describe('drag-helper · mapDragEndToMoveIntent', () => {
     expect(
       mapDragEndToMoveIntent({ fromColumnId: 'a', toColumnId: 'b', issueIndex: 42 }),
     ).toMatchObject({ issueIndex: 42 });
-  });
-});
-
-describe('drag-helper · keyDownToColumn', () => {
-  const cols = [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }];
-
-  it('ArrowRight：从 c1 到 c2', () => {
-    expect(keyDownToColumn(cols, 'c1', 'ArrowRight')).toBe('c2');
-  });
-
-  it('ArrowRight：末尾循环到第 0 列', () => {
-    expect(keyDownToColumn(cols, 'c3', 'ArrowRight')).toBe('c1');
-  });
-
-  it('ArrowLeft：从 c2 到 c1', () => {
-    expect(keyDownToColumn(cols, 'c2', 'ArrowLeft')).toBe('c1');
-  });
-
-  it('ArrowLeft：第 0 列循环到末尾', () => {
-    expect(keyDownToColumn(cols, 'c1', 'ArrowLeft')).toBe('c3');
-  });
-
-  it('ArrowUp 等同 ArrowLeft', () => {
-    expect(keyDownToColumn(cols, 'c2', 'ArrowUp')).toBe('c1');
-  });
-
-  it('ArrowDown 等同 ArrowRight', () => {
-    expect(keyDownToColumn(cols, 'c2', 'ArrowDown')).toBe('c3');
-  });
-
-  it('Home → 第 0 列', () => {
-    expect(keyDownToColumn(cols, 'c2', 'Home')).toBe('c1');
-  });
-
-  it('End → 末尾列', () => {
-    expect(keyDownToColumn(cols, 'c2', 'End')).toBe('c3');
-  });
-
-  it('空 columns → null（任意键）', () => {
-    expect(keyDownToColumn([], 'c1', 'ArrowRight')).toBeNull();
-  });
-
-  it('未知键 → null', () => {
-    expect(keyDownToColumn(cols, 'c1', 'Enter')).toBeNull();
-    expect(keyDownToColumn(cols, 'c1', 'Tab')).toBeNull();
-    expect(keyDownToColumn(cols, 'c1', 'a')).toBeNull();
-  });
-
-  it('currentColumnId 不在列里 → fallback 到第 0 列（防御列刚被删除）', () => {
-    // currentColumnId 是 "deleted"，从"第 0 列位置"按 ArrowRight 应到 c2
-    expect(keyDownToColumn(cols, 'deleted', 'ArrowRight')).toBe('c2');
-    expect(keyDownToColumn(cols, 'deleted', 'Home')).toBe('c1');
-  });
-
-  it('currentColumnId 不在列里 + ArrowLeft → 末尾（循环从 0 出发）', () => {
-    expect(keyDownToColumn(cols, 'deleted', 'ArrowLeft')).toBe('c3');
-  });
-
-  it('单列时 ArrowLeft / ArrowRight 都回到自己', () => {
-    const single = [{ id: 'only' }];
-    expect(keyDownToColumn(single, 'only', 'ArrowRight')).toBe('only');
-    expect(keyDownToColumn(single, 'only', 'ArrowLeft')).toBe('only');
   });
 });
 
@@ -144,12 +75,6 @@ describe('drag-helper · isFinishColumnByTitle', () => {
 
   it('"To Do" → false', () => {
     expect(isFinishColumnByTitle('To Do')).toBe(false);
-  });
-});
-
-describe('drag-helper · makeIdleKeyboardDrag', () => {
-  it('返回 idle state', () => {
-    expect(makeIdleKeyboardDrag()).toEqual({ kind: 'idle' });
   });
 });
 
