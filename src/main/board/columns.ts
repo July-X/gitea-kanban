@@ -87,7 +87,14 @@ function resolveColumn(columnId: string): { projectId: string } {
  * **不**读 localStore.labelMaps 的 giteaLabelName 缓存字段（避免漂移）
  */
 function toColumnDto(
-  col: { id: string; projectId: string; title: string; position: number; createdAt: number },
+  col: {
+    id: string;
+    projectId: string;
+    title: string;
+    position: number;
+    createdAt: number;
+    wipLimit?: number | null;
+  },
   boundLabelIds: number[],
   liveLabelsById: Map<number, { name: string; color: string }>,
 ): ColumnDto {
@@ -105,6 +112,7 @@ function toColumnDto(
     title: col.title,
     position: col.position,
     labels,
+    wipLimit: normalizeWipLimit(col.wipLimit),
   };
 }
 
@@ -116,7 +124,14 @@ function toColumnDto(
  * - `color` 字段：mapLabel 从 gitea 拉、create/unmapLabel 留空字符串（renderer 不读后端 DTO）
  */
 function toColumnDtoFromLabels(
-  col: { id: string; projectId: string; title: string; position: number; createdAt: number },
+  col: {
+    id: string;
+    projectId: string;
+    title: string;
+    position: number;
+    createdAt: number;
+    wipLimit?: number | null;
+  },
   labels: Array<{ id: number; name: string; color: string }>,
 ): ColumnDto {
   return {
@@ -125,7 +140,25 @@ function toColumnDtoFromLabels(
     title: col.title,
     position: col.position,
     labels: labels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
+    wipLimit: normalizeWipLimit(col.wipLimit),
   };
+}
+
+/**
+ * WIP 上限归一化（plan_25cc4562 · Task B）：
+ * - 正整数 → 保留
+ * - 0 / 负数 / 非整数 → null（视作"无限"，容错旧数据 / 输入错误）
+ * - null / undefined → null（无限）
+ *
+ * 为何不在写入时拒绝 0？
+ * - 业务语义 0 = "一卡都不能放"无意义
+ * - 但容错路径上（旧 state 没 wipLimit 字段）选 null 比 422 更友好
+ *   —— 真正的非法值已在 updateColumn 入口用 VALIDATION_FAILED 拦截
+ */
+function normalizeWipLimit(raw: number | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (!Number.isInteger(raw) || raw <= 0) return null;
+  return raw;
 }
 
 /**
@@ -182,6 +215,7 @@ export function createColumn(args: CreateBoardColumnArgs): ColumnDto {
     title: args.title,
     position: newPosition,
     createdAt: nowEpochMs,
+    wipLimit: null, // v1.3 默认无限（UI 列设置弹窗可改）
   };
 
   getLocalStore().mutate((s) => {
@@ -204,6 +238,21 @@ export function updateColumn(args: UpdateBoardColumnArgs): ColumnDto {
     });
   }
 
+  // 业务层二次校验 wipLimit（Zod 已在 IPC 入口校验过；这里兜底防止业务层被 direct 调时漏过）
+  // Zod 接受的正整数已经过滤了负数 / 0 / 浮点；这里只需要再挡一次 NaN 之类
+  if (args.patch.wipLimit !== undefined) {
+    if (
+      args.patch.wipLimit !== null &&
+      (!Number.isInteger(args.patch.wipLimit) || args.patch.wipLimit <= 0)
+    ) {
+      throw new IpcError({
+        code: IpcErrorCode.VALIDATION_FAILED,
+        message: 'wipLimit 必须是正整数或 null（无限）',
+        hint: '请输入 ≥ 1 的整数，留空表示无限',
+      });
+    }
+  }
+
   store.mutate((s) => {
     const idx = s.columns.findIndex((c) => c.id === args.columnId);
     if (idx < 0) return;
@@ -211,11 +260,12 @@ export function updateColumn(args: UpdateBoardColumnArgs): ColumnDto {
       ...s.columns[idx]!,
       ...(args.patch.title !== undefined ? { title: args.patch.title } : {}),
       ...(args.patch.position !== undefined ? { position: args.patch.position } : {}),
+      ...(args.patch.wipLimit !== undefined ? { wipLimit: args.patch.wipLimit } : {}),
     };
   });
 
   const refreshed = findColumnByIdWithStore(store.get(), args.columnId)!;
-  // updateColumn 只动 title/position，labels 不变；name 来自 localStore 缓存，color 留空（renderer 不读后端 DTO 的 color）
+  // updateColumn 只动 title/position/wipLimit，labels 不变；name 来自 localStore 缓存，color 留空（renderer 不读后端 DTO 的 color）
   const labels = listLabelMapsByColumnWithStore(store.get(), args.columnId).map((m) => ({
     id: Number(m.giteaLabelId),
     name: m.giteaLabelName,

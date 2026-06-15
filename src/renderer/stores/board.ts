@@ -24,6 +24,7 @@ import {
   boardColumnsMapLabel,
   boardColumnsUnmapLabel,
   boardColumnsUpdate,
+  issuesAddLabel,
   issuesCreate,
   issuesList,
   issuesMoveColumn,
@@ -38,6 +39,20 @@ import type {
  IssueLabelDto,
  ListIssuesResp,
 } from '../../main/ipc/schema.js';
+
+/** loadBoard 出参契约（plan_25cc4562 Task C · autoInit 透明化）
+ *
+ * - `columns`         : 当前 project 实际生效的列（autoInit 触发后含新建列）
+ * - `autoInitCreatedCount` : autoInit 帮建的列数（>0 时 UI 应弹 toast 透明化提示）
+ *                          · 0 列 + gitea 无 label → 0（不弹 toast，避免"啥都没干"误报）
+ *                          · 0 列 + gitea 有 label → >0（已自动建好）
+ *                          · N 列 → 0（已建过不干预）
+ *                          · loadBoard 抛错 → 0（错误优先）
+ */
+export interface LoadBoardResult {
+  columns: ColumnDto[];
+  autoInitCreatedCount: number;
+}
 
 /** undo / redo 栈深度（来自 main 端 src/main/board/undo.ts）
  *
@@ -54,6 +69,8 @@ export const useBoardStore = defineStore('board', () => {
  // ===== state =====
  const columns = ref<ColumnDto[]>([]);
  const issuesByColumn = ref<Record<string, IssueCardDto[]>>({});
+ /** 未归到任何列的 issue（没带任何"列绑 label"的 issue）——给用户可见出口 */
+ const unassignedIssues = ref<IssueCardDto[]>([]);
  const labelsByProject = ref<IssueLabelDto[]>([]);
  const loading = ref(false);
  const loadingIssues = ref<Set<string>>(new Set());
@@ -92,7 +109,8 @@ export const useBoardStore = defineStore('board', () => {
  for (const col of columns.value) {
  const colLabelIds = col.labels.map((l) => l.id);
  if (colLabelIds.length ===0) continue;
- if (colLabelIds.every((id) => issueLabelIds.has(id))) return col.id;
+ // OR 语义：与 matchIssueToColumn 保持一致
+ if (colLabelIds.some((id) => issueLabelIds.has(id))) return col.id;
  }
  return null;
  }
@@ -103,53 +121,154 @@ export const useBoardStore = defineStore('board', () => {
  *加载某 project 的看板：列 + 每列 issue + 项目级 label列表
  *
  *流程：
- *1.拉 columns（本地 sqlite）
+ *1.拉 columns（本地 localStore）
  *2.拉 labels（gitea仓库 label列表）——看板列绑 label 用
  *3.拉全量 open issue（不走 columnId过滤，**前端**按 labels交集归类到列）
+ *4.**自动初始化**：如果项目没有任何列，根据 gitea label 自动创建默认看板列并绑定
  *
  * 为何不用 `issues.list({ columnId })`？
  * - 后端按 column_label_mapping过滤，可能漏掉新绑 label 的 issue（gitea issue同步有延迟）
  * - 前端用 issue.labels ∩ column.labels自行归类，更稳
+ *
+ * 自动初始化策略（2026-06-15 新增）：
+ * - 新用户首次使用看板时，项目没有列也没有 label 映射
+ * - 此时看板显示空状态 "还没有看板列"，用户体验极差
+ * - 修复：检测到 0 列 + gitea 有 label 时，自动按 label 名创建列并绑定
+ * - 匹配规则：gitea label 名精确匹配预设列名（新建/进行中/待办/已完成/Backlog/In Progress/To Do/Done）
+ * - 只在首次（0 列）时触发，用户已手动创建列后不再自动干预
+ *
+ * 出参 `LoadBoardResult`（plan_25cc4562 Task C · autoInit 透明化）：
+ * - `columns` 跟 store.columns 同步——autoInit 触发后含新建列
+ * - `autoInitCreatedCount` = 本次 autoInit 帮建的列数
+ *   · 0 列 + gitea 无 label → 0（**不**弹 toast，避免"啥都没干"误报）
+ *   · 0 列 + gitea 有 label → >0（弹 toast 含具体数字 + "（点击列名可改名 / 解绑）"）
+ *   · N 列 → 0（已建过不干预，不弹 toast）
+ *   · 抛错 → 0（错误优先，错误走 board.error）
  */
- async function loadBoard(projectId: string): Promise<void> {
- loading.value = true;
- error.value = null;
+  async function loadBoard(projectId: string): Promise<LoadBoardResult> {
+  loading.value = true;
+  error.value = null;
+  // 局部变量：成功路径才返给 caller；catch 路径返 0 列 + 0 计数（避免 undefined 引用）
+  let resultColumns: ColumnDto[] = [];
+  let resultAutoInitCount = 0;
+  try {
+  let cols = (await boardColumnsList({ projectId })) as ColumnDto[];
+  currentProjectId.value = projectId;
+
+  // 并行拉 labels + 全量 open issue（受 gitea API速率限制，量小没事）
+  const [labelsResp, issuesResp] = await Promise.all([
+  labelsList({ projectId, limit:100, page:1 }) as Promise<{ items: IssueLabelDto[]; hasMore: boolean }>,
+  issuesList({ projectId, state: 'open', limit:100, page:1 }) as Promise<ListIssuesResp>,
+  ]);
+  labelsByProject.value = labelsResp.items;
+
+  // === 自动初始化：0 列 + gitea 有可匹配 label → 自动创建列并绑定 ===
+  if (cols.length === 0 && labelsResp.items.length > 0) {
+  const autoResult = await autoInitColumns(projectId, labelsResp.items);
+  resultAutoInitCount = autoResult.length;
+  if (autoResult.length > 0) {
+  // 重新拉列（后端已写入 localStore；createColumn 已把 cols 同步进 store.columns，
+  // 这里再拉一次拿绑 label 后的真实 labels 数据）
+  cols = (await boardColumnsList({ projectId })) as ColumnDto[];
+  }
+  }
+
+  columns.value = cols;
+  resultColumns = cols;
+  issuesByColumn.value = Object.fromEntries(cols.map((c) => [c.id, []]));
+  //归类：按 issue.labels跟 column.labels交集放列；未匹配的进 unassignedIssues
+  const byCol: Record<string, IssueCardDto[]> = Object.fromEntries(cols.map((c) => [c.id, []]));
+  const unassigned: IssueCardDto[] = [];
+  for (const issue of issuesResp.items) {
+  const colId = matchIssueToColumn(issue, cols);
+  if (colId) byCol[colId]!.push(issue);
+  else unassigned.push(issue);
+  }
+  issuesByColumn.value = byCol;
+  unassignedIssues.value = unassigned;
+  return { columns: resultColumns, autoInitCreatedCount: resultAutoInitCount };
+  } catch (e) {
+  error.value = e as UserFacingError;
+  throw e;
+  } finally {
+  loading.value = false;
+  }
+  }
+
+ /**
+ * 自动初始化看板列：当项目没有任何列时，根据 gitea label 自动创建并绑定
+ *
+ * 策略：
+ * 1. 预设列名列表（中文优先，英文兜底）
+ * 2. 在 gitea label 中找匹配项（精确匹配名称）
+ * 3. 每个匹配到的 label → 创建同名列 → 绑定该 label
+ * 4. 如果没有任何匹配，不创建任何列（避免创建无用的空列）
+ *
+ * @returns 新创建的列数组
+ */
+ async function autoInitColumns(
+ projectId: string,
+ giteaLabels: IssueLabelDto[],
+ ): Promise<ColumnDto[]> {
+ // 预设列名 → 按优先级匹配（第一个匹配到的 label 绑到该列）
+ // 同一个 label 只能绑一列，所以用 Set 追踪已使用的 label
+ const presetColumns = [
+ // 中文常见看板列名
+ '新建', '进行中', '待办', '已完成',
+ // 英文常见看板列名
+ 'Backlog', 'To Do', 'In Progress', 'Done',
+ // 其他常见
+ '待处理', '处理中', '已完成',
+ ];
+ const usedLabelIds = new Set<number>();
+ const createdCols: ColumnDto[] = [];
+
+ for (const presetName of presetColumns) {
+ const matchedLabel = giteaLabels.find(
+ (l) => l.name === presetName && !usedLabelIds.has(l.id),
+ );
+ if (!matchedLabel) continue;
+
+ // 创建列
  try {
- const cols = (await boardColumnsList({ projectId })) as ColumnDto[];
- columns.value = cols;
- currentProjectId.value = projectId;
- issuesByColumn.value = Object.fromEntries(cols.map((c) => [c.id, []]));
- // 并行拉 labels + 全量 open issue（受 gitea API速率限制，量小没事）
- const [labelsResp, issuesResp] = await Promise.all([
- labelsList({ projectId, limit:100, page:1 }) as Promise<{ items: IssueLabelDto[]; hasMore: boolean }>,
- issuesList({ projectId, state: 'open', limit:100, page:1 }) as Promise<ListIssuesResp>,
- ]);
- labelsByProject.value = labelsResp.items;
- //归类：按 issue.labels跟 column.labels交集放列；未匹配的丢进"未分类"
- const byCol: Record<string, IssueCardDto[]> = Object.fromEntries(cols.map((c) => [c.id, []]));
- for (const issue of issuesResp.items) {
- const colId = matchIssueToColumn(issue, cols);
- if (colId) byCol[colId]!.push(issue);
+ const col = await createColumn({ projectId, title: presetName });
+ // 绑定 label
+ try {
+ await mapLabelToColumn({
+ columnId: col.id,
+ giteaLabelId: matchedLabel.id,
+ giteaLabelName: matchedLabel.name,
+ });
+ } catch {
+ // 绑定失败不阻断（列已创建，用户可手动绑）
  }
- issuesByColumn.value = byCol;
- } catch (e) {
- error.value = e as UserFacingError;
- throw e;
- } finally {
- loading.value = false;
+ usedLabelIds.add(matchedLabel.id);
+ createdCols.push(col);
+ } catch {
+ // 创建失败跳过，继续尝试下一个
  }
+ }
+
+ return createdCols;
  }
 
  /**
  * 把 issue归类到某个 column（按 labels交集）
- * 返回 null 表示没匹配到任何列（"未分类"状态，v1 不渲染）
+ *
+ * 匹配逻辑：issue 只要拥有列绑的**任意一个** label，就属于该列（OR 语义）
+ * - 与 gitea API `?labels=1,2,3` 的 OR 语义一致
+ * - 一列绑多个 label 是为了让不同 label 的 issue 都归到同一列
+ * - 例：列绑了 "待办"+"前端"，issue 有 "待办" → 归入该列
+ *
+ * 返回 null 表示没匹配到任何列（"未分类"状态，进 unassignedIssues）
  */
  function matchIssueToColumn(issue: IssueCardDto, cols: ColumnDto[]): string | null {
  const issueLabelIds = new Set(issue.labels.map((l) => l.id));
  for (const col of cols) {
  const colLabelIds = col.labels.map((l) => l.id);
  if (colLabelIds.length ===0) continue;
- if (colLabelIds.every((id) => issueLabelIds.has(id))) return col.id;
+ // OR 语义：issue 拥有列绑的任意一个 label 即匹配
+ if (colLabelIds.some((id) => issueLabelIds.has(id))) return col.id;
  }
  return null;
  }
@@ -169,15 +288,18 @@ export const useBoardStore = defineStore('board', () => {
  const col = columns.value.find((c) => c.id === columnId);
  const byCol: Record<string, IssueCardDto[]> = { ...issuesByColumn.value };
  for (const c of columns.value) byCol[c.id] = [];
+ const unassigned: IssueCardDto[] = [];
  for (const issue of resp.items) {
  const cid = columnIdFromIssueLabels(issue);
  if (cid) byCol[cid]!.push(issue);
+ else unassigned.push(issue);
  }
  //防御：col 不存在时清空
  if (!col) {
  delete byCol[columnId];
  }
  issuesByColumn.value = byCol;
+ unassignedIssues.value = unassigned;
  } catch (e) {
  error.value = e as UserFacingError;
  throw e;
@@ -282,32 +404,117 @@ export const useBoardStore = defineStore('board', () => {
  *
  *二次确认由 UI 层（BoardView）触发，本函数**不**弹确认。
  */
- async function closeIssue(args: { projectId: string; issueIndex: number }): Promise<void> {
- const colId = findIssueColumnId(args.issueIndex);
- if (!colId) return; // 已经不在看板里
- const before = issuesByColumn.value[colId] ?? [];
- const issue = before.find((i) => i.index === args.issueIndex);
- //乐观移除
- issuesByColumn.value = {
- ...issuesByColumn.value,
- [colId]: before.filter((i) => i.index !== args.issueIndex),
- };
- try {
- await issuesUpdate({
- projectId: args.projectId,
- issueIndex: args.issueIndex,
- patch: { state: 'closed' },
- });
- } catch (e) {
- // 回滚
- issuesByColumn.value = {
- ...issuesByColumn.value,
- [colId]: [...(issuesByColumn.value[colId] ?? []), issue!].sort((a, b) => a.index - b.index),
- };
- error.value = e as UserFacingError;
- throw e;
- }
- }
+  async function closeIssue(args: { projectId: string; issueIndex: number }): Promise<void> {
+  const colId = findIssueColumnId(args.issueIndex);
+  if (!colId) return; // 已经不在看板里
+  const before = issuesByColumn.value[colId] ?? [];
+  const issue = before.find((i) => i.index === args.issueIndex);
+  //乐观移除
+  issuesByColumn.value = {
+  ...issuesByColumn.value,
+  [colId]: before.filter((i) => i.index !== args.issueIndex),
+  };
+  try {
+  await issuesUpdate({
+  projectId: args.projectId,
+  issueIndex: args.issueIndex,
+  patch: { state: 'closed' },
+  });
+  } catch (e) {
+  // 回滚
+  issuesByColumn.value = {
+  ...issuesByColumn.value,
+  [colId]: [...(issuesByColumn.value[colId] ?? []), issue!].sort((a, b) => a.index - b.index),
+  };
+  error.value = e as UserFacingError;
+  throw e;
+  }
+  }
+
+  /**
+ * 把"未分类 issue"归到指定列（plan_25cc4562 Task C · 未分类快捷归类）
+ *
+ * 业务语义：
+ * - 未分类 issue = 不带任何"列绑 label"的 gitea issue（`unassignedIssues`）
+ * - 归类 = 给 issue 加目标列绑的**第一个** label（OR 语义下足够让它匹配到该列）
+ * - **不**调 `removeLabel`（issue 本来就没这个 label —— gitea 端 addLabel 幂等）
+ * - 走的是 `issues.addLabel`（裸 label 端点）**不**是 `issues.moveColumn`（moveColumn 走
+ *   "从 fromColumn 全 remove + toColumn 全 add" 流程，而未分类 issue 根本不在 fromColumn）
+ *
+ * 边界：
+ * - 目标列必须**已绑 label**（`col.labels[0]` 必存在）；v1.3 业务上未分类 section 出现
+ *   就说明所有列都绑了 label，**不**做空防御 → 让上层 UI 在二次确认前发现
+ * - UI 层先弹 ConfirmDialog 二次确认（"归到「列名」？"）→ 确认后调本函数
+ * - 成功后乐观更新：unassignedIssues 移除 + issuesByColumn[toColumnId] 追加
+ * - 失败回滚：issue 还回 unassignedIssues + 从 issuesByColumn 撤回
+ */
+  async function assignUnassignedIssue(args: {
+  projectId: string;
+  issueIndex: number;
+  toColumnId: string;
+  }): Promise<void> {
+  const col = columns.value.find((c) => c.id === args.toColumnId);
+  if (!col) {
+  throw {
+  code: 'not_found',
+  messageText: '找不到内容：列已不存在',
+  hint: '请刷新看板',
+  recoverable: false,
+  } satisfies UserFacingError;
+  }
+  if (col.labels.length === 0) {
+  // v1.3 业务上未分类 section 出现时所有列都绑了 label，但**不**假设 UI 层校验过
+  throw {
+  code: 'validation_failed',
+  messageText: '操作冲突：目标列还未绑标签',
+  hint: '请给列先绑定一个 Gitea 标签',
+  recoverable: false,
+  } satisfies UserFacingError;
+  }
+  // 取目标列绑的第一个 label（OR 语义：任意一个绑 label 都足够让 issue 归到该列）
+  const targetLabel = col.labels[0]!;
+  const issue = unassignedIssues.value.find((i) => i.index === args.issueIndex);
+  if (!issue) {
+  throw {
+  code: 'not_found',
+  messageText: '找不到内容：议题已不在未分类列表',
+  hint: '可能已被其他操作归类，请刷新',
+  recoverable: false,
+  } satisfies UserFacingError;
+  }
+  //乐观更新：从 unassignedIssues 移到 issuesByColumn[toColumnId]
+  const issueWithLabel: IssueCardDto = {
+  ...issue,
+  labels: [...issue.labels, targetLabel],
+  };
+  unassignedIssues.value = unassignedIssues.value.filter(
+  (i) => i.index !== args.issueIndex,
+  );
+  const toList = [...(issuesByColumn.value[args.toColumnId] ?? []), issueWithLabel];
+  issuesByColumn.value = { ...issuesByColumn.value, [args.toColumnId]: toList };
+
+  try {
+  await issuesAddLabel({
+  projectId: args.projectId,
+  issueIndex: args.issueIndex,
+  labelId: targetLabel.id,
+  });
+  } catch (e) {
+  // 回滚：放回 unassigned + 从目标列撤回（label 仍要剔除本地的乐观变更）
+  const newIssue = { ...issue }; // 原始未带 label 的 issue
+  unassignedIssues.value = [...unassignedIssues.value, newIssue].sort(
+  (a, b) => a.index - b.index,
+  );
+  issuesByColumn.value = {
+  ...issuesByColumn.value,
+  [args.toColumnId]: (issuesByColumn.value[args.toColumnId] ?? []).filter(
+  (i) => i.index !== args.issueIndex,
+  ),
+  };
+  error.value = e as UserFacingError;
+  throw e;
+  }
+  }
 
  // =====撤销 / 重做（M6 undo-by-project：main 端为 single source of truth） =====
 
@@ -395,17 +602,40 @@ export const useBoardStore = defineStore('board', () => {
   }
 
   /**
-   * 改列名（v1.1：先只支持改名，reorder 走 v2 拖拽）
+   * 改列属性（v1.1：改名；v1.3：加 wipLimit）
+   *
+   * 用例：BoardView 列设置弹窗保存时调，可只传 title / 只传 wipLimit / 一起传
+   * - reorder 走 v2 拖拽（**不**走此函数）
+   * - wipLimit 语义（plan_25cc4562 · Task B）：正整数 = 上限，null = 无限
+   *
+   * 失败抛 UserFacingError，UI 层 toast 展示
    */
-  async function updateColumn(args: { columnId: string; title: string }): Promise<void> {
+  async function updateColumn(args: {
+  columnId: string;
+  title?: string;
+  wipLimit?: number | null;
+  }): Promise<void> {
   error.value = null;
   try {
+  // 构造 patch：只传 caller 显式给的字段（保留 updateColumn 在 IPC 层的 "patch 至少含一个字段" 校验）
+  const patch: { title?: string; wipLimit?: number | null } = {};
+  if (args.title !== undefined) patch.title = args.title;
+  if (args.wipLimit !== undefined) patch.wipLimit = args.wipLimit;
   await boardColumnsUpdate({
   columnId: args.columnId,
-  patch: { title: args.title },
+  patch,
   });
-  // 同步本地
-  columns.value = columns.value.map((c) => (c.id === args.columnId ? { ...c, title: args.title } : c));
+  // 同步本地：把 caller 改了的字段都合并进去（**不**用后端 DTO 直接覆盖，
+  // 是因为本函数没拿后端返回的 ColumnDto 也没改 IPC 端行为；本地值 = caller 传值兜底）
+  columns.value = columns.value.map((c) =>
+  c.id === args.columnId
+  ? {
+  ...c,
+  ...(args.title !== undefined ? { title: args.title } : {}),
+  ...(args.wipLimit !== undefined ? { wipLimit: args.wipLimit } : {}),
+  }
+  : c,
+  );
   } catch (e) {
   error.value = e as UserFacingError;
   throw e;
@@ -484,6 +714,7 @@ export const useBoardStore = defineStore('board', () => {
   // state
   columns,
   issuesByColumn,
+  unassignedIssues,
   labelsByProject,
   loading,
   loadingIssues,
@@ -502,6 +733,7 @@ export const useBoardStore = defineStore('board', () => {
   createIssue,
   moveIssue,
   closeIssue,
+  assignUnassignedIssue,
   loadUndoStatus,
   canUndo,
   canRedo,

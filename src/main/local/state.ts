@@ -73,6 +73,14 @@ export interface BoardColumn {
   title: string;
   position: number;
   createdAt: number;
+  /**
+   * WIP（Work-In-Progress）上限
+   * - 正整数 = 列里允许的最大 issue 数
+   * - undefined = 无限（旧列无此字段，向后兼容）
+   *
+   * 业务语义（plan_25cc4562 · Task B）：仅提示不拦截 —— 超限**允许**继续加卡片
+   */
+  wipLimit?: number | null;
 }
 
 export interface ColumnLabelMap {

@@ -623,48 +623,69 @@ export const ColumnLabelDtoSchema = z
  .strict();
 export type ColumnLabelDto = z.infer<typeof ColumnLabelDtoSchema>;
 
+/** 看板列 WIP（Work-In-Progress）上限
+ *
+ * 语义（plan_25cc4562 · Task B · 看板 WIP 上限）：
+ * - 正整数 = 列里允许的最大 issue 数
+ * - null    = 无限（**不**是 0；0 是非法值 —— 一张都不能放无业务意义）
+ *
+ * 业务规则：仅提示不拦截（v1.3）
+ * - 超限**允许**继续加卡片 / 拖入
+ * - 列头变红 + 提示气泡 "超出建议 N 张" 提醒用户
+ * - 二次确认拦截**不**触发（避免和 A 的 drag + confirmFinish 路径纠缠）
+ */
+export const WipLimitSchema = z
+  .union([z.number().int().positive(), z.null()])
+  .describe('WIP 上限：正整数 = 上限，null = 无限');
+export type WipLimit = z.infer<typeof WipLimitSchema>;
+
 /**看板列 DTO（DB row +绑定的 gitea labels） */
 export const ColumnDtoSchema = z
- .object({
- id: NonEmptyStringSchema,
- projectId: NonEmptyStringSchema,
- title: NonEmptyStringSchema,
- position: z.number().int().min(0),
- labels: z.array(ColumnLabelDtoSchema),
- })
- .strict();
+  .object({
+  id: NonEmptyStringSchema,
+  projectId: NonEmptyStringSchema,
+  title: NonEmptyStringSchema,
+  position: z.number().int().min(0),
+  labels: z.array(ColumnLabelDtoSchema),
+  wipLimit: WipLimitSchema.optional(),
+  })
+  .strict();
 export type ColumnDto = z.infer<typeof ColumnDtoSchema>;
 
 export const ListBoardColumnsArgsSchema = z
- .object({
- projectId: NonEmptyStringSchema,
- })
- .strict();
+  .object({
+  projectId: NonEmptyStringSchema,
+  })
+  .strict();
 export type ListBoardColumnsArgs = z.infer<typeof ListBoardColumnsArgsSchema>;
 
 export const CreateBoardColumnArgsSchema = z
- .object({
- projectId: NonEmptyStringSchema,
- title: NonEmptyStringSchema,
- position: z.number().int().min(0),
- })
- .strict();
+  .object({
+  projectId: NonEmptyStringSchema,
+  title: NonEmptyStringSchema,
+  position: z.number().int().min(0),
+  })
+  .strict();
 export type CreateBoardColumnArgs = z.infer<typeof CreateBoardColumnArgsSchema>;
 
 export const UpdateBoardColumnArgsSchema = z
- .object({
- columnId: NonEmptyStringSchema,
- patch: z
- .object({
- title: NonEmptyStringSchema.optional(),
- position: z.number().int().min(0).optional(),
- })
- .strict()
- .refine((p) => p.title !== undefined || p.position !== undefined, {
- message: 'patch 必须至少含一个字段',
- }),
- })
- .strict();
+  .object({
+  columnId: NonEmptyStringSchema,
+  patch: z
+  .object({
+  title: NonEmptyStringSchema.optional(),
+  position: z.number().int().min(0).optional(),
+  wipLimit: WipLimitSchema.optional(),
+  })
+  .strict()
+  .refine(
+  (p) => p.title !== undefined || p.position !== undefined || p.wipLimit !== undefined,
+  {
+  message: 'patch 必须至少含一个字段',
+  },
+  ),
+  })
+  .strict();
 export type UpdateBoardColumnArgs = z.infer<typeof UpdateBoardColumnArgsSchema>;
 
 export const ReorderBoardColumnsArgsSchema = z
