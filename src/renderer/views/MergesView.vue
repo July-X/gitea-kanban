@@ -886,8 +886,16 @@ function formatRelative(iso: string | undefined): string {
             <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
           </a>
         </div>
-        <!-- 展开区：左 meta + 右 comments 两栏 grid（左 1 / 右 2） -->
-        <div v-if="expanded.has(p.index)" class="merge-item__detail">
+        <!-- 展开区：左 meta + 右 comments 两栏 grid（左 1 / 右 2）
+             关键：detail 内部所有 click / keydown 必须 stop 冒泡,
+             否则点击 textarea / 输入框 / 滚动评论列表会冒泡到 li 的 click,
+             触发 toggleExpand 收起整张卡片（v1.3.1 bugfix）。 -->
+        <div
+          v-if="expanded.has(p.index)"
+          class="merge-item__detail"
+          @click.stop
+          @keydown.stop
+        >
           <!-- ===== 左栏：元数据 + 编辑属性 ===== -->
           <div class="merge-item__detail-left">
             <dl class="merge-item__meta">
@@ -1759,12 +1767,16 @@ function formatRelative(iso: string | undefined): string {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: var(--space-4);
-  align-items: start;
+  /* v1.3.1：stretch 让左右两栏等高,给右栏评论区可见高度,
+   * 评论列表才能 flex:1 占满垂直空间 */
+  align-items: stretch;
+  min-height: 480px;
 }
 
 @media (max-width: 700px) {
   .merge-item__detail {
     grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
   }
 }
 
@@ -1954,10 +1966,20 @@ function formatRelative(iso: string | undefined): string {
  *
  * 移到右栏：占 detail 的 2/3 宽度。
  * 评论布局 = 聊天气泡：他人评论靠左 + 头像在左；"我"评论靠右 + 头像在右。
- * 评论列表固定 max-height + overflow-y: auto（数据多了支持滚动）。
+ * 评论列表在右栏内 flex:1 占满垂直空间（不再固定 max-height: 360px,
+ * 跟右栏高度自适应），数据多了支持滚动。
  *
  * 设计参考：gitea 评论右栏、微信聊天风格。
  */
+
+.merge-item__detail-right {
+  /* v1.3.1：让右栏成为 flex column 容器,
+   * 子项（header / list / compose）能按 flex 规则分配高度 */
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
 
 .merge-item__comments {
   display: flex;
@@ -1965,6 +1987,10 @@ function formatRelative(iso: string | undefined): string {
   gap: var(--space-2);
   min-width: 0;
   min-height: 0;
+  /* 充满整个右栏高度（父 .merge-item__detail 是 grid,align-items: start,
+   * 但 detail-right 自身高度 = 右栏行高;用 min-height: 100% 让 compose 区
+   * 永远贴底、list 区占满剩余空间） */
+  height: 100%;
 }
 
 .merge-item__comments-header {
@@ -2056,8 +2082,11 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  /* 滚动条核心：固定 max-height + overflow-y:auto */
-  max-height: 360px;
+  /* v1.3.1：flex 占满右栏剩余垂直空间,不再固定 360px;
+   * max-height 改为 60vh,保留上限避免特别高的右栏把列表拉过长 */
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 60vh;
   overflow-y: auto;
   /* 自定义滚动条样式（webkit only） */
   scrollbar-width: thin;
