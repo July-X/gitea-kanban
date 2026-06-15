@@ -663,6 +663,35 @@ export function issuesMoveColumn(args: {
  return getIpcClient().invoke('issues', 'moveColumn', args);
 }
 
+/**
+ * 列评论（issue 或合并请求 —— gitea 共享 /repos/{owner}/{repo}/issues/{index}/comments 端点，
+ * 合并请求的 index 与 issue 在同一编号空间，所以这个 wrapper 直接复用到合并请求评论）。
+ *
+ * v1.2 合并请求对话：MergesView 手风琴展开时拉一次，发送评论后再拉一次（策略：展开时拉一次 + 发送后刷新）。
+ *
+ * @param issueIndex issue 或合并请求的 index（合并请求也是这个数字）
+ */
+export function issuesCommentList(args: {
+  projectId: string;
+  issueIndex: number;
+}): Promise<unknown> {
+  return getIpcClient().invokeNested('issues', 'comment', 'list', args);
+}
+
+/**
+ * 发评论（issue 或合并请求）
+ *
+ * IPC 边界：body 必须是非空字符串（schema NonEmptyStringSchema），渲染端要先 trim。
+ * 后端会同步到 gitea 并返回 IssueCommentDto；前端在发送成功后 refresh 评论列表拿到权威回复。
+ */
+export function issuesCommentCreate(args: {
+  projectId: string;
+  issueIndex: number;
+  body: string;
+}): Promise<unknown> {
+  return getIpcClient().invokeNested('issues', 'comment', 'create', args);
+}
+
 // ============================================================
 // ===== labels.* （ADR-0002：看板列绑 gitea label 用） =====
 // ============================================================

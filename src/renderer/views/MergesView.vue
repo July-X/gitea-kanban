@@ -21,14 +21,17 @@
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil } from 'lucide-vue-next';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2 } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
 import { showToast } from '@renderer/lib/toast';
+import { renderMarkdown } from '@renderer/lib/markdown';
+import { issuesCommentCreate, issuesCommentList } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 import type { PullDto, RepoDto, MergeMethod } from '../../main/ipc/schema.js';
+import type { IssueCommentDto } from '../../main/ipc/schema.js';
 
 const repo = useRepoStore();
 const pull = usePullStore();
@@ -157,6 +160,19 @@ function toggleExpand(idx: number): void {
   if (next.has(idx)) next.delete(idx);
   else next.add(idx);
   expanded.value = next;
+}
+
+/**
+ * 行点击展开：除切 expanded 外,展开的瞬间调 loadComments 拉评论
+ *
+ * 收起时**不**清空 panel —— 用户再次展开能秒开（避免重复 IO）
+ */
+function toggleExpandWithComments(p: PullDto): void {
+  const wasExpanded = expanded.value.has(p.index);
+  toggleExpand(p.index);
+  if (!wasExpanded) {
+    void loadComments(p);
+  }
 }
 
 /** 生成 gitea web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
@@ -440,6 +456,141 @@ const closeConfirmDescription = computed(() => {
   return `将关闭 #${p.index}「${p.title}」。\n\n关闭后此合并请求将不再可合并，需要在 gitea 页面重新打开。`;
 });
 
+// ===== 合并请求对话（评论）=====
+//
+// 设计（v1.2 · task #25）：
+//   - 策略：展开手风琴时拉一次评论；发送评论后立即重拉（拿到权威评论；新评论 id / 时间）
+//   - 数据源：复用 issues.comment.list / create（gitea 共享 /issues/{index}/comments 端点）
+//   - 渲染：markdown-it + DOMPurify（见 src/renderer/lib/markdown.ts）
+//   - 状态：Map<index, { items, loading, error, posting }> —— 一个仓库手风琴可同时展开多个合并请求，
+//     每个合并请求维护自己的评论 state（避免互相污染，也避免刷新合并请求列表时清空评论）
+//   - 当前用户评论高亮：拿到 auth.currentUsername 后做 author === self 判断（v1.2 best-effort）
+
+/** 每合并请求一份评论 state */
+interface CommentPanelState {
+  items: IssueCommentDto[];
+  loading: boolean;
+  posting: boolean;
+  error: string | null;
+  /** 上一次成功拉取的毫秒时间戳（"刚刚刷新"提示用） */
+  lastLoadedAt: number | null;
+}
+
+const commentPanels = ref<Map<number, CommentPanelState>>(new Map());
+
+/** 新评论输入草稿（每个合并请求一份，避免切到别的合并请求输入框被清空） */
+const commentDrafts = ref<Map<number, string>>(new Map());
+
+/** 当前用户 username（用来在评论旁标"我" / 加视觉高亮） */
+const currentUsername = computed<string | null>(() => auth.currentUsername ?? null);
+
+/** 拿某合并请求的 panel state（没有就初始化一个空的） */
+function getPanel(idx: number): CommentPanelState {
+  let p = commentPanels.value.get(idx);
+  if (!p) {
+    p = { items: [], loading: false, posting: false, error: null, lastLoadedAt: null };
+    commentPanels.value.set(idx, p);
+  }
+  return p;
+}
+
+/** 拿某合并请求的评论草稿 */
+function getDraft(idx: number): string {
+  return commentDrafts.value.get(idx) ?? '';
+}
+
+/** 设置某合并请求的评论草稿（v-model 双向绑） */
+function setDraft(idx: number, v: string): void {
+  commentDrafts.value.set(idx, v);
+}
+
+/**
+ * 展开手风琴时拉评论 —— 已被展开的合并请求不会重复拉（避免抖动）
+ *
+ * 性能：单个仓库合并请求数通常 < 50；用户一次只展开 1-3 个；评论接口本身 < 1s
+ */
+async function loadComments(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  const panel = getPanel(p.index);
+  // 已加载过且非空，跳过（用户切 tab / 列表 refresh 也不会清空，保留上下文）
+  if (panel.lastLoadedAt !== null) return;
+  await fetchComments(p);
+}
+
+/** 强制重拉评论（发送评论后用 —— 保证看到自己刚发的，带权威 id / 时间戳） */
+async function fetchComments(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  const panel = getPanel(p.index);
+  panel.loading = true;
+  panel.error = null;
+  try {
+    const list = (await issuesCommentList({
+      projectId: String(activeProjectId.value),
+      issueIndex: p.index,
+    })) as IssueCommentDto[];
+    panel.items = Array.isArray(list) ? list : [];
+    panel.lastLoadedAt = Date.now();
+  } catch (e) {
+    const err = e as { messageText?: string };
+    panel.error = err.messageText ?? '加载评论失败';
+  } finally {
+    panel.loading = false;
+  }
+}
+
+/**
+ * 发送评论
+ *
+ * 流程：
+ *   1. trim 草稿；空 → 静默返回（不发 toast，零打扰）
+ *   2. posting=true → issues.comment.create → 成功后 fetchComments 重拉列表
+ *   3. 失败 → 错误 toast（persistent = true）；state 保留方便用户改完重发
+ *   4. 成功 → 清空草稿 + success toast
+ */
+async function postComment(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  const body = getDraft(p.index).trim();
+  if (!body) return;
+  const panel = getPanel(p.index);
+  panel.posting = true;
+  panel.error = null;
+  try {
+    await issuesCommentCreate({
+      projectId: String(activeProjectId.value),
+      issueIndex: p.index,
+      body,
+    });
+    setDraft(p.index, '');
+    // 发送成功后重拉：拿到权威评论（带 gitea 给的 id / createdAt）
+    await fetchComments(p);
+    showToast({ type: 'success', message: `评论已发送到 #${p.index}` });
+  } catch (e) {
+    const err = e as { messageText?: string; hint?: string };
+    panel.error = err.messageText ?? '发送失败';
+    showToast({
+      type: 'error',
+      message: err.messageText ?? '发送失败',
+      hint: err.hint ?? '请检查网络或稍后重试',
+      persistent: true,
+    });
+  } finally {
+    panel.posting = false;
+  }
+}
+
+/**
+ * Ctrl/Cmd + Enter 提交评论（输入框快捷键）
+ *
+ * 为什么不在 keydown.enter 上无条件提交：换行（Shift+Enter）在多行场景是常用操作，
+ * 这里 v1 评论输入框设计是单行 textarea，Enter 直接提交；v2 如扩多行可改为 Shift+Enter 换行 + Enter 提交
+ */
+function onCommentKeydown(p: PullDto, e: KeyboardEvent): void {
+  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    e.preventDefault();
+    void postComment(p);
+  }
+}
+
 /** 生成二次确认描述文案 */
 const confirmDescription = computed(() => {
   const p = mergingPull.value;
@@ -603,9 +754,9 @@ function formatRelative(iso: string | undefined): string {
         role="button"
         tabindex="0"
         :aria-expanded="expanded.has(p.index)"
-        @click="toggleExpand(p.index)"
-        @keydown.enter="toggleExpand(p.index)"
-        @keydown.space.prevent="toggleExpand(p.index)"
+        @click="toggleExpandWithComments(p)"
+        @keydown.enter="toggleExpandWithComments(p)"
+        @keydown.space.prevent="toggleExpandWithComments(p)"
       >
         <!-- 模仿 gitea /pulls 列表布局：
              [leading: 状态图标] [main: 标题 + #index + 时间/作者 + 分支流向] [trailing: 操作按钮] -->
@@ -768,6 +919,95 @@ function formatRelative(iso: string | undefined): string {
             <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
             <span>编辑属性</span>
           </button>
+        </div>
+        <!-- ===== 合并请求对话（评论区）=====
+             策略：展开时 loadComments 拉一次；发送后 fetchComments 重拉拿权威数据。
+             数据源走 issues.comment.list/create（gitea 共享 comments 端点，合并请求也走这个）。 -->
+        <div v-if="expanded.has(p.index)" class="merge-item__detail merge-item__comments">
+          <div class="merge-item__comments-header">
+            <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
+            <span class="merge-item__comments-title">
+              对话
+              <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
+                ({{ getPanel(p.index).items.length }})
+              </span>
+            </span>
+            <button
+              type="button"
+              class="merge-item__comments-refresh"
+              :disabled="getPanel(p.index).loading"
+              :title="'刷新对话'"
+              @click.stop="fetchComments(p)"
+            >
+              <RefreshCw
+                :size="12"
+                :stroke-width="2"
+                :class="{ spin: getPanel(p.index).loading }"
+                aria-hidden="true"
+              />
+              <span>{{ getPanel(p.index).loading ? '加载中…' : '刷新' }}</span>
+            </button>
+          </div>
+          <!-- 加载态 -->
+          <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
+            <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
+            <span>正在加载对话…</span>
+          </div>
+          <!-- 错误态 -->
+          <div v-else-if="getPanel(p.index).error && getPanel(p.index).items.length === 0" class="merge-item__comments-error" role="alert">
+            <span>{{ getPanel(p.index).error }}</span>
+            <button type="button" class="merge-item__comments-retry" @click.stop="fetchComments(p)">重试</button>
+          </div>
+          <!-- 空态：暂无评论 + 提示用户第一条由谁起 -->
+          <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
+            暂无对话，发起第一条评论开始讨论吧
+          </div>
+          <!-- 评论列表 -->
+          <ul v-else class="merge-item__comment-list">
+            <li
+              v-for="c in getPanel(p.index).items"
+              :key="c.id"
+              class="merge-item__comment"
+              :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
+            >
+              <div class="merge-item__comment-meta">
+                <span class="merge-item__comment-author">{{ c.author.username }}</span>
+                <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
+                <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
+              </div>
+              <!-- markdown-it + DOMPurify 渲染的 HTML（src/renderer/lib/markdown.ts 已 sanitize） -->
+              <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
+            </li>
+          </ul>
+          <!-- 发评论输入区 -->
+          <div class="merge-item__comment-compose">
+            <textarea
+              class="merge-item__comment-input"
+              :value="getDraft(p.index)"
+              @input="setDraft(p.index, ($event.target as HTMLTextAreaElement).value)"
+              @keydown="onCommentKeydown(p, $event)"
+              :placeholder="'发条评论给 #'+p.index+'（Enter 发送，⌘/Ctrl+Enter 也行）'"
+              :disabled="getPanel(p.index).posting"
+              rows="2"
+              maxlength="65535"
+              spellcheck="false"
+            ></textarea>
+            <div class="merge-item__comment-actions">
+              <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
+                {{ getDraft(p.index).length }} / 65535
+              </span>
+              <button
+                type="button"
+                class="merge-item__comment-send"
+                :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
+                :title="'发送评论'"
+                @click.stop="postComment(p)"
+              >
+                <Send :size="12" :stroke-width="2" aria-hidden="true" />
+                <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
+              </button>
+            </div>
+          </div>
         </div>
         <!-- 属性编辑弹窗 -->
         <ConfirmDialog
@@ -1668,6 +1908,315 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__edit-attrs:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
+}
+
+/* ===== 合并请求对话区（v1.2 · task #25）=====
+ *
+ * 复用 .merge-item__detail 的视觉（border-top + padding-top），
+ * 但用第二层缩进与"编辑属性"区区分 —— gitea 同样把合并请求对话放详情下方。
+ * 评论主体 markdown 走 .md-body 全局 class（其它视图复用）。 */
+
+.merge-item__comments {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-divider);
+}
+
+.merge-item__comments-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+}
+
+.merge-item__comments-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.merge-item__comments-count {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.merge-item__comments-refresh {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.merge-item__comments-refresh:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.merge-item__comments-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.merge-item__comments-loading,
+.merge-item__comments-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.merge-item__comments-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-warning);
+}
+.merge-item__comments-retry {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-warning);
+  cursor: pointer;
+}
+.merge-item__comments-retry:hover {
+  background: var(--color-warning);
+  color: var(--color-text-inverse);
+}
+
+.merge-item__comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.merge-item__comment {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  /* 左 border 留空，给 --self 高亮用 */
+  border-left-width: 3px;
+  border-left-color: var(--color-divider);
+}
+.merge-item__comment--self {
+  border-left-color: var(--color-primary);
+  background: var(--color-primary-soft, var(--color-bg-elevated));
+}
+
+.merge-item__comment-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+.merge-item__comment-author {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.merge-item__comment-self-tag {
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-pill);
+  line-height: 1.6;
+}
+.merge-item__comment-time {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.merge-item__comment-body {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 发评论输入区 */
+.merge-item__comment-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+}
+.merge-item__comment-input {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  font-family: inherit;
+  padding: 0;
+}
+.merge-item__comment-input:focus {
+  outline: none;
+}
+.merge-item__comment-input::placeholder {
+  color: var(--color-text-muted);
+}
+.merge-item__comment-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.merge-item__comment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.merge-item__comment-counter {
+  margin-right: auto;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+.merge-item__comment-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.merge-item__comment-send:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+.merge-item__comment-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== markdown 正文全局样式（v1.2）=====
+ *
+ * 给所有 .md-body 内的元素加 reset，避免 markdown-it 产出的 HTML 走浏览器默认样式
+ * （gitea 评论在暗色主题下默认 <code> 黑色字看不清；<pre> 没滚动条等）。
+ * 颜色用项目主题变量，不写死。 */
+.md-body {
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  color: var(--color-text);
+}
+.md-body p {
+  margin: 0 0 4px 0;
+}
+.md-body p:last-child {
+  margin-bottom: 0;
+}
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+  margin: var(--space-2) 0 4px 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.md-body h1 { font-size: var(--font-lg); }
+.md-body h2 { font-size: var(--font-md); }
+.md-body h3 { font-size: var(--font-sm); }
+.md-body h4, .md-body h5, .md-body h6 { font-size: var(--font-sm); }
+.md-body ul, .md-body ol {
+  margin: 4px 0;
+  padding-left: var(--space-4);
+}
+.md-body li { margin: 2px 0; }
+.md-body blockquote {
+  margin: 4px 0;
+  padding: 4px var(--space-3);
+  border-left: 3px solid var(--color-divider);
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.md-body code {
+  padding: 1px 6px;
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.9em;
+  color: var(--color-accent);
+}
+.md-body pre {
+  margin: 4px 0;
+  padding: var(--space-2);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--font-xs);
+  line-height: 1.5;
+}
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: inherit;
+}
+.md-body a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.md-body a:hover {
+  text-decoration: underline;
+}
+.md-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+.md-body table {
+  border-collapse: collapse;
+  margin: 4px 0;
+  font-size: var(--font-xs);
+}
+.md-body th, .md-body td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-divider);
+}
+.md-body th {
+  background: var(--color-bg);
+  font-weight: 600;
+}
+.md-body hr {
+  border: 0;
+  border-top: 1px solid var(--color-divider);
+  margin: var(--space-2) 0;
 }
 
 /* ===== 属性编辑器弹窗内容 ===== */
