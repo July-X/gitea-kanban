@@ -1,9 +1,11 @@
 // Vitest 配置
 // 主进程 + preload + shared 代码单测（renderer 由 frontend agent 负责）
 import { defineConfig } from 'vitest/config';
+import vue from '@vitejs/plugin-vue';
 import { resolve } from 'node:path';
 
 export default defineConfig({
+  plugins: [vue()],
   resolve: {
     alias: {
       '@main': resolve(__dirname, 'src/main'),
@@ -24,6 +26,7 @@ export default defineConfig({
       'src/preload/**/*.test.ts',
       'src/shared/**/*.test.ts',
       'src/renderer/**/*.test.ts',  // frontend agent 单测（plan_373b3dd8 M2）
+      'tests/**/*.spec.ts',         // plan_25cc4562 Task C 起的 e2e 端到端验证（mount BoardView + mock IPC）
     ],
     exclude: [
       'node_modules/**',
