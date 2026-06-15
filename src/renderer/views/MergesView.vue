@@ -481,8 +481,37 @@ const commentPanels = ref<Map<number, CommentPanelState>>(new Map());
 /** 新评论输入草稿（每个合并请求一份，避免切到别的合并请求输入框被清空） */
 const commentDrafts = ref<Map<number, string>>(new Map());
 
+/** v1.4 · @ 提及状态：每个合并请求维护自己的"@ 候选" + "激活索引"
+ *   mentionKey: 输入框内当前 @ 触发的关键词（不含 @ 本身）
+ *   mentionOpenIdx: 下拉中当前选中项的索引
+ */
+const mentionState = ref<Map<number, { key: string; cursor: number; activeIdx: number }>>(new Map());
+
 /** 当前用户 username（用来在评论旁标"我" / 加视觉高亮） */
 const currentUsername = computed<string | null>(() => auth.currentUsername ?? null);
+
+/** @ 提及下拉是否打开 */
+function isMentionOpen(idx: number): boolean {
+  const s = mentionState.value.get(idx);
+  if (!s) return false;
+  return s.key.length > 0 && mentionCandidates(idx).length > 0;
+}
+
+/** @ 候选成员列表（按 key 过滤） */
+function mentionCandidates(idx: number): string[] {
+  const s = mentionState.value.get(idx);
+  if (!s) return [];
+  const key = s.key.toLowerCase();
+  return availableMembers.value
+    .filter(m => m.toLowerCase().includes(key))
+    .slice(0, 6);
+}
+
+/** 候选激活索引（用于键盘上下键） */
+function mentionActiveIdx(idx: number): number {
+  const s = mentionState.value.get(idx);
+  return s?.activeIdx ?? 0;
+}
 
 /** 拿某合并请求的 panel state（没有就初始化一个空的） */
 function getPanel(idx: number): CommentPanelState {
@@ -499,9 +528,51 @@ function getDraft(idx: number): string {
   return commentDrafts.value.get(idx) ?? '';
 }
 
-/** 设置某合并请求的评论草稿（v-model 双向绑） */
-function setDraft(idx: number, v: string): void {
-  commentDrafts.value.set(idx, v);
+/**
+ * 输入评论 → 同步草稿 + 解析 @ 触发
+ */
+function onCommentInput(p: PullDto, e: Event): void {
+  const ta = e.target as HTMLTextAreaElement;
+  const val = ta.value;
+  setDraft(p.index, val);
+  // 找 @ 触发位置：从光标往前找最近的 @ + 连续非空白
+  const cursor = ta.selectionStart ?? val.length;
+  const before = val.slice(0, cursor);
+  const m = /@([^\s@]*)$/.exec(before);
+  if (m) {
+    mentionState.value.set(p.index, { key: m[1] ?? '', cursor, activeIdx: 0 });
+  } else {
+    mentionState.value.delete(p.index);
+  }
+}
+
+/**
+ * 选一个 @ 候选插入
+ *   - 替换"@key"为"@member "
+ *   - 光标移到插入后
+ */
+function insertMention(idx: number, member: string): void {
+  const s = mentionState.value.get(idx);
+  if (!s) return;
+  const draft = getDraft(idx);
+  const before = draft.slice(0, s.cursor);
+  const after = draft.slice(s.cursor);
+  // 替换 before 末尾的 "@key" 为 "@member "
+  const replaced = before.replace(/@[^\s@]*$/, `@${member} `);
+  const newVal = replaced + after;
+  setDraft(idx, newVal);
+  mentionState.value.delete(idx);
+  // 让 textarea 反映新值
+  nextTick(() => {
+    const ta = document.querySelector<HTMLTextAreaElement>(
+      `.merge-item[data-pr-idx="${idx}"] .merge-item__comment-input`,
+    );
+    if (ta) {
+      const pos = replaced.length;
+      ta.focus();
+      ta.setSelectionRange(pos, pos);
+    }
+  });
 }
 
 /**
@@ -579,13 +650,47 @@ async function postComment(p: PullDto): Promise<void> {
 }
 
 /**
- * Ctrl/Cmd + Enter 提交评论（输入框快捷键）
- *
- * 为什么不在 keydown.enter 上无条件提交：换行（Shift+Enter）在多行场景是常用操作，
- * 这里 v1 评论输入框设计是单行 textarea，Enter 直接提交；v2 如扩多行可改为 Shift+Enter 换行 + Enter 提交
+ * 评论输入框快捷键
+ *   - Enter（无 Shift） → 提交
+ *   - @ 候选打开时 ↑/↓ 选择 / Enter 选中
+ *   - Esc 关闭 @ 候选
  */
 function onCommentKeydown(p: PullDto, e: KeyboardEvent): void {
-  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+  if (e.nativeEvent.isComposing) return;
+
+  // @ 候选打开时的特殊键
+  if (isMentionOpen(p.index)) {
+    const candidates = mentionCandidates(p.index);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const s = mentionState.value.get(p.index);
+      if (s) s.activeIdx = (s.activeIdx + 1) % candidates.length;
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const s = mentionState.value.get(p.index);
+      if (s) s.activeIdx = (s.activeIdx - 1 + candidates.length) % candidates.length;
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const s = mentionState.value.get(p.index);
+      if (s) {
+        const m = candidates[s.activeIdx];
+        if (m) insertMention(p.index, m);
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      mentionState.value.delete(p.index);
+      return;
+    }
+  }
+
+  // 普通 Enter 提交（无 Shift）
+  if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     void postComment(p);
   }
@@ -896,31 +1001,31 @@ function formatRelative(iso: string | undefined): string {
           @click.stop
           @keydown.stop
         >
-          <!-- ===== 左栏：元数据 + 编辑属性 ===== -->
-          <div class="merge-item__detail-left">
-            <dl class="merge-item__meta">
-              <div class="merge-item__meta-row">
+          <!-- ===== 详情头部：meta 一行 + 编辑属性按钮（右对齐）=====
+               v1.4 简化：meta 折行紧凑展示 + 编辑按钮同行；评论区独占下面整行 -->
+          <div class="merge-item__detail-meta-row">
+            <dl class="merge-item__meta-inline">
+              <div class="merge-item__meta-chip">
                 <dt>作者</dt>
                 <dd>{{ p.author.username }}</dd>
               </div>
-              <div class="merge-item__meta-row">
+              <div class="merge-item__meta-chip">
                 <dt>创建</dt>
                 <dd>{{ formatDate(p.createdAt) }}</dd>
               </div>
-              <div class="merge-item__meta-row">
+              <div class="merge-item__meta-chip">
                 <dt>更新</dt>
                 <dd>{{ formatDate(p.updatedAt) }}</dd>
               </div>
-              <div class="merge-item__meta-row">
+              <div class="merge-item__meta-chip">
                 <dt>冲突</dt>
                 <dd>{{ p.hasConflicts ? '有冲突' : '无冲突' }}</dd>
               </div>
-              <div class="merge-item__meta-row">
+              <div class="merge-item__meta-chip">
                 <dt>可合并</dt>
                 <dd>{{ p.mergeable ? '是' : '否' }}</dd>
               </div>
             </dl>
-            <!-- 编辑属性按钮 -->
             <button
               type="button"
               class="merge-item__edit-attrs"
@@ -930,19 +1035,16 @@ function formatRelative(iso: string | undefined): string {
               <span>编辑属性</span>
             </button>
           </div>
-          <!-- ===== 右栏：合并请求对话（评论区）=====
-               策略：展开时 loadComments 拉一次；发送后 fetchComments 重拉拿权威数据。
-               数据源走 issues.comment.list/create（gitea 共享 comments 端点，合并请求也走这个）。 -->
-          <div class="merge-item__detail-right">
-            <div class="merge-item__comments">
-              <div class="merge-item__comments-header">
-                <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
-                <span class="merge-item__comments-title">
-                  对话
-                  <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
-                    ({{ getPanel(p.index).items.length }})
-                  </span>
+          <!-- ===== 评论区：v1.4 整行铺满 ===== -->
+          <div class="merge-item__comments">
+            <div class="merge-item__comments-header">
+              <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
+              <span class="merge-item__comments-title">
+                对话
+                <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
+                  ({{ getPanel(p.index).items.length }})
                 </span>
+              </span>
                 <button
                   type="button"
                   class="merge-item__comments-refresh"
@@ -998,19 +1100,36 @@ function formatRelative(iso: string | undefined): string {
                   </div>
                 </li>
               </ul>
-              <!-- 发评论输入区 -->
+              <!-- 发评论输入区（v1.4 加大 + @ 提及自动补全） -->
               <div class="merge-item__comment-compose">
-                <textarea
-                  class="merge-item__comment-input"
-                  :value="getDraft(p.index)"
-                  @input="setDraft(p.index, ($event.target as HTMLTextAreaElement).value)"
-                  @keydown="onCommentKeydown(p, $event)"
-                  :placeholder="'发条评论给 #'+p.index+'（Enter 发送，⌘/Ctrl+Enter 也行）'"
-                  :disabled="getPanel(p.index).posting"
-                  rows="2"
-                  maxlength="65535"
-                  spellcheck="false"
-                ></textarea>
+                <div class="merge-item__comment-input-wrap">
+                  <textarea
+                    ref="commentInputRef"
+                    class="merge-item__comment-input"
+                    :value="getDraft(p.index)"
+                    @input="onCommentInput(p, $event)"
+                    @keydown="onCommentKeydown(p, $event)"
+                    :placeholder="'发条评论给 #' + p.index + '（@ 提及成员，Enter 发送，⌘/Ctrl+Enter 也行）'"
+                    :disabled="getPanel(p.index).posting"
+                    rows="3"
+                    maxlength="65535"
+                    spellcheck="false"
+                  ></textarea>
+                  <!-- @ 提及下拉（v1.4 新增） -->
+                  <div
+                    v-if="isMentionOpen(p.index) && mentionCandidates(p.index).length > 0"
+                    class="merge-item__mention-dropdown"
+                  >
+                    <button
+                      v-for="(m, i) in mentionCandidates(p.index)"
+                      :key="m"
+                      type="button"
+                      class="merge-item__mention-item"
+                      :class="{ 'merge-item__mention-item--active': i === mentionActiveIdx(p.index) }"
+                      @click.stop.prevent="insertMention(p.index, m)"
+                    >{{ '@' + m }}</button>
+                  </div>
+                </div>
                 <div class="merge-item__comment-actions">
                   <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
                     {{ getDraft(p.index).length }} / 65535
@@ -1761,23 +1880,13 @@ function formatRelative(iso: string | undefined): string {
   padding: var(--space-3) 0 0;
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
-  /* v1.3 · task #25 调整：左 meta / 右 comments 两栏，左 1 / 右 2
-   * 评论多时右侧能拿到 60%+ 宽度，评论长期挂着不挤；
-   * < 700px 降为单列堆叠（meta 在上，评论在下，评论全宽）。 */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--space-4);
-  /* v1.3.1：stretch 让左右两栏等高,给右栏评论区可见高度,
-   * 评论列表才能 flex:1 占满垂直空间 */
-  align-items: stretch;
-  min-height: 480px;
-}
-
-@media (max-width: 700px) {
-  .merge-item__detail {
-    grid-template-columns: minmax(0, 1fr);
-    min-height: 0;
-  }
+  /* v1.3 · task #25 调整：左 meta / 右 comments 两栏
+   * v1.4 · task #30 简化：detail 改单列，评论区/输入框**整行铺满**不再受左 meta 限制
+   *  左 meta 改为详情区头部一行（折行），评论区拿满整行宽度 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
 }
 
 .merge-item__detail-left {
@@ -1785,6 +1894,48 @@ function formatRelative(iso: string | undefined): string {
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
+}
+
+/* v1.4 · 详情头部一行：meta 紧凑 + 编辑按钮（同行右对齐）*/
+.merge-item__detail-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.merge-item__meta-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.merge-item__meta-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+.merge-item__meta-chip dt {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.merge-item__meta-chip dd {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
 }
 
 .merge-item__detail-right {
@@ -2227,9 +2378,16 @@ function formatRelative(iso: string | undefined): string {
   border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
+
+/* textarea + @ 候选下拉的相对定位容器 */
+.merge-item__comment-input-wrap {
+  position: relative;
+}
+
+/* v1.4 输入框更大（min-height 从 56px → 72px） */
 .merge-item__comment-input {
   width: 100%;
-  min-height: 56px;
+  min-height: 72px;
   resize: vertical;
   background: transparent;
   border: none;
@@ -2239,6 +2397,39 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
   font-family: inherit;
   padding: 0;
+}
+
+/* v1.4 @ 提及下拉（绝对定位，浮在 textarea 上方） */
+.merge-item__mention-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 2px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 5;
+}
+
+.merge-item__mention-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px var(--space-3);
+  background: transparent;
+  border: none;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.merge-item__mention-item:hover,
+.merge-item__mention-item--active {
+  background: var(--color-primary-soft, var(--color-bg-hover));
+  color: var(--color-primary);
 }
 .merge-item__comment-input:focus {
   outline: none;
