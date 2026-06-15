@@ -2219,12 +2219,13 @@ function formatRelative(iso: string | undefined): string {
   cursor: not-allowed;
 }
 
-/* ===== v1.5 主体：左 50% 历史 / 右 50% 输入框 ===== */
+/* ===== v1.5 主体：左 70% 历史 / 右 30% 输入框 ===== */
 .merge-item__comments-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* v1.5.9：消息列表 70% + 回复区 30%（gitea web 的 "discussion + reply" 布局） */
+  grid-template-columns: 7fr 3fr;
   grid-template-rows: 1fr;
-  gap: 6px;                     /* v1.5.8：12 → 6 */
+  gap: 6px;
   flex: 1 1 0;
   min-height: 0;
 }
@@ -2316,11 +2317,11 @@ function formatRelative(iso: string | undefined): string {
   align-items: flex-start;
   gap: 6px;
   min-width: 0;
+  /* v1.5.9：所有评论统一左对齐（gitea web 风格）—— list 占左 70% 列，消息都贴左 */
 }
 
 .merge-item__comment--self {
-  /* "我" 的评论整条反序，让头像+气泡都贴右 */
-  flex-direction: row-reverse;
+  /* v1.5.9：不再 row-reverse，所有消息都左对齐；用 background 区分自己/他人 */
 }
 
 /* 头像圈（首字母） */
@@ -2343,28 +2344,20 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text-inverse);
 }
 
-/* 气泡容器 */
+/* 气泡容器（v1.5.9：撑满剩余空间，消息左贴 list 边框） */
 .merge-item__comment-bubble {
-  max-width: 78%;
+  /* 不再 max-width: 78%——在 70% 列里让气泡尽量宽（用 min-width: 0 + flex: 1 撑满） */
+  flex: 1 1 0;
   min-width: 0;
-  padding: 6px 10px;
+  padding: 5px 8px;             /* v1.5.9：6 10 → 5 8，紧凑 */
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
-  border-radius: 10px;
+  border-radius: 8px;           /* v1.5.9：10 → 8，更紧凑 */
   position: relative;
-  /* 默认（他人）—— 小尖角在左上角 */
 }
 .merge-item__comment-bubble::before {
-  content: '';
-  position: absolute;
-  top: 8px;
-  left: -5px;
-  width: 8px;
-  height: 8px;
-  background: var(--color-bg-elevated);
-  border-left: 1px solid var(--color-divider);
-  border-bottom: 1px solid var(--color-divider);
-  transform: rotate(45deg);
+  /* v1.5.9：去掉小尖角，简洁风格（Gitea 经典 PR 评论是气泡+作者 bar） */
+  display: none;
 }
 .merge-item__comment--self .merge-item__comment-bubble {
   background: var(--color-primary-soft, var(--color-bg-elevated));
