@@ -1900,13 +1900,14 @@ function formatRelative(iso: string | undefined): string {
   padding: var(--space-3) var(--space-4) var(--space-4);
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
-  /* v1.5.4：按你原则只用 max-height 兜底（多 PR 展开时整页不超高）
-   *  - 单 PR 展开：高度由内部内容（header + meta + 评论区 list/input）自然堆叠
-   *  - 评论区 list / input 自身 max-height: 100% + overflow-y: auto 溢出滚动 */
+  /* v1.5.7：单 PR 展开时 detail 高度 = max(min-height, 内容)
+   *  - min-height 440px 是兜底——确保评论区至少有 ~340px 可见（440 - 60 meta - 40 header - 12 gap）
+   *  - max-height 900px 限制多 PR 展开时整页不超高
+   *  - 内部 flex: 1 1 0 链让评论区 grow 到底，溢出时 list/input 自身 overflow:auto 滚动 */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  min-height: 0;
+  min-height: 440px;
   max-height: min(90vh, 900px);
   overflow: hidden;
 }
@@ -2160,10 +2161,9 @@ function formatRelative(iso: string | undefined): string {
   gap: 12px;                    /* v1.5：每个子块之间 12px 间距，不再挤 */
   min-width: 0;
   min-height: 0;
-  /* 充满整个右栏高度（父 .merge-item__detail 是 grid,align-items: start,
-   * 但 detail-right 自身高度 = 右栏行高;用 min-height: 100% 让 compose 区
-   * 永远贴底、list 区占满剩余空间） */
-  height: 100%;
+  /* v1.5.5：不写 height: 100%（父 detail max-height 是约束，flex item 拿不到确定高度）
+   *  改用 flex: 1 1 0 配合父的 min-height: 0，flex item 才会真正占满父可用空间 */
+  flex: 1 1 0;
 }
 
 /* ===== 顶部 header：左标题 + 右刷新按钮 ===== */
@@ -2225,21 +2225,23 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comments-body {
   display: grid;
   grid-template-columns: 1fr 1fr;   /* v1.5：左历史 / 右输入各 50% */
-  /* v1.5.4：按你原则不用 min-height 撑高；行高 minmax(0, auto) 让内容驱动 */
-  grid-template-rows: minmax(0, 1fr);
+  /* v1.5.6：单行 1fr 撑满 grid 容器
+   *  - grid 容器有 flex: 1 1 0 + min-height: 0（flex parent 给高度）
+   *  - 1fr 在显式高度的 grid 容器中 = grid 容器高度
+   *  - 列 item 默认 align-self: stretch 占满行高 */
+  grid-template-rows: 1fr;
   gap: 12px;
-  /* detail 是 flex column,comments-body 是 flex item,用 flex:1 让父给的高度传下来 */
   flex: 1 1 0;
   min-height: 0;
 }
 
-/* 左列：历史评论 + 各种态（loading/error/empty）—— v1.5.4 跟内容走 */
+/* 左列：历史评论 + 各种态（loading/error/empty） */
 .merge-item__comments-history {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  max-height: 100%;
+  /* grid item stretch；list flex 1 撑满 history */
   overflow: hidden;
 }
 
@@ -2420,7 +2422,7 @@ function formatRelative(iso: string | undefined): string {
   line-height: 1.5;
 }
 
-/* 发评论输入区（v1.5.4 按你原则不强制高度） */
+/* 发评论输入区（v1.5.5） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
@@ -2431,8 +2433,7 @@ function formatRelative(iso: string | undefined): string {
   border-radius: var(--radius-md);
   min-width: 0;
   min-height: 0;
-  /* v1.5.4：不写 height，让 grid 默认 align-self: stretch 撑满列高 */
-  max-height: 100%;
+  /* grid item stretch，列高 = grid 行高；内部 textarea flex 1 撑满 */
   overflow: hidden;
 }
 
