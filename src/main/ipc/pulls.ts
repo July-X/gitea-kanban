@@ -147,40 +147,62 @@ async function pullsListHandler(args: ListPullsArgs): Promise<ListPullsResp> {
   // 2. resolve
   const proj = resolveProject(args.projectId);
 
- // 3. 调 gitea
- const giteaResult = await listGiteaPulls({
- giteaUrl: proj.giteaUrl,
- username: proj.username,
- owner: proj.owner,
- repo: proj.repo,
- state: args.state,
- page: args.page,
- limit: args.limit,
- });
+  // 3. 调 gitea（网络错误时 fallback 到缓存）
+  try {
+    const giteaResult = await listGiteaPulls({
+      giteaUrl: proj.giteaUrl,
+      username: proj.username,
+      owner: proj.owner,
+      repo: proj.repo,
+      state: args.state,
+      page: args.page,
+      limit: args.limit,
+    });
 
-  // 4. JOIN 本地 linkedCards
- const linkedCardsMap = getLinkedCardsForPulls({
- owner: proj.owner,
- repo: proj.repo,
- indexes: giteaResult.items.map((p) => p.index),
- });
+    // 4. JOIN 本地 linkedCards
+    const linkedCardsMap = getLinkedCardsForPulls({
+      owner: proj.owner,
+      repo: proj.repo,
+      indexes: giteaResult.items.map((p) => p.index),
+    });
 
-  const items: PullDto[] = giteaResult.items.map((p) => ({
-    ...p,
-    linkedCards: linkedCardsMap.get(p.index) ?? [],
-  }));
+    const items: PullDto[] = giteaResult.items.map((p) => ({
+      ...p,
+      linkedCards: linkedCardsMap.get(p.index) ?? [],
+    }));
 
-  const resp: ListPullsResp = {
-    items,
-    total: giteaResult.hasMore ? items.length + 1 : items.length, // hasMore 时 total 至少比当前页多 1
-    hasMore: giteaResult.hasMore,
-  };
+    const resp: ListPullsResp = {
+      items,
+      total: giteaResult.hasMore ? items.length + 1 : items.length, // hasMore 时 total 至少比当前页多 1
+      hasMore: giteaResult.hasMore,
+    };
 
-  // 5. 写缓存
-  setPullsCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(resp) });
+    // 5. 写缓存
+    setPullsCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(resp) });
 
-  logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
-  return resp;
+    logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
+    return resp;
+  } catch (err) {
+    if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
+      logger.warn({ op, latencyMs: Date.now() - start }, 'gitea unreachable, falling back to cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as ListPullsResp;
+          (parsed as unknown as Record<string, unknown>)['__offline'] = true;
+          logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, offline: true }, 'ipc done (offline)');
+          return parsed;
+        } catch {
+          // 缓存损坏
+        }
+      }
+      // 无缓存，返回空 offline 响应
+      const offlineResp: ListPullsResp = { items: [], total: 0, hasMore: false };
+      (offlineResp as unknown as Record<string, unknown>)['__offline'] = true;
+      logger.info({ op, latencyMs: Date.now() - start, offline: true }, 'ipc done (offline, no cache)');
+      return offlineResp;
+    }
+    throw err;
+  }
 }
 
 // ===== pulls.get =====

@@ -54,6 +54,9 @@ import {
   projectExists,
 } from '../board/columns.js';
 import { dispatch, registerOp } from '../sync/dispatch.js';
+import { getLocalStore } from '../local/state.js';
+import { listColumnsByProjectWithStore } from '../local/columns.js';
+import { listLabelMapsByColumnWithStore } from '../local/label-maps.js';
 
 /** 统一包装：parse 入参 → 调 handler → 错误转 IpcError */
 function wrapIpc<TArgs, TResult>(
@@ -109,10 +112,43 @@ async function listBoardColumnsHandler(args: ListBoardColumnsArgs): Promise<Colu
       hint: '请先在仓库列表中重新添加该仓库为项目',
     });
   }
-  // listColumns 现在是 async（调 gitea 拉 label name/color；Gitea 优先原则 2026-06-15）
-  const result = await listColumns(args.projectId);
-  logger.info({ op: 'board.columns.list', latencyMs: Date.now() - start, count: result.length }, 'ipc done');
-  return result;
+  // listColumns 调 gitea 拉 label name/color；gitea 不可达时 fallback 到 localStore
+  try {
+    const result = await listColumns(args.projectId);
+    logger.info({ op: 'board.columns.list', latencyMs: Date.now() - start, count: result.length }, 'ipc done');
+    return result;
+  } catch (err) {
+    // 网络错误时 fallback 到 localStore 列（label 信息来自本地缓存，可能稍旧）
+    if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
+      logger.warn({ op: 'board.columns.list', latencyMs: Date.now() - start }, 'gitea unreachable, falling back to localStore');
+      const state = getLocalStore().get();
+      const cols = listColumnsByProjectWithStore(state, args.projectId);
+      const result: ColumnDto[] = cols.map((c) => {
+        const boundLabelIds = listLabelMapsByColumnWithStore(state, c.id).map((m: { giteaLabelId: string }) => Number(m.giteaLabelId));
+        const labels = boundLabelIds.map((id: number) => {
+          const lm = state.labelMaps.find(
+            (m: { columnId: string; giteaLabelId: string }) => m.columnId === c.id && Number(m.giteaLabelId) === id,
+          );
+          return lm
+            ? { id, name: lm.giteaLabelName, color: '' }
+            : { id, name: `<label-${id}>`, color: '' };
+        });
+        return {
+          id: c.id,
+          projectId: c.projectId,
+          title: c.title,
+          position: c.position,
+          labels,
+          wipLimit: c.wipLimit ?? null,
+        };
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (result as unknown as Record<string, unknown>)['__offline'] = true;
+      logger.info({ op: 'board.columns.list', latencyMs: Date.now() - start, count: result.length, __offline: true }, 'ipc done (offline)');
+      return result;
+    }
+    throw err;
+  }
 }
 
 async function createBoardColumnHandler(args: CreateBoardColumnArgs): Promise<ColumnDto> {

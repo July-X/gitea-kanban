@@ -177,45 +177,67 @@ async function commitsListHandler(args: ListCommitsArgs): Promise<ListCommitsRes
   // 2. resolve
   const proj = resolveProject(args.projectId);
 
-  // 3. 调 gitea
-  const giteaResult = await listGiteaCommits({
-    giteaUrl: proj.giteaUrl,
-    username: proj.username,
-    owner: proj.owner,
-    repo: proj.repo,
-    sha: args.sha,
-    path: args.path,
-    author: args.author,
-    since: args.since,
-    until: args.until,
-    page: args.page,
-    limit: args.limit,
-  });
+  // 3. 调 gitea（网络错误时 fallback 到缓存）
+  try {
+    const giteaResult = await listGiteaCommits({
+      giteaUrl: proj.giteaUrl,
+      username: proj.username,
+      owner: proj.owner,
+      repo: proj.repo,
+      sha: args.sha,
+      path: args.path,
+      author: args.author,
+      since: args.since,
+      until: args.until,
+      page: args.page,
+      limit: args.limit,
+    });
 
-  // 4. JOIN 本地 linkedCards
-  const linkedCardsMap = getLinkedCardsForCommits({
-    owner: proj.owner,
-    repo: proj.repo,
-    shas: giteaResult.items.map((c) => c.sha),
-  });
+    // 4. JOIN 本地 linkedCards
+    const linkedCardsMap = getLinkedCardsForCommits({
+      owner: proj.owner,
+      repo: proj.repo,
+      shas: giteaResult.items.map((c) => c.sha),
+    });
 
-  const items: CommitDto[] = giteaResult.items.map((c) => ({
-    ...c,
-    linkedCards: linkedCardsMap.get(c.sha) ?? [],
-  }));
+    const items: CommitDto[] = giteaResult.items.map((c) => ({
+      ...c,
+      linkedCards: linkedCardsMap.get(c.sha) ?? [],
+    }));
 
-  const resp: ListCommitsResp = {
-    items,
-    total: items.length,
-    hasMore: giteaResult.hasMore,
-    nextPage: giteaResult.hasMore ? args.page + 1 : null,
-  };
+    const resp: ListCommitsResp = {
+      items,
+      total: items.length,
+      hasMore: giteaResult.hasMore,
+      nextPage: giteaResult.hasMore ? args.page + 1 : null,
+    };
 
-  // 5. 写缓存
-  setCommitsCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(resp) });
+    // 5. 写缓存
+    setCommitsCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(resp) });
 
-  logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
-  return resp;
+    logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
+    return resp;
+  } catch (err) {
+    if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
+      logger.warn({ op, latencyMs: Date.now() - start }, 'gitea unreachable, falling back to cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as ListCommitsResp;
+          (parsed as unknown as Record<string, unknown>)['__offline'] = true;
+          logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, offline: true }, 'ipc done (offline)');
+          return parsed;
+        } catch {
+          // 缓存损坏
+        }
+      }
+      // 无缓存，返回空 offline 响应
+      const offlineResp: ListCommitsResp = { items: [], total: 0, hasMore: false, nextPage: null };
+      (offlineResp as unknown as Record<string, unknown>)['__offline'] = true;
+      logger.info({ op, latencyMs: Date.now() - start, offline: true }, 'ipc done (offline, no cache)');
+      return offlineResp;
+    }
+    throw err;
+  }
 }
 
 // ===== commits.get =====
@@ -308,97 +330,132 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
   // 2. resolve project
   const proj = resolveProject(args.projectId);
 
-  // 3. 对每个 branch 拉 commits，优先命中分支级缓存（避免重复选择同一分支时反复请求 gitea）
-  const commitsByBranch: Record<string, CommitDto[]> = {};
-  for (const branch of args.branches) {
-    const branchCacheKey = makeBranchCommitsCacheKey(
-      args.projectId,
-      branch,
-      args.since,
-      args.until,
-      args.maxNodes,
-    );
-    const cachedBranch = getCommitsCache({ projectId: args.projectId, cacheKey: branchCacheKey });
-    if (cachedBranch) {
-      try {
-        const parsed = JSON.parse(cachedBranch) as { items: CommitDto[] };
-        commitsByBranch[branch] = parsed.items;
-        continue;
-      } catch {
-        // 缓存损坏 = miss，继续走 gitea
+  try {
+    // 3. 对每个 branch 拉 commits，优先命中分支级缓存（避免重复选择同一分支时反复请求 gitea）
+    const commitsByBranch: Record<string, CommitDto[]> = {};
+    for (const branch of args.branches) {
+      const branchCacheKey = makeBranchCommitsCacheKey(
+        args.projectId,
+        branch,
+        args.since,
+        args.until,
+        args.maxNodes,
+      );
+      const cachedBranch = getCommitsCache({ projectId: args.projectId, cacheKey: branchCacheKey });
+      if (cachedBranch) {
+        try {
+          const parsed = JSON.parse(cachedBranch) as { items: CommitDto[] };
+          commitsByBranch[branch] = parsed.items;
+          continue;
+        } catch {
+          // 缓存损坏 = miss，继续走 gitea
+        }
       }
+      const r = await listGiteaCommits({
+        giteaUrl: proj.giteaUrl,
+        username: proj.username,
+        owner: proj.owner,
+        repo: proj.repo,
+        sha: branch,
+        since: args.since,
+        until: args.until,
+        page: 1,
+        limit: args.maxNodes, // 拉够 maxNodes 即可（任务 prompt §关键约束 12）
+      });
+      commitsByBranch[branch] = r.items;
+      setCommitsCache({
+        projectId: args.projectId,
+        cacheKey: branchCacheKey,
+        payload: JSON.stringify({ items: r.items }),
+        ttlSeconds: COMMITS_LIST_TTL_SECONDS,
+      });
     }
-    const r = await listGiteaCommits({
-      giteaUrl: proj.giteaUrl,
-      username: proj.username,
+
+    // 4. 拉 PR 列表（state='all' 拿全 + 改 state 适配 schema 限制）
+    // 02 §5.3.5 PullStateSchema 只接受 'open' | 'closed' → 拆两次合并
+    const prsOpen = await listGiteaPullsCached(args.projectId, proj, 'open', 100);
+    const prsClosed = await listGiteaPullsCached(args.projectId, proj, 'closed', 100);
+
+    // 转 TimelinePR 形态
+    // a3 注：PullDto.state 现在含 'all'（PullStateSchema 加了 a3 'all' 字段），
+    //   但 gitea /pulls 实际只返 'open' / 'closed'；这里 narrowing 收窄到不含 'all' 的子集。
+    const timelinePrs: TimelinePR[] = [...prsOpen.items, ...prsClosed.items].map((p) => {
+      const state: 'open' | 'closed' | 'merged' = p.merged ? 'merged' : (p.state === 'all' ? 'open' : p.state);
+      return {
+        id: `pr:${proj.owner}/${proj.repo}/${p.index}`,
+        index: p.index,
+        title: p.title,
+        state,
+        head: p.head.ref,
+        base: p.base.ref,
+        author: { name: p.author.username, ...(p.author.avatarUrl ? { avatarUrl: p.author.avatarUrl } : {}) },
+        url: `${proj.giteaUrl.replace(/\/+$/, '')}/${proj.owner}/${proj.repo}/pulls/${p.index}`,
+        ...(p.merged && p.updatedAt ? { mergedAt: p.updatedAt } : {}),
+      };
+    });
+
+    // 5. 拿全部 commit 的 linkedCardIds
+    const allShas = new Set<string>();
+    for (const list of Object.values(commitsByBranch)) {
+      for (const c of list) allShas.add(c.sha);
+    }
+    const linkedCardsMap = getLinkedCardsForCommits({
       owner: proj.owner,
       repo: proj.repo,
-      sha: branch,
-      since: args.since,
-      until: args.until,
-      page: 1,
-      limit: args.maxNodes, // 拉够 maxNodes 即可（任务 prompt §关键约束 12）
+      shas: [...allShas],
     });
-    commitsByBranch[branch] = r.items;
-    setCommitsCache({
-      projectId: args.projectId,
-      cacheKey: branchCacheKey,
-      payload: JSON.stringify({ items: r.items }),
-      ttlSeconds: COMMITS_LIST_TTL_SECONDS,
-    });
+   const linkedCardIdsBySha = new Map<string, string[]>();
+   for (const [sha, links] of linkedCardsMap.entries()) {
+   // v1 stub：linkedCardsMap.value 类型是 never[]（永不返回任何 linkedCard）
+   // 真有 link 时会是 { cardId: string }，v1 不会发生
+   linkedCardIdsBySha.set(sha, (links as Array<{ cardId: string }>).map((l) => l.cardId));
+   }
+
+    // 6. buildTimeline 归一化
+    const dto = buildTimeline({ args, commitsByBranch, pulls: timelinePrs, linkedCardIdsBySha });
+
+    // 7. 写缓存（payload 统一为 JSON 字符串，cache 层不关心业务类型）
+    setTimelineCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(dto) });
+
+    logger.info(
+      { op, latencyMs: Date.now() - start, totalCommits: dto.totalCommits, nodes: dto.nodes.length, truncated: dto.truncated },
+      'ipc done',
+    );
+    return dto;
+  } catch (err) {
+    if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
+      logger.warn({ op, latencyMs: Date.now() - start }, 'gitea unreachable, falling back to timeline cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as TimelineDto;
+          (parsed as unknown as Record<string, unknown>)['__offline'] = true;
+          logger.info({ op, latencyMs: Date.now() - start, offline: true, totalCommits: parsed.totalCommits }, 'ipc done (offline)');
+          return parsed;
+        } catch {
+          // 缓存损坏
+        }
+      }
+      // 无缓存，返回空 offline 响应
+      const offlineDto: TimelineDto = {
+        windowStart: undefined,
+        windowEnd: undefined,
+        range: {
+          from: args.since ?? new Date(0).toISOString(),
+          to: args.until ?? new Date().toISOString(),
+        },
+        lanes: [],
+        nodes: [],
+        edges: [],
+        prs: [],
+        truncated: false,
+        totalCommits: 0,
+      };
+      (offlineDto as unknown as Record<string, unknown>)['__offline'] = true;
+      logger.info({ op, latencyMs: Date.now() - start, offline: true }, 'ipc done (offline, no cache)');
+      return offlineDto;
+    }
+    throw err;
   }
-
-  // 4. 拉 PR 列表（state='all' 拿全 + 改 state 适配 schema 限制）
-  // 02 §5.3.5 PullStateSchema 只接受 'open' | 'closed' → 拆两次合并
-  const prsOpen = await listGiteaPullsCached(args.projectId, proj, 'open', 100);
-  const prsClosed = await listGiteaPullsCached(args.projectId, proj, 'closed', 100);
-
-  // 转 TimelinePR 形态
-  // a3 注：PullDto.state 现在含 'all'（PullStateSchema 加了 a3 'all' 字段），
-  //   但 gitea /pulls 实际只返 'open' / 'closed'；这里 narrowing 收窄到不含 'all' 的子集。
-  const timelinePrs: TimelinePR[] = [...prsOpen.items, ...prsClosed.items].map((p) => {
-    const state: 'open' | 'closed' | 'merged' = p.merged ? 'merged' : (p.state === 'all' ? 'open' : p.state);
-    return {
-      id: `pr:${proj.owner}/${proj.repo}/${p.index}`,
-      index: p.index,
-      title: p.title,
-      state,
-      head: p.head.ref,
-      base: p.base.ref,
-      author: { name: p.author.username, ...(p.author.avatarUrl ? { avatarUrl: p.author.avatarUrl } : {}) },
-      url: `${proj.giteaUrl.replace(/\/+$/, '')}/${proj.owner}/${proj.repo}/pulls/${p.index}`,
-      ...(p.merged && p.updatedAt ? { mergedAt: p.updatedAt } : {}),
-    };
-  });
-
-  // 5. 拿全部 commit 的 linkedCardIds
-  const allShas = new Set<string>();
-  for (const list of Object.values(commitsByBranch)) {
-    for (const c of list) allShas.add(c.sha);
-  }
-  const linkedCardsMap = getLinkedCardsForCommits({
-    owner: proj.owner,
-    repo: proj.repo,
-    shas: [...allShas],
-  });
- const linkedCardIdsBySha = new Map<string, string[]>();
- for (const [sha, links] of linkedCardsMap.entries()) {
- // v1 stub：linkedCardsMap.value 类型是 never[]（永不返回任何 linkedCard）
- // 真有 link 时会是 { cardId: string }，v1 不会发生
- linkedCardIdsBySha.set(sha, (links as Array<{ cardId: string }>).map((l) => l.cardId));
- }
-
-  // 6. buildTimeline 归一化
-  const dto = buildTimeline({ args, commitsByBranch, pulls: timelinePrs, linkedCardIdsBySha });
-
-  // 7. 写缓存（payload 统一为 JSON 字符串，cache 层不关心业务类型）
-  setTimelineCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(dto) });
-
-  logger.info(
-    { op, latencyMs: Date.now() - start, totalCommits: dto.totalCommits, nodes: dto.nodes.length, truncated: dto.truncated },
-    'ipc done',
-  );
-  return dto;
 }
 
 // ===== 注册 =====
