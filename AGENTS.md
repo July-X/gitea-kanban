@@ -3,7 +3,7 @@
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-06-13（基于当前实际代码与配置重写）
+> 最后更新：2026-06-15（新增 §10 第 11/12 条：Vue v-if 链折叠坑 + div 嵌套平衡自检）
 
 ---
 
@@ -547,6 +547,8 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 8. **Edit 工具残段**：StrReplaceFile 的 `oldString` 尽量包整个函数或大段；替换后 `git diff` 确认无重复行。
 9. **不要跨边界**：渲染端不写 `src/main/**`、不改 `src/shared/ipc-types.ts`；主进程不写 Vue 组件 / CSS。
 10. **启动排查 + CDP 调试**：详见 §8.7。**关键提醒**：(a) pino 在 dev/preview 模式走 file transport 不是 stdout，tee 看不到；(b) CDP 远程调试端口 9492 在 dev / preview 模式自动开，连接用 `http://127.0.0.1:9492/json/list` 拿 Renderer 列表。
+11. **Vue v-if/v-else-if/v-else 链会"折叠"（2026-06-15 踩坑）**：v-if 链在编译期被折叠成**第一个 v-if 节点的 children**，所以链中如果出现异 tag（比如 `<div v-if>...<ul v-else><li>...</li></ul>`），`<li>` 实际成了 `<div v-if>` 的 child 而不是 `<ul>` 的 child → `</li></ul>` 闭合错位 → 编译报 `Element is missing end tag`。**正确做法**：每个分支独立 v-if，列表分支用 `<ul v-if="...">` 而不是 `<ul v-else>`。**自检**：重构 placeholder/状态分支后，立刻跑 `node -e "const{baseCompile}=require('./node_modules/.pnpm/@vue+compiler-core@3.5.35/node_modules/@vue/compiler-core/dist/compiler-core.cjs.prod.js');const fs=require('fs');const m=fs.readFileSync('src/renderer/views/<View>.vue','utf-8').match(/<template>([\s\S]*?)<\/template>/);const errs=[];baseCompile(m[1],{onError:e=>errs.push(e)});console.log('errors:',errs.length,errs.map(e=>e.message).join(';'))"` 跑 0 错误。
+12. **重构 detail 区要数 div 嵌套层数**（2026-06-15 踩坑）：`<div v-if="expanded">` 包裹多卡片内容时（meta + comments + comment-compose + input-wrap + @-dropdown），手改完忘了删一个 `</div>`，编译报 `Element is missing end tag` 但**实际错误位置不是真正的 unclose**——因为 Vue 编译器在闭合错位时才报错。**自检**：用 `awk '{n+=gsub(/<div/,"&")-gsub(/<\/div>/,"&")} END{print "balance="n}' src/renderer/views/<View>.vue` 看是否 = 0（注意：自闭的 `<div .../>` 算 1 开 + 1 闭）。**或者**用第 11 条的 `baseCompile` 一行命令直接验证。
 
 ---
 
