@@ -528,6 +528,15 @@ function getDraft(idx: number): string {
   return commentDrafts.value.get(idx) ?? '';
 }
 
+/** 写某合并请求的评论草稿（v1.5 补：之前 onCommentInput 调用了未定义的 setDraft 导致 ReferenceError） */
+function setDraft(idx: number, val: string): void {
+  if (val === '') {
+    commentDrafts.value.delete(idx);
+  } else {
+    commentDrafts.value.set(idx, val);
+  }
+}
+
 /**
  * 输入评论 → 同步草稿 + 解析 @ 触发
  */
