@@ -1896,20 +1896,19 @@ function formatRelative(iso: string | undefined): string {
 
 .merge-item__detail {
   grid-column: 1 / -1;
-  padding: var(--space-3) 0 0;
+  /* v1.5.3：左右 padding 跟主行一致（var(--space-4) = 16px），detail 不顶到 merge-item 边缘 */
+  padding: var(--space-3) var(--space-4) var(--space-4);
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
-  /* v1.3 · task #25 调整：左 meta / 右 comments 两栏
-   * v1.4 · task #30 简化：detail 改单列，评论区/输入框**整行铺满**不再受左 meta 限制
-   *  左 meta 改为详情区头部一行（折行），评论区拿满整行宽度
-   * v1.5：加 max-height 防止单个合并请求 的 detail 撑爆整页
-   * v1.5.2：max-height 从 600px → 80vh / 700px，撑高对话区（之前评论区完全看不到） */
+  /* v1.5.3：高度跟内容走，max-height 兜底多 PR 展开时整页不超高
+   *  - 移除了 min-height（之前 520px 让单个 PR 展开时空白太多）
+   *  - max-height 由评论区自适应（grid 行高 minmax 0/1fr） */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  min-height: 520px;              /* v1.5.2：保证评论区至少 520px 可见 */
-  max-height: min(85vh, 800px);
-  overflow: hidden;               /* v1.5：list 内部已 overflow:auto，detail 自身不滚 */
+  min-height: 0;
+  max-height: min(80vh, 720px);
+  overflow: hidden;
 }
 
 .merge-item__detail-left {
@@ -2226,10 +2225,13 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comments-body {
   display: grid;
   grid-template-columns: 1fr 1fr;   /* v1.5：左历史 / 右输入各 50% */
-  grid-template-rows: minmax(280px, 1fr); /* v1.5.2：行高撑满父可用空间，最小 280px 保证可见 */
+  /* v1.5.3：行高跟内容走，minmax(0, 1fr) 让父级 max-height 决定实际高度
+   *  - 评论区不再强制 280px 高度（之前和 detail min-height 联用导致空白）
+   *  - 父 detail max-height 限住整页不超高 */
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   flex: 1 1 0;
-  min-height: 280px;             /* v1.5.2：保证至少 280px 可见 */
+  min-height: 0;
 }
 
 /* 左列：历史评论 + 各种态（loading/error/empty） */
