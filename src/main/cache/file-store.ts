@@ -25,7 +25,6 @@
  * - **不**碰 src/renderer/**
  * - **不**改 Gitea 集成
  * - **不**存业务态（业务态走 localStore）
- * - **不**接 drizzle / better-sqlite3（Phase 3b 目标就是删这俩）
  *
  * 错误处理：
  * - 读失败（JSON.parse 错 / 文件不存在）→ 返 null（cache miss）

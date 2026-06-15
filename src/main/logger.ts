@@ -39,7 +39,7 @@ const REDACT_PATHS = [
 ];
 
 /**
- * 计算数据根目录（与 src/main/cache/sqlite.ts:resolveDbPath 同源 —— 见 AGENTS §8.15）
+ * 计算数据根目录（localStore / cache / queue / logs 共用，见 AGENTS §8.2）
  *
  * 优先级：
  * 1. 环境变量 GITEA_KANBAN_DATA_DIR（绝对路径，多实例/备份场景）
