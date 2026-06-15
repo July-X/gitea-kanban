@@ -21,7 +21,7 @@
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2 } from 'lucide-vue-next';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -535,6 +535,37 @@ function setDraft(idx: number, val: string): void {
   } else {
     commentDrafts.value.set(idx, val);
   }
+}
+
+/**
+ * 引用一条评论：把评论作为 markdown 引用块插入草稿。
+ * Gitea 风格：```> @username 写了：\n> 原评论内容```（多行用 > 续行）
+ */
+function quoteComment(idx: number, c: IssueCommentDto): void {
+  const author = c.author.username;
+  // 把原评论的换行用 \n> 续行（markdown 引用块的写法）
+  const quotedBody = c.body
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n');
+  const quote = `> **@${author}** 写了：\n${quotedBody}\n\n`;
+  // 追加到现有草稿末尾（如果有内容则加换行分隔）
+  const cur = getDraft(idx);
+  const next = cur ? `${cur}\n${quote}` : quote;
+  setDraft(idx, next);
+  // 关闭当前合并请求的 mention 状态
+  mentionState.value.delete(idx);
+  // 让 textarea 反映新值 + 自动 focus + 光标移到末尾
+  nextTick(() => {
+    const ta = document.querySelector<HTMLTextAreaElement>(
+      `.merge-item[data-pr-idx="${idx}"] .merge-item__comment-input`,
+    );
+    if (ta) {
+      ta.focus();
+      const pos = next.length;
+      ta.setSelectionRange(pos, pos);
+    }
+  });
 }
 
 /**
@@ -1115,6 +1146,17 @@ function formatRelative(iso: string | undefined): string {
                           <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
                         </div>
                         <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
+                        <!-- v1.5.11：复刻 Gitea 引用评论 —— 鼠标 hover 气泡显示 "引用" 按钮，点击把评论作为 markdown 引用块插入输入框 -->
+                        <button
+                          v-if="currentUsername && c.author.username !== currentUsername"
+                          type="button"
+                          class="merge-item__comment-quote"
+                          :title="'引用这条评论'"
+                          @click.stop="quoteComment(p.index, c)"
+                        >
+                          <Quote :size="11" :stroke-width="2" aria-hidden="true" />
+                          <span>引用</span>
+                        </button>
                       </div>
                     </li>
                   </ul>
@@ -2320,11 +2362,11 @@ function formatRelative(iso: string | undefined): string {
   align-items: flex-start;
   gap: 6px;
   min-width: 0;
-  /* v1.5.9：所有评论统一左对齐（gitea web 风格）—— list 占左 70% 列，消息都贴左 */
 }
 
+/* v1.5.11：复刻 gitea 合并请求评论聊天布局——"我"的消息头像+气泡都贴右（对称显示） */
 .merge-item__comment--self {
-  /* v1.5.9：不再 row-reverse，所有消息都左对齐；用 background 区分自己/他人 */
+  flex-direction: row-reverse;
 }
 
 /* 头像圈（首字母） */
@@ -2347,24 +2389,80 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text-inverse);
 }
 
-/* 气泡容器（v1.5.9：撑满剩余空间，消息左贴 list 边框） */
+/* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
 .merge-item__comment-bubble {
-  /* 不再 max-width: 78%——在 70% 列里让气泡尽量宽（用 min-width: 0 + flex: 1 撑满） */
   flex: 1 1 0;
   min-width: 0;
-  padding: 5px 8px;             /* v1.5.9：6 10 → 5 8，紧凑 */
+  padding: 5px 8px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
-  border-radius: 8px;           /* v1.5.9：10 → 8，更紧凑 */
+  border-radius: 8px;
   position: relative;
 }
+/* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
+ * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
+.merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
+  padding-right: 56px;
+}
 .merge-item__comment-bubble::before {
-  /* v1.5.9：去掉小尖角，简洁风格（Gitea 经典 PR 评论是气泡+作者 bar） */
   display: none;
 }
+/* v1.5.11：复刻 gitea 颜色——"我"的气泡用主色实色 + 白字（强对比），
+ * 他人保持 elevated 浅色 + 默认字（弱对比） */
 .merge-item__comment--self .merge-item__comment-bubble {
-  background: var(--color-primary-soft, var(--color-bg-elevated));
+  background: var(--color-primary);
   border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+/* "我"的气泡里所有文字反色 */
+.merge-item__comment--self .merge-item__comment-author,
+.merge-item__comment--self .merge-item__comment-time,
+.merge-item__comment--self .merge-item__comment-self-tag,
+.merge-item__comment--self .merge-item__comment-body {
+  color: var(--color-text-inverse);
+}
+/* "我"的气泡里 markdown body 内元素也反色（链接/代码） */
+.merge-item__comment--self .merge-item__comment-body a {
+  color: var(--color-text-inverse);
+  text-decoration: underline;
+}
+
+/* v1.5.11：复刻 Gitea 引用评论——hover 气泡显示"引用"按钮（他人消息才显示，自己不能引用自己） */
+.merge-item__comment-quote {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.merge-item__comment-bubble:hover .merge-item__comment-quote {
+  opacity: 1;
+}
+.merge-item__comment-quote:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+/* v1.5.11：自己消息的气泡，hover 引用按钮也保持反色（深背景上） */
+.merge-item__comment--self .merge-item__comment-quote {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-inverse);
+}
+.merge-item__comment--self .merge-item__comment-quote:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-inverse);
+  border-color: var(--color-text-inverse);
 }
 .merge-item__comment--self .merge-item__comment-bubble::before {
   left: auto;
