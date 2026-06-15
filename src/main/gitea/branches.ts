@@ -6,9 +6,10 @@
  * endpoint清单（02 §6.2表格）：
  * - GET /repos/{owner}/{repo}/branches → list
  * - GET /repos/{owner}/{repo}/branches/{branch} → 单分支（lastCommit用）
- * - POST /repos/{owner}/{repo}/branches → create
  * - PATCH /repos/{owner}/{repo}/branches/{oldName} → rename（2026-06-10 user拍板维持 PATCH）
- * - DELETE /repos/{owner}/{repo}/branches/{branch} → delete
+ *
+ * 破坏性操作清理（2026-06-15 用户拍板）：
+ * - create/delete 分支已从 App 移除，保留 list/rename/star
  *
  * 重要偏离（决策项）：
  * - gitea实际上**没有**原生 rename API（见02-architecture §7.1第4条
@@ -93,33 +94,6 @@ export async function getGiteaBranchWithCommit(args: {
 }
 
 /**
- * 创建分支
- *
- * gitea POST body: { new_branch_name, old_branch_name }
- */
-export async function createGiteaBranch(args: {
-  giteaUrl: string;
-  username: string;
-  owner: string;
-  repo: string;
-  newBranch: string;
-  fromBranch: string;
-}): Promise<BranchDto> {
-  const { api } = await getGiteaClient(args.giteaUrl, args.username);
-
-  const res = await api.repos.repoCreateBranch(args.owner, args.repo, {
-    new_branch_name: args.newBranch,
-    old_branch_name: args.fromBranch,
-  });
-  const raw = unwrapGitea(res, '创建分支失败');
-
-  return {
-    ...branchToDto(raw),
-    lastCommit: lastCommitToDto(raw),
-  };
-}
-
-/**
  * 重命名分支 —— PATCH（任务 prompt拍板）
  *
  * 注意：gitea本身不直接支持 rename；本实现按任务 prompt调 PATCH
@@ -138,20 +112,4 @@ export async function renameGiteaBranch(args: {
   const raw = unwrapGitea(res, `重命名分支 ${args.oldName}失败`);
 
   return branchToDto(raw);
-}
-
-/**
- * 删除分支
- */
-export async function deleteGiteaBranch(args: {
-  giteaUrl: string;
-  username: string;
-  owner: string;
-  repo: string;
-  branch: string;
-}): Promise<void> {
-  const { api } = await getGiteaClient(args.giteaUrl, args.username);
-
-  const res = await api.repos.repoDeleteBranch(args.owner, args.repo, args.branch);
-  unwrapGitea(res, `删除分支 ${args.branch}失败`);
 }

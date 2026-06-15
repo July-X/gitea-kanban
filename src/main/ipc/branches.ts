@@ -1,18 +1,15 @@
 /**
- * IPC 路由：branches.* 五个 endpoint
+ * IPC 路由：branches.* 三个 endpoint
  *
  * 契约：02-architecture.md §5.3.2
  *
  * 端点：
  * - branches.list    →  GET /branches  +  本地 cache_entries（1 min TTL）+ starred JOIN
- * - branches.create  →  POST /branches  +  失效 cache
  * - branches.rename  →  PATCH /branches/{oldName}  +  失效 cache
- * - branches.delete  →  DELETE /branches/{branch}  +  失效 cache（**pre-check 默认分支**）
  * - branches.star    →  本地 starred_branches UPSERT/DELETE
  *
- * 危险操作保护（任务 prompt §关键约束 6 / 02 §7.1 第 5 条）：
- * - branches.delete 必须在 IPC handler 入口校验"不能删 default branch"
- *   pre-check + 抛 IpcError(code=CONFLICT, hint=不能删除默认分支)
+ * 破坏性操作清理（2026-06-15 用户拍板）：
+ * - branches.create / branches.delete 已从 App 移除，保留 list/rename/star
  *
  * 流程：wrapIpc(Zod parse) → 调 gitea/branches.ts 或 cache/branches.ts → 错误转 IpcError
  */
@@ -23,23 +20,17 @@ import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
 import {
   IpcChannel,
   ListBranchesArgsSchema,
-  CreateBranchArgsSchema,
   RenameBranchArgsSchema,
-  DeleteBranchArgsSchema,
   StarBranchArgsSchema,
   type ListBranchesArgs,
-  type CreateBranchArgs,
   type RenameBranchArgs,
-  type DeleteBranchArgs,
   type StarBranchArgs,
   type ListBranchesResp,
   type BranchDto,
 } from './schema.js';
 import {
   listGiteaBranches,
-  createGiteaBranch,
   renameGiteaBranch,
-  deleteGiteaBranch,
 } from '../gitea/branches.js';
 import {
   listStarredBranches,
@@ -156,31 +147,6 @@ async function branchesListHandler(args: ListBranchesArgs): Promise<ListBranches
   return resp;
 }
 
-// ===== branches.create =====
-
-async function branchesCreateHandler(args: CreateBranchArgs): Promise<BranchDto> {
-  const start = Date.now();
-  const op = 'branches.create';
-  logger.info({ op, args }, 'ipc start');
-
-  const proj = resolveProject(args.projectId);
-
-  const created = await createGiteaBranch({
-    giteaUrl: proj.giteaUrl,
-    username: proj.username,
-    owner: proj.owner,
-    repo: proj.repo,
-    newBranch: args.newBranch,
-    fromBranch: args.fromBranch,
-  });
-
-  // 失效 branches 缓存
-  invalidateBranchesCache(args.projectId);
-
-  logger.info({ op, latencyMs: Date.now() - start, branch: created.name }, 'ipc done');
-  return { ...created, isDefault: false };
-}
-
 // ===== branches.rename =====
 
 async function branchesRenameHandler(args: RenameBranchArgs): Promise<BranchDto> {
@@ -221,44 +187,6 @@ async function branchesRenameHandler(args: RenameBranchArgs): Promise<BranchDto>
   return { ...renamed, isDefault: false };
 }
 
-// ===== branches.delete（危险操作）=====
-
-async function branchesDeleteHandler(args: DeleteBranchArgs): Promise<void> {
-  const start = Date.now();
-  const op = 'branches.delete';
-  logger.info({ op, args }, 'ipc start');
-
-  const proj = resolveProject(args.projectId);
-
-  // pre-check：不能删默认分支（任务 prompt §关键约束 6）
-  if (proj.defaultBranch === args.branch) {
-    throw new IpcError({
-      code: IpcErrorCode.CONFLICT,
-      message: '不能删除默认分支',
-      hint: '默认分支在 gitea 端是项目基线，不允许删除',
-    });
-  }
-
-  // pre-check：受保护分支（gitea protected branch）— 调一次单分支接口拿 protected 状态
-  // v1 简化：直接调 DELETE，让 gitea 自己 403/409 报错
-  // —— 上层 giteaFetch 已经把 403 → PERMISSION_DENIED、409 → CONFLICT
-  await deleteGiteaBranch({
-    giteaUrl: proj.giteaUrl,
-    username: proj.username,
-    owner: proj.owner,
-    repo: proj.repo,
-    branch: args.branch,
-  });
-
-  // 失效 branches 缓存
-  invalidateBranchesCache(args.projectId);
-
-  // 同步删除 starred 记录
-  _setStarred({ projectId: args.projectId, branch: args.branch, starred: false });
-
-  logger.info({ op, latencyMs: Date.now() - start, branch: args.branch }, 'ipc done');
-}
-
 // ===== branches.star =====
 
 async function branchesStarHandler(args: StarBranchArgs): Promise<void> {
@@ -279,16 +207,12 @@ export function registerBranchesIpc(): void {
   });
 
   wrapIpc(IpcChannel.BRANCHES_LIST, ListBranchesArgsSchema, branchesListHandler);
-  wrapIpc(IpcChannel.BRANCHES_CREATE, CreateBranchArgsSchema, branchesCreateHandler);
   wrapIpc(IpcChannel.BRANCHES_RENAME, RenameBranchArgsSchema, branchesRenameHandler);
-  wrapIpc(IpcChannel.BRANCHES_DELETE, DeleteBranchArgsSchema, branchesDeleteHandler);
   wrapIpc(IpcChannel.BRANCHES_STAR, StarBranchArgsSchema, branchesStarHandler);
 }
 
 export function unregisterBranchesIpc(): void {
   ipcMain.removeHandler(IpcChannel.BRANCHES_LIST);
-  ipcMain.removeHandler(IpcChannel.BRANCHES_CREATE);
   ipcMain.removeHandler(IpcChannel.BRANCHES_RENAME);
-  ipcMain.removeHandler(IpcChannel.BRANCHES_DELETE);
   ipcMain.removeHandler(IpcChannel.BRANCHES_STAR);
 }

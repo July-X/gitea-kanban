@@ -147,31 +147,6 @@ export async function getGiteaPull(args: {
   return toPullDto(raw);
 }
 
-/** 创建 PR */
-export async function createGiteaPull(args: {
-  giteaUrl: string;
-  username: string;
-  owner: string;
-  repo: string;
-  head: string;
-  base: string;
-  title: string;
-  body?: string;
-  draft?: boolean;
-}): Promise<PullDto> {
-  const { api } = await getGiteaClient(args.giteaUrl, args.username);
-
-  const res = await api.repos.repoCreatePullRequest(args.owner, args.repo, {
-    head: args.head,
-    base: args.base,
-    title: args.title,
-    ...(args.body !== undefined ? { body: args.body } : {}),
-    ...(args.draft !== undefined ? { draft: args.draft } : {}),
-  });
-  const raw = unwrapGitea(res, `创建 PR失败`);
-  return toPullDto(raw);
-}
-
 /**
  * 合并 PR（**危险操作**）
  *

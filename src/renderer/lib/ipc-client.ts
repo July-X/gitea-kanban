@@ -461,18 +461,6 @@ export function pullsGet(args: { projectId: string; index: number }): Promise<un
   return getIpcClient().invoke('pulls', 'get', args);
 }
 
-/** 创建合并请求 */
-export function pullsCreate(args: {
-  projectId: string;
-  head: string;
-  base: string;
-  title: string;
-  body?: string;
-  draft?: boolean;
-}): Promise<unknown> {
-  return getIpcClient().invoke('pulls', 'create', args);
-}
-
 /**
  * 合并合并请求（**危险操作**，UI 层必须二次确认）
  *

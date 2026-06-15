@@ -8,14 +8,14 @@
  * -不暴露 ipcRenderer / process / require
  *
  * M6状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个，theme-preload 补齐 preferences.theme.* 2 个，clipboard 补齐 preferences.clipboard.write 1 个，undo-by-project 补齐 user.undoStatus 1 个）：
- * - src/main/ipc/schema.ts 注册 45 个 IpcChannel（M3=32 → M5 fix-3=36 → a3=37 → theme-preload=39 → clipboard=44 → undo-by-project=45）：
- * auth×3, repos×3, branches×5, commits×3, pulls×4,
+ * - src/main/ipc/schema.ts 注册 42 个 IpcChannel（-3 destructive-ops-cleanup：branches.create/delete, pulls.create）：
+ * auth×3, repos×3, branches×3, commits×3, pulls×3,
  * board.columns×7 (reset后从5→7，加 mapLabel/unmapLabel),
  * issues×9 (新增：list/get/create/update/addLabel/removeLabel/moveColumn + comment.list/create),
  * labels×2 (新增), members×1 (a3 新增：list — 仓库成员 = gitea repo collaborators),
  * user×5 (M5补齐：prefs.get/set + undo/redo；M6 undo-by-project：undoStatus),
  * preferences×3 (v1.1.2 主题切换：preferences.theme.get / preferences.theme.set；M6补：preferences.clipboard.write — 分支/提交号复制)
- * - 本文件暴露完整45 个 invoke + on()监听器
+ * - 本文件暴露完整42 个 invoke + on()监听器
  * - api.d.ts通过 `Api = typeof api`自动派生，**不**手改
  *
  * 方法签名约定（除 auth.connect历史兼容性保留 (giteaUrl, token) 双参）：
@@ -42,9 +42,9 @@ const invoke =
  *命名空间（ADR-0002 +02-architecture.md §5.3）：
  * auth ×3 : connect, disconnect, status
  * repos ×3 : list, addProject, removeProject
- * branches ×5 : list, create, rename, delete, star
+ * branches ×3 : list, rename, star（create/delete 已移除）
  * commits ×3 : list, get, timeline
- * pulls ×4 : list, get, create, merge
+ * pulls ×7 : list, get, merge, close, updateLabels, updateAssignee, updateReviewers
  * board.columns ×7 : list, create, update, reorder, delete, mapLabel, unmapLabel
  * issues ×7 : list, get, create, update, addLabel, removeLabel, moveColumn
  * issues.comment ×2 : list, create
@@ -55,7 +55,7 @@ const invoke =
  * preferences.clipboard.write（M6 补：分支/提交号复制；commit 588da2b）
  * 走 preferences.* 而非 theme.*，为后续"应用级偏好"（通知规则 / 同步周期 / 自定义快捷键 / 剪贴板等）留 namespace 空间
  * ─────────────────
- *合计:45 个 invoke
+ *合计:42 个 invoke（-3：branches.create/delete, pulls.create）
  */
 const api = {
  //===== auth namespace（AGENTS §8.2 token唯一入口）=====
@@ -79,14 +79,12 @@ const api = {
  removeProject: invoke(IpcChannel.REPOS_REMOVE_PROJECT),
  },
 
- //===== branches namespace =====
- branches: {
- list: invoke(IpcChannel.BRANCHES_LIST),
- create: invoke(IpcChannel.BRANCHES_CREATE),
- rename: invoke(IpcChannel.BRANCHES_RENAME),
- delete: invoke(IpcChannel.BRANCHES_DELETE),
- star: invoke(IpcChannel.BRANCHES_STAR),
- },
+  //===== branches namespace =====
+  branches: {
+  list: invoke(IpcChannel.BRANCHES_LIST),
+  rename: invoke(IpcChannel.BRANCHES_RENAME),
+  star: invoke(IpcChannel.BRANCHES_STAR),
+  },
 
  //===== commits namespace =====
  commits: {
@@ -96,11 +94,10 @@ const api = {
  },
 
  //===== pulls namespace =====
- pulls: {
- list: invoke(IpcChannel.PULLS_LIST),
- get: invoke(IpcChannel.PULLS_GET),
- create: invoke(IpcChannel.PULLS_CREATE),
- merge: invoke(IpcChannel.PULLS_MERGE),
+  pulls: {
+  list: invoke(IpcChannel.PULLS_LIST),
+  get: invoke(IpcChannel.PULLS_GET),
+  merge: invoke(IpcChannel.PULLS_MERGE),
  close: invoke(IpcChannel.PULLS_CLOSE),
  updateLabels: invoke(IpcChannel.PULLS_UPDATE_LABELS),
  updateAssignee: invoke(IpcChannel.PULLS_UPDATE_ASSIGNEE),

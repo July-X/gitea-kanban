@@ -31,7 +31,6 @@ import {
   IpcChannel,
   ListPullsArgsSchema,
   GetPullArgsSchema,
-  CreatePullArgsSchema,
   MergePrArgsSchema,
   ClosePrArgsSchema,
   UpdatePullLabelsArgsSchema,
@@ -40,7 +39,6 @@ import {
   type ListPullsArgs,
   type ListPullsResp,
   type GetPullArgs,
-  type CreatePullArgs,
   type MergePrArgs,
   type MergePrResult,
   type ClosePrArgs,
@@ -52,7 +50,6 @@ import {
 import {
   listGiteaPulls,
   getGiteaPull,
-  createGiteaPull,
   mergeGiteaPull,
   closeGiteaPull,
   updatePullLabels,
@@ -234,35 +231,6 @@ async function pullsGetHandler(args: GetPullArgs): Promise<PullDto> {
   return dto;
 }
 
-// ===== pulls.create =====
-
-async function pullsCreateHandler(args: CreatePullArgs): Promise<PullDto> {
-  const start = Date.now();
-  const op = 'pulls.create';
-  logger.info({ op, args }, 'ipc start');
-
-  const proj = resolveProject(args.projectId);
-
-  const created = await createGiteaPull({
-    giteaUrl: proj.giteaUrl,
-    username: proj.username,
-    owner: proj.owner,
-    repo: proj.repo,
-    head: args.head,
-    base: args.base,
-    title: args.title,
-    body: args.body,
-    draft: args.draft,
-  });
-
-  // 失效 pulls 缓存（list 里有新 PR）
-  invalidatePullsCache(args.projectId);
-
-  // linkedCards 关联（新 PR 还没卡，所以走空）
-  logger.info({ op, latencyMs: Date.now() - start, index: created.index }, 'ipc done');
-  return { ...created, linkedCards: [] };
-}
-
 // ===== pulls.merge（危险操作）=====
 
 async function pullsMergeHandler(args: MergePrArgs): Promise<MergePrResult> {
@@ -387,7 +355,6 @@ async function pullsUpdateReviewersHandler(args: UpdatePullReviewersArgs): Promi
 export function registerPullsIpc(): void {
   wrapIpc(IpcChannel.PULLS_LIST, ListPullsArgsSchema, pullsListHandler);
   wrapIpc(IpcChannel.PULLS_GET, GetPullArgsSchema, pullsGetHandler);
-  wrapIpc(IpcChannel.PULLS_CREATE, CreatePullArgsSchema, pullsCreateHandler);
   wrapIpc(IpcChannel.PULLS_MERGE, MergePrArgsSchema, pullsMergeHandler);
   wrapIpc(IpcChannel.PULLS_CLOSE, ClosePrArgsSchema, pullsCloseHandler);
   wrapIpc(IpcChannel.PULLS_UPDATE_LABELS, UpdatePullLabelsArgsSchema, pullsUpdateLabelsHandler);
@@ -398,7 +365,6 @@ export function registerPullsIpc(): void {
 export function unregisterPullsIpc(): void {
   ipcMain.removeHandler(IpcChannel.PULLS_LIST);
   ipcMain.removeHandler(IpcChannel.PULLS_GET);
-  ipcMain.removeHandler(IpcChannel.PULLS_CREATE);
   ipcMain.removeHandler(IpcChannel.PULLS_MERGE);
   ipcMain.removeHandler(IpcChannel.PULLS_CLOSE);
   ipcMain.removeHandler(IpcChannel.PULLS_UPDATE_LABELS);

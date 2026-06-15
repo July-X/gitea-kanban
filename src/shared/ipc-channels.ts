@@ -20,9 +20,9 @@
  * 端点清单（M6 拍板，45 个）：
  * auth ×3 : connect / disconnect / status
  * repos ×3 : list / addProject / removeProject
- * branches ×5 : list / create / rename / delete / star
+ * branches ×3 : list / rename / star（create/delete 已移除）
  * commits ×3 : list / get / timeline
- * pulls ×4 : list / get / create / merge
+ * pulls ×3 : list / get / merge（+ close/updateLabels/updateAssignees/updateReviewers；create 已移除）
  * board.columns ×7 : list / create / update / reorder / delete / mapLabel / unmapLabel
  * issues ×7 : list / get / create / update / addLabel / removeLabel / moveColumn
  * labels ×2 : list / create
@@ -37,7 +37,7 @@
  *   （如通知规则 / 同步周期 / 自定义快捷键 / 剪贴板等）共享同一个 namespace，主题只是其中之一
  * - 渲染端 API 暴露 = `window.api.preferences.{theme,clipboard}.{get,set,write}`（preload 端在 theme-preload / clipboard task 改）
  *
- * 历史端点计数：M3=32 → M5 fix-3=36（+4 user.prefs）→ a3=37（+1 members）→ theme-ipc=39（+2 preferences.theme）→ clipboard=44（+1 preferences.clipboard.write）→ undo-by-project=45（+1 user.undoStatus）
+ * 历史端点计数：M3=32 → M5 fix-3=36（+4 user.prefs）→ a3=37（+1 members）→ theme-ipc=39（+2 preferences.theme）→ clipboard=44（+1 preferences.clipboard.write）→ undo-by-project=45（+1 user.undoStatus）→ destructive-ops-cleanup=42（-3：branches.create/delete, pulls.create）
  */
 
 export const IpcChannel = {
@@ -51,23 +51,22 @@ export const IpcChannel = {
  REPOS_ADD_PROJECT: 'repos.addProject',
  REPOS_REMOVE_PROJECT: 'repos.removeProject',
 
- // === branches namespace（02-architecture.md §5.3.2）===
- BRANCHES_LIST: 'branches.list',
- BRANCHES_CREATE: 'branches.create',
- BRANCHES_RENAME: 'branches.rename',
- BRANCHES_DELETE: 'branches.delete',
- BRANCHES_STAR: 'branches.star',
+  // === branches namespace（02-architecture.md §5.3.2）===
+  // 破坏性操作清理（2026-06-15 用户拍板）：create/delete 已从 App 移除，保留 list/rename/star
+  BRANCHES_LIST: 'branches.list',
+  BRANCHES_RENAME: 'branches.rename',
+  BRANCHES_STAR: 'branches.star',
 
  // === commits namespace（02-architecture.md §5.3.3 + §5.3.4）===
  COMMITS_LIST: 'commits.list',
  COMMITS_GET: 'commits.get',
  COMMITS_TIMELINE: 'commits.timeline',
 
- // === pulls namespace（02-architecture.md §5.3.5 + §5.3.6）===
- PULLS_LIST: 'pulls.list',
- PULLS_GET: 'pulls.get',
- PULLS_CREATE: 'pulls.create',
- PULLS_MERGE: 'pulls.merge',
+  // === pulls namespace（02-architecture.md §5.3.5 + §5.3.6）===
+  // 破坏性操作清理（2026-06-15 用户拍板）：create 已从 App 移除，保留 list/get/merge/close
+  PULLS_LIST: 'pulls.list',
+  PULLS_GET: 'pulls.get',
+  PULLS_MERGE: 'pulls.merge',
  PULLS_CLOSE: 'pulls.close',
  PULLS_UPDATE_LABELS: 'pulls.updateLabels',
  PULLS_UPDATE_ASSIGNEE: 'pulls.updateAssignee',

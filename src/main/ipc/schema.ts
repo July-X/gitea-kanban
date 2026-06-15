@@ -252,15 +252,6 @@ export const ListBranchesRespSchema = z
   .strict();
 export type ListBranchesResp = z.infer<typeof ListBranchesRespSchema>;
 
-export const CreateBranchArgsSchema = z
-  .object({
-    projectId: NonEmptyStringSchema,
-    newBranch: NonEmptyStringSchema,
-    fromBranch: NonEmptyStringSchema,
-  })
-  .strict();
-export type CreateBranchArgs = z.infer<typeof CreateBranchArgsSchema>;
-
 export const RenameBranchArgsSchema = z
   .object({
     projectId: NonEmptyStringSchema,
@@ -269,14 +260,6 @@ export const RenameBranchArgsSchema = z
   })
   .strict();
 export type RenameBranchArgs = z.infer<typeof RenameBranchArgsSchema>;
-
-export const DeleteBranchArgsSchema = z
-  .object({
-    projectId: NonEmptyStringSchema,
-    branch: NonEmptyStringSchema,
-  })
-  .strict();
-export type DeleteBranchArgs = z.infer<typeof DeleteBranchArgsSchema>;
 
 export const StarBranchArgsSchema = z
   .object({
@@ -494,18 +477,6 @@ export const GetPullArgsSchema = z
   })
   .strict();
 export type GetPullArgs = z.infer<typeof GetPullArgsSchema>;
-
-export const CreatePullArgsSchema = z
-  .object({
-    projectId: NonEmptyStringSchema,
-    head: NonEmptyStringSchema,
-    base: NonEmptyStringSchema,
-    title: NonEmptyStringSchema,
-    body: z.string().optional(),
-    draft: z.boolean().optional(),
-  })
-  .strict();
-export type CreatePullArgs = z.infer<typeof CreatePullArgsSchema>;
 
 /**
  * PR 合并方式（02-architecture.md §5.3.6 + gitea 1.26 swagger）

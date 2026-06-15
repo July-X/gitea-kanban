@@ -22,7 +22,7 @@
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { pullsList, pullsGet, pullsCreate, pullsMerge, pullsClose } from '@renderer/lib/ipc-client';
+import { pullsList, pullsGet, pullsMerge, pullsClose } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListPullsResp, PullDto, PullState, MergeMethod } from '../../main/ipc/schema.js';
 
@@ -153,21 +153,6 @@ export const usePullStore = defineStore('pull', () => {
     return dto;
   }
 
-  /** 创建合并请求 */
-  async function create(args: {
-    projectId: string;
-    head: string;
-    base: string;
-    title: string;
-    body?: string;
-    draft?: boolean;
-  }): Promise<PullDto> {
-    const dto = (await pullsCreate(args)) as PullDto;
-    // 新合并请求加到列表头部
-    items.value.unshift(dto);
-    return dto;
-  }
-
   /**
    * 合并合并请求（**危险操作**，调用前 UI 必须弹二次确认）
    *
@@ -247,7 +232,6 @@ export const usePullStore = defineStore('pull', () => {
     setFilter,
     select,
     get,
-    create,
     mergePull,
     closePull,
     clearError,
