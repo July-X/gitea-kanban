@@ -1040,15 +1040,16 @@ function formatRelative(iso: string | undefined): string {
             </button>
           </div>
           <!-- ===== 评论区：v1.4 整行铺满 ===== -->
-          <div class="merge-item__comments">
-            <div class="merge-item__comments-header">
-              <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
-              <span class="merge-item__comments-title">
-                对话
-                <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
-                  ({{ getPanel(p.index).items.length }})
-                </span>
-              </span>
+            <div class="merge-item__comments">
+              <!-- 顶部：对话标题 + 刷新按钮 -->
+              <div class="merge-item__comments-header">
+                <div class="merge-item__comments-header-left">
+                  <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
+                  <span class="merge-item__comments-title">对话</span>
+                  <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
+                    {{ getPanel(p.index).items.length }}
+                  </span>
+                </div>
                 <button
                   type="button"
                   class="merge-item__comments-refresh"
@@ -1065,6 +1066,7 @@ function formatRelative(iso: string | undefined): string {
                   <span>{{ getPanel(p.index).loading ? '加载中…' : '刷新' }}</span>
                 </button>
               </div>
+
               <!-- 加载态 -->
               <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
                 <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
@@ -1087,7 +1089,6 @@ function formatRelative(iso: string | undefined): string {
                   class="merge-item__comment"
                   :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
                 >
-                  <!-- 头像圈（首字母） -->
                   <div
                     class="merge-item__comment-avatar"
                     :title="c.author.username"
@@ -1099,11 +1100,11 @@ function formatRelative(iso: string | undefined): string {
                       <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
                       <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
                     </div>
-                    <!-- markdown-it + DOMPurify 渲染的 HTML（src/renderer/lib/markdown.ts 已 sanitize） -->
                     <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
                   </div>
                 </li>
               </ul>
+
               <!-- 发评论输入区（v1.4 加大 + @ 提及自动补全） -->
               <div class="merge-item__comment-compose">
                 <div class="merge-item__comment-input-wrap">
@@ -1119,7 +1120,6 @@ function formatRelative(iso: string | undefined): string {
                     maxlength="65535"
                     spellcheck="false"
                   ></textarea>
-                  <!-- @ 提及下拉（v1.4 新增） -->
                   <div
                     v-if="isMentionOpen(p.index) && mentionCandidates(p.index).length > 0"
                     class="merge-item__mention-dropdown"
@@ -1885,11 +1885,14 @@ function formatRelative(iso: string | undefined): string {
   margin-top: var(--space-3);
   /* v1.3 · task #25 调整：左 meta / 右 comments 两栏
    * v1.4 · task #30 简化：detail 改单列，评论区/输入框**整行铺满**不再受左 meta 限制
-   *  左 meta 改为详情区头部一行（折行），评论区拿满整行宽度 */
+   *  左 meta 改为详情区头部一行（折行），评论区拿满整行宽度
+   * v1.5：加 max-height 防止单个合并请求 的 detail 撑爆整页（之前 list 用 60vh，4 个合并请求展开 = 240vh 整页超高） */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
+  max-height: min(70vh, 600px);
+  overflow: hidden;          /* v1.5：list 内部已 overflow:auto，detail 自身不滚 */
 }
 
 .merge-item__detail-left {
@@ -2138,7 +2141,7 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comments {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 12px;                    /* v1.5：每个子块之间 12px 间距，不再挤 */
   min-width: 0;
   min-height: 0;
   /* 充满整个右栏高度（父 .merge-item__detail 是 grid,align-items: start,
@@ -2147,15 +2150,24 @@ function formatRelative(iso: string | undefined): string {
   height: 100%;
 }
 
+/* ===== 顶部 header：左标题 + 右刷新按钮 ===== */
 .merge-item__comments-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;   /* v1.5：左右两端对齐，不再 margin-left: auto hack */
+  gap: 8px;
   font-size: var(--font-sm);
   font-weight: 600;
   color: var(--color-text);
-  margin-bottom: 4px;
   flex-shrink: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-divider-soft);
+}
+
+.merge-item__comments-header-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .merge-item__comments-title {
@@ -2168,14 +2180,14 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   font-weight: 400;
+  margin-left: 2px;
 }
 
 .merge-item__comments-refresh {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 4px 10px;        /* v1.5：稍微大一点，方便点 */
   background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
@@ -2195,10 +2207,11 @@ function formatRelative(iso: string | undefined): string {
 
 .merge-item__comments-loading,
 .merge-item__comments-empty {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;  /* v1.5：水平居中 */
   gap: 6px;
-  padding: var(--space-2) 0;
+  padding: 16px 8px;         /* v1.5：上下 padding 加大，让空态/加载态有"呼吸" */
   font-size: var(--font-xs);
   color: var(--color-text-muted);
 }
@@ -2232,22 +2245,22 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: var(--space-2);
+  padding: var(--space-3);       /* v1.5：space-2 → space-3，评论之间呼吸更大 */
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  /* v1.3.1：flex 占满右栏剩余垂直空间,不再固定 360px;
-   * max-height 改为 60vh,保留上限避免特别高的右栏把列表拉过长 */
+  gap: var(--space-3);            /* v1.5：space-2 → space-3，气泡之间不挤 */
+  /* v1.5：max-height 60vh → min(50vh, 380px)，多合并请求同时展开时整页不会无限高；
+   * 单合并请求展开时也保留足够空间。flex:1 让它占满剩余高度，没内容时自动收缩。 */
   flex: 1 1 0;
   min-height: 0;
-  max-height: 60vh;
+  max-height: min(50vh, 380px);
   overflow-y: auto;
   /* 自定义滚动条样式（webkit only） */
   scrollbar-width: thin;
   scrollbar-color: var(--color-divider) transparent;
   background: var(--color-bg);
   border: 1px solid var(--color-divider);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 .merge-item__comment-list::-webkit-scrollbar {
@@ -2370,15 +2383,15 @@ function formatRelative(iso: string | undefined): string {
   line-height: 1.5;
 }
 
-/* 发评论输入区 */
+/* 发评论输入区（v1.5 加大顶部 divider 视觉分离） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: var(--space-2);
+  gap: 8px;                       /* v1.5：gap 4 → 8，行内呼吸 */
+  padding: var(--space-3);        /* v1.5：padding space-2 → space-3，输入区更宽敞 */
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md); /* v1.5：sm → md，与列表一致 */
   flex-shrink: 0;
 }
 
@@ -2400,6 +2413,7 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
   font-family: inherit;
   padding: 0;
+  line-height: 1.5;             /* v1.5：行高 1.5，长评论更易读 */
 }
 
 /* v1.4 @ 提及下拉（绝对定位，浮在 textarea 上方） */
@@ -2408,7 +2422,7 @@ function formatRelative(iso: string | undefined): string {
   left: 0;
   right: 0;
   bottom: 100%;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
@@ -2422,7 +2436,7 @@ function formatRelative(iso: string | undefined): string {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 6px var(--space-3);
+  padding: 8px var(--space-3);  /* v1.5：6 → 8，更易点 */
   background: transparent;
   border: none;
   font-size: var(--font-sm);
@@ -2449,6 +2463,8 @@ function formatRelative(iso: string | undefined): string {
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
+  padding-top: 6px;             /* v1.5：与 textarea 之间视觉分隔 */
+  border-top: 1px solid var(--color-divider-soft);
 }
 .merge-item__comment-counter {
   margin-right: auto;
@@ -2459,7 +2475,7 @@ function formatRelative(iso: string | undefined): string {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px;
+  padding: 6px 14px;            /* v1.5：4 12 → 6 14，触控更舒服（44px 命中区） */
   background: var(--color-primary);
   color: var(--color-text-inverse);
   border: 1px solid var(--color-primary);
@@ -2468,6 +2484,7 @@ function formatRelative(iso: string | undefined): string {
   font-weight: 500;
   cursor: pointer;
   transition: background var(--t-fast) var(--ease);
+  min-height: 32px;             /* v1.5：明确最小高度，触控目标 ≥ 32 */
 }
 .merge-item__comment-send:hover:not(:disabled) {
   background: var(--color-primary-hover);
