@@ -824,21 +824,18 @@ function formatRelative(iso: string | undefined): string {
       <p class="merges__error-hint">{{ pull.error.hint }}</p>
     </div>
 
-    <!-- ============== 主体 ============== -->
+    <!--
+      主体：5 个独立 v-if 分支。
+      注意：v-if/v-else-if/v-else 链要求所有 element 同 tag，且 AST 会"折叠"到第一个 v-if 节点的 children 里——
+      也就是说链里最后一个元素如果是 <ul>，那么 <li> 实际成了 <div v-if> 的 child 而不是 <ul> 的 child，
+      </li></ul> 闭合会错位（这就是之前"Element is missing end tag" bug 的根因）。
+      所以这里直接用独立 v-if，每个分支自己决定渲染什么。
+    -->
     <div v-if="!activeRepo" class="merges__placeholder">
       <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看合并请求' />
     </div>
     <div v-else-if="pull.loading && pull.items.length === 0" class="merges__placeholder">
       <p class="muted">加载中…</p>
-    </div>
-    <div
-      v-else-if="!pull.filteredItems.length && pull.items.length > 0"
-      class="merges__placeholder"
-    >
-      <EmptyState
-        :title="`没有匹配「${tabs.find((t) => t.id === pull.filter)?.label}」的合并请求`"
-        description="试试切换其他 tab，或调整搜索词"
-      />
     </div>
     <div v-else-if="!pull.items.length" class="merges__placeholder">
       <EmptyState
@@ -846,7 +843,14 @@ function formatRelative(iso: string | undefined): string {
         description="去 gitea 创建第一个合并请求，或去时间轴页看分支进度"
       />
     </div>
-    <ul v-else class="merges__list">
+    <div v-else-if="!pull.filteredItems.length" class="merges__placeholder">
+      <EmptyState
+        :title="`没有匹配「${tabs.find((t) => t.id === pull.filter)?.label}」的合并请求`"
+        description="试试切换其他 tab，或调整搜索词"
+      />
+    </div>
+    <!-- 列表分支：直接用 template v-if（独立判断，避免污染 v-else 链） -->
+    <ul v-if="activeRepo && pull.filteredItems.length" class="merges__list">
       <li
         v-for="p in pull.filteredItems"
         :key="p.index"
@@ -1148,7 +1152,6 @@ function formatRelative(iso: string | undefined): string {
               </div>
             </div>
           </div>
-        </div>
         <!-- 属性编辑弹窗 -->
         <ConfirmDialog
           :open="attrEditorOpen && editingPull?.index === p.index"
