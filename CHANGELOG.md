@@ -2,6 +2,92 @@
 
 gitea-kanban 阶段性交付记录。所有变更以 milestone (M0-M11+) 为粒度。
 
+## v1.3 — 看板功能 polish（真拖拽 + WIP 上限 + autoInit 透明化 + 未分类快捷归类 + BoardView 拆组件）(2026-06-15)
+
+**用户拍板原则（2026-06-15）**：
+> 看板是 PM / 设计师 / 市场 / 运营每天看的工作面板，交互要顺、反馈要明、零术语
+> 改的都是 UI polish，但要把"自动化行为"对用户透明化
+
+**核心变更（5 项）**：
+
+1. **真拖拽接入（vue-draggable-plus@^0.6.1）** — 替换旧的"按钮式换列"
+   - 鼠标拖拽：列内排序 + 跨列拖动，drag end 走 `board.moveIssue` store action（不旁路 gitea IPC）
+   - 键盘拖拽：Tab 聚焦 → Space 拾起（banner + 列高亮）→ 方向键切列 → Space 放下 / Esc 取消
+   - 拖到"已完成"列触发 `confirmFinish` 二次确认（沿用 ConfirmDialog，drag end 提前 return 不调 IPC）
+   - 列内拖动 v1 不接后端位置（gitea label 不存 position；视觉占位 + TODO 注释留给 v2）
+   - 边界：拖入 WIP 满列**不**触发 ConfirmDialog（v1.3 留给 v1.4 拍板）
+
+2. **WIP 上限（仅提示不拦截）**
+   - 后端：`UpdateBoardColumnArgs.patch` 加 `wipLimit: number | null` 字段（schema 校验：正整数 / null，0/负数/非整数 → VALIDATION_FAILED）
+   - 持久化：`BoardColumn.wipLimit` 字段；DTO 透传；`normalizeWipLimit` 容错（0/负数/旧 state 无字段 → 视作"无限"）
+   - 前端：列头显示 `3 / 5` 格式（无限时只显示数字），超限边框/标题变红 + 提示气泡"超出建议 N 张"
+   - 列设置弹窗加"WIP 上限"输入框（数字留空 = 无限）
+   - 业务规则：超限**允许**继续加卡（仅视觉警告，v1.3 不强制拦截）
+
+3. **autoInit 透明化提示**
+   - `board.loadBoard` 返 `{ columns, autoInitCreatedCount }`（替代 void）
+   - 0 列 + gitea 有 label → 自动建列 + 弹 toast「已根据仓库现有标签自动建了 N 个列（点击列名可改名 / 解绑）」
+   - 0 列 + gitea 无 label → **不**弹 toast（避免"啥都没干"误报）
+   - 切 project 时 `unassignedIssues` + pending toast 一起清掉
+
+4. **未分类快捷归类**
+   - 未分类 section 每张 issue 卡片加"归到…"按钮（复用 moveMenu 弹目标列）
+   - 新增 `board.assignUnassignedIssue({ projectId, issueIndex, toColumnId })`：调 `issues.addLabel`（目标列绑的第一个 label id）
+   - 弹 ConfirmDialog 二次确认"归到「列名」？"（轻量级，确认后只加一个 label）
+
+5. **BoardView.vue 重构：1407 → 398 行（-72%）**
+   - 拆出 8 个子组件到 `src/renderer/components/board/`：
+     `BoardTopbar` / `KanbanColumnSection` / `ColumnHeader` / `ColumnMenu` / `LabelPicker` / `MoveColumnPicker` / `ConfirmFinishDialog` / `UnassignedSection`
+   - 抽 5 个业务 composable 到 `src/renderer/composables/`：
+     `useBoardActions` / `useBoardBootstrap` / `useBoardCardActions` / `useColumnManager` / `useKanbanKeyboardDrag` / `useKanbanMouseDrag`
+   - Teleport 全局样式（`.modal-overlay` / `.move-menu-overlay`）集中到 `board-modals.css`
+   - 子组件全部 props + emit 通信，**不**直接调 store
+   - **跨 commit 归属**：BoardView.vue 实际**只**在 `635dc1c`（拖拽 commit）一次改动完成（净 -1009 行）；`ce98afb`（refactor commit）**不**改 BoardView，只新增 components/board/ + composables/
+
+**提交序列（5 commit，commit 末尾无 Co-Authored-By）**：
+
+| # | commit | type | scope | 改 BoardView |
+|---|---|---|---|---|
+| 1 | `635dc1c` | feat | 看板真拖拽接入 vue-draggable-plus + 键盘双模 | ✓ 1407→398 |
+| 2 | `1e65adb` | feat | 看板列 WIP 上限（设置 / 显示 / 超限视觉提示） | — |
+| 3 | `4e59077` | feat | autoInit 透明化提示 + 未分类快捷归类 | — |
+| 4 | `ce98afb` | refactor | BoardView 拆子组件 + 业务 composable 收口 | —（只新增子文件） |
+| 5 | `3fc3ba0` | docs | v1.3 收口记录 | — |
+
+**新单测**（61 个 it() 用例，独立 it() 计数）：
+- `src/renderer/lib/__tests__/drag-helper.test.ts` — 36 用例（`isFinishColumnByTitle` / `mapDragEndToMoveIntent` / `keyDownToColumn` 方向键映射等）
+- `src/renderer/composables/__tests__/useKanbanKeyboardDrag.test.ts` — 10 用例（拾起/放下/取消/越界）
+- `src/renderer/stores/__tests__/board-wip-limit.test.ts` — 6 用例（updateColumn WIP 单字段 / 联合 / 不传 / IPC 失败）
+- `src/renderer/stores/__tests__/board-autoinit.test.ts` — 3 用例（0+有label / 0+无label / N列）
+- `src/main/board/__tests__/columns-wip-limit.test.ts` — 6 用例（`wipLimit` reject + DTO 透传 + 容错）
+
+**新 e2e**（8 个 it() 用例，mount-free 模式）：
+- `tests/e2e/board-drag.spec.ts` — 4 用例（跨列拖动 + 二次确认 + 键盘拾起/放下 + 列内不调后端）
+- `tests/e2e/board-unassigned.spec.ts` — 4 用例（autoInit toast + 归类 + 0/无label 边界 + N列边界）
+
+**4 件套**（v1.3 HEAD `3fc3ba0` 提交后）：
+
+| 检查 | 结果 |
+|---|---|
+| `pnpm type-check` | EXIT 0 ✅ |
+| `pnpm build` | 6.45s (renderer) + 1.94s (main) + 27ms (preload) ✅ |
+| `pnpm test` | 17 files / 223 tests passed（含 timeline/merges/repo 相邻模块）✅ |
+| `pnpm check:no-jargon` | OK ✅ |
+
+**越界检查**（plan_bcf92da6 final-gate 独立复核，全过）：
+
+| 边界 | 状态 |
+|---|---|
+| BoardView.vue 行数 | 398 < 400 ✅ |
+| drag end 调 `board.moveIssue`，**不**直接调 `gitea.issues.moveColumn` IPC | ✅（grep `gitea\.\\*\\.moveColumn` in BoardView 0 命中） |
+| WIP 校验（0/负数/非整数 → reject） | ✅（`columns-wip-limit.test.ts` 覆盖 3 类 reject） |
+| autoInit toast 只在 0 列 + 有 label 时弹 | ✅（3 用例覆盖：0+有label 弹 / 0+无label 不弹 / N列 不弹） |
+| assignUnassignedIssue 走 `issues.addLabel`，**不**调 `moveIssue` | ✅（store grep 确认） |
+| 8 个子组件 props + emit 通信，不直接调 store | ✅（每个子组件都有 `defineProps` + `defineEmits`） |
+| BoardView 跨 commit 归属 | ✅（只在 `635dc1c` 改，其它 4 commit 不改） |
+| commit 末尾无 Co-Authored-By | ✅（5 commit 全部 OK） |
+| commit message 中文 + type 前缀 | ✅（3 feat + 1 refactor + 1 docs） |
+
 ## v1.2 hotfix 1 — 看板列 Gitea 数据对齐 (2026-06-15)
 
 **用户拍板原则（2026-06-15）**：
