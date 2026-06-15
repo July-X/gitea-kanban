@@ -3,7 +3,7 @@
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-06-15（新增 §10 第 11/12 条：Vue v-if 链折叠坑 + div 嵌套平衡自检）
+> 最后更新：2026-06-15（新增 §8.7.6 沙箱 EPERM 杀进程诊断 + §8.7.7 CDP 测试 Node 25+ WebSocket 模板；§10 第 11/12 条：Vue v-if 链折叠坑 + div 嵌套平衡自检）
 
 ---
 
@@ -490,6 +490,135 @@ tail -20 /tmp/electron-stdout.log
 - 1 没东西 + 2 没东西 + 3 啥都没 → pino file transport 没启（异常环境，logger 退化 silent）；改用 `pino.destination(1)` 强制 stdout
 - 1 活着 + 2 显示 createMainWindow done + 3 没东西 → 渲染端**没崩**，可能 IPC 异常；走 CDP 抓 console
 - 1 活着 + 3 有 `Renderer process gone` → 渲染端崩（preload 错 / CSP 拦 / IPC schema 错），用 CDP attach 抓 console
+- **1 起初活但马上死 + 2 满屏 `EPERM: ... state.json.tmp` / `cache/repos/...json.tmp`** → 容器/沙箱没写 `~/.gitea-kanban` 的权限，**Electron 进程被 sandbox 直接 kill 而非正常退出**（2026-06-15 reasonix 沙箱踩坑）。**修法**：必须 `export GITEA_KANBAN_DATA_DIR=/tmp/gitea-kanban-test` 落到 `/tmp`（或任何沙箱可写路径），再 `pnpm dev`。lsof 短暂能看到 9492 LISTEN 然后立即 ECONNREFUSED = 这个症状。
+
+#### 8.7.6 沙箱/容器内跑 CDP 的完整流程
+
+当 dev 环境是 AI agent 沙箱（reasonix / docker / k8s），默认 `~/.gitea-kanban` 写不进去时，按下面跑：
+
+```bash
+# 1. 选个沙箱可写的数据目录
+export GITEA_KANBAN_DATA_DIR=/tmp/gitea-kanban-test
+rm -rf "$GITEA_KANBAN_DATA_DIR"
+
+# 2. 后台跑 dev（用环境变量彻底绕开 ~ 目录）
+GITEA_KANBAN_DATA_DIR="$GITEA_KANBAN_DATA_DIR" pnpm dev > /tmp/dev.log 2>&1 &
+echo "pid=$!"
+
+# 3. 等 12 秒（vite 编译 + Electron 起来）
+sleep 12
+
+# 4. 三路看
+echo "--- a) CDP 端口是否还在听 ---"
+lsof -nP -iTCP:9492 -sTCP:LISTEN 2>&1 | tail -2
+echo "--- b) EPERM 写错误？---"
+grep -c "EPERM" /tmp/dev.log
+echo "--- c) Electron 自身输出 ---"
+grep -E "starting electron|DevTools|error" /tmp/dev.log | head -5
+```
+
+判断：
+- a 有 PID + b=0 → 可以走 CDP
+- a 有 PID + b>0 → 还在写 `~/.gitea-kanban`（环境变量没传到位）→ 杀掉重来
+- a 没东西 + b>0 → sandbox 杀进程，看 b 找 EPERM 路径确认是不是 `~/...`
+
+#### 8.7.7 CDP 端到端测试模板（Node 25+ 内置 WebSocket）
+
+写到 `.reasonix/cdp/test-<feature>.mjs`，**不要**依赖 `ws` 库（Node 25+ `WebSocket` 原生），按下面结构：
+
+```javascript
+import http from 'node:http';
+import fs from 'node:fs';
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+http.get('http://127.0.0.1:9492/json', (res) => {
+  let d = '';
+  res.on('data', (c) => (d += c));
+  res.on('end', async () => {
+    const arr = JSON.parse(d);
+    const page = arr.find((p) => p.type === 'page' && p.url.includes('5173'));
+    if (!page) { console.log('no page'); return; }
+    const ws = new WebSocket(page.webSocketDebuggerUrl);
+    let id = 0;
+    const pending = new Map();
+    function send(method, params = {}) {
+      const i = ++id;
+      ws.send(JSON.stringify({ id: i, method, params }));
+      return new Promise((res, rej) => pending.set(i, { res, rej }));
+    }
+    ws.addEventListener('message', (e) => {
+      const m = JSON.parse(e.data);
+      if (m.id && pending.has(m.id)) {
+        const { res, rej } = pending.get(m.id);
+        pending.delete(m.id);
+        m.error ? rej(new Error(m.error.message)) : res(m.result);
+      }
+    });
+    const consoleMsgs = [];
+    ws.addEventListener('message', (e) => {
+      const m = JSON.parse(e.data);
+      if (m.method === 'Runtime.consoleAPICalled' || m.method === 'Runtime.exceptionThrown') {
+        consoleMsgs.push(m.params);
+      }
+    });
+
+    ws.addEventListener('open', async () => {
+      try {
+        await send('Runtime.enable');
+        await send('Log.enable');
+
+        // 1. 导航
+        await send('Runtime.evaluate', { expression: `location.hash = '#/<route>'` });
+        await sleep(3500);
+
+        // 2. 注入 store + 数据 + 触发 UI
+        const r = await send('Runtime.evaluate', {
+          expression: `(async () => {
+            const stores = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s;
+            const s = stores.get('<store>');
+            s.items = [...];   // 注入 mock
+            return { ok: true };
+          })()`,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        console.log(JSON.stringify(r.result.value));
+
+        // 3. layout dump
+        const dump = await send('Runtime.evaluate', {
+          expression: `(() => {
+            const el = document.querySelector('.<selector>');
+            return el ? el.getBoundingClientRect().toJSON() : null;
+          })()`,
+          returnByValue: true,
+        });
+
+        // 4. 截图
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync('.reasonix/cdp/<name>.png', Buffer.from(shot.data, 'base64'));
+
+        // 5. console errors
+        consoleMsgs.forEach((m) => {
+          const t = m.type || m.exceptionDetails?.text;
+          console.log(`  [${t}]`, (m.args?.map((a) => a.value || a.description).filter(Boolean).join(' ') || m.exceptionDetails?.exception?.description || '').slice(0, 200));
+        });
+
+        ws.close();
+      } catch (e) {
+        console.error('ERROR:', e.message);
+        ws.close();
+      }
+    });
+  });
+});
+```
+
+**关键点**：
+- `awaitPromise: true` + `returnByValue: true` → 在 eval 里 await 异步操作并直接拿到 result
+- `consoleMsgs` 用第二个 `addEventListener` 收集，**别**只打印不存
+- `Page.captureScreenshot` 存到 `.reasonix/cdp/` 便于 diff
+- **沙箱内 CDP 不稳**——若 `lsof` 说 9492 活着但 `http.get` ECONNREFUSED，多半是 sandbox 杀 Electron 了，不是网络问题
 
 ---
 
