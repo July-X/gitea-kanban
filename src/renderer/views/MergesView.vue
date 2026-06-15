@@ -1900,14 +1900,14 @@ function formatRelative(iso: string | undefined): string {
   padding: var(--space-3) var(--space-4) var(--space-4);
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
-  /* v1.5.3：高度跟内容走，max-height 兜底多 PR 展开时整页不超高
-   *  - 移除了 min-height（之前 520px 让单个 PR 展开时空白太多）
-   *  - max-height 由评论区自适应（grid 行高 minmax 0/1fr） */
+  /* v1.5.4：按你原则只用 max-height 兜底（多 PR 展开时整页不超高）
+   *  - 单 PR 展开：高度由内部内容（header + meta + 评论区 list/input）自然堆叠
+   *  - 评论区 list / input 自身 max-height: 100% + overflow-y: auto 溢出滚动 */
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
-  max-height: min(80vh, 720px);
+  max-height: min(90vh, 900px);
   overflow: hidden;
 }
 
@@ -2225,23 +2225,22 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comments-body {
   display: grid;
   grid-template-columns: 1fr 1fr;   /* v1.5：左历史 / 右输入各 50% */
-  /* v1.5.3：行高跟内容走，minmax(0, 1fr) 让父级 max-height 决定实际高度
-   *  - 评论区不再强制 280px 高度（之前和 detail min-height 联用导致空白）
-   *  - 父 detail max-height 限住整页不超高 */
+  /* v1.5.4：按你原则不用 min-height 撑高；行高 minmax(0, auto) 让内容驱动 */
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
+  /* detail 是 flex column,comments-body 是 flex item,用 flex:1 让父给的高度传下来 */
   flex: 1 1 0;
   min-height: 0;
 }
 
-/* 左列：历史评论 + 各种态（loading/error/empty） */
+/* 左列：历史评论 + 各种态（loading/error/empty）—— v1.5.4 跟内容走 */
 .merge-item__comments-history {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  /* 高度 = 父 grid 行高；max-height 由父 .merge-item__detail 限 */
-  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .merge-item__comments-loading,
@@ -2421,20 +2420,20 @@ function formatRelative(iso: string | undefined): string {
   line-height: 1.5;
 }
 
-/* 发评论输入区（v1.5 加大顶部 divider 视觉分离 + 占满右列高） */
+/* 发评论输入区（v1.5.4 按你原则不强制高度） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
-  gap: 8px;                       /* v1.5：gap 4 → 8，行内呼吸 */
-  padding: var(--space-3);        /* v1.5：padding space-2 → space-3，输入区更宽敞 */
+  gap: 8px;
+  padding: var(--space-3);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
-  border-radius: var(--radius-md); /* v1.5：sm → md，与列表一致 */
+  border-radius: var(--radius-md);
   min-width: 0;
   min-height: 0;
-  /* v1.5：右列 grid 1fr 项，撑满右列高度 */
-  height: 100%;
-  overflow: hidden;                /* textarea 内部滚动；外层不滚 */
+  /* v1.5.4：不写 height，让 grid 默认 align-self: stretch 撑满列高 */
+  max-height: 100%;
+  overflow: hidden;
 }
 
 /* textarea + @ 候选下拉的相对定位容器（v1.5 撑满 compose 剩余高度） */
@@ -2445,12 +2444,15 @@ function formatRelative(iso: string | undefined): string {
   min-height: 0;
 }
 
-/* v1.4 输入框更大（min-height 从 56px → 72px），v1.5 flex:1 让它撑满右列剩余高度 */
+/* v1.5.4：去掉 min-height，按你要求只保留 max-height 兜底
+ *  - 高度由 rows 决定基础（rows=8 ≈ 8 行高），用 flex:1 在右列空间大时撑满
+ *  - 空间不够时 flex shrink 到 rows 大小，输入框换行溢出由 max-height 触发滚动 */
 .merge-item__comment-input {
   width: 100%;
-  min-height: 120px;
-  flex: 1 1 0;
-  resize: none;                    /* v1.5：左右布局下禁止手拽改高，避免破坏等高 */
+  flex: 1 1 auto;
+  min-height: 0;                    /* v1.5.4：去掉 120px 强制高度 */
+  max-height: 100%;
+  resize: none;                     /* 左右布局下禁止手拽改高，避免破坏等高 */
   background: transparent;
   border: none;
   outline: none;
@@ -2458,8 +2460,9 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   color: var(--color-text);
   font-family: inherit;
-  padding: 0;
-  line-height: 1.5;             /* v1.5：行高 1.5，长评论更易读 */
+  padding: 0;                       /* v1.5.4：padding 跟 textarea 自带默认（行高 1.5 × 8 rows ≈ 200px） */
+  line-height: 1.5;
+  overflow-y: auto;                 /* v1.5.4：内容超过 max-height 出现滚动条（你要求） */
 }
 
 /* v1.4 @ 提及下拉（绝对定位，浮在 textarea 上方） */
