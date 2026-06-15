@@ -2228,6 +2228,9 @@ function formatRelative(iso: string | undefined): string {
   gap: 6px;
   flex: 1 1 0;
   min-height: 0;
+  /* v1.5.10：左右填满父 .merge-item__comments（block 元素默认 stretch，width:100% 兜底） */
+  width: 100%;
+  margin-bottom: 5px;          /* v1.5.10：底部 5px 留白（你要求） */
 }
 
 /* 左列：历史评论 + 各种态（loading/error/empty） */
