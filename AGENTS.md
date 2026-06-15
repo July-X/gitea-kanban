@@ -12,9 +12,9 @@
 **gitea-kanban** 是一个**基于 Gitea 的桌面端看板 + 时间轴工具**，技术形态为 **Electron + TypeScript + Vue 3**。
 
 - **核心定位**：把 Gitea 仓库里的 issue、分支、提交、合并请求以可视化方式呈现给团队，让非技术人员也能看懂当前工作流。
-- **Source of truth**：Gitea。本地 SQLite 只存用户偏好、缓存和必要的派生数据。
+- **Source of truth**：Gitea。本地只存用户偏好、缓存和必要的派生数据（localStore + 文件 KV，零 SQLite 依赖）。
 - **目标用户**：Gitea 自托管团队，**包含非技术人员**（PM、设计师、市场、运营）。因此 UI 必须零术语、危险操作二次确认、错误提示要说“人话”。
-- **当前状态**：项目处于 0→1 实现阶段，单分支 `master` 直推，已有完整主进程 IPC、渲染端路由/视图、本地 SQLite schema 与迁移。
+- **当前状态**：项目处于 0→1 实现阶段，单分支 `master` 直推，已有完整主进程 IPC、渲染端路由/视图、本地存储（localStore state.json + 文件 KV 缓存 + queue.jsonl 同步队列）。
 
 ---
 
@@ -36,8 +36,8 @@
 | 时间轴 | **AntV X6 3.1.7** + **@antv/x6-vue-shape** | 图编辑引擎 + Vue 官方桥 |
 | 图标 | **lucide-vue-next** | |
 | 校验 | **Zod 3.23.8** | IPC 边界强制校验 |
-| 本地存储 | **electron-store 11.0.2**（业务态）+ **better-sqlite3 12.10.0 + Drizzle ORM 0.45.2**（Gitea 缓存层，Phase 3 唯一保留） | 业务态 → localStore.state.json；Gitea 缓存 → cache_entries（SQLite） |
-| 同步队列 | **queue.jsonl**（append-only，JSONL） | 离线写 op 持久化（ADR-0003 Phase 3） |
+| 本地存储 | **electron-store 11.0.2**（业务态）+ **文件 KV**（Gitea 缓存层，自研 file-store.ts） | 业务态 → localStore.state.json；Gitea 缓存 → cache/<resource>/<projectId>__<key>.json（ADR-0003 完结，零 SQLite 依赖） |
+| 同步队列 | **queue.jsonl**（append-only，JSONL） | 离线写 op 持久化（ADR-0003 完结） |
 | Gitea 客户端 | **gitea-js 1.23.0** | swagger 生成 TS client（ADR-0002） |
 | 密钥存储 | **@napi-rs/keyring 1.3.0** | 替代已归档的 keytar（ADR-0001） |
 | 日志 | **pino 9.5.0** + pino-pretty | 主进程唯一日志出口 |
@@ -82,8 +82,6 @@ gitea-kanban/
 ├── giteaDemo/                   # 本地 Gitea 演示 docker-compose
 ├── scripts/                     # 工具脚本
 │   ├── check-no-jargon.ts       # 零术语检查
-│   ├── migrate.ts               # 应用迁移
-│   ├── rebuild-native.sh        # better-sqlite3 native binding 重建
 │   └── ...                      # e2e / seed / verify 脚本
 ├── src/
 │   ├── main/                    # 主进程
@@ -91,16 +89,14 @@ gitea-kanban/
 │   │   ├── window.ts            # BrowserWindow + CSP
 │   │   ├── logger.ts            # pino 日志
 │   │   ├── config.ts            # 默认配置
-│   │   ├── local/               # ADR-0003 Phase 1：localStore（替代 9 张活 SQLite 表）
+│   │   ├── local/               # localStore（业务态 source of truth，ADR-0003 完结）
 │   │   │   ├── store.ts         #   LocalStore 抽象（原子写 + debounce flush + 重试退避）
 │   │   │   ├── state.ts         #   顶层 LocalState TS interface + 单例
-│   │   │   ├── prefs-mirror.ts  #   prefs 双写层（SQLite ↔ localStore）
-│   │   │   ├── accounts.ts      #   Phase 2 业务接口：accounts（替代 gitea_accounts + gitea_user）
-│   │   │   ├── projects.ts      #   Phase 2 业务接口：repo_projects
-│   │   │   ├── columns.ts       #   Phase 2 业务接口：board_columns
-│   │   │   ├── label-maps.ts    #   Phase 2 业务接口：column_label_mapping
-│   │   │   ├── starred-branches.ts # Phase 2 业务接口：starred_branches
-│   │   │   └── bootstrap.ts     #   启动期全表 bootstrap（SQLite → localStore）
+│   │   │   ├── accounts.ts      #   业务接口：accounts（含 userInfo）
+│   │   │   ├── projects.ts      #   业务接口：repo_projects
+│   │   │   ├── columns.ts       #   业务接口：board_columns
+│   │   │   ├── label-maps.ts    #   业务接口：column_label_mapping
+│   │   │   └── starred-branches.ts # 业务接口：starred_branches
 │   │   ├── ipc/                 # IPC handler（按 namespace 分文件）
 │   │   │   ├── index.ts         # 统一注册入口
 │   │   │   ├── schema.ts        # 所有 IPC 的 Zod schema
@@ -122,10 +118,9 @@ gitea-kanban/
 │   │   │   ├── keychain.ts      # @napi-rs/keyring 封装
 │   │   │   ├── repos.ts / branches.ts / commits.ts / pulls.ts / issues.ts / labels.ts
 │   │   │   └── ...
-│   │   ├── cache/               # SQLite 缓存层
-│   │   │   ├── sqlite.ts        # better-sqlite3 单例 + 迁移
-│   │   │   ├── schema/          # Drizzle schema（12 张业务表 + 2 张基础设施表）
-│   │   │   └── ...              # 各资源 cache-aside / TTL
+│   │   ├── cache/               # Gitea 缓存层（文件 KV，file-store.ts）
+│   │   │   ├── file-store.ts    # 文件 KV + TTL + LRU GC（替代 SQLite cache_entries）
+│   │   │   └── ...              # 各资源 cache-aside / TTL（repos / branches / commits / pulls / timeline）
 │   │   └── board/               # 看板业务逻辑（列 / 卡片移动）
 │   ├── preload/                 # preload 桥
 │   │   ├── index.ts             # contextBridge.exposeInMainWorld('api', api)
@@ -179,17 +174,13 @@ pnpm lint:fix
 pnpm format            # prettier --write "src/**/*.{ts,tsx,json,css,md}"
 pnpm format:check
 pnpm check:no-jargon   # 零术语检查（**没跑过不准 merge**）
-
-# native binding（better-sqlite3 对齐 Electron ABI）
-pnpm rebuild:native
 ```
 
 ### 本地开发首次 setup
 1. `nvm use` 或保证 Node >= 20
-2. `pnpm install`
-3. `pnpm rebuild:native`（postinstall 会自动跑，如失败可手动再跑）
-4. 如需本地 Gitea：`cd giteaDemo && docker compose up -d`
-5. `pnpm dev`
+2. `pnpm install`（ADR-0003 完结后无 native binding 需求，postinstall 已移除）
+3. 如需本地 Gitea：`cd giteaDemo && docker compose up -d`
+4. `pnpm dev`
 
 ---
 
@@ -267,9 +258,9 @@ pnpm rebuild:native
 
 ### 6.3 数据模型
 
-**v1.2 现状（ADR-0003 Phase 3 完结：业务表全走 localStore，SQLite 仅 Gitea 缓存层）**：
+**v1.2 现状（ADR-0003 完结：零 SQLite 依赖）**：
 
-业务态 7 张表（**全部**迁到 localStore.state.json）：
+业务态 7 张表（**全部**在 localStore.state.json）：
 - `users`（1 行 seed `local-user`）
 - `gitea_accounts` + `gitea_user` denormalize 进 `accounts[]` + `accounts[].userInfo`
 - `repo_projects` → `projects[]`
@@ -278,15 +269,17 @@ pnpm rebuild:native
 - `starred_branches` → `starredBranches[]`
 - `prefs` → `prefs` (Record<string, unknown>)
 
-基础设施 1 张表（**唯一**保留在 SQLite）：
-- `cache_entries`（Gitea 资源级缓存：repos / branches / commits / pulls / timeline 5 资源）
+Gitea 缓存层（文件 KV，自研 `src/main/cache/file-store.ts`）：
+- 5 个 resource（repos / branches / commits / pulls / timeline）→ `cache/<resource>/<projectId>__<key>.json`
+- TTL 按 mtime 算；启动期 LRU GC（50 MB 预算）；原子写（tmp + rename）
 
-> **2026-06-14 Phase 3 完结**：ADR-0003 三阶段全部落地
+> **2026-06-15 ADR-0003 真正完结**：三阶段 + Phase 3b 全部落地
 > - **Phase 1**：localStore 基础设施 + prefs 双写 + 一致性巡检（commit `8ffa951`）
 > - **Phase 2**：业务表全走 localStore 读 + 5 个 commit 切读路径（`79f761d`~`d214a0e`）
-> - **Phase 3**：写 op dispatch 统一入口 + 同步队列 + 删 drizzle-kit + 删 8 张业务表 schema + 删业务层 SQLite 镜像（`93e9659`~`372017e`）
+> - **Phase 3**：写 op dispatch 统一入口 + 同步队列 + 删 drizzle-kit + 删 8 张业务表 schema（`93e9659`~`372017e`）
+> - **Phase 3b**：Gitea 缓存层从 SQLite 切文件 KV + 删 SQLite 链路本体（`sqlite.ts` + `cache/schema/` + `better-sqlite3`/`drizzle-orm` 依赖 + native rebuild 工具链，commit `5bae978`）
 >
-> 净行数：~700 行 SQLite 业务表代码 + 工具链删除；Gitea 缓存层仍走 SQLite（cache-aside 模式不切）
+> 净效果：零 SQLite 依赖，包体减 200+ MB，Electron 升级不再需要 rebuild native binding。
 >
 > 详见 `docs/adr/0003-local-store-electron-store.md`。
 
@@ -294,7 +287,7 @@ pnpm rebuild:native
 - **看板列**是 gitea-kanban 本地概念，存 `localStore.state.columns[]`。
 - **卡片 = Gitea issue**，本地不存卡片实体，通过 `state.labelMaps` 把列映射到 Gitea label；issue 带这个 label 就属于该列。
 - **本地业务态** = `state.json`（`src/main/local/state.ts`）；崩恢复靠 localStore.atomic write。
-- **Gitea 缓存层** = `kanban.db.cache_entries`（`src/main/cache/sqlite.ts` raw SQL 建表，drizzle schema 跟业务态解耦）。
+- **Gitea 缓存层** = `${DATA_DIR}/cache/<resource>/`（`src/main/cache/file-store.ts`，cache-aside 模式）。
 - **同步队列** = `${DATA_DIR}/queue.jsonl`（`src/main/sync/queue.ts` + `runner.ts`）—— append-only + 崩恢复 + 30 天 GC。
 
 ### 6.4 Gitea 集成
@@ -308,7 +301,7 @@ pnpm rebuild:native
 - **v1.2 拍板**：**2 主题切换**（dark / light），默认 dark。
   - dark 基底 `#0F1115`（中性近黑），主色 token `#74B830`
   - light 基底 `#E8F1F5`，主色 token `#466B16`
-- 持久化走 SQLite `prefs` 表；IPC 端点 `preferences.theme.get` / `preferences.theme.set`。
+- 持久化走 localStore `prefs` 子键；IPC 端点 `preferences.theme.get` / `preferences.theme.set`。
 - 启动期 0 闪烁：由 `src/renderer/index.html` 内联 script 先读 `localStorage`，再由 `useUiStore().initTheme()` 与后端 reconcile。
 - 切换入口 3 处：StatusBar cycle 按钮 / 设置页“外观” / 命令面板 ⌘K。
 
@@ -352,7 +345,7 @@ pnpm rebuild:native
 
 - **token 永远不离开主进程内存**。
 - `auth.connect` 是**唯一**接收 token 的 IPC 入口。
-- token 通过 `@napi-rs/keyring` 存系统 keychain；**绝不**存到 SQLite / 文件（生产）/ 日志 / localStorage。
+- token 通过 `@napi-rs/keyring` 存系统 keychain；**绝不**存到文件（生产）/ 日志 / localStorage。
 - 渲染进程永远拿不到明文 token，只能看连接状态。
 - pino `redact` 规则写死，禁止把 `token` / `password` / `key` 等写入日志。
 
@@ -361,7 +354,9 @@ pnpm rebuild:native
 - 数据根目录优先级：
   1. 环境变量 `GITEA_KANBAN_DATA_DIR`（必须是绝对路径）
   2. 兜底 `~/.gitea-kanban`
-- SQLite 文件：`${dataRoot}/kanban.db`
+- 业务态：`${dataRoot}/state.json`（localStore，electron-store 序列化）
+- Gitea 缓存：`${dataRoot}/cache/<resource>/<projectId>__<key>.json`（file-store.ts）
+- 同步队列：`${dataRoot}/queue.jsonl`
 - 日志目录：`${dataRoot}/logs/main/main-YYYY-MM-DD.log`
 - 保留 14 天。
 - 开发模式如遇 macOS SIP 写权限问题，会 fallback 到 `/tmp/gitea-kanban`。
@@ -424,10 +419,10 @@ tail -50 "$GITEA_KANBAN_DATA_DIR/logs/main/main-"*.log
 
 #### 8.7.2 主进程崩溃常见原因（按出现频率排序）
 
-1. **`better-sqlite3` ABI 不匹配**（`NODE_MODULE_VERSION 141 vs 145`）—— `pnpm install --ignore-scripts` 会跳过 `rebuild-native.sh` postinstall。**修法**：`bash scripts/rebuild-native.sh`（编给 Electron ABI 145）
-2. **CSP 拒绝加载渲染端**（`THEME_BOOTSTRAP_SCRIPT_HASH` 不匹配）—— `src/renderer/index.html` 的 theme bootstrap inline script 改了但 `src/main/window.ts` line 71 的 hash 没同步
-3. **`app.setPath('userData', ...)` 写入受限**（macOS SIP）—— dev 模式已 hard-code `/tmp/gitea-kanban-dev`；如自定义路径走 `GITEA_KANBAN_DATA_DIR`
-4. **electron-store 11 + ajv schema 校验失败**（Phase 3 才会出现）—— 不传 schema 即可关闭
+1. **CSP 拒绝加载渲染端**（`THEME_BOOTSTRAP_SCRIPT_HASH` 不匹配）—— `src/renderer/index.html` 的 theme bootstrap inline script 改了但 `src/main/window.ts` line 71 的 hash 没同步
+2. **`app.setPath('userData', ...)` 写入受限**（macOS SIP）—— dev 模式已 hard-code `/tmp/gitea-kanban-dev`；如自定义路径走 `GITEA_KANBAN_DATA_DIR`
+3. **electron-store 11 + ajv schema 校验失败** —— 不传 schema 即可关闭（本项目 localStore 已关闭 ajv，校验走 Zod）
+4. **state.json 损坏 / 缺失** —— localStore 启动期文件缺失会初始化默认值（不抛）；JSON 损坏会抛，删 `state.json` 重启即可恢复（业务态可从 Gitea 重建）
 
 #### 8.7.3 CDP 远程调试连接
 
@@ -534,7 +529,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 
 ### 9.4 离线降级
 
-- 远程 Gitea API 失败时降级到本地 SQLite 缓存，状态栏显著提示“离线/缓存模式”。
+- 远程 Gitea API 失败时降级到本地文件缓存，状态栏显著提示"离线/缓存模式"。
 - 写操作离线时禁用按钮并说明原因。
 - v1 默认不开本地 webhook server，后台轮询周期：pull 30s / commit 2min / branch 5min。
 
@@ -545,14 +540,13 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 1. **IPC 端点命名**：用 `<namespace>.<method>`，不是 `资源:动作`。`board.columns.*` 是嵌套 namespace，渲染端用 `invokeNested`。
 2. **preload 产物格式**：必须是 `out/preload/index.cjs`（CJS）。改成 `.mjs` 会在 sandboxed preload 启动时失败。
 3. **CSP hash 同步**：`src/renderer/index.html` 里的主题 bootstrap inline script 修改后，必须同步更新 `src/main/window.ts` 里的 `THEME_BOOTSTRAP_SCRIPT_HASH`。
-4. **better-sqlite3 ABI**：`pnpm install` 后务必确认 native binding 匹配 Electron ABI；`pnpm rebuild:native` 可修复。
-5. **keychain dev fallback**：开发模式因 macOS sandbox 限制，token 会 fallback 写到 `userData/dev-tokens/*.json`（0600）；生产仍走系统 keychain。
-6. **@napi-rs/keyring 平台包**：`package.json` 的 `optionalDependencies` 已显式列出 7 个目标平台包；不要删除。
-7. **pnpm 11 allowBuilds**：`pnpm-workspace.yaml` 里 `allowBuilds` 控制原生 build；当前只有 `better-sqlite3`、`electron`、`esbuild` 等需要 true。
-8. **X6 回调签名**：`interacting.*` 回调第一参数是 `cellView`，默认事件回调第一参数是 `{ cell, view }`；不要想当然用 `getData()`。
-9. **Edit 工具残段**：StrReplaceFile 的 `oldString` 尽量包整个函数或大段；替换后 `git diff` 确认无重复行。
-10. **不要跨边界**：渲染端不写 `src/main/**`、不改 `src/shared/ipc-types.ts`；主进程不写 Vue 组件 / CSS。
-11. **启动排查 + CDP 调试**：详见 §8.7。**关键提醒**：(a) pino 在 dev/preview 模式走 file transport 不是 stdout，tee 看不到；(b) `pnpm install --ignore-scripts` 会跳过 `rebuild-native.sh` postinstall，better-sqlite3 ABI 141 vs 145 报 `ERR_DLOPEN_FAILED`；(c) CDP 远程调试端口 9492 在 dev / preview 模式自动开，连接用 `http://127.0.0.1:9492/json/list` 拿 Renderer 列表。
+4. **keychain dev fallback**：开发模式因 macOS sandbox 限制，token 会 fallback 写到 `userData/dev-tokens/*.json`（0600）；生产仍走系统 keychain。
+5. **@napi-rs/keyring 平台包**：`package.json` 的 `optionalDependencies` 已显式列出 7 个目标平台包；不要删除。
+6. **pnpm 11 allowBuilds**：`pnpm-workspace.yaml` 里 `allowBuilds` 控制原生 build；当前 `electron`、`esbuild` 等需要 true（ADR-0003 完结后无 better-sqlite3）。
+7. **X6 回调签名**：`interacting.*` 回调第一参数是 `cellView`，默认事件回调第一参数是 `{ cell, view }`；不要想当然用 `getData()`。
+8. **Edit 工具残段**：StrReplaceFile 的 `oldString` 尽量包整个函数或大段；替换后 `git diff` 确认无重复行。
+9. **不要跨边界**：渲染端不写 `src/main/**`、不改 `src/shared/ipc-types.ts`；主进程不写 Vue 组件 / CSS。
+10. **启动排查 + CDP 调试**：详见 §8.7。**关键提醒**：(a) pino 在 dev/preview 模式走 file transport 不是 stdout，tee 看不到；(b) CDP 远程调试端口 9492 在 dev / preview 模式自动开，连接用 `http://127.0.0.1:9492/json/list` 拿 Renderer 列表。
 
 ---
 
@@ -565,7 +559,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 | 前端设计 | `docs/design/03-frontend.md` | UI/UX、路由、状态管理 |
 | keychain 选型 | `docs/adr/0001-keychain.md` | 为什么用 @napi-rs/keyring |
 | board 数据模型 reset | `docs/adr/0002-board-data-source-reset.md` | 为什么卡片 = Gitea issue |
-| **本地存储迁移 + 同步队列** | `docs/adr/0003-local-store-electron-store.md` | **ADR-0003**：SQLite → electron-store + queue.jsonl；**当前 Phase 1 双写期** |
+| **本地存储迁移 + 同步队列** | `docs/adr/0003-local-store-electron-store.md` | **ADR-0003（已完结）**：SQLite → electron-store + 文件 KV + queue.jsonl；零 SQLite 依赖 |
 | 设计系统（生效） | `design-system/gitea-kanban/OVERRIDE.md` | 颜色、字体、零术语、二次确认 |
 | 科技感精修 token | `design-system/pages/tech-refine.md` | v1.1/v1.2 具体 token |
 | 本文件 | `AGENTS.md` | agent 入口规范 |
@@ -577,8 +571,8 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 > 项目使用 mavis team plan 时的角色分工。单人开发时也可作为代码组织参考。
 
 - **后端 agent**：负责 `src/main/**`、`src/preload/**`、`src/shared/*`、`drizzle/**`、打包配置。
-- **前端 agent**：负责 `src/renderer/**`、wireframe、组件库；不碰主进程 / SQLite schema / IPC schema。
-- **verifier**：独立验证 `ipcMain.handle` 数与 `window.api` 暴露数、零术语、错误码统一性、SQLite 路径、e2e、打包安装。
+- **前端 agent**：负责 `src/renderer/**`、wireframe、组件库；不碰主进程 / IPC schema。
+- **verifier**：独立验证 `ipcMain.handle` 数与 `window.api` 暴露数、零术语、错误码统一性、数据路径、e2e、打包安装。
 - **orchestrator**：拆 plan、跑 cycle、统一 git commit。
 
 ---
@@ -586,9 +580,9 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 ## 13. 不决事项（必须推给用户拍板）
 
 以下变更不准 agent 自决：
-1. 改技术栈（Electron / TS / Vue 3 / Pinia / X6 / SQLite / Drizzle 任一变更）
+1. 改技术栈（Electron / TS / Vue 3 / Pinia / X6 / electron-store 任一变更）
 2. 改 IPC 契约（`src/shared/ipc-types.ts` 或 `schema.ts` 字段增删 / 命名变更）
-3. 改数据模型（SQLite schema 业务表增删改）
+3. 改数据模型（localStore state 结构 / 文件缓存 resource 增删改）
 4. 改设计原则（零术语表、危险操作清单、错误码表）
 5. 改设计系统 token（主色 / 强调色 / 字体 / 默认主题）
 6. 改鉴权方式（PAT → OAuth2 等）

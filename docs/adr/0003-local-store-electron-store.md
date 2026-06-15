@@ -1,8 +1,13 @@
 # ADR-0003: 本地存储从 better-sqlite3 迁移到 electron-store + 同步队列
 
-- **Status**: Accepted
-- **Date**: 2026-06-14
+- **Status**: Implemented（2026-06-15 完结，commit `5bae978`）
+- **Date**: 2026-06-14（决策）/ 2026-06-15（完结）
 - **Deciders**: backend agent (Coder)、orchestrator (Mavis)、verifier 待 review
+- **完结说明**：三个 phase 全部落地。最后一步（Phase 3b）于 2026-06-15 删除 SQLite
+  链路本体（`sqlite.ts` + `cache/schema/` + `better-sqlite3`/`drizzle-orm` 依赖 +
+  native rebuild 工具链）。至此项目**零 SQLite 依赖**：业务态走 `state.json`，
+  Gitea 缓存走 `cache/<resource>/` 文件 KV，离线写走 `queue.jsonl`。包体净减 200+ MB，
+  Electron 大版本升级不再需要 rebuild native binding。
 - **Related**:
   - `docs/design/02-architecture.md` §4 数据模型、§6 离线降级
   - `AGENTS.md` §6.3 数据模型、§10 常见陷阱
