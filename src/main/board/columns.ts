@@ -3,16 +3,23 @@
  *
  * 职责（docs/adr/0002-board-data-source-reset.md + 02-architecture §5.3.7）：
  * - 7 个 IPC handler 调用的纯业务函数（不接 wrapIpc 包装 —— wrapIpc 在 ipc/board.ts）
- * - **纯 localStore**：列/列-标签映射都改 localStore
+ * - 列/列-标签映射改 localStore（业务配置）
  * - 撤销栈写入：每次写操作调 recordUndo（M6 已切 in-memory）
  * - 顺序用浮点 position 避免全表重写（POS=1024）
  *
+ * 数据源原则（2026-06-15 user 拍板）：
+ * - App 是"Gitea 显示/聚合/简化"平台，**gitea 是 label 数据的 source of truth**
+ * - `listColumns` 调 gitea 拉最新 label name/color（**不**依赖 localStore 缓存的 giteaLabelName 字段）
+ * - `mapLabel` 调 gitea 校验 label 真实存在（写 localStore 前先验证 gitea 端）
+ * - 已删 label 在 `listColumns` 返回时**过滤掉**（不展示给用户）
+ * - gitea 拉失败 → 抛 NETWORK_OFFLINE（不静默降级用 stale 数据）
+ *
  * 边界（ADR-0002 + AGENTS §5.1）：
  * - **不**接 wrapIpc（IPC 包装在 ipc/board.ts）
- * - **不**改 schema
+ * - **不**改 schema / IpcErrorCode
  * - **不**做权限校验
  * - **不**做 columns 的 cache_entries 缓存（业务类型变更频繁）
- * - **不**调 gitea API
+ * - **不**改 resolveProject.ts（59 个调用点跨 9 个 IPC 文件 —— 单独拍板）
  *
  * ADR-0003 Phase 3：业务态走 localStore，**没有** SQLite 镜像分支
  * （删了 SQLite 双写后，写操作只改 localStore；崩恢复靠 localStore.atomic write）
@@ -42,6 +49,8 @@ import {
   findLabelMapByColumnAndLabelWithStore,
   listLabelMapsByColumnWithStore,
 } from '../local/label-maps.js';
+import { listGiteaLabels } from '../gitea/labels.js';
+import { resolveProject } from './resolveProject.js';
 
 /** position 间隔 */
 export const POSITION_STEP = 1024;
@@ -73,8 +82,40 @@ function resolveColumn(columnId: string): { projectId: string } {
 
 /**
  * 单列 DTO 转换（含绑定的 gitea labels）
+ *
+ * 关键：name/color 来自 caller 传入的 gitea 实时数据（`liveLabelsById` 映射），
+ * **不**读 localStore.labelMaps 的 giteaLabelName 缓存字段（避免漂移）
  */
 function toColumnDto(
+  col: { id: string; projectId: string; title: string; position: number; createdAt: number },
+  boundLabelIds: number[],
+  liveLabelsById: Map<number, { name: string; color: string }>,
+): ColumnDto {
+  const labels = boundLabelIds
+    .map((id) => {
+      const live = liveLabelsById.get(id);
+      // gitea 端已删的 label → 跳过（不展示给用户，避免误导）
+      if (!live) return null;
+      return { id, name: live.name, color: live.color };
+    })
+    .filter((l): l is { id: number; name: string; color: string } => l !== null);
+  return {
+    id: col.id,
+    projectId: col.projectId,
+    title: col.title,
+    position: col.position,
+    labels,
+  };
+}
+
+/**
+ * 单列 DTO 转换（labels 来自 caller 给的扁平数组，**不**调 gitea）
+ *
+ * 用途：单列写操作（create/update/unmapLabel）返 DTO 时避免再调一次 gitea 拉全表
+ * - `name` 取自 caller 传（mapLabel 用 gitea 实时名；create/unmapLabel 留空 color）
+ * - `color` 字段：mapLabel 从 gitea 拉、create/unmapLabel 留空字符串（renderer 不读后端 DTO）
+ */
+function toColumnDtoFromLabels(
   col: { id: string; projectId: string; title: string; position: number; createdAt: number },
   labels: Array<{ id: number; name: string; color: string }>,
 ): ColumnDto {
@@ -88,23 +129,43 @@ function toColumnDto(
 }
 
 /**
- * 拿某列绑的 gitea labels（localStore.labelMaps 过滤）
- */
-function listColumnLabels(columnId: string): Array<{ id: number; name: string; color: string }> {
-  return listLabelMapsByColumnWithStore(getLocalStore().get(), columnId).map((m) => ({
-    id: Number(m.giteaLabelId),
-    name: m.giteaLabelName,
-    color: '', // v1: color 不缓存，UI 调 labels.list 拿
-  }));
-}
-
-/**
  * 拿某 project 下全部列 + 绑定的 labels
- * ADR-0003 Phase 3：localStore only
+ *
+ * 数据源：localStore 拿列定义 + labelMap 关系（**配置**）
+ *        gitea 实时拉 label name/color（**展示数据** —— gitea 是真理源）
+ *
+ * 失败策略：gitea 拉失败 → 抛 NETWORK_OFFLINE（不静默降级用 stale 数据）
+ * 过滤策略：gitea 端已删的 label 在 DTO 中**过滤掉**（用户看到的就是 gitea 真实存在）
  */
-export function listColumns(projectId: string): ColumnDto[] {
-  const cols = listColumnsByProjectWithStore(getLocalStore().get(), projectId);
-  return cols.map((c) => toColumnDto(c, listColumnLabels(c.id)));
+export async function listColumns(projectId: string): Promise<ColumnDto[]> {
+  const state = getLocalStore().get();
+  const cols = listColumnsByProjectWithStore(state, projectId);
+
+  // 1. 收集所有绑定到本 project 的 label id（跨列去重）
+  const allLabelMaps = state.labelMaps.filter((m) => m.projectId === projectId);
+  const boundLabelIds = Array.from(new Set(allLabelMaps.map((m) => Number(m.giteaLabelId))));
+
+  // 2. 拉 gitea 实时 label（一次 list 拿全）
+  //    无绑定 label → 跳过网络调用（让空列场景不浪费请求）
+  let liveLabelsById: Map<number, { name: string; color: string }> = new Map();
+  if (boundLabelIds.length > 0) {
+    const proj = resolveProject(projectId);
+    const resp = await listGiteaLabels({
+      giteaUrl: proj.giteaUrl,
+      username: proj.username,
+      owner: proj.owner,
+      repo: proj.repo,
+      page: 1,
+      limit: 50, // 单仓库 label 通常 < 50，gitea 端无 project 概念后全 repo label 拉一次
+    });
+    liveLabelsById = new Map(resp.items.map((l) => [l.id, { name: l.name, color: l.color }]));
+  }
+
+  // 3. 每列拼 DTO：按 column 过滤已绑 label id（保证只展示该列绑的）
+  return cols.map((c) => {
+    const colBoundIds = listLabelMapsByColumnWithStore(state, c.id).map((m) => Number(m.giteaLabelId));
+    return toColumnDto(c, colBoundIds, liveLabelsById);
+  });
 }
 
 // ============================================================
@@ -127,7 +188,7 @@ export function createColumn(args: CreateBoardColumnArgs): ColumnDto {
     s.columns.push(createdRow);
   });
 
-  return toColumnDto(createdRow, []);
+  return toColumnDtoFromLabels(createdRow, []);
 }
 
 // ============================================================
@@ -154,7 +215,13 @@ export function updateColumn(args: UpdateBoardColumnArgs): ColumnDto {
   });
 
   const refreshed = findColumnByIdWithStore(store.get(), args.columnId)!;
-  return toColumnDto(refreshed, listColumnLabels(args.columnId));
+  // updateColumn 只动 title/position，labels 不变；name 来自 localStore 缓存，color 留空（renderer 不读后端 DTO 的 color）
+  const labels = listLabelMapsByColumnWithStore(store.get(), args.columnId).map((m) => ({
+    id: Number(m.giteaLabelId),
+    name: m.giteaLabelName,
+    color: '',
+  }));
+  return toColumnDtoFromLabels(refreshed, labels);
 }
 
 // ============================================================
@@ -209,15 +276,40 @@ export function deleteColumn(args: { columnId: string }): void {
  *
  * - 同 (projectId, giteaLabelId) 已经绑了别的列 → 抛 CONFLICT（业务规则：一 label 一列）
  * - 同 (columnId, giteaLabelId) 已绑 → 幂等（不动）
+ * - **写 localStore 前先调 gitea 校验 label 真实存在**（Gitea 优先原则）：
+ *   - 已删 → 抛 NOT_FOUND（提示用户刷新 label 列表）
+ *   - 网络失败 → 抛 NETWORK_OFFLINE（不静默写入 stale 数据）
+ *   - name/color **以 gitea 实时数据为准**写 localStore（避免 caller 传 stale name）
  */
-export function mapLabel(args: {
+export async function mapLabel(args: {
   columnId: string;
   giteaLabelId: number;
   giteaLabelName: string;
-}): ColumnDto {
+}): Promise<ColumnDto> {
   const store = getLocalStore();
   const { projectId } = resolveColumn(args.columnId);
 
+  // 1. 调 gitea 校验 label 存在（一次 list 拿全，过滤）
+  const proj = resolveProject(projectId);
+  const resp = await listGiteaLabels({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    page: 1,
+    limit: 50,
+  });
+  const liveLabel = resp.items.find((l) => l.id === args.giteaLabelId);
+  if (!liveLabel) {
+    throw new IpcError({
+      code: IpcErrorCode.NOT_FOUND,
+      message: '该 gitea label 已不存在',
+      hint: '请在 label 选择器中刷新后重选',
+      cause: `giteaLabelId=${args.giteaLabelId} not found in repo ${proj.owner}/${proj.repo}`,
+    });
+  }
+
+  // 2. 一 label 一列校验
   const conflict = findLabelMapByProjectAndLabelWithStore(store.get(), {
     projectId,
     giteaLabelId: String(args.giteaLabelId),
@@ -231,6 +323,7 @@ export function mapLabel(args: {
     });
   }
 
+  // 3. 幂等检查 + 写入（name 取 gitea 实时值，不是 caller 传的）
   const existing = findLabelMapByColumnAndLabelWithStore(store.get(), {
     columnId: args.columnId,
     giteaLabelId: String(args.giteaLabelId),
@@ -241,16 +334,29 @@ export function mapLabel(args: {
       columnId: args.columnId,
       projectId,
       giteaLabelId: String(args.giteaLabelId),
-      giteaLabelName: args.giteaLabelName,
+      giteaLabelName: liveLabel.name, // Gitea 优先：以 gitea 实时 name 写
       createdAt: Date.now(),
     };
     store.mutate((s) => {
       s.labelMaps.push(newMap);
     });
+  } else if (existing.giteaLabelName !== liveLabel.name) {
+    // 漂移修复：caller 之前传的 name 跟 gitea 不一致 → 同步修正
+    store.mutate((s) => {
+      const idx = s.labelMaps.findIndex(
+        (m) => m.columnId === args.columnId && m.giteaLabelId === String(args.giteaLabelId),
+      );
+      if (idx >= 0) {
+        s.labelMaps[idx] = { ...s.labelMaps[idx]!, giteaLabelName: liveLabel.name };
+      }
+    });
   }
 
+  // 4. 返 DTO（color 用 gitea 实时值）
   const refreshed = findColumnByIdWithStore(store.get(), args.columnId)!;
-  return toColumnDto(refreshed, listColumnLabels(args.columnId));
+  return toColumnDtoFromLabels(refreshed, [
+    { id: liveLabel.id, name: liveLabel.name, color: liveLabel.color },
+  ]);
 }
 
 // ============================================================
@@ -267,5 +373,10 @@ export function unmapLabel(args: { columnId: string; giteaLabelId: number }): Co
   });
 
   const refreshed = findColumnByIdWithStore(store.get(), args.columnId)!;
-  return toColumnDto(refreshed, listColumnLabels(args.columnId));
+  const labels = listLabelMapsByColumnWithStore(store.get(), args.columnId).map((m) => ({
+    id: Number(m.giteaLabelId),
+    name: m.giteaLabelName,
+    color: '',
+  }));
+  return toColumnDtoFromLabels(refreshed, labels);
 }

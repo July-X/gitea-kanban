@@ -2,6 +2,51 @@
 
 gitea-kanban 阶段性交付记录。所有变更以 milestone (M0-M11+) 为粒度。
 
+## v1.2 hotfix 1 — 看板列 Gitea 数据对齐 (2026-06-15)
+
+**用户拍板原则（2026-06-15）**：
+> 先处理"看板"功能的数据对齐问题，数据的来源优先从 Gitea 获取，本地操作都要优先同步到 Gitea，你可以理解 App 是一个显示为主、聚合操作、简化用法的平台
+
+**核心变更**：
+- **`board.columns.list` 改 async 调 gitea 拉实时 label name/color**（数据源 = gitea；不依赖 localStore 缓存的 `giteaLabelName` 字段）
+- **`board.columns.mapLabel` 改 async 调 gitea 校验 label 真实存在**（写 localStore 前先验证 gitea 端）—— 已删 label 抛 `NOT_FOUND`，网络失败抛 `NETWORK_OFFLINE`
+- **漂移修复**：`mapLabel` 写 localStore 时**以 gitea 实时 name 为准**（caller 传的 stale name 不写入）；existing labelMap name 跟 gitea 不一致时自动同步修正
+- **gitea 端已删的 label 在 listColumns 返回时过滤掉**（用户看到的就是 gitea 真实存在）
+- **保留 `giteaLabelName` schema 字段兼容**（IPC 契约不破）+ 单列写 op 内部用 `toColumnDtoFromLabels` helper（避免再调一次 gitea 拉全表）
+- **store 同步用后端 DTO**：`mapLabelToColumn` 不再手 push `color: ''`，直接用后端返的完整 ColumnDto（带 gitea 实时 color）
+
+**新单测**（10 个用例）：`src/main/board/__tests__/columns-gitea-priority.test.ts`
+- listColumns: 调 gitea 拉实时数据 / 过滤已删 / gitea 失败透传 / 无绑定跳过调用
+- mapLabel: label 不存在 / gitea 实时 name 写入 / 网络失败不写 localStore / 漂移修复
+- 回归: unmapLabel / createColumn 不调 gitea（保持原行为）
+
+**4 件套**（master HEAD 提交后）：
+
+| 检查 | 结果 |
+|---|---|
+| `pnpm type-check` | EXIT 0 ✅ |
+| `pnpm build` | 14.57s ✅ |
+| `pnpm test` | 10 files / 154 passed ✅ |
+| `pnpm check:no-jargon` | OK ✅ |
+
+**不动的部分**（避免跟 ADR-0003 冲突 / 风险太高）：
+- `resolveProject.ts`（59 个调用点跨 9 个 IPC 文件）—— 单独拍板
+- ADR-0003 切读路径方向（"localStore 是 board 数据的主读路径"）—— 与"Gitea 优先"原则部分冲突，本 hotfix **只动 label 数据流**，不动 board 主数据读路径
+- `giteaLabelName` 字段保留（schema 兼容；v1.3 可考虑删除）
+
+**关键文件**：
+- `src/main/board/columns.ts`（+重构 `toColumnDto` / 新增 `toColumnDtoFromLabels` / listColumns + mapLabel 改 async）
+- `src/main/ipc/board.ts`（listBoardColumnsHandler await listColumns）
+- `src/renderer/lib/ipc-client.ts`（boardColumnsMapLabel 注释更新）
+- `src/renderer/stores/board.ts`（mapLabelToColumn 用后端 DTO 同步）
+- `src/main/board/__tests__/columns-gitea-priority.test.ts`（新增 10 个用例）
+
+**遗留**（v1.3 polish 候选）：
+- **`columns.list` 每次切看板都调 gitea 一次**——频繁切会重复网络请求；可加 30-60s TTL 内存缓存（v1.3 polish）
+- **未读 localStore `giteaLabelName` 字段**——v1.3 可考虑删（依赖方只剩 ipc schema 必填项）
+
+---
+
 ## M11 — 合并请求（pulls）UI 操作链路 (2026-06-14)
 
 **核心变更**：

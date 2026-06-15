@@ -438,6 +438,9 @@ export const useBoardStore = defineStore('board', () => {
    * 同步更新 columns[c].labels
    *
    * 注：后端 mapLabel 走 resolveColumn(args.columnId) 拿 projectId，不需要 caller 传
+   *
+   * 2026-06-15 Gitea 优先原则：mapLabel 后端调 gitea 校验 + 拉实时 name/color 写 localStore，
+   * 返 ColumnDto 含完整 label 数据；store 直接用后端 DTO 同步本地，**不**再手 push `color: ''`
    */
   async function mapLabelToColumn(args: {
   columnId: string;
@@ -446,17 +449,13 @@ export const useBoardStore = defineStore('board', () => {
   }): Promise<void> {
   error.value = null;
   try {
-  await boardColumnsMapLabel({
+  const col = (await boardColumnsMapLabel({
   columnId: args.columnId,
   giteaLabelId: args.giteaLabelId,
   giteaLabelName: args.giteaLabelName,
-  });
-  // 同步本地（push 标签 if not exists）
-  columns.value = columns.value.map((c) => {
-  if (c.id !== args.columnId) return c;
-  if (c.labels.some((l) => l.id === args.giteaLabelId)) return c;
-  return { ...c, labels: [...c.labels, { id: args.giteaLabelId, name: args.giteaLabelName, color: '' }] };
-  });
+  })) as ColumnDto;
+  // 同步本地：用后端 DTO 覆盖（gitea 实时 name/color）
+  columns.value = columns.value.map((c) => (c.id === args.columnId ? col : c));
   } catch (e) {
   error.value = e as UserFacingError;
   throw e;

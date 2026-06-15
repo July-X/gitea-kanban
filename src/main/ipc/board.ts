@@ -109,7 +109,8 @@ async function listBoardColumnsHandler(args: ListBoardColumnsArgs): Promise<Colu
       hint: '请先在仓库列表中重新添加该仓库为项目',
     });
   }
-  const result = listColumns(args.projectId);
+  // listColumns 现在是 async（调 gitea 拉 label name/color；Gitea 优先原则 2026-06-15）
+  const result = await listColumns(args.projectId);
   logger.info({ op: 'board.columns.list', latencyMs: Date.now() - start, count: result.length }, 'ipc done');
   return result;
 }

@@ -570,7 +570,11 @@ export function boardColumnsDelete(args: { columnId: string }): Promise<unknown>
  return getIpcClient().invokeNested('board', 'columns', 'delete', args);
 }
 
-/** 列绑一个 gitea label（issue 带这个 label 就属于这个列） */
+/** 列绑一个 gitea label（issue 带这个 label 就属于这个列）
+ *
+ *  2026-06-15 Gitea 优先原则：后端调 gitea 校验 label 真实存在后写 localStore；
+ *  返 ColumnDto 含 gitea 实时 name/color（caller 不必再用 labelsList 补 color）
+ */
 export function boardColumnsMapLabel(args: {
  columnId: string;
  giteaLabelId: number;
