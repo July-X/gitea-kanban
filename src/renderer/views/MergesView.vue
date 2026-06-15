@@ -656,7 +656,8 @@ async function postComment(p: PullDto): Promise<void> {
  *   - Esc 关闭 @ 候选
  */
 function onCommentKeydown(p: PullDto, e: KeyboardEvent): void {
-  if (e.nativeEvent.isComposing) return;
+  // 防御性：KeyboardEvent.isComposing 是 DOM 标准属性，直接读；不要走 e.nativeEvent（v1.5 修复 devtool 报错 e.nativeEvent is undefined）
+  if (e.isComposing) return;
 
   // @ 候选打开时的特殊键
   if (isMentionOpen(p.index)) {
@@ -1039,9 +1040,9 @@ function formatRelative(iso: string | undefined): string {
               <span>编辑属性</span>
             </button>
           </div>
-          <!-- ===== 评论区：v1.4 整行铺满 ===== -->
+          <!-- ===== 评论区：v1.5 header 整行 + 左历史/右输入各 50% ===== -->
             <div class="merge-item__comments">
-              <!-- 顶部：对话标题 + 刷新按钮 -->
+              <!-- 顶部：对话标题 + 刷新按钮（整行铺满） -->
               <div class="merge-item__comments-header">
                 <div class="merge-item__comments-header-left">
                   <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
@@ -1067,88 +1068,94 @@ function formatRelative(iso: string | undefined): string {
                 </button>
               </div>
 
-              <!-- 加载态 -->
-              <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
-                <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
-                <span>正在加载对话…</span>
-              </div>
-              <!-- 错误态 -->
-              <div v-else-if="getPanel(p.index).error && getPanel(p.index).items.length === 0" class="merge-item__comments-error" role="alert">
-                <span>{{ getPanel(p.index).error }}</span>
-                <button type="button" class="merge-item__comments-retry" @click.stop="fetchComments(p)">重试</button>
-              </div>
-              <!-- 空态：暂无评论 + 提示用户第一条由谁起 -->
-              <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
-                暂无对话，发起第一条评论开始讨论吧
-              </div>
-              <!-- 评论列表：气泡聊天布局 + 滚动 -->
-              <ul v-else class="merge-item__comment-list">
-                <li
-                  v-for="c in getPanel(p.index).items"
-                  :key="c.id"
-                  class="merge-item__comment"
-                  :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
-                >
-                  <div
-                    class="merge-item__comment-avatar"
-                    :title="c.author.username"
-                    aria-hidden="true"
-                  >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
-                  <div class="merge-item__comment-bubble">
-                    <div class="merge-item__comment-meta">
-                      <span class="merge-item__comment-author">{{ c.author.username }}</span>
-                      <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
-                      <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
-                    </div>
-                    <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
+              <!-- 主体：左 50% 历史评论 + 右 50% 输入框 -->
+              <div class="merge-item__comments-body">
+                <!-- 左列：加载态 / 错误态 / 空态 / 评论列表 -->
+                <div class="merge-item__comments-history">
+                  <!-- 加载态 -->
+                  <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
+                    <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
+                    <span>正在加载对话…</span>
                   </div>
-                </li>
-              </ul>
+                  <!-- 错误态 -->
+                  <div v-else-if="getPanel(p.index).error && getPanel(p.index).items.length === 0" class="merge-item__comments-error" role="alert">
+                    <span>{{ getPanel(p.index).error }}</span>
+                    <button type="button" class="merge-item__comments-retry" @click.stop="fetchComments(p)">重试</button>
+                  </div>
+                  <!-- 空态：暂无评论 + 提示用户第一条由谁起 -->
+                  <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
+                    暂无对话，发起第一条评论开始讨论吧
+                  </div>
+                  <!-- 评论列表：气泡聊天布局 + 滚动 -->
+                  <ul v-else class="merge-item__comment-list">
+                    <li
+                      v-for="c in getPanel(p.index).items"
+                      :key="c.id"
+                      class="merge-item__comment"
+                      :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
+                    >
+                      <div
+                        class="merge-item__comment-avatar"
+                        :title="c.author.username"
+                        aria-hidden="true"
+                      >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
+                      <div class="merge-item__comment-bubble">
+                        <div class="merge-item__comment-meta">
+                          <span class="merge-item__comment-author">{{ c.author.username }}</span>
+                          <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
+                          <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
+                        </div>
+                        <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
+                      </div>
+                    </li>
+                  </ul>
+                </div>
 
-              <!-- 发评论输入区（v1.4 加大 + @ 提及自动补全） -->
-              <div class="merge-item__comment-compose">
-                <div class="merge-item__comment-input-wrap">
-                  <textarea
-                    ref="commentInputRef"
-                    class="merge-item__comment-input"
-                    :value="getDraft(p.index)"
-                    @input="onCommentInput(p, $event)"
-                    @keydown="onCommentKeydown(p, $event)"
-                    :placeholder="'发条评论给 #' + p.index + '（@ 提及成员，Enter 发送，⌘/Ctrl+Enter 也行）'"
-                    :disabled="getPanel(p.index).posting"
-                    rows="3"
-                    maxlength="65535"
-                    spellcheck="false"
-                  ></textarea>
-                  <div
-                    v-if="isMentionOpen(p.index) && mentionCandidates(p.index).length > 0"
-                    class="merge-item__mention-dropdown"
-                  >
-                    <button
-                      v-for="(m, i) in mentionCandidates(p.index)"
-                      :key="m"
-                      type="button"
-                      class="merge-item__mention-item"
-                      :class="{ 'merge-item__mention-item--active': i === mentionActiveIdx(p.index) }"
-                      @click.stop.prevent="insertMention(p.index, m)"
-                    >{{ '@' + m }}</button>
+                <!-- 右列：发评论输入区（v1.4 加大 + @ 提及自动补全） -->
+                <div class="merge-item__comment-compose">
+                  <div class="merge-item__comment-input-wrap">
+                    <textarea
+                      ref="commentInputRef"
+                      class="merge-item__comment-input"
+                      :value="getDraft(p.index)"
+                      @input="onCommentInput(p, $event)"
+                      @keydown="onCommentKeydown(p, $event)"
+                      :placeholder="'发条评论给 #' + p.index + '\n@ 提及成员，Enter 发送，⌘/Ctrl+Enter 也行'"
+                      :disabled="getPanel(p.index).posting"
+                      rows="8"
+                      maxlength="65535"
+                      spellcheck="false"
+                    ></textarea>
+                    <div
+                      v-if="isMentionOpen(p.index) && mentionCandidates(p.index).length > 0"
+                      class="merge-item__mention-dropdown"
+                    >
+                      <button
+                        v-for="(m, i) in mentionCandidates(p.index)"
+                        :key="m"
+                        type="button"
+                        class="merge-item__mention-item"
+                        :class="{ 'merge-item__mention-item--active': i === mentionActiveIdx(p.index) }"
+                        @click.stop.prevent="insertMention(p.index, m)"
+                      >{{ '@' + m }}</button>
+                    </div>
                   </div>
+                  <div class="merge-item__comment-actions">
+                    <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
+                      {{ getDraft(p.index).length }} / 65535
+                    </span>
+                    <button
+                      type="button"
+                      class="merge-item__comment-send"
+                      :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
+                      :title="'发送评论'"
+                      @click.stop="postComment(p)"
+                    >
+                      <Send :size="12" :stroke-width="2" aria-hidden="true" />
+                      <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
+                    </button>
                 </div>
-                <div class="merge-item__comment-actions">
-                  <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
-                    {{ getDraft(p.index).length }} / 65535
-                  </span>
-                  <button
-                    type="button"
-                    class="merge-item__comment-send"
-                    :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
-                    :title="'发送评论'"
-                    @click.stop="postComment(p)"
-                  >
-                    <Send :size="12" :stroke-width="2" aria-hidden="true" />
-                    <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
-                  </button>
-                </div>
+              </div>
               </div>
             </div>
           </div>
@@ -2205,6 +2212,25 @@ function formatRelative(iso: string | undefined): string {
   cursor: not-allowed;
 }
 
+/* ===== v1.5 主体：左 50% 历史 / 右 50% 输入框 ===== */
+.merge-item__comments-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;   /* v1.5：左历史 / 右输入各 50% */
+  gap: 12px;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* 左列：历史评论 + 各种态（loading/error/empty） */
+.merge-item__comments-history {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* 高度 = 父 grid 行高；max-height 由父 .merge-item__detail 限 */
+  height: 100%;
+}
+
 .merge-item__comments-loading,
 .merge-item__comments-empty {
   display: flex;
@@ -2249,11 +2275,10 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);            /* v1.5：space-2 → space-3，气泡之间不挤 */
-  /* v1.5：max-height 60vh → min(50vh, 380px)，多合并请求同时展开时整页不会无限高；
-   * 单合并请求展开时也保留足够空间。flex:1 让它占满剩余高度，没内容时自动收缩。 */
+  /* v1.5：列内子元素（grid 1fr 列），撑满左列高度；max-height 由父 .merge-item__detail 限 */
   flex: 1 1 0;
   min-height: 0;
-  max-height: min(50vh, 380px);
+  max-height: 100%;
   overflow-y: auto;
   /* 自定义滚动条样式（webkit only） */
   scrollbar-width: thin;
@@ -2383,7 +2408,7 @@ function formatRelative(iso: string | undefined): string {
   line-height: 1.5;
 }
 
-/* 发评论输入区（v1.5 加大顶部 divider 视觉分离） */
+/* 发评论输入区（v1.5 加大顶部 divider 视觉分离 + 占满右列高） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
@@ -2392,19 +2417,27 @@ function formatRelative(iso: string | undefined): string {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md); /* v1.5：sm → md，与列表一致 */
-  flex-shrink: 0;
+  min-width: 0;
+  min-height: 0;
+  /* v1.5：右列 grid 1fr 项，撑满右列高度 */
+  height: 100%;
+  overflow: hidden;                /* textarea 内部滚动；外层不滚 */
 }
 
-/* textarea + @ 候选下拉的相对定位容器 */
+/* textarea + @ 候选下拉的相对定位容器（v1.5 撑满 compose 剩余高度） */
 .merge-item__comment-input-wrap {
   position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
-/* v1.4 输入框更大（min-height 从 56px → 72px） */
+/* v1.4 输入框更大（min-height 从 56px → 72px），v1.5 flex:1 让它撑满右列剩余高度 */
 .merge-item__comment-input {
   width: 100%;
-  min-height: 72px;
-  resize: vertical;
+  min-height: 120px;
+  flex: 1 1 0;
+  resize: none;                    /* v1.5：左右布局下禁止手拽改高，避免破坏等高 */
   background: transparent;
   border: none;
   outline: none;
