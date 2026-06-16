@@ -69,6 +69,37 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/renderer/index.html') },
+        /**
+         * 拆 vendor chunk（v1.4 polish · 性能优化）
+         *
+         * 之前所有第三方依赖 + 业务代码全堆在 `index-*.js` 一个文件（369 KB）。
+         * 切视图时浏览器要重新请求整个 entry；缓存命中率也差。
+         *
+         * 拆法（粗粒度 3 个 vendor chunk）：
+         * - `vendor-vue`：vue + vue-router + pinia + lucide-vue-next（每个 view 都用）
+         * - `vendor-markdown`：markdown-it + dompurify（只在合并请求对话 / 评论预览用）
+         * - `vendor-drag`：vue-draggable-plus（只在看板拖拽用）
+         * - 业务代码仍按 view 拆（AuthView / BoardView / MergesView / TimelineView ...）
+         *
+         * 收益：首屏 index chunk 减重 + 浏览器可独立缓存 vendor（vendor 变化频率远低于业务代码）。
+         */
+        output: {
+          manualChunks(id: string): string | undefined {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('vue-draggable-plus')) return 'vendor-drag';
+            if (id.includes('markdown-it') || id.includes('dompurify')) return 'vendor-markdown';
+            if (
+              id.includes('lucide-vue-next') ||
+              id.includes('/vue/') ||
+              id.includes('/pinia/') ||
+              id.includes('/vue-router/') ||
+              id.includes('@vue/')
+            ) {
+              return 'vendor-vue';
+            }
+            return undefined;
+          },
+        },
       },
       outDir: 'out/renderer',
     },
