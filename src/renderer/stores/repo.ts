@@ -10,6 +10,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { reposAddProject, reposList, reposRemoveProject } from '@renderer/lib/ipc-client';
+import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListReposResp, RepoDto, RepoProjectDto } from '../../main/ipc/schema.js';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -84,7 +85,7 @@ export const useRepoStore = defineStore('repo', () => {
       total.value = resp.total;
       hasMore.value = resp.hasMore;
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;
@@ -136,7 +137,7 @@ export const useRepoStore = defineStore('repo', () => {
       currentProject.value = project;
       return project;
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;
@@ -164,7 +165,7 @@ export const useRepoStore = defineStore('repo', () => {
       }
       await loadRepos('', true);
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;

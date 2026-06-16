@@ -16,6 +16,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { branchesList, branchesStar } from '@renderer/lib/ipc-client';
+import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { BranchDto, ListBranchesResp } from '../../main/ipc/schema.js';
 
@@ -119,7 +120,7 @@ export const useBranchStore = defineStore('branch', () => {
         currentSelectedName.value = null;
       }
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;

@@ -13,6 +13,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { authConnect, authDisconnect, authStatus } from '@renderer/lib/ipc-client';
+import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 // 渲染端通过 @main/ipc/schema 拿到 IPC 类型（AGENTS §5.5 拍板的"IPC 单一信息源"）；
 // src/shared/ipc-types.ts 文件尚未由 backend 创建，frontend 任务**只读** schema.ts,
@@ -49,7 +50,7 @@ export const useAuthStore = defineStore('auth', () => {
       accounts.value = resp.accounts;
       currentUser.value = resp.currentUser;
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       // status 失败不重置 accounts —— 可能是临时网络问题
     } finally {
       loading.value = false;
@@ -70,7 +71,7 @@ export const useAuthStore = defineStore('auth', () => {
       // 连接成功后立即拉一次 status 把账号 + 用户填进 store
       await refreshStatus();
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;
@@ -87,7 +88,7 @@ export const useAuthStore = defineStore('auth', () => {
       await authDisconnect(giteaUrl);
       await refreshStatus();
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;

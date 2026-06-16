@@ -17,6 +17,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { membersList } from '@renderer/lib/ipc-client';
+import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 
 /** 视图层权限维度 */
@@ -110,7 +111,7 @@ export const useMemberStore = defineStore('member', () => {
       items.value = Array.isArray(resp) ? resp : [];
       currentProjectId.value = projectId;
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;

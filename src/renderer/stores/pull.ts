@@ -23,6 +23,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { pullsList, pullsGet, pullsMerge, pullsClose } from '@renderer/lib/ipc-client';
+import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListPullsResp, PullDto, PullState, MergeMethod } from '../../main/ipc/schema.js';
 
@@ -112,7 +113,7 @@ export const usePullStore = defineStore('pull', () => {
       items.value = resp.items;
       currentProjectId.value = projectId;
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;

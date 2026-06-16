@@ -32,6 +32,7 @@ import {
   labelsList,
   getIpcClient,
 } from '@renderer/lib/ipc-client';
+import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type {
   ColumnDto,
@@ -187,7 +188,7 @@ export const useBoardStore = defineStore('board', () => {
   unassignedIssues.value = unassigned;
   return { columns: resultColumns, autoInitCreatedCount: resultAutoInitCount };
   } catch (e) {
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   } finally {
   loading.value = false;
@@ -300,7 +301,7 @@ export const useBoardStore = defineStore('board', () => {
  issuesByColumn.value = byCol;
  unassignedIssues.value = unassigned;
  } catch (e) {
- error.value = e as UserFacingError;
+ error.value = normalizeError(e);
  throw e;
  } finally {
  loadingIssues.value.delete(columnId);
@@ -333,7 +334,7 @@ export const useBoardStore = defineStore('board', () => {
  };
  return issue;
  } catch (e) {
- error.value = e as UserFacingError;
+ error.value = normalizeError(e);
  throw e;
  }
  }
@@ -393,7 +394,7 @@ export const useBoardStore = defineStore('board', () => {
  (i) => i.index !== args.issueIndex,
  ),
  };
- error.value = e as UserFacingError;
+ error.value = normalizeError(e);
  throw e;
  }
  }
@@ -425,7 +426,7 @@ export const useBoardStore = defineStore('board', () => {
   ...issuesByColumn.value,
   [colId]: [...(issuesByColumn.value[colId] ?? []), issue!].sort((a, b) => a.index - b.index),
   };
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   }
   }
@@ -510,7 +511,7 @@ export const useBoardStore = defineStore('board', () => {
   (i) => i.index !== args.issueIndex,
   ),
   };
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   }
   }
@@ -594,7 +595,7 @@ export const useBoardStore = defineStore('board', () => {
   issuesByColumn.value = { ...issuesByColumn.value, [col.id]: [] };
   return col;
   } catch (e) {
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   }
   }
@@ -635,7 +636,7 @@ export const useBoardStore = defineStore('board', () => {
   : c,
   );
   } catch (e) {
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   }
   }
@@ -654,7 +655,7 @@ export const useBoardStore = defineStore('board', () => {
   delete next[args.columnId];
   issuesByColumn.value = next;
   } catch (e) {
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   }
   }
@@ -685,7 +686,7 @@ export const useBoardStore = defineStore('board', () => {
   // 同步本地：用后端 DTO 覆盖（gitea 实时 name/color）
   columns.value = columns.value.map((c) => (c.id === args.columnId ? col : c));
   } catch (e) {
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   }
   }
@@ -703,7 +704,7 @@ export const useBoardStore = defineStore('board', () => {
   : c,
   );
   } catch (e) {
-  error.value = e as UserFacingError;
+  error.value = normalizeError(e);
   throw e;
   }
   }

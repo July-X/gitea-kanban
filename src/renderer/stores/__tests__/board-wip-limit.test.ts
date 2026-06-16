@@ -60,6 +60,8 @@ vi.mock('@renderer/lib/ipc-client', () => ({
   issuesUpdate: vi.fn(),
   labelsList: vi.fn(),
   getIpcClient: vi.fn(),
+  // store 层 catch (e) 时调 normalizeError 把 unknown 规整为 UserFacingError
+  normalizeError: vi.fn((e: unknown) => e),
 }));
 
 import { setActivePinia, createPinia } from 'pinia';

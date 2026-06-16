@@ -19,6 +19,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { issuesList } from '@renderer/lib/ipc-client';
+import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { IssueCardDto } from '../../main/ipc/schema.js';
 
@@ -104,7 +105,7 @@ export const useMyCardStore = defineStore('my-card', () => {
       currentProjectId.value = projectId;
       currentAssignee.value = assignee;
     } catch (e) {
-      error.value = e as UserFacingError;
+      error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;
