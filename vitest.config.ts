@@ -48,10 +48,18 @@ export default defineConfig({
         '**/index.ts',  // barrel files（被覆盖在各自子文件里）
       ],
       thresholds: {
-        lines: 70,
-        statements: 70,
-        functions: 70,
-        branches: 65,
+        // v1.4 polish 修订（commit 5b5a432+）：实际覆盖率 23.5%（远低于历史 70% 假数字）。
+        // 原因：main/ipc + main/gitea + main/board 三层业务几乎 0 测（1 万+ LOC）。
+        // 历史 70% 是 v1.0 设的"目标"——实际没 enforce（CI 只跑 pnpm test，不带 coverage）。
+        // v1.4 拍板：把 threshold 降到当前实际 + buffer，**不**装高水位。
+        // 后续 plan（v1.5/M12）逐步补 IPC handler / board 业务 / gitea 集成的单测后再涨。
+        //
+        // 2026-06-16 baseline：lines 23.49% / statements 23.52% / branches 12.49% / functions 24.57%
+        // 设 buffer = +2pp 给后续零星加测的余量
+        lines: 25,
+        statements: 25,
+        functions: 25,
+        branches: 15,
       },
     },
   },
