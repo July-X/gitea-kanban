@@ -21,6 +21,7 @@ import {
   boardColumnsCreate,
   boardColumnsDelete,
   boardColumnsList,
+  boardColumnsReset,
   boardColumnsMapLabel,
   boardColumnsUnmapLabel,
   boardColumnsUpdate,
@@ -172,6 +173,46 @@ export const useBoardStore = defineStore('board', () => {
  *   · N 列 → 0（已建过不干预，不弹 toast）
  *   · 抛错 → 0（错误优先，错误走 board.error）
  */
+  /**
+   * v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
+   * 重置 columns + 列绑 label + 重新跑 autoInit
+   *
+   * 设计：
+   *   - 调 boardColumnsReset({ projectId }) 走 IPC（v1.4 新增）
+   *     · 主进程 resetColumns 删所有列 + labelMaps
+   *     · 重新跑 autoInit（走 cluster L1/L2/L3）建列
+   *   - 重新 boardColumnsList 拉新列
+   *   - 不重置 currentProjectId（保持 user 选的项目）
+   *
+   * 二次确认：UI 层（BoardTopbar "重建视图"按钮）已用 ConfirmDialog
+   *
+   * @returns LoadBoardResult（autoInitBreakdown=null —— reset 路径不返回 breakdown）
+   */
+  async function resetColumnsAndReinit(projectId: string): Promise<LoadBoardResult> {
+    loading.value = true;
+    useGlobalLoadingStore().show('board');
+    error.value = null;
+    let resultColumns: ColumnDto[] = [];
+    try {
+      currentProjectId.value = projectId;
+      // 1. 调 reset IPC（主进程删列 + labelMaps）
+      await boardColumnsReset({ projectId });
+      // 2. 调 loadBoard —— 内部自动触发 autoInit（cluster L1/L2/L3）
+      //    loadBoard 返 LoadBoardResult 含 autoInitCreatedCount + autoInitBreakdown
+      return await loadBoard(projectId);
+    } catch (e) {
+      error.value = normalizeError(e);
+      return {
+        columns: resultColumns,
+        autoInitCreatedCount: 0,
+        autoInitBreakdown: null,
+      };
+    } finally {
+      loading.value = false;
+      useGlobalLoadingStore().hide('board');
+    }
+  }
+
   async function loadBoard(projectId: string): Promise<LoadBoardResult> {
   loading.value = true;
   useGlobalLoadingStore().show('board');
@@ -706,6 +747,8 @@ async function autoInitColumns(
   findIssueColumnId,
   labelIdsOf,
   // actions
+  // v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
+  resetColumnsAndReinit,
   loadBoard,
   refreshColumn,
   createIssue,

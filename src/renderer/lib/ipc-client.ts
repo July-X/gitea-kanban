@@ -566,7 +566,7 @@ export function pullsUpdateReviewers(args: {
 }
 
 // ============================================================
-// ===== board.columns.* （ADR-0002 reset 后7 个端点） =====
+// ===== board.columns.* （ADR-0002 reset 后 8 个端点，v1.4 加 reset） =====
 // ============================================================
 
 /**列出某 project 的看板列 */
@@ -595,6 +595,15 @@ export function boardColumnsReorder(args: { projectId: string; orderedIds: strin
 /** 删除看板列（**危险操作**，UI 必须二次确认） */
 export function boardColumnsDelete(args: { columnId: string }): Promise<void> {
  return getIpcClient().invokeNested('board', 'columns', 'delete', args);
+}
+
+/**
+ * v1.4 增量 · 拍板 2026-06-16 user 拍板"重建视图"按钮
+ * 重置 project 的列 + 重新跑 autoInit
+ * @returns { resetCount, autoInitCreatedCount } 给前端 toast 文案
+ */
+export function boardColumnsReset(args: { projectId: string }): Promise<{ resetCount: number }> {
+ return getIpcClient().invokeNested('board', 'columns', 'reset', args) as Promise<{ resetCount: number; autoInitCreatedCount: number }>;
 }
 
 /** 列绑一个 gitea label（issue 带这个 label 就属于这个列）

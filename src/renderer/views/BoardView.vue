@@ -20,6 +20,7 @@
  */
 import { computed, ref } from 'vue';
 import { Plus } from 'lucide-vue-next';
+import { showToast } from '@renderer/lib/toast';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
 import type { RepoDto } from '../../main/ipc/schema.js';
@@ -50,6 +51,59 @@ const newIssueDrafts = ref<Record<string, string>>({});
 // v1.4（P0-1 autoInit 透明化）：把 useColumnManager() 提到顶部，让 openColumnMenu
 // 既能注入 bootstrap 回调、又能给下面解构用（避免重复声明）
 const columnManager = useColumnManager();
+
+// v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
+// ConfirmDialog 状态
+const resetDialogOpen = ref(false);
+
+/** 打开 ConfirmDialog（BoardTopbar @reset-view 触发） */
+function onResetViewRequest(): void {
+  // 至少要有 activeProject 才允许 reset（否则就 Reset 0 列，没必要）
+  if (!activeProjectId.value) {
+    showToast({
+      type: 'info',
+      message: '当前未选仓库',
+      description: '请先在状态栏选个仓库再重建视图',
+      duration: 3000,
+    });
+    return;
+  }
+  resetDialogOpen.value = true;
+}
+
+/** 用户点 ConfirmDialog 确认 → 调 store resetColumnsAndReinit */
+async function onConfirmResetView(): Promise<void> {
+  resetDialogOpen.value = false;
+  const projectId = activeProjectId.value;
+  if (!projectId) return;
+  const beforeCount = board.columns.length;
+  try {
+    const result = await board.resetColumnsAndReinit(projectId);
+    if (result.autoInitCreatedCount > 0) {
+      showToast({
+        type: 'success',
+        message: '视图已重建',
+        description: `已清空 ${beforeCount} 列并按 gitea label 重新建了 ${result.autoInitCreatedCount} 列`,
+        duration: 4500,
+      });
+    } else {
+      showToast({
+        type: 'info',
+        message: '视图已重建',
+        description: `已清空 ${beforeCount} 列（gitea 暂无 label，无新列可建）`,
+        duration: 3500,
+      });
+    }
+  } catch (e) {
+    // store 内部已 set error.value；这里只提示
+    showToast({
+      type: 'error',
+      message: '重建失败',
+      description: '请看状态栏错误提示，重试一次',
+      duration: 4000,
+    });
+  }
+}
 const { openColumnMenu } = columnManager;
 const { activeProjectId } = useBoardBootstrap({
   onAutoInitOpenColumnMenu: (col) => {
@@ -146,6 +200,7 @@ const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
       :loading="board.loading"
       @undo="undoLastMove"
       @redo="redoLastMove"
+      @reset-view="onResetViewRequest"
     />
 
     <div v-if="!activeRepo" class="board__placeholder">
@@ -325,6 +380,24 @@ const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
       confirm-keyword="删除"
       @update:open="(v) => (confirmDeleteColumn.open = v)"
       @confirm="performDeleteColumn"
+    />
+
+    <!--
+      v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
+      - ConfirmDialog 二次确认（AGENTS §9.2 危险操作）
+      - 描述带列数（动态）："已清空 N 列后按 gitea label 重建"
+      - confirm-keyword 强制输入「重建」（让用户主动敲字才能确认）
+    -->
+    <ConfirmDialog
+      :open="resetDialogOpen"
+      title="重建视图"
+      :description="`会移除本地 ${board.columns.length} 个列,重建后按 gitea label 重新生成。继续?`"
+      confirm-label="重建"
+      cancel-label="取消"
+      :danger="true"
+      confirm-keyword="重建"
+      @update:open="(v) => (resetDialogOpen = v)"
+      @confirm="onConfirmResetView"
     />
   </div>
 </template>
