@@ -24,6 +24,7 @@ import { useSettingsStore } from '@renderer/stores/settings';
 import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stores/ui';
 import { useRouter } from 'vue-router';
 import { showToast } from '@renderer/lib/toast';
+import { formatLastUpdated } from '@renderer/lib/last-updated';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
@@ -52,8 +53,11 @@ const stateText = computed(() => {
   switch (connState.value) {
     case 'connected':
       return '已连接';
-    case 'offline':
-      return '离线模式（使用本地缓存）';
+    case 'offline': {
+      // v1.4 polish：离线时显示缓存数据年龄（用户最想知道"看到的是多旧的数据"）
+      const age = formatLastUpdated();
+      return age ? `离线 · 缓存来自 ${age}` : '离线模式（使用本地缓存）';
+    }
     case 'error':
       return '连接异常';
     case 'unauthenticated':

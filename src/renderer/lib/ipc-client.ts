@@ -19,6 +19,7 @@
  */
 
 import type { IpcErrorPayload, IpcErrorCodeValue } from '@shared/errors';
+import { markUpdated } from './last-updated';
 import type {
   ConnectResult,
   StatusResult,
@@ -261,9 +262,13 @@ export class IpcClient {
   //唯一例外：auth.connect走 (giteaUrl, token) 双参而不是 (args) 单参
   if (namespace === 'auth' && method === 'connect') {
   const a = args as { giteaUrl: string; token: string };
-  return (await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(a.giteaUrl, a.token)) as T;
+  const r = (await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(a.giteaUrl, a.token)) as T;
+  markUpdated();
+  return r;
   }
-  return (await ns[method](args)) as T;
+  const r = (await ns[method](args)) as T;
+  markUpdated();
+  return r;
   } catch (err) {
   throw normalizeError(err);
   }
@@ -295,7 +300,9 @@ export class IpcClient {
  } satisfies UserFacingError;
  }
   try {
-  return (await subNs[method](args)) as T;
+  const r = (await subNs[method](args)) as T;
+  markUpdated();
+  return r;
   } catch (err) {
   throw normalizeError(err);
   }
