@@ -402,3 +402,49 @@
   from { transform: translateY(8px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* ============================================================
+ * v1.4 P0-2：列设置弹窗"未归类 gitea label"banner 区
+ *   - 触发条件：unmatchedCount > 0
+ *   - v1.4 占位（CTA disabled，v1.5 接 board store 真实值后开放）
+ *   - 颜色走主色 / 警告 token，跟 P0-1 toast 风格统一
+ * ============================================================ */
+.modal__unmatched {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+}
+
+.modal__unmatched-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-warning);
+  line-height: 1.4;
+}
+
+.modal__unmatched-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.modal__unmatched-actions .modal__btn {
+  /* CTA 按钮在 warning banner 里要更紧凑 */
+  padding: 4px 10px;
+  font-size: var(--font-xs);
+  flex: 1;
+}
+
+.modal__unmatched-actions .modal__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal__unmatched-hint {
+  margin: 0;
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}

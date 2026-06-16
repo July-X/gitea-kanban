@@ -7,6 +7,12 @@
  * - 显示已绑 label 列表（chip 形式）+ 解绑 + "+ 绑定 gitea 标签"入口
  * - 删列按钮（独立操作 → 触发 confirm dialog）
  *
+ * v1.4 增强（P0-2 列 = label UI 标注落地 · plan_25cc4562 Task C）：
+ * - 加 `unmatchedCount: number` props（v1.4 默认 0；v1.5 接 autoInit 升级版后传真实值）
+ * - "未归类" banner 区：v1.4 提示文案占位，v1.5 接两个 CTA（"再建几列" / "塞进待办"）
+ * - 边界：v1.4 **不**碰 board store，**不**新增 IPC，**不**加 wireframe 里说的"批量建列向导"
+ *   （向导涉及 cluster 逻辑，是 P0-2 wireframe 后续 v1.5 增量）
+ *
  * 通信：props + emit（不直接调 store）
  *   - props.open          : 是否打开
  *   - props.column        : 当前列（v1 一次只编辑一列；null = 关闭态）
@@ -15,6 +21,7 @@
  *   - props.isWipInvalid  : 当前输入是否非法（父组件判定后传回）
  *   - props.isDirty       : 是否有字段变更（父组件判定后传回）
  *   - props.bindingLabel  : 正在绑 label 时的 loading 态
+ *   - props.unmatchedCount: 当前仓库还有 N 个 gitea label 未归类（v1.4 默认 0）
  *   - emit('update:open')        : 关闭弹窗
  *   - emit('update:editingTitle') : 列名输入
  *   - emit('update:editingWipLimit') : WIP 输入
@@ -22,6 +29,8 @@
  *   - emit('request-delete')     : 删列按钮
  *   - emit('unbind-label', id)   : 解绑 label
  *   - emit('open-bind-label')    : 打开"绑 label picker"
+ *   - emit('open-batch-create')  : 打开"批量建列"向导（v1.5 增量，v1.4 占位）
+ *   - emit('bind-unmatched-to-current') : 把未匹配 label 绑到当前列（v1.5 增量，v1.4 占位）
  */
 import { Trash2, X } from 'lucide-vue-next';
 import type { ColumnDto } from '../../../main/ipc/schema.js';
@@ -34,9 +43,17 @@ interface Props {
   isWipInvalid: boolean;
   isDirty: boolean;
   bindingLabel: boolean;
+  /**
+   * v1.4 P0-2：当前仓库还有 N 个 gitea label 未归类
+   *  - 默认 0：v1.4 兜底（不显示 banner）
+   *  - v1.5 接 board store 真实值
+   */
+  unmatchedCount: number;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  unmatchedCount: 0,
+});
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void;
@@ -46,6 +63,8 @@ const emit = defineEmits<{
   (e: 'request-delete'): void;
   (e: 'unbind-label', labelId: number): void;
   (e: 'open-bind-label'): void;
+  (e: 'open-batch-create'): void;
+  (e: 'bind-unmatched-to-current'): void;
 }>();
 
 function close(): void {
@@ -137,6 +156,41 @@ function close(): void {
             >
               + 绑定 gitea 标签
             </button>
+          </div>
+          <!--
+            v1.4 P0-2：未归类 gitea label 提示
+            - 触发条件：unmatchedCount > 0
+            - v1.4：仅占位 banner，CTA 按钮 disabled（v1.5 接 board store 真实值后再开放）
+            - v1.5：CTA 1 = "再建几列"（走向导），CTA 2 = "塞进待办"（一键绑当前列）
+            - 设计原因：让 user 在列设置里"看见"还有 label 没归类，**不**藏在 toast 里（toast 会被关）
+          -->
+          <div v-if="props.unmatchedCount > 0" class="modal__unmatched">
+            <p class="modal__unmatched-title">
+              ⚠ 仓库还有 {{ props.unmatchedCount }} 个 gitea 标签没归类
+            </p>
+            <div class="modal__unmatched-actions">
+              <button
+                type="button"
+                class="modal__btn modal__btn--primary"
+                disabled
+                :title="'v1.5 增量：批量建列向导'"
+                @click="emit('open-batch-create')"
+              >
+                再建几列
+              </button>
+              <button
+                type="button"
+                class="modal__btn modal__btn--ghost"
+                disabled
+                :title="'v1.5 增量：把未匹配 label 绑到当前列'"
+                @click="emit('bind-unmatched-to-current')"
+              >
+                塞进当前列
+              </button>
+            </div>
+            <p class="modal__unmatched-hint muted">
+              v1.5 接入 autoInit 升级版后开放（详见 P0-1 wireframe 场景 3）
+            </p>
           </div>
         </div>
         <footer class="modal__footer">
