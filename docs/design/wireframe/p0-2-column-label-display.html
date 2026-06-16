@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <title>Gitea Kanban · Wireframe · P0-2 列 = label UI 标注</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ============================================================
+       仅 dark（user 拍板 wireframe 不画 light）
+       ============================================================ */
+    :root {
+      --color-primary: #74B830;
+      --color-primary-soft: rgba(116, 184, 48, 0.18);
+      --color-primary-alpha-22: rgba(116, 184, 48, 0.22);
+      --color-accent: #F76707;
+      --color-text: #DCE9F0;
+      --color-text-secondary: #90A4AE;
+      --color-text-muted: #5F7A87;
+      --color-bg: #0F1115;
+      --color-bg-elevated: #1E222A;
+      --color-bg-hover: #2D333F;
+      --color-divider: rgba(220, 233, 240, 0.12);
+      --color-info: #4fc4d6;
+      --color-warning: #E8B954;
+      --color-warning-soft: rgba(232, 185, 84, 0.14);
+      --color-danger: #F47A6B;
+      --color-danger-soft: rgba(244, 122, 107, 0.14);
+      --color-success: #5BC76A;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', 'Noto Sans SC', sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+    .page { max-width: 1280px; margin: 0 auto; padding: 32px 40px 80px; }
+
+    .wireframe-header {
+      padding: 24px 32px;
+      background: var(--color-bg-elevated);
+      border-radius: var(--radius-lg);
+      border-left: 4px solid var(--color-primary);
+      margin-bottom: 40px;
+    }
+    .wireframe-header h1 { margin: 0 0 8px; font-size: 22px; font-weight: 700; }
+    .wireframe-header p { margin: 0 0 12px; color: var(--color-text-secondary); }
+    .wireframe-header code {
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 12px;
+      color: var(--color-primary);
+    }
+    .wireframe-header .meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+    .wireframe-header .meta span {
+      background: rgba(0, 0, 0, 0.2);
+      padding: 2px 8px;
+      border-radius: 3px;
+    }
+
+    .scene { margin-bottom: 56px; }
+    .scene h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: var(--color-primary); }
+    .scene .desc { color: var(--color-text-secondary); margin: 0 0 16px; font-size: 13px; }
+    .scene .desc strong { color: var(--color-text); }
+    .scene .caption {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      margin-top: 12px;
+      padding-left: 12px;
+      border-left: 2px solid var(--color-divider);
+    }
+    .scene .caption b { color: var(--color-info); }
+
+    /* ===== Board mock（3 列 + 1 警示）===== */
+    .board {
+      display: grid;
+      grid-template-columns: 280px 280px 280px 280px;
+      gap: 12px;
+      padding: 16px;
+      background: var(--color-bg);
+      border: 1px solid var(--color-divider);
+      border-radius: var(--radius-md);
+    }
+    .col {
+      background: var(--color-bg-elevated);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      min-height: 400px;
+      display: flex;
+      flex-direction: column;
+    }
+    .col--warning {
+      border: 2px dashed var(--color-danger);
+    }
+    .col__header {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 12px 8px;
+      border-bottom: 1px solid var(--color-divider);
+    }
+    .col__title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .col__title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+    }
+    .col__count {
+      font-size: 11px;
+      padding: 2px 8px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      color: var(--color-text-secondary);
+      font-weight: 500;
+    }
+    .col__settings-btn {
+      width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid var(--color-divider);
+      border-radius: 4px;
+      color: var(--color-text-muted);
+      cursor: pointer;
+    }
+    .col__settings-btn:hover {
+      color: var(--color-text);
+      background: var(--color-bg-hover);
+    }
+    /* P0-2 关键：label chip 区 */
+    .col__labels {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .label-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px 2px 4px;
+      background: rgba(0,0,0,0.25);
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--color-text);
+    }
+    .label-chip__dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .col--warning-banner {
+      background: var(--color-danger-soft);
+      color: var(--color-danger);
+      padding: 8px 10px;
+      font-size: 11px;
+      line-height: 1.4;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      border-bottom: 1px solid var(--color-danger);
+    }
+    .col--warning-banner .icon { flex-shrink: 0; margin-top: 1px; }
+    .col--warning-banner b { display: block; font-weight: 600; margin-bottom: 2px; }
+    .col--warning-banner button {
+      margin-top: 6px;
+      background: var(--color-danger);
+      color: var(--color-bg);
+      border: none;
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+    }
+
+    .col__body {
+      padding: 8px;
+      flex: 1;
+      color: var(--color-text-muted);
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <div class="wireframe-header">
+    <h1>P0-2 · 列 = label UI 显式标注</h1>
+    <p>
+      拍板 2026-06-16：<code>column.labels[]</code> 数据已在 schema / store，但 UI 现状是"label 列表 join 成一行 + 统一灰色 icon"——user 看见不到"列绑了哪些 gitea label、为什么这些 issue 进这列"。
+    </p>
+    <p>
+      这次把"列 = label"这件事从隐式变显式：列头 chip 化用 gitea label 真实颜色、列没绑 label 时<b>显式红边警告</b>、列菜单<b>批量建列 + 自动绑剩余 label</b> 入口。
+    </p>
+    <div class="meta">
+      <span>📁 改动 3 个文件：ColumnHeader.vue / ColumnMenu.vue / KanbanColumnSection.vue（待评审）</span>
+      <span>⏱ 工程量 ~1.5-2 天</span>
+      <span>🎯 风险 中（高频 UI）</span>
+    </div>
+  </div>
+
+  <!-- 场景 1：现状（baseline，标出来对比） -->
+  <div class="scene">
+    <h2>场景 1：v1.4 现状（对照 baseline）</h2>
+    <p class="desc">
+      列头"已绑 label"已经存在，但 chip 用 <code>·</code> join 成一行、icon 统一灰色——user 看不出"为什么这些 issue 进这列"。计数字段文案 bug 写"X 个标签"，实际是 issue 数。
+    </p>
+
+    <div class="board">
+      <div class="col">
+        <div class="col__header">
+          <div class="col__title-row">
+            <h3 class="col__title">待办</h3>
+            <span class="col__count">3 个标签</span>
+            <button class="col__settings-btn" title="设置列 待办">⚙</button>
+          </div>
+          <div class="col__labels">
+            <span style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-accent);">
+              <span style="width: 11px; height: 11px; border: 1.5px solid currentColor; border-radius: 2px;"></span>
+              <span style="width: 11px; height: 11px; border: 1.5px solid currentColor; border-radius: 2px;"></span>
+              <span style="width: 11px; height: 11px; border: 1.5px solid currentColor; border-radius: 2px;"></span>
+              <span style="color: var(--color-text-secondary);">待办 · todo · backlog</span>
+            </span>
+          </div>
+        </div>
+        <div class="col__body">（v1.4 现状）</div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>问题 1</b>：chip 用 <code>·</code> join，user 分不清"一个 label"还是"三个 label"。<br>
+      <b>问题 2</b>：icon 统一灰色（<code>var(--color-accent)</code>），不显示 gitea label 真实颜色 → user 看不到 label 视觉区分。<br>
+      <b>问题 3</b>：列没绑 label 时，<b>无</b>任何警告 → user 不知道"issue 怎么不进来"。
+    </p>
+  </div>
+
+  <!-- 场景 2：理想态（绑定 label + 真实颜色 + 卡片计数） -->
+  <div class="scene">
+    <h2>场景 2：P0-2 增强后（绑 label · 显示真实颜色 · chip 化）</h2>
+    <p class="desc">
+      列头显示绑的 gitea label（用 gitea label 真实颜色作背景圆点），每个 label 一个 chip。计数字段改回正确的"X 张卡片"。user 一眼能看到"这列匹配哪些 gitea label"。
+    </p>
+
+    <div class="board">
+      <div class="col">
+        <div class="col__header">
+          <div class="col__title-row">
+            <h3 class="col__title">待办</h3>
+            <span class="col__count">3 张</span>
+            <button class="col__settings-btn" title="设置列 待办">⚙</button>
+          </div>
+          <div class="col__labels">
+            <span class="label-chip">
+              <span class="label-chip__dot" style="background: #fbca04;"></span>
+              待办
+            </span>
+            <span class="label-chip">
+              <span class="label-chip__dot" style="background: #0e8a16;"></span>
+              todo
+            </span>
+            <span class="label-chip">
+              <span class="label-chip__dot" style="background: #cccccc;"></span>
+              backlog
+            </span>
+          </div>
+        </div>
+        <div class="col__body">（P0-2 增强）</div>
+      </div>
+
+      <div class="col">
+        <div class="col__header">
+          <div class="col__title-row">
+            <h3 class="col__title">进行中</h3>
+            <span class="col__count">2 / 5</span>
+            <button class="col__settings-btn">⚙</button>
+          </div>
+          <div class="col__labels">
+            <span class="label-chip">
+              <span class="label-chip__dot" style="background: #1d76db;"></span>
+              进行中
+            </span>
+            <span class="label-chip">
+              <span class="label-chip__dot" style="background: #5319e7;"></span>
+              in-progress
+            </span>
+          </div>
+        </div>
+        <div class="col__body">（WIP 限制 5）</div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>改进点</b>：<br>
+      ① 每个 label 一个独立 chip，gitea label 颜色作背景圆点 → 视觉快速匹配<br>
+      ② 计数改回"X 张"（不是"X 个标签"）——修文案 bug<br>
+      ③ 有 WIP 时显示"2 / 5"格式（v1 已有）<br>
+      ④ 列设置按钮保留（v1 已有）
+    </p>
+  </div>
+
+  <!-- 场景 3：列没绑 label 的红边警告 -->
+  <div class="scene">
+    <h2>场景 3：列没绑 label → 红边警告</h2>
+    <p class="desc">
+      列绑的 label 集合为空（user 手动建了一列 + 没绑任何 label），或者绑的 label 都被删了——这种情况 user 不知道为什么"issue 进不来"。红边虚线 + banner 明确告知 + 一键跳到列设置。
+    </p>
+
+    <div class="board">
+      <div class="col col--warning">
+        <div class="col__header">
+          <div class="col__title-row">
+            <h3 class="col__title">设计稿评审</h3>
+            <span class="col__count">0 张</span>
+            <button class="col__settings-btn">⚙</button>
+          </div>
+          <div class="col__labels" style="color: var(--color-text-muted); font-size: 11px;">
+            （未绑 gitea label）
+          </div>
+        </div>
+        <div class="col--warning-banner">
+          <span class="icon">⚠</span>
+          <div>
+            <b>这列没有匹配 gitea label</b>
+            带任何 gitea label 的 issue 都不会进这列。点下方按钮去列设置绑定。
+            <br><button>去列设置绑 label</button>
+          </div>
+        </div>
+        <div class="col__body">（issue 进不来）</div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>触发条件</b>：<code>column.labels.length === 0</code><br>
+      <b>视觉</b>：<b>红色虚线边框</b>（2px dashed）+ banner（红底柔色 + 警示图标 + 文案 + CTA）<br>
+      <b>CTA</b>："去列设置绑 label" — 点击直接打开列设置弹窗（useColumnManager.openColumnMenu）<br>
+      <b>为什么"虚线"而不是"实线"</b>：虚线 = "需要用户操作"，实线 = "已确认的边界"（设计系统 §HUD 装饰规则）
+    </p>
+  </div>
+
+  <!-- 场景 4：列菜单新增"批量建列" -->
+  <div class="scene">
+    <h2>场景 4：列菜单加"批量建列 + 自动绑剩余 label"</h2>
+    <p class="desc">
+      现状：列菜单有"已绑 label"列表 + "+ 绑定 gitea 标签" 入口（ColumnMenu.vue:110-130）。本次增强：加 <b>"批量建列 + 自动绑剩余 label"</b> 按钮，把 autoInit 升级版的"未匹配的 label"一键处理。
+    </p>
+
+    <div style="background: var(--color-bg-elevated); padding: 16px; border-radius: var(--radius-md); max-width: 420px; font-size: 13px;">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+        <strong>设置列 待办</strong>
+        <span style="margin-left: auto; color: var(--color-text-muted);">×</span>
+      </div>
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--color-text-muted); margin-bottom: 4px;">列名</div>
+        <input value="待办" style="width: 100%; padding: 6px 8px; background: var(--color-bg); border: 1px solid var(--color-divider); border-radius: 4px; color: var(--color-text); font-family: inherit;" />
+      </div>
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--color-text-muted); margin-bottom: 4px;">已绑 gitea 标签</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+          <span class="label-chip"><span class="label-chip__dot" style="background: #fbca04;"></span>待办 ×</span>
+          <span class="label-chip"><span class="label-chip__dot" style="background: #0e8a16;"></span>todo ×</span>
+        </div>
+        <button style="margin-top: 6px; background: var(--color-primary-soft); color: var(--color-primary); border: 1px solid var(--color-primary); padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; font-family: inherit;">+ 绑定 gitea 标签</button>
+      </div>
+      <!-- P0-2 新增：批量建列入口 -->
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--color-divider);">
+        <div style="font-size: 11px; color: var(--color-warning); margin-bottom: 6px;">
+          ⚠ 仓库还有 4 个 gitea label 没归类
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button style="flex: 1; background: var(--color-primary); color: var(--color-bg); border: none; padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; font-family: inherit; font-weight: 600;">
+            再建几列
+          </button>
+          <button style="flex: 1; background: transparent; color: var(--color-text-secondary); border: 1px solid var(--color-divider); padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; font-family: inherit;">
+            塞进待办
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>数据源</b>：autoInit 的 <code>autoInitBreakdown.unmatched</code> 字段（P0-1 透出）<br>
+      <b>行为</b>：<br>
+      · "再建几列"：打开"批量建列向导"（v1.5 增量，本次先放按钮占位）<br>
+      · "塞进待办"：把未匹配的 4 个 label 绑到当前列（待办），issue 自动归位<br>
+      <b>为什么在列菜单</b>：用户点开"列设置"说明他在管列 → 这是展示"未匹配 label"的合理位置
+    </p>
+  </div>
+
+  <!-- 场景 5：状态矩阵（4 列 × 4 状态） -->
+  <div class="scene">
+    <h2>📊 状态矩阵：4 列 × 4 状态</h2>
+
+    <div style="display: grid; grid-template-columns: 120px repeat(4, 1fr); gap: 8px; font-size: 12px; align-items: center;">
+      <div></div>
+      <div style="font-weight: 600; padding: 8px; text-align: center;">绑 1 个 label</div>
+      <div style="font-weight: 600; padding: 8px; text-align: center;">绑 3+ label</div>
+      <div style="font-weight: 600; padding: 8px; text-align: center;">绑 0 label</div>
+      <div style="font-weight: 600; padding: 8px; text-align: center;">绑 0 label + 有未归类</div>
+
+      <div style="font-weight: 600;">正常态</div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center;">
+        <div class="col__labels" style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;">
+          <span class="label-chip"><span class="label-chip__dot" style="background: #fbca04;"></span>bug</span>
+        </div>
+      </div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center;">
+        <div class="col__labels" style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;">
+          <span class="label-chip"><span class="label-chip__dot" style="background: #fbca04;"></span>待办</span>
+          <span class="label-chip"><span class="label-chip__dot" style="background: #0e8a16;"></span>todo</span>
+          <span class="label-chip"><span class="label-chip__dot" style="background: #cccccc;"></span>backlog</span>
+        </div>
+      </div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center; color: var(--color-text-muted);">
+        （未绑 gitea label）
+      </div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center; color: var(--color-text-muted);">
+        （未绑 + 4 未归类）
+      </div>
+
+      <div style="font-weight: 600;">警告态</div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center; color: var(--color-success);">无</div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center; color: var(--color-success);">无</div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center;">
+        <div style="display: inline-block; padding: 4px 8px; background: var(--color-danger-soft); color: var(--color-danger); border-radius: 4px; font-size: 10px; font-weight: 600;">红边虚线</div>
+      </div>
+      <div style="background: var(--color-bg-elevated); padding: 12px; border-radius: 4px; text-align: center;">
+        <div style="display: inline-block; padding: 4px 8px; background: var(--color-danger-soft); color: var(--color-danger); border-radius: 4px; font-size: 10px; font-weight: 600;">红边虚线</div>
+        <div style="display: inline-block; padding: 4px 8px; background: var(--color-warning-soft); color: var(--color-warning); border-radius: 4px; font-size: 10px; font-weight: 600; margin-top: 4px;">未归类条</div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>结论</b>：警告态 = "绑 0 label"（无论有没有未归类）。修复路径：列设置 → 绑 label。
+    </p>
+  </div>
+
+  <!-- 场景 6：列卡片视觉对比 -->
+  <div class="scene">
+    <h2>📦 改动文件 + 工程量</h2>
+
+    <div style="background: var(--color-bg-elevated); padding: 20px 24px; border-radius: var(--radius-md); font-size: 13px; line-height: 1.8;">
+      <div><b style="color: var(--color-primary);">ColumnHeader.vue</b> — chip 化 + gitea label 颜色 + 修"X 个标签"文案 bug + 加红边虚线 class（class 由父组件 KanbanColumnSection 控制）</div>
+      <div><b style="color: var(--color-primary);">KanbanColumnSection.vue</b> — 根据 <code>column.labels.length === 0</code> 加 <code>col--warning</code> class + 渲染红边 banner</div>
+      <div><b style="color: var(--color-primary);">ColumnMenu.vue</b> — 加"批量建列"分块（v1.4 占位，v1.5 接 autoInitBreakdown 字段）</div>
+      <div style="margin-top: 8px; color: var(--color-text-muted);">
+        总代码量：~50-80 行 CSS + ~20-30 行 TS。无新 IPC 端点（v1.4 不接 breakdown 字段）。<br>
+        测试：<code>useColumnManager.test.ts</code> + 文件指纹测试（ColumnHeader 必须含 chip 渲染 + 红边 class）
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
