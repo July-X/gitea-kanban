@@ -46,11 +46,17 @@ import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 const repo = useRepoStore();
 const board = useBoardStore();
 
-const search = ref('');
-const showProjectPicker = ref(false);
 const newIssueDrafts = ref<Record<string, string>>({});
-const { activeProjectId } = useBoardBootstrap();
-const { selectProject, createIssueInColumn, undoLastMove, redoLastMove } = useBoardActions({
+// v1.4（P0-1 autoInit 透明化）：把 useColumnManager() 提到顶部，让 openColumnMenu
+// 既能注入 bootstrap 回调、又能给下面解构用（避免重复声明）
+const columnManager = useColumnManager();
+const { openColumnMenu } = columnManager;
+const { activeProjectId } = useBoardBootstrap({
+  onAutoInitOpenColumnMenu: (col) => {
+    openColumnMenu(col);
+  },
+});
+const { createIssueInColumn, undoLastMove, redoLastMove } = useBoardActions({
   newIssueDrafts: newIssueDrafts.value,
   activeProjectId,
 });
@@ -61,7 +67,9 @@ const activeRepo = computed<RepoDto | null>(() => {
     : null;
   return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
 });
-const toggleProjectPicker = () => (showProjectPicker.value = !showProjectPicker.value);
+// v1.4 任务 #statusbar-picker：仓库选择已下沉到 StatusBar 全局 picker
+// BoardTopbar 不再接收 activeRepo / search / pickerOpen / selectProject 这些 props/emits
+// 这里保留 activeRepo 仅用于 EmptyState 判断"是否选过仓库"
 
 const {
   showCreateColumn,
@@ -76,7 +84,6 @@ const {
   openCreateColumn,
   closeCreateColumn,
   confirmCreateColumn,
-  openColumnMenu,
   isColumnOverLimit,
   wipOverLimitTooltip,
   isWipLimitInputInvalid,
@@ -119,18 +126,12 @@ const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
 <template>
   <div class="board">
     <BoardTopbar
-      :active-repo="activeRepo"
-      :repos="repo.repos"
-      :search="search"
       :can-undo="board.canUndo"
       :can-redo="board.canRedo"
       :undo-size="board.undoSize"
       :redo-size="board.redoSize"
+      :repo-count="repo.repos.length"
       :loading="board.loading"
-      :picker-open="showProjectPicker"
-      @toggle-picker="toggleProjectPicker"
-      @update:search="(v) => (search = v)"
-      @select="(r) => { showProjectPicker = false; void selectProject(r); }"
       @undo="undoLastMove"
       @redo="redoLastMove"
     />
@@ -138,12 +139,13 @@ const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
     <div v-if="!activeRepo" class="board__placeholder">
       <EmptyState
         title="还没有选中仓库"
-        description="点击左上角选择仓库，或去 gitea 添加新仓库"
+        description="点状态栏（窗口底部）的仓库名，从下拉里选一个"
       />
     </div>
-    <div v-else-if="board.loading && board.columns.length === 0" class="board__placeholder">
-      <p class="muted">正在加载看板…</p>
-    </div>
+    <!--
+      v1.4 拍板"替换模式"：删 v-else-if="board.loading && ..." 的"正在加载看板…"占位
+      全局海豚 overlay 接管请求级 loading
+    -->
     <div v-else-if="board.columns.length === 0" class="board__placeholder">
       <EmptyState
         title="这个仓库还没有看板列"
