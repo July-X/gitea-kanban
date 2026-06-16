@@ -64,6 +64,7 @@
     "electron-vite": "^5.0.0",
     "eslint": "^8.57.0",
     "eslint-plugin-vue": "^9.32.0",
+    "happy-dom": "^20.10.3",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^3.0.4",
     "pino-pretty": "^13.1.3",
