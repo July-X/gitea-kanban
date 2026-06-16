@@ -24,8 +24,10 @@ notes/cap_*.png
 # e2e bundle 产物（worker esbuild 自动生成，跑完可重建）
 scripts/.e2e-verify-*.bundled.mjs
 
-# gitea 测试服务运行时数据
-giteaDemo/data/
+# giteaDemo —— 本地 Gitea 测试服务目录（v1.4 polish 移除入仓）
+# 包含 docker-compose 配置 + README + .gitkeep + 内部 .gitignore
+# 整体不入仓，开发者各自在本地新建（参考 docs/dev/cdp-performance-testing.md 提示）
+giteaDemo/
 
 # 渲染端类型生成物（d.ts 编译产物）
 src/renderer/.d.ts/

@@ -90,7 +90,7 @@ pnpm dev
 应用启动后，**第一次**会引导你填两项：
 
 1. **Gitea 服务地址**——你的 Gitea 实例的网址，例如 `https://gitea.example.com`。
-   - 如果只是本地测试用，[`giteaDemo/README.md`](giteaDemo/README.md) 里有一个用 Docker 启动的本地实例。
+   - 本地测试用任何一个本地 Gitea 实例即可（Docker 部署 / 自托管都行），不需要专门的演示目录。
 2. **个人访问令牌**——在 Gitea 网页上「设置 → 应用 → 生成令牌」，勾上跟仓库读写、议题读写相关的权限。
    - 申请令牌的具体步骤会因 Gitea 版本略有不同，按网页提示走即可。
 
@@ -124,7 +124,7 @@ pnpm e2e:w3
 
 这条命令会跑 `tests/e2e/board-drag.spec.ts` 和 `tests/e2e/board-unassigned.spec.ts` 两个套件（合计 7 个用例）。底层走 vitest 的 mount-free 模式（不弹窗、用 mock IPC），不需要起 Electron。
 
-> **前提**：需要先在本地跑起一个 Gitea 测试实例（参考 [`giteaDemo/README.md`](giteaDemo/README.md)），并把令牌设到环境变量 `KB_TOKEN`。
+> **前提**：需要先在本地跑起一个 Gitea 测试实例（任何一个本地 Gitea 跑在 `localhost:3000` 即可），并把令牌设到环境变量 `KB_TOKEN`。
 >
 > 历史背景：M9 收口时拍板——W1 旧脚本（526 行）永不恢复，e2e 覆盖散在 W2/W3/W4 三个套件里。本仓库当前只维护 W3 一份，详见 `docs/review/m9-followup-e2e-coverage.md`。
 
@@ -141,7 +141,7 @@ pnpm e2e:w3
 
 ### 端到端测试跑不起来
 
-1. **Gitea 实例没起**：`pnpm e2e:w3` 需要本机有 Gitea 实例跑在 `localhost:3000`，按 [`giteaDemo/README.md`](giteaDemo/README.md) 起
+1. **Gitea 实例没起**：`pnpm e2e:w3` 需要本机有 Gitea 实例跑在 `localhost:3000`（任何一个本地实例都行）
 2. **`KB_TOKEN` 没设**：`export KB_TOKEN=<你的令牌>`，然后再跑
 3. **跑单测没问题但 e2e 失败**：e2e 走真实 gitea API，受网络 / 实例状态影响。先用 `pnpm test` 确认单测绿了，再看 e2e 报错具体是哪个 case
 

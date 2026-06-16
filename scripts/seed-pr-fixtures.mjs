@@ -6,7 +6,7 @@
  *   node scripts/seed-pr-fixtures.mjs
  *
  * 前提：
- *   - giteaDemo/docker compose up -d 已启动
+ *   - 本地有 Gitea 实例跑在 `localhost:3000`（任何来源的本地实例都可）
  *   - 已给 kanban_demo 生成 access token（与 cdp-seed-timeline-data.mjs 同一 token）
  *
  * 会创建：

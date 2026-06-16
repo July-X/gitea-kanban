@@ -79,7 +79,6 @@ gitea-kanban/
 │   ├── gitea-kanban/OVERRIDE.md # **本项目设计系统 single source of truth**
 │   └── pages/tech-refine.md     # v1.1/v1.2 科技感精修 token
 ├── drizzle/                     # 迁移 SQL 文件
-├── giteaDemo/                   # 本地 Gitea 演示 docker-compose
 ├── scripts/                     # 工具脚本
 │   ├── check-no-jargon.ts       # 零术语检查
 │   └── ...                      # e2e / seed / verify 脚本
@@ -179,8 +178,7 @@ pnpm check:no-jargon   # 零术语检查（**没跑过不准 merge**）
 ### 本地开发首次 setup
 1. `nvm use` 或保证 Node >= 20
 2. `pnpm install`（ADR-0003 完结后无 native binding 需求，postinstall 已移除）
-3. 如需本地 Gitea：`cd giteaDemo && docker compose up -d`
-4. `pnpm dev`
+3. `pnpm dev`
 
 ---
 

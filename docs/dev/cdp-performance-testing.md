@@ -91,7 +91,7 @@ node scripts/cdp-seed-timeline-data.mjs my-perf-branch 50
 ```
 
 - 在 `kanban_demo/m4java-test` 仓库创建一个新分支，并基于 main 生成指定数量的 commit。
-- 需要 Gitea demo 已启动（`cd giteaDemo && docker compose up -d`）。
+- 需要本地 Gitea 实例已启动在 `localhost:3000`（任何 Docker 部署 / 自托管实例均可）。
 - 环境变量：
   - `GITEA_URL`：默认 `http://localhost:3000`
   - `GITEA_TOKEN`：默认脚本里已填入给 `kanban_demo` 生成的 token；如果 token 过期，可到容器内执行：

@@ -8,7 +8,7 @@
  *   默认：分支名 prefix = timeline-test，commit 数 = 30
  *
  * 前提：
- *   - giteaDemo/docker compose up -d 已启动
+ *   - 本地有 Gitea 实例跑在 `localhost:3000`（任何来源的本地实例都可）
  *   - 已给 kanban_demo 生成 access token（见下面 TOKEN 获取方式）
  */
 import http from 'node:http';
