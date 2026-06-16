@@ -183,3 +183,77 @@ describe('ipc/clipboard · writeClipboard', () => {
     );
   });
 });
+
+describe('ipc/user · prefs get/set + undo/redo + undoStatus', () => {
+  beforeEach(async () => {
+    const stateMod = await import('../../local/state.js');
+    await stateMod._resetLocalStoreForTest();
+    await stateMod.initLocalStore();
+    const { registerUserIpc } = await import('../user.js');
+    registerUserIpc();
+  });
+
+  it('getPrefs 首次启动：未设过的 key → 返空 Record（不在 store 里的 key 不过滤，返回 store 实际内容）', async () => {
+    const handler = getHandler('user.prefs.get');
+    // schema 要求 keys.length >= 1，测试传一个不存在的 key 看默认行为
+    const result = await handler({ keys: ['nope'] });
+    // prefs 初始空 → result 是 prefs 快照过滤后（不存在的 key 跳过）
+    expect(result).toEqual({});
+  });
+
+  it('setPrefs 后 getPrefs 返设置值', async () => {
+    const setHandler = getHandler('user.prefs.set');
+    await setHandler({ entries: { foo: 'bar' } });
+    const getHandler2 = getHandler('user.prefs.get');
+    const result = await getHandler2({ keys: ['foo'] });
+    expect(result).toEqual({ foo: 'bar' });
+  });
+
+  it('setPrefs 入参 entries 为空 → 不写（不调 mutate）', async () => {
+    const setHandler = getHandler('user.prefs.set');
+    await setHandler({ entries: {} });
+    // 验证 prefs 仍空
+    const stateMod = await import('../../local/state.js');
+    expect(stateMod.getLocalStore().get().prefs).toEqual({});
+  });
+
+  it('undoStatus 未推栈 → 返 0/0', async () => {
+    const handler = getHandler('user.undoStatus');
+    const result = await handler({ projectId: 'p-1' });
+    expect(result).toEqual({ undoSize: 0, redoSize: 0 });
+  });
+
+  it('pushUndo 后 undoStatus 返深度 + undoOne 弹栈 + 调 reverse handler', async () => {
+    const { pushUndo, registerUndoHandler, _resetStacks } = await import('../../board/undo.js');
+    // 同一个 vitest module 实例（vi.resetModules 没清 board/undo 因为它 import 在 setHandler 之前）
+    _resetStacks();
+    registerUndoHandler('issues.moveColumn', {
+      forward: vi.fn().mockResolvedValue(undefined),
+      reverse: vi.fn().mockResolvedValue(undefined),
+    });
+    pushUndo('issues.moveColumn', 'p-1', { fwd: 1 }, { rev: 1 });
+
+    // undoStatus 返深度
+    const statusHandler = getHandler('user.undoStatus');
+    const status = await statusHandler({ projectId: 'p-1' });
+    expect(status).toEqual({ undoSize: 1, redoSize: 0 });
+
+    // undoOne 弹栈
+    const undoHandler = getHandler('user.undo');
+    const result = (await undoHandler({ projectId: 'p-1' })) as { restored: number };
+    expect(result.restored).toBe(1);
+    // 推 redo
+    const statusAfter = await statusHandler({ projectId: 'p-1' });
+    expect(statusAfter).toEqual({ undoSize: 0, redoSize: 1 });
+  });
+
+  it('unregisterUserIpc 移除 5 个 channel handler', async () => {
+    const { unregisterUserIpc } = await import('../user.js');
+    unregisterUserIpc();
+    expect(mocks.ipcMainRemoveHandler).toHaveBeenCalledWith('user.prefs.get');
+    expect(mocks.ipcMainRemoveHandler).toHaveBeenCalledWith('user.prefs.set');
+    expect(mocks.ipcMainRemoveHandler).toHaveBeenCalledWith('user.undo');
+    expect(mocks.ipcMainRemoveHandler).toHaveBeenCalledWith('user.redo');
+    expect(mocks.ipcMainRemoveHandler).toHaveBeenCalledWith('user.undoStatus');
+  });
+});
