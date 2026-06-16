@@ -45,10 +45,13 @@ interface Props {
   bindingLabel: boolean;
   /**
    * v1.4 P0-2：当前仓库还有 N 个 gitea label 未归类
+   *  - 可选 prop（v1.4 BoardView 不传，v1.5 接 board store 真实值后必传）
    *  - 默认 0：v1.4 兜底（不显示 banner）
-   *  - v1.5 接 board store 真实值
+   *  - 类型标记 `unmatchedCount?: number`（**不**标必填）→ Vue dev mode 不报 "Missing required prop"
+   *  - 运行时 withDefaults 兜底：忘记传时拿 0，不影响 banner v-if 判断
+   *  - v1.5 接 autoInitBreakdown 时，BoardView 从 board store 拿值显式传入
    */
-  unmatchedCount: number;
+  unmatchedCount?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {

@@ -67,6 +67,18 @@ const activeRepo = computed<RepoDto | null>(() => {
     : null;
   return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
 });
+
+/**
+ * v1.4 P0-2：未归类 gitea label 数量
+ *  - v1.4 兜底：board store 没有 breakdown 字段 → 0（不显示 banner）
+ *  - v1.5 接 autoInitBreakdown：返回 store 的 unmatched.length
+ *  - 走 computed 形式：响应 board store 变化，未来 v1.5 改 store 即可
+ */
+const unmatchedLabelCount = computed<number>(() => {
+  // v1.4：永远 0（v1.5 占位）
+  // v1.5 替换：return board.lastAutoInitBreakdown?.unmatched.length ?? 0;
+  return 0;
+});
 // v1.4 任务 #statusbar-picker：仓库选择已下沉到 StatusBar 全局 picker
 // BoardTopbar 不再接收 activeRepo / search / pickerOpen / selectProject 这些 props/emits
 // 这里保留 activeRepo 仅用于 EmptyState 判断"是否选过仓库"
@@ -284,6 +296,7 @@ const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
       :is-wip-invalid="isWipLimitInputInvalid()"
       :is-dirty="isColumnMenuDirty()"
       :binding-label="bindingLabel"
+      :unmatched-count="unmatchedLabelCount"
       @update:open="(v) => (showColumnMenu.open = v)"
       @update:editing-title="(v) => (editingColumnTitle = v)"
       @update:editing-wip-limit="(v) => (editingColumnWipLimit = v)"

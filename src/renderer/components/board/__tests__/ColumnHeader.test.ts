@@ -21,6 +21,7 @@ const columnHeaderPath = resolve(projectRoot, 'src/renderer/components/board/Col
 const columnMenuPath = resolve(projectRoot, 'src/renderer/components/board/ColumnMenu.vue');
 const boardModalsCssPath = resolve(projectRoot, 'src/renderer/components/board/board-modals.css');
 const columnSectionPath = resolve(projectRoot, 'src/renderer/components/board/KanbanColumnSection.vue');
+const boardViewPath = resolve(projectRoot, 'src/renderer/views/BoardView.vue');
 
 describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
   describe('ColumnHeader.vue · chip 化 + 修文案 bug', () => {
@@ -154,6 +155,44 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
       const content = readFileSync(boardModalsCssPath, 'utf-8');
       expect(content).toMatch(/\.modal__unmatched-actions[\s\S]+:disabled\s*\{[\s\S]+opacity:\s*0\.5/);
       expect(content).toMatch(/\.modal__unmatched-actions[\s\S]+:disabled\s*\{[\s\S]+cursor:\s*not-allowed/);
+    });
+  });
+
+  describe('ColumnMenu.vue · v1.4 unmatchedCount 是可选 prop（v-if 兜底）', () => {
+    it('Props interface 把 unmatchedCount 标为可选（?: number）', () => {
+      const content = readFileSync(columnMenuPath, 'utf-8');
+      // 必须有 "unmatchedCount?: number"（问号表示可选）—— 防止 Vue 3 dev mode 报 "Missing required prop"
+      expect(content).toMatch(/unmatchedCount\?:\s*number/);
+      // 不能是 "unmatchedCount: number"（必填，缺传会 warn）
+      // 用更严格 regex：行内 "unmatchedCount: number" 且**整行**独立（不被问号在前面）
+      // 匹配 Props interface 段内独立的 "unmatchedCount: number"（前面是空格或逗号）
+      const required = content.match(/[,;\s]unmatchedCount:\s*number[\s,;}]/);
+      expect(required).toBeNull();
+    });
+
+    it('withDefaults 兜底 unmatchedCount=0（防御性）', () => {
+      const content = readFileSync(columnMenuPath, 'utf-8');
+      expect(content).toMatch(/withDefaults\(defineProps<Props>\(\),\s*\{[\s\S]+unmatchedCount:\s*0/);
+    });
+  });
+
+  describe('BoardView.vue · 显式传 unmatchedCount=0（v1.4 占位）', () => {
+    it('BoardView template 里 :unmatched-count="..." 显式传值', () => {
+      const content = readFileSync(boardViewPath, 'utf-8');
+      expect(content).toMatch(/:unmatched-count="\w+"/);
+    });
+
+    it('BoardView 内部定义 unmatchedLabelCount computed', () => {
+      const content = readFileSync(boardViewPath, 'utf-8');
+      expect(content).toMatch(/const\s+unmatchedLabelCount\s*=\s*computed/);
+    });
+
+    it('v1.4 占位返回 0（v1.5 改 return board.lastAutoInitBreakdown?.unmatched.length）', () => {
+      const content = readFileSync(boardViewPath, 'utf-8');
+      // v1.4 必须返回 0（不是 NaN/null/undefined）
+      const computedMatch = content.match(/unmatchedLabelCount\s*=\s*computed<number>\(\(\)\s*=>\s*\{[\s\S]+?\}\)/);
+      expect(computedMatch).not.toBeNull();
+      expect(computedMatch![0]).toMatch(/return\s+0/);
     });
   });
 
