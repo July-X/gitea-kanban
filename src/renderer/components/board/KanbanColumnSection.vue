@@ -30,14 +30,32 @@
  * + card-keydown emit + card--picked / column__cards--drag-target class；v1.3.1 撤回。
  * 卡片 tabindex="0" + role="article" 保留（驱动 .card:focus-within 视觉反馈）。
  */
-import { ChevronDown, Plus, Tag } from 'lucide-vue-next';
+import { computed } from 'vue';
+import { ChevronDown, ChevronUp, Plus, Tag } from 'lucide-vue-next';
 import { VueDraggable } from 'vue-draggable-plus';
 import type { ColumnDto, IssueCardDto } from '../../../main/ipc/schema.js';
 import ColumnHeader from '@renderer/components/board/ColumnHeader.vue';
 
 interface Props {
   column: ColumnDto;
+  /**
+   * 当前列的 open issue（默认列表，**不**含已关闭）
+   * v1.4：拆 `closedIssues` 单独 prop —— 已关闭走折叠区
+   */
   issues: IssueCardDto[];
+  /**
+   * v1.4：当前列已关闭的 issue（折叠区显示）
+   * - 空数组 → 不渲染折叠区
+   */
+  closedIssues: IssueCardDto[];
+  /**
+   * v1.4：是否展示已关闭的 issue（列内 AND 全局）
+   * - 全局开关 + 列内开关同时为真才显示
+   * - 列内 toggle 单独控制（用户可能想看某列的已关，不想看其他列）
+   */
+  showClosedInColumn: boolean;
+  /** v1.4：列内"显示已关闭" toggle（用户单独控制列级展开） */
+  showClosedColumn: boolean;
   newIssueDraft: string;
   loading: boolean;
   isOverLimit: boolean;
@@ -54,7 +72,32 @@ const emit = defineEmits<{
   (e: 'create-issue'): void;
   (e: 'open-move-menu', payload: { issue: IssueCardDto; fromColumnId: string }): void;
   (e: 'request-delete-issue', payload: { issue: IssueCardDto; columnId: string }): void;
+  // v1.4 增量：列内 toggle "显示已关闭"
+  (e: 'toggle-show-closed', columnId: string): void;
 }>();
+
+/**
+ * v1.4 拍板：列内"显示已关闭"折叠 toggle
+ * - showClosedColumn = true → 展开 closedIssues 列表
+ * - 列内 toggle 跟全局 toggle AND（showClosedInColumn = showClosed && showClosedColumn）
+ * - 文案：N 已关闭 ▼ / N 已关闭 ▶
+ */
+const closedToggleText = computed(() => {
+  const n = props.closedIssues.length;
+  if (n === 0) return null;
+  return `${n} 张已关闭`;
+});
+/** 列内 toggle 按钮：点击后 emit，由父组件维护 showClosedColumn state */
+function onToggleClosed(): void {
+  emit('toggle-show-closed', props.column.id);
+}
+/** 显示哪些 issues（merge open + closed 当 showClosed 时） */
+const displayIssues = computed<IssueCardDto[]>(() => {
+  if (props.showClosedInColumn) {
+    return [...props.issues, ...props.closedIssues];
+  }
+  return props.issues;
+});
 </script>
 
 <template>
@@ -87,7 +130,7 @@ const emit = defineEmits<{
     </div>
     <!-- v1.3 拖拽：v-else 不能跟 VueDraggable 异 tag；走独立 v-if 绕开 v-else 折叠 -->
     <VueDraggable
-      v-if="props.column.labels.length > 0 && props.issues.length > 0"
+      v-if="props.column.labels.length > 0 && displayIssues.length > 0"
       v-bind="props.dragOptions"
       class="column__cards"
       :data-column-id="props.column.id"
@@ -95,7 +138,7 @@ const emit = defineEmits<{
       tag="ul"
     >
       <li
-        v-for="issue in props.issues"
+        v-for="issue in displayIssues"
         :key="issue.id"
         class="card"
         :class="{
@@ -149,6 +192,25 @@ const emit = defineEmits<{
         </div>
       </li>
     </VueDraggable>
+    <!--
+      v1.4 增量：列内"已关闭"折叠 toggle
+      - 默认收起（showClosedColumn = false）—— 不占列内空间
+      - 展开后：列底追加"已关闭"卡片列表（视觉用 card--closed 灰显样式）
+      - 全局 showClosed 关时强制 hide（即便 showClosedColumn true）
+    -->
+    <button
+      v-if="props.closedIssues.length > 0"
+      type="button"
+      class="column__closed-toggle"
+      :class="{ 'column__closed-toggle--active': props.showClosedInColumn }"
+      :title="props.showClosedInColumn ? '收起已关闭议题' : `展开 ${props.closedIssues.length} 张已关闭议题`"
+      :aria-expanded="props.showClosedInColumn"
+      @click="onToggleClosed"
+    >
+      <span>{{ closedToggleText }}</span>
+      <ChevronDown v-if="!props.showClosedInColumn" :size="14" :stroke-width="2" aria-hidden="true" />
+      <ChevronUp v-else :size="14" :stroke-width="2" aria-hidden="true" />
+    </button>
     <div class="column__new">
       <input
         :value="props.newIssueDraft"
@@ -197,6 +259,30 @@ const emit = defineEmits<{
   padding: var(--space-3);
   overflow-y: auto;
   min-height: 60px;
+}
+
+/* v1.4 增量：列内"已关闭"折叠 toggle —— 灰显 + 边框 + 展开/收起 */
+.column__closed-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 8px;
+  margin: 4px 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.column__closed-toggle:hover { background: var(--color-bg-hover); color: var(--color-text); }
+.column__closed-toggle--active {
+  border-style: solid;
+  border-color: var(--color-text-muted);
+  color: var(--color-text);
 }
 
 .column__new {

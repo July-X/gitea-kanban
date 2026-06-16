@@ -18,18 +18,21 @@
  * 4. 保留 a11y / hover / focus / disabled 视觉反馈
  * 5. **不**改业务逻辑（store actions / IPC / main 端）；只搬代码不改语义
  */
-import { computed, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { Plus } from 'lucide-vue-next';
 import { showToast } from '@renderer/lib/toast';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
-import type { RepoDto } from '../../main/ipc/schema.js';
+import type { ColumnDto, IssueCardDto, RepoDto } from '../../main/ipc/schema.js';
+import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
+import { isFinishColumnByTitle } from '@renderer/lib/drag-helper';
 import EmptyState from '@renderer/components/EmptyState.vue';
 // 全局样式（Teleport 后 .modal-overlay / .move-menu-overlay / .column__settings-btn 等）
 import '@renderer/components/board/board-modals.css';
 // 子组件
 import BoardTopbar from '@renderer/components/board/BoardTopbar.vue';
 import KanbanColumnSection from '@renderer/components/board/KanbanColumnSection.vue';
+import ClosedSection from '@renderer/components/board/ClosedSection.vue';
 import ColumnMenu from '@renderer/components/board/ColumnMenu.vue';
 import LabelPicker from '@renderer/components/board/LabelPicker.vue';
 import MoveColumnPicker from '@renderer/components/board/MoveColumnPicker.vue';
@@ -181,12 +184,81 @@ const {
 
 // ===== 拖拽（v1.3 · plan_25cc4562 Task A · v1.3.1 撤回键盘双模） =====
 // 鼠标拖拽（vue-draggable-plus）：保留为唯一拖拽路径
+// v1.4 增量：列内"显示已关闭" toggle（每列独立，key = columnId）
+const showClosedByColumn = reactive<Record<string, boolean>>({});
+function toggleColumnShowClosed(columnId: string): void {
+  showClosedByColumn[columnId] = !(showClosedByColumn[columnId] ?? false);
+}
+/**
+ * v1.4 拍板（user 反馈 2026-06-16 21:13）：
+ * columns + closedSection 合并列表 —— 把"已关闭"折叠 section 插到"已完成"列**之后**
+ * - sort：保留 board.columns 现有 position 升序
+ * - 找已完成列（isFinishColumnByTitle 标题匹配）：在它之后插入 closedSection
+ * - 没已完成列：插在 list 末尾
+ * - kind: 'column' | 'closed' —— 模板 v-for 分支渲染
+ */
+type ColumnListItem =
+  | { kind: 'column'; key: string; column: ColumnDto }
+  | { kind: 'closed'; key: 'closed' };
+
+const columnsWithClosed = computed<ColumnListItem[]>(() => {
+  const cols = board.columns;
+  const items: ColumnListItem[] = cols.map((c) => ({ kind: 'column', key: c.id, column: c }));
+  // 仅当 closed 存在时才插入（避免空 section）
+  if (board.closedIssues.length === 0) return items;
+  // 找"已完成"列：标题含"完成" / done / closed
+  const finishIdx = cols.findIndex((c) => isFinishColumnByTitle(c.title));
+  const closedItem: ColumnListItem = { kind: 'closed', key: 'closed' };
+  if (finishIdx >= 0) {
+    // 插在已完成列之后
+    items.splice(finishIdx + 1, 0, closedItem);
+  } else {
+    // 没已完成列 → 插在最末
+    items.push(closedItem);
+  }
+  return items;
+});
+
+/** v1.4：按列 id 拿该列的 closed issue 列表（已关的） */
+function closedIssuesOf(columnId: string): IssueCardDto[] {
+  // closedIssues 是全局仓库的，需要按 column 归类（同 open 的逻辑）
+  // 复用 matchIssueToColumn：按 issue.labels ∩ column.labels 匹配
+  return board.closedIssues.filter((iss) => matchIssueToColumn(iss, board.columns) === columnId);
+}
+
 const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
   getColumnIssues: (columnId) => board.issuesOf(columnId),
   onMove: (issue, fromColumnId, toColumnId) => {
     void performDragMove(issue, fromColumnId, toColumnId, activeProjectId.value);
   },
 });
+
+/**
+ * v1.4 拍板"未分类拖拽归类"：未分类列 → 普通列 的拖拽 end 回调
+ * - 走 assignUnassignedIssue（不是 moveIssue）—— 未分类到普通列是"首次归类"，不是"换列"
+ * - moveIssue 走 issues.moveColumn（要求 fromColumn 绑的 label = issue 当前真有的 label）
+ *   未分类 issue 没有列绑 label，会校验失败
+ * - 复用了"归到…"按钮的 assignUnassignedIssue 路径 + 弹 toast
+ */
+async function onUnassignedDragEnd(evt: unknown): Promise<void> {
+  const e = evt as { to?: HTMLElement; item?: HTMLElement };
+  const toColumnId = e.to?.dataset.columnId ?? '';
+  const issueIndex = Number(e.item?.dataset.issueIndex ?? NaN);
+  if (!toColumnId || toColumnId === '__unassigned__' || !Number.isFinite(issueIndex)) return;
+  if (!activeProjectId.value) return;
+  const issue = board.unassignedIssues.find((i) => i.index === issueIndex);
+  if (!issue) return;
+  try {
+    await board.assignUnassignedIssue({
+      projectId: activeProjectId.value,
+      issueIndex,
+      toColumnId,
+    });
+    showToast({ type: 'success', message: `议题 #${issueIndex} 已归到列` });
+  } catch {
+    /* error in board.error */
+  }
+}
 </script>
 
 <template>
@@ -224,28 +296,49 @@ const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
       </button>
     </div>
     <div v-else class="board__columns">
-      <KanbanColumnSection
-        v-for="col in board.columns"
-        :key="col.id"
-        :column="col"
-        :issues="board.issuesOf(col.id)"
-        :new-issue-draft="newIssueDrafts[col.id] ?? ''"
-        :loading="board.loading"
-        :is-over-limit="isColumnOverLimit(col)"
-        :over-limit-tooltip="wipOverLimitTooltip(col)"
-        :drag-options="columnDragOptions"
-        @open-settings="openColumnMenu(col)"
-        @drag-end="(evt) => onColumnDragEnd(col, evt)"
-        @update:new-issue-draft="(v) => (newIssueDrafts[col.id] = v)"
-        @create-issue="createIssueInColumn(col)"
-        @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
-        @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
-      />
+      <!--
+        v1.4 拍板（user 反馈 2026-06-16 21:13）：
+        "已关闭"section 放在"已完成"列旁边，作为独立第三列
+        - 默认折叠（占用一个窄列，仅显示"X 张已关闭 ▸"按钮 + brief 文字）
+        - 展开后看 closed 卡片列表
+        - 跟"未分类"section 同样风格（独立成列，不挤占普通列）
+        - 位置：插在"已完成"列**之后**；没有已完成列时插在最末
+        - 列内 toggle + 全局 showClosed 双层控制保留（向后兼容）
+      -->
+      <template v-for="(item, idx) in columnsWithClosed" :key="item.key">
+        <KanbanColumnSection
+          v-if="item.kind === 'column'"
+          :column="item.column"
+          :issues="board.issuesOf(item.column.id)"
+          :closed-issues="closedIssuesOf(item.column.id)"
+          :show-closed-in-column="board.showClosed && (showClosedByColumn[item.column.id] ?? false)"
+          :show-closed-column="showClosedByColumn[item.column.id] ?? false"
+          :new-issue-draft="newIssueDrafts[item.column.id] ?? ''"
+          :loading="board.loading"
+          :is-over-limit="isColumnOverLimit(item.column)"
+          :over-limit-tooltip="wipOverLimitTooltip(item.column)"
+          :drag-options="columnDragOptions"
+          @open-settings="openColumnMenu(item.column)"
+          @drag-end="(evt) => onColumnDragEnd(item.column, evt)"
+          @update:new-issue-draft="(v) => (newIssueDrafts[item.column.id] = v)"
+          @create-issue="createIssueInColumn(item.column)"
+          @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
+          @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
+          @toggle-show-closed="(columnId) => toggleColumnShowClosed(columnId)"
+        />
+        <ClosedSection
+          v-else-if="item.kind === 'closed'"
+          :issues="board.closedIssues"
+          :loading="board.loading"
+        />
+      </template>
       <UnassignedSection
         v-if="board.unassignedIssues.length"
         :issues="board.unassignedIssues"
         :loading="board.loading"
+        :drag-options="columnDragOptions"
         @request-assign="openAssignMenu"
+        @drag-end="onUnassignedDragEnd"
       />
     </div>
 

@@ -42,6 +42,7 @@ import type {
 } from '../../main/ipc/schema.js';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import { clusterLabels, type ClusterPlan } from '@renderer/lib/label-cluster';
+import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
 
 /** loadBoard 出参契约（plan_25cc4562 Task C · autoInit 透明化 + v1.4 智能化）
  *
@@ -79,6 +80,23 @@ export const useBoardStore = defineStore('board', () => {
  const issuesByColumn = ref<Record<string, IssueCardDto[]>>({});
  /** 未归到任何列的 issue（没带任何"列绑 label"的 issue）——给用户可见出口 */
  const unassignedIssues = ref<IssueCardDto[]>([]);
+ /**
+ * v1.4 拍板：已关闭的 issue 单独存放
+ * - 默认折叠收起（showClosed = false），避免列内一堆"已关闭"卡片占位
+ * - 列内 toggle / BoardView 顶部 toggle 控制是否显示
+ */
+ const closedIssues = ref<IssueCardDto[]>([]);
+ /**
+ * v1.4 拍板：是否展示已关闭议题
+ * - 全局 toggle 在 BoardView 顶部 / StatusBar
+ * - 列内 toggle 跟全局 AND：全局关 → 列内 disable
+ * - 默认 false（折叠收起 —— 不打扰 user 主线工作）
+ */
+ const showClosed = ref(false);
+ /** 切换全局"显示已关闭" */
+ function toggleShowClosed(): void {
+   showClosed.value = !showClosed.value;
+ }
  const labelsByProject = ref<IssueLabelDto[]>([]);
  const loading = ref(false);
  const loadingIssues = ref<Set<string>>(new Set());
@@ -227,7 +245,11 @@ export const useBoardStore = defineStore('board', () => {
   // 并行拉 labels + 全量 open issue（受 gitea API速率限制，量小没事）
   const [labelsResp, issuesResp] = await Promise.all([
   labelsList({ projectId, limit:100, page:1 }),
-  issuesList({ projectId, state: 'open', limit:100, page:1 }),
+  // v1.4 拍板：state='all' 一次性拉全（open + closed），下面归类时拆 closedIssues
+  //  - 之前只拉 open 漏掉已关闭的；user 看不到也搜不到
+  //  - closed 单独存到 closedIssues 数组，UI 默认折叠
+  //  - limit 上限 100（schema ListIssuesArgsSchema limit.max(100)）
+  issuesList({ projectId, state: 'all', limit: 100, page: 1 }),
   ]);
   labelsByProject.value = labelsResp.items;
 
@@ -249,16 +271,24 @@ export const useBoardStore = defineStore('board', () => {
   columns.value = cols;
   resultColumns = cols;
   issuesByColumn.value = Object.fromEntries(cols.map((c) => [c.id, []]));
-  //归类：按 issue.labels跟 column.labels交集放列；未匹配的进 unassignedIssues
+  // 归类：按 issue.labels跟 column.labels交集放列；未匹配的进 unassignedIssues
+  //  v1.4：拆 open / closed —— closed 进 closedIssues，open 才进 issuesByColumn / unassignedIssues
   const byCol: Record<string, IssueCardDto[]> = Object.fromEntries(cols.map((c) => [c.id, []]));
   const unassigned: IssueCardDto[] = [];
+  const closed: IssueCardDto[] = [];
   for (const issue of issuesResp.items) {
-  const colId = matchIssueToColumn(issue, cols);
-  if (colId) byCol[colId]!.push(issue);
-  else unassigned.push(issue);
+    // 已关闭的单独存
+    if (issue.state === 'closed') {
+      closed.push(issue);
+      continue;
+    }
+    const colId = matchIssueToColumn(issue, cols);
+    if (colId) byCol[colId]!.push(issue);
+    else unassigned.push(issue);
   }
   issuesByColumn.value = byCol;
   unassignedIssues.value = unassigned;
+  closedIssues.value = closed;
   return { columns: resultColumns, autoInitCreatedCount: resultAutoInitCount, autoInitBreakdown };
   } catch (e) {
   error.value = normalizeError(e);
@@ -329,16 +359,6 @@ async function autoInitColumns(
  *
  * 返回 null 表示没匹配到任何列（"未分类"状态，进 unassignedIssues）
  */
- function matchIssueToColumn(issue: IssueCardDto, cols: ColumnDto[]): string | null {
- const issueLabelIds = new Set(issue.labels.map((l) => l.id));
- for (const col of cols) {
- const colLabelIds = col.labels.map((l) => l.id);
- if (colLabelIds.length ===0) continue;
- // OR 语义：issue 拥有列绑的任意一个 label 即匹配
- if (colLabelIds.some((id) => issueLabelIds.has(id))) return col.id;
- }
- return null;
- }
 
  /**
  *单独刷新某列的 issue（新建 / 删除 /换列后调）
@@ -730,6 +750,10 @@ async function autoInitColumns(
   columns,
   issuesByColumn,
   unassignedIssues,
+  // v1.4 增量：closed 单独存放 + showClosed toggle
+  closedIssues,
+  showClosed,
+  toggleShowClosed,
    labelsByProject,
   loading,
   loadingIssues,
