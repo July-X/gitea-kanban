@@ -67,16 +67,13 @@ git clone <你的仓库地址>
 cd gitea-kanban
 ```
 
-### 安装依赖 + 编译原生模块
+### 安装依赖
 
 ```bash
 pnpm install
-pnpm rebuild:native
 ```
 
-`pnpm rebuild:native` 会重新下载 SQLite 的本地模块，让它匹配 Electron 的版本。如果跳过这一步，启动时可能会白屏或报错 "native module ABI 不匹配"。
-
-> `pnpm install` 在装包时会自动跑 `pnpm rebuild:native`（`postinstall` 钩子），一般不用手动再跑。手动跑是为了"装完后我又改了点东西"或"重装"的场景。
+项目**没有需要本地编译的原生模块**——钥匙串走 `@napi-rs/keyring` 的 napi prebuilt（每个平台都有预编译包），其他依赖都是纯 JS / WASM。装完直接 `pnpm dev` 就能跑。
 
 ## 启动开发版
 
@@ -122,33 +119,31 @@ pnpm build
 开发者参考用——日常使用不需要跑这个。
 
 ```bash
-pnpm e2e:all
+pnpm e2e:w3
 ```
 
-这条命令会自动切换原生模块的版本（开发用 Electron 版本 ↔ 测试用 Node 版本），串跑 4 个端到端测试套件，结束后自动切回。
+这条命令会跑 `tests/e2e/board-drag.spec.ts` 和 `tests/e2e/board-unassigned.spec.ts` 两个套件（合计 7 个用例）。底层走 vitest 的 mount-free 模式（不弹窗、用 mock IPC），不需要起 Electron。
 
 > **前提**：需要先在本地跑起一个 Gitea 测试实例（参考 [`giteaDemo/README.md`](giteaDemo/README.md)），并把令牌设到环境变量 `KB_TOKEN`。
+>
+> 历史背景：M9 收口时拍板——W1 旧脚本（526 行）永不恢复，e2e 覆盖散在 W2/W3/W4 三个套件里。本仓库当前只维护 W3 一份，详见 `docs/review/m9-followup-e2e-coverage.md`。
 
 ## 常见问题
 
 ### 启动后白屏 / 报"原生模块不匹配"
 
-大多是 SQLite 的本地模块没编译成 Electron 用的版本。手动跑：
+项目用的是 napi prebuilt 的 `@napi-rs/keyring`，正常装包就匹配 Electron ABI。如果还报白屏：
 
-```bash
-pnpm rebuild:native
-```
-
-然后重新 `pnpm dev`。
+1. **检查 Node 版本**：`.nvmrc` 指定 20，用 `nvm use` 切到 20
+2. **检查 pnpm 版本**：`pnpm -v` 应该输出 `10.x`，不是 8 或 9
+3. **杀干净再启动**：`pkill -9 -f "out/main" || true` 后重新 `pnpm dev`
+4. **看日志**：dev/preview 模式 pino 走文件 transport，日志在 `${GITEA_KANBAN_DATA_DIR}/logs/main/main-*.log`（默认 `~/.gitea-kanban/logs/main/`），**不在 stdout**。详见 `AGENTS.md §8.7`
 
 ### 端到端测试跑不起来
 
-也是同类问题——测试在 Node 上跑，开发在 Electron 上跑，原生模块版本不一样。`pnpm e2e:all` 内部会自动切换，如果中途失败、手动跑过其他命令导致状态乱了，重新跑：
-
-```bash
-pnpm rebuild:native
-pnpm e2e:all
-```
+1. **Gitea 实例没起**：`pnpm e2e:w3` 需要本机有 Gitea 实例跑在 `localhost:3000`，按 [`giteaDemo/README.md`](giteaDemo/README.md) 起
+2. **`KB_TOKEN` 没设**：`export KB_TOKEN=<你的令牌>`，然后再跑
+3. **跑单测没问题但 e2e 失败**：e2e 走真实 gitea API，受网络 / 实例状态影响。先用 `pnpm test` 确认单测绿了，再看 e2e 报错具体是哪个 case
 
 ### 令牌存不进去 / 钥匙串报错
 
