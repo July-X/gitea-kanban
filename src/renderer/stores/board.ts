@@ -35,9 +35,8 @@ import {
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type {
   ColumnDto,
- IssueCardDto,
- IssueLabelDto,
- ListIssuesResp,
+  IssueCardDto,
+  IssueLabelDto,
 } from '../../main/ipc/schema.js';
 
 /** loadBoard 出参契约（plan_25cc4562 Task C · autoInit 透明化）
@@ -152,13 +151,13 @@ export const useBoardStore = defineStore('board', () => {
   let resultColumns: ColumnDto[] = [];
   let resultAutoInitCount = 0;
   try {
-  let cols = (await boardColumnsList({ projectId })) as ColumnDto[];
+  let cols = await boardColumnsList({ projectId });
   currentProjectId.value = projectId;
 
   // 并行拉 labels + 全量 open issue（受 gitea API速率限制，量小没事）
   const [labelsResp, issuesResp] = await Promise.all([
-  labelsList({ projectId, limit:100, page:1 }) as Promise<{ items: IssueLabelDto[]; hasMore: boolean }>,
-  issuesList({ projectId, state: 'open', limit:100, page:1 }) as Promise<ListIssuesResp>,
+  labelsList({ projectId, limit:100, page:1 }),
+  issuesList({ projectId, state: 'open', limit:100, page:1 }),
   ]);
   labelsByProject.value = labelsResp.items;
 
@@ -169,7 +168,7 @@ export const useBoardStore = defineStore('board', () => {
   if (autoResult.length > 0) {
   // 重新拉列（后端已写入 localStore；createColumn 已把 cols 同步进 store.columns，
   // 这里再拉一次拿绑 label 后的真实 labels 数据）
-  cols = (await boardColumnsList({ projectId })) as ColumnDto[];
+  cols = await boardColumnsList({ projectId });
   }
   }
 
@@ -279,12 +278,12 @@ export const useBoardStore = defineStore('board', () => {
  async function refreshColumn(projectId: string, columnId: string): Promise<void> {
  loadingIssues.value.add(columnId);
  try {
- const resp = (await issuesList({
- projectId,
- state: 'open',
- limit:100,
- page:1,
- })) as ListIssuesResp;
+  const resp = await issuesList({
+  projectId,
+  state: 'open',
+  limit:100,
+  page:1,
+  });
  const col = columns.value.find((c) => c.id === columnId);
  const byCol: Record<string, IssueCardDto[]> = { ...issuesByColumn.value };
  for (const c of columns.value) byCol[c.id] = [];
@@ -320,12 +319,12 @@ export const useBoardStore = defineStore('board', () => {
  error.value = null;
  try {
  const labelIds = labelIdsOf(args.columnId);
- const issue = (await issuesCreate({
- projectId: args.projectId,
- title: args.title,
- ...(args.body !== undefined ? { body: args.body } : {}),
- ...(labelIds.length >0 ? { labelIds } : {}),
- })) as IssueCardDto;
+  const issue = await issuesCreate({
+  projectId: args.projectId,
+  title: args.title,
+  ...(args.body !== undefined ? { body: args.body } : {}),
+  ...(labelIds.length >0 ? { labelIds } : {}),
+  });
  //追加到本地（不动其他列）
  const existing = issuesByColumn.value[args.columnId] ?? [];
  issuesByColumn.value = {
@@ -584,12 +583,11 @@ export const useBoardStore = defineStore('board', () => {
   async function createColumn(args: { projectId: string; title: string }): Promise<ColumnDto> {
   error.value = null;
   try {
-  const resp = await boardColumnsCreate({
+  const col = await boardColumnsCreate({
   projectId: args.projectId,
   title: args.title,
   position: 0, // 后端忽略（listColumns 按 position 升序 + createColumn 用 max + STEP）
   });
-  const col = resp as ColumnDto;
   // 追加到 columns 列表头部
   columns.value = [col, ...columns.value];
   // 给 issuesByColumn 加空数组
@@ -679,11 +677,11 @@ export const useBoardStore = defineStore('board', () => {
   }): Promise<void> {
   error.value = null;
   try {
-  const col = (await boardColumnsMapLabel({
+  const col = await boardColumnsMapLabel({
   columnId: args.columnId,
   giteaLabelId: args.giteaLabelId,
   giteaLabelName: args.giteaLabelName,
-  })) as ColumnDto;
+  });
   // 同步本地：用后端 DTO 覆盖（gitea 实时 name/color）
   columns.value = columns.value.map((c) => (c.id === args.columnId ? col : c));
   } catch (e) {

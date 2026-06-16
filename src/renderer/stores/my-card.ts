@@ -20,7 +20,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { issuesList } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
-import type { IssueCardDto, ListIssuesResp } from '../../main/ipc/schema.js';
+import type { IssueCardDto } from '../../main/ipc/schema.js';
 
 /** 视图层状态维度 */
 export type MyCardFilter = 'all' | 'open' | 'closed';
@@ -93,13 +93,13 @@ export const useMyCardStore = defineStore('my-card', () => {
       currentSelectedItem.value = null;
     }
     try {
-      const resp = (await issuesList({
+      const resp = await issuesList({
         projectId,
         assignee, // A3：透传到 gitea /issues?assignee=<username>
         state: 'all',
         limit: 100,
         page: 1,
-      })) as ListIssuesResp;
+      });
       items.value = resp.items;
       currentProjectId.value = projectId;
       currentAssignee.value = assignee;

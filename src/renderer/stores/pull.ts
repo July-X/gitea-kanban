@@ -144,7 +144,7 @@ export const usePullStore = defineStore('pull', () => {
 
   /** 拿单个合并请求详情 */
   async function get(projectId: string, index: number): Promise<PullDto> {
-    const dto = (await pullsGet({ projectId, index })) as PullDto;
+    const dto = await pullsGet({ projectId, index });
     // 更新本地 items 中对应条目（如果存在）
     const idx = items.value.findIndex((p) => p.index === index);
     if (idx >= 0) {

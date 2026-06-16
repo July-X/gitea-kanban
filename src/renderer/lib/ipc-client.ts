@@ -19,6 +19,26 @@
  */
 
 import type { IpcErrorPayload, IpcErrorCodeValue } from '@shared/errors';
+import type {
+  ConnectResult,
+  StatusResult,
+  ListReposResp,
+  ListBranchesResp,
+  ListCommitsResp,
+  ListPullsResp,
+  MergePrResult,
+  ListLabelsResp,
+  ListMembersResp,
+  ListIssuesResp,
+  ColumnDto,
+  CommitDto,
+  IssueCardDto,
+  IssueCommentDto,
+  LabelDto,
+  PullDto,
+  RepoProjectDto,
+  TimelineDto,
+} from '../../main/ipc/schema.js';
 
 /** window.api 的精确类型（preload/index.ts导出） */
 export type WindowApi = NonNullable<typeof window.api>;
@@ -213,8 +233,20 @@ export class IpcClient {
   * 这里放宽到 string 让前端代码能"先写后端对齐"（A3 拍板的契约驱动开发）。
   * 运行时仍然校验 ns[method] 是函数才发，**不**会泄漏到 main。
   */
+  /**
+   * 通用 invoke —— 把 window.api.<namespace>.<method>(args) 调到 main 端，
+   * 错误 reject 时把 IpcErrorPayload 转成 UserFacingError 后再抛。
+   *
+   * 泛型 `<T = unknown>`：wrapper 调用方可以指定期望返回类型（如 `invoke<ColumnDto[]>(...)`），
+   * 让跨 IPC 边界的 `unknown` 在封装层一次性 narrow 到业务 DTO。store 层就**不需要**再 `as` 强转。
+   *
+   * namespace 用 string 不用 `keyof WindowApi` 约束 —— A3 等后端新增 namespace
+   * （members.*）时 WindowApi 类型**先**在 preload 加，**然后**前端 store 调。
+   * 这里放宽到 string 让前端代码能"先写后端对齐"（A3 拍板的契约驱动开发）。
+   * 运行时仍然校验 ns[method] 是函数才发，**不**会泄漏到 main。
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async invoke(namespace: string, method: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  async invoke<T = unknown>(namespace: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ns = (this.api as unknown as Record<string, any>)[namespace];
   if (!ns || typeof ns[method] !== 'function') {
@@ -229,9 +261,9 @@ export class IpcClient {
   //唯一例外：auth.connect走 (giteaUrl, token) 双参而不是 (args) 单参
   if (namespace === 'auth' && method === 'connect') {
   const a = args as { giteaUrl: string; token: string };
-  return await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(a.giteaUrl, a.token);
+  return (await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(a.giteaUrl, a.token)) as T;
   }
-  return await ns[method](args);
+  return (await ns[method](args)) as T;
   } catch (err) {
   throw normalizeError(err);
   }
@@ -243,12 +275,12 @@ export class IpcClient {
  * 用法：await ipc.invokeNested('board', 'columns', 'list', { projectId })
  *错误处理同 invoke()
  */
- async invokeNested(
- namespace: string,
- sub: string,
- method: string,
- args: Record<string, unknown> = {},
- ): Promise<unknown> {
+  async invokeNested<T = unknown>(
+  namespace: string,
+  sub: string,
+  method: string,
+  args: Record<string, unknown> = {},
+  ): Promise<T> {
  // ns 的类型在 TS看来是 Record<string, T> 但 T是个函数,所以 ns[sub] 不能再用 string索引
  // 用 any绕过这条狭窄的索引约束（语义上正确：sub 是动态字符串）
  // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -262,12 +294,12 @@ export class IpcClient {
  recoverable: false,
  } satisfies UserFacingError;
  }
- try {
- return await subNs[method](args);
- } catch (err) {
- throw normalizeError(err);
- }
- }
+  try {
+  return (await subNs[method](args)) as T;
+  } catch (err) {
+  throw normalizeError(err);
+  }
+  }
 
  /**通用事件监听（main → renderer推送） */
  on(event: string, cb: (payload: unknown) => void): () => void {
@@ -298,37 +330,37 @@ export function getIpcClient(): IpcClient {
 // =====便捷具名方法（给 store / view 用，比 ipc.invoke('namespace.method', args)直观） =====
 
 /**列出所有已连接的 gitea账号 + 当前用户（**不**含 token） */
-export function authStatus(): Promise<unknown> {
+export function authStatus(): Promise<StatusResult> {
  return getIpcClient().invoke('auth', 'status');
 }
 
 /** 连接 gitea（**唯一**接收 token 的入口） */
-export function authConnect(giteaUrl: string, token: string): Promise<unknown> {
+export function authConnect(giteaUrl: string, token: string): Promise<ConnectResult> {
  return getIpcClient().invoke('auth', 'connect', { giteaUrl, token });
 }
 
 /**断开某个 gitea URL 的连接 */
-export function authDisconnect(giteaUrl: string): Promise<unknown> {
+export function authDisconnect(giteaUrl: string): Promise<void> {
  return getIpcClient().invoke('auth', 'disconnect', { giteaUrl });
 }
 
 /**列出某账号可访问的仓库 + 已加为 project 的标记 */
-export function reposList(args: { giteaAccountId: string; query?: string; limit?: number; page?: number }): Promise<unknown> {
+export function reposList(args: { giteaAccountId: string; query?: string; limit?: number; page?: number }): Promise<ListReposResp> {
  return getIpcClient().invoke('repos', 'list', args);
 }
 
 /**标记某个仓库为 project（加入本机看板） */
-export function reposAddProject(args: { giteaAccountId: string; owner: string; name: string }): Promise<unknown> {
+export function reposAddProject(args: { giteaAccountId: string; owner: string; name: string }): Promise<RepoProjectDto> {
  return getIpcClient().invoke('repos', 'addProject', args);
 }
 
 /**取消标记 */
-export function reposRemoveProject(args: { projectId: string }): Promise<unknown> {
+export function reposRemoveProject(args: { projectId: string }): Promise<void> {
  return getIpcClient().invoke('repos', 'removeProject', args);
 }
 
 /**列出某 project 的分支 */
-export function branchesList(args: { projectId: string; query?: string; limit?: number; page?: number }): Promise<unknown> {
+export function branchesList(args: { projectId: string; query?: string; limit?: number; page?: number }): Promise<ListBranchesResp> {
  return getIpcClient().invoke('branches', 'list', args);
 }
 
@@ -338,7 +370,7 @@ export function branchesList(args: { projectId: string; query?: string; limit?: 
  * 入参契约见 StarBranchArgsSchema。后端处理：setStarred(args)
  * （cache/branches.ts:UPSERT/DELETE）。
  */
-export function branchesStar(args: { projectId: string; branch: string; starred: boolean }): Promise<unknown> {
+export function branchesStar(args: { projectId: string; branch: string; starred: boolean }): Promise<void> {
  return getIpcClient().invoke('branches', 'star', args);
 }
 
@@ -366,12 +398,12 @@ export function commitsList(args: {
  until?: string;
  page?: number;
  limit?: number;
-}): Promise<unknown> {
+}): Promise<ListCommitsResp> {
  return getIpcClient().invoke('commits', 'list', args);
 }
 
 /** 拿单个 commit 详情（gitea /repos/{owner}/{repo}/git/commits/{sha}，含 stats） */
-export function commitsGet(args: { projectId: string; sha: string }): Promise<unknown> {
+export function commitsGet(args: { projectId: string; sha: string }): Promise<CommitDto> {
  return getIpcClient().invoke('commits', 'get', args);
 }
 
@@ -388,7 +420,7 @@ export function commitsTimeline(args: {
   until?: string;
   maxNodes?: number;
   laneMode?: LaneModeArg;
-}): Promise<unknown> {
+}): Promise<TimelineDto> {
   // 把内部 alias还原为 IPC实际接受的字面量（main端 schema = 'branch' | 'author' | 'pr'）
   const wireLaneMode: 'branch' | 'author' | 'pr' | undefined =
   args.laneMode === 'laneByA'
@@ -416,7 +448,7 @@ export function commitsTimeline(args: {
  * 2) 主进程走 system clipboard API，与 webview focus 解耦
  * 3) 沙箱合规：renderer 不直接调系统 API
  */
-export function clipboardWrite(text: string): Promise<unknown> {
+export function clipboardWrite(text: string): Promise<void> {
  // 调用 window.api.preferences.clipboard.write({text}) —— 三段式 path，
  // 必须用 invokeNested('preferences', 'clipboard', 'write', ...)；
  // 之前误用 invoke('preferences', 'clipboard.write', ...) 会把 'clipboard.write'
@@ -452,12 +484,12 @@ export function pullsList(args: {
   author?: string;
   page?: number;
   limit?: number;
-}): Promise<unknown> {
+}): Promise<ListPullsResp> {
   return getIpcClient().invoke('pulls', 'list', args);
 }
 
 /** 拿单个合并请求详情 */
-export function pullsGet(args: { projectId: string; index: number }): Promise<unknown> {
+export function pullsGet(args: { projectId: string; index: number }): Promise<PullDto> {
   return getIpcClient().invoke('pulls', 'get', args);
 }
 
@@ -481,7 +513,7 @@ export function pullsMerge(args: {
   method: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
   deleteBranchAfter?: boolean;
   commitMessage?: string;
-}): Promise<unknown> {
+}): Promise<MergePrResult> {
   return getIpcClient().invoke('pulls', 'merge', args);
 }
 
@@ -495,7 +527,7 @@ export function pullsClose(args: {
   projectId: string;
   index: number;
   reason?: string;
-}): Promise<unknown> {
+}): Promise<{ closed: boolean }> {
   return getIpcClient().invoke('pulls', 'close', args);
 }
 
@@ -504,7 +536,7 @@ export function pullsUpdateLabels(args: {
   projectId: string;
   index: number;
   labels: string[];
-}): Promise<unknown> {
+}): Promise<PullDto> {
   return getIpcClient().invoke('pulls', 'updateLabels', args);
 }
 
@@ -513,7 +545,7 @@ export function pullsUpdateAssignee(args: {
   projectId: string;
   index: number;
   assignee: string;
-}): Promise<unknown> {
+}): Promise<PullDto> {
   return getIpcClient().invoke('pulls', 'updateAssignee', args);
 }
 
@@ -522,7 +554,7 @@ export function pullsUpdateReviewers(args: {
   projectId: string;
   index: number;
   reviewers: string[];
-}): Promise<unknown> {
+}): Promise<PullDto> {
   return getIpcClient().invoke('pulls', 'updateReviewers', args);
 }
 
@@ -531,12 +563,12 @@ export function pullsUpdateReviewers(args: {
 // ============================================================
 
 /**列出某 project 的看板列 */
-export function boardColumnsList(args: { projectId: string }): Promise<unknown> {
+export function boardColumnsList(args: { projectId: string }): Promise<ColumnDto[]> {
  return getIpcClient().invokeNested('board', 'columns', 'list', args);
 }
 
 /** 新建看板列 */
-export function boardColumnsCreate(args: { projectId: string; title: string; position: number }): Promise<unknown> {
+export function boardColumnsCreate(args: { projectId: string; title: string; position: number }): Promise<ColumnDto> {
  return getIpcClient().invokeNested('board', 'columns', 'create', args);
 }
 
@@ -544,17 +576,17 @@ export function boardColumnsCreate(args: { projectId: string; title: string; pos
 export function boardColumnsUpdate(args: {
  columnId: string;
  patch: { title?: string; position?: number };
-}): Promise<unknown> {
+}): Promise<ColumnDto> {
  return getIpcClient().invokeNested('board', 'columns', 'update', args);
 }
 
 /** 列重排序（拖动列头） */
-export function boardColumnsReorder(args: { projectId: string; orderedIds: string[] }): Promise<unknown> {
+export function boardColumnsReorder(args: { projectId: string; orderedIds: string[] }): Promise<ColumnDto[]> {
  return getIpcClient().invokeNested('board', 'columns', 'reorder', args);
 }
 
 /** 删除看板列（**危险操作**，UI 必须二次确认） */
-export function boardColumnsDelete(args: { columnId: string }): Promise<unknown> {
+export function boardColumnsDelete(args: { columnId: string }): Promise<void> {
  return getIpcClient().invokeNested('board', 'columns', 'delete', args);
 }
 
@@ -567,12 +599,12 @@ export function boardColumnsMapLabel(args: {
  columnId: string;
  giteaLabelId: number;
  giteaLabelName: string;
-}): Promise<unknown> {
+}): Promise<ColumnDto> {
  return getIpcClient().invokeNested('board', 'columns', 'mapLabel', args);
 }
 
 /** 列解绑一个 gitea label */
-export function boardColumnsUnmapLabel(args: { columnId: string; giteaLabelId: number }): Promise<unknown> {
+export function boardColumnsUnmapLabel(args: { columnId: string; giteaLabelId: number }): Promise<ColumnDto> {
  return getIpcClient().invokeNested('board', 'columns', 'unmapLabel', args);
 }
 
@@ -598,12 +630,12 @@ export function issuesList(args: {
   assignee?: string;
   page?: number;
   limit?: number;
-}): Promise<unknown> {
+}): Promise<ListIssuesResp> {
   return getIpcClient().invoke('issues', 'list', args);
 }
 
 /**拿单个 issue详情 */
-export function issuesGet(args: { projectId: string; issueIndex: number }): Promise<unknown> {
+export function issuesGet(args: { projectId: string; issueIndex: number }): Promise<IssueCardDto> {
  return getIpcClient().invoke('issues', 'get', args);
 }
 
@@ -613,7 +645,7 @@ export function issuesCreate(args: {
  title: string;
  body?: string;
  labelIds?: number[];
-}): Promise<unknown> {
+}): Promise<IssueCardDto> {
  return getIpcClient().invoke('issues', 'create', args);
 }
 
@@ -622,17 +654,17 @@ export function issuesUpdate(args: {
  projectId: string;
  issueIndex: number;
  patch: { title?: string; body?: string; state?: 'open' | 'closed' };
-}): Promise<unknown> {
+}): Promise<IssueCardDto> {
  return getIpcClient().invoke('issues', 'update', args);
 }
 
 /** issue 加 label */
-export function issuesAddLabel(args: { projectId: string; issueIndex: number; labelId: number }): Promise<unknown> {
+export function issuesAddLabel(args: { projectId: string; issueIndex: number; labelId: number }): Promise<void> {
  return getIpcClient().invoke('issues', 'addLabel', args);
 }
 
 /** issue 去 label */
-export function issuesRemoveLabel(args: { projectId: string; issueIndex: number; labelId: number }): Promise<unknown> {
+export function issuesRemoveLabel(args: { projectId: string; issueIndex: number; labelId: number }): Promise<void> {
  return getIpcClient().invoke('issues', 'removeLabel', args);
 }
 
@@ -647,7 +679,7 @@ export function issuesMoveColumn(args: {
  issueIndex: number;
  fromColumnId: string;
  toColumnId: string;
-}): Promise<unknown> {
+}): Promise<void> {
  return getIpcClient().invoke('issues', 'moveColumn', args);
 }
 
@@ -662,7 +694,7 @@ export function issuesMoveColumn(args: {
 export function issuesCommentList(args: {
   projectId: string;
   issueIndex: number;
-}): Promise<unknown> {
+}): Promise<IssueCommentDto[]> {
   return getIpcClient().invokeNested('issues', 'comment', 'list', args);
 }
 
@@ -676,7 +708,7 @@ export function issuesCommentCreate(args: {
   projectId: string;
   issueIndex: number;
   body: string;
-}): Promise<unknown> {
+}): Promise<IssueCommentDto> {
   return getIpcClient().invokeNested('issues', 'comment', 'create', args);
 }
 
@@ -685,7 +717,7 @@ export function issuesCommentCreate(args: {
 // ============================================================
 
 /**列出某 project 的 gitea label */
-export function labelsList(args: { projectId: string; page?: number; limit?: number }): Promise<unknown> {
+export function labelsList(args: { projectId: string; page?: number; limit?: number }): Promise<ListLabelsResp> {
  return getIpcClient().invoke('labels', 'list', args);
 }
 
@@ -695,7 +727,7 @@ export function labelsCreate(args: {
   name: string;
   color: string;
   description?: string;
-}): Promise<unknown> {
+}): Promise<LabelDto> {
   return getIpcClient().invoke('labels', 'create', args);
 }
 
@@ -710,6 +742,6 @@ export function labelsCreate(args: {
  * v1 简化：直接返 CollaboratorDto[]，**不**做分页（gitea collaborators 接口无 page 参数）。
  * 二次过滤（按权限 / 名称）放 store 层。
  */
-export function membersList(args: { projectId: string }): Promise<unknown> {
+export function membersList(args: { projectId: string }): Promise<ListMembersResp> {
   return getIpcClient().invoke('members', 'list', args);
 }
