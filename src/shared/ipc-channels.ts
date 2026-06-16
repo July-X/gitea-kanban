@@ -80,6 +80,7 @@ export const IpcChannel = {
  BOARD_COLUMNS_DELETE: 'board.columns.delete',
  BOARD_COLUMNS_MAP_LABEL: 'board.columns.mapLabel',
  BOARD_COLUMNS_UNMAP_LABEL: 'board.columns.unmapLabel',
+ BOARD_COLUMNS_RESET: 'board.columns.reset',
 
  // === issues namespace（ADR-0002 reset：卡片 = gitea issue）===
  ISSUES_LIST: 'issues.list',

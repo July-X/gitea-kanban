@@ -674,6 +674,29 @@ export const DeleteBoardColumnArgsSchema = z
  .strict();
 export type DeleteBoardColumnArgs = z.infer<typeof DeleteBoardColumnArgsSchema>;
 
+/**
+ * board.columns.reset 入参（v1.4 增量 · 拍板 2026-06-16 user 拍板"重建视图"按钮）
+ *   - 重置 project 的所有列 + 列绑 label 映射
+ *   - 触发后 store.columns = []，调用方应立刻再 loadBoard 走 autoInit 重建
+ *   - 设计原因：user 在前端"重建视图"按钮触发（详见 P0-1 wireframe 场景 4）
+ */
+export const ResetBoardColumnsArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+  })
+  .strict();
+export type ResetBoardColumnsArgs = z.infer<typeof ResetBoardColumnsArgsSchema>;
+
+/**
+ * board.columns.reset 出参
+ *   - resetCount: 删了多少列（labelMaps 随列一起删，不单独计）
+ *   - 实现：handler 走 localStore 删列 + labelMaps；renderer 端 loadBoard 自动触发 autoInit
+ */
+export const ResetBoardColumnsResultSchema = z.object({
+  resetCount: z.number().int().min(0),
+});
+export type ResetBoardColumnsResult = z.infer<typeof ResetBoardColumnsResultSchema>;
+
 export const MapColumnLabelArgsSchema = z
  .object({
  columnId: NonEmptyStringSchema,

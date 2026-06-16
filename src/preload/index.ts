@@ -10,7 +10,7 @@
  * M6状态（M5 补齐 user.* 4 个，a3 补齐 members.* 1 个，theme-preload 补齐 preferences.theme.* 2 个，clipboard 补齐 preferences.clipboard.write 1 个，undo-by-project 补齐 user.undoStatus 1 个）：
  * - src/main/ipc/schema.ts 注册 42 个 IpcChannel（-3 destructive-ops-cleanup：branches.create/delete, pulls.create）：
  * auth×3, repos×3, branches×3, commits×3, pulls×3,
- * board.columns×7 (reset后从5→7，加 mapLabel/unmapLabel),
+ * board.columns×8 (reset后从7→8，加 reset),
  * issues×9 (新增：list/get/create/update/addLabel/removeLabel/moveColumn + comment.list/create),
  * labels×2 (新增), members×1 (a3 新增：list — 仓库成员 = gitea repo collaborators),
  * user×5 (M5补齐：prefs.get/set + undo/redo；M6 undo-by-project：undoStatus),
@@ -45,7 +45,7 @@ const invoke =
  * branches ×3 : list, rename, star（create/delete 已移除）
  * commits ×3 : list, get, timeline
  * pulls ×7 : list, get, merge, close, updateLabels, updateAssignee, updateReviewers
- * board.columns ×7 : list, create, update, reorder, delete, mapLabel, unmapLabel
+ * board.columns ×8 : list, create, update, reorder, delete, mapLabel, unmapLabel, reset
  * issues ×7 : list, get, create, update, addLabel, removeLabel, moveColumn
  * issues.comment ×2 : list, create
  * labels ×2 : list, create
@@ -114,6 +114,7 @@ const api = {
  delete: invoke(IpcChannel.BOARD_COLUMNS_DELETE),
  mapLabel: invoke(IpcChannel.BOARD_COLUMNS_MAP_LABEL),
  unmapLabel: invoke(IpcChannel.BOARD_COLUMNS_UNMAP_LABEL),
+ reset: invoke(IpcChannel.BOARD_COLUMNS_RESET),
  },
  },
 

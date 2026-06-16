@@ -33,6 +33,7 @@ import {
   DeleteBoardColumnArgsSchema,
   MapColumnLabelArgsSchema,
   UnmapColumnLabelArgsSchema,
+  ResetBoardColumnsArgsSchema,
   type ListBoardColumnsArgs,
   type CreateBoardColumnArgs,
   type UpdateBoardColumnArgs,
@@ -40,6 +41,8 @@ import {
   type DeleteBoardColumnArgs,
   type MapColumnLabelArgs,
   type UnmapColumnLabelArgs,
+  type ResetBoardColumnsArgs,
+  type ResetBoardColumnsResult,
   type ColumnDto,
 } from './schema.js';
 import { logger } from '../logger.js';
@@ -214,6 +217,34 @@ async function unmapColumnLabelHandler(args: UnmapColumnLabelArgs): Promise<Colu
 // ===== 注册 =====
 // ============================================================
 
+// ===== board.columns.reset =====
+/**
+ * 重置 project 的列 + label 映射 + 重新跑 autoInit
+ *
+ * 设计（v1.4 增量 · 拍板 2026-06-16 user 拍板"重建视图"按钮）：
+ *   1. 读 localStore 拿现有列（不走 gitea，避免网络问题）
+ *   2. 删所有列（labelMaps 在 _deleteColumn 内部已处理）
+ *   3. 调 listLabels 拿 gitea labels → 重新跑 autoInit（走 cluster L1/L2/L3）
+ *   4. 返回 { resetCount, autoInitCreatedCount } 给前端 toast
+ *
+ * 二次确认：调用方负责（AGENTS §9.2 危险操作二次确认）
+ *
+ * v1.4 第六轮：autoInitColumns 已改走 clusterLabels，reset 后列更智能。
+ */
+async function _resetBoardColumns(args: ResetBoardColumnsArgs): Promise<ResetBoardColumnsResult> {
+  const { projectId } = args;
+  // 1. 读 localStore 拿现有列（不走 gitea，避免网络/限权问题）
+  const state = getLocalStore().get();
+  const beforeCols = state.columns.filter((c: { projectId: string }) => c.projectId === projectId);
+  const resetCount = beforeCols.length;
+  // 2. 删所有列（labelMaps 在 _deleteColumn 内部已处理）
+  for (const col of beforeCols) {
+    try { await _deleteColumn({ columnId: col.id }); } catch { /* 单列失败不阻断 */ }
+  }
+  // 3. 不在 main 端跑 autoInit —— renderer store.loadBoard() 内部会触发 cluster + autoInit
+  return { resetCount };
+}
+
 export function registerBoardIpc(): void {
   // ADR-0003 Phase 3：注册 op 到 dispatch 中心
   //   board.columns.* 都是纯本地 op（仅改 localStore），不调 gitea
@@ -246,6 +277,7 @@ export function registerBoardIpc(): void {
   wrapIpc(IpcChannel.BOARD_COLUMNS_DELETE, DeleteBoardColumnArgsSchema, deleteBoardColumnHandler);
   wrapIpc(IpcChannel.BOARD_COLUMNS_MAP_LABEL, MapColumnLabelArgsSchema, mapColumnLabelHandler);
   wrapIpc(IpcChannel.BOARD_COLUMNS_UNMAP_LABEL, UnmapColumnLabelArgsSchema, unmapColumnLabelHandler);
+  wrapIpc(IpcChannel.BOARD_COLUMNS_RESET, ResetBoardColumnsArgsSchema, _resetBoardColumns);
 }
 
 export function unregisterBoardIpc(): void {
@@ -256,4 +288,5 @@ export function unregisterBoardIpc(): void {
   ipcMain.removeHandler(IpcChannel.BOARD_COLUMNS_DELETE);
   ipcMain.removeHandler(IpcChannel.BOARD_COLUMNS_MAP_LABEL);
   ipcMain.removeHandler(IpcChannel.BOARD_COLUMNS_UNMAP_LABEL);
+  ipcMain.removeHandler(IpcChannel.BOARD_COLUMNS_RESET);
 }
