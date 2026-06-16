@@ -689,7 +689,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 | keychain 选型 | `docs/adr/0001-keychain.md` | 为什么用 @napi-rs/keyring |
 | board 数据模型 reset | `docs/adr/0002-board-data-source-reset.md` | 为什么卡片 = Gitea issue |
 | **本地存储迁移 + 同步队列** | `docs/adr/0003-local-store-electron-store.md` | **ADR-0003（已完结）**：SQLite → electron-store + 文件 KV + queue.jsonl；零 SQLite 依赖 |
-| **单一仓库专注模式** | `docs/adr/0004-single-repo-focus.md` | **ADR-0004（v1.4 拍板）**：每个 view 只看一个 project（= currentProjectId），**不**做跨仓库聚合。设计"我的视角 / 团队视图"前必读 |
+| **单一仓库专注模式** | `docs/adr/0004-single-repo-focus.md` | **ADR-0004（v1.4 拍板 + v1.4 路由占位落地）**：每个 view 只看一个 project（= currentProjectId），**不**做跨仓库聚合。`/team` 路由已预占位（TeamView.vue 仅 EmptyState，**不**进 store / IPC；v2 拍板前**不**挂 NavRail）。设计"我的视角 / 团队视图"前必读 |
 | 设计系统（生效） | `design-system/gitea-kanban/OVERRIDE.md` | 颜色、字体、零术语、二次确认 |
 | 科技感精修 token | `design-system/pages/tech-refine.md` | v1.1/v1.2 具体 token |
 | 本文件 | `AGENTS.md` | agent 入口规范 |

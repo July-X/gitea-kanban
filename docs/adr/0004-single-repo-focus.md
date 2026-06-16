@@ -55,6 +55,16 @@ v1 代码**已经**是单一仓库模式（无回归风险）：
 - **v2+ 跨仓库需求**（如果有）：必须**先**重新走 ADR 流程，不允许"顺便在某个 view 加个跨仓库 toggle"
 - **"我的视角" 替代方案**：v1.5+ 如果要做"用户手头卡片"——**仍**走单仓库（"我在当前 project 里被指派的卡"），**不**聚合多仓库
 - **团队视图**：v2 单独的路由 `/team`，跟单仓库 view **不**在同一个 store / IPC 命名空间
+  - v1.4 路由占位已落地：
+    - 路由：`src/renderer/routes/index.ts` 加 `/team` 路由（`requiresAuth: true`、`meta.placeholder: 'v2'`）
+    - 组件：`src/renderer/views/TeamView.vue` —— 仅 EmptyState + "回看板" CTA，**不**读 store / **不**触发 IPC
+    - NavRail：**不**挂入口（v2 拍板前**不**暴露，避免诱导 user 切换）
+  - 实现 TODO（v2 拍板后开）：
+    - 新建 `src/renderer/stores/team.ts`（独立 store，**不**复用 board/issue store）
+    - 新建 `src/renderer/views/TeamView.vue` 真实版 + `src/renderer/lib/team-aggregator.ts`
+    - 新建 IPC namespace（**不**在 board/issue 下加端点）：`src/main/ipc/team.ts` + `src/shared/ipc-channels.ts` 加 `team.*`
+    - NavRail 加入口，配套 DevAnnotate 说明数据来源
+    - 走单独的 ADR 流程拍板后再实现，不允许 v1 阶段"顺便加"
 
 ## 反例（设计踩坑提示）
 

@@ -3,6 +3,9 @@
  *
  * 设计（03-frontend.md §7 + AGENTS §5.5）：
  *   - 7 个一级路由：/、/auth、/board、/timeline、/merges、/my-cards、/members、/settings
+ *   - v1.4 拍板：加 /team 占位路由（v2 团队视图落地前，**不**挂 NavRail 入口）
+ *     · 详见 ADR-0004（docs/adr/0004-single-repo-focus.md）
+ *     · view 走 TeamView.vue 占位，仅保留路由，**不**进 store / IPC
  *   - 根路径 / 重定向到 /auth（未连接时合理入口）
  *   - 用 createWebHashHistory 适配 Electron file:// 协议
  *   - 懒加载（动态 import）减小首屏 bundle
@@ -61,6 +64,16 @@ const routes: RouteRecordRaw[] = [
     name: 'settings',
     component: () => import('@renderer/views/SettingsView.vue'),
     meta: { title: '设置', requiresAuth: true },
+  },
+  {
+    // v1.4 拍板占位（ADR-0004）：v2 团队视图落地前的路由占位
+    // - requiresAuth: true（跟其他业务路由一致）
+    // - 组件：TeamView.vue 占位（仅 EmptyState，**不**进 store / IPC）
+    // - v2 拍板前**不**挂 NavRail 入口（避免诱导 user）
+    path: '/team',
+    name: 'team',
+    component: () => import('@renderer/views/TeamView.vue'),
+    meta: { title: '团队视图', requiresAuth: true, placeholder: 'v2' },
   },
   {
     path: '/:pathMatch(.*)*',
