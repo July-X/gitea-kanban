@@ -291,6 +291,19 @@ gitea 不支持直接 rename API，v1 **不**实现"新建 + 推送 + 删旧"三
 
 ## 5. 时间轴可视化方案（**重点**）
 
+> **⚠️ v1.4 polish 状态更新（2026-06-16）**：
+>
+> 本节 §5.1-§5.6 是 v1.1/v1.2 设计稿的 AntV X6 方案——**实际 TimelineView 实现已弃用 X6，改用 Vue 3 + 自研 lane 渲染**（详见 `src/renderer/views/TimelineView.vue` + `src/renderer/lib/command-palette.ts` / `useBranchLoadDebounce` composable）。
+>
+> **设计决策**：
+> - 时间轴数据流（`TimelineDto` / `lanes` / `nodes` / `edges` 字段）**仍按本节 §5.2 契约**（schema 已稳定）
+> - 渲染层放弃 X6，原因：X6 200-500 节点规模没必要引入额外包体积 + 学习成本；Vue 3 模板 + CSS Grid 已足够画 lane + 节点
+> - `package.json` 已删 `@antv/x6` + `@antv/x6-vue-shape`（v1.4 commit）
+>
+> 本节保留作为**历史决策档案**——`docs/design/01-research.md` 调研 + 本节 X6 选型过程，是 v1.1 决策的真实记录；v1.4 重选不抹掉历史，AGENTS.md §2 表格行已改。
+>
+> 如果你是在 v1.4 之后读这份文档找时间轴实现，**直接看代码**（`TimelineView.vue` 1613 行，含完整渲染 + 防抖 + heatmap + 分支 chip 逻辑），不要按本节 §5.6 的 X6 桥接实现。
+
 ### 5.1 库选型（最终决定）
 
 **用 AntV X6@3.1.7**。理由（继承 research 结论）：

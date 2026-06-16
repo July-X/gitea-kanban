@@ -33,7 +33,7 @@
 | 路由 | **Vue Router 4.6.4** | `createWebHashHistory` 适配 Electron file:// |
 | UI 组件 | **Radix Vue** + **@headlessui/vue** + 自研组件 | 无 antd / Element Plus |
 | 样式 | **CSS Modules + 全局 CSS 变量** | 无 Tailwind；token 在 `src/renderer/styles/theme.css` |
-| 时间轴 | **AntV X6 3.1.7** + **@antv/x6-vue-shape** | 图编辑引擎 + Vue 官方桥 |
+| 时间轴 | **Vue 3 + 自研 lane 渲染**（v1.4 polish：AntV X6 已弃，0 文件引用） | 详见 `docs/design/03-frontend.md §5.2 + §5.6` 的"自研方案"小节 |
 | 图标 | **lucide-vue-next** | |
 | 校验 | **Zod 3.23.8** | IPC 边界强制校验 |
 | 本地存储 | **electron-store 11.0.2**（业务态）+ **文件 KV**（Gitea 缓存层，自研 file-store.ts） | 业务态 → localStore.state.json；Gitea 缓存 → cache/<resource>/<projectId>__<key>.json（ADR-0003 完结，零 SQLite 依赖） |
@@ -672,8 +672,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 4. **keychain dev fallback**：开发模式因 macOS sandbox 限制，token 会 fallback 写到 `userData/dev-tokens/*.json`（0600）；生产仍走系统 keychain。
 5. **@napi-rs/keyring 平台包**：`package.json` 的 `optionalDependencies` 已显式列出 7 个目标平台包；不要删除。
 6. **pnpm 11 allowBuilds**：`pnpm-workspace.yaml` 里 `allowBuilds` 控制原生 build；当前 `electron`、`esbuild` 等需要 true（ADR-0003 完结后无 better-sqlite3）。
-7. **X6 回调签名**：`interacting.*` 回调第一参数是 `cellView`，默认事件回调第一参数是 `{ cell, view }`；不要想当然用 `getData()`。
-8. **Edit 工具残段**：StrReplaceFile 的 `oldString` 尽量包整个函数或大段；替换后 `git diff` 确认无重复行。
+7. **Edit 工具残段**：StrReplaceFile 的 `oldString` 尽量包整个函数或大段；替换后 `git diff` 确认无重复行。
 9. **不要跨边界**：渲染端不写 `src/main/**`、不改 `src/shared/ipc-types.ts`；主进程不写 Vue 组件 / CSS。
 10. **启动排查 + CDP 调试**：详见 §8.7。**关键提醒**：(a) pino 在 dev/preview 模式走 file transport 不是 stdout，tee 看不到；(b) CDP 远程调试端口 9492 在 dev / preview 模式自动开，连接用 `http://127.0.0.1:9492/json/list` 拿 Renderer 列表。
 11. **Vue v-if/v-else-if/v-else 链会"折叠"（2026-06-15 踩坑）**：v-if 链在编译期被折叠成**第一个 v-if 节点的 children**，所以链中如果出现异 tag（比如 `<div v-if>...<ul v-else><li>...</li></ul>`），`<li>` 实际成了 `<div v-if>` 的 child 而不是 `<ul>` 的 child → `</li></ul>` 闭合错位 → 编译报 `Element is missing end tag`。**正确做法**：每个分支独立 v-if，列表分支用 `<ul v-if="...">` 而不是 `<ul v-else>`。**自检**：重构 placeholder/状态分支后，立刻跑 `node -e "const{baseCompile}=require('./node_modules/.pnpm/@vue+compiler-core@3.5.35/node_modules/@vue/compiler-core/dist/compiler-core.cjs.prod.js');const fs=require('fs');const m=fs.readFileSync('src/renderer/views/<View>.vue','utf-8').match(/<template>([\s\S]*?)<\/template>/);const errs=[];baseCompile(m[1],{onError:e=>errs.push(e)});console.log('errors:',errs.length,errs.map(e=>e.message).join(';'))"` 跑 0 错误。
@@ -711,7 +710,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 ## 13. 不决事项（必须推给用户拍板）
 
 以下变更不准 agent 自决：
-1. 改技术栈（Electron / TS / Vue 3 / Pinia / X6 / electron-store 任一变更）
+1. 改技术栈（Electron / TS / Vue 3 / Pinia / electron-store 任一变更）
 2. 改 IPC 契约（`src/shared/ipc-types.ts` 或 `schema.ts` 字段增删 / 命名变更）
 3. 改数据模型（localStore state 结构 / 文件缓存 resource 增删改）
 4. 改设计原则（零术语表、危险操作清单、错误码表）

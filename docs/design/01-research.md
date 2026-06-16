@@ -4,6 +4,8 @@
 > 输出时间：2026-06-10
 > **调研时效声明**：调研时间 2026-06-10，结论有效期 6 个月（至 2026-12-10）。
 > **重要**：本调研报告完成于用户决策 #1（Electron + TS）切换之前，本章 §1.2 / §5.2 / §5.3 / §5.4 的部分内容（推荐 Go + Gin + go-sdk + SQLite/PostgreSQL + 独立服务 + nginx 反代 + OAuth2）**已被用户决策否决作废**——最终方案见 `02-architecture.md §2` 与 `AGENTS.md §2`（Electron + TS + PAT + keychain，无 OAuth / 无 nginx / 无 Go SDK）。本调研的 gitea API endpoint 清单（§2.1）、timeline 库横评（§4）、X6 vs G6/vs D3 论证（§4）仍然有效，可作为后续 plan 的事实基础。
+>
+> **v1.4 polish 状态补充（2026-06-16）**：§4 timeline 库横评中"**选 X6**"的最终结论在 v1.4 已被推翻——v1.4 实际 TimelineView 用 Vue 3 + 自研 lane 渲染（**已删 `@antv/x6` + `@antv/x6-vue-shape`** devDep，0 文件引用）。§4 的 X6 论证仍可作为"为什么 v1 早期选 X6 / 为什么 v1.4 弃用"的历史决策档案保留；不要按本节结论去重装 X6。
 > 目的：为后续架构设计、前端设计、技术选型提供事实基础。不写代码。
 
 ---
