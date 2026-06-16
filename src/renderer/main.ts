@@ -24,6 +24,7 @@ import App from './App.vue';
 import { router } from './routes';
 import { mountCommandPalette } from './lib/command-palette';
 import { useUiStore } from './stores/ui';
+import { showToast } from './lib/toast';
 
 // 全局样式（reset + 主题变量）
 import './styles/reset.css';
@@ -58,14 +59,12 @@ if (import.meta.env.DEV) {
 app.config.errorHandler = (err, _instance, info) => {
   // eslint-disable-next-line no-console -- 渲染端 console 兜底（开发期可看）
   console.error('[gitea-kanban] 组件错误：', err, '\n触发位置：', info);
-  // 从 lib/toast.ts 拿 showToast（不用 import SFC,因为 SFC 顶层变量是组件实例）
-  void import('./lib/toast').then(({ showToast }) => {
-    showToast({
-      type: 'error',
-      message: '界面出错了',
-      description: err instanceof Error ? err.message : String(err),
-      duration: 5000,
-    });
+  // toast 是 lib（不是 SFC），直接 static import；之前的 dynamic import 是历史误判 + 触发 vite dynamic+static warning
+  showToast({
+    type: 'error',
+    message: '界面出错了',
+    description: err instanceof Error ? err.message : String(err),
+    duration: 5000,
   });
 };
 
