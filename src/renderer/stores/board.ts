@@ -39,8 +39,10 @@ import type {
   IssueCardDto,
   IssueLabelDto,
 } from '../../main/ipc/schema.js';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
+import { clusterLabels, type ClusterPlan } from '@renderer/lib/label-cluster';
 
-/** loadBoard 出参契约（plan_25cc4562 Task C · autoInit 透明化）
+/** loadBoard 出参契约（plan_25cc4562 Task C · autoInit 透明化 + v1.4 智能化）
  *
  * - `columns`         : 当前 project 实际生效的列（autoInit 触发后含新建列）
  * - `autoInitCreatedCount` : autoInit 帮建的列数（>0 时 UI 应弹 toast 透明化提示）
@@ -48,10 +50,16 @@ import type {
  *                          · 0 列 + gitea 有 label → >0（已自动建好）
  *                          · N 列 → 0（已建过不干预）
  *                          · loadBoard 抛错 → 0（错误优先）
+ * - `autoInitBreakdown`   : v1.4 智能化聚类详情（user 拍板"m10-*, bugfix-m10-* 等"）
+ *                          · 0 列 + gitea 无 label → null（不展示）
+ *                          · 0 列 + gitea 有 label → { literal, prefixGroup, compound, unmatched }
+ *                          · N 列 → null（已建过不干预）
+ *                          · loadBoard 抛错 → null
  */
 export interface LoadBoardResult {
   columns: ColumnDto[];
   autoInitCreatedCount: number;
+  autoInitBreakdown: ClusterPlan | null;
 }
 
 /** undo / redo 栈深度 —— 状态走 src/renderer/composables/useUndoStack（M6 undo-by-project）
@@ -166,6 +174,7 @@ export const useBoardStore = defineStore('board', () => {
  */
   async function loadBoard(projectId: string): Promise<LoadBoardResult> {
   loading.value = true;
+  useGlobalLoadingStore().show('board');
   error.value = null;
   // 局部变量：成功路径才返给 caller；catch 路径返 0 列 + 0 计数（避免 undefined 引用）
   let resultColumns: ColumnDto[] = [];
@@ -181,15 +190,19 @@ export const useBoardStore = defineStore('board', () => {
   ]);
   labelsByProject.value = labelsResp.items;
 
-  // === 自动初始化：0 列 + gitea 有可匹配 label → 自动创建列并绑定 ===
+  // === 自动初始化：0 列 + gitea 有 label → cluster + 自动创建列并绑定 ===
+  let autoInitBreakdown: ClusterPlan | null = null;
   if (cols.length === 0 && labelsResp.items.length > 0) {
-  const autoResult = await autoInitColumns(projectId, labelsResp.items);
-  resultAutoInitCount = autoResult.length;
-  if (autoResult.length > 0) {
-  // 重新拉列（后端已写入 localStore；createColumn 已把 cols 同步进 store.columns，
-  // 这里再拉一次拿绑 label 后的真实 labels 数据）
-  cols = await boardColumnsList({ projectId });
-  }
+    // 跑 cluster（纯函数），拿 breakdown 返给 caller 弹 toast
+    const plan = clusterLabels(labelsResp.items);
+    autoInitBreakdown = plan;
+    const autoResult = await autoInitColumns(projectId, labelsResp.items);
+    resultAutoInitCount = autoResult.length;
+    if (autoResult.length > 0) {
+    // 重新拉列（后端已写入 localStore；createColumn 已把 cols 同步进 store.columns，
+    // 这里再拉一次拿绑 label 后的真实 labels 数据）
+    cols = await boardColumnsList({ projectId });
+    }
   }
 
   columns.value = cols;
@@ -205,63 +218,56 @@ export const useBoardStore = defineStore('board', () => {
   }
   issuesByColumn.value = byCol;
   unassignedIssues.value = unassigned;
-  return { columns: resultColumns, autoInitCreatedCount: resultAutoInitCount };
+  return { columns: resultColumns, autoInitCreatedCount: resultAutoInitCount, autoInitBreakdown };
   } catch (e) {
   error.value = normalizeError(e);
   throw e;
   } finally {
   loading.value = false;
+  useGlobalLoadingStore().hide('board');
   }
   }
 
- /**
+/**
  * 自动初始化看板列：当项目没有任何列时，根据 gitea label 自动创建并绑定
  *
- * 策略：
- * 1. 预设列名列表（中文优先，英文兜底）
- * 2. 在 gitea label 中找匹配项（精确匹配名称）
- * 3. 每个匹配到的 label → 创建同名列 → 绑定该 label
- * 4. 如果没有任何匹配，不创建任何列（避免创建无用的空列）
+ * **v1.4 智能化（plan_25cc4562 Task C · user 拍板 2026-06-16）**：
+ * 原本只精确匹配 12 个预设字面量。v1.4 改走 `clusterLabels()` 智能聚类：
+ *   - L1 精确匹配（'待办' / '进行中' 等 10 个去重字面量）
+ *   - L2 prefix 聚类（'m10a-version1', 'm10a-version2' → 'm10a-version1-*'）
+ *   - L3 复合 prefix（'m10-1', 'm10-2' → 'm10-*'；'bugfix-m10-1', 'bugfix-m10-2' → 'bugfix-m10-*'）
  *
- * @returns 新创建的列数组
+ * 列名规则：literal = label 原名；prefixGroup / compound = `${prefix}-*` 形式
+ *
+ * @returns 新创建的列数组（按 literal → prefixGroup → compound 顺序）
  */
- async function autoInitColumns(
+async function autoInitColumns(
  projectId: string,
  giteaLabels: IssueLabelDto[],
- ): Promise<ColumnDto[]> {
- // 预设列名 → 按优先级匹配（第一个匹配到的 label 绑到该列）
- // 同一个 label 只能绑一列，所以用 Set 追踪已使用的 label
- const presetColumns = [
- // 中文常见看板列名
- '新建', '进行中', '待办', '已完成',
- // 英文常见看板列名
- 'Backlog', 'To Do', 'In Progress', 'Done',
- // 其他常见
- '待处理', '处理中', '已完成',
- ];
- const usedLabelIds = new Set<number>();
+): Promise<ColumnDto[]> {
+ // 1. 聚类
+ const plan = clusterLabels(giteaLabels);
+ const allGroups = [...plan.literal, ...plan.prefixGroup, ...plan.compound];
  const createdCols: ColumnDto[] = [];
 
- for (const presetName of presetColumns) {
- const matchedLabel = giteaLabels.find(
- (l) => l.name === presetName && !usedLabelIds.has(l.id),
- );
- if (!matchedLabel) continue;
-
+ for (const group of allGroups) {
  // 创建列
  try {
- const col = await createColumn({ projectId, title: presetName });
- // 绑定 label
+ const col = await createColumn({ projectId, title: group.columnTitle });
+ // 绑定所有 label
+ for (const labelId of group.labelIds) {
+ const label = giteaLabels.find((l) => l.id === labelId);
+ if (!label) continue;
  try {
  await mapLabelToColumn({
  columnId: col.id,
- giteaLabelId: matchedLabel.id,
- giteaLabelName: matchedLabel.name,
+ giteaLabelId: labelId,
+ giteaLabelName: label.name,
  });
  } catch {
  // 绑定失败不阻断（列已创建，用户可手动绑）
  }
- usedLabelIds.add(matchedLabel.id);
+ }
  createdCols.push(col);
  } catch {
  // 创建失败跳过，继续尝试下一个
@@ -269,7 +275,8 @@ export const useBoardStore = defineStore('board', () => {
  }
 
  return createdCols;
- }
+}
+
 
  /**
  * 把 issue归类到某个 column（按 labels交集）

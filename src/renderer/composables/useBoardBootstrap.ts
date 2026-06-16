@@ -122,10 +122,41 @@ export function useBoardBootstrap(
           const firstCol = board.columns[0];
           if (!firstCol) return;
           const count = loadResult.autoInitCreatedCount;
+          // v1.4 智能化（plan_25cc4562 Task C）：按 breakdown 动态生成文案
+          //  - literal-only：原文案（纯字面量匹配）
+          //  - literal + prefixGroup：列 N 列（含 L2 聚类）
+          //  - literal + prefixGroup + compound：列 N 列（含 L3 复合）
+          //  - 有 unmatched：附加"还有 K 个 label 没归类"
+          const breakdown = loadResult.autoInitBreakdown;
+          const unmatched = breakdown?.unmatched.length ?? 0;
+          const compoundCount = breakdown?.compound.length ?? 0;
+          const hasL2L3 = (breakdown?.prefixGroup.length ?? 0) > 0 || compoundCount > 0;
+          const descriptionParts: string[] = [];
+          if (breakdown && (breakdown.literal.length + breakdown.prefixGroup.length + breakdown.compound.length) > 0) {
+            const literalNames = breakdown.literal.map((c) => c.columnTitle);
+            const prefixNames = breakdown.prefixGroup.map((c) => c.columnTitle);
+            const compoundNames = breakdown.compound.map((c) => c.columnTitle);
+            const allNames = [...literalNames, ...prefixNames, ...compoundNames].slice(0, 5);
+            if (allNames.length > 0) {
+              descriptionParts.push(`已建：${allNames.join(' / ')}${allNames.length === 5 ? ' ...' : ''}`);
+            }
+          } else {
+            descriptionParts.push('gitea 仓库已有匹配的 label，按名字建好了列。');
+          }
+          if (hasL2L3) {
+            descriptionParts.push('含聚类列（label 自动归纳）。');
+          }
+          if (unmatched > 0) {
+            const unmatchedNames = breakdown!.unmatched.slice(0, 3).map((u) => u.labelName);
+            descriptionParts.push(
+              `还有 ${unmatched} 个 label 没归类：${unmatchedNames.join(' / ')}${unmatched > 3 ? ' ...' : ''}`,
+            );
+          }
+          descriptionParts.push('点列名可改名 / 解绑 label。');
           showToast({
             type: 'info',
             message: `帮你建了 ${count} 列`,
-            description: `gitea 仓库已有匹配的 label，按名字建好了 ${count} 列。点列名可改名 / 解绑 label。`,
+            description: descriptionParts.join(' '),
             duration: 6000,
             actions: [
               {
