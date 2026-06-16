@@ -13,6 +13,8 @@
 
 > **gitea-kanban = 给 gitea 用户的桌面端看板 + 时间轴工具，专注强 git 集成 + 零术语界面 + 单二进制轻量自托管。**
 
+> **v1.4 user 拍板（2026-06-16）补充**：每个 view 只看一个 project（= `useRepoStore().currentProjectId`），**不**做跨仓库聚合。理由 + 反例 + 验证命令见 [ADR-0004](./adr/0004-single-repo-focus.md)。设计"我的视角 / 团队视图"等跨仓库功能时必须**先**重新走 ADR 流程。
+
 ---
 
 ## 2. 核心特性清单

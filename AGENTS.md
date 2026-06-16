@@ -675,6 +675,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 10. **启动排查 + CDP 调试**：详见 §8.7。**关键提醒**：(a) pino 在 dev/preview 模式走 file transport 不是 stdout，tee 看不到；(b) CDP 远程调试端口 9492 在 dev / preview 模式自动开，连接用 `http://127.0.0.1:9492/json/list` 拿 Renderer 列表。
 11. **Vue v-if/v-else-if/v-else 链会"折叠"（2026-06-15 踩坑）**：v-if 链在编译期被折叠成**第一个 v-if 节点的 children**，所以链中如果出现异 tag（比如 `<div v-if>...<ul v-else><li>...</li></ul>`），`<li>` 实际成了 `<div v-if>` 的 child 而不是 `<ul>` 的 child → `</li></ul>` 闭合错位 → 编译报 `Element is missing end tag`。**正确做法**：每个分支独立 v-if，列表分支用 `<ul v-if="...">` 而不是 `<ul v-else>`。**自检**：重构 placeholder/状态分支后，立刻跑 `node -e "const{baseCompile}=require('./node_modules/.pnpm/@vue+compiler-core@3.5.35/node_modules/@vue/compiler-core/dist/compiler-core.cjs.prod.js');const fs=require('fs');const m=fs.readFileSync('src/renderer/views/<View>.vue','utf-8').match(/<template>([\s\S]*?)<\/template>/);const errs=[];baseCompile(m[1],{onError:e=>errs.push(e)});console.log('errors:',errs.length,errs.map(e=>e.message).join(';'))"` 跑 0 错误。
 12. **重构 detail 区要数 div 嵌套层数**（2026-06-15 踩坑）：`<div v-if="expanded">` 包裹多卡片内容时（meta + comments + comment-compose + input-wrap + @-dropdown），手改完忘了删一个 `</div>`，编译报 `Element is missing end tag` 但**实际错误位置不是真正的 unclose**——因为 Vue 编译器在闭合错位时才报错。**自检**：用 `awk '{n+=gsub(/<div/,"&")-gsub(/<\/div>/,"&")} END{print "balance="n}' src/renderer/views/<View>.vue` 看是否 = 0（注意：自闭的 `<div .../>` 算 1 开 + 1 闭）。**或者**用第 11 条的 `baseCompile` 一行命令直接验证。
+13. **emoji 字符做旋转动画要外层 wrapper**（2026-06-16 踩坑 · GlobalLoadingOverlay v1.4）：emoji 字符**自己不能** `transform: rotate()` —— 旋转作用在外层 wrapper（`<div class="dolphin-emoji-wrap">`）上，emoji 跟随 wrapper 转。**a11y**：`aria-hidden="true"` 包住 emoji（避免屏幕阅读器读"dolphin emoji"），外层 `role="status" aria-live="polite"` 负责播报"加载中"。**跨平台渲染差异**：emoji 跨 OS 颜色字体不同（Apple Color Emoji / Google Noto / Windows Segoe UI / Linux Noto Color Emoji），不强制 `font-family` → 走系统默认 → 4 平台都能渲染（接受 trade-off）。**OVERRIDE 推翻**：emoji 在"装饰性吉祥物"场景豁免（已同步更新 OVERRIDE.md 表格 v1.4），业务图标 / 操作图标 / 状态图标**仍**必须 SVG。
 
 ---
 
@@ -688,6 +689,7 @@ UI 文本禁止直接出现以下原词，必须走翻译表：
 | keychain 选型 | `docs/adr/0001-keychain.md` | 为什么用 @napi-rs/keyring |
 | board 数据模型 reset | `docs/adr/0002-board-data-source-reset.md` | 为什么卡片 = Gitea issue |
 | **本地存储迁移 + 同步队列** | `docs/adr/0003-local-store-electron-store.md` | **ADR-0003（已完结）**：SQLite → electron-store + 文件 KV + queue.jsonl；零 SQLite 依赖 |
+| **单一仓库专注模式** | `docs/adr/0004-single-repo-focus.md` | **ADR-0004（v1.4 拍板）**：每个 view 只看一个 project（= currentProjectId），**不**做跨仓库聚合。设计"我的视角 / 团队视图"前必读 |
 | 设计系统（生效） | `design-system/gitea-kanban/OVERRIDE.md` | 颜色、字体、零术语、二次确认 |
 | 科技感精修 token | `design-system/pages/tech-refine.md` | v1.1/v1.2 具体 token |
 | 本文件 | `AGENTS.md` | agent 入口规范 |
