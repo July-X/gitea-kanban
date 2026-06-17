@@ -22,6 +22,7 @@ import { issuesList } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { IssueCardDto } from '../../main/ipc/schema.js';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 
 /** 视图层状态维度 */
 export type MyCardFilter = 'all' | 'open' | 'closed';
@@ -88,6 +89,7 @@ export const useMyCardStore = defineStore('my-card', () => {
     reset = true,
   ): Promise<void> {
     loading.value = true;
+    useGlobalLoadingStore().show('myCard');
     error.value = null;
     if (reset) {
       items.value = [];
@@ -109,6 +111,7 @@ export const useMyCardStore = defineStore('my-card', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('myCard');
     }
   }
 

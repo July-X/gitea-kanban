@@ -14,6 +14,7 @@
  * 不重复 watch / onMounted，避免 lifecycle hook 重复注册。
  */
 import { useRoute, useRouter } from 'vue-router';
+import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
 import { showToast } from '@renderer/lib/toast';
@@ -36,6 +37,7 @@ export interface UseBoardActionsReturn {
 
 export function useBoardActions(options: UseBoardActionsOptions): UseBoardActionsReturn {
   const repo = useRepoStore();
+  const auth = useAuthStore();
   const board = useBoardStore();
   const route = useRoute();
   const router = useRouter();
@@ -56,7 +58,12 @@ export function useBoardActions(options: UseBoardActionsOptions): UseBoardAction
         return;
       }
     }
-    if (project) repo.selectProject(project);
+    if (project) {
+      repo.selectProject(project);
+      // v1.4 任务 #statusbar-persist:持久化本次选择
+      // 静默失败 — selectProject 自身的 IPC 已成功,持久化是 bonus
+      void repo.persistLastSelected(r, project, auth.currentGiteaUrl);
+    }
     void router.replace({ query: { ...route.query, project: r.fullName } });
     try {
       await board.loadBoard(repo.currentProjectId ?? r.fullName);

@@ -26,6 +26,7 @@ import { pullsList, pullsGet, pullsMerge, pullsClose } from '@renderer/lib/ipc-c
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListPullsResp, PullDto, PullState, MergeMethod } from '../../main/ipc/schema.js';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 
 /** 视图层 tab 维度 */
 export type PullFilter = 'all' | 'open' | 'merged' | 'closed';
@@ -97,6 +98,7 @@ export const usePullStore = defineStore('pull', () => {
    */
   async function list(projectId: string, reset = true): Promise<void> {
     loading.value = true;
+    useGlobalLoadingStore().show('pull');
     error.value = null;
     if (reset) {
       items.value = [];
@@ -117,6 +119,7 @@ export const usePullStore = defineStore('pull', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('pull');
     }
   }
 

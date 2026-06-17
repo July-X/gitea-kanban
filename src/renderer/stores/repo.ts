@@ -9,11 +9,52 @@
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { reposAddProject, reposList, reposRemoveProject } from '@renderer/lib/ipc-client';
+import { reposAddProject, reposList, reposRemoveProject, getIpcClient } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListReposResp, RepoDto, RepoProjectDto } from '../../main/ipc/schema.js';
 import { useAuthStore } from '@renderer/stores/auth';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
+
+/**
+ * v1.4 任务 #statusbar-persist：上次选择的仓库持久化 key
+ *
+ * 走 user.prefs 通用通道（theme / navrail.collapsed / repo.last.selected 同一管线）
+ * value schema:
+ *   {
+ *     giteaUrl: string,  // 检测「换 gitea 账号」→ 不一致则视为失效
+ *     owner:     string,
+ *     name:      string,
+ *     projectId: string, // RepoProjectDto 的真 uuid（精确选回，避免 fullName 撞库）
+ *   }
+ *
+ * localStorage 同步缓存 key（启动期 0 闪烁，跟 navCollapsed 同模式）
+ */
+const REPO_LAST_PREF_KEY = 'repo.last.selected';
+const REPO_LAST_STORAGE_KEY = 'gitea-kanban.repoLast';
+
+/** 持久化 value 的窄类型 —— 读 prefs 时容错校验,失败返 null(等于"没选过") */
+interface RepoLastPrefValue {
+  giteaUrl: string;
+  owner: string;
+  name: string;
+  projectId: string;
+}
+
+function isRepoLastPrefValue(v: unknown): v is RepoLastPrefValue {
+  if (!v || typeof v !== 'object') return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.giteaUrl === 'string' &&
+    typeof o.owner === 'string' &&
+    typeof o.name === 'string' &&
+    typeof o.projectId === 'string' &&
+    o.giteaUrl.length > 0 &&
+    o.owner.length > 0 &&
+    o.name.length > 0 &&
+    o.projectId.length > 0
+  );
+}
 
 export const useRepoStore = defineStore('repo', () => {
   // ===== state =====
@@ -69,6 +110,7 @@ export const useRepoStore = defineStore('repo', () => {
     }
     const accountId = auth.accounts[0].id;
     loading.value = true;
+    useGlobalLoadingStore().show('repo');
     error.value = null;
     try {
       const resp = (await reposList({
@@ -89,6 +131,7 @@ export const useRepoStore = defineStore('repo', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('repo');
     }
   }
 
@@ -125,6 +168,7 @@ export const useRepoStore = defineStore('repo', () => {
     }
     const accountId = auth.accounts[0].id;
     loading.value = true;
+    useGlobalLoadingStore().show('repo');
     error.value = null;
     try {
       const project = (await reposAddProject({
@@ -141,6 +185,7 @@ export const useRepoStore = defineStore('repo', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('repo');
     }
   }
 
@@ -157,6 +202,7 @@ export const useRepoStore = defineStore('repo', () => {
       return;
     }
     loading.value = true;
+    useGlobalLoadingStore().show('repo');
     error.value = null;
     try {
       await reposRemoveProject({ projectId: uuid });
@@ -169,6 +215,7 @@ export const useRepoStore = defineStore('repo', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('repo');
     }
   }
 
@@ -193,6 +240,143 @@ export const useRepoStore = defineStore('repo', () => {
     error.value = null;
   }
 
+  /**
+   * v1.4 任务 #statusbar-picker：
+   * 登录成功后,如果还没选仓库,提示用户从下拉菜单选一个 —— "全局保存,后续所有操作都针对这个仓库"
+   * 实现:App.vue 监听 auth.isConnected 边沿变 true + repo.currentProject == null → set true
+   * StatusBar 监听此 ref 变 true → 自动打开 picker,选完清回 false
+   *
+   * 跨 store 协调不引 bus/事件:用 repo store 的一个普通 ref 当标志位最轻
+   * (不存 localStore,纯运行时状态,刷新即丢)
+   */
+  const guideOnConnect = ref(false);
+  function consumeGuideOnConnect(): void {
+    guideOnConnect.value = false;
+  }
+
+  // ===== v1.4 任务 #statusbar-persist:仓库选择持久化 =====
+
+  /**
+   * 持久化当前选择的仓库
+   *
+   * - 同步写 localStorage（启动期 reconcile 用,**不**是持久化主路径）
+   * - 异步 IPC user.prefs.set（不阻塞 UI;失败 console.warn 不弹 toast）
+   * - 传 null 时清掉持久化（退出登录/手动清除时用）
+   *
+   * 调用方传 RepoDto + RepoProjectDto + giteaUrl;
+   * 调用时机:useBoardActions.selectProject 完成后 / 退出登录
+   *
+   * 注意:RepoDto.id 是 gitea 后端的 number id,**不**是本机 project uuid;
+   * RepoProjectDto.id 才是本机 uuid(主 IPC 用这个)
+   */
+  async function persistLastSelected(
+    repoDto: RepoDto | null,
+    project: RepoProjectDto | null,
+    giteaUrl: string,
+  ): Promise<void> {
+    // 计算 value —— 没传完整三件套就清掉
+    let value: RepoLastPrefValue | null = null;
+    if (repoDto && project && giteaUrl) {
+      value = {
+        giteaUrl,
+        owner: repoDto.owner,
+        name: repoDto.name,
+        projectId: project.id,
+      };
+    }
+
+    // 同步写 localStorage（启动期 restore 用）
+    try {
+      if (value) {
+        localStorage.setItem(REPO_LAST_STORAGE_KEY, JSON.stringify(value));
+      } else {
+        localStorage.removeItem(REPO_LAST_STORAGE_KEY);
+      }
+    } catch {
+      // localStorage 不可用（隐私模式 / quota）—— 静默
+    }
+
+    // 异步 IPC 持久化
+    try {
+      const entries: Record<string, unknown> = value
+        ? { [REPO_LAST_PREF_KEY]: value }
+        : { [REPO_LAST_PREF_KEY]: null };
+      await getIpcClient().invokeNested('user', 'prefs', 'set', { entries });
+    } catch (err) {
+      // 静默失败 —— localStorage 已写/已删,下次启动仍能恢复/失效
+      // console.warn 留痕（dev 调试用）
+      // eslint-disable-next-line no-console
+      console.warn('[repo] repo.last.selected persistence failed:', err);
+    }
+  }
+
+  /**
+   * 启动期 reconcile（App.vue mount 后调一次）
+   *
+   * 1. 同步:localStorage 读 → 校验 → 标记 "有持久化候选"
+   * 2. 异步:IPC user.prefs.get 拉权威值 → 不一致则用 prefs 覆盖 localStorage
+   *
+   * 不在此函数内 selectProject —— 仓库列表(RepoDto[])此时可能还没加载,
+   * caller(App.vue)拿 reconcile 结果 + loadRepos 后再决定是否能 selectProject。
+   *
+   * 返:
+   *   - null:没有持久化 / 持久化已失效(giteaUrl 不匹配) / 校验失败
+   *   - RepoLastPrefValue:有持久化,值得后续尝试 selectProject
+   */
+  async function restoreLastSelected(currentGiteaUrl: string): Promise<RepoLastPrefValue | null> {
+    // 1. 同步:localStorage 兜底
+    let cached: RepoLastPrefValue | null = null;
+    try {
+      const raw = localStorage.getItem(REPO_LAST_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (isRepoLastPrefValue(parsed) && parsed.giteaUrl === currentGiteaUrl) {
+          cached = parsed;
+        }
+      }
+    } catch {
+      // localStorage 不可用 / JSON.parse 失败 → 保持 null
+    }
+
+    // 2. 异步:IPC 拉权威值
+    let fromPrefs: RepoLastPrefValue | null = null;
+    try {
+      const result = (await getIpcClient().invokeNested('user', 'prefs', 'get', {
+        keys: [REPO_LAST_PREF_KEY],
+      })) as Record<string, unknown> | null;
+      const v = result?.[REPO_LAST_PREF_KEY];
+      if (isRepoLastPrefValue(v) && v.giteaUrl === currentGiteaUrl) {
+        fromPrefs = v;
+      }
+    } catch {
+      // 静默
+    }
+
+    // 3. 取权威值(prefs > localStorage);都不行 → 返 null
+    const final = fromPrefs ?? cached;
+    if (!final) return null;
+
+    // 4. 同步两边:prefs 拿到值则写 localStorage(单源策略,以 prefs 为准)
+    if (fromPrefs && !cached) {
+      try {
+        localStorage.setItem(REPO_LAST_STORAGE_KEY, JSON.stringify(fromPrefs));
+      } catch {
+        /* ignore */
+      }
+    }
+    // prefs 没值但 localStorage 有 → 用 localStorage 写回 prefs(双端对齐)
+    if (!fromPrefs && cached) {
+      try {
+        await getIpcClient().invokeNested('user', 'prefs', 'set', {
+          entries: { [REPO_LAST_PREF_KEY]: cached },
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    return final;
+  }
+
   return {
     // state
     repos,
@@ -202,6 +386,7 @@ export const useRepoStore = defineStore('repo', () => {
     currentProjectId,
     loading,
     error,
+    guideOnConnect,
     // getters
     currentRepo,
     projects,
@@ -211,5 +396,8 @@ export const useRepoStore = defineStore('repo', () => {
     addProject,
     removeProject,
     clearError,
+    consumeGuideOnConnect,
+    persistLastSelected,
+    restoreLastSelected,
   };
 });

@@ -19,6 +19,30 @@ import { branchesList, branchesStar } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { BranchDto, ListBranchesResp } from '../../main/ipc/schema.js';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
+
+/**
+ * 跨视图状态传递：从 MergesView 写 → TimelineView onMounted 读
+ *
+ * - setPendingTimelineFocus(payload) 接收 { ref, sha }（v1.4 · 任务 #merge-timeline-jump：
+ *   从合并请求跳时间轴需要 sha 高亮该合并请求头提交；旧 string 调用方已迁移,保留 string overload
+ *   仅作 type 兼容,运行行为统一归一化成 { ref, sha: '' }）
+ * - TimelineView onMounted 调 consumePendingTimelineFocus() 读出并清空
+ *
+ * 选 Pinia pending 而非 query / route param 的理由:
+ * router 路径都是 /timeline 不带 param，引入动态路由会影响所有 `router.push({name:'timeline'})`
+ * 调用方；Pinia pending 改动最小（1 store + 1 视图）。
+ */
+export interface PendingTimelineFocus {
+  /** 分支名（gitea branch ref） */
+  ref: string;
+  /**
+   * 提交 sha（合并请求头提交的 sha）
+   * - 有值 → TimelineView 加载完后,匹配该 sha 的 commit-row 高亮 + 滚动到视图
+   * - 空串 → 仅切分支,不滚动高亮（兼容旧 "在时间轴查看此分支" 调用）
+   */
+  sha: string;
+}
 
 export const useBranchStore = defineStore('branch', () => {
   // ===== state =====
@@ -46,14 +70,13 @@ export const useBranchStore = defineStore('branch', () => {
   const currentSelectedItem = ref<BranchDto | null>(null);
 
   /**
-   * 跨视图状态传递：写入方是分支相关 UI（v1.4 起唯一写入方暂未挂载——pending 留给后续分支
-   * 操作面板使用），TimelineView onMounted 调 `consumePendingTimelineFocus()` 读出并清空。
+   * 跨视图状态传递：从 MergesView 写 → TimelineView onMounted 读
    *
-   * 选 Pinia pending 而非 query / route param 的理由（见 plan §4）：
+   * 选 Pinia pending 而非 query / route param 的理由:
    * router 路径都是 /timeline 不带 param，引入动态路由会影响所有 `router.push({name:'timeline'})`
    * 调用方；Pinia pending 改动最小（1 store + 1 视图）。
    */
-  const pendingTimelineFocus = ref<string | null>(null);
+  const pendingTimelineFocus = ref<PendingTimelineFocus | null>(null);
 
   // ===== getters =====
   const total = computed(() => items.value.length);
@@ -99,6 +122,7 @@ export const useBranchStore = defineStore('branch', () => {
    */
   async function list(projectId: string, reset = true): Promise<void> {
     loading.value = true;
+    useGlobalLoadingStore().show('branch');
     error.value = null;
     if (reset) {
       items.value = [];
@@ -124,6 +148,7 @@ export const useBranchStore = defineStore('branch', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('branch');
     }
   }
 
@@ -192,16 +217,21 @@ export const useBranchStore = defineStore('branch', () => {
     return starred;
   }
 
-  /** 写跨视图状态："在时间轴查看此分支"——TimelineView onMounted consume */
-  function setPendingTimelineFocus(name: string): void {
-    pendingTimelineFocus.value = name;
+  /** 写跨视图状态:"在时间轴查看此分支/提交" —— TimelineView onMounted consume */
+  function setPendingTimelineFocus(payload: PendingTimelineFocus | string): void {
+    // 兼容旧 string 调用方(目前已无 caller,保留仅防外部 lib 误用)
+    if (typeof payload === 'string') {
+      pendingTimelineFocus.value = { ref: payload, sha: '' };
+      return;
+    }
+    pendingTimelineFocus.value = payload;
   }
 
-  /** 读跨视图状态并清空（TimelineView onMounted 调一次） */
-  function consumePendingTimelineFocus(): string | null {
-    const n = pendingTimelineFocus.value;
+  /** 读跨视图状态并清空(TimelineView onMounted 调一次) */
+  function consumePendingTimelineFocus(): PendingTimelineFocus | null {
+    const v = pendingTimelineFocus.value;
     pendingTimelineFocus.value = null;
-    return n;
+    return v;
   }
 
   function clearError(): void {

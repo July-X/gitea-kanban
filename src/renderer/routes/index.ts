@@ -4,7 +4,7 @@
  * 设计（03-frontend.md §7 + AGENTS §5.5）：
  *   - 7 个一级路由：/、/auth、/board、/timeline、/merges、/my-cards、/members、/settings
  *   - v1.4 拍板：加 /team 占位路由（v2 团队视图落地前，**不**挂 NavRail 入口）
- *     · 详见 ADR-0004（docs/adr/0004-single-repo-focus.md）
+ *     · 详见 ADR-0004（docs/adr/0004-single-repository-focus.md）
  *     · view 走 TeamView.vue 占位，仅保留路由，**不**进 store / IPC
  *   - 根路径 / 重定向到 /auth（未连接时合理入口）
  *   - 用 createWebHashHistory 适配 Electron file:// 协议

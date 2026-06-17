@@ -19,6 +19,7 @@ import { computed, ref } from 'vue';
 import { membersList } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 
 /** 视图层权限维度 */
 export type MemberFilter = 'all' | 'admin' | 'write' | 'read';
@@ -101,6 +102,7 @@ export const useMemberStore = defineStore('member', () => {
    */
   async function list(projectId: string, reset = true): Promise<void> {
     loading.value = true;
+    useGlobalLoadingStore().show('member');
     error.value = null;
     if (reset) {
       items.value = [];
@@ -115,6 +117,7 @@ export const useMemberStore = defineStore('member', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('member');
     }
   }
 

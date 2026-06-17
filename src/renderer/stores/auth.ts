@@ -19,6 +19,7 @@ import type { UserFacingError } from '@renderer/lib/ipc-client';
 // src/shared/ipc-types.ts 文件尚未由 backend 创建，frontend 任务**只读** schema.ts,
 // 不在 shared 目录新增 re-export 文件以避免改 shared 边界。
 import type { GiteaAccountDto, UserDto } from '../../main/ipc/schema.js';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 
 export const useAuthStore = defineStore('auth', () => {
   // ===== state =====
@@ -41,6 +42,7 @@ export const useAuthStore = defineStore('auth', () => {
    */
   async function refreshStatus(): Promise<void> {
     loading.value = true;
+    useGlobalLoadingStore().show('auth');
     error.value = null;
     try {
       const resp = (await authStatus()) as {
@@ -54,6 +56,7 @@ export const useAuthStore = defineStore('auth', () => {
       // status 失败不重置 accounts —— 可能是临时网络问题
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('auth');
     }
   }
 
@@ -65,6 +68,7 @@ export const useAuthStore = defineStore('auth', () => {
    */
   async function connect(giteaUrl: string, token: string): Promise<void> {
     loading.value = true;
+    useGlobalLoadingStore().show('auth');
     error.value = null;
     try {
       await authConnect(giteaUrl, token);
@@ -75,6 +79,7 @@ export const useAuthStore = defineStore('auth', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('auth');
     }
   }
 
@@ -83,6 +88,7 @@ export const useAuthStore = defineStore('auth', () => {
    */
   async function disconnect(giteaUrl: string): Promise<void> {
     loading.value = true;
+    useGlobalLoadingStore().show('auth');
     error.value = null;
     try {
       await authDisconnect(giteaUrl);
@@ -92,6 +98,7 @@ export const useAuthStore = defineStore('auth', () => {
       throw e;
     } finally {
       loading.value = false;
+      useGlobalLoadingStore().hide('auth');
     }
   }
 
