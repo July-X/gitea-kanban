@@ -429,4 +429,18 @@ const displayIssues = computed<IssueCardDto[]>(() => {
 .card__action:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text); }
 .card__action--danger:hover:not(:disabled) { color: var(--color-danger); }
 .card__action:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ===== v1.4 列级光晕（拖卡时整列外发光）=====
+ * 必须放在组件 <style scoped> 里 —— 全局 board-drag.css 的 .column:has() 编译后
+ * 特异性 (0,1,0) < scoped .column[data-v-xxx] (0,2,0) 永远输。
+ * 放在同文件内靠 source order 胜出（:has 在 .column 之后定义）。
+ * 触发：包含正在拖的 card 的列（SortableJS 把 .card--dragging 加在拖中的 card 上，
+ * card 已被 Sortable 移入目标列的 DOM，所以 :has 自动命中目标列）。
+ * box-shadow：内 2px 主色实线 + 外 24px 主色 glow 扩散 + 120ms 过渡。 */
+.column:has(.card--dragging) {
+  box-shadow:
+    0 0 0 2px var(--color-primary),
+    0 0 24px 4px var(--color-primary-glow);
+  transition: box-shadow 120ms ease-out;
+}
 </style>

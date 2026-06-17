@@ -23,6 +23,19 @@ export interface UseKanbanMouseDragOptions {
     fromColumnId: string,
     toColumnId: string,
   ) => void | Promise<void>;
+  /**
+   * 可选：判断 columnId 是不是有效目标列。
+   * 不传 = 不过滤（保留旧行为）。
+   *
+   * 用途：过滤非真实列 id（如 UnassignedSection 的 `'__unassigned__'` 哨兵），
+   * 避免这些"非列 DOM"被当成目标列触发 `board.moveIssue(toColumnId: '__unassigned__')`，
+   * 走到 main 端 `findColumnByIdWithStore` 找不到列 → 抛 NOT_FOUND → 乐观更新回滚
+   * → 用户感知"我松手了但 data 没更新"（v1.4 修复）。
+   *
+   * 设计：composable 不依赖 store（caller 注入），所以判断逻辑也走 caller 注入。
+   *   BoardView 用法：`isValidTargetColumn: (id) => board.columns.some(c => c.id === id)`
+   */
+  isValidTargetColumn?: (columnId: string) => boolean;
 }
 
 export interface UseKanbanMouseDragReturn {
@@ -51,6 +64,9 @@ export function useKanbanMouseDrag(
     const toColumnId = e.to?.dataset.columnId ?? '';
     const issueIndex = Number(e.item?.dataset.issueIndex ?? NaN);
     if (!fromColumnId || !toColumnId || !Number.isFinite(issueIndex)) return;
+    // v1.4 修复：过滤非真实列目标（如 UnassignedSection 的 '__unassigned__'）。
+    // 不传 isValidTargetColumn = 不过滤，保留旧行为（向后兼容）。
+    if (options.isValidTargetColumn && !options.isValidTargetColumn(toColumnId)) return;
     const intent = mapDragEndToMoveIntent({ fromColumnId, toColumnId, issueIndex });
     if (!intent) return;
     const issue = options

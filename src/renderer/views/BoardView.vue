@@ -231,6 +231,9 @@ const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
   onMove: (issue, fromColumnId, toColumnId) => {
     void performDragMove(issue, fromColumnId, toColumnId, activeProjectId.value);
   },
+  // v1.4 修复：过滤非真实列目标（UnassignedSection 的 '__unassigned__' 哨兵），
+  // 避免拖列到未分类 section 时误触 board.moveIssue('__unassigned__') 走 IPC 失败 → 静默回滚
+  isValidTargetColumn: (id) => board.columns.some((c) => c.id === id),
 });
 
 /**

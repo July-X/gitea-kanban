@@ -39,6 +39,12 @@
  box-shadow: var(--shadow-md);
 }
 
+/* ===== 列级光晕（v1.4 · 用户反馈：拖 card 时整列高亮，告知"会落入这列"）=====
+ * ⚠️ 此规则**不**能放这里 —— 全局 .column:has() 编译后特异性 (0,1,0)，
+ *    永远输给 KanbanColumnSection.vue <style scoped> 里的 .column[data-v-xxx] (0,2,0)。
+ *    实际位置：src/renderer/components/board/KanbanColumnSection.vue（scoped 内，source order 胜出）。
+ *    全局留这一段说明，便于后人定位。 */
+
 /* ===== 键盘拾起（v1.3 · Space 拾起后该卡高亮）=====
  * - outline 2px 主色（focus 风格）
  * - 主色微光外环（暗色底也看得清） */
