@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gitea Kanban · Wireframe · P0-1 autoInit 透明化</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ============================================================
+       Design tokens · 仅 dark
+       user 拍板：本 wireframe 只画暗色，不考虑主题切换
+       v1.2 实际项目已切 2 主题（dark/light），但 wireframe 阶段不画 light
+       后续如要画 light 主题版本，再独立开一个文件 p0-1-autoinit-toast-light.html
+       ============================================================ */
+    :root {
+      --color-primary: #609926;
+      --color-primary-soft: rgba(96, 153, 38, 0.22);
+      --color-accent: #F76707;
+      --color-accent-soft: rgba(247, 103, 7, 0.18);
+      --color-text: #DCE9F0;
+      --color-text-secondary: #90A4AE;
+      --color-text-muted: #5F7A87;
+      --color-bg: #134857;
+      --color-bg-elevated: #1B5868;
+      --color-bg-hover: #236479;
+      --color-bg-active: #2D7487;
+      --color-divider: rgba(220, 233, 240, 0.08);
+      --color-success: #5BC76A;
+      --color-success-soft: rgba(91, 199, 106, 0.18);
+      --color-warning: #E8B954;
+      --color-warning-soft: rgba(232, 185, 84, 0.18);
+      --color-info: #6FB1FF;
+      --color-info-soft: rgba(111, 177, 255, 0.18);
+      --color-danger: #F47A6B;
+      --color-danger-soft: rgba(244, 122, 107, 0.18);
+      --shadow-sm: 0 1px 2px rgba(10, 42, 50, 0.45);
+      --shadow-md: 0 4px 12px rgba(10, 42, 50, 0.5);
+      --shadow-lg: 0 12px 40px rgba(10, 42, 50, 0.6);
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', 'Noto Sans SC', sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+    .page { max-width: 1280px; margin: 0 auto; padding: 32px 40px 80px; }
+
+    /* ===== 顶部说明（不进主 wireframe） ===== */
+    .wireframe-header {
+      padding: 24px 32px;
+      background: var(--color-bg-elevated);
+      border-radius: var(--radius-lg);
+      border-left: 4px solid var(--color-primary);
+      margin-bottom: 40px;
+    }
+    .wireframe-header h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .wireframe-header p { margin: 0 0 12px; color: var(--color-text-secondary); }
+    .wireframe-header code {
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 12px;
+      color: var(--color-primary);
+    }
+    .wireframe-header .meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+    .wireframe-header .meta span {
+      background: rgba(0, 0, 0, 0.2);
+      padding: 2px 8px;
+      border-radius: 3px;
+    }
+
+    /* ===== Section ===== */
+    .scene { margin-bottom: 56px; }
+    .scene h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0 0 4px;
+      color: var(--color-primary);
+    }
+    .scene .desc { color: var(--color-text-secondary); margin: 0 0 16px; font-size: 13px; }
+    .scene .desc strong { color: var(--color-text); }
+    .scene .caption {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      margin-top: 12px;
+      padding-left: 12px;
+      border-left: 2px solid var(--color-divider);
+    }
+    .scene .caption b { color: var(--color-info); }
+
+    /* ===== App shell（最简 — 展示 toast 用） ===== */
+    .app-shell {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      height: 480px;
+      background: var(--color-bg);
+      border: 1px solid var(--color-divider);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      position: relative;
+    }
+    .nav-rail {
+      background: var(--color-bg-elevated);
+      padding: 16px 12px;
+      border-right: 1px solid var(--color-divider);
+    }
+    .nav-rail .logo {
+      font-weight: 700;
+      color: var(--color-primary);
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+    .nav-item {
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+    .nav-item--active { background: var(--color-primary-soft); color: var(--color-primary); }
+    .main-area { padding: 16px 24px; position: relative; }
+
+    /* ===== Toast —— 屏幕右下角 ===== */
+    .toast-stack {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 360px;
+      z-index: 100;
+    }
+    .toast {
+      background: var(--color-bg-elevated);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      box-shadow: var(--shadow-lg);
+      border-left: 3px solid var(--color-info);
+      font-size: 13px;
+      animation: toast-in 200ms ease-out;
+    }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateX(20px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .toast--info { border-left-color: var(--color-info); }
+    .toast--success { border-left-color: var(--color-success); }
+    .toast--warning { border-left-color: var(--color-warning); }
+    .toast .toast-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .toast .icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--color-bg);
+      flex-shrink: 0;
+    }
+    .toast--info .icon { background: var(--color-info); }
+    .toast--success .icon { background: var(--color-success); }
+    .toast--warning .icon { background: var(--color-warning); }
+    .toast .body { color: var(--color-text-secondary); margin-left: 24px; }
+    .toast .body code {
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-size: 11px;
+      color: var(--color-primary);
+    }
+    .toast .action-row {
+      margin-left: 24px;
+      margin-top: 8px;
+      display: flex;
+      gap: 8px;
+    }
+    .toast .btn {
+      background: var(--color-primary-soft);
+      color: var(--color-primary);
+      border: 1px solid var(--color-primary);
+      padding: 4px 10px;
+      font-size: 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .toast .btn--ghost {
+      background: transparent;
+      border: 1px solid var(--color-divider);
+      color: var(--color-text-secondary);
+    }
+    .toast .x {
+      margin-left: auto;
+      cursor: pointer;
+      color: var(--color-text-muted);
+      font-size: 16px;
+    }
+
+    /* ===== Column / Card mock ===== */
+    .col-header {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      padding: 8px 0;
+      border-bottom: 1px solid var(--color-divider);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .col-header .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-muted); }
+    .col-header .count {
+      background: rgba(0,0,0,0.25);
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 11px;
+      color: var(--color-text-muted);
+      font-weight: 500;
+    }
+    .empty-board {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--color-text-muted);
+      font-size: 13px;
+    }
+    .empty-board .icon { font-size: 40px; opacity: 0.4; margin-bottom: 12px; }
+
+    /* ===== 状态徽章：用户已经看到这一步 ===== */
+    .step-tag {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      background: var(--color-info-soft);
+      color: var(--color-info);
+      margin-bottom: 4px;
+    }
+    .step-tag--success { background: var(--color-success-soft); color: var(--color-success); }
+    .step-tag--warning { background: var(--color-warning-soft); color: var(--color-warning); }
+
+    /* ===== 时间轴（流程图） ===== */
+    .flow-timeline {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 16px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+    .flow-step {
+      padding: 6px 10px;
+      background: var(--color-bg-elevated);
+      border-radius: var(--radius-sm);
+    }
+    .flow-step--now { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 600; }
+    .flow-arrow { padding: 0 6px; opacity: 0.5; }
+
+    /* ===== 列菜单（带 label 绑定的展开态） ===== */
+    .col-menu-popover {
+      position: absolute;
+      top: 60px;
+      left: 24px;
+      width: 320px;
+      background: var(--color-bg-elevated);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-lg);
+      padding: 16px;
+      z-index: 50;
+    }
+    .col-menu-popover h3 { margin: 0 0 12px; font-size: 13px; }
+    .label-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      font-size: 12px;
+    }
+    .label-row .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+    }
+    .label-row .name { flex: 1; }
+    .label-row .badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: var(--color-success-soft);
+      color: var(--color-success);
+    }
+    .label-row .badge--unbound { background: var(--color-warning-soft); color: var(--color-warning); }
+    .label-row .x-btn { color: var(--color-text-muted); cursor: pointer; padding: 0 4px; }
+
+    /* ===== inline annotation（带数字小圆圈的设计说明） ===== */
+    .annot {
+      position: relative;
+      display: inline-block;
+    }
+    .annot::after {
+      content: attr(data-n);
+      position: absolute;
+      top: -6px;
+      right: -10px;
+      width: 18px;
+      height: 18px;
+      background: var(--color-accent);
+      color: var(--color-bg);
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 2px var(--color-bg);
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ========================================================
+       顶部说明
+       ======================================================== -->
+  <div class="wireframe-header">
+    <h1>P0-1 · autoInit 透明化 toast</h1>
+    <p>
+      拍板 2026-06-16：<code>loadBoard()</code> 已经返回 <code>autoInitCreatedCount</code>，但 caller 没消费。
+      这次让 user <strong>看见</strong>系统做了什么、为什么这么做、下一步怎么改。
+    </p>
+    <div class="meta">
+      <span>📁 改动文件 1 个：<code>src/renderer/views/BoardView.vue</code></span>
+      <span>⏱ 工程量 ~半天</span>
+      <span>🎯 风险 低（toast 非阻塞）</span>
+      <span>📦 依赖：<code>stores/board.ts</code> 已返字段，不动</span>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       场景 1：第一次进仓库 — autoInit 帮建了 3 列
+       ======================================================== -->
+  <div class="scene">
+    <h2>场景 1：新用户首次进仓库，gitea 已有 3 个匹配 label</h2>
+    <p class="desc">
+      触发：<code>autoInitCreatedCount = 3</code>，0 列 + gitea 有 <code>待办/进行中/已完成</code> 三个 label 命中预设列名。
+    </p>
+
+    <div class="app-shell">
+      <div class="nav-rail">
+        <div class="logo">gitea-kanban</div>
+        <div class="nav-item">连接</div>
+        <div class="nav-item nav-item--active">看板</div>
+        <div class="nav-item">时间轴</div>
+        <div class="nav-item">合并请求</div>
+        <div class="nav-item">我的卡片</div>
+      </div>
+
+      <div class="main-area">
+        <div class="flow-timeline">
+          <div class="flow-step flow-step--now">① 连接仓库</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step flow-step--now">② 自动建列</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">③ 调整列</div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">④ 拖卡</div>
+        </div>
+
+        <div class="col-header">
+          <span class="dot"></span>
+          <span>待办</span>
+          <span class="count">0</span>
+        </div>
+        <div class="col-header">
+          <span class="dot"></span>
+          <span>进行中</span>
+          <span class="count">0</span>
+        </div>
+        <div class="col-header">
+          <span class="dot"></span>
+          <span>已完成</span>
+          <span class="count">0</span>
+        </div>
+
+        <!-- Toast 栈 -->
+        <div class="toast-stack">
+          <div class="toast toast--info">
+            <div class="toast-head">
+              <span class="icon">i</span>
+              <span>帮你建了 3 列</span>
+              <span class="x">×</span>
+            </div>
+            <div class="body">
+              gitea 仓库 <code>m4java-team/api</code> 已有匹配的 label，
+              我们按名字建好了 <code>待办 / 进行中 / 已完成</code> 三列。
+            </div>
+            <div class="action-row">
+              <button class="btn">打开列设置</button>
+              <button class="btn btn--ghost">不再提示</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>设计要点：</b>
+      ① 标题是"帮你建了 N 列"——<b>人话</b>，不是"autoInit created N columns"<br>
+      ② 写明<b>为什么这么做</b>（"gitea 已有匹配的 label"），让 user 理解而非被吓到<br>
+      ③ "打开列设置" 按钮 = 一键跳到第一列的菜单，可改名 / 改绑 label<br>
+      ④ "不再提示" 按钮 = 用 localStorage 记住 <code>autoInit.dismissed.${projectId}</code>
+    </p>
+  </div>
+
+  <!-- ========================================================
+       场景 2：gitea 没 label，但 user 主动点"新增列"
+       ======================================================== -->
+  <div class="scene">
+    <h2>场景 2：gitea 完全没有 label，0 列 + 0 label</h2>
+    <p class="desc">
+      触发：<code>autoInitCreatedCount = 0</code>，按 plan 约定<b>不</b>弹 toast（避免"啥都没干"误报）——
+      但 EmptyState 文案要变更，从"这个仓库还没有看板列"升级为"建第一列 + 教 label 怎么绑"。
+    </p>
+
+    <div class="app-shell">
+      <div class="nav-rail">
+        <div class="logo">gitea-kanban</div>
+        <div class="nav-item">连接</div>
+        <div class="nav-item nav-item--active">看板</div>
+        <div class="nav-item">时间轴</div>
+        <div class="nav-item">合并请求</div>
+        <div class="nav-item">我的卡片</div>
+      </div>
+
+      <div class="main-area">
+        <div class="empty-board">
+          <div class="icon">📋</div>
+          <div style="font-size: 15px; color: var(--color-text-secondary); margin-bottom: 4px;">
+            还没有看板列
+          </div>
+          <div style="margin-bottom: 16px; max-width: 320px; text-align: center;">
+            这个仓库还没有 label。先建第一列，再去 gitea 给它绑 label，
+            <br>之后带这个 label 的 issue 会自动出现在这列。
+          </div>
+          <button class="toast" style="background: var(--color-primary-soft); color: var(--color-primary); border: 1px solid var(--color-primary); padding: 8px 16px; cursor: pointer; font-family: inherit; box-shadow: var(--shadow-md);">
+            + 新增列
+          </button>
+        </div>
+
+        <!-- 二级 toast：教 label 怎么绑 -->
+        <div class="toast-stack">
+          <div class="toast toast--warning">
+            <div class="toast-head">
+              <span class="icon">!</span>
+              <span>列和 label 是怎么关联的？</span>
+              <span class="x">×</span>
+            </div>
+            <div class="body">
+              列匹配 gitea 仓库里的 label（不是列自己存卡片）。
+              改列绑的 label → 这列里的 issue 跟着变。
+            </div>
+            <div class="action-row">
+              <button class="btn">看图解</button>
+              <button class="btn btn--ghost">知道了</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>设计要点：</b>
+      ① <b>不弹 autoInit toast</b>（避免"系统啥都没干却弹个窗"）<br>
+      ② EmptyState 文案要 <b>教</b>：列和 label 的关系（v1 现状文案没写，user 看了还是不懂）<br>
+      ③ "+ 新增列" 按钮走<b>列创建向导</b>（不是裸弹个模态），向导里有"建列 + 绑 label"二合一<br>
+      ④ 黄色 toast 是 <b>概念解释</b>——"列匹配 gitea label"这件事 user 第一次用根本不知道
+    </p>
+  </div>
+
+  <!-- ========================================================
+       场景 3：autoInit 帮建了 3 列，但 gitea 还有 4 个 label 没归类
+       ======================================================== -->
+  <div class="scene">
+    <h2>场景 3：autoInit 帮建了 3 列，gitea 还有 4 个未归类的 label</h2>
+    <p class="desc">
+      触发：<code>autoInitCreatedCount = 3</code>，gitea 实际有 7 个 label，但预设列名只匹配 3 个。
+      这是 autoInit 的"已知边界"——user 看到的 3 列不能覆盖所有 issue。
+    </p>
+
+    <div class="app-shell">
+      <div class="nav-rail">
+        <div class="logo">gitea-kanban</div>
+        <div class="nav-item">连接</div>
+        <div class="nav-item nav-item--active">看板</div>
+        <div class="nav-item">时间轴</div>
+        <div class="nav-item">合并请求</div>
+        <div class="nav-item">我的卡片</div>
+      </div>
+
+      <div class="main-area">
+        <div class="col-header">
+          <span class="dot"></span>
+          <span>待办</span>
+          <span class="count">3</span>
+        </div>
+        <div class="col-header">
+          <span class="dot"></span>
+          <span>进行中</span>
+          <span class="count">2</span>
+        </div>
+        <div class="col-header">
+          <span class="dot"></span>
+          <span>已完成</span>
+          <span class="count">5</span>
+        </div>
+        <!-- 未归类卡片区 -->
+        <div style="margin-top: 16px; padding: 12px; background: var(--color-warning-soft); border-radius: var(--radius-md); border: 1px dashed var(--color-warning); font-size: 12px;">
+          <div style="font-weight: 600; color: var(--color-warning); margin-bottom: 4px;">
+            ⚠ 还有 4 张 issue 没归类
+          </div>
+          <div style="color: var(--color-text-secondary);">
+            带 <code style="background: rgba(0,0,0,0.3); padding: 1px 4px; border-radius: 2px;">bug</code>
+            <code style="background: rgba(0,0,0,0.3); padding: 1px 4px; border-radius: 2px;">feature</code>
+            <code style="background: rgba(0,0,0,0.3); padding: 1px 4px; border-radius: 2px;">紧急</code>
+            <code style="background: rgba(0,0,0,0.3); padding: 1px 4px; border-radius: 2px;">文档</code>
+            label 的 issue 还没进任何列。
+          </div>
+          <button style="margin-top: 8px; background: var(--color-warning); color: var(--color-bg); padding: 4px 10px; border: none; border-radius: var(--radius-sm); font-family: inherit; font-size: 12px; cursor: pointer; font-weight: 600;">
+            把它们也归进来 →
+          </button>
+        </div>
+
+        <!-- Toast 栈（这次的 toast 升级为"二选一"） -->
+        <div class="toast-stack">
+          <div class="toast toast--info">
+            <div class="toast-head">
+              <span class="icon">i</span>
+              <span>帮你建了 3 列，但 gitea 还有 4 个 label 没匹配上</span>
+              <span class="x">×</span>
+            </div>
+            <div class="body">
+              已建：<code>待办 / 进行中 / 已完成</code>。<br>
+              未匹配：<code>bug / feature / 紧急 / 文档</code>——这些 label 命中的 issue 现在没列可归。
+            </div>
+            <div class="action-row">
+              <button class="btn">再建几列</button>
+              <button class="btn btn--ghost">把没归类的塞进"待办"</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>设计要点：</b>
+      ① toast 不止说"做了什么"，还要说"还有什么没做"<br>
+      ② 列出<b>具体</b>未匹配的 label 名（不是抽象说"还有 label 没匹配"）<br>
+      ③ 两个明确动作：<b>再建几列</b>（精细控制）vs <b>全部塞待办</b>（懒人选项）<br>
+      ④ 主区用<b>黄色虚线</b>画"未归类区"，让 user 不依赖 toast 也能看到（toast 会消失）<br>
+      ⑤ "把它们也归进来" 按钮 = 走一个"批量建列 + 自动绑剩余 label" 的向导
+    </p>
+  </div>
+
+  <!-- ========================================================
+       场景 4：user 第二次进同仓库 — 不再弹 toast
+       ======================================================== -->
+  <div class="scene">
+    <h2>场景 4：user 第二次进同仓库，0 弹窗</h2>
+    <p class="desc">
+      触发：<code>localStorage['gitea-kanban.autoInit.dismissed.${projectId}'] === '1'</code>，
+      或者 <code>autoInitCreatedCount = 0</code> 且仓库已有列。
+    </p>
+
+    <div class="app-shell">
+      <div class="nav-rail">
+        <div class="logo">gitea-kanban</div>
+        <div class="nav-item">连接</div>
+        <div class="nav-item nav-item--active">看板</div>
+        <div class="nav-item">时间轴</div>
+        <div class="nav-item">合并请求</div>
+        <div class="nav-item">我的卡片</div>
+      </div>
+
+      <div class="main-area">
+        <div style="height: 100%; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px;">
+          （无 toast，正常渲染看板）
+        </div>
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>设计要点：</b>
+      ① 第二次进同仓库 = "我知道了，别烦我"。<b>不弹</b> toast。<br>
+      ② 用 localStorage key 标记：<code>gitea-kanban.autoInit.dismissed.${projectId}</code> = 1<br>
+      ③ 触发"不再提示"按钮 OR 第二次进入同 project 时设置<br>
+      ④ 如果 user 后来<b>主动</b>删了所有列再触发 autoInit，<b>重新弹</b>（清掉 dismiss 标记）
+    </p>
+  </div>
+
+  <!-- ========================================================
+       数据流：5 行说清楚这次改什么
+       ======================================================== -->
+  <div class="scene">
+    <h2>📦 数据流：这次到底改什么</h2>
+
+    <div style="background: var(--color-bg-elevated); padding: 20px 24px; border-radius: var(--radius-md); font-size: 13px; line-height: 1.8;">
+      <div style="color: var(--color-text-secondary); margin-bottom: 12px;">
+        <b style="color: var(--color-primary);">stores/board.ts</b> 已经有 <code>autoInitCreatedCount</code> 出参，<b>不</b>改。
+      </div>
+
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: var(--radius-sm); border-left: 3px solid var(--color-info);">
+        <span style="color: var(--color-text-muted);">// src/renderer/views/BoardView.vue · selectProject()</span><br>
+        <span style="color: var(--color-info);">const</span> result = <span style="color: var(--color-info);">await</span> board.<span style="color: var(--color-primary);">loadBoard</span>(activeProjectId);<br>
+        <span style="color: var(--color-info);">if</span> (result.<span style="color: var(--color-primary);">autoInitCreatedCount</span> > <span style="color: var(--color-accent);">0</span>) {<br>
+        &nbsp;&nbsp;<span style="color: var(--color-info);">const</span> dismissed = localStorage.<span style="color: var(--color-primary);">getItem</span>(<span style="color: var(--color-success);">`autoInit.dismissed.${activeProjectId}`</span>);<br>
+        &nbsp;&nbsp;<span style="color: var(--color-info);">if</span> (!dismissed) {<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span style="color: var(--color-primary);">showToast</span>({<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;type: <span style="color: var(--color-success);">'info'</span>,<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;message: <span style="color: var(--color-success);">`帮你建了 ${result.autoInitCreatedCount} 列`</span>,<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;body: <span style="color: var(--color-success);">`gitea 仓库已有匹配的 label ...`</span>,<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;actions: [<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{ label: <span style="color: var(--color-success);">'打开列设置'</span>, onClick: () =&gt; <span style="color: var(--color-primary);">openColumnMenu</span>(firstCol) },<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{ label: <span style="color: var(--color-success);">'不再提示'</span>, onClick: () =&gt; localStorage.<span style="color: var(--color-primary);">setItem</span>(...) },<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;],<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;});<br>
+        &nbsp;&nbsp;}<br>
+        }
+      </div>
+
+      <div style="margin-top: 16px; color: var(--color-text-secondary);">
+        <b style="color: var(--color-primary);">showToast</b> 组件要支持 <code>body</code> + <code>actions</code> 字段。
+        如果现有 Toast 组件不支持（<code>src/renderer/components/Toast.vue</code>），需要 <b>扩展</b>，不重写。
+      </div>
+
+      <div style="margin-top: 12px; color: var(--color-text-secondary);">
+        <b style="color: var(--color-primary);">EmptyState</b> 升级：场景 2 的"教你 label 怎么绑" 二级 toast 需要 <code>Toast.vue</code> 支持二次触发（不是单实例）。
+      </div>
+    </div>
+
+    <p class="caption">
+      <b>总改动量：</b> 1 个 view 文件 + 0 个 store 文件 + 可能扩展 1 个 Toast 组件 + 可能扩展 1 个 EmptyState 组件。
+      <b>预计代码量：</b>~30-50 行 TS / 0 行 CSS。<br>
+      <b>测试：</b>手动跑 4 个场景（建一个干净仓库 → 触发 autoInit → 看到 toast；切走再回来 → 不弹；删所有列 → 重弹）
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
