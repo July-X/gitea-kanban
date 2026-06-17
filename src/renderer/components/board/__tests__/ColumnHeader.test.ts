@@ -207,4 +207,36 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
       expect(content).toMatch(/绑定标签/);
     });
   });
+
+  describe('KanbanColumnSection.vue · v1.4 修复（2026-06-17 拖拽光晕 + 空列拖放）', () => {
+    it('空列也渲染 VueDraggable：v-if 只看 labels.length，不再 && displayIssues.length > 0', () => {
+      const content = readFileSync(columnSectionPath, 'utf-8');
+      // 旧的 `props.column.labels.length > 0 && displayIssues.length > 0` 会导致空列不渲染 VueDraggable
+      // → 空列无 drop zone → 拖不回来。修后只看 labels.length > 0。
+      expect(content).toMatch(/v-if="props\.column\.labels\.length > 0"/);
+      expect(content).not.toMatch(/displayIssues\.length > 0"\s*\n\s*v-bind/);
+    });
+
+    it('VueDraggable 接 @start / @move emit（光晕显式管 class 链路）', () => {
+      const content = readFileSync(columnSectionPath, 'utf-8');
+      expect(content).toMatch(/@start="\(evt\) => emit\('drag-start', evt\)"/);
+      expect(content).toMatch(/@move="\(evt\) => emit\('drag-move', evt\)"/);
+      expect(content).toMatch(/@end="\(evt\) => emit\('drag-end', evt\)"/);
+    });
+
+    it('光晕 CSS 用显式 class（.column--drag-source / .column--drop-target），不再 :has(.card--dragging) 作选择器', () => {
+      const content = readFileSync(columnSectionPath, 'utf-8');
+      // 旧版 :has(.card--dragging) 在原生拖拽模式下失效（SortableJS 立即移除 .card--dragging）
+      expect(content).toMatch(/\.column--drag-source\s*\{/);
+      expect(content).toMatch(/\.column--drop-target\s*\{/);
+      // 选择器形式（带 {）的 :has(.card--dragging) 规则必须删掉（注释里提到不算）
+      expect(content).not.toMatch(/\.column:has\(\.card--dragging\)\s*\{/);
+    });
+
+    it('空列占位 li 渲染（displayIssues 空时撑 drop zone + 文案）', () => {
+      const content = readFileSync(columnSectionPath, 'utf-8');
+      expect(content).toMatch(/column__empty-placeholder/);
+      expect(content).toMatch(/v-if="!displayIssues\.length"/);
+    });
+  });
 });

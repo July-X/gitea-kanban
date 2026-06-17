@@ -68,6 +68,9 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (e: 'open-settings'): void;
   (e: 'drag-end', evt: unknown): void;
+  // v1.4 修复：拖拽光晕显式管 class —— onStart/onMove 透传给父
+  (e: 'drag-start', evt: unknown): void;
+  (e: 'drag-move', evt: unknown): void;
   (e: 'update:newIssueDraft', value: string): void;
   (e: 'create-issue'): void;
   (e: 'open-move-menu', payload: { issue: IssueCardDto; fromColumnId: string }): void;
@@ -123,20 +126,32 @@ const displayIssues = computed<IssueCardDto[]>(() => {
         绑定标签
       </button>
     </div>
-    <!-- 空状态：绑了 label 但没匹配到 issue -->
-    <div v-else-if="!props.issues.length" class="column__empty">
-      <p class="column__empty-text muted">这列还没有议题</p>
-      <p class="column__empty-hint muted">在下面输入框创建，或给现有议题加上对应的标签</p>
-    </div>
-    <!-- v1.3 拖拽：v-else 不能跟 VueDraggable 异 tag；走独立 v-if 绕开 v-else 折叠 -->
+    <!--
+      v1.4 修复（2026-06-17 · 空列无法成为拖放目标 bug）：
+      旧 v-if="props.column.labels.length > 0 && displayIssues.length > 0" 导致列一旦空了
+      （卡片全拖走 / 新建空列），VueDraggable 就不渲染 → 空列没有 drop zone → 拖不回来。
+      现改为只看 labels.length > 0：绑了 label 的列即使 0 卡片也渲染 VueDraggable
+      （min-height: 60px 撑出 drop zone），空状态文案移到 VueDraggable 内部当占位 li。
+      v-if 而非 v-else：跟下面的 VueDraggable 异 tag，走独立 v-if 绕开 v-else 折叠坑（AGENTS §10.11）。
+    -->
     <VueDraggable
-      v-if="props.column.labels.length > 0 && displayIssues.length > 0"
+      v-if="props.column.labels.length > 0"
       v-bind="props.dragOptions"
       class="column__cards"
       :data-column-id="props.column.id"
+      @start="(evt) => emit('drag-start', evt)"
+      @move="(evt) => emit('drag-move', evt)"
       @end="(evt) => emit('drag-end', evt)"
       tag="ul"
     >
+      <!--
+        空列占位：displayIssues 为空时渲染一个不可拖的占位 li（提示文案），
+        min-height 由 .column__cards 撑住 drop zone。占位 li 不带 data-issue-index，
+        SortableJS 不会当 card 处理；v-if 独立避免 v-else 折叠坑。
+      -->
+      <li v-if="!displayIssues.length" class="column__empty-placeholder" aria-hidden="true">
+        <span class="muted">这列还没有议题，拖卡片进来或下面输入框创建</span>
+      </li>
       <li
         v-for="issue in displayIssues"
         :key="issue.id"
@@ -430,17 +445,42 @@ const displayIssues = computed<IssueCardDto[]>(() => {
 .card__action--danger:hover:not(:disabled) { color: var(--color-danger); }
 .card__action:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* ===== v1.4 列级光晕（拖卡时整列外发光）=====
- * 必须放在组件 <style scoped> 里 —— 全局 board-drag.css 的 .column:has() 编译后
- * 特异性 (0,1,0) < scoped .column[data-v-xxx] (0,2,0) 永远输。
- * 放在同文件内靠 source order 胜出（:has 在 .column 之后定义）。
- * 触发：包含正在拖的 card 的列（SortableJS 把 .card--dragging 加在拖中的 card 上，
- * card 已被 Sortable 移入目标列的 DOM，所以 :has 自动命中目标列）。
- * box-shadow：内 2px 主色实线 + 外 24px 主色 glow 扩散 + 120ms 过渡。 */
-.column:has(.card--dragging) {
+/* ===== v1.4 列级光晕（拖卡时整列外发光 · 2026-06-17 重写）=====
+ * 旧版用 `.column:has(.card--dragging)`，但配置 forceFallback: false（原生 HTML5 拖拽）
+ * 下 SortableJS 的 _dragStarted 会立即把 .card--dragging 从被拖 card 上移除（改加
+ * .card--ghost），导致拖拽全程没有任何元素带 .card--dragging → :has() 永不命中 → 光晕不亮。
+ *
+ * 修法：不依赖 SortableJS 的 dragClass，改由 useKanbanMouseDrag 的 onColumnDragStart /
+ * onColumnDragMove / clearGlow 显式给列加/移 class：
+ *   - .column--drag-source：源列（ onStart 加，淡光提示"我从这拖出"）
+ *   - .column--drop-target：当前目标列（ onMove 加，强光提示"会落入这列"）
+ * onEnd（onColumnDragEnd 内部）清所有光晕 class。
+ * 模式无关（native + fallback 都 work），可单测。
+ *
+ * box-shadow：drop-target 用主色 2px 实线 + 24px glow 扩散；
+ * drag-source 用更弱的 soft 描边（区别于目标列强光）。 */
+.column--drag-source {
+  box-shadow:
+    0 0 0 1px var(--color-primary-soft),
+    0 0 12px 2px var(--color-primary-soft);
+  transition: box-shadow 120ms ease-out;
+}
+.column--drop-target {
   box-shadow:
     0 0 0 2px var(--color-primary),
     0 0 24px 4px var(--color-primary-glow);
   transition: box-shadow 120ms ease-out;
+}
+
+/* v1.4 修复：空列占位 li（VueDraggable 内部，撑 drop zone + 提示文案） */
+.column__empty-placeholder {
+  list-style: none;
+  padding: var(--space-3);
+  text-align: center;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-divider);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
 }
 </style>

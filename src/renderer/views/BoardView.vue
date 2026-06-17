@@ -226,7 +226,12 @@ function closedIssuesOf(columnId: string): IssueCardDto[] {
   return board.closedIssues.filter((iss) => matchIssueToColumn(iss, board.columns) === columnId);
 }
 
-const { dragOptions: columnDragOptions, onColumnDragEnd } = useKanbanMouseDrag({
+const {
+  dragOptions: columnDragOptions,
+  onColumnDragEnd,
+  onColumnDragStart,
+  onColumnDragMove,
+} = useKanbanMouseDrag({
   getColumnIssues: (columnId) => board.issuesOf(columnId),
   onMove: (issue, fromColumnId, toColumnId) => {
     void performDragMove(issue, fromColumnId, toColumnId, activeProjectId.value);
@@ -322,6 +327,8 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
           :over-limit-tooltip="wipOverLimitTooltip(item.column)"
           :drag-options="columnDragOptions"
           @open-settings="openColumnMenu(item.column)"
+          @drag-start="(evt) => onColumnDragStart(item.column, evt)"
+          @drag-move="(evt) => onColumnDragMove(item.column, evt)"
           @drag-end="(evt) => onColumnDragEnd(item.column, evt)"
           @update:new-issue-draft="(v) => (newIssueDrafts[item.column.id] = v)"
           @create-issue="createIssueInColumn(item.column)"
