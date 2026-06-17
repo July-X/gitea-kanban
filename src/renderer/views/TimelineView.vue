@@ -13,9 +13,9 @@
  *   - nodes 数组按时间戳倒序排列后作为行号
  *   - edges 数组（parent/combined）决定分支曲线
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Clipboard, ExternalLink, GitBranch, Loader2, RefreshCw, Timer } from 'lucide-vue-next';
+import { Clipboard, ExternalLink, GitBranch, RefreshCw, Timer } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
@@ -34,6 +34,7 @@ import type {
 } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import Tooltip from '@renderer/components/Tooltip.vue';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 
 const route = useRoute();
 const router = useRouter();
@@ -70,19 +71,22 @@ const timeline = ref<TimelineDto | null>(null);
 const loading = ref(false);
 const localError = ref<UserFacingError | null>(null);
 
+/**
+ * v1.4 · 任务 #merge-timeline-jump:从合并请求跳过来要高亮的 commit sha
+ * - 有值 → commit-row 命中该 sha 加 .is-pr-focus 样式 + 自动滚动到视图
+ * - 用户主动切分支/刷新后保留高亮,直到主动点别的 commit 或新一次 merge-jump 覆盖
+ * - 设置时机:loadBranches 内 pending.sha 有值 / watch pendingTimelineFocus 有值
+ */
+const prFocusSha = ref<string | null>(null);
+
 const defaultBranch = computed(() => branches.value.find((b) => b.isDefault) ?? null);
 
 onMounted(async () => {
   if (repo.repos.length === 0) {
     try { await repo.loadRepos('', true); } catch { /* error in repo.error */ }
   }
-  if (!activeProjectId.value && repo.projects.length > 0) {
-    const first = repo.projects[0]!;
-    try {
-      const project = await repo.addProject({ owner: first.owner, name: first.name });
-      repo.selectProject(project);
-    } catch { /* error in repo.error */ }
-  }
+  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
+  // 仓库由 App.vue 在登录/启动期通过 StatusBar picker 引导用户主动选
   if (activeProjectId.value) {
     await loadBranches();
   }
@@ -98,8 +102,12 @@ async function loadBranches(): Promise<void> {
     })) as ListBranchesResp;
     branches.value = resp.items;
     const pending = branch.consumePendingTimelineFocus();
-    if (pending && resp.items.some((b) => b.name === pending)) {
-      selectedBranches.value = new Set<string>([pending]);
+    if (pending && resp.items.some((b) => b.name === pending.ref)) {
+      selectedBranches.value = new Set<string>([pending.ref]);
+      // v1.4 · 任务 #merge-timeline-jump:pending 携带 sha → timeline 加载后高亮
+      if (pending.sha) {
+        prFocusSha.value = pending.sha;
+      }
     } else {
       const nextSelected = new Set<string>();
       if (defaultBranch.value) nextSelected.add(defaultBranch.value.name);
@@ -115,11 +123,17 @@ async function loadBranches(): Promise<void> {
   }
 }
 
-watch(() => branch.pendingTimelineFocus, (name) => {
-  if (!name || !activeProjectId.value) return;
+watch(() => branch.pendingTimelineFocus, (pending) => {
+  if (!pending || !activeProjectId.value) return;
   branch.pendingTimelineFocus = null;
-  if (branches.value.some((b) => b.name === name)) {
-    selectedBranches.value = new Set<string>([name]);
+  if (branches.value.some((b) => b.name === pending.ref)) {
+    selectedBranches.value = new Set<string>([pending.ref]);
+    // 同上:刷新 prFocusSha
+    if (pending.sha) {
+      prFocusSha.value = pending.sha;
+    } else {
+      prFocusSha.value = null;
+    }
     debounce.schedule();
   }
 });
@@ -135,6 +149,7 @@ async function loadTimeline(): Promise<void> {
   if (!activeProjectId.value) return;
   if (selectedBranches.value.size === 0) return;
   loading.value = true;
+  useGlobalLoadingStore().show('timeline');
   localError.value = null;
   try {
     const resp = (await commitsTimeline({
@@ -148,7 +163,34 @@ async function loadTimeline(): Promise<void> {
     localError.value = e as UserFacingError;
   } finally {
     loading.value = false;
+    useGlobalLoadingStore().hide('timeline');
   }
+}
+
+/**
+ * v1.4 · 任务 #merge-timeline-jump:timeline 渲染后,如果 prFocusSha 有值,
+ * 找到对应 commit-row 滚动到视图。
+ *
+ * 用 nextTick 等 DOM 渲染完;scrollIntoView 加 block:center 让目标落在中间,
+ * 行为:'auto' 异步平滑滚动（用户没主动操作前不抢滚动,符合 a11y 最佳实践）。
+ *
+ * 高亮 class (.is-pr-focus) 由 :class 表达式直接根据 prFocusSha 计算,
+ * 本函数只负责滚动 + 一次"清除 prFocusSha 的轻提示"。
+ */
+async function scrollToPrFocus(): Promise<void> {
+  if (!prFocusSha.value) return;
+  const targetSha = prFocusSha.value;
+  // 等 v-for 渲染完
+  await nextTick();
+  // 用 requestAnimationFrame 双保险（v-for 已经 nextTick,但有的浏览器实测还要再等一帧）
+  requestAnimationFrame(() => {
+    const el = document.querySelector<HTMLElement>(
+      `.commit-row[data-pr-sha="${CSS.escape(targetSha)}"]`,
+    );
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
 }
 
 /**
@@ -158,6 +200,22 @@ async function loadTimeline(): Promise<void> {
  * - debounce.cancel()    ⇔  toggleBranch 取消最后一个分支时清 timer + 不拉
  */
 const debounce = useBranchLoadDebounce(loadTimeline);
+
+/**
+ * v1.4 · 任务 #merge-timeline-jump:timeline 加载完后,如果 prFocusSha 有值,
+ * 触发滚动到目标 commit-row。
+ *
+ * watch timeline.value 不带 immediate —— loadTimeline 内部已 timeline.value = resp,
+ * watcher 在 DOM 更新后触发,scrollToPrFocus 内部再 nextTick + rAF 兜底
+ */
+watch(
+  () => timeline.value,
+  () => {
+    if (prFocusSha.value) {
+      void scrollToPrFocus();
+    }
+  },
+);
 
 function toggleBranch(name: string): void {
   const next = new Set(selectedBranches.value);
@@ -224,6 +282,8 @@ async function loadDetailDetail(sha: string): Promise<void> {
   const loadingNext = new Set(detailLoadingSet.value);
   loadingNext.add(sha);
   detailLoadingSet.value = loadingNext;
+  // 详情懒加载也接 globalLoading（共用 'timeline' namespace · 多 commit 并发自动合并）
+  useGlobalLoadingStore().show('timeline');
   try {
     const detail = (await commitsGet({ projectId: pid, sha })) as CommitDto;
     const next = new Map(detailDetailCache.value);
@@ -239,6 +299,7 @@ async function loadDetailDetail(sha: string): Promise<void> {
     const loadingDone = new Set(detailLoadingSet.value);
     loadingDone.delete(sha);
     detailLoadingSet.value = loadingDone;
+    useGlobalLoadingStore().hide('timeline');
   }
 }
 
@@ -632,12 +693,12 @@ function formatRelative(iso: string): string {
           :disabled="loading"
           @click="refresh"
         >
-          <RefreshCw :size="14" :stroke-width="1.75" :class="{ spin: loading }" />
+          <RefreshCw :size="14" :stroke-width="1.75" />
         </button>
-        <div v-if="loading" class="timeline__loading">
-          <Loader2 :size="14" :stroke-width="2" class="spin" />
-          <span>加载中…</span>
-        </div>
+        <!--
+          v1.4 拍板"替换模式"：删顶栏右侧"加载中…"文字 + Loader2 spin
+          全局海豚 overlay 接管请求级 loading 指示
+        -->
       </div>
     </header>
 
@@ -731,7 +792,11 @@ function formatRelative(iso: string): string {
                   v-for="row in commitRows"
                   :key="row.node.id"
                   class="commit-row"
-                  :class="{ 'is-head-row': row.isHead }"
+                  :class="{
+                    'is-head-row': row.isHead,
+                    'is-pr-focus': row.node.sha === prFocusSha,
+                  }"
+                  :data-pr-sha="row.node.sha"
                   role="button"
                   tabindex="0"
                   :aria-label="`查看提交 ${row.node.shortSha} 详情`"
@@ -1026,8 +1091,8 @@ function formatRelative(iso: string): string {
 
 .timeline__actions { display: flex; align-items: center; gap: var(--space-2); }
 .timeline__loading { display: inline-flex; align-items: center; gap: 4px; color: var(--color-info); font-size: var(--font-xs); }
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+/* v1.4 拍板"替换模式"：顶栏的 spin/Loader2 已删；全局海豚 overlay 接管 loading
+   .spin / @keyframes spin CSS 也删（不再使用） */
 
 .timeline__main {
   flex: 1;
@@ -1184,6 +1249,18 @@ function formatRelative(iso: string): string {
 }
 .commit-row:hover { background: var(--color-bg-hover); }
 .commit-row.is-head-row { background: linear-gradient(90deg, var(--color-primary-soft) 0%, transparent 70%); }
+
+/* v1.4 · 任务 #merge-timeline-jump:
+   从合并请求跳过来要高亮的 commit。
+   - 主色软底 + 主色左边框 + 主色微光 ring 让用户一眼看到
+   - 比 is-head-row 更显眼（这是用户主动跳过来的目标） */
+.commit-row.is-pr-focus {
+  background: var(--color-primary-soft);
+  box-shadow: inset 3px 0 0 0 var(--color-primary), 0 0 0 1px var(--color-primary-alpha-45);
+}
+.commit-row.is-pr-focus:hover {
+  background: color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-primary) 8%);
+}
 
 .commit-row__graph { position: relative; width: 100px; height: 100%; }
 .commit-row__dot {

@@ -63,15 +63,7 @@ onMounted(async () => {
       /* error in repo.error */
     }
   }
-  if (!activeProjectId.value && repo.projects.length > 0) {
-    const first = repo.projects[0]!;
-    try {
-      const project = await repo.addProject({ owner: first.owner, name: first.name });
-      repo.selectProject(project);
-    } catch {
-      /* error in repo.error */
-    }
-  }
+  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
   if (activeProjectId.value) {
     await loadMembers();
     // 拉一下看板只为统计卡片数（失败不阻塞）
@@ -175,8 +167,8 @@ function permissionClass(m: MemberDto): string {
           :title="'刷新'"
           @click="onRefresh"
         >
-          <RefreshCw :size="14" :stroke-width="2" :class="{ spin: member.loading }" />
-          <span>{{ member.loading ? '加载中…' : '刷新' }}</span>
+          <RefreshCw :size="14" :stroke-width="2" />
+          <span>刷新</span>
         </button>
       </div>
     </header>
@@ -221,9 +213,10 @@ function permissionClass(m: MemberDto): string {
     <div v-if="!activeRepo" class="members__placeholder">
       <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看成员' />
     </div>
-    <div v-else-if="member.loading && member.items.length === 0" class="members__placeholder">
-      <p class="muted">加载中…</p>
-    </div>
+    <!--
+      v1.4 拍板"替换模式"：删 v-else-if="member.loading && ..." 的"加载中…"占位
+      全局海豚 overlay（GlobalLoadingOverlay）接管请求级 loading 指示
+    -->
     <div
       v-else-if="!member.filteredItems.length && member.items.length > 0"
       class="members__placeholder"
@@ -585,12 +578,5 @@ function permissionClass(m: MemberDto): string {
   color: var(--color-text-secondary);
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 </style>

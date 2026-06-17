@@ -34,7 +34,7 @@ function onBackToBoard(): void {
   <div class="team">
     <EmptyState
       title="团队视图 · v2 拍板后实现"
-      description="当前路由仅占位。v1.x 严格走单仓库专注模式（每个 view 只看一个 project），不跨仓库聚合——详见 ADR-0004（docs/adr/0004-single-repo-focus.md）。v2 团队视图将作为独立 store + IPC 命名空间实现，不进 board/issue 等现有 namespace。"
+      description="当前路由仅占位。v1.x 严格走单仓库专注模式（每个 view 只看一个 project），不跨仓库聚合——详见 ADR-0004（docs/adr/0004-single-repository-focus.md）。v2 团队视图将作为独立 store + IPC 命名空间实现，不进 board/issue 等现有 namespace。"
       action-label="回看板"
       @action="onBackToBoard"
     />

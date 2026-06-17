@@ -2,10 +2,11 @@
 /**
  * MyCardsView —— "我的卡片"列表（= 当前用户作为 assignee 的 gitea issues）
  *
- * 设计（AGENTS §5.2 + plan_32018da5）：
- *   - 顶栏：仓库选择器（侧拉从 repo.projects 取 + 当前用户头像 + 名 + 总卡片数）
- *   - 主体：议题列表（标题 / 编号 / 状态 / 标签 / 截止日期）
- *   - 数据：issues.list({ assignee: <currentUser.login> }) IPC → useMyCardStore
+ * 设计（v1.4 · 任务 #statusbar-picker 重构）：
+ *   - v1.4 之前：顶栏有仓库选择器（侧拉从 repo.projects 取）
+ *   - v1.4 之后：**仓库选择已下沉到 StatusBar 全局 picker**（状态栏唯一入口），
+ *     本视图不再渲染 picker / 不接 selectProject
+ *   - 保留：当前用户头像 + 名 + 总卡片数 + tabs + 搜索 + 列表
  *
  * 零术语：UI 文本**不**出现 issue 原词（中文用"议题/卡片"），
  *   - "我的卡片" / "进行中" / "已关闭" / "共 X 张"
@@ -18,7 +19,7 @@
  *   - **不**做"卡片详情抽屉"（v1 只读列表；点行打开 gitea web）
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { ListChecks, RefreshCw, Search, ChevronDown } from 'lucide-vue-next';
+import { ListChecks, RefreshCw, Search } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useMyCardStore, type MyCardFilter } from '@renderer/stores/my-card';
@@ -44,18 +45,6 @@ const tabs: { id: MyCardFilter; label: string }[] = [
   { id: 'closed', label: '已关闭' },
 ];
 
-/** 仓库选择器 state */
-const showProjectPicker = ref(false);
-const pickerSearch = ref('');
-
-const filteredProjects = computed<RepoDto[]>(() => {
-  const q = pickerSearch.value.trim().toLowerCase();
-  if (!q) return repo.projects;
-  return repo.projects.filter(
-    (r) => r.fullName.toLowerCase().includes(q) || r.description.toLowerCase().includes(q),
-  );
-});
-
 onMounted(async () => {
   // 1. 拉账号 + 用户
   if (auth.accounts.length === 0) {
@@ -65,7 +54,7 @@ onMounted(async () => {
       /* error in auth.error */
     }
   }
-  // 2. 仓库列表
+  // 2. 仓库列表（兜底轮询还没跑的情况;如果 App.vue 引导选仓库成功,这里只是补一次）
   if (repo.repos.length === 0) {
     try {
       await repo.loadRepos('', true);
@@ -73,17 +62,10 @@ onMounted(async () => {
       /* error */
     }
   }
-  // 3. 默认选第一个 project
-  if (!activeProjectId.value && repo.projects.length > 0) {
-    const first = repo.projects[0]!;
-    try {
-      const project = await repo.addProject({ owner: first.owner, name: first.name });
-      repo.selectProject(project);
-    } catch {
-      /* error */
-    }
-  }
-  // 4. 拉"我的卡片"（如果已连 + 有 user.login）
+  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
+  // 仓库由 App.vue 在登录/启动期通过 StatusBar picker 引导用户主动选;
+  // 没选就展示 EmptyState 提示,让用户去状态栏选仓库
+  // 3. 拉"我的卡片"（如果已连 + 有 user.login + 已选仓库）
   if (activeProjectId.value && auth.currentUser?.login) {
     await loadMyCards();
   }
@@ -129,23 +111,6 @@ async function onRefresh(): Promise<void> {
   }
 }
 
-async function pickProject(r: RepoDto): Promise<void> {
-  showProjectPicker.value = false;
-  pickerSearch.value = '';
-  let project;
-  try {
-    project = await repo.addProject({ owner: r.owner, name: r.name });
-  } catch {
-    return;
-  }
-  if (project) {
-    repo.selectProject(project);
-  }
-  if (auth.currentUser?.login) {
-    await loadMyCards();
-  }
-}
-
 function formatDate(iso: string | undefined): string {
   if (!iso) return '—';
   try {
@@ -163,12 +128,8 @@ function formatDate(iso: string | undefined): string {
 
 <template>
   <div class="my-cards">
-    <!-- ============== 顶栏 ============== -->
+    <!-- ============== 顶栏（v1.4：删 picker,保留当前用户 + 总卡片数 + 刷新） ============== -->
     <header class="my-cards__topbar">
-      <div class="my-cards__picker" @click="showProjectPicker = !showProjectPicker">
-        <ChevronDown :size="16" :stroke-width="2" aria-hidden="true" />
-        <span class="my-cards__picker-name">{{ activeRepo?.fullName ?? '请选择仓库' }}</span>
-      </div>
       <div class="my-cards__user" v-if="auth.currentUser">
         <div class="my-cards__avatar" aria-hidden="true">
           <img
@@ -195,49 +156,26 @@ function formatDate(iso: string | undefined): string {
           :title="'刷新'"
           @click="onRefresh"
         >
-          <RefreshCw :size="14" :stroke-width="2" :class="{ spin: myCard.loading }" />
-          <span>{{ myCard.loading ? '加载中…' : '刷新' }}</span>
+          <RefreshCw :size="14" :stroke-width="2" />
+          <span>刷新</span>
         </button>
       </div>
     </header>
 
-    <!-- ============== 仓库下拉 ============== -->
-    <div v-if="showProjectPicker" class="my-cards__dropdown" role="dialog" aria-label="选择仓库">
-      <div class="my-cards__dropdown-search">
-        <Search :size="14" :stroke-width="2" aria-hidden="true" />
-        <input
-          v-model="pickerSearch"
-          type="text"
-          class="my-cards__dropdown-input"
-          placeholder="搜索仓库（按名称 / 描述）"
-          autocomplete="off"
-          spellcheck="false"
-        />
-      </div>
-      <ul v-if="filteredProjects.length" class="my-cards__dropdown-list">
-        <li v-for="r in filteredProjects" :key="r.id">
-          <button
-            type="button"
-            class="my-cards__dropdown-item"
-            @click="pickProject(r)"
-          >
-            <span class="my-cards__dropdown-item-name">{{ r.fullName }}</span>
-          </button>
-        </li>
-      </ul>
-      <EmptyState v-else title="没有匹配的仓库" />
-    </div>
-
     <!-- ============== 主体 ============== -->
     <div v-if="!activeRepo" class="my-cards__placeholder">
-      <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看"我的卡片"' />
+      <EmptyState
+        title="还没有选中仓库"
+        description="点状态栏（窗口底部）的仓库名，从下拉里选一个"
+      />
     </div>
     <div v-else-if="!auth.currentUser" class="my-cards__placeholder">
       <EmptyState title="未获取到当前用户" description="请确认 gitea 连接" />
     </div>
-    <div v-else-if="myCard.loading && myCard.items.length === 0" class="my-cards__placeholder">
-      <p class="muted">加载中…</p>
-    </div>
+    <!--
+      v1.4 拍板"替换模式"：删 v-else-if="myCard.loading && ..." 的"加载中…"占位
+      全局海豚 overlay 接管请求级 loading
+    -->
 
     <template v-else>
       <!-- tabs + search -->
@@ -358,30 +296,10 @@ function formatDate(iso: string | undefined): string {
   flex-shrink: 0;
 }
 
-.my-cards__picker {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 4px 10px;
-  background: var(--color-bg);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-sm);
-  color: var(--color-text);
-  font-weight: 500;
-  cursor: pointer;
-  min-width: 240px;
-}
-
-.my-cards__picker:hover {
-  background: var(--color-bg-hover);
-}
-
-.my-cards__picker-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* v1.4 任务 #statusbar-picker：删除 .my-cards__picker / .my-cards__picker-name /
+ * .my-cards__dropdown / .my-cards__dropdown-search / .my-cards__dropdown-input /
+ * .my-cards__dropdown-list / .my-cards__dropdown-item / .my-cards__dropdown-item-name
+ * 相关样式 —— 仓库选择已下沉到 StatusBar */
 
 .my-cards__user {
   display: flex;
@@ -466,76 +384,6 @@ function formatDate(iso: string | undefined): string {
 .my-cards__refresh:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.my-cards__dropdown {
-  position: absolute;
-  top: 56px;
-  left: var(--space-4);
-  width: 360px;
-  max-height: 480px;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-bg-elevated);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  z-index: var(--z-nav);
-  overflow: hidden;
-}
-
-.my-cards__dropdown-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--color-divider);
-  color: var(--color-text-muted);
-}
-
-.my-cards__dropdown-input {
-  flex: 1;
-  background: transparent;
-  padding: 0;
-  border: none;
-}
-
-.my-cards__dropdown-input:focus {
-  background: transparent;
-  box-shadow: none;
-}
-
-.my-cards__dropdown-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--space-1);
-  list-style: none;
-  margin: 0;
-}
-
-.my-cards__dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  text-align: left;
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  background: transparent;
-}
-
-.my-cards__dropdown-item:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text);
-}
-
-.my-cards__dropdown-item-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .my-cards__controls {
@@ -748,12 +596,5 @@ function formatDate(iso: string | undefined): string {
   font-weight: 500;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 </style>

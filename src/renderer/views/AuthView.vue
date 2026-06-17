@@ -15,7 +15,7 @@
  *   - 提交中：按钮禁用 + 显示加载文案
  *   - 成功后：跳 /board（路由 push）
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Eye, EyeOff, KeyRound, LogIn, ShieldCheck } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -25,10 +25,25 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
-const giteaUrl = ref('');
+/**
+ * v1.4 任务 #auth-prefill-localhost:
+ * 默认本地测试地址 → 用户只需填 token 即可快速测。
+ *
+ * 行为：
+ *   - 首次进入 AuthView + 还没连上 → 自动填 http://127.0.0.1:3000
+ *   - 用户可改:地址框不锁(锁了反而添堵,自托管环境要换)
+ *   - 自动 focus 到 token 输入框（输入完直接 ⏎ 提交）
+ *   - placeholder 同步改为提示"自托管/自定义地址"
+ *   - 已经在持久化 prefs 里看到 giteaUrl 时保留(v1.4 起 prefs 里有 url),
+ *     走 restoreLastSelected 的 prefs 路径 —— AuthView 本身不读 prefs(职责单一)
+ */
+const DEFAULT_LOCAL_URL = 'http://127.0.0.1:3000';
+
+const giteaUrl = ref(DEFAULT_LOCAL_URL);
 const token = ref('');
 const showToken = ref(false);
 const localError = ref<string | null>(null);
+const tokenInputEl = ref<HTMLInputElement | null>(null);
 
 const submitting = computed(() => auth.loading);
 const hasAnyError = computed(() => Boolean(localError.value) || Boolean(auth.error));
@@ -53,7 +68,11 @@ onMounted(async () => {
   }
   if (auth.isConnected) {
     goNext();
+    return;
   }
+  // 未连接:token 框自动 focus —— 用户粘贴 token 后直接 ⏎ 提交,无需点输入框
+  await nextTick();
+  tokenInputEl.value?.focus();
 });
 
 function validateUrl(url: string): string | null {
@@ -131,12 +150,12 @@ function goNext(): void {
             v-model="giteaUrl"
             type="url"
             class="auth__input"
-            placeholder="http://localhost:3000"
+            placeholder="自托管 gitea:https://git.example.com/gitea/"
             autocomplete="url"
             spellcheck="false"
             :disabled="submitting"
           />
-          <p class="auth__hint">默认本地测试地址 http://localhost:3000；自托管 gitea 多部署在子路径，例如 https://git.example.com/gitea/</p>
+          <p class="auth__hint">默认本地测试地址 http://127.0.0.1:3000；自托管 gitea 多部署在子路径，例如 https://git.example.com/gitea/</p>
         </div>
 
         <div class="auth__field">
@@ -144,6 +163,7 @@ function goNext(): void {
           <div class="auth__input-wrap">
             <input
               id="gitea-token"
+              ref="tokenInputEl"
               v-model="token"
               :type="showToken ? 'text' : 'password'"
               class="auth__input auth__input--with-icon"

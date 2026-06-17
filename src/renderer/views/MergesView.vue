@@ -21,14 +21,17 @@
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote } from 'lucide-vue-next';
+import { useRouter } from 'vue-router';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
+import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
 import { renderMarkdown } from '@renderer/lib/markdown';
 import { issuesCommentCreate, issuesCommentList } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
+import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 import type { PullDto, RepoDto, MergeMethod } from '../../main/ipc/schema.js';
 import type { IssueCommentDto } from '../../main/ipc/schema.js';
@@ -36,6 +39,8 @@ import type { IssueCommentDto } from '../../main/ipc/schema.js';
 const repo = useRepoStore();
 const pull = usePullStore();
 const auth = useAuthStore();
+const branch = useBranchStore();
+const router = useRouter();
 
 /** 去掉 URL 末尾的 `/` 字符（gitea URL 拼接用）
  *
@@ -110,15 +115,7 @@ onMounted(async () => {
       /* error in repo.error */
     }
   }
-  if (!activeProjectId.value && repo.projects.length > 0) {
-    const first = repo.projects[0]!;
-    try {
-      const project = await repo.addProject({ owner: first.owner, name: first.name });
-      repo.selectProject(project);
-    } catch {
-      /* error in repo.error */
-    }
-  }
+  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
   if (activeProjectId.value) {
     await loadPulls();
   }
@@ -173,6 +170,25 @@ function toggleExpandWithComments(p: PullDto): void {
   if (!wasExpanded) {
     void loadComments(p);
   }
+}
+
+/**
+ * v1.4 · 任务 #merge-timeline-jump:
+ *   从合并请求 header 跳时间轴,在该合并请求的 head 分支中定位到 head.sha 这一行
+ *
+ * 写入 branch.pendingTimelineFocus({ ref: p.head.ref, sha: p.head.sha })
+ * → router.push('/timeline') → TimelineView onMounted consumePendingTimelineFocus
+ *  → 选中 head 分支 + 加载完 timeline 后高亮 + scrollIntoView
+ *
+ * @click.stop 阻止冒泡到 merge-item 行（避免同时触发 toggleExpandWithComments 展开手风琴）
+ */
+function onJumpToTimeline(p: PullDto): void {
+  if (!p.head?.ref || !p.head?.sha) {
+    showToast({ type: 'error', message: '这条合并请求没有可跳转的分支信息' });
+    return;
+  }
+  branch.setPendingTimelineFocus({ ref: p.head.ref, sha: p.head.sha });
+  void router.push('/timeline');
 }
 
 /** 生成 gitea web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
@@ -634,6 +650,8 @@ async function fetchComments(p: PullDto): Promise<void> {
   const panel = getPanel(p.index);
   panel.loading = true;
   panel.error = null;
+  // 评论加载也接 globalLoading（panel 二级加载，多 pr 并发 active 时合并）
+  useGlobalLoadingStore().show('merges');
   try {
     const list = (await issuesCommentList({
       projectId: String(activeProjectId.value),
@@ -646,6 +664,7 @@ async function fetchComments(p: PullDto): Promise<void> {
     panel.error = err.messageText ?? '加载评论失败';
   } finally {
     panel.loading = false;
+    useGlobalLoadingStore().hide('merges');
   }
 }
 
@@ -823,8 +842,8 @@ function formatRelative(iso: string | undefined): string {
           :title="'刷新'"
           @click="onRefresh"
         >
-          <RefreshCw :size="14" :stroke-width="2" :class="{ spin: pull.loading }" />
-          <span>{{ pull.loading ? '加载中…' : '刷新' }}</span>
+          <RefreshCw :size="14" :stroke-width="2" />
+          <span>刷新</span>
         </button>
       </div>
     </header>
@@ -875,9 +894,10 @@ function formatRelative(iso: string | undefined): string {
     <div v-if="!activeRepo" class="merges__placeholder">
       <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看合并请求' />
     </div>
-    <div v-else-if="pull.loading && pull.items.length === 0" class="merges__placeholder">
-      <p class="muted">加载中…</p>
-    </div>
+    <!--
+      v1.4 拍板"替换模式"：删 v-else-if="pull.loading && ..." 的"加载中…"占位
+      全局海豚 overlay 接管请求级 loading
+    -->
     <div v-else-if="!pull.items.length" class="merges__placeholder">
       <EmptyState
         title="这个仓库还没有合并请求"
@@ -939,6 +959,20 @@ function formatRelative(iso: string | undefined): string {
         <div class="merge-item__main">
           <div class="merge-item__header">
             <span class="merge-item__title" :title="p.title">{{ p.title }}</span>
+            <!-- v1.4 · 任务 #merge-timeline-jump:
+                 跳时间轴定位到本合并请求的 head 提交。
+                 默认态用主色软底 + 主色文字 + 主色描边(跟 TimelineView .is-pr-focus
+                 同一强调色系,让用户一眼识别"点这个就能跳过去看")。
+                 @click.stop 避免同时触发行的 toggleExpandWithComments 展开手风琴 -->
+            <button
+              type="button"
+              class="merge-item__timeline-btn"
+              :title="`跳到时间轴，定位到 ${p.head.ref} 上的提交 ${p.head.sha.slice(0, 7)}`"
+              :aria-label="`跳到时间轴，定位到 ${p.head.ref} 上的提交 ${p.head.sha.slice(0, 7)}`"
+              @click.stop="onJumpToTimeline(p)"
+            >
+              <Timer :size="13" :stroke-width="2" aria-hidden="true" />
+            </button>
             <span :class="badgeClass(p)" class="merge-item__badge">{{ badgeText(p) }}</span>
           </div>
           <div class="merge-item__body">
@@ -1098,13 +1132,8 @@ function formatRelative(iso: string | undefined): string {
                   :title="'刷新对话'"
                   @click.stop="fetchComments(p)"
                 >
-                  <RefreshCw
-                    :size="12"
-                    :stroke-width="2"
-                    :class="{ spin: getPanel(p.index).loading }"
-                    aria-hidden="true"
-                  />
-                  <span>{{ getPanel(p.index).loading ? '加载中…' : '刷新' }}</span>
+                  <RefreshCw :size="12" :stroke-width="2" aria-hidden="true" />
+                  <span>刷新</span>
                 </button>
               </div>
 
@@ -1691,8 +1720,15 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__header {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  /* 4px 紧贴：title / 时钟按钮 / badge 三者都贴在一起,
+     让 header 看起来是"标题 + 一组附标(时钟 + 状态)"的紧凑单元。
+     badge 靠自身的 status 色(open=success/merged=accent/draft=warning/
+     closed=secondary)与 title 区分,不需要靠距离分组。 */
+  gap: var(--space-1);
+  /* 强制一行 —— timeline-btn 必须紧贴 title 末尾(不换行跑到第二行,
+     否则视觉上跟 trailing 区的"在 gitea 中打开"/"合并"/"关闭"按钮撞在一起);
+     title 必要时 ellipsis 截断,badge + timeline-btn 始终可见 */
+  flex-wrap: nowrap;
 }
 
 .merge-item__title {
@@ -1717,6 +1753,41 @@ function formatRelative(iso: string | undefined): string {
   border-radius: var(--radius-pill);
   font-weight: 500;
   flex-shrink: 0;
+}
+
+/* v1.4 · 任务 #merge-timeline-jump:
+   header 上的时钟按钮 —— 跳时间轴定位到本合并请求的 head 提交
+   视觉强调：默认就用主色软底 + 主色文字 + 主色描边(跟 TimelineView
+   .commit-row.is-pr-focus 同一主色系),用户一眼能识别"点这个跳过去"。
+
+   跟 title / badge 一起走 header 的 4px gap 紧贴成一组。 */
+.merge-item__timeline-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  /* 默认态：主色软底 + 主色文字 + 1px 主色描边 —— 强调色,与 is-pr-focus 同源 */
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.merge-item__timeline-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+.merge-item__timeline-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 .merge-badge--open {
   background: var(--color-success-soft);
