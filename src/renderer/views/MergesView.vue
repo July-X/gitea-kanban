@@ -959,6 +959,7 @@ function formatRelative(iso: string | undefined): string {
         <div class="merge-item__main">
           <div class="merge-item__header">
             <span class="merge-item__title" :title="p.title">{{ p.title }}</span>
+            <span :class="badgeClass(p)" class="merge-item__badge">{{ badgeText(p) }}</span>
             <!-- v1.4 · 任务 #merge-timeline-jump:
                  跳时间轴定位到本合并请求的 head 提交。
                  默认态用主色软底 + 主色文字 + 主色描边(跟 TimelineView .is-pr-focus
@@ -973,7 +974,6 @@ function formatRelative(iso: string | undefined): string {
             >
               <Timer :size="13" :stroke-width="2" aria-hidden="true" />
             </button>
-            <span :class="badgeClass(p)" class="merge-item__badge">{{ badgeText(p) }}</span>
           </div>
           <div class="merge-item__body">
             <a
@@ -1736,7 +1736,14 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
   font-weight: 600;
   text-decoration: none;
-  flex: 1 1 0;
+  /* flex: 0 1 auto —— 不要 grow 占满 header 宽度,
+   * 否则会把 .merge-item__timeline-btn 和 badge 推到 header 最右,
+   * 视觉上跟 title 拉开一大段空隙(用户反馈)。
+   * 0 1 auto + min-width: 0 + ellipsis 经典组合:
+   * - 自然宽度时按内容走
+   * - 撑不下时 title 收缩并 ellipsis(clock/badge 都有 flex-shrink: 0 不动)
+   * - 右侧多出的空隙在 trailing 列(grid 留出的)那边,不影响 header 内部 */
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1753,6 +1760,12 @@ function formatRelative(iso: string | undefined): string {
   border-radius: var(--radius-pill);
   font-weight: 500;
   flex-shrink: 0;
+  /* title → badge 间距跟 .merge-item__timeline-btn 宽度(22px)等宽
+   * —— header 自身 gap 4px + 本 margin 18px = 22px,视觉上像
+   * "title 后留出一格时钟按钮的位置再放 badge"，
+   * 让 title 跟 [badge+clock] 这一组在视觉上明确分块。
+   * 一改时钟按钮宽度,这个值要跟着改。 */
+  margin-left: 18px;
 }
 
 /* v1.4 · 任务 #merge-timeline-jump:
