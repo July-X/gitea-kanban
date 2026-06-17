@@ -53,8 +53,8 @@ const items: NavItem[] = [
     devAnnotation: {
       web: '/<owner>/<repo>/issues',
       api: 'GET /api/v1/repos/<owner>/<repo>/issues?state=open',
-      ipc: 'board.columns.list / board.cards.list',
-      notes: '看板列 = 本地 SQLite；卡片 = gitea issue（按 label 映射列）',
+      ipc: 'board.columns.list（列）· issues.list（卡片，按 label 过滤映射）',
+      notes: '看板列 = 本地 localStore 文件（ADR-0003 Phase 3 删 SQLite 双写）；卡片 = gitea issue（按 gitea label 映射列，gitea 是 label 源）',
     },
   },
   {
@@ -86,9 +86,9 @@ const items: NavItem[] = [
     icon: ListChecks,
     to: '/my-cards',
     devAnnotation: {
-      web: '/issues?q=is:open+assignee:@<me>',
-      api: 'GET /api/v1/issues/search?assigned=true&state=open',
-      ipc: 'myCards.list',
+      web: '/<owner>/<repo>/issues?q=assignee:@me&state=open',
+      api: 'GET /api/v1/repos/<owner>/<repo>/issues?assignee=<me>&state=open',
+      ipc: 'issues.list（带 assignee 过滤，per active project）',
     },
   },
   {
@@ -109,8 +109,8 @@ const items: NavItem[] = [
     to: '/settings',
     devAnnotation: {
       web: '（无 gitea 对应页 · 本地应用设置）',
-      ipc: 'preferences.get / preferences.set / auth.list / auth.connect / auth.disconnect',
-      notes: '主题 / 轮询间隔 / 账号管理 / 危险操作（清缓存 / 重置看板）',
+      ipc: 'preferences.theme.get/set（主题）· auth.connect/disconnect/status（账号）',
+      notes: '主题 / 轮询间隔（走 localStorage） / 账号管理（gitea 地址 + 登录用户 + 更新连接）',
     },
   },
 ];
