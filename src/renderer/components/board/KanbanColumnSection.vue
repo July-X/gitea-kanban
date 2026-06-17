@@ -133,9 +133,21 @@ const displayIssues = computed<IssueCardDto[]>(() => {
       现改为只看 labels.length > 0：绑了 label 的列即使 0 卡片也渲染 VueDraggable
       （min-height: 60px 撑出 drop zone），空状态文案移到 VueDraggable 内部当占位 li。
       v-if 而非 v-else：跟下面的 VueDraggable 异 tag，走独立 v-if 绕开 v-else 折叠坑（AGENTS §10.11）。
+
+      v1.4 修复（2026-06-17 · 拖拽光晕失效 + 释放不记录 bug · 真因）：
+      vue-draggable-plus 0.6.1 的 useDraggable 参数解析有坑：当**不传 modelValue** 时，
+      它的 `Array.isArray(unref(modelValueRef)) || (options = modelValueRef, modelValueRef = null)`
+      会把"本应是 options 的第二个参数"误当成 modelValue，真正的 options（group/animation/
+      onStart/onMove/onEnd 等）被丢弃 → SortableJS 用默认 options 创建 → 没有 onStart/onMove/onEnd
+      回调 → emit 不触发 → 上一个 commit 加的 onColumnDragStart/Move/End 永远不被调 → 光晕不亮 +
+      moveIssue 不调（释放不记录）。
+      修法：传 `:model-value="displayIssues"`（真实数组）让参数解析走对分支。**不**监听
+      `@update:model-value` —— store 仍是 source of truth（Sortable 改 DOM 的视觉效果会被 Vue
+      下一帧重渲染拉回，只有 store.moveIssue 的乐观更新说了算，与 drag-helper.ts 注释一致）。
     -->
     <VueDraggable
       v-if="props.column.labels.length > 0"
+      :model-value="displayIssues"
       v-bind="props.dragOptions"
       class="column__cards"
       :data-column-id="props.column.id"

@@ -18,6 +18,21 @@
  * 修法：不依赖 SortableJS 的 dragClass，改在 onStart / onMove / onEnd 里显式给列加/移
  * `.column--drag-source`（源列）/ `.column--drop-target`（当前目标列）class，CSS 改匹配这俩。
  * 模式无关（native + fallback 都 work），且可单测。
+ *
+ * v1.4 修复（2026-06-17 · 拖拽光晕 + 释放不记录 真因 · commit 9deaf09 之上）：
+ * 上一个 commit（9deaf09）加了 onStart/onMove/onEnd 显式管 class，但**没生效**——
+ * 根因在 vue-draggable-plus 0.6.1 的 `useDraggable(target, modelValue, options)` 参数解析：
+ *   `Array.isArray(unref(modelValue)) || (options = modelValue, modelValue = null)`
+ * 当**不传 modelValue**（旧 KanbanColumnSection 只 v-bind="dragOptions"，没 :model-value）时，
+ * modelValue 的 unref 是 undefined（非数组）→ 把本应是 options 的第 2 参误当 modelValue，
+ * 真正的 options（group/animation/onStart/onMove/onEnd 等）被丢弃 → SortableJS 用**默认 options**
+ * 创建 → 没有 onStart/onMove/onEnd 回调 → emit 不触发 → onColumnDragStart/Move/End 永远不被调
+ * → 光晕不亮 + moveIssue 不调（释放不记录）。
+ * 修法在 KanbanColumnSection.vue：给 VueDraggable 加 `:model-value="displayIssues"`（真实数组）
+ * 让参数解析走对分支；**不**监听 @update:model-value（store 仍是 source of truth，与 drag-helper.ts
+ * 注释描述的"Sortable 改 DOM，Vue 重渲染拉回"行为一致）。
+ * 验证：CDP direct 调 sortable.options.onStart/onMove/onEnd → onColumnDragStart/Move/End 全被调
+ * + moveIssue 被调 + 乐观更新把卡片从 colA 移到 colB（full-simulate.mjs 实测）。
  */
 import type { ColumnDto, IssueCardDto } from '../../main/ipc/schema.js';
 import { mapDragEndToMoveIntent } from '@renderer/lib/drag-helper';

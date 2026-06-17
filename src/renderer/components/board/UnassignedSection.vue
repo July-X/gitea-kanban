@@ -68,8 +68,11 @@ const showClosedLocal = ref(false);
     <p class="column__unassigned-hint muted">
       这些议题还没归到任何列。<b>直接拖到右边任意列</b>可快速归类；点下方"归到…"也可手动选。
     </p>
-    <!-- v1.4 拍板：VueDraggable + group:'kanban' 跨列共享拖拽 -->
+    <!-- v1.4 拍板：VueDraggable + group:'kanban' 跨列共享拖拽
+         v1.4 修复（2026-06-17）：传 :model-value 让 vue-draggable-plus 0.6.1 参数解析走对分支
+         （详见 KanbanColumnSection 同名注释），否则 group/onEnd 等 options 被丢弃 → 跨列拖失效 -->
     <VueDraggable
+      :model-value="openIssues"
       v-bind="props.dragOptions"
       class="column__cards"
       data-column-id="__unassigned__"
