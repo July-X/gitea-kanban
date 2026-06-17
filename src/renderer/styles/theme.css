@@ -96,7 +96,7 @@
   /* === 布局 === */
   --navrail-width: 224px;
   --navrail-collapsed-width: 56px;
-  --statusbar-height: 28px;
+  --statusbar-height: 33px; /* 28 → 33（v1.4 · 任务 #statusbar-picker：留出下拉空间放仓库触发器） */
   --topbar-height: 48px;
 
   /* === z-index === */

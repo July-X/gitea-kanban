@@ -11,9 +11,17 @@
  *   - 路由切换由 vue-router 4 的 <router-view> 接管
  *   - 顶栏 = 当前 view 内部自带（避免全局顶栏过度复杂）
  *   - 错误捕获：app-level errorHandler 已经在 main.ts 注册；这里只管 layout
+ *
+ * v1.4 第六轮（plan 调整）：
+ *   - GlobalLoadingOverlay 从 App.vue 移到 .shell__content 内（v1.4 第六轮 user 拍板）
+ *   - 原因：之前 overlay 走 fixed + 半透明蒙版 → 整个主区被"蒙版盖住"
+ *   - 现在 overlay 是主区的兄弟节点，position: absolute 居中在 .shell__content
+ *   - 不挡内容、不蒙版、不模糊 —— 跟 view 内容同框渲染
+ *   - 路由切换 fade 过渡时 overlay 跟 router-view 平级，位置稳定
  */
 import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
+import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
 </script>
 
 <template>
@@ -33,6 +41,13 @@ import StatusBar from './StatusBar.vue';
             <component :is="Component" />
           </transition>
         </router-view>
+        <!--
+          v1.4 第六轮：overlay 挂在 .shell__content 内，跟 router-view 平级
+          - 不浮在内容之上（无蒙版 / 无 blur / 无 box-shadow）
+          - 跟内容同框，pointer-events: none 不抢点击
+          - 路由切换时 router-view fade 180ms 期间 overlay 位置稳定
+        -->
+        <GlobalLoadingOverlay />
       </div>
     </main>
     <StatusBar class="shell__status" />
@@ -61,7 +76,9 @@ import StatusBar from './StatusBar.vue';
 .shell__nav {
   position: relative;
   z-index: 1;
-  height: 100%;
+  /* v1.4 任务 #statusbar-picker：高度让出底部状态栏 33px，避免左下角折叠按钮被遮
+   * 旧值 height: 100%（状态栏 28px 时已经盖住 28px，33px 之后更明显） */
+  height: calc(100% - var(--statusbar-height));
   /* 半透明 + **移除 backdrop-filter** —— blur 把 grid 8% alpha 弱线条糊掉看不见
    * alpha 从 60% 降到 35% · 让 24px grid 清晰透出侧栏背景 */
   background: color-mix(in srgb, var(--color-bg-elevated) 35%, transparent);

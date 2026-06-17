@@ -48,6 +48,10 @@ onMounted(async () => {
   }
   // 启动被动轮询（连接后才有效，函数内已守卫）
   startPolling();
+  // v1.4 任务 #statusbar-persist:启动期尝试恢复上次选择的仓库,失败再走引导
+  // 注:此处只恢复 currentProject;不自动 loadBoard —— 避免启动期一堆 IPC 并发,
+  // 用户点导航到具体 view 时由各 view 自行 load(更可控)
+  await tryRestoreOrPromptRepoGuide();
 });
 
 // 用户改了 polling interval → 重启 timer
@@ -55,6 +59,87 @@ watch(
   () => settings.pollingIntervalMs,
   () => startPolling(),
 );
+
+/**
+ * v1.4 任务 #statusbar-picker + #statusbar-persist
+ *
+ * 监听 isConnected 边沿:
+ *   - false → true 切换 + 当前还没选仓库 → 拉一次仓库列表 → 尝试恢复 → 失败再引导
+ *   - 启动期 tryRestoreOrPromptRepoGuide 走相同路径
+ */
+let connectedFromDisconnect = !auth.isConnected;
+watch(
+  () => auth.isConnected,
+  async (now, prev) => {
+    if (now && !prev) {
+      connectedFromDisconnect = true;
+    }
+    if (now && connectedFromDisconnect && !repo.currentProject) {
+      connectedFromDisconnect = false;
+      try {
+        if (repo.repos.length === 0) {
+          await repo.loadRepos('', true);
+        }
+      } catch {
+        /* 错误已在 repo.error,StatusBar 提示 */
+      }
+      await tryRestoreOrPromptRepoGuide(/* alreadyLoadedRepos */ true);
+    }
+  },
+);
+
+/**
+ * v1.4 任务 #statusbar-persist + #statusbar-picker
+ *
+ * 启动期 / isConnected 边沿 共用入口:
+ *   1. 未连接 → 直接 return（StatusBar 已显示"未连接"chip,用户得先去 /auth 连）
+ *   2. 已选仓库 → 直接 return
+ *   3. 尝试 restoreLastSelected:
+ *      - 成功拿到 { owner, name, projectId } + 当前 repos[] 里有 fullName 匹配 →
+ *        用 repo.addProject（如果还没 project）+ repo.selectProject → done
+ *        （uuid 沿用 prefs 里的,但 addProject 返回的才是真 uuid;两者用同一个 fullName,
+ *         main 端 addProject 幂等 → 拿到的 uuid 跟 prefs 一致,后续 IPC 不出问题）
+ *      - 任何环节失败（无持久化 / giteaUrl 不匹配 / 仓库已被删） → fall through 引导
+ *   4. 引导:repo.guideOnConnect = true → StatusBar watch 触发 picker 打开
+ *
+ * @param alreadyLoadedRepos true 表示仓库列表已拉过(避免重复 loadRepos)
+ */
+async function tryRestoreOrPromptRepoGuide(alreadyLoadedRepos = false): Promise<void> {
+  if (!auth.isConnected || repo.currentProject) return;
+
+  // 兜底拉一次仓库列表（callers 可传 alreadyLoadedRepos=true 跳过）
+  if (!alreadyLoadedRepos && repo.repos.length === 0) {
+    try {
+      await repo.loadRepos('', true);
+    } catch {
+      /* 错误已在 repo.error */
+    }
+  }
+
+  // 尝试从持久化恢复
+  const restored = await repo.restoreLastSelected(auth.currentGiteaUrl);
+  if (restored) {
+    const matched = repo.repos.find(
+      (r) => r.owner === restored.owner && r.name === restored.name,
+    );
+    if (matched) {
+      try {
+        // addProject 幂等（已加入过也走同一路径）→ 拿到真 uuid 后 selectProject
+        const project = await repo.addProject({ owner: restored.owner, name: restored.name });
+        repo.selectProject(project);
+        // 恢复成功 → 重新持久化一次（addProject 内部 refresh repos 后 isProject 标记变了,
+        // 这次持久化把"已加入"标签也写进 prefs,后续 restore 更准确）
+        void repo.persistLastSelected(matched, project, auth.currentGiteaUrl);
+        return; // 跳过引导
+      } catch {
+        /* addProject 失败 → fall through 引导 */
+      }
+    }
+  }
+
+  // 恢复失败 → 引导选仓库
+  repo.guideOnConnect = true;
+}
 
 onBeforeUnmount(() => {
   if (pollTimer) {
@@ -67,6 +152,11 @@ onBeforeUnmount(() => {
 <template>
   <AppShell />
   <Toast />
+  <!--
+    全局加载海豚 v1.4 第六轮改：移到 AppShell.vue 的 .shell__content 内
+    （v1.4 之前在 App.vue 走 fixed 全屏蒙版 → 整个主区被"蒙版盖住"，
+     user 反馈不符合预期：希望海豚直接显示在内容区 DOM 上，不浮在内容之上）
+  -->
   <!--
     Dev 模式注解 popover（v1.1.3 · task #42）
     - 仅 dev 显示（Vite 把 isDev 编译成 false，生产 v-if 消除）
