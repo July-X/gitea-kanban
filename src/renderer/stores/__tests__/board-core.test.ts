@@ -75,6 +75,9 @@ const PROJECT_ID = 'p-test-uuid';
 
 const LABEL_TODO: IssueLabelDto = { id: 100, name: 'To Do', color: '#cccccc' };
 const LABEL_DOING: IssueLabelDto = { id: 101, name: 'In Progress', color: '#dddddd' };
+// v1.4 修复守护：moveIssue 乐观更新 labels 字段测试需要更多 label fixture
+const LABEL_BUG: IssueLabelDto = { id: 102, name: 'bug', color: '#ee0701' };
+const LABEL_FEATURE: IssueLabelDto = { id: 103, name: 'feature', color: '#00aaff' };
 
 function makeCol(id: string, title: string, labels: IssueLabelDto[]): ColumnDto {
   return {
@@ -259,5 +262,92 @@ describe('board store · moveIssue', () => {
       }),
     ).rejects.toMatchObject({ code: 'not_found' });
     expect(mocks.issuesMoveColumn).not.toHaveBeenCalled();
+  });
+
+  // v1.4 修复守护：乐观更新 issue.labels 字段同步刷
+  //  原 bug：位置层更新但 issue.labels 保留 fromColumn 绑的 label
+  //  → 卡片 label chip 仍显示旧 label，用户感受"释放不更新"
+  it('moveIssue 乐观更新同步刷 issue.labels（移除 fromCol 绑的 + 加上 toCol 绑的）', async () => {
+    const board = await setupBoard();
+    mocks.issuesMoveColumn.mockResolvedValueOnce(undefined);
+
+    // setupBoard 把 issue 1 放在 todoCol 且 labels=[LABEL_TODO]（见 makeIssue 默认）
+    // 期待：移去 doingCol 后，issue.labels 应只含 LABEL_DOING（移除 LABEL_TODO + 加 LABEL_DOING）
+    await board.moveIssue({
+      projectId: PROJECT_ID,
+      issueIndex: 1,
+      fromColumnId: 'c-todo',
+      toColumnId: 'c-doing',
+    });
+
+    const moved = board.issuesOf('c-doing')[0];
+    expect(moved).toBeDefined();
+    const labelIds = moved!.labels.map((l) => l.id);
+    // 不应再含 LABEL_TODO
+    expect(labelIds).not.toContain(LABEL_TODO.id);
+    // 应含 LABEL_DOING
+    expect(labelIds).toContain(LABEL_DOING.id);
+    // issue 其他字段保留
+    expect(moved!.index).toBe(1);
+    expect(moved!.title).toBe('A');
+  });
+
+  it('moveIssue 失败回滚用原 issue（labels 不变）+ 状态完整恢复', async () => {
+    const board = await setupBoard();
+    const originalIssue = board.issuesOf('c-todo')[0]!;
+    mocks.issuesMoveColumn.mockRejectedValueOnce({
+      code: 'gitea_error',
+      message: '服务器开小差',
+      hint: '请稍候重试',
+      recoverable: true,
+    });
+
+    await expect(
+      board.moveIssue({
+        projectId: PROJECT_ID,
+        issueIndex: 1,
+        fromColumnId: 'c-todo',
+        toColumnId: 'c-doing',
+      }),
+    ).rejects.toBeDefined();
+
+    // 回滚后 issue 应回 todoCol 且 labels 是原值
+    const rolled = board.issuesOf('c-todo')[0]!;
+    expect(rolled).toBeDefined();
+    expect(rolled.labels.map((l) => l.id)).toEqual(originalIssue.labels.map((l) => l.id));
+    expect(rolled.labels.map((l) => l.id)).toContain(LABEL_TODO.id);
+  });
+
+  it('moveIssue 多列绑 label 的 issue：labels 集合正确（OR 语义）', async () => {
+    // 列绑 2 个 label：todoCol 绑 [TODO, BUG]，doingCol 绑 [DOING]
+    // issue 在 todoCol 实际 labels = [TODO, BUG, FEATURE]（FEATURE 是其它无关 label）
+    // 移去 doingCol 后：issue.labels = 原 labels - {TODO, BUG} ∪ {DOING} = [FEATURE, DOING]
+    const todoCol = makeCol('c-todo', 'To Do', [LABEL_TODO, LABEL_BUG]);
+    const doingCol = makeCol('c-doing', 'Doing', [LABEL_DOING]);
+    mocks.boardColumnsList.mockResolvedValueOnce([todoCol, doingCol]);
+    mocks.labelsList.mockResolvedValueOnce({ items: [LABEL_TODO, LABEL_BUG, LABEL_DOING, LABEL_FEATURE], hasMore: false });
+    const issueWithMultiLabels = makeIssue(1, 'A', [LABEL_TODO, LABEL_BUG, LABEL_FEATURE]);
+    mocks.issuesList.mockResolvedValueOnce({ items: [issueWithMultiLabels], hasMore: false });
+    setActivePinia(createPinia());
+    const board = useBoardStore();
+    await board.loadBoard(PROJECT_ID);
+    mocks.issuesMoveColumn.mockResolvedValueOnce(undefined);
+
+    await board.moveIssue({
+      projectId: PROJECT_ID,
+      issueIndex: 1,
+      fromColumnId: 'c-todo',
+      toColumnId: 'c-doing',
+    });
+
+    const moved = board.issuesOf('c-doing')[0]!;
+    const labelIds = moved.labels.map((l) => l.id).sort();
+    // 应去掉 TODO + BUG（fromCol 绑的）
+    expect(labelIds).not.toContain(LABEL_TODO.id);
+    expect(labelIds).not.toContain(LABEL_BUG.id);
+    // 应加 DOING（toCol 绑的）
+    expect(labelIds).toContain(LABEL_DOING.id);
+    // 应保留 FEATURE（与列绑定无关）
+    expect(labelIds).toContain(LABEL_FEATURE.id);
   });
 });

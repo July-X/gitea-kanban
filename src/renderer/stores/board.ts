@@ -437,54 +437,83 @@ async function autoInitColumns(
  *
  *边界：**不**做位置拖拽（toPosition 没传），issue永远按 index排到目标列末尾
  */
- async function moveIssue(args: {
- projectId: string;
- issueIndex: number;
- fromColumnId: string;
- toColumnId: string;
- }): Promise<void> {
- if (args.fromColumnId === args.toColumnId) return; //no-op
- const fromList = (issuesByColumn.value[args.fromColumnId] ?? []).filter(
- (i) => i.index !== args.issueIndex,
- );
- const issue = (issuesByColumn.value[args.fromColumnId] ?? []).find(
- (i) => i.index === args.issueIndex,
- );
- if (!issue) {
- throw {
- code: 'not_found',
- messageText: '找不到内容：议题已不存在',
- hint: '请刷新看板',
- recoverable: false,
- } satisfies UserFacingError;
- }
- const toList = [...(issuesByColumn.value[args.toColumnId] ?? []), issue];
- //乐观更新
- issuesByColumn.value = {
- ...issuesByColumn.value,
- [args.fromColumnId]: fromList,
- [args.toColumnId]: toList,
- };
+  async function moveIssue(args: {
+  projectId: string;
+  issueIndex: number;
+  fromColumnId: string;
+  toColumnId: string;
+  }): Promise<void> {
+  if (args.fromColumnId === args.toColumnId) return; //no-op
+  const fromList = (issuesByColumn.value[args.fromColumnId] ?? []).filter(
+  (i) => i.index !== args.issueIndex,
+  );
+  const issue = (issuesByColumn.value[args.fromColumnId] ?? []).find(
+  (i) => i.index === args.issueIndex,
+  );
+  if (!issue) {
+  throw {
+  code: 'not_found',
+  messageText: '找不到内容：议题已不存在',
+  hint: '请刷新看板',
+  recoverable: false,
+  } satisfies UserFacingError;
+  }
+  // v1.4 修复（commit 84b83fa 后定位的真实 bug）：
+  //  乐观更新**同步刷** issue.labels 字段 —— 移除 fromColumn 绑的 + 加上 toColumn 绑的。
+  //  原代码只挪 issue 引用位置，issue.labels 保留旧值，导致：
+  //    1) 卡片上的 label chip 仍显示 fromColumn 绑的 label（视觉错位）
+  //    2) 用户感受"释放不更新"（位置改了但数据没变）
+  //  修后立即一致：issue.labels = 原 labels - fromColumn 绑的 ∪ toColumn 绑的
+  //  与 main 端 moveIssueColumn (src/main/board/move-card.ts) 行为对齐：
+  //    addLabel(toLabels) 跳过已带的 + removeLabel(fromLabels) 全部
+  //  失败回滚用原 issue 对象（labels 未变）保证回滚干净
+  const fromCol = columns.value.find((c) => c.id === args.fromColumnId);
+  const toCol = columns.value.find((c) => c.id === args.toColumnId);
+  const fromColLabelIds = new Set((fromCol?.labels ?? []).map((l) => l.id));
+  const toColLabels = toCol?.labels ?? [];
+  // 移除 fromColumn 绑的 + 追加 toColumn 绑的（去重）
+  const seenLabelIds = new Set<number>();
+  const optimisticLabels: IssueLabelDto[] = [
+  ...issue.labels.filter((l) => {
+  if (fromColLabelIds.has(l.id)) return false;
+  if (seenLabelIds.has(l.id)) return false;
+  seenLabelIds.add(l.id);
+  return true;
+  }),
+  ...toColLabels.filter((l) => {
+  if (seenLabelIds.has(l.id)) return false;
+  seenLabelIds.add(l.id);
+  return true;
+  }),
+  ];
+  const optimisticIssue: IssueCardDto = { ...issue, labels: optimisticLabels };
+  const toList = [...(issuesByColumn.value[args.toColumnId] ?? []), optimisticIssue];
+  //乐观更新
+  issuesByColumn.value = {
+  ...issuesByColumn.value,
+  [args.fromColumnId]: fromList,
+  [args.toColumnId]: toList,
+  };
   try {
   await issuesMoveColumn(args);
   // M6 undo-by-project：main 端会自己 pushUndo（src/main/board/move-card.ts:184）
   // 渲染端只刷新按钮状态
   await undo.loadUndoStatus(args.projectId);
- } catch (e) {
- //失败回滚
- issuesByColumn.value = {
- ...issuesByColumn.value,
- [args.fromColumnId]: [...(issuesByColumn.value[args.fromColumnId] ?? []), issue].sort(
- (a, b) => a.index - b.index,
- ),
- [args.toColumnId]: (issuesByColumn.value[args.toColumnId] ?? []).filter(
- (i) => i.index !== args.issueIndex,
- ),
- };
- error.value = normalizeError(e);
- throw e;
- }
- }
+  } catch (e) {
+  //失败回滚（用原 issue，labels 未变）
+  issuesByColumn.value = {
+  ...issuesByColumn.value,
+  [args.fromColumnId]: [...(issuesByColumn.value[args.fromColumnId] ?? []), issue].sort(
+  (a, b) => a.index - b.index,
+  ),
+  [args.toColumnId]: (issuesByColumn.value[args.toColumnId] ?? []).filter(
+  (i) => i.index !== args.issueIndex,
+  ),
+  };
+  error.value = normalizeError(e);
+  throw e;
+  }
+  }
 
  /**
  * 删除 issue（**v1走 issues.update({ state: 'closed' }）** —— gitea1.x 没 DELETE issue API）
