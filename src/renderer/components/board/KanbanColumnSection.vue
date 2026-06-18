@@ -74,6 +74,8 @@ const emit = defineEmits<{
   (e: 'request-delete-issue', payload: { issue: IssueCardDto; columnId: string }): void;
   // v1.4 增量：列内 toggle "显示已关闭"
   (e: 'toggle-show-closed', columnId: string): void;
+  // v1.4 新增：点击 card 打开详情弹窗
+  (e: 'open-issue-detail', issue: IssueCardDto): void;
 }>();
 
 /**
@@ -173,6 +175,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
         tabindex="0"
         role="article"
         :aria-label="`议题 #${issue.index}：${issue.title}`"
+        @click="emit('open-issue-detail', issue)"
       >
         <div class="card__head">
           <span class="card__index mono">#{{ issue.index }}</span>
@@ -199,7 +202,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
             :title="`换列：${issue.title}`"
             :aria-label="`换列 ${issue.title}`"
             :disabled="props.loading"
-            @click="emit('open-move-menu', { issue, fromColumnId: props.column.id })"
+            @click.stop="emit('open-move-menu', { issue, fromColumnId: props.column.id })"
           >
             <ChevronDown :size="14" :stroke-width="2" />
           </button>
@@ -209,7 +212,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
             :title="`关闭议题 #${issue.index}`"
             :aria-label="`关闭议题 #${issue.index}`"
             :disabled="props.loading"
-            @click="emit('request-delete-issue', { issue, columnId: props.column.id })"
+            @click.stop="emit('request-delete-issue', { issue, columnId: props.column.id })"
           >
             <span :style="{ display: 'inline-flex' }" aria-hidden="true">×</span>
           </button>

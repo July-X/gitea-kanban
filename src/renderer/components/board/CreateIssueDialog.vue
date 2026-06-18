@@ -72,6 +72,16 @@ watch(
 
 const canSubmit = computed(() => title.value.trim().length > 0);
 
+/** 是否有未保存改动（标题/正文/标签/指派人/里程碑 任一非空） */
+const hasUnsavedChanges = computed(
+  () =>
+    title.value.trim().length > 0 ||
+    body.value.trim().length > 0 ||
+    selectedLabelIds.value.size > 0 ||
+    selectedAssignees.value.size > 0 ||
+    selectedMilestoneId.value !== null,
+);
+
 function toggleLabel(id: number): void {
   const next = new Set(selectedLabelIds.value);
   if (next.has(id)) next.delete(id);
@@ -86,7 +96,15 @@ function toggleAssignee(username: string): void {
   selectedAssignees.value = next;
 }
 
-function close(): void {
+/**
+ * 请求关闭：必须点关闭按钮主动触发（不响应遮罩点击）。
+ * 有未保存改动时二次确认，避免误关丢失信息。
+ */
+function requestClose(): void {
+  if (hasUnsavedChanges.value) {
+    const ok = window.confirm('当前有未保存的改动，关闭将丢失信息。确定不保存并关闭吗？');
+    if (!ok) return;
+  }
   emit('update:open', false);
 }
 
@@ -108,11 +126,12 @@ function submit(): void {
 
 <template>
   <Teleport to="body">
-    <div v-if="props.open" class="modal-overlay" @click.self="close">
+    <!-- v1.4：非模态 —— 点遮罩不关闭，必须点关闭按钮主动管理；有改动时二次确认 -->
+    <div v-if="props.open" class="modal-overlay">
       <div class="modal create-issue-modal" role="dialog" aria-modal="true" aria-label="新建议题">
         <header class="modal__header">
           <h2 class="modal__title">新建议题</h2>
-          <button type="button" class="modal__close" aria-label="关闭" @click="close">
+          <button type="button" class="modal__close" aria-label="关闭" @click="requestClose">
             <X :size="16" :stroke-width="2" />
           </button>
         </header>
@@ -214,7 +233,7 @@ function submit(): void {
           </div>
         </div>
         <footer class="modal__footer">
-          <button type="button" class="modal__btn modal__btn--ghost" @click="close">取消</button>
+          <button type="button" class="modal__btn modal__btn--ghost" @click="requestClose">取消</button>
           <button
             type="button"
             class="modal__btn modal__btn--primary"

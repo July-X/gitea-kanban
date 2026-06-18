@@ -24,9 +24,9 @@ import { showToast } from '@renderer/lib/toast';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
-import type { ColumnDto, IssueCardDto, RepoDto, CollaboratorDto, MilestoneDto } from '../../main/ipc/schema.js';
+import type { ColumnDto, IssueCardDto, RepoDto, CollaboratorDto, MilestoneDto, IssueCommentDto } from '../../main/ipc/schema.js';
 import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
-import { membersList, milestonesList } from '@renderer/lib/ipc-client';
+import { membersList, milestonesList, issuesCommentList, issuesCommentCreate } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 // 全局样式（Teleport 后 .modal-overlay / .move-menu-overlay / .column__settings-btn 等）
 import '@renderer/components/board/board-modals.css';
@@ -40,6 +40,7 @@ import MoveColumnPicker from '@renderer/components/board/MoveColumnPicker.vue';
 import ConfirmFinishDialog from '@renderer/components/board/ConfirmFinishDialog.vue';
 import UnassignedSection from '@renderer/components/board/UnassignedSection.vue';
 import CreateIssueDialog from '@renderer/components/board/CreateIssueDialog.vue';
+import IssueDetailDialog from '@renderer/components/board/IssueDetailDialog.vue';
 // composables
 import { useColumnManager } from '@renderer/composables/useColumnManager';
 import { useBoardCardActions } from '@renderer/composables/useBoardCardActions';
@@ -229,6 +230,54 @@ watch(
   },
   { immediate: true },
 );
+
+// v1.4 议题详情弹窗（点击 card 触发）
+const issueDetailOpen = ref(false);
+const issueDetailIssue = ref<IssueCardDto | null>(null);
+const issueDetailComments = ref<IssueCommentDto[]>([]);
+const issueDetailCommentsLoading = ref(false);
+const issueDetailSubmitting = ref(false);
+
+/** 打开议题详情：加载评论列表 */
+async function openIssueDetail(issue: IssueCardDto): Promise<void> {
+  issueDetailIssue.value = issue;
+  issueDetailOpen.value = true;
+  issueDetailComments.value = [];
+  issueDetailCommentsLoading.value = true;
+  try {
+    const pid = activeProjectId.value;
+    if (pid) {
+      issueDetailComments.value = await issuesCommentList({
+        projectId: pid,
+        issueIndex: issue.index,
+      });
+    }
+  } catch {
+    /* 评论加载失败静默，列表为空 */
+  } finally {
+    issueDetailCommentsLoading.value = false;
+  }
+}
+
+/** 发评论 */
+async function onSubmitComment(payload: { issueIndex: number; body: string }): Promise<void> {
+  const pid = activeProjectId.value;
+  if (!pid) return;
+  issueDetailSubmitting.value = true;
+  try {
+    const created = await issuesCommentCreate({
+      projectId: pid,
+      issueIndex: payload.issueIndex,
+      body: payload.body,
+    });
+    issueDetailComments.value = [...issueDetailComments.value, created];
+    showToast({ type: 'success', message: '评论已发送', duration: 2000 });
+  } catch {
+    showToast({ type: 'error', message: '评论发送失败', duration: 3000 });
+  } finally {
+    issueDetailSubmitting.value = false;
+  }
+}
 // v1.4 调整（2026-06-18）：列内新建框已移除，createIssueInColumn 不再使用；
 // 保留 useBoardActions 取 undo/redo，newIssueDrafts 传空对象（createIssueInColumn 不再被调）
 const { undoLastMove, redoLastMove } = useBoardActions({
@@ -445,6 +494,7 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
         @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
         @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
         @toggle-show-closed="(columnId) => toggleColumnShowClosed(columnId)"
+        @open-issue-detail="openIssueDetail"
       />
       <!--
         v1.4 布局修订（2026-06-18）：ClosedSection 排在普通列之后、UnassignedSection 之前。
@@ -626,6 +676,16 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       :loading="createIssueLoading"
       @update:open="(v) => (createIssueDialogOpen = v)"
       @create="onCreateIssue"
+    />
+    <!-- v1.4 议题详情弹窗（点击 card 触发） -->
+    <IssueDetailDialog
+      :open="issueDetailOpen"
+      :issue="issueDetailIssue"
+      :comments="issueDetailComments"
+      :comments-loading="issueDetailCommentsLoading"
+      :submitting="issueDetailSubmitting"
+      @update:open="(v) => (issueDetailOpen = v)"
+      @submit-comment="onSubmitComment"
     />
   </div>
 </template>
