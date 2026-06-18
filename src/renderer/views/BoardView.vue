@@ -93,14 +93,6 @@ async function preloadCreateIssueData(pid: string): Promise<void> {
   }
 }
 
-// activeProjectId 变化（loadBoard 完成）时后台预加载
-watch(
-  activeProjectId,
-  (pid) => {
-    if (pid) void preloadCreateIssueData(pid);
-  },
-  { immediate: true },
-);
 // v1.4（P0-1 autoInit 透明化）：把 useColumnManager() 提到顶部，让 openColumnMenu
 // 既能注入 bootstrap 回调、又能给下面解构用（避免重复声明）
 const columnManager = useColumnManager();
@@ -228,6 +220,15 @@ const { activeProjectId } = useBoardBootstrap({
     openColumnMenu(col);
   },
 });
+// v1.4 优化：activeProjectId 变化（loadBoard 完成）时后台预加载 members/milestones
+// （放在 activeProjectId 定义之后，避免 ReferenceError: Cannot access before initialization）
+watch(
+  activeProjectId,
+  (pid) => {
+    if (pid) void preloadCreateIssueData(pid);
+  },
+  { immediate: true },
+);
 // v1.4 调整（2026-06-18）：列内新建框已移除，createIssueInColumn 不再使用；
 // 保留 useBoardActions 取 undo/redo，newIssueDrafts 传空对象（createIssueInColumn 不再被调）
 const { undoLastMove, redoLastMove } = useBoardActions({
