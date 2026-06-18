@@ -18,7 +18,7 @@
  * 4. 保留 a11y / hover / focus / disabled 视觉反馈
  * 5. **不**改业务逻辑（store actions / IPC / main 端）；只搬代码不改语义
  */
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { Plus } from 'lucide-vue-next';
 import { showToast } from '@renderer/lib/toast';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -64,6 +64,43 @@ const lockedColumn = computed<ColumnDto | null>(() => {
   if (cols.length === 0) return null;
   return cols.find((c) => c.title.includes('新建')) ?? cols[0];
 });
+
+/**
+ * v1.4 优化（2026-06-18）：members/milestones 会话级缓存。
+ * 旧版每次点"新建议题"都 Promise.all 拉 Gitea API（~1.5s），弹窗下拉禁用等待。
+ * 改为：activeProjectId 变化时后台预加载（用户看板加载时并行，无感知），
+ * 弹窗打开时缓存已就绪则直接用（瞬时）；缓存未命中才请求（fallback）。
+ * 缓存 key = projectId，切仓库时重置。
+ */
+const createIssueCache = ref<Record<string, { members: CollaboratorDto[]; milestones: MilestoneDto[] }>>({});
+let createIssuePreloading = false;
+
+/** 后台预加载 members/milestones（不阻塞 UI，失败静默——弹窗打开时 fallback 重试） */
+async function preloadCreateIssueData(pid: string): Promise<void> {
+  if (createIssuePreloading || createIssueCache.value[pid]) return;
+  createIssuePreloading = true;
+  try {
+    const [memResp, mileResp] = await Promise.all([
+      membersList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
+      milestonesList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
+    ]);
+    createIssueCache.value = {
+      ...createIssueCache.value,
+      [pid]: { members: memResp.items, milestones: mileResp.items },
+    };
+  } finally {
+    createIssuePreloading = false;
+  }
+}
+
+// activeProjectId 变化（loadBoard 完成）时后台预加载
+watch(
+  activeProjectId,
+  (pid) => {
+    if (pid) void preloadCreateIssueData(pid);
+  },
+  { immediate: true },
+);
 // v1.4（P0-1 autoInit 透明化）：把 useColumnManager() 提到顶部，让 openColumnMenu
 // 既能注入 bootstrap 回调、又能给下面解构用（避免重复声明）
 const columnManager = useColumnManager();
@@ -123,12 +160,21 @@ async function onConfirmResetView(): Promise<void> {
 
 /**
  * v1.4 调整（2026-06-18）：新建议题弹窗。
- * 打开弹窗时并行加载协作者 + 里程碑列表（弹窗字段数据源）。
+ * 优先用预加载缓存（瞬时）；缓存未命中才请求（fallback ~1.5s）。
  */
 async function openCreateIssueDialog(): Promise<void> {
   const pid = activeProjectId.value;
   if (!pid) return;
   createIssueDialogOpen.value = true;
+  // 优先用缓存（预加载大概率已就绪 → 瞬时显示）
+  const cached = createIssueCache.value[pid];
+  if (cached) {
+    createIssueMembers.value = cached.members;
+    createIssueMilestones.value = cached.milestones;
+    createIssueLoading.value = false;
+    return;
+  }
+  // 缓存未命中：请求 + 缓存
   createIssueLoading.value = true;
   createIssueMembers.value = [];
   createIssueMilestones.value = [];
@@ -139,6 +185,10 @@ async function openCreateIssueDialog(): Promise<void> {
     ]);
     createIssueMembers.value = memResp.items;
     createIssueMilestones.value = mileResp.items;
+    createIssueCache.value = {
+      ...createIssueCache.value,
+      [pid]: { members: memResp.items, milestones: mileResp.items },
+    };
   } finally {
     createIssueLoading.value = false;
   }
