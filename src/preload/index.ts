@@ -148,6 +148,12 @@ const api = {
   list: invoke(IpcChannel.MEMBERS_LIST),
   },
 
+  //===== milestones namespace (v1.4 新增：新建议题弹窗选里程碑用)=====
+  //返 { items: MilestoneDto[], hasMore }，items 含仓库全部里程碑（state=all）
+  milestones: {
+  list: invoke(IpcChannel.MILESTONES_LIST),
+  },
+
   //===== user namespace (M5 补齐)=====
   //本机用户偏好（prefs）+ undo/redo（M6 真栈版，按 projectId 弹栈）
   //详见 02-architecture.md §5.3.9 + src/main/ipc/user.ts + src/main/board/undo.ts

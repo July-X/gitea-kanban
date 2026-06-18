@@ -21,7 +21,7 @@
  *   - props.loading            : loading 标志
  *   - emit('undo') / emit('redo')
  */
-import { ExternalLink, RefreshCw, RotateCcw, RotateCw } from 'lucide-vue-next';
+import { ExternalLink, Plus, RefreshCw, RotateCcw, RotateCw } from 'lucide-vue-next';
 
 interface Props {
   canUndo: boolean;
@@ -40,6 +40,8 @@ const emit = defineEmits<{
   (e: 'redo'): void;
   // v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
   (e: 'reset-view'): void;
+  // v1.4 调整（2026-06-18）：Header 左侧新建议题按钮 → 弹 Gitea 风格创建弹窗
+  (e: 'create-issue'): void;
 }>();
 
 /** 打开 Gitea 仓库页面（window.open 被 main 端 setWindowOpenHandler 拦截 → shell.openExternal 走系统浏览器） */
@@ -51,6 +53,19 @@ function openGiteaSource(): void {
 
 <template>
   <header class="board__topbar">
+    <!-- v1.4 调整（2026-06-18）：左侧新建议题按钮（Gitea 风格弹窗入口） -->
+    <div class="board__topbar-left">
+      <button
+        type="button"
+        class="board__create-btn"
+        :disabled="props.loading"
+        title="新建议题"
+        @click="emit('create-issue')"
+      >
+        <Plus :size="14" :stroke-width="2" />
+        <span>新建议题</span>
+      </button>
+    </div>
     <div class="board__topbar-right">
       <!--
         v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
@@ -111,13 +126,18 @@ function openGiteaSource(): void {
 .board__topbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: var(--space-3) var(--space-4);
   background: var(--color-bg-elevated);
   border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
   gap: var(--space-3);
   position: relative;
+}
+.board__topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 .board__topbar-right {
   display: flex;
@@ -126,6 +146,24 @@ function openGiteaSource(): void {
   font-size: var(--font-sm);
   color: var(--color-text-muted);
 }
+/* v1.4 调整：左侧新建议题按钮 —— 主色填充风格（最显眼的创建动作） */
+.board__create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter var(--t-fast) var(--ease);
+}
+.board__create-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.board__create-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .board__reset-btn,
 .board__undo-btn,
 .board__redo-btn {

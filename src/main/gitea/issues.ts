@@ -124,10 +124,12 @@ export async function getGiteaIssue(args: {
 }
 
 /**
- * 创建 issue（gitea返回新 issue）
+ * 创建 issue（gitea 返回新 issue）
  *
- * body参数对应 gitea CreateIssueOption：{ title, body?, labels?: number[] }
- * gitea-js要求 body字段是 CreateIssueOption类型（不传就 undefined）
+ * body 参数对应 gitea CreateIssueOption：{ title, body?, labels?, milestone?, assignees? }
+ * gitea-js 要求 body 字段是 CreateIssueOption 类型（不传就 undefined）
+ *
+ * v1.4 扩展：支持 milestoneId（→ gitea milestone 字段）+ assignees（gitea username 列表）
  */
 export async function createGiteaIssue(args: {
   giteaUrl: string;
@@ -137,6 +139,8 @@ export async function createGiteaIssue(args: {
   title: string;
   body?: string;
   labelIds?: number[];
+  milestoneId?: number;
+  assignees?: string[];
 }): Promise<IssueCardDto> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
 
@@ -144,6 +148,9 @@ export async function createGiteaIssue(args: {
     title: args.title,
     ...(args.body !== undefined ? { body: args.body } : {}),
     ...(args.labelIds && args.labelIds.length > 0 ? { labels: args.labelIds } : {}),
+    // v1.4 扩展：里程碑（gitea milestone 字段 = milestone id）+ 指派人（gitea username 列表）
+    ...(args.milestoneId !== undefined ? { milestone: args.milestoneId } : {}),
+    ...(args.assignees && args.assignees.length > 0 ? { assignees: args.assignees } : {}),
   });
   const raw = unwrapGitea(res, `创建 issue失败`);
   return toIssueDto(raw);

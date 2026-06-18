@@ -24,8 +24,9 @@ import { showToast } from '@renderer/lib/toast';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
-import type { ColumnDto, IssueCardDto, RepoDto } from '../../main/ipc/schema.js';
+import type { ColumnDto, IssueCardDto, RepoDto, CollaboratorDto, MilestoneDto } from '../../main/ipc/schema.js';
 import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
+import { membersList, milestonesList } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 // 全局样式（Teleport 后 .modal-overlay / .move-menu-overlay / .column__settings-btn 等）
 import '@renderer/components/board/board-modals.css';
@@ -38,6 +39,7 @@ import LabelPicker from '@renderer/components/board/LabelPicker.vue';
 import MoveColumnPicker from '@renderer/components/board/MoveColumnPicker.vue';
 import ConfirmFinishDialog from '@renderer/components/board/ConfirmFinishDialog.vue';
 import UnassignedSection from '@renderer/components/board/UnassignedSection.vue';
+import CreateIssueDialog from '@renderer/components/board/CreateIssueDialog.vue';
 // composables
 import { useColumnManager } from '@renderer/composables/useColumnManager';
 import { useBoardCardActions } from '@renderer/composables/useBoardCardActions';
@@ -51,7 +53,17 @@ const repo = useRepoStore();
 const board = useBoardStore();
 const auth = useAuthStore();
 
-const newIssueDrafts = ref<Record<string, string>>({});
+// v1.4 调整（2026-06-18）：列内 inline 新建框已移除，新建议题改走 Header 弹窗
+const createIssueDialogOpen = ref(false);
+const createIssueMembers = ref<CollaboratorDto[]>([]);
+const createIssueMilestones = ref<MilestoneDto[]>([]);
+const createIssueLoading = ref(false);
+/** 锁定的"新建"列（新建议题默认进此列）。找不到时退回第一列。 */
+const lockedColumn = computed<ColumnDto | null>(() => {
+  const cols = board.columns;
+  if (cols.length === 0) return null;
+  return cols.find((c) => c.title.includes('新建')) ?? cols[0];
+});
 // v1.4（P0-1 autoInit 透明化）：把 useColumnManager() 提到顶部，让 openColumnMenu
 // 既能注入 bootstrap 回调、又能给下面解构用（避免重复声明）
 const columnManager = useColumnManager();
@@ -108,14 +120,68 @@ async function onConfirmResetView(): Promise<void> {
     });
   }
 }
+
+/**
+ * v1.4 调整（2026-06-18）：新建议题弹窗。
+ * 打开弹窗时并行加载协作者 + 里程碑列表（弹窗字段数据源）。
+ */
+async function openCreateIssueDialog(): Promise<void> {
+  const pid = activeProjectId.value;
+  if (!pid) return;
+  createIssueDialogOpen.value = true;
+  createIssueLoading.value = true;
+  createIssueMembers.value = [];
+  createIssueMilestones.value = [];
+  try {
+    const [memResp, mileResp] = await Promise.all([
+      membersList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
+      milestonesList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
+    ]);
+    createIssueMembers.value = memResp.items;
+    createIssueMilestones.value = mileResp.items;
+  } finally {
+    createIssueLoading.value = false;
+  }
+}
+
+/** 弹窗确认创建 → 调 board.createIssue（列 label 自动合并） */
+async function onCreateIssue(payload: {
+  title: string;
+  body?: string;
+  labelIds?: number[];
+  assignees?: string[];
+  milestoneId?: number;
+}): Promise<void> {
+  const pid = activeProjectId.value;
+  const col = lockedColumn.value;
+  if (!pid || !col) return;
+  try {
+    await board.createIssue({
+      projectId: pid,
+      columnId: col.id,
+      title: payload.title,
+      ...(payload.body ? { body: payload.body } : {}),
+      ...(payload.labelIds && payload.labelIds.length > 0 ? { labelIds: payload.labelIds } : {}),
+      ...(payload.assignees && payload.assignees.length > 0 ? { assignees: payload.assignees } : {}),
+      ...(payload.milestoneId !== undefined ? { milestoneId: payload.milestoneId } : {}),
+    });
+    createIssueDialogOpen.value = false;
+    showToast({ type: 'success', message: '已创建议题', duration: 2500 });
+  } catch {
+    /* board.error 已设置，状态栏会显示 */
+  }
+}
+
 const { openColumnMenu } = columnManager;
 const { activeProjectId } = useBoardBootstrap({
   onAutoInitOpenColumnMenu: (col) => {
     openColumnMenu(col);
   },
 });
-const { createIssueInColumn, undoLastMove, redoLastMove } = useBoardActions({
-  newIssueDrafts: newIssueDrafts.value,
+// v1.4 调整（2026-06-18）：列内新建框已移除，createIssueInColumn 不再使用；
+// 保留 useBoardActions 取 undo/redo，newIssueDrafts 传空对象（createIssueInColumn 不再被调）
+const { undoLastMove, redoLastMove } = useBoardActions({
+  newIssueDrafts: {},
   activeProjectId,
 });
 const activeRepo = computed<RepoDto | null>(() => {
@@ -278,6 +344,7 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       @undo="undoLastMove"
       @redo="redoLastMove"
       @reset-view="onResetViewRequest"
+      @create-issue="openCreateIssueDialog"
     />
 
     <div v-if="!activeRepo" class="board__placeholder">
@@ -316,7 +383,6 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
         :closed-issues="closedIssuesOf(col.column.id)"
         :show-closed-in-column="board.showClosed && (showClosedByColumn[col.column.id] ?? false)"
         :show-closed-column="showClosedByColumn[col.column.id] ?? false"
-        :new-issue-draft="newIssueDrafts[col.column.id] ?? ''"
         :loading="board.loading"
         :is-over-limit="isColumnOverLimit(col.column)"
         :over-limit-tooltip="wipOverLimitTooltip(col.column)"
@@ -325,8 +391,6 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
         @drag-start="(evt) => onColumnDragStart(col.column, evt)"
         @drag-move="(evt) => onColumnDragMove(col.column, evt)"
         @drag-end="(evt) => onColumnDragEnd(col.column, evt)"
-        @update:new-issue-draft="(v) => (newIssueDrafts[col.column.id] = v)"
-        @create-issue="createIssueInColumn(col.column)"
         @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
         @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
         @toggle-show-closed="(columnId) => toggleColumnShowClosed(columnId)"
@@ -500,6 +564,17 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       confirm-keyword="重建"
       @update:open="(v) => (resetDialogOpen = v)"
       @confirm="onConfirmResetView"
+    />
+    <!-- v1.4 调整（2026-06-18）：新建议题弹窗（Header 左侧按钮触发） -->
+    <CreateIssueDialog
+      :open="createIssueDialogOpen"
+      :labels="board.labelsByProject"
+      :members="createIssueMembers"
+      :milestones="createIssueMilestones"
+      :locked-column-title="lockedColumn?.title ?? '新建'"
+      :loading="createIssueLoading"
+      @update:open="(v) => (createIssueDialogOpen = v)"
+      @create="onCreateIssue"
     />
   </div>
 </template>

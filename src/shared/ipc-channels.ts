@@ -101,6 +101,9 @@ export const IpcChannel = {
   // === members namespace（a3 新增：仓库成员 = gitea repo collaborators）===
   MEMBERS_LIST: 'members.list',
 
+  // === milestones namespace（v1.4 新增：新建议题弹窗选里程碑用）===
+  MILESTONES_LIST: 'milestones.list',
+
   // === user namespace（02-architecture.md §5.3.9；M5补齐 + M6 undo-by-project）===
   USER_PREFS_GET: 'user.prefs.get',
   USER_PREFS_SET: 'user.prefs.set',

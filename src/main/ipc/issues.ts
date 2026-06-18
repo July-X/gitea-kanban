@@ -127,20 +127,23 @@ async function getIssueHandler(args: GetIssueArgs): Promise<IssueCardDto> {
 }
 
 async function createIssueHandler(args: CreateIssueArgs): Promise<IssueCardDto> {
- const start = Date.now();
- logger.info({ op: 'issues.create', args: { projectId: args.projectId, title: args.title } }, 'ipc start');
- const proj = resolveProject(args.projectId);
- const result = await createGiteaIssue({
- giteaUrl: proj.giteaUrl,
- username: proj.username,
- owner: proj.owner,
- repo: proj.repo,
- title: args.title,
- ...(args.body !== undefined ? { body: args.body } : {}),
- ...(args.labelIds && args.labelIds.length >0 ? { labelIds: args.labelIds } : {}),
- });
- logger.info({ op: 'issues.create', latencyMs: Date.now() - start, issueIndex: result.index }, 'ipc done');
- return result;
+  const start = Date.now();
+  logger.info({ op: 'issues.create', args: { projectId: args.projectId, title: args.title } }, 'ipc start');
+  const proj = resolveProject(args.projectId);
+  const result = await createGiteaIssue({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    title: args.title,
+    ...(args.body !== undefined ? { body: args.body } : {}),
+    ...(args.labelIds && args.labelIds.length > 0 ? { labelIds: args.labelIds } : {}),
+    // v1.4 扩展：里程碑 + 指派人透传到 gitea issueCreateIssue
+    ...(args.milestoneId !== undefined ? { milestoneId: args.milestoneId } : {}),
+    ...(args.assignees && args.assignees.length > 0 ? { assignees: args.assignees } : {}),
+  });
+  logger.info({ op: 'issues.create', latencyMs: Date.now() - start, issueIndex: result.index }, 'ipc done');
+  return result;
 }
 
 async function updateIssueHandler(args: UpdateIssueArgs): Promise<IssueCardDto> {

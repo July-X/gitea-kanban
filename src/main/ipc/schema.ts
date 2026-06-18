@@ -799,13 +799,17 @@ export const GetIssueArgsSchema = z
 export type GetIssueArgs = z.infer<typeof GetIssueArgsSchema>;
 
 export const CreateIssueArgsSchema = z
- .object({
- projectId: NonEmptyStringSchema,
- title: NonEmptyStringSchema,
- body: z.string().optional(),
- labelIds: z.array(z.number().int().positive()).optional(),
- })
- .strict();
+  .object({
+    projectId: NonEmptyStringSchema,
+    title: NonEmptyStringSchema,
+    body: z.string().optional(),
+    labelIds: z.array(z.number().int().positive()).optional(),
+    /** v1.4 新增：里程碑 id（gitea issueCreateIssue 的 milestone 字段） */
+    milestoneId: z.number().int().positive().optional(),
+    /** v1.4 新增：指派人 gitea username 列表（gitea issueCreateIssue 的 assignees 字段） */
+    assignees: z.array(NonEmptyStringSchema).optional(),
+  })
+  .strict();
 export type CreateIssueArgs = z.infer<typeof CreateIssueArgsSchema>;
 
 export const UpdateIssueArgsSchema = z
@@ -923,6 +927,44 @@ export const CreateLabelArgsSchema = z
   })
   .strict();
 export type CreateLabelArgs = z.infer<typeof CreateLabelArgsSchema>;
+
+// ============================================================
+// ===== milestones namespace（v1.4 新增：新建议题弹窗选里程碑用）=====
+// ============================================================
+
+/**
+ * 里程碑 DTO —— 字段来源 gitea-js Milestone（来自 GET /repos/{owner}/{repo}/milestones）
+ * v1.4 新建议题弹窗用：下拉选里程碑，传 milestoneId 到 issues.create。
+ * gitea `issueCreateIssue` 的 `milestone` 字段 = milestone id（int64）。
+ */
+export const MilestoneDtoSchema = z
+  .object({
+    id: z.number().int().positive(),
+    title: NonEmptyStringSchema,
+    state: z.enum(['open', 'closed', 'all']).default('open'),
+    description: z.string().optional(),
+  })
+  .strict();
+export type MilestoneDto = z.infer<typeof MilestoneDtoSchema>;
+
+export const ListMilestonesArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    /** gitea state 过滤：默认 'all'（弹窗要列全部里程碑供选择） */
+    state: z.enum(['open', 'closed', 'all']).default('all'),
+    page: z.number().int().min(1).default(1),
+    limit: z.number().int().min(1).max(100).default(50),
+  })
+  .strict();
+export type ListMilestonesArgs = z.infer<typeof ListMilestonesArgsSchema>;
+
+export const ListMilestonesRespSchema = z
+  .object({
+    items: z.array(MilestoneDtoSchema),
+    hasMore: z.boolean(),
+  })
+  .strict();
+export type ListMilestonesResp = z.infer<typeof ListMilestonesRespSchema>;
 
 // ============================================================
 // ===== members namespace（a3 新增：仓库成员 = gitea repo collaborators）=====

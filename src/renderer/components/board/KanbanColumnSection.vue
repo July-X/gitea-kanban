@@ -31,7 +31,7 @@
  * 卡片 tabindex="0" + role="article" 保留（驱动 .card:focus-within 视觉反馈）。
  */
 import { computed } from 'vue';
-import { ChevronDown, ChevronUp, Plus, Tag } from 'lucide-vue-next';
+import { ChevronDown, ChevronUp, Tag } from 'lucide-vue-next';
 import { VueDraggable } from 'vue-draggable-plus';
 import type { ColumnDto, IssueCardDto } from '../../../main/ipc/schema.js';
 import ColumnHeader from '@renderer/components/board/ColumnHeader.vue';
@@ -56,7 +56,6 @@ interface Props {
   showClosedInColumn: boolean;
   /** v1.4：列内"显示已关闭" toggle（用户单独控制列级展开） */
   showClosedColumn: boolean;
-  newIssueDraft: string;
   loading: boolean;
   isOverLimit: boolean;
   overLimitTooltip: string;
@@ -71,8 +70,6 @@ const emit = defineEmits<{
   // v1.4 修复：拖拽光晕显式管 class —— onStart/onMove 透传给父
   (e: 'drag-start', evt: unknown): void;
   (e: 'drag-move', evt: unknown): void;
-  (e: 'update:newIssueDraft', value: string): void;
-  (e: 'create-issue'): void;
   (e: 'open-move-menu', payload: { issue: IssueCardDto; fromColumnId: string }): void;
   (e: 'request-delete-issue', payload: { issue: IssueCardDto; columnId: string }): void;
   // v1.4 增量：列内 toggle "显示已关闭"
@@ -238,27 +235,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
       <ChevronDown v-if="!props.showClosedInColumn" :size="14" :stroke-width="2" aria-hidden="true" />
       <ChevronUp v-else :size="14" :stroke-width="2" aria-hidden="true" />
     </button>
-    <div class="column__new">
-      <input
-        :value="props.newIssueDraft"
-        type="text"
-        class="column__new-input"
-        :placeholder="`在「${props.column.title}」新建议题`"
-        :disabled="props.loading"
-        @input="(e) => emit('update:newIssueDraft', (e.target as HTMLInputElement).value)"
-        @keydown.enter="emit('create-issue')"
-      />
-      <button
-        type="button"
-        class="column__new-btn"
-        :disabled="!props.newIssueDraft.trim() || props.loading"
-        :title="'新建议题'"
-        :aria-label="'新建议题'"
-        @click="emit('create-issue')"
-      >
-        <Plus :size="16" :stroke-width="2" />
-      </button>
-    </div>
+    <!-- v1.4 调整（2026-06-18）：列内 inline 新建框已移除，新建议题改走 Header 弹窗 -->
   </section>
 </template>
 
@@ -310,37 +287,6 @@ const displayIssues = computed<IssueCardDto[]>(() => {
   border-style: solid;
   border-color: var(--color-text-muted);
   color: var(--color-text);
-}
-
-.column__new {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3) var(--space-3);
-  flex-shrink: 0;
-  border-top: 1px solid var(--color-divider);
-}
-.column__new-input { flex: 1; background: var(--color-bg); font-size: var(--font-sm); }
-.column__new-btn {
-  padding: 6px;
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow:
-    0 0 0 1px var(--color-primary-active),
-    0 0 8px var(--color-primary-glow);
-  transition: background var(--t-fast) var(--ease);
-}
-.column__new-btn:hover:not(:disabled) { background: var(--color-primary-hover); }
-.column__new-btn:disabled {
-  background: var(--color-bg-hover);
-  color: var(--color-text-muted);
-  box-shadow: none;
-  cursor: not-allowed;
 }
 
 .column__empty {

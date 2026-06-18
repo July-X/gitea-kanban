@@ -395,36 +395,48 @@ async function autoInitColumns(
  }
  }
 
- /**
- * 新建 issue（**看板列绑 label 时**自动带上 column绑的 label）
- */
- async function createIssue(args: {
- projectId: string;
- columnId: string;
- title: string;
- body?: string;
- }): Promise<IssueCardDto> {
- error.value = null;
- try {
- const labelIds = labelIdsOf(args.columnId);
-  const issue = await issuesCreate({
-  projectId: args.projectId,
-  title: args.title,
-  ...(args.body !== undefined ? { body: args.body } : {}),
-  ...(labelIds.length >0 ? { labelIds } : {}),
-  });
- //追加到本地（不动其他列）
- const existing = issuesByColumn.value[args.columnId] ?? [];
- issuesByColumn.value = {
- ...issuesByColumn.value,
- [args.columnId]: [...existing, issue],
- };
- return issue;
- } catch (e) {
- error.value = normalizeError(e);
- throw e;
- }
- }
+  /**
+   * 新建 issue（**看板列绑 label 时**自动带上 column 绑的 label）
+   *
+   * v1.4 扩展（2026-06-18 · 新建议题弹窗）：
+   * - 支持用户手选额外标签 labelIds（与列绑 label 合并去重后传 Gitea）
+   * - 支持 milestoneId（里程碑 id）+ assignees（gitea username 列表）
+   */
+  async function createIssue(args: {
+    projectId: string;
+    columnId: string;
+    title: string;
+    body?: string;
+    /** 用户手选的额外标签（与列绑 label 合并去重） */
+    labelIds?: number[];
+    milestoneId?: number;
+    assignees?: string[];
+  }): Promise<IssueCardDto> {
+    error.value = null;
+    try {
+      // 标签合并：列绑 label ∪ 用户手选 label，去重
+      const colLabelIds = labelIdsOf(args.columnId);
+      const mergedLabelIds = Array.from(new Set([...colLabelIds, ...(args.labelIds ?? [])]));
+      const issue = await issuesCreate({
+        projectId: args.projectId,
+        title: args.title,
+        ...(args.body !== undefined ? { body: args.body } : {}),
+        ...(mergedLabelIds.length > 0 ? { labelIds: mergedLabelIds } : {}),
+        ...(args.milestoneId !== undefined ? { milestoneId: args.milestoneId } : {}),
+        ...(args.assignees && args.assignees.length > 0 ? { assignees: args.assignees } : {}),
+      });
+      // 追加到本地（不动其他列）
+      const existing = issuesByColumn.value[args.columnId] ?? [];
+      issuesByColumn.value = {
+        ...issuesByColumn.value,
+        [args.columnId]: [...existing, issue],
+      };
+      return issue;
+    } catch (e) {
+      error.value = normalizeError(e);
+      throw e;
+    }
+  }
 
  /**
  *换列（**按钮式**调 issues.moveColumn —— 后端原子换绑 label）

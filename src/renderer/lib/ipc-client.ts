@@ -30,6 +30,7 @@ import type {
   MergePrResult,
   ListLabelsResp,
   ListMembersResp,
+  ListMilestonesResp,
   ListIssuesResp,
   ColumnDto,
   CommitDto,
@@ -655,14 +656,17 @@ export function issuesGet(args: { projectId: string; issueIndex: number }): Prom
  return getIpcClient().invoke('issues', 'get', args);
 }
 
-/** 新建 issue（**看板列绑 label 时 labelIds必填**） */
+/** 新建 issue（**看板列绑 label 时 labelIds 必填**）
+ * v1.4 扩展：支持 milestoneId（里程碑 id）+ assignees（gitea username 列表） */
 export function issuesCreate(args: {
- projectId: string;
- title: string;
- body?: string;
- labelIds?: number[];
+  projectId: string;
+  title: string;
+  body?: string;
+  labelIds?: number[];
+  milestoneId?: number;
+  assignees?: string[];
 }): Promise<IssueCardDto> {
- return getIpcClient().invoke('issues', 'create', args);
+  return getIpcClient().invoke('issues', 'create', args);
 }
 
 /** 更新 issue（标题 / 正文 /状态） */
@@ -760,4 +764,15 @@ export function labelsCreate(args: {
  */
 export function membersList(args: { projectId: string }): Promise<ListMembersResp> {
   return getIpcClient().invoke('members', 'list', args);
+}
+
+/** 列仓库里程碑（v1.4 新增：新建议题弹窗选里程碑用）
+ * 返 { items: MilestoneDto[], hasMore }，items 含仓库全部里程碑（state=all） */
+export function milestonesList(args: {
+  projectId: string;
+  state?: 'open' | 'closed' | 'all';
+  page?: number;
+  limit?: number;
+}): Promise<ListMilestonesResp> {
+  return getIpcClient().invoke('milestones', 'list', args);
 }
