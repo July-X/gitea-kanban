@@ -21,6 +21,7 @@
 import { computed, reactive, ref } from 'vue';
 import { Plus } from 'lucide-vue-next';
 import { showToast } from '@renderer/lib/toast';
+import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
 import type { ColumnDto, IssueCardDto, RepoDto } from '../../main/ipc/schema.js';
@@ -48,6 +49,7 @@ import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 
 const repo = useRepoStore();
 const board = useBoardStore();
+const auth = useAuthStore();
 
 const newIssueDrafts = ref<Record<string, string>>({});
 // v1.4（P0-1 autoInit 透明化）：把 useColumnManager() 提到顶部，让 openColumnMenu
@@ -122,6 +124,18 @@ const activeRepo = computed<RepoDto | null>(() => {
     ? `${repo.currentProject.owner}/${repo.currentProject.name}`
     : null;
   return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
+});
+
+/**
+ * v1.4 调整（2026-06-18）：当前仓库的 Gitea 页面 URL，传给 BoardTopbar 的"Gitea 数据源"按钮。
+ * 拼 ${giteaUrl}/${owner}/${name}（Gitea 仓库路径 = owner/name）。
+ * 无 currentProject 或 giteaUrl 时返空串（按钮隐藏）。
+ */
+const giteaSourceUrl = computed<string>(() => {
+  const proj = repo.currentProject;
+  const url = auth.currentGiteaUrl;
+  if (!proj || !url) return '';
+  return `${url.replace(/\/+$/, '')}/${proj.owner}/${proj.name}`;
 });
 
 /**
@@ -259,7 +273,7 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       :can-redo="board.canRedo"
       :undo-size="board.undoSize"
       :redo-size="board.redoSize"
-      :repo-count="repo.repos.length"
+      :gitea-source-url="giteaSourceUrl"
       :loading="board.loading"
       @undo="undoLastMove"
       @redo="redoLastMove"

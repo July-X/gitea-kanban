@@ -6,23 +6,30 @@
  * - v1.4 之前：仓库下拉触发器 + 撤销 / 重做 / 仓库计数 / loading
  * - v1.4 之后：**仓库选择已下沉到 StatusBar 全局 picker**（状态栏唯一入口），
  *   BoardTopbar **不再**渲染 picker 触发器 / 也不接收 picker 相关 props/emits
- * - 保留：撤销 / 重做 / 仓库计数（只读展示）/ loading
+ * - 保留：撤销 / 重做 / loading
+ *
+ * v1.4 调整（2026-06-18）：
+ * - 移除左侧"看板"标题（StatusBar 已有当前 view 语义，顶栏不再重复）
+ * - 移除右侧"共 X 个仓库"计数（仓库上下文由 StatusBar picker 承担）
+ * - 撤销后方加"Gitea 数据源"按钮：window.open 走系统浏览器（main 端 setWindowOpenHandler
+ *   拦截 → shell.openExternal）
  *
  * 通信：props + emit
  *   - props.canUndo / canRedo : 撤销 / 重做按钮可点态
  *   - props.undoSize / redoSize : 撤销 / 重做栈深度（tooltip 文本）
- *   - props.loading           : loading 标志
+ *   - props.giteaSourceUrl     : 当前仓库的 Gitea 页面 URL（无值时按钮隐藏）
+ *   - props.loading            : loading 标志
  *   - emit('undo') / emit('redo')
  */
-import { Package, RefreshCw, RotateCcw, RotateCw } from 'lucide-vue-next';
+import { ExternalLink, RefreshCw, RotateCcw, RotateCw } from 'lucide-vue-next';
 
 interface Props {
   canUndo: boolean;
   canRedo: boolean;
   undoSize: number;
   redoSize: number;
-  /** 仓库全量计数（v1.4：只读展示，不渲染 picker） */
-  repoCount: number;
+  /** 当前仓库的 Gitea 页面 URL（无值时隐藏"Gitea 数据源"按钮） */
+  giteaSourceUrl: string;
   loading: boolean;
 }
 
@@ -34,11 +41,16 @@ const emit = defineEmits<{
   // v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
   (e: 'reset-view'): void;
 }>();
+
+/** 打开 Gitea 仓库页面（window.open 被 main 端 setWindowOpenHandler 拦截 → shell.openExternal 走系统浏览器） */
+function openGiteaSource(): void {
+  if (!props.giteaSourceUrl) return;
+  window.open(props.giteaSourceUrl, '_blank', 'noopener,noreferrer');
+}
 </script>
 
 <template>
   <header class="board__topbar">
-    <div class="board__topbar-title muted text-xs">看板</div>
     <div class="board__topbar-right">
       <!--
         v1.4 增量 · 拍板 2026-06-16 user 拍板「重建视图」按钮
@@ -67,6 +79,18 @@ const emit = defineEmits<{
         <RotateCcw :size="14" :stroke-width="2" />
         <span>撤销</span>
       </button>
+      <!-- v1.4 调整（2026-06-18）：撤销后方加 Gitea 数据源按钮，跳转当前仓库的 Gitea 页面 -->
+      <button
+        v-if="props.giteaSourceUrl"
+        type="button"
+        class="board__gitea-btn"
+        :disabled="props.loading"
+        title="在 Gitea 上查看当前仓库"
+        @click="openGiteaSource"
+      >
+        <ExternalLink :size="14" :stroke-width="2" />
+        <span>Gitea 数据源</span>
+      </button>
       <button
         v-if="props.canRedo"
         type="button"
@@ -78,10 +102,6 @@ const emit = defineEmits<{
         <RotateCw :size="14" :stroke-width="2" />
         <span>重做</span>
       </button>
-      <span class="board__counter">
-        <Package :size="14" :stroke-width="2" aria-hidden="true" />
-        <span>共 {{ props.repoCount }} 个仓库</span>
-      </span>
       <span v-if="props.loading" class="board__loading">加载中…</span>
     </div>
   </header>
@@ -91,18 +111,13 @@ const emit = defineEmits<{
 .board__topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: var(--space-3) var(--space-4);
   background: var(--color-bg-elevated);
   border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
   gap: var(--space-3);
   position: relative;
-}
-.board__topbar-title {
-  /* v1.4: 顶栏不再渲染仓库 picker,留个 "看板" 小标做语义锚;
-   * 真正的仓库上下文由 StatusBar picker 承担（全局唯一） */
-  font-weight: 500;
 }
 .board__topbar-right {
   display: flex;
@@ -134,6 +149,23 @@ const emit = defineEmits<{
 .board__reset-btn:disabled,
 .board__undo-btn:disabled,
 .board__redo-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.board__counter { display: inline-flex; align-items: center; gap: 4px; }
+/* v1.4 调整：Gitea 数据源按钮 —— 主色风格（区别于撤销/重做的 warning） */
+.board__gitea-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--color-primary-glow);
+  color: var(--color-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.board__gitea-btn:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+.board__gitea-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .board__loading { color: var(--color-info); font-size: var(--font-xs); }
 </style>
