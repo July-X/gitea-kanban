@@ -122,11 +122,45 @@ export function useKanbanMouseDrag(
     fallbackOnBody: true,
   };
 
-  /** v1.4 修复：拖拽光晕显式管 class（绕开原生模式 dragClass 被立即移除的陷阱） */
+  /**
+   * v1.4 修复（2026-06-18 · 光晕延迟 bug）：
+   * 旧版靠 SortableJS 的 onMove 回调更新目标列光晕，但 onMove 只在 SortableJS 内部
+   * `_onDragOver` 判定"需要 swap/insert"时才触发 —— 鼠标进入列但还没到插入判定阈值时
+   * onMove 不触发 → 光晕延迟出现（用户要悬停较久才亮）。
+   *
+   * 修法：onColumnDragStart 时注册全局 `dragover` 监听器（capture 阶段），用
+   * `elementFromPoint(clientX, clientY)` 找当前鼠标下的 section.column，即时加
+   * drop-target class。onEnd 时移除监听器。这样光晕跟鼠标实时联动，无判定延迟。
+   *
+   * 保留 onColumnDragMove（仍接 SortableJS @move）作为兜底（onMove 触发时也更新一次）。
+   */
+  let dragoverHandler: ((e: DragEvent) => void) | null = null;
+
   function onColumnDragStart(_col: ColumnDto, evt: unknown): void {
     const e = evt as { from?: HTMLElement };
     const sec = findColumnSection(e.from);
     sec?.classList.add(DRAG_SOURCE_CLASS);
+    // 注册全局 dragover 监听器（capture，避免被 SortableJS 的 preventDefault 拦截）
+    if (typeof document !== 'undefined' && !dragoverHandler) {
+      dragoverHandler = (de: DragEvent) => {
+        // 优先用 elementFromPoint（精确鼠标位置），兜底用事件 target（dragover 冒泡到的元素）
+        let el: Element | null = null;
+        if (de.clientX !== undefined && de.clientY !== undefined) {
+          el = document.elementFromPoint(de.clientX, de.clientY);
+        }
+        if (!el) el = de.target as Element | null;
+        const targetSec = findColumnSection(el as HTMLElement | null);
+        if (!targetSec) return;
+        // 清掉其他列的 drop-target，只保留当前目标
+        document
+          .querySelectorAll<HTMLElement>(`.${DROP_TARGET_CLASS}`)
+          .forEach((node) => {
+            if (node !== targetSec) node.classList.remove(DROP_TARGET_CLASS);
+          });
+        targetSec.classList.add(DROP_TARGET_CLASS);
+      };
+      document.addEventListener('dragover', dragoverHandler, true);
+    }
   }
 
   function onColumnDragMove(_col: ColumnDto, evt: unknown): void {
@@ -145,6 +179,11 @@ export function useKanbanMouseDrag(
 
   function clearGlow(): void {
     clearAllGlowClasses();
+    // 移除全局 dragover 监听器
+    if (dragoverHandler && typeof document !== 'undefined') {
+      document.removeEventListener('dragover', dragoverHandler, true);
+      dragoverHandler = null;
+    }
   }
 
   function onColumnDragEnd(_col: ColumnDto, evt: unknown): void {

@@ -83,6 +83,8 @@ const showClosedLocal = ref(false);
         v-for="issue in openIssues"
         :key="issue.id"
         class="card card--unassigned"
+        :data-issue-index="issue.index"
+        :data-column-id="'__unassigned__'"
         tabindex="0"
         role="article"
         :aria-label="`议题 #${issue.index}：${issue.title}`"
@@ -152,12 +154,50 @@ const showClosedLocal = ref(false);
 </template>
 
 <style scoped>
+/* v1.4 bug4 修复（2026-06-18）：补齐列容器 + header 样式，跟 KanbanColumnSection / ColumnHeader 对齐。
+   旧版只有 opacity:0.85，缺 background/border-radius/box-shadow + header padding/border-bottom，
+   视觉跟普通列不匹配。 */
 .column--unassigned {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   opacity: 0.85;
+}
+.column__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.column__title-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.column__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+.column__count {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
 }
 .column__unassigned-hint {
   margin: 0 0 var(--space-sm, 8px);
-  padding: 0 var(--space-xs, 6px);
+  padding: var(--space-2) var(--space-3) 0;
   font-size: 12px;
   line-height: 1.5;
 }

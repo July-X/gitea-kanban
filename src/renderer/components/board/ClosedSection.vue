@@ -129,9 +129,33 @@ function onToggle(): void {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-divider);
 }
 .column__header--closed:hover {
   background: var(--color-bg-hover);
+}
+/* title-wrap / title / count 跟 ColumnHeader 对齐（scoped 隔离需各自声明） */
+.column__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.column__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+.column__count {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
 }
 .column__closed-icon {
   color: var(--color-text-muted);
