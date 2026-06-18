@@ -25,7 +25,6 @@ import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
 import type { ColumnDto, IssueCardDto, RepoDto } from '../../main/ipc/schema.js';
 import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
-import { isFinishColumnByTitle } from '@renderer/lib/drag-helper';
 import EmptyState from '@renderer/components/EmptyState.vue';
 // 全局样式（Teleport 后 .modal-overlay / .move-menu-overlay / .column__settings-btn 等）
 import '@renderer/components/board/board-modals.css';
@@ -190,33 +189,17 @@ function toggleColumnShowClosed(columnId: string): void {
   showClosedByColumn[columnId] = !(showClosedByColumn[columnId] ?? false);
 }
 /**
- * v1.4 拍板（user 反馈 2026-06-16 21:13）：
- * columns + closedSection 合并列表 —— 把"已关闭"折叠 section 插到"已完成"列**之后**
- * - sort：保留 board.columns 现有 position 升序
- * - 找已完成列（isFinishColumnByTitle 标题匹配）：在它之后插入 closedSection
- * - 没已完成列：插在 list 末尾
- * - kind: 'column' | 'closed' —— 模板 v-for 分支渲染
+ * v1.4 布局（2026-06-18 修订 · 消除横向滚动条）：
+ * 普通列列表 —— 不再把"已关闭"section 插入列流。
+ * 旧版把 ClosedSection 当独立列插入横向 flex 流，列多时总宽超视口 → 横向滚动条。
+ * 修订后 ClosedSection 独立渲染在列区下方（换行排到"第一列下面"语义），
+ * `.board__columns` 改 flex-wrap + overflow-y:auto，列换行适配视口，仅纵向滚动。
  */
-type ColumnListItem =
-  | { kind: 'column'; key: string; column: ColumnDto }
-  | { kind: 'closed'; key: 'closed' };
+type ColumnListItem = { kind: 'column'; key: string; column: ColumnDto };
 
 const columnsWithClosed = computed<ColumnListItem[]>(() => {
-  const cols = board.columns;
-  const items: ColumnListItem[] = cols.map((c) => ({ kind: 'column', key: c.id, column: c }));
-  // 仅当 closed 存在时才插入（避免空 section）
-  if (board.closedIssues.length === 0) return items;
-  // 找"已完成"列：标题含"完成" / done / closed
-  const finishIdx = cols.findIndex((c) => isFinishColumnByTitle(c.title));
-  const closedItem: ColumnListItem = { kind: 'closed', key: 'closed' };
-  if (finishIdx >= 0) {
-    // 插在已完成列之后
-    items.splice(finishIdx + 1, 0, closedItem);
-  } else {
-    // 没已完成列 → 插在最末
-    items.push(closedItem);
-  }
-  return items;
+  // 纯列列表（ClosedSection 不再 inline，模板独立渲染）
+  return board.columns.map((c) => ({ kind: 'column', key: c.id, column: c }));
 });
 
 /** v1.4：按列 id 拿该列的 closed issue 列表（已关的） */
@@ -305,43 +288,45 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
     </div>
     <div v-else class="board__columns">
       <!--
-        v1.4 拍板（user 反馈 2026-06-16 21:13）：
-        "已关闭"section 放在"已完成"列旁边，作为独立第三列
-        - 默认折叠（占用一个窄列，仅显示"X 张已关闭 ▸"按钮 + brief 文字）
-        - 展开后看 closed 卡片列表
-        - 跟"未分类"section 同样风格（独立成列，不挤占普通列）
-        - 位置：插在"已完成"列**之后**；没有已完成列时插在最末
-        - 列内 toggle + 全局 showClosed 双层控制保留（向后兼容）
+        v1.4 布局（2026-06-18 修订 · 消除横向滚动条）：
+        普通列 flex-wrap 换行适配视口，列宽固定 280px（4 列/1280px 视口），
+        第 5 列起自动换到下一行；`.board__columns` overflow-y:auto 仅纵向滚动。
+        ClosedSection / UnassignedSection 作为独立块跟在列后，换行后排到下方
+        （语义 = "已关闭"折到第一列下面），不再占横向列宽 → 不出横向滚动条。
       -->
-      <template v-for="(item, idx) in columnsWithClosed" :key="item.key">
-        <KanbanColumnSection
-          v-if="item.kind === 'column'"
-          :column="item.column"
-          :issues="board.issuesOf(item.column.id)"
-          :closed-issues="closedIssuesOf(item.column.id)"
-          :show-closed-in-column="board.showClosed && (showClosedByColumn[item.column.id] ?? false)"
-          :show-closed-column="showClosedByColumn[item.column.id] ?? false"
-          :new-issue-draft="newIssueDrafts[item.column.id] ?? ''"
-          :loading="board.loading"
-          :is-over-limit="isColumnOverLimit(item.column)"
-          :over-limit-tooltip="wipOverLimitTooltip(item.column)"
-          :drag-options="columnDragOptions"
-          @open-settings="openColumnMenu(item.column)"
-          @drag-start="(evt) => onColumnDragStart(item.column, evt)"
-          @drag-move="(evt) => onColumnDragMove(item.column, evt)"
-          @drag-end="(evt) => onColumnDragEnd(item.column, evt)"
-          @update:new-issue-draft="(v) => (newIssueDrafts[item.column.id] = v)"
-          @create-issue="createIssueInColumn(item.column)"
-          @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
-          @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
-          @toggle-show-closed="(columnId) => toggleColumnShowClosed(columnId)"
-        />
-        <ClosedSection
-          v-else-if="item.kind === 'closed'"
-          :issues="board.closedIssues"
-          :loading="board.loading"
-        />
-      </template>
+      <KanbanColumnSection
+        v-for="col in columnsWithClosed"
+        :key="col.key"
+        :column="col.column"
+        :issues="board.issuesOf(col.column.id)"
+        :closed-issues="closedIssuesOf(col.column.id)"
+        :show-closed-in-column="board.showClosed && (showClosedByColumn[col.column.id] ?? false)"
+        :show-closed-column="showClosedByColumn[col.column.id] ?? false"
+        :new-issue-draft="newIssueDrafts[col.column.id] ?? ''"
+        :loading="board.loading"
+        :is-over-limit="isColumnOverLimit(col.column)"
+        :over-limit-tooltip="wipOverLimitTooltip(col.column)"
+        :drag-options="columnDragOptions"
+        @open-settings="openColumnMenu(col.column)"
+        @drag-start="(evt) => onColumnDragStart(col.column, evt)"
+        @drag-move="(evt) => onColumnDragMove(col.column, evt)"
+        @drag-end="(evt) => onColumnDragEnd(col.column, evt)"
+        @update:new-issue-draft="(v) => (newIssueDrafts[col.column.id] = v)"
+        @create-issue="createIssueInColumn(col.column)"
+        @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
+        @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
+        @toggle-show-closed="(columnId) => toggleColumnShowClosed(columnId)"
+      />
+      <!--
+        v1.4 布局修订（2026-06-18）：ClosedSection 排在普通列之后、UnassignedSection 之前。
+        flex-wrap 换行后，已关闭区会优先填到第二行剩余位置（贴近已完成列），
+        排不下了才折到下一行 —— 语义上"折到看板下方"，不再占横向列宽。
+      -->
+      <ClosedSection
+        v-if="board.closedIssues.length"
+        :issues="board.closedIssues"
+        :loading="board.loading"
+      />
       <UnassignedSection
         v-if="board.unassignedIssues.length"
         :issues="board.unassignedIssues"
@@ -538,10 +523,14 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
 .board__columns {
   flex: 1;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
   padding: var(--space-4);
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* v1.4 布局修订（2026-06-18）：列换行适配视口，仅纵向滚动，不出横向滚动条。
+     旧版 overflow-x:auto 横向滚动 → 列多时看板显示不全 + 横向滚动条。 */
+  overflow-x: hidden;
+  overflow-y: auto;
   align-items: flex-start;
+  align-content: flex-start;
 }
 </style>

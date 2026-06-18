@@ -102,13 +102,21 @@ function onToggle(): void {
 </template>
 
 <style scoped>
-/* v1.4 拍板：独立列形态（不挤占内容区）—— 默认只显示头部 + hint */
+/* v1.4 拍板：独立列形态（不挤占内容区）—— 默认只显示头部 + hint
+   v1.4 布局修订（2026-06-18）：从横向列流移出，作为独立块渲染在列区下方
+   （flex-wrap 换行后排到下方）。补齐列容器视觉（background/border-radius/shadow），
+   与 KanbanColumnSection 的 .column 基础样式对齐。 */
 .column--closed {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
   /* 折叠时窄一点（只显示"X 张"），展开时变宽 */
   min-width: 180px;
   max-width: 320px;
   width: auto;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 .column--closed-expanded {
   min-width: 280px;
