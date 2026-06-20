@@ -536,9 +536,31 @@ const graphPaths = computed<GraphPath[]>(() => {
   const mainColor = lsm.get(main.id)?.color ?? 'var(--color-primary)';
   const lastY = yMap.get(nodes[nodes.length - 1]!.id) ?? 0;
 
-  // v1.4 INP 优化：预建 laneId → nodes[] 分组，避免每 lane 全量 filter nodes
+  /*
+   * v1.5 错位修复（2026-06-20 · 任务 #timeline-graph-fix）：
+   *
+   * 旧算法假设"一个 lane 上的节点在 sortedNodes 时间序列里连续"，
+   * 实际上同一条 branch lane 的 commit 可能分散在时间轴上，
+   * 中间夹着 main lane 上的 commit。
+   * 旧 (b) 节点间垂直线对 `laneNodes[i]` → `laneNodes[i+1]` 无脑连直线，
+   * → 直线穿过中间 main 节点行 → 视觉错位。
+   * 旧 (a) 入口曲线 / (c) 出口曲线用 `firstY±ROW_H` 数学公式定位 mainX，
+   * 假设该 y 正好对应 main 节点，但实际可能对应 branch 节点 → 拐到错位置。
+   *
+   * 新算法：
+   *  - §2 lane 内节点间垂直线：只在 sortedNodes 索引真正相邻时画（中间没夹别的节点）
+   *  - §3 跨 lane 曲线：用后端 `edges` 数组（parent/merge 关系），从 child → parent 画 cubic bezier
+   *  - §4 unmerged branch dashed 延展到 lastY（保留原视觉）
+   *  - §5 bridges（exp 虚线穿越处的背景色小段）：保留原逻辑兜底
+   *
+   * 后端已经返回 `edges: ParentEdge[]`（source=child sha, target=parent sha），
+   * 旧版根本没用这些数据。
+   */
+  const sortedIdx = new Map<string, number>();
   const nodesByLane = new Map<string, CommitNodeDto[]>();
-  for (const n of nodes) {
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    sortedIdx.set(n.id, i);
     const arr = nodesByLane.get(n.laneId);
     if (arr) arr.push(n);
     else nodesByLane.set(n.laneId, [n]);
@@ -549,70 +571,83 @@ const graphPaths = computed<GraphPath[]>(() => {
   // === 1. main 贯穿线（贯穿整列）===
   paths.push({ d: `M ${mainX} 18 L ${mainX} ${lastY}`, color: mainColor });
 
-  // === 2. 每个 branch lane 的曲线 ===
-  const branchLanes = timeline.value.lanes.filter((l) => l.order > 0);
-  for (const lane of branchLanes) {
-    const laneNodes = nodesByLane.get(lane.id) ?? [];
-    if (laneNodes.length === 0) continue;
+  // === 2. lane 内节点间垂直线（关键修复：sortedIndex 必须真正相邻）===
+  for (const lane of timeline.value.lanes) {
+    const laneNodes = nodesByLane.get(lane.id);
+    if (!laneNodes || laneNodes.length < 2) continue;
     const x = xMap.get(lane.id) ?? 0;
     const color = lsm.get(lane.id)?.color ?? 'var(--color-text-secondary)';
-    // 第一个节点（最新）
-    const firstY = yMap.get(laneNodes[0]!.id) ?? 0;
-    // 最后一个节点（最旧）
-    const lastBranchY = yMap.get(laneNodes[laneNodes.length - 1]!.id) ?? 0;
-    // 是否合并到 main（存在 isMerge 节点 = 合并过；否则视为 unmerged）
-    const hasMerge = laneNodes.some((n) => n.isMerge);
-
-    // (a) 入口曲线：mainX at firstY+ROW_H → x at firstY
-    //     （如果第一个节点就是分支首 commit，从它下面进入 main）
-    if (firstY + ROW_H <= lastY) {
-      paths.push({
-        d: `M ${mainX} ${firstY + ROW_H} C ${mainX} ${firstY + ROW_H + 8}, ${x} ${firstY + ROW_H + 8}, ${x} ${firstY}`,
-        color,
-      });
-    }
-
-    // (b) 节点之间的垂直线
     for (let i = 0; i < laneNodes.length - 1; i++) {
-      const y1 = yMap.get(laneNodes[i]!.id) ?? 0;
-      const y2 = yMap.get(laneNodes[i + 1]!.id) ?? 0;
+      const a = laneNodes[i]!;
+      const b = laneNodes[i + 1]!;
+      const ia = sortedIdx.get(a.id);
+      const ib = sortedIdx.get(b.id);
+      if (ia === undefined || ib === undefined || ib !== ia + 1) continue;
+      const y1 = yMap.get(a.id) ?? 0;
+      const y2 = yMap.get(b.id) ?? 0;
       paths.push({ d: `M ${x} ${y1} L ${x} ${y2}`, color });
-    }
-
-    // (c) 出口曲线 或 dashed 延展
-    if (hasMerge && lastBranchY - ROW_H >= 0) {
-      // 合并回 main：x at lastBranchY → mainX at lastBranchY - ROW_H
-      paths.push({
-        d: `M ${x} ${lastBranchY} C ${x} ${lastBranchY - 8}, ${mainX} ${lastBranchY - 8}, ${mainX} ${lastBranchY - ROW_H}`,
-        color,
-      });
-    } else if (!hasMerge) {
-      // 未合并：dashed 延展到列表末尾
-      paths.push({ d: `M ${x} ${lastBranchY} L ${x} ${lastY}`, color, dashed: true });
     }
   }
 
-  // === 3. bridges：在 exp 虚线被 chore/refactor/docs/spike 交叉处画背景色小段 ===
-  //     exp lane（order=3）虚线延展会被后续 branch lane 曲线穿过。
-  //     找穿越的 y 位置：在每条 branch curve 穿过 exp 虚线 x=expX 处加桥
-  //     简化策略：找所有与 exp lane x 接近的 crossing y
+  // === 3. 跨 lane 曲线（从 edges 数组画，cubic bezier 从 child 到 parent）===
+  //     - source = child commit（新），target = parent commit（旧）
+  //     - 同 lane 的 edge（sx === tx）由 §2 lane 内垂直线覆盖，这里跳过避免重复
+  for (const e of timeline.value.edges) {
+    const sNode = nodes.find((n) => n.id === e.source);
+    const tNode = nodes.find((n) => n.id === e.target);
+    if (!sNode || !tNode) continue;
+    const sx = xMap.get(sNode.laneId);
+    const tx = xMap.get(tNode.laneId);
+    const sy = yMap.get(sNode.id);
+    const ty = yMap.get(tNode.id);
+    if (sx === undefined || tx === undefined || sy === undefined || ty === undefined) continue;
+    if (sx === tx) continue; // 同 lane：§2 已处理，不重复
+
+    const gap = ty - sy; // source 是 child（时间更近 → 排序在前 → sy 更小），所以 gap > 0
+    const halfGap = Math.max(8, gap / 2);
+
+    const color =
+      e.kind === 'merge'
+        ? 'var(--color-accent)'
+        : (lsm.get(tNode.laneId)?.color ?? 'var(--color-text-secondary)');
+
+    paths.push({
+      d: `M ${sx} ${sy} C ${sx} ${sy + halfGap}, ${tx} ${ty - halfGap}, ${tx} ${ty}`,
+      color,
+    });
+  }
+
+  // === 4. unmerged branch dashed 延展到列表末尾（视觉提示 branch 还活跃）===
+  const branchLanes = timeline.value.lanes.filter((l) => l.order > 0);
+  for (const lane of branchLanes) {
+    const laneNodes = nodesByLane.get(lane.id);
+    if (!laneNodes || laneNodes.length === 0) continue;
+    const hasMerge = laneNodes.some((n) => n.isMerge);
+    if (hasMerge) continue; // 已合并 branch 不延展
+    const lastBranchNode = laneNodes[laneNodes.length - 1]!;
+    const lastBranchY = yMap.get(lastBranchNode.id) ?? 0;
+    if (lastBranchY >= lastY) continue;
+    const x = xMap.get(lane.id) ?? 0;
+    const color = lsm.get(lane.id)?.color ?? 'var(--color-text-secondary)';
+    paths.push({ d: `M ${x} ${lastBranchY} L ${x} ${lastY}`, color, dashed: true });
+  }
+
+  // === 5. bridges：在 exp 虚线被后续 branch lane 曲线穿过处画背景色小段（兜底保留）===
   const expLane = branchLanes.find((l) => l.label.toLowerCase().includes('exp'));
   if (expLane) {
     const expX = xMap.get(expLane.id) ?? 41;
-    // 找所有穿过 expX 的非 exp 曲线 / 直线：每条 branch lane 都可能穿过
-    // 简化：遍历所有 path，估算与 expX 相交的 y
-    // 这里采用更简单的方法：基于 lane order 推算 — order 3 之后的所有 lane 都会有曲线穿过 expX
     const laterLanes = branchLanes.filter((l) => l.order > (expLane.order ?? 3));
     for (const lane of laterLanes) {
       const laneNodesInOrder = nodesByLane.get(lane.id) ?? [];
       if (laneNodesInOrder.length === 0) continue;
-      // 入口曲线穿过 expX 的 y ≈ enterY + ROW_H/2 + 8
+      // 跨 lane 曲线从 edges 画后，§3 不会"穿过" exp lane 虚线
+      // —— 但万一某些 edge 的源/目标 lane 都不是 exp，但 cubic bezier 控制点的 y 跨越 exp y，
+      //    视觉上还是会跟 exp 虚线相交。这里仍保留原 bridge 逻辑（保险）。
       const firstY = yMap.get(laneNodesInOrder[0]!.id) ?? 0;
       const y1 = firstY + ROW_H + 8;
       if (y1 > 0 && y1 < lastY) {
         paths.push({ isBridge: true, d: '', color: 'var(--color-bg)', x: expX, y: y1 });
       }
-      // 出口曲线：x at lastBranchY-ROW_H/2 处
       if (laneNodesInOrder.some((n) => n.isMerge)) {
         const lastBranchY = yMap.get(laneNodesInOrder[laneNodesInOrder.length - 1]!.id) ?? 0;
         const y2 = lastBranchY - 8;
@@ -699,6 +734,35 @@ function formatRelative(iso: string, now = Date.now()): string {
   const mo = Math.floor(day / 30);
   if (mo < 12) return `${mo} 个月前`;
   return `${Math.floor(mo / 12)} 年前`;
+}
+
+/**
+ * 测试便利：暴露 vm 给 CDP 测试（scripts/cdp-timeline-graph-fix.mjs），
+ * 注入 mock timeline 数据复现错位场景 → 截图前后对比。
+ * 暴露的对象都是 ref/computed，不含敏感数据；只用于 CDP 集成测试。
+ *
+ * 注意：必须暴露 `setTimeline` setter 而不是直接 `timeline` ref —
+ * 直接赋值 `vm.timeline = mock` 会替换 ref 引用本身（让 sortedNodes computed 失效），
+ * `setTimeline(mock)` 才是 ref.value = mock（reactive 替换，computed 重算）。
+ */
+function setTimeline(t: TimelineDto): void {
+  timeline.value = t;
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __timelineVm: unknown }).__timelineVm = {
+    branches,
+    selectedBranches,
+    timeline,
+    setTimeline,
+    loadTimeline,
+    toggleBranch,
+    sortedNodes,
+    graphPaths,
+    commitRows,
+    laneXMap,
+    nodeYMap,
+  };
 }
 
 </script>
