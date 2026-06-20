@@ -351,7 +351,12 @@ watch(() => activeProjectId.value, async (id) => {
 // ============================================================
 
 const ROW_H = 32;
-const GRAPH_W = 100; // 8 lane 间距 12px（5 + 7×12 + 7 padding ≈ 100）
+/** SVG 宽度 = 起始 padding 5 + 10 lanes × 10px 步进 + 尾部 padding 15 = 120（容纳 v1.5 多 lane 场景） */
+const GRAPH_W = 120;
+/** lane 间距（10px 步进，从 x=5 开始） */
+const LANE_GAP = 10;
+/** commit dot 半径（CSS dot 14px 直径对应 7px 半径；线条端点避开 dot 用） */
+const DOT_R = 7;
 
 /** 节点按时间戳倒序（新 → 旧） */
 const sortedNodes = computed<CommitNodeDto[]>(() => {
@@ -361,30 +366,52 @@ const sortedNodes = computed<CommitNodeDto[]>(() => {
   );
 });
 
-/** laneId → x 中心点（lane.order 0 = main @ x=5；12px 步进到 x=89） */
+/**
+ * v1.5 Gitea 风格对齐（2026-06-20 · 任务 #timeline-graph-fix）：
+ * Gitea 把 main 放在 lane 中间（其他 cx-* branch lane 分布在两侧）。
+ * 后端 buildLanes 按传入 branches 顺序建 lane order（main 不一定在 0），
+ * 前端按 lane.label 找 main 后重新分配 x，让 main 永远在 lane 列表的中间位置。
+ *
+ * lanes 数 = 2 时 main 在右（x=15），lanes=3 时 main 在中间（x=15），
+ * lanes=5 时 main 偏中间（x=25）。
+ */
+const mainLane = computed<Lane | null>(() => {
+  if (!timeline.value) return null;
+  return timeline.value.lanes.find((l) => l.label.toLowerCase() === 'main') ?? null;
+});
+
+/** laneId → x 中心点（main 永远在 lane 列表的中间位置） */
 const laneXMap = computed<Map<string, number>>(() => {
   const map = new Map<string, number>();
   if (!timeline.value) return map;
   const lanes = [...timeline.value.lanes].sort((a, b) => a.order - b.order);
-  lanes.forEach((lane, i) => {
-    map.set(lane.id, 5 + i * 12);
+  const main = mainLane.value;
+  if (!main) {
+    lanes.forEach((lane, i) => map.set(lane.id, 5 + i * LANE_GAP));
+    return map;
+  }
+  const totalLanes = lanes.length;
+  const mainTargetIdx = Math.floor(totalLanes / 2);
+  const others = lanes.filter((l) => l.id !== main.id);
+  const before = others.slice(0, mainTargetIdx);
+  const after = others.slice(mainTargetIdx);
+  before.forEach((lane, i) => {
+    map.set(lane.id, 5 + i * LANE_GAP);
+  });
+  map.set(main.id, 5 + before.length * LANE_GAP);
+  after.forEach((lane, i) => {
+    map.set(lane.id, 5 + (before.length + 1 + i) * LANE_GAP);
   });
   return map;
 });
 
-/** commitId → y 中心点（row index × 36 + 18） */
+/** commitId → y 中心点（row index × ROW_H + DOT_R + ROW_H/2 - DOT_R = i*ROW_H + ROW_H/2） */
 const nodeYMap = computed<Map<string, number>>(() => {
   const map = new Map<string, number>();
   sortedNodes.value.forEach((n, i) => {
-    map.set(n.id, i * ROW_H + 18);
+    map.set(n.id, i * ROW_H + ROW_H / 2);
   });
   return map;
-});
-
-/** 主 lane（order=0） */
-const mainLane = computed<Lane | null>(() => {
-  if (!timeline.value) return null;
-  return timeline.value.lanes.find((l) => l.order === 0) ?? timeline.value.lanes[0] ?? null;
 });
 
 /** lane.label → CSS 颜色 token（按命名约定匹配） */
@@ -529,32 +556,28 @@ const graphPaths = computed<GraphPath[]>(() => {
   const nodes = sortedNodes.value;
   const xMap = laneXMap.value;
   const yMap = nodeYMap.value;
-  const main = mainLane.value;
-  if (!main) return [];
-  const mainX = xMap.get(main.id) ?? 5;
   const lsm = laneStyleMap.value;
-  const mainColor = lsm.get(main.id)?.color ?? 'var(--color-primary)';
   const lastY = yMap.get(nodes[nodes.length - 1]!.id) ?? 0;
 
   /*
-   * v1.5 错位修复（2026-06-20 · 任务 #timeline-graph-fix）：
+   * v1.5 Gitea 风格对齐（2026-06-20 · 任务 #timeline-graph-fix）：
    *
-   * 旧算法假设"一个 lane 上的节点在 sortedNodes 时间序列里连续"，
-   * 实际上同一条 branch lane 的 commit 可能分散在时间轴上，
-   * 中间夹着 main lane 上的 commit。
-   * 旧 (b) 节点间垂直线对 `laneNodes[i]` → `laneNodes[i+1]` 无脑连直线，
-   * → 直线穿过中间 main 节点行 → 视觉错位。
-   * 旧 (a) 入口曲线 / (c) 出口曲线用 `firstY±ROW_H` 数学公式定位 mainX，
-   * 假设该 y 正好对应 main 节点，但实际可能对应 branch 节点 → 拐到错位置。
+   * Gitea 提交图的画法（关键）：
+   *  - 每个 commit dot 是独立元素，**线条端点落在 dot 边缘**（不是 dot 中心）
+   *  - lane 内节点间画**短竖线段**（从上一 dot 下边缘到下一 dot 上边缘），
+   *    不是从顶到底的贯穿长线 —— dot 自身遮住线段中间，视觉上像"dot 在线端点上"
+   *  - 跨 lane 用 cubic bezier 从 child dot 下边缘 → parent dot 上边缘
    *
-   * 新算法：
-   *  - §2 lane 内节点间垂直线：只在 sortedNodes 索引真正相邻时画（中间没夹别的节点）
-   *  - §3 跨 lane 曲线：用后端 `edges` 数组（parent/merge 关系），从 child → parent 画 cubic bezier
-   *  - §4 unmerged branch dashed 延展到 lastY（保留原视觉）
-   *  - §5 bridges（exp 虚线穿越处的背景色小段）：保留原逻辑兜底
+   * 本实现：
+   *  - §1 lane 内节点间短竖线段（dot 边缘 → dot 边缘，仅 sortedIndex 相邻时画）
+   *  - §2 跨 lane cubic bezier（child dot 下边缘 → parent dot 上边缘）
+   *  - §3 unmerged branch dashed 延展（从 dot 下边缘到列表底部）
    *
-   * 后端已经返回 `edges: ParentEdge[]`（source=child sha, target=parent sha），
-   * 旧版根本没用这些数据。
+   * 删除：
+   *  - 旧 §1 main 贯穿长线（`M mainX 18 L mainX lastY`）：改成 §1 节点间短竖线段，
+   *    视觉上 main lane 是"独立一列"而不是贯穿长线，更接近 Gitea
+   *  - 旧 §5 bridges（exp 虚线穿越处的背景色小段）：新算法下 cubic bezier 不会
+   *    穿过 exp lane 虚线（Gitea 也没这种桥），简化为按 dot 边缘终止
    */
   const sortedIdx = new Map<string, number>();
   const nodesByLane = new Map<string, CommitNodeDto[]>();
@@ -568,10 +591,7 @@ const graphPaths = computed<GraphPath[]>(() => {
 
   const paths: GraphPath[] = [];
 
-  // === 1. main 贯穿线（贯穿整列）===
-  paths.push({ d: `M ${mainX} 18 L ${mainX} ${lastY}`, color: mainColor });
-
-  // === 2. lane 内节点间垂直线（关键修复：sortedIndex 必须真正相邻）===
+  // === §1 lane 内节点间短竖线段（dot 边缘 → dot 边缘，仅 sortedIndex 相邻）===
   for (const lane of timeline.value.lanes) {
     const laneNodes = nodesByLane.get(lane.id);
     if (!laneNodes || laneNodes.length < 2) continue;
@@ -585,13 +605,13 @@ const graphPaths = computed<GraphPath[]>(() => {
       if (ia === undefined || ib === undefined || ib !== ia + 1) continue;
       const y1 = yMap.get(a.id) ?? 0;
       const y2 = yMap.get(b.id) ?? 0;
-      paths.push({ d: `M ${x} ${y1} L ${x} ${y2}`, color });
+      // 短竖线段：从 a dot 下边缘 (y1 + DOT_R) 到 b dot 上边缘 (y2 - DOT_R)
+      // 视觉上像 dot "在线端点上"（dot 自身遮住线段中间，Gitea 风格）
+      paths.push({ d: `M ${x} ${y1 + DOT_R} L ${x} ${y2 - DOT_R}`, color });
     }
   }
 
-  // === 3. 跨 lane 曲线（从 edges 数组画，cubic bezier 从 child 到 parent）===
-  //     - source = child commit（新），target = parent commit（旧）
-  //     - 同 lane 的 edge（sx === tx）由 §2 lane 内垂直线覆盖，这里跳过避免重复
+  // === §2 跨 lane cubic bezier（child dot 下边缘 → parent dot 上边缘）===
   for (const e of timeline.value.edges) {
     const sNode = nodes.find((n) => n.id === e.source);
     const tNode = nodes.find((n) => n.id === e.target);
@@ -601,10 +621,13 @@ const graphPaths = computed<GraphPath[]>(() => {
     const sy = yMap.get(sNode.id);
     const ty = yMap.get(tNode.id);
     if (sx === undefined || tx === undefined || sy === undefined || ty === undefined) continue;
-    if (sx === tx) continue; // 同 lane：§2 已处理，不重复
+    if (sx === tx) continue; // 同 lane：§1 已处理，不重复
 
-    const gap = ty - sy; // source 是 child（时间更近 → 排序在前 → sy 更小），所以 gap > 0
-    const halfGap = Math.max(8, gap / 2);
+    // source = child（时间更近，sy 更小）；起点 source dot 下边缘，终点 target dot 上边缘
+    const startY = sy + DOT_R;
+    const endY = ty - DOT_R;
+    const verticalGap = endY - startY; // > 0
+    const halfGap = Math.max(DOT_R * 2, verticalGap / 2);
 
     const color =
       e.kind === 'merge'
@@ -612,13 +635,14 @@ const graphPaths = computed<GraphPath[]>(() => {
         : (lsm.get(tNode.laneId)?.color ?? 'var(--color-text-secondary)');
 
     paths.push({
-      d: `M ${sx} ${sy} C ${sx} ${sy + halfGap}, ${tx} ${ty - halfGap}, ${tx} ${ty}`,
+      d: `M ${sx} ${startY} C ${sx} ${startY + halfGap}, ${tx} ${endY - halfGap}, ${tx} ${endY}`,
       color,
     });
   }
 
-  // === 4. unmerged branch dashed 延展到列表末尾（视觉提示 branch 还活跃）===
-  const branchLanes = timeline.value.lanes.filter((l) => l.order > 0);
+  // === §3 unmerged branch dashed 延展到列表末尾（从 dot 下边缘到 lastY）===
+  const main = mainLane.value;
+  const branchLanes = timeline.value.lanes.filter((l) => l.id !== main?.id);
   for (const lane of branchLanes) {
     const laneNodes = nodesByLane.get(lane.id);
     if (!laneNodes || laneNodes.length === 0) continue;
@@ -629,33 +653,8 @@ const graphPaths = computed<GraphPath[]>(() => {
     if (lastBranchY >= lastY) continue;
     const x = xMap.get(lane.id) ?? 0;
     const color = lsm.get(lane.id)?.color ?? 'var(--color-text-secondary)';
-    paths.push({ d: `M ${x} ${lastBranchY} L ${x} ${lastY}`, color, dashed: true });
-  }
-
-  // === 5. bridges：在 exp 虚线被后续 branch lane 曲线穿过处画背景色小段（兜底保留）===
-  const expLane = branchLanes.find((l) => l.label.toLowerCase().includes('exp'));
-  if (expLane) {
-    const expX = xMap.get(expLane.id) ?? 41;
-    const laterLanes = branchLanes.filter((l) => l.order > (expLane.order ?? 3));
-    for (const lane of laterLanes) {
-      const laneNodesInOrder = nodesByLane.get(lane.id) ?? [];
-      if (laneNodesInOrder.length === 0) continue;
-      // 跨 lane 曲线从 edges 画后，§3 不会"穿过" exp lane 虚线
-      // —— 但万一某些 edge 的源/目标 lane 都不是 exp，但 cubic bezier 控制点的 y 跨越 exp y，
-      //    视觉上还是会跟 exp 虚线相交。这里仍保留原 bridge 逻辑（保险）。
-      const firstY = yMap.get(laneNodesInOrder[0]!.id) ?? 0;
-      const y1 = firstY + ROW_H + 8;
-      if (y1 > 0 && y1 < lastY) {
-        paths.push({ isBridge: true, d: '', color: 'var(--color-bg)', x: expX, y: y1 });
-      }
-      if (laneNodesInOrder.some((n) => n.isMerge)) {
-        const lastBranchY = yMap.get(laneNodesInOrder[laneNodesInOrder.length - 1]!.id) ?? 0;
-        const y2 = lastBranchY - 8;
-        if (y2 > 0 && y2 < lastY) {
-          paths.push({ isBridge: true, d: '', color: 'var(--color-bg)', x: expX, y: y2 });
-        }
-      }
-    }
+    // 从 dot 下边缘延展
+    paths.push({ d: `M ${x} ${lastBranchY + DOT_R} L ${x} ${lastY}`, color, dashed: true });
   }
 
   return paths;
@@ -1328,7 +1327,8 @@ if (typeof window !== 'undefined') {
 .commit-list__inner { position: relative; min-width: 0; padding-left: 0; }
 .commit-list__edges {
   position: absolute; top: 0; left: 0;
-  width: 54px; height: 100%;
+  /* GRAPH_W=120 配合 LANE_GAP=10：容纳 10 lanes (x=5+9*10=95) + 25px 尾部 padding */
+  width: 120px; height: 100%;
   pointer-events: none;
   z-index: 1;
 }
@@ -1336,12 +1336,13 @@ if (typeof window !== 'undefined') {
 .commit-row {
   position: relative;
   /*
-   * C-3 硬约束 #6 配套：4 列 grid 用 minmax + 1fr 自适应；
-   * 1024×720 窗口（主区 ~468px）下，最右 meta 列缩到 min 80，
-   * 中间 msg 列吃 1fr 弹性扩展，作者/分支/时间最小化。
+   * v1.5 Gitea 风格（任务 #timeline-graph-fix）：
+   * 第一列从 60px 扩到 130px，匹配 SVG 宽度 + commit-row__graph 宽度，
+   * 保证 dot (14px) + 多 lane 缩进（最大 x=95px + dot 半径 7px = 102px）有空间，
+   * hash 列不被裁切。
    */
   display: grid;
-  grid-template-columns: 60px 64px minmax(80px, 1fr) minmax(80px, 240px);
+  grid-template-columns: 130px 64px minmax(80px, 1fr) minmax(80px, 240px);
   align-items: center;
   height: var(--row-h, 32px);
   padding: 0 var(--space-3) 0 0;
@@ -1373,15 +1374,22 @@ if (typeof window !== 'undefined') {
   background: color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-primary) 8%);
 }
 
-.commit-row__graph { position: relative; width: 100px; height: 100%; }
+.commit-row__graph { position: relative; width: 120px; height: 100%; }
+/*
+ * v1.5 Gitea 风格（任务 #timeline-graph-fix）：
+ * dot 直径从 10px 扩到 14px（半径 7px = DOT_R 常量），
+ * 跟 GRAPH_W=120 + LANE_GAP=10 视觉协调，更接近 Gitea 提交图视觉感受。
+ * 删 box-shadow 外圈 divider ring（Gitea dot 边缘干净无外圈），
+ * 保留内圈 bg 2px 让 dot 在 hover/highlight 时不跟同色背景融合。
+ */
 .commit-row__dot {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 10px; height: 10px;
+  width: 14px; height: 14px;
   border-radius: 50%;
   color: var(--dot-color, var(--color-primary));
-  box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3px var(--color-divider-strong);
+  box-shadow: 0 0 0 2px var(--color-bg);
   transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
   z-index: 3;
 }

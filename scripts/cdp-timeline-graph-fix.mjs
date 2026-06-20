@@ -225,7 +225,7 @@ async function main() {
 
   // 额外 dump graphPaths 数量 + node count + 每条 path 详情
   const dump = await cdp.send('Runtime.evaluate', {
-    expression: `(()=>{ const vm = window.__timelineVm; const paths = vm?.graphPaths?.value ?? vm?.graphPaths; const nodes = vm?.sortedNodes?.value ?? vm?.sortedNodes; return { nodeCount: vm?.commitRows?.value?.length ?? -1, graphPathsCount: Array.isArray(paths) ? paths.length : -1, sortedIdxRange: nodes?.length ?? -1, allPaths: (paths ?? []).map((p,i) => ({ i, type: p.isBridge ? 'bridge' : (p.dashed ? 'dashed' : 'normal'), d: p.d, color: p.color })), sortedNodesOrder: (nodes ?? []).map(n => ({ sha: n.sha.slice(0,7), laneId: n.laneId, i: nodes.indexOf(n) })) }; })()`,
+    expression: `(()=>{ const vm = window.__timelineVm; const paths = vm?.graphPaths?.value ?? vm?.graphPaths; const nodes = vm?.sortedNodes?.value ?? vm?.sortedNodes; return { graphPathsCount: Array.isArray(paths) ? paths.length : -1, allPaths: (paths ?? []).map((p,i) => ({ i, d: p.d, color: p.color, dashed: p.dashed })) }; })()`,
     returnByValue: true,
   });
   console.log('render dump:', JSON.stringify(dump.result.value, null, 2));
