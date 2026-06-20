@@ -168,6 +168,7 @@ describe('ipc/issues · list / get / create / update + label actions', () => {
     const result = (await getHandler('issues.create')({
       projectId: PROJECT_ID,
       title: 'new',
+      refBranch: 'main',
     })) as typeof dto;
     expect(result.title).toBe('new');
   });

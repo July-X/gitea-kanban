@@ -756,6 +756,8 @@ export const IssueCardDtoSchema = z
  *看板拖拽换列时只对纯 issue生效。
  */
  isPullRequest: z.boolean(),
+ /** v1.4：gitea issue ref 字段（关联分支/Git 标签），无关联时为空串 */
+ refBranch: z.string().default(''),
  })
  .strict();
 export type IssueCardDto = z.infer<typeof IssueCardDtoSchema>;
@@ -808,6 +810,8 @@ export const CreateIssueArgsSchema = z
     milestoneId: z.number().int().positive().optional(),
     /** v1.4 新增：指派人 gitea username 列表（gitea issueCreateIssue 的 assignees 字段） */
     assignees: z.array(NonEmptyStringSchema).optional(),
+    /** v1.4 新增：关联分支（gitea issueCreateIssue 的 ref 字段，必填） */
+    refBranch: NonEmptyStringSchema,
   })
   .strict();
 export type CreateIssueArgs = z.infer<typeof CreateIssueArgsSchema>;
@@ -821,10 +825,12 @@ export const UpdateIssueArgsSchema = z
  title: NonEmptyStringSchema.optional(),
  body: z.string().optional(),
  state: z.enum(['open', 'closed']).optional(),
+ /** v1.4 新增：关联分支（gitea issueEditIssue 的 ref 字段） */
+ refBranch: z.string().optional(),
  })
  .strict()
  .refine(
- (p) => p.title !== undefined || p.body !== undefined || p.state !== undefined,
+ (p) => p.title !== undefined || p.body !== undefined || p.state !== undefined || p.refBranch !== undefined,
  { message: 'patch 必须至少含一个字段' },
  ),
  })

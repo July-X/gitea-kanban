@@ -109,6 +109,9 @@ const FORBIDDEN_TERMS = [
       'branch ',
       'next.branch',   // v1.3 route query 对象 delete 字段
       'query.branch',  // v1.3 route.query.branch 字段读取
+      'refBranch',     // v1.4 IssueCardDto 字段名（gitea ref）
+      'ref-branch',    // v1.4 CSS class（issue-detail__ref-branch）
+      'create-issue-branch', // v1.4 HTML id（新建议题分支选择框）
       '不出现',        // 注释禁用词复述
       '禁用词',
       '零术语',

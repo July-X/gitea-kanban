@@ -24,9 +24,9 @@ import { showToast } from '@renderer/lib/toast';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
-import type { ColumnDto, IssueCardDto, RepoDto, CollaboratorDto, MilestoneDto, IssueCommentDto } from '../../main/ipc/schema.js';
+import type { ColumnDto, IssueCardDto, RepoDto, CollaboratorDto, MilestoneDto, IssueCommentDto, BranchDto } from '../../main/ipc/schema.js';
 import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
-import { membersList, milestonesList, issuesCommentList, issuesCommentCreate } from '@renderer/lib/ipc-client';
+import { membersList, milestonesList, issuesCommentList, issuesCommentCreate, branchesList } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 // 全局样式（Teleport 后 .modal-overlay / .move-menu-overlay / .column__settings-btn 等）
 import '@renderer/components/board/board-modals.css';
@@ -58,6 +58,8 @@ const auth = useAuthStore();
 const createIssueDialogOpen = ref(false);
 const createIssueMembers = ref<CollaboratorDto[]>([]);
 const createIssueMilestones = ref<MilestoneDto[]>([]);
+/** v1.4：分支列表（新建议题关联分支用） */
+const createIssueBranches = ref<BranchDto[]>([]);
 const createIssueLoading = ref(false);
 /** 锁定的"新建"列（新建议题默认进此列）。找不到时退回第一列。 */
 const lockedColumn = computed<ColumnDto | null>(() => {
@@ -73,21 +75,22 @@ const lockedColumn = computed<ColumnDto | null>(() => {
  * 弹窗打开时缓存已就绪则直接用（瞬时）；缓存未命中才请求（fallback）。
  * 缓存 key = projectId，切仓库时重置。
  */
-const createIssueCache = ref<Record<string, { members: CollaboratorDto[]; milestones: MilestoneDto[] }>>({});
+const createIssueCache = ref<Record<string, { members: CollaboratorDto[]; milestones: MilestoneDto[]; branches: BranchDto[] }>>({});
 let createIssuePreloading = false;
 
-/** 后台预加载 members/milestones（不阻塞 UI，失败静默——弹窗打开时 fallback 重试） */
+/** 后台预加载 members/milestones/branches（不阻塞 UI，失败静默——弹窗打开时 fallback 重试） */
 async function preloadCreateIssueData(pid: string): Promise<void> {
   if (createIssuePreloading || createIssueCache.value[pid]) return;
   createIssuePreloading = true;
   try {
-    const [memResp, mileResp] = await Promise.all([
+    const [memResp, mileResp, brResp] = await Promise.all([
       membersList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
       milestonesList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
+      branchesList({ projectId: pid, limit: 50, page: 1 }).catch(() => ({ items: [], hasMore: false })),
     ]);
     createIssueCache.value = {
       ...createIssueCache.value,
-      [pid]: { members: memResp.items, milestones: mileResp.items },
+      [pid]: { members: memResp.items, milestones: mileResp.items, branches: brResp.items },
     };
   } finally {
     createIssuePreloading = false;
@@ -164,6 +167,7 @@ async function openCreateIssueDialog(): Promise<void> {
   if (cached) {
     createIssueMembers.value = cached.members;
     createIssueMilestones.value = cached.milestones;
+    createIssueBranches.value = cached.branches;
     createIssueLoading.value = false;
     return;
   }
@@ -171,16 +175,19 @@ async function openCreateIssueDialog(): Promise<void> {
   createIssueLoading.value = true;
   createIssueMembers.value = [];
   createIssueMilestones.value = [];
+  createIssueBranches.value = [];
   try {
-    const [memResp, mileResp] = await Promise.all([
+    const [memResp, mileResp, brResp] = await Promise.all([
       membersList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
       milestonesList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
+      branchesList({ projectId: pid, limit: 50, page: 1 }).catch(() => ({ items: [], hasMore: false })),
     ]);
     createIssueMembers.value = memResp.items;
     createIssueMilestones.value = mileResp.items;
+    createIssueBranches.value = brResp.items;
     createIssueCache.value = {
       ...createIssueCache.value,
-      [pid]: { members: memResp.items, milestones: mileResp.items },
+      [pid]: { members: memResp.items, milestones: mileResp.items, branches: brResp.items },
     };
   } finally {
     createIssueLoading.value = false;
@@ -194,6 +201,7 @@ async function onCreateIssue(payload: {
   labelIds?: number[];
   assignees?: string[];
   milestoneId?: number;
+  refBranch: string;
 }): Promise<void> {
   const pid = activeProjectId.value;
   const col = lockedColumn.value;
@@ -207,6 +215,7 @@ async function onCreateIssue(payload: {
       ...(payload.labelIds && payload.labelIds.length > 0 ? { labelIds: payload.labelIds } : {}),
       ...(payload.assignees && payload.assignees.length > 0 ? { assignees: payload.assignees } : {}),
       ...(payload.milestoneId !== undefined ? { milestoneId: payload.milestoneId } : {}),
+      refBranch: payload.refBranch,
     });
     createIssueDialogOpen.value = false;
     showToast({ type: 'success', message: '已创建议题', duration: 2500 });
@@ -276,6 +285,35 @@ async function onSubmitComment(payload: { issueIndex: number; body: string }): P
     showToast({ type: 'error', message: '评论发送失败', duration: 3000 });
   } finally {
     issueDetailSubmitting.value = false;
+  }
+}
+
+/** v1.4：二次修改标签（IssueDetailDialog 触发 → 调 store.updateIssueLabels） */
+async function onUpdateIssueLabels(payload: {
+  issueIndex: number;
+  addLabelIds: number[];
+  removeLabelIds: number[];
+}): Promise<void> {
+  const pid = activeProjectId.value;
+  if (!pid) return;
+  try {
+    await board.updateIssueLabels({
+      projectId: pid,
+      issueIndex: payload.issueIndex,
+      addLabelIds: payload.addLabelIds,
+      removeLabelIds: payload.removeLabelIds,
+    });
+    // 同步 issueDetailIssue（弹窗内展示的标签跟着变）
+    if (issueDetailIssue.value && issueDetailIssue.value.index === payload.issueIndex) {
+      const colId = board.findIssueColumnId(payload.issueIndex);
+      const updated = colId
+        ? board.issuesOf(colId).find((i) => i.index === payload.issueIndex)
+        : null;
+      issueDetailIssue.value = updated ? { ...updated } : issueDetailIssue.value;
+    }
+    showToast({ type: 'success', message: '标签已更新', duration: 2000 });
+  } catch {
+    showToast({ type: 'error', message: '标签更新失败', duration: 3000 });
   }
 }
 // v1.4 调整（2026-06-18）：列内新建框已移除，createIssueInColumn 不再使用；
@@ -377,9 +415,21 @@ function toggleColumnShowClosed(columnId: string): void {
  */
 type ColumnListItem = { kind: 'column'; key: string; column: ColumnDto };
 
-const columnsWithClosed = computed<ColumnListItem[]>(() => {
-  // 纯列列表（ClosedSection 不再 inline，模板独立渲染）
-  return board.columns.map((c) => ({ kind: 'column', key: c.id, column: c }));
+/**
+ * v1.4 布局（2026-06-19 修订）：把「已完成」列从 v-for 拆出来，和「已关闭」折叠区
+ * 包进同一个 wrapper（一个 grid cell），让两者视觉上合成一列、紧贴无缝。
+ * - doneColumn   : 已完成列对象（找不到时 = null）
+ * - otherColumns : 非已完成列（仍走 v-for auto-flow）
+ */
+const doneColumn = computed<ColumnDto | null>(() => {
+  const idx = doneColumnIndex.value;
+  return idx < 0 ? null : board.columns[idx] ?? null;
+});
+const otherColumns = computed<ColumnListItem[]>(() => {
+  const doneId = doneColumn.value?.id;
+  return board.columns
+    .filter((c) => c.id !== doneId)
+    .map((c) => ({ kind: 'column', key: c.id, column: c }));
 });
 
 /** v1.4：按列 id 拿该列的 closed issue 列表（已关的） */
@@ -388,6 +438,20 @@ function closedIssuesOf(columnId: string): IssueCardDto[] {
   // 复用 matchIssueToColumn：按 issue.labels ∩ column.labels 匹配
   return board.closedIssues.filter((iss) => matchIssueToColumn(iss, board.columns) === columnId);
 }
+
+/**
+ * v1.4 布局（2026-06-19）：列区横向单行 flex，每列高度自适应内容区（= Window 高度）。
+ * 「已完成」+「已关闭」合成一个 flex item（.board__done-wrap），其余列各自一个。
+ * 列内 .column__cards overflow 处理卡片过多；内容区整体不滚动（overflow:hidden）。
+ */
+/** 「已完成」列在所有列中的 0-based 序号（找不到时 = -1） */
+const doneColumnIndex = computed(() => {
+  // 与 isFinishColumnByTitle 同语义：标题含"完成"/"done"/"closed"
+  return board.columns.findIndex((c) => {
+    const t = c.title.trim().toLowerCase();
+    return t === '已完成' || t === 'done' || t === 'closed' || t.includes('完成');
+  });
+});
 
 const {
   dragOptions: columnDragOptions,
@@ -469,14 +533,14 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
     </div>
     <div v-else class="board__columns">
       <!--
-        v1.4 布局（2026-06-18 修订 · 消除横向滚动条）：
-        普通列 flex-wrap 换行适配视口，列宽固定 280px（4 列/1280px 视口），
-        第 5 列起自动换到下一行；`.board__columns` overflow-y:auto 仅纵向滚动。
-        ClosedSection / UnassignedSection 作为独立块跟在列后，换行后排到下方
-        （语义 = "已关闭"折到第一列下面），不再占横向列宽 → 不出横向滚动条。
+        v1.4 布局（2026-06-19 修订）：列区 CSS Grid（列宽 280px、gap 12px）。
+        「已完成」列 + 「已关闭」折叠区包进同一个 wrapper（一个 grid cell），
+        内部 flex 纵向、gap 0 紧贴 —— 视觉上合成一列、无缝、不各自滚动。
+        wrapper align-self:start 不被 grid 行拉伸，高度自适应内容，不触发容器纵向滚动。
+        其余列走 v-for auto-flow；「未分类」区跟在最后。
       -->
       <KanbanColumnSection
-        v-for="col in columnsWithClosed"
+        v-for="col in otherColumns"
         :key="col.key"
         :column="col.column"
         :issues="board.issuesOf(col.column.id)"
@@ -497,15 +561,38 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
         @open-issue-detail="openIssueDetail"
       />
       <!--
-        v1.4 布局修订（2026-06-18）：ClosedSection 排在普通列之后、UnassignedSection 之前。
-        flex-wrap 换行后，已关闭区会优先填到第二行剩余位置（贴近已完成列），
-        排不下了才折到下一行 —— 语义上"折到看板下方"，不再占横向列宽。
+        「已完成」+「已关闭」合成一列：同一 grid cell，flex 纵向 gap:0 紧贴。
+        - 已完成列在上方（正常渲染）
+        - 已关闭区紧贴其下（无间距），视觉延续成一列
+        - 整体 align-self:start，高度自适应，不出容器纵向滚动条
       -->
-      <ClosedSection
-        v-if="board.closedIssues.length"
-        :issues="board.closedIssues"
-        :loading="board.loading"
-      />
+      <div v-if="doneColumn" class="board__done-wrap">
+        <KanbanColumnSection
+          :key="doneColumn.id"
+          :column="doneColumn"
+          :issues="board.issuesOf(doneColumn.id)"
+          :closed-issues="closedIssuesOf(doneColumn.id)"
+          :show-closed-in-column="board.showClosed && (showClosedByColumn[doneColumn.id] ?? false)"
+          :show-closed-column="showClosedByColumn[doneColumn.id] ?? false"
+          :loading="board.loading"
+          :is-over-limit="isColumnOverLimit(doneColumn)"
+          :over-limit-tooltip="wipOverLimitTooltip(doneColumn)"
+          :drag-options="columnDragOptions"
+          @open-settings="openColumnMenu(doneColumn)"
+          @drag-start="(evt) => onColumnDragStart(doneColumn, evt)"
+          @drag-move="(evt) => onColumnDragMove(doneColumn, evt)"
+          @drag-end="(evt) => onColumnDragEnd(doneColumn, evt)"
+          @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
+          @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
+          @toggle-show-closed="(columnId) => toggleColumnShowClosed(columnId)"
+          @open-issue-detail="openIssueDetail"
+        />
+        <ClosedSection
+          v-if="board.closedIssues.length"
+          :issues="board.closedIssues"
+          :loading="board.loading"
+        />
+      </div>
       <UnassignedSection
         v-if="board.unassignedIssues.length"
         :issues="board.unassignedIssues"
@@ -672,6 +759,7 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       :labels="board.labelsByProject"
       :members="createIssueMembers"
       :milestones="createIssueMilestones"
+      :branches="createIssueBranches"
       :locked-column-title="lockedColumn?.title ?? '新建'"
       :loading="createIssueLoading"
       @update:open="(v) => (createIssueDialogOpen = v)"
@@ -684,8 +772,10 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       :comments="issueDetailComments"
       :comments-loading="issueDetailCommentsLoading"
       :submitting="issueDetailSubmitting"
+      :all-labels="board.labelsByProject"
       @update:open="(v) => (issueDetailOpen = v)"
       @submit-comment="onSubmitComment"
+      @update-labels="onUpdateIssueLabels"
     />
   </div>
 </template>
@@ -722,15 +812,41 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
 }
 .board__columns {
   flex: 1;
+  /* v1.4 布局（2026-06-19）：横向单行 flex，每列高度 = 内容区高度（自适应 Window）。
+     - 列内 .column__cards overflow-y:auto 处理卡片过多（列内滚动）
+     - 内容区整体不出纵向滚动条（overflow-y:hidden）
+     - 列多时横向滚动（overflow-x:auto），符合主流看板布局 */
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: row;
   gap: var(--space-3);
   padding: var(--space-4);
-  /* v1.4 布局修订（2026-06-18）：列换行适配视口，仅纵向滚动，不出横向滚动条。
-     旧版 overflow-x:auto 横向滚动 → 列多时看板显示不全 + 横向滚动条。 */
-  overflow-x: hidden;
-  overflow-y: auto;
-  align-items: flex-start;
-  align-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: stretch;
+  min-height: 0;
+}
+/* 「已完成」+「已关闭」合成一列的 wrapper：占一个 flex item，
+   内部 flex 纵向、gap:0 紧贴 —— 视觉延续成一列。
+   高度 = 内容区高度（align-items:stretch 拉满），内部两个区块各自 overflow。 */
+.board__done-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 0 0 280px;
+  min-height: 0;
+}
+/* 已完成列在 wrapper 内：撑满 wrapper 高度，内容多时列内滚动 */
+.board__done-wrap > :deep(.column) {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+}
+/* 已关闭区紧贴已完成列底部：固定高度比例，内容多时内部滚动 */
+.board__done-wrap > :deep(.column--closed) {
+  flex: 0 0 auto;
+  max-height: 40%;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 1px solid var(--color-divider);
 }
 </style>

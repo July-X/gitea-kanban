@@ -29,6 +29,7 @@ import {
   issuesCreate,
   issuesList,
   issuesMoveColumn,
+  issuesRemoveLabel,
   issuesUpdate,
   labelsList,
 } from '@renderer/lib/ipc-client';
@@ -411,6 +412,8 @@ async function autoInitColumns(
     labelIds?: number[];
     milestoneId?: number;
     assignees?: string[];
+    /** v1.4：关联分支（gitea ref 字段，必填） */
+    refBranch: string;
   }): Promise<IssueCardDto> {
     error.value = null;
     try {
@@ -424,6 +427,7 @@ async function autoInitColumns(
         ...(mergedLabelIds.length > 0 ? { labelIds: mergedLabelIds } : {}),
         ...(args.milestoneId !== undefined ? { milestoneId: args.milestoneId } : {}),
         ...(args.assignees && args.assignees.length > 0 ? { assignees: args.assignees } : {}),
+        refBranch: args.refBranch,
       });
       // 追加到本地（不动其他列）
       const existing = issuesByColumn.value[args.columnId] ?? [];
@@ -557,6 +561,81 @@ async function autoInitColumns(
   error.value = normalizeError(e);
   throw e;
   }
+  }
+
+  /**
+   * v1.4：二次修改 issue 标签（IssueDetailDialog 用）
+   *
+   * - addLabels：给 issue 加一组 label（gitea addLabel，幂等）
+   * - removeLabels：给 issue 移除一组 label（gitea removeLabel）
+   * - 乐观更新 issue.labels，失败回滚
+   * - 同时同步 issuesByColumn / unassignedIssues / closedIssues 里的同一 issue
+   */
+  async function updateIssueLabels(args: {
+    projectId: string;
+    issueIndex: number;
+    addLabelIds?: number[];
+    removeLabelIds?: number[];
+  }): Promise<void> {
+    error.value = null;
+    const colId = findIssueColumnId(args.issueIndex);
+    const locateIssue = ():
+      | { issue: IssueCardDto; ref: { kind: 'column'; id: string } | { kind: 'unassigned' } | { kind: 'closed' } }
+      | null => {
+      if (colId) {
+        const iss = (issuesByColumn.value[colId] ?? []).find((i) => i.index === args.issueIndex);
+        if (iss) return { issue: iss, ref: { kind: 'column', id: colId } };
+      }
+      const unIss = unassignedIssues.value.find((i) => i.index === args.issueIndex);
+      if (unIss) return { issue: unIss, ref: { kind: 'unassigned' } };
+      const clIss = closedIssues.value.find((i) => i.index === args.issueIndex);
+      if (clIss) return { issue: clIss, ref: { kind: 'closed' } };
+      return null;
+    };
+    const located = locateIssue();
+    if (!located) return;
+    const { issue, ref } = located;
+    const addIds = args.addLabelIds ?? [];
+    const removeIds = args.removeLabelIds ?? [];
+    if (addIds.length === 0 && removeIds.length === 0) return;
+
+    // 乐观更新 labels
+    const removeSet = new Set(removeIds);
+    const existingIds = new Set(issue.labels.map((l) => l.id));
+    const optimisticLabels = [
+      ...issue.labels.filter((l) => !removeSet.has(l.id)),
+      ...addIds
+        .filter((id) => !existingIds.has(id))
+        .map((id) => labelsByProject.value.find((l) => l.id === id))
+        .filter((l): l is IssueLabelDto => Boolean(l)),
+    ];
+    const optimisticIssue: IssueCardDto = { ...issue, labels: optimisticLabels };
+    const writeBack = (iss: IssueCardDto): void => {
+      if (ref.kind === 'column') {
+        issuesByColumn.value = {
+          ...issuesByColumn.value,
+          [ref.id]: (issuesByColumn.value[ref.id] ?? []).map((i) => (i.index === args.issueIndex ? iss : i)),
+        };
+      } else if (ref.kind === 'unassigned') {
+        unassignedIssues.value = unassignedIssues.value.map((i) => (i.index === args.issueIndex ? iss : i));
+      } else {
+        closedIssues.value = closedIssues.value.map((i) => (i.index === args.issueIndex ? iss : i));
+      }
+    };
+    writeBack(optimisticIssue);
+
+    try {
+      for (const id of addIds) {
+        await issuesAddLabel({ projectId: args.projectId, issueIndex: args.issueIndex, labelId: id });
+      }
+      for (const id of removeIds) {
+        await issuesRemoveLabel({ projectId: args.projectId, issueIndex: args.issueIndex, labelId: id });
+      }
+    } catch (e) {
+      writeBack(issue);
+      error.value = normalizeError(e);
+      throw e;
+    }
   }
 
   /**
@@ -819,6 +898,8 @@ async function autoInitColumns(
   createIssue,
   moveIssue,
   closeIssue,
+  // v1.4：二次修改 issue 标签（IssueDetailDialog 用）
+  updateIssueLabels,
   assignUnassignedIssue,
   undoLastMove,
   redoLastMove,

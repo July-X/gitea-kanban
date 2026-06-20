@@ -5,7 +5,7 @@
  * 设计（2026-06-16 21:13 user 反馈）：
  * - 独立列形态，**插在"已完成"列右侧**（没已完成列时插在最末）
  * - **默认折叠**：仅显示"X 张已关闭 ▸"标题 + 简短文字，**不挤占内容区**
- * - 点击展开 → 列出所有 closed issue（按 gitea issue.index 升序）
+ * - 点击展开 → 列出所有 closed issue（按 gitea issue.index 倒序，编号大的在前面）
  * - 视觉与 UnassignedSection 类似（虚线 border + muted 文字）
  * - **不**走 vue-draggable-plus（v1.4：closed 是"已结束"的事，不支持拖回 open 列）
  *   - 如需"重开"操作：v1.5 走 gitea 端 reopen（本期不做）
@@ -32,9 +32,9 @@ const props = defineProps<Props>();
 /** v1.4：默认折叠（user 反馈"不挤占内容区"） */
 const expanded = ref(false);
 
-/** 按 issue.index 升序展示（跟普通列一致） */
+/** 按 issue.index 倒序展示（编号大的在前面） */
 const sortedIssues = computed<IssueCardDto[]>(() =>
-  [...props.issues].sort((a, b) => a.index - b.index),
+  [...props.issues].sort((a, b) => b.index - a.index),
 );
 
 function onToggle(): void {
@@ -110,18 +110,18 @@ function onToggle(): void {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  /* 折叠时窄一点（只显示"X 张"），展开时变宽 */
-  min-width: 180px;
-  max-width: 320px;
-  width: auto;
+  /* v1.4 布局（2026-06-19）：宽度交给外层 wrapper（280px）控制，
+     折叠/展开都撑满 wrapper，与上方「已完成」列等宽对齐。 */
+  min-width: 0;
+  width: 100%;
   background: var(--color-bg-elevated);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
 }
 .column--closed-expanded {
-  min-width: 280px;
-  max-width: 320px;
-  width: 320px;
+  /* 展开时仍撑满 cell，不再单独设宽 */
+  min-width: 0;
+  width: 100%;
 }
 .column__header--closed {
   cursor: pointer;
@@ -180,12 +180,59 @@ function onToggle(): void {
   line-height: 1.5;
   color: var(--color-text-muted);
 }
-/* v1.4 拍板：已关闭卡片灰显 + 左边框 muted */
+/* v1.4（2026-06-19）：card 基础样式 —— 与 KanbanColumnSection 的 .card 完全对齐，
+   保证「已关闭」区卡片视觉与其他列一致（背景/圆角/padding/border-left/hover/cursor）。
+   scoped 隔离下拿不到 KanbanColumnSection 的 .card，必须各自声明。 */
+.card {
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  border-left: 3px solid var(--color-primary);
+  position: relative;
+  transition: background var(--t-fast) var(--ease);
+  cursor: grab;
+}
+.card:active { cursor: grabbing; }
+.card:hover { background: var(--color-bg-hover); }
+.card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+.card__index { font-size: var(--font-xs); color: var(--color-text-muted); font-weight: 600; }
+.card__title {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  line-height: var(--line-base);
+  word-break: break-word;
+}
+.card__labels {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.card__label {
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-weight: 500;
+  white-space: nowrap;
+  background-color: var(--label-color, var(--color-bg-active));
+  color: var(--label-fg, var(--color-text-inverse, #ffffff));
+}
+.card__author { margin-top: var(--space-2); font-size: var(--font-xs); }
+/* 已关闭卡片：灰显 + 左边框 muted（与 KanbanColumnSection .card--closed 一致） */
 .card--closed {
-  opacity: 0.7;
+  opacity: 0.6;
   border-left-color: var(--color-text-muted);
 }
-.card--closed:hover { opacity: 0.9; }
+.card--closed:hover { opacity: 0.8; }
 .card--closed .card__state {
   font-size: var(--font-xs);
   padding: 1px 6px;
@@ -202,6 +249,7 @@ function onToggle(): void {
   padding: var(--space-3);
   overflow-y: auto;
   min-height: 100px;
-  max-height: 60vh;
+  /* v1.4（2026-06-19）：高度由 .board__done-wrap 的 max-height:40% 限制，
+     展开时内容区在此限额内滚动，不撑破 wrapper。 */
 }
 </style>

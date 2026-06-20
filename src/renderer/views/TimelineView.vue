@@ -404,6 +404,27 @@ function laneColorToken(laneId: string): string {
   return lane.color; // fallback: 后端给的 hex
 }
 
+/**
+ * v1.4 性能优化（2026-06-19 · INP > 1s 修复）：
+ * 预建 laneId → { color, soft, label } 映射，O(1) 查找替代 laneColorToken /
+ * laneSoftToken 在 commitRows / graphPaths 里每节点 O(n) find + 多次 startsWith。
+ *
+ * 旧版 commitRows 500 节点 × 2 次 find（color + soft）= 1000 次线性扫描 + 8000 次
+ * startsWith；新版 1 次 lanes 遍历建 map，节点查 O(1)。
+ */
+const laneStyleMap = computed<Map<string, { color: string; soft: string; label: string }>>(() => {
+  const map = new Map<string, { color: string; soft: string; label: string }>();
+  if (!timeline.value) return map;
+  for (const lane of timeline.value.lanes) {
+    map.set(lane.id, {
+      color: laneColorToken(lane.id),
+      soft: laneSoftToken(lane.id),
+      label: lane.label,
+    });
+  }
+  return map;
+});
+
 /** 分支名 → chip 样式（与外部 commit-row__branch pill 视觉一致） */
 function branchChipStyle(name: string): string {
   if (!timeline.value) return '';
@@ -511,8 +532,17 @@ const graphPaths = computed<GraphPath[]>(() => {
   const main = mainLane.value;
   if (!main) return [];
   const mainX = xMap.get(main.id) ?? 5;
-  const mainColor = laneColorToken(main.id);
+  const lsm = laneStyleMap.value;
+  const mainColor = lsm.get(main.id)?.color ?? 'var(--color-primary)';
   const lastY = yMap.get(nodes[nodes.length - 1]!.id) ?? 0;
+
+  // v1.4 INP 优化：预建 laneId → nodes[] 分组，避免每 lane 全量 filter nodes
+  const nodesByLane = new Map<string, CommitNodeDto[]>();
+  for (const n of nodes) {
+    const arr = nodesByLane.get(n.laneId);
+    if (arr) arr.push(n);
+    else nodesByLane.set(n.laneId, [n]);
+  }
 
   const paths: GraphPath[] = [];
 
@@ -522,10 +552,10 @@ const graphPaths = computed<GraphPath[]>(() => {
   // === 2. 每个 branch lane 的曲线 ===
   const branchLanes = timeline.value.lanes.filter((l) => l.order > 0);
   for (const lane of branchLanes) {
-    const laneNodes = nodes.filter((n) => n.laneId === lane.id);
+    const laneNodes = nodesByLane.get(lane.id) ?? [];
     if (laneNodes.length === 0) continue;
     const x = xMap.get(lane.id) ?? 0;
-    const color = laneColorToken(lane.id);
+    const color = lsm.get(lane.id)?.color ?? 'var(--color-text-secondary)';
     // 第一个节点（最新）
     const firstY = yMap.get(laneNodes[0]!.id) ?? 0;
     // 最后一个节点（最旧）
@@ -574,7 +604,7 @@ const graphPaths = computed<GraphPath[]>(() => {
     // 这里采用更简单的方法：基于 lane order 推算 — order 3 之后的所有 lane 都会有曲线穿过 expX
     const laterLanes = branchLanes.filter((l) => l.order > (expLane.order ?? 3));
     for (const lane of laterLanes) {
-      const laneNodesInOrder = nodes.filter((n) => n.laneId === lane.id);
+      const laneNodesInOrder = nodesByLane.get(lane.id) ?? [];
       if (laneNodesInOrder.length === 0) continue;
       // 入口曲线穿过 expX 的 y ≈ enterY + ROW_H/2 + 8
       const firstY = yMap.get(laneNodesInOrder[0]!.id) ?? 0;
@@ -610,22 +640,33 @@ interface CommitRow {
   branchPillStyle: string;
   authorInitials: string;
   authorColor: string;
+  /** v1.4 INP 优化：预计算相对时间，避免模板 v-for 每次调 formatRelative */
+  relativeTime: string;
 }
 
 const commitRows = computed<CommitRow[]>(() => {
   if (!timeline.value) return [];
   const xMap = laneXMap.value;
   const yMap = nodeYMap.value;
+  // v1.4 INP 优化：预建 lane 查找表，避免每节点 find
+  const lanes = timeline.value.lanes;
+  const laneById = new Map<string, { label: string }>();
+  for (const l of lanes) laneById.set(l.id, l);
+  const lsm = laneStyleMap.value;
+  const now = Date.now();
   return sortedNodes.value.map((n, i) => {
     const dotX = xMap.get(n.laneId) ?? 5;
     const rowY = i * ROW_H + 18;
+    const laneInfo = lsm.get(n.laneId);
+    const color = laneInfo?.color ?? 'var(--color-text-secondary)';
+    const soft = laneInfo?.soft ?? 'var(--color-bg-hover)';
     // 分支 pill：取 branchHints[0] 或 lane.label
-    const branchPill = n.branchHints[0] ?? timeline.value!.lanes.find((l) => l.id === n.laneId)?.label ?? '';
-    const branchPillStyle = `background: ${laneSoftToken(n.laneId)}; color: ${laneColorToken(n.laneId)};`;
+    const branchPill = n.branchHints[0] ?? laneById.get(n.laneId)?.label ?? '';
+    const branchPillStyle = `background: ${soft}; color: ${color};`;
     // 作者头像首字母 + 颜色
     const authorInitials = n.author.name.slice(0, 2).toUpperCase();
-    // 用 lane color 作为 author avatar 背景（简化）
-    const authorColor = laneColorToken(n.laneId);
+    // v1.4 INP 优化：预计算相对时间（原模板 formatRelative 每次渲染重算）
+    const relativeTime = formatRelative(n.timestamp, now);
     return {
       node: n,
       dotX,
@@ -635,17 +676,18 @@ const commitRows = computed<CommitRow[]>(() => {
       branchPill,
       branchPillStyle,
       authorInitials,
-      authorColor,
+      authorColor: color,
+      relativeTime,
     };
   });
 });
 
 const totalRows = computed(() => commitRows.value.length);
 
-/** 把 ISO 时间戳转成"X 天前 / X 小时前"——简化版 */
-function formatRelative(iso: string): string {
+/** 把 ISO 时间戳转成"X 天前 / X 小时前"——简化版
+ *  v1.4 INP 优化：接受可选 now 参数，commitRows 批量计算时复用同一个 now */
+function formatRelative(iso: string, now = Date.now()): string {
   const t = new Date(iso).getTime();
-  const now = Date.now();
   const diff = now - t;
   const min = Math.floor(diff / 60_000);
   if (min < 1) return '刚刚';
@@ -788,9 +830,12 @@ function formatRelative(iso: string): string {
                   />
                 </svg>
                 <!-- 行 -->
+                <!-- v1.4 INP 优化：v-memo 让大部分行在 prFocusSha 变化时跳过 patch，
+                     只有命中/原命中行（sha === prFocusSha 翻转）重新 diff -->
                 <div
                   v-for="row in commitRows"
                   :key="row.node.id"
+                  v-memo="[row, row.node.sha === prFocusSha]"
                   class="commit-row"
                   :class="{
                     'is-head-row': row.isHead,
@@ -833,7 +878,7 @@ function formatRelative(iso: string): string {
                       >{{ row.authorInitials }}</span>
                       <span>{{ row.node.author.name }}</span>
                     </div>
-                    <div class="commit-row__time">{{ formatRelative(row.node.timestamp) }}</div>
+                    <div class="commit-row__time">{{ row.relativeTime }}</div>
                   </div>
                 </div>
               </div>

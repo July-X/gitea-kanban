@@ -11,9 +11,10 @@
  * - 数据：props.issue（IssueCardDto）传当前议题；评论 props 传入或组件内自加载
  * - 通信：props.open + emit('update:open') + emit('comment-created')
  */
-import { ref, watch } from 'vue';
-import { X, Send } from 'lucide-vue-next';
-import type { IssueCardDto, IssueCommentDto } from '../../../../main/ipc/schema.js';
+import { computed, ref, watch } from 'vue';
+import { X, Send, GitBranch } from 'lucide-vue-next';
+import type { IssueCardDto, IssueCommentDto, IssueLabelDto } from '../../../../main/ipc/schema.js';
+import LabelSelectDropdown from '@renderer/components/board/LabelSelectDropdown.vue';
 
 interface Props {
   open: boolean;
@@ -25,17 +26,22 @@ interface Props {
   commentsLoading?: boolean;
   /** 发评论中 */
   submitting?: boolean;
+  /** v1.4：仓库全部标签（标签编辑用） */
+  allLabels?: IssueLabelDto[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
   commentsLoading: false,
   submitting: false,
+  allLabels: () => [],
 });
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void;
   (e: 'request-comments', issueIndex: number): void;
   (e: 'submit-comment', payload: { issueIndex: number; body: string }): void;
+  /** v1.4：标签增删（父组件调 store.updateIssueLabels） */
+  (e: 'update-labels', payload: { issueIndex: number; addLabelIds: number[]; removeLabelIds: number[] }): void;
 }>();
 
 const commentDraft = ref('');
@@ -51,6 +57,19 @@ watch(
 );
 
 const canSubmitComment = () => commentDraft.value.trim().length > 0;
+
+/** v1.4：标签编辑 —— 当前 issue 已有的 label id 集合 */
+const issueLabelIds = computed<Set<number>>(() => new Set(props.issue?.labels.map((l) => l.id) ?? []));
+
+/** v1.4：标签切换（LabelSelectDropdown toggle）—— 已有则删，没有则加 */
+function toggleLabel(id: number): void {
+  if (!props.issue) return;
+  if (issueLabelIds.value.has(id)) {
+    emit('update-labels', { issueIndex: props.issue.index, addLabelIds: [], removeLabelIds: [id] });
+  } else {
+    emit('update-labels', { issueIndex: props.issue.index, addLabelIds: [id], removeLabelIds: [] });
+  }
+}
 
 function close(): void {
   emit('update:open', false);
@@ -110,16 +129,21 @@ function fmtDate(iso: string): string {
             <span class="muted">更新：{{ fmtDate(props.issue.updatedAt) }}</span>
           </div>
 
-          <!-- 标签 -->
-          <div v-if="props.issue.labels.length" class="issue-detail__labels">
-            <span
-              v-for="lab in props.issue.labels"
-              :key="lab.id"
-              class="issue-detail__label"
-              :style="{ '--label-color': lab.color }"
-            >
-              {{ lab.name }}
-            </span>
+          <!-- 标签（v1.4：带搜索过滤下拉框，可二次增删） -->
+          <div class="issue-detail__labels-section">
+            <span class="issue-detail__section-label">标签</span>
+            <LabelSelectDropdown
+              :labels="props.allLabels"
+              :selected-ids="issueLabelIds"
+              placeholder="搜索或选择标签"
+              @toggle="toggleLabel"
+            />
+          </div>
+
+          <!-- 关联分支（v1.4） -->
+          <div v-if="props.issue.refBranch" class="issue-detail__ref-branch">
+            <GitBranch :size="13" :stroke-width="2" aria-hidden="true" />
+            <span class="mono">{{ props.issue.refBranch }}</span>
           </div>
 
           <!-- 正文 -->
@@ -236,12 +260,74 @@ function fmtDate(iso: string): string {
   flex-wrap: wrap;
   gap: 4px;
 }
+/* v1.4：标签二次修改区 */
+.issue-detail__labels-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.issue-detail__section-label {
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+.issue-detail__labels-current {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.issue-detail__labels-available {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.issue-detail__labels-hint {
+  font-size: var(--font-xs);
+  margin-right: 2px;
+}
+.issue-detail__labels-empty {
+  font-size: var(--font-xs);
+  font-style: italic;
+}
 .issue-detail__label {
   padding: 2px 8px;
   border-radius: var(--radius-pill);
   font-size: var(--font-xs);
   background: var(--label-color, var(--color-bg-hover));
   color: var(--color-text-inverse, #fff);
+}
+.issue-detail__label--removable {
+  cursor: pointer;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.issue-detail__label--removable:hover {
+  opacity: 0.6;
+}
+.issue-detail__label--addable {
+  cursor: pointer;
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+  color: var(--color-text-muted);
+  transition: all var(--t-fast) var(--ease);
+}
+.issue-detail__label--addable:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  border-style: solid;
+}
+/* v1.4：关联分支展示 */
+.issue-detail__ref-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  padding: 2px 8px;
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  align-self: flex-start;
 }
 .issue-detail__section {
   display: flex;

@@ -25,6 +25,7 @@ function makeIssue(idx: number, labelIds: number[], state: 'open' | 'closed' = '
     author: { username: 'u' },
     labels: labelIds.map((lId) => ({ id: lId, name: `l-${lId}`, color: '#000' })),
     isPullRequest: false,
+    refBranch: '',
   };
 }
 

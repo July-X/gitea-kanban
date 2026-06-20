@@ -226,6 +226,7 @@ function toIssueCardDto(raw: GiteaIssue): IssueCardDto {
         }))
       : [],
     isPullRequest: Boolean(raw.pull_request),
+    refBranch: raw.ref ?? '',
   };
 }
 

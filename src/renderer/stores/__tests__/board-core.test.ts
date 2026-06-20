@@ -99,6 +99,7 @@ function makeIssue(index: number, title: string, labels: IssueLabelDto[]): Issue
     author: { username: 'tester' },
     labels,
     isPullRequest: false,
+    refBranch: '',
     createdAt: '2026-06-01T00:00:00Z',
     updatedAt: '2026-06-01T00:00:00Z',
   };

@@ -665,15 +665,17 @@ export function issuesCreate(args: {
   labelIds?: number[];
   milestoneId?: number;
   assignees?: string[];
+  /** v1.4：关联分支（gitea ref 字段，必填） */
+  refBranch: string;
 }): Promise<IssueCardDto> {
   return getIpcClient().invoke('issues', 'create', args);
 }
 
-/** 更新 issue（标题 / 正文 /状态） */
+/** 更新 issue（标题 / 正文 /状态 /关联分支） */
 export function issuesUpdate(args: {
  projectId: string;
  issueIndex: number;
- patch: { title?: string; body?: string; state?: 'open' | 'closed' };
+ patch: { title?: string; body?: string; state?: 'open' | 'closed'; refBranch?: string };
 }): Promise<IssueCardDto> {
  return getIpcClient().invoke('issues', 'update', args);
 }

@@ -49,6 +49,8 @@ function toIssueDto(r: Issue): IssueCardDto {
     labels: (r.labels ?? []).map((l) => labelToDto(l)),
     // true 当 gitea response 包含非空 pull_request（gitea 把 PR 也列在 /issues）
     isPullRequest: r.pull_request != null,
+    // v1.4：gitea issue ref 字段（关联分支/Git 标签），无关联时为空串
+    refBranch: r.ref ?? '',
   };
 }
 
@@ -141,6 +143,8 @@ export async function createGiteaIssue(args: {
   labelIds?: number[];
   milestoneId?: number;
   assignees?: string[];
+  /** v1.4：关联分支（gitea CreateIssueOption.ref 字段） */
+  refBranch?: string;
 }): Promise<IssueCardDto> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
 
@@ -151,12 +155,14 @@ export async function createGiteaIssue(args: {
     // v1.4 扩展：里程碑（gitea milestone 字段 = milestone id）+ 指派人（gitea username 列表）
     ...(args.milestoneId !== undefined ? { milestone: args.milestoneId } : {}),
     ...(args.assignees && args.assignees.length > 0 ? { assignees: args.assignees } : {}),
+    // v1.4：关联分支（gitea ref 字段）
+    ...(args.refBranch ? { ref: args.refBranch } : {}),
   });
   const raw = unwrapGitea(res, `创建 issue失败`);
   return toIssueDto(raw);
 }
 
-/** 编辑 issue（title / body / state） */
+/** 编辑 issue（title / body / state / ref） */
 export async function editGiteaIssue(args: {
   giteaUrl: string;
   username: string;
@@ -166,6 +172,8 @@ export async function editGiteaIssue(args: {
   title?: string;
   body?: string;
   state?: 'open' | 'closed';
+  /** v1.4：关联分支（gitea EditIssueOption.ref 字段） */
+  refBranch?: string;
 }): Promise<IssueCardDto> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
 
@@ -173,6 +181,7 @@ export async function editGiteaIssue(args: {
     ...(args.title !== undefined ? { title: args.title } : {}),
     ...(args.body !== undefined ? { body: args.body } : {}),
     ...(args.state !== undefined ? { state: args.state } : {}),
+    ...(args.refBranch !== undefined ? { ref: args.refBranch } : {}),
   });
   const raw = unwrapGitea(res, `编辑 issue #${args.index}失败`);
   return toIssueDto(raw);

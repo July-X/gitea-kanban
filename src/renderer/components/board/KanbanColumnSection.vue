@@ -60,6 +60,12 @@ interface Props {
   isOverLimit: boolean;
   overLimitTooltip: string;
   dragOptions: Record<string, unknown>;
+  /**
+   * v1.4（2026-06-19）：可选的根节点内联样式（用于「已完成」列限高）。
+   * - 父组件注入 --done-max-height / --done-align，scoped CSS 读取后限制列高
+   * - 非已完成列不传（保持默认 max-height:100% / align-self:stretch）
+   */
+  columnStyle?: Record<string, string>;
 }
 
 const props = defineProps<Props>();
@@ -93,10 +99,12 @@ const closedToggleText = computed(() => {
 function onToggleClosed(): void {
   emit('toggle-show-closed', props.column.id);
 }
-/** 显示哪些 issues（merge open + closed 当 showClosed 时） */
+/** 显示哪些 issues（merge open + closed 当 showClosed 时）
+ *  v1.4：已关闭部分按编号倒序（编号大的在前面），与独立「已关闭」折叠区一致 */
 const displayIssues = computed<IssueCardDto[]>(() => {
   if (props.showClosedInColumn) {
-    return [...props.issues, ...props.closedIssues];
+    const closedDesc = [...props.closedIssues].sort((a, b) => b.index - a.index);
+    return [...props.issues, ...closedDesc];
   }
   return props.issues;
 });
@@ -106,6 +114,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
   <section
     class="column"
     :class="{ 'column--over-limit': props.isOverLimit }"
+    :style="props.columnStyle"
     :title="props.isOverLimit ? props.overLimitTooltip : ''"
     :aria-label="props.isOverLimit ? props.overLimitTooltip : undefined"
   >
@@ -245,9 +254,12 @@ const displayIssues = computed<IssueCardDto[]>(() => {
 <style scoped>
 .column {
   flex: 0 0 280px;
+  /* v1.4（2026-06-19）：高度自适应内容区（= Window 减去 topbar/statusbar），
+     align-items:stretch 让列纵向拉满；min-height:0 让 .column__cards 能在列内滚动 */
   display: flex;
   flex-direction: column;
-  max-height: 100%;
+  height: 100%;
+  min-height: 0;
   background: var(--color-bg-elevated);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);

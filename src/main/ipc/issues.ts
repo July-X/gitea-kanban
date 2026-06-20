@@ -141,6 +141,8 @@ async function createIssueHandler(args: CreateIssueArgs): Promise<IssueCardDto> 
     // v1.4 扩展：里程碑 + 指派人透传到 gitea issueCreateIssue
     ...(args.milestoneId !== undefined ? { milestoneId: args.milestoneId } : {}),
     ...(args.assignees && args.assignees.length > 0 ? { assignees: args.assignees } : {}),
+    // v1.4：关联分支（gitea ref 字段，必填）
+    refBranch: args.refBranch,
   });
   logger.info({ op: 'issues.create', latencyMs: Date.now() - start, issueIndex: result.index }, 'ipc done');
   return result;
@@ -159,6 +161,8 @@ async function updateIssueHandler(args: UpdateIssueArgs): Promise<IssueCardDto> 
  ...(args.patch.title !== undefined ? { title: args.patch.title } : {}),
  ...(args.patch.body !== undefined ? { body: args.patch.body } : {}),
  ...(args.patch.state !== undefined ? { state: args.patch.state } : {}),
+ // v1.4：关联分支（gitea ref 字段）
+ ...(args.patch.refBranch !== undefined ? { refBranch: args.patch.refBranch } : {}),
  });
  logger.info({ op: 'issues.update', latencyMs: Date.now() - start, issueIndex: args.issueIndex }, 'ipc done');
  return result;

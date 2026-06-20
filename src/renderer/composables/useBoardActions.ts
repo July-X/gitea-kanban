@@ -76,7 +76,8 @@ export function useBoardActions(options: UseBoardActionsOptions): UseBoardAction
     const title = (options.newIssueDrafts[col.id] ?? '').trim();
     if (!title || !id) return;
     try {
-      await board.createIssue({ projectId: id, columnId: col.id, title });
+      // v1.4：refBranch 必填，旧路径无分支选择 → 传主分支名兜底
+      await board.createIssue({ projectId: id, columnId: col.id, title, refBranch: 'main' });
       options.newIssueDrafts[col.id] = '';
       showToast({ type: 'success', message: '已创建议题' });
     } catch {

@@ -16,7 +16,8 @@
  */
 import { computed, ref, watch } from 'vue';
 import { X, Plus } from 'lucide-vue-next';
-import type { IssueLabelDto, CollaboratorDto, MilestoneDto } from '../../../../main/ipc/schema.js';
+import type { IssueLabelDto, CollaboratorDto, MilestoneDto, BranchDto } from '../../../../main/ipc/schema.js';
+import LabelSelectDropdown from '@renderer/components/board/LabelSelectDropdown.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -27,12 +28,14 @@ const props = withDefaults(
     members?: CollaboratorDto[];
     /** 仓库里程碑（来自 window.api.milestones.list） */
     milestones?: MilestoneDto[];
+    /** v1.4：仓库分支列表（来自 branch store / branchesList） */
+    branches?: BranchDto[];
     /** 锁定的看板列标题（展示用，如"新建"） */
     lockedColumnTitle: string;
     /** 里程碑/指派人加载中 */
     loading?: boolean;
   }>(),
-  { labels: () => [], members: () => [], milestones: () => [], loading: false },
+  { labels: () => [], members: () => [], milestones: () => [], branches: () => [], loading: false },
 );
 
 const emit = defineEmits<{
@@ -45,6 +48,8 @@ const emit = defineEmits<{
       labelIds?: number[];
       assignees?: string[];
       milestoneId?: number;
+      /** v1.4：关联分支（必填） */
+      refBranch: string;
     },
   ): void;
 }>();
@@ -55,6 +60,8 @@ const body = ref('');
 const selectedLabelIds = ref<Set<number>>(new Set());
 const selectedAssignees = ref<Set<string>>(new Set());
 const selectedMilestoneId = ref<number | null>(null);
+/** v1.4：关联分支（必填） */
+const selectedBranch = ref('');
 
 // 每次打开弹窗时重置表单
 watch(
@@ -66,11 +73,13 @@ watch(
       selectedLabelIds.value = new Set();
       selectedAssignees.value = new Set();
       selectedMilestoneId.value = null;
+      // v1.4：默认选主分支（如果有）
+      selectedBranch.value = props.branches.find((b) => b.isDefault)?.name ?? '';
     }
   },
 );
 
-const canSubmit = computed(() => title.value.trim().length > 0);
+const canSubmit = computed(() => title.value.trim().length > 0 && selectedBranch.value.length > 0);
 
 /** 是否有未保存改动（标题/正文/标签/指派人/里程碑 任一非空） */
 const hasUnsavedChanges = computed(
@@ -120,6 +129,7 @@ function submit(): void {
       ? { assignees: Array.from(selectedAssignees.value) }
       : {}),
     ...(selectedMilestoneId.value !== null ? { milestoneId: selectedMilestoneId.value } : {}),
+    refBranch: selectedBranch.value,
   });
 }
 </script>
@@ -136,6 +146,27 @@ function submit(): void {
           </button>
         </header>
         <div class="modal__body create-issue__body">
+          <!-- 关联分支（必填 · v1.4 · 置顶） -->
+          <div class="create-issue__field">
+            <label class="create-issue__label" for="create-issue-branch">
+              关联分支 <span class="create-issue__required">*</span>
+            </label>
+            <select
+              id="create-issue-branch"
+              v-model="selectedBranch"
+              class="create-issue__select"
+              :disabled="props.loading || props.branches.length === 0"
+            >
+              <option value="" disabled>请选择分支</option>
+              <option v-for="b in props.branches" :key="b.name" :value="b.name">
+                {{ b.name }}{{ b.isDefault ? '（默认）' : '' }}
+              </option>
+            </select>
+            <span v-if="props.branches.length === 0" class="create-issue__empty-hint">
+              暂无分支，请先在 Gitea 创建分支
+            </span>
+          </div>
+
           <!-- 标题（必填） -->
           <div class="create-issue__field">
             <label class="create-issue__label" for="create-issue-title">标题</label>
@@ -161,26 +192,15 @@ function submit(): void {
             />
           </div>
 
-          <!-- 标签（多选） -->
+          <!-- 标签（多选 · v1.4：带搜索过滤下拉框） -->
           <div class="create-issue__field">
             <span class="create-issue__label">标签</span>
-            <div class="create-issue__chips">
-              <button
-                v-for="lab in props.labels"
-                :key="lab.id"
-                type="button"
-                class="create-issue__chip"
-                :class="{ 'create-issue__chip--active': selectedLabelIds.has(lab.id) }"
-                :title="lab.description || lab.name"
-                @click="toggleLabel(lab.id)"
-              >
-                <span class="create-issue__chip-dot" :style="{ background: lab.color || '#888' }" />
-                <span>{{ lab.name }}</span>
-              </button>
-              <span v-if="props.labels.length === 0" class="create-issue__empty-hint">
-                仓库暂无标签
-              </span>
-            </div>
+            <LabelSelectDropdown
+              :labels="props.labels"
+              :selected-ids="selectedLabelIds"
+              placeholder="搜索或选择标签"
+              @toggle="toggleLabel"
+            />
           </div>
 
           <!-- 里程碑（下拉单选） -->
@@ -272,6 +292,9 @@ function submit(): void {
   font-size: var(--font-xs);
   font-weight: 500;
   color: var(--color-text-muted);
+}
+.create-issue__required {
+  color: var(--color-danger);
 }
 .create-issue__input,
 .create-issue__textarea,
