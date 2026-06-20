@@ -1316,14 +1316,16 @@ if (typeof window !== 'undefined') {
 .commit-list::-webkit-scrollbar-thumb { background: var(--color-divider); border-radius: 5px; }
 .commit-list::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 /*
- * C-3 硬约束 #6（TimelineView · responsive）修法（2026-06-14）：
- * 旧版 min-width: 880px 阻塞 960×600 最小窗口布局。
- * 窗口 960 - navrail 224 - statusbar 28 = 708px 主区，
- * 880px > 708px 必须横向滚动。改用 auto-fit grid 自适应。
- * 注：commit-row 4 列 grid 在 1024×720 仍能完整显示（720 - 224 - 28 ≈ 468px），
- * 用 fr 单位让列宽自动按比例缩小；窄于 600px 退化为 2 列（桌面断点）。
+ * v1.5 修复（2026-06-20 · 任务 #timeline-graph-fix）：
+ * 旧版 `.commit-list__inner` 有 `padding-left: var(--space-3)` (12px)，
+ * 但 `.commit-list__edges` (SVG) 是 absolute `left:0` 不受 padding 影响 →
+ * SVG 起点跟 commit-row 起点错开 12px → dot center (5px) 实际 DOM 位置 17px，
+ * SVG x=5 在 DOM 5px 位置 → 线和点对不上。
+ *
+ * 修法：去掉 padding-left（commit-row 贴左对齐 SVG），dot center = 5px = SVG x=5 重合。
+ * hash 列距 dot 还有 60-5=55px 间距，不需要额外 padding。
  */
-.commit-list__inner { position: relative; min-width: 0; padding-left: var(--space-3); }
+.commit-list__inner { position: relative; min-width: 0; padding-left: 0; }
 .commit-list__edges {
   position: absolute; top: 0; left: 0;
   width: 54px; height: 100%;
