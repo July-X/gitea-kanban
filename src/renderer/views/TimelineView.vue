@@ -350,13 +350,17 @@ watch(() => activeProjectId.value, async (id) => {
 // 数据布局计算（commit 排序 / lane 映射 / heatmap / SVG 路径）
 // ============================================================
 
-const ROW_H = 32;
-/** SVG 宽度 = 起始 padding 5 + 10 lanes × 14px 步进 + 尾部 padding 5 = 150（Gitea 风格 1:1 复刻） */
-const GRAPH_W = 150;
-/** lane 间距（14px 步进，从 x=5 开始） */
-const LANE_GAP = 14;
-/** commit dot 半径（CSS dot 14px 直径对应 7px 半径；线条端点避开 dot 用） */
-const DOT_R = 7;
+const ROW_H = 36;
+/** SVG 宽度 = 54px（直接复用 wireframe 值） */
+const GRAPH_W = 54;
+/** lane 间距（wireframe: x=5,11,17,... 间距=6） */
+const LANE_GAP = 6;
+/** commit dot 半径（wireframe: dot 直径 10px → 5px 半径） */
+const DOT_R = 5;
+/** wireframe: lane0 dot X=5 */
+const LANE_START = 5;
+/** wireframe bezier 控制点固定偏移（不受 LANE_GAP 影响） */
+const BEZIER_OFFSET = 8;
 
 /** 节点按时间戳倒序（新 → 旧） */
 const sortedNodes = computed<CommitNodeDto[]>(() => {
@@ -387,7 +391,7 @@ const laneXMap = computed<Map<string, number>>(() => {
   const lanes = [...timeline.value.lanes].sort((a, b) => a.order - b.order);
   const main = mainLane.value;
   if (!main) {
-    lanes.forEach((lane, i) => map.set(lane.id, 5 + i * LANE_GAP));
+    lanes.forEach((lane, i) => map.set(lane.id, LANE_START + i * LANE_GAP));
     return map;
   }
   const totalLanes = lanes.length;
@@ -396,11 +400,11 @@ const laneXMap = computed<Map<string, number>>(() => {
   const before = others.slice(0, mainTargetIdx);
   const after = others.slice(mainTargetIdx);
   before.forEach((lane, i) => {
-    map.set(lane.id, 5 + i * LANE_GAP);
+    map.set(lane.id, LANE_START + i * LANE_GAP);
   });
-  map.set(main.id, 5 + before.length * LANE_GAP);
+  map.set(main.id, LANE_START + before.length * LANE_GAP);
   after.forEach((lane, i) => {
-    map.set(lane.id, 5 + (before.length + 1 + i) * LANE_GAP);
+    map.set(lane.id, LANE_START + (before.length + 1 + i) * LANE_GAP);
   });
   return map;
 });
@@ -420,14 +424,42 @@ const nodeYMap = computed<Map<string, number>>(() => {
  * merge edge 用 var(--color-danger) 红色单独区分（看 Gitea 截图 merge 曲线是红色）。
  *
  * 注：laneSoftToken 仍按 lane label 区分（用于 commit-row__branch pill chip 背景色），
- * 分支名 chip 的视觉区分由 pill 颜色承担，不影响 dot/线条。
- */
+  * 分支名 chip 的视觉区分由 pill 颜色承担，不影响 dot/线条。
+  */
 function laneColorToken(laneId: string): string {
   if (!timeline.value) return 'var(--color-text-secondary)';
   const lane = timeline.value.lanes.find((l) => l.id === laneId);
   if (!lane) return 'var(--color-text-secondary)';
-  // Gitea 1:1：所有 lane dot 和线条统一主色（绿）
-  return 'var(--color-primary)';
+  // wireframe §Branch colors：按 label 前缀映射语义色
+  const l = lane.label.toLowerCase();
+  if (l === 'main') return 'var(--color-primary)';         // 绿色
+  if (l.startsWith('feature')) return 'var(--color-accent)';   // 橙色
+  if (l.startsWith('hotfix')) return 'var(--color-info)';       // 蓝色
+  if (l.startsWith('user/') && l.includes('/exp')) return 'var(--color-purple)'; // 紫色
+  if (l.startsWith('chore')) return 'var(--color-teal)';         // 青色
+  if (l.startsWith('refactor')) return 'var(--color-warning)';  // 黄色
+  if (l.startsWith('docs')) return 'var(--color-pink)';         // 粉色
+  if (l.startsWith('spike')) return 'var(--color-lime)';        // 青柠色
+  return 'var(--color-primary)'; // 默认绿色主线
+}
+
+/** author name → 确定性颜色（wireframe avatarBg 用 author 色，非 lane 色） */
+const AUTHOR_COLORS = [
+  'var(--color-info)',      // 蓝
+  'var(--color-accent)',    // 橙
+  'var(--color-danger)',    // 红
+  'var(--color-purple)',    // 紫
+  'var(--color-teal)',     // 青
+  'var(--color-warning)',  // 黄
+  'var(--color-pink)',     // 粉
+  'var(--color-lime)',     // 青柠
+];
+function authorColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return AUTHOR_COLORS[hash % AUTHOR_COLORS.length]!;
 }
 
 /**
@@ -625,16 +657,12 @@ const graphPaths = computed<GraphPath[]>(() => {
     // source = child（时间更近，sy 更小）；起点 source dot 下边缘，终点 target dot 上边缘
     const startY = sy + DOT_R;
     const endY = ty - DOT_R;
-    const verticalGap = endY - startY; // > 0
-    const halfGap = Math.max(DOT_R * 2, verticalGap / 2);
 
-    const color =
-      e.kind === 'merge'
-        ? 'var(--color-danger)'
-        : (lsm.get(tNode.laneId)?.color ?? 'var(--color-primary)');
+    // wireframe bezier 控制点偏移 = 固定 8px
+    const color = lsm.get(tNode.laneId)?.color ?? 'var(--color-primary)';
 
     paths.push({
-      d: `M ${sx} ${startY} C ${sx} ${startY + halfGap}, ${tx} ${endY - halfGap}, ${tx} ${endY}`,
+      d: `M ${sx} ${startY} C ${sx} ${startY + BEZIER_OFFSET}, ${tx} ${endY - BEZIER_OFFSET}, ${tx} ${endY}`,
       color,
     });
   }
@@ -672,7 +700,10 @@ interface CommitRow {
   branchPill: string;
   branchPillStyle: string;
   authorInitials: string;
+  /** 头像背景色：按 author name 确定性映射 */
   authorColor: string;
+  /** dot/线条颜色：按 lane 类型映射 */
+  laneColor: string;
   /** v1.4 INP 优化：预计算相对时间，避免模板 v-for 每次调 formatRelative */
   relativeTime: string;
 }
@@ -688,16 +719,17 @@ const commitRows = computed<CommitRow[]>(() => {
   const lsm = laneStyleMap.value;
   const now = Date.now();
   return sortedNodes.value.map((n, i) => {
-    const dotX = xMap.get(n.laneId) ?? 5;
-    const rowY = i * ROW_H + 18;
+    const dotX = xMap.get(n.laneId) ?? LANE_START;
+    const rowY = i * ROW_H + ROW_H / 2;
     const laneInfo = lsm.get(n.laneId);
-    const color = laneInfo?.color ?? 'var(--color-text-secondary)';
+    const laneColor = laneInfo?.color ?? 'var(--color-text-secondary)';
     const soft = laneInfo?.soft ?? 'var(--color-bg-hover)';
     // 分支 pill：取 branchHints[0] 或 lane.label
     const branchPill = n.branchHints[0] ?? laneById.get(n.laneId)?.label ?? '';
-    const branchPillStyle = `background: ${soft}; color: ${color};`;
-    // 作者头像首字母 + 颜色
+    const branchPillStyle = `background: ${soft}; color: ${laneColor};`;
+    // 作者头像首字母 + 颜色（wireframe: avatarBg = author 色，非 lane 色）
     const authorInitials = n.author.name.slice(0, 2).toUpperCase();
+    const avatarColor = authorColor(n.author.name);
     // v1.4 INP 优化：预计算相对时间（原模板 formatRelative 每次渲染重算）
     const relativeTime = formatRelative(n.timestamp, now);
     return {
@@ -709,7 +741,8 @@ const commitRows = computed<CommitRow[]>(() => {
       branchPill,
       branchPillStyle,
       authorInitials,
-      authorColor: color,
+      authorColor: avatarColor,
+      laneColor,
       relativeTime,
     };
   });
@@ -886,7 +919,7 @@ if (typeof window !== 'undefined') {
                     :stroke="p.color"
                     :stroke-width="p.isBridge ? '2.5' : '1.5'"
                     :stroke-dasharray="p.dashed ? '4 3' : undefined"
-                    :opacity="p.dashed ? '0.55' : (p.isBridge ? '1' : '1')"
+                    :opacity="p.dashed ? '0.55' : '1'"
                     stroke-linecap="round"
                     fill="none"
                   />
@@ -914,34 +947,32 @@ if (typeof window !== 'undefined') {
                   <div class="commit-row__graph">
                     <div
                       class="commit-row__dot"
-                      :class="{ 'is-combined': row.isMerge, 'is-head': row.isHead }"
+                      :class="{ 'is-merge': row.isMerge, 'is-head': row.isHead }"
                       :style="{
                         left: row.dotX + 'px',
-                        '--dot-color': row.authorColor,
-                        background: row.authorColor,
+                        '--dot-color': row.laneColor,
+                        background: row.laneColor,
                       }"
                     />
                   </div>
                   <div class="commit-row__hash mono">{{ row.node.shortSha }}</div>
                   <div class="commit-row__msg" :title="row.node.message">{{ row.node.message }}</div>
-                  <div class="commit-row__meta">
-                    <div
-                      class="commit-row__branch"
-                      :class="{ combined: row.isMerge }"
-                      :style="row.branchPillStyle"
-                    >
-                      <template v-if="row.isMerge">← {{ row.branchPill }}</template>
-                      <template v-else>{{ row.branchPill }}</template>
-                    </div>
-                    <div class="commit-row__author">
-                      <span
-                        class="commit-row__avatar"
-                        :style="{ background: row.authorColor }"
-                      >{{ row.authorInitials }}</span>
-                      <span>{{ row.node.author.name }}</span>
-                    </div>
-                    <div class="commit-row__time">{{ row.relativeTime }}</div>
+                  <div
+                    class="commit-row__branch"
+                    :class="{ merge: row.isMerge }"
+                    :style="row.branchPillStyle"
+                  >
+                    <template v-if="row.isMerge">← {{ row.branchPill }}</template>
+                    <template v-else>{{ row.branchPill }}</template>
                   </div>
+                  <div class="commit-row__author">
+                    <span
+                      class="commit-row__avatar"
+                      :style="{ background: row.authorColor }"
+                    >{{ row.authorInitials }}</span>
+                    <span>{{ row.node.author.name }}</span>
+                  </div>
+                  <div class="commit-row__time">{{ row.relativeTime }}</div>
                 </div>
               </div>
             </div>
@@ -1326,8 +1357,8 @@ if (typeof window !== 'undefined') {
 .commit-list__inner { position: relative; min-width: 0; padding-left: 0; }
 .commit-list__edges {
   position: absolute; top: 0; left: 0;
-  /* GRAPH_W=150 配合 LANE_GAP=14：容纳 10 lanes (x=5+9*14=131) + 19px 尾部 padding */
-  width: 150px; height: 100%;
+  /* wireframe 值：GRAPH_W=54px */
+  width: 54px; height: 100%;
   pointer-events: none;
   z-index: 1;
 }
@@ -1335,28 +1366,17 @@ if (typeof window !== 'undefined') {
 .commit-row {
   position: relative;
   /*
-   * v1.5 Gitea 风格（任务 #timeline-graph-fix）：
-   * 第一列从 60px 扩到 165px，匹配 SVG 宽度（150px）+ commit-row__graph 宽度，
-   * 保证 dot (14px) + 多 lane 缩进（最大 x=131px + dot 半径 7px = 138px）有空间，
-   * hash 列不被裁切。
+   * wireframe grid 列宽（6 列）：
+   * graph 54px | hash 96px | message 1fr | branch 140px | author 140px | time 100px
    */
   display: grid;
-  grid-template-columns: 165px 64px minmax(80px, 1fr) minmax(80px, 240px);
+  grid-template-columns: 54px 96px 1fr 140px 140px 100px;
   align-items: center;
-  height: var(--row-h, 32px);
+  height: var(--row-h, 36px);
   padding: 0 var(--space-3) 0 0;
   cursor: pointer;
   transition: background-color var(--t-base) var(--ease);
   z-index: 2;
-}
-.commit-row__meta {
-  display: grid;
-  /* 后两列 auto 缩到内容，避免 "kanban_bot" 跟 "2 天前" 中间留一大段空 */
-  grid-template-columns: 120px auto auto;
-  align-items: center;
-  justify-content: end;
-  gap: var(--space-2);
-  min-width: 0;
 }
 .commit-row:hover { background: var(--color-bg-hover); }
 .commit-row.is-head-row { background: linear-gradient(90deg, var(--color-primary-soft) 0%, transparent 70%); }
@@ -1373,7 +1393,7 @@ if (typeof window !== 'undefined') {
   background: color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-primary) 8%);
 }
 
-.commit-row__graph { position: relative; width: 150px; height: 100%; }
+.commit-row__graph { position: relative; width: 54px; height: 100%; }
 /*
  * v1.5 Gitea 风格（任务 #timeline-graph-fix）：
  * dot 直径 14px（半径 7px = DOT_R 常量），统一绿色（lane 不区分 dot 颜色）。
@@ -1384,10 +1404,10 @@ if (typeof window !== 'undefined') {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 14px; height: 14px;
+  width: 10px; height: 10px;
   border-radius: 50%;
   color: var(--dot-color, var(--color-primary));
-  box-shadow: 0 0 0 1px var(--color-bg);
+  box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3px var(--dot-halo);
   transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
   z-index: 3;
 }
@@ -1396,52 +1416,45 @@ if (typeof window !== 'undefined') {
  * 与 heatmap__cell 保持一致（OVERRIDE §15.2 "禁用 scale"）。
  * 保留 z-index 提到 5 让 dot 在 hover 时仍在 SVG edges 之上。
  */
-.commit-row:hover .commit-row__dot { z-index: 5; }
+.commit-row:hover .commit-row__dot { transform: translate(-50%, -50%) scale(1.4); z-index: 5; }
+/* wireframe：merge commit dot 是方形的 */
+.commit-row__dot.is-merge { border-radius: 2px; }
 /*
- * v1.5 Gitea 风格：删 `.is-combined { border-radius: 2px }`（merge commit 保持圆形，
- * Gitea 截图里所有 dot 都是圆形，没方形 merge 节点特殊样式）。
- * merge 节点的视觉区分改由 §2 merge edge 红色曲线承担（graphPaths 里 e.kind === 'merge'）。
+ * HEAD dot（wireframe 风格）
  */
 .commit-row__dot.is-head {
   box-shadow:
-    0 0 0 1px var(--color-bg),
-    0 0 0 2px var(--color-primary),
-    0 0 6px var(--color-primary);
+    0 0 0 2px var(--color-bg),
+    0 0 0 3px var(--dot-halo),
+    0 0 6px var(--dot-color);
 }
+/* HEAD 三角标（wireframe: top:-8px, border:4px） */
 .commit-row__dot.is-head::after {
   content: ''; position: absolute; left: 50%; top: -8px;
   transform: translateX(-50%);
   border: 4px solid transparent;
-  border-top-color: var(--color-primary);
-  filter: drop-shadow(0 0 2px var(--color-primary));
+  border-top-color: var(--dot-color);
+  filter: drop-shadow(0 0 2px var(--dot-color));
 }
 
-.commit-row__hash { font-size: var(--font-xs); color: var(--color-info); font-weight: 600; padding-left: 4px; }
+.commit-row__hash { font-size: var(--font-xs); color: var(--color-accent); font-weight: 600; padding-left: 4px; }
 .commit-row__msg { font-size: var(--font-sm); color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: var(--space-3); }
 .commit-row__branch {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-xs);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  justify-self: end;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 2px;
+  font-size: 10px; font-weight: 600;
+  background: var(--branch-bg); color: var(--branch-color);
+  font-family: var(--font-mono-stack);
+  max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.commit-row__branch.combined { color: var(--color-accent) !important; background: var(--color-accent-soft) !important; }
-.commit-row__author { display: flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--color-text-secondary); min-width: 0; }
+.commit-row__branch.merge { background: var(--color-accent-soft); color: var(--color-accent); font-family: inherit; }
+.commit-row__author { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-xs); color: var(--color-text-secondary); }
 .commit-row__avatar {
-  display: inline-grid;
-  place-items: center;
-  width: 20px; height: 20px;
-  border-radius: 50%;
-  font-size: 9px;
-  font-weight: 600;
-  color: #fff;
-  flex-shrink: 0;
+  width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 10px; font-weight: 600; color: #fff; flex-shrink: 0;
 }
-.commit-row__time { font-size: var(--font-xs); color: var(--color-text-muted); text-align: right; }
+.commit-row__time { font-size: var(--font-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; text-align: right; }
 
 .mono { font-family: var(--font-mono-stack); }
 .muted { color: var(--color-text-muted); }
