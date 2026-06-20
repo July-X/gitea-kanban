@@ -19,11 +19,13 @@
  * 5. **不**改业务逻辑（store actions / IPC / main 端）；只搬代码不改语义
  */
 import { computed, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { Plus } from 'lucide-vue-next';
 import { showToast } from '@renderer/lib/toast';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
+import { useBranchStore } from '@renderer/stores/branch';
 import type { ColumnDto, IssueCardDto, RepoDto, CollaboratorDto, MilestoneDto, IssueCommentDto, BranchDto } from '../../main/ipc/schema.js';
 import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
 import { membersList, milestonesList, issuesCommentList, issuesCommentCreate, branchesList } from '@renderer/lib/ipc-client';
@@ -53,6 +55,8 @@ import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 const repo = useRepoStore();
 const board = useBoardStore();
 const auth = useAuthStore();
+const router = useRouter();
+const branchStore = useBranchStore();
 
 // v1.4 调整（2026-06-18）：列内 inline 新建框已移除，新建议题改走 Header 弹窗
 const createIssueDialogOpen = ref(false);
@@ -315,6 +319,49 @@ async function onUpdateIssueLabels(payload: {
   } catch {
     showToast({ type: 'error', message: '标签更新失败', duration: 3000 });
   }
+}
+
+/**
+ * v1.4：点击议题关联分支 → 跳时间轴并高亮该分支最新提交（IssueDetailDialog 触发）。
+ *
+ * 链路（照抄 MergesView.onJumpToTimeline 模式）：
+ * 1. 校验 refBranch 在当前仓库分支列表里（不在则 toast 不跳转）
+ * 2. 取该分支 head commit sha（BranchDto.sha = gitea branch.commit.id）
+ * 3. branchStore.setPendingTimelineFocus({ ref, sha }) → router.push('/timeline')
+ * 4. TimelineView watch pendingTimelineFocus → 选分支加载 timeline + 设 prFocusSha → 滚动高亮
+ *
+ * 分支列表来源：优先复用 createIssueBranches（新建议题弹窗的缓存），
+ * 缓存为空时按需 branchesList 拉一次。弹窗保留（不关），切回看板仍在。
+ */
+async function onJumpToBranch(refBranch: string): Promise<void> {
+  const pid = activeProjectId.value;
+  if (!pid || !refBranch) return;
+
+  // 取分支列表：复用缓存，否则按需拉（失败兜底空数组 → 校验必失败 → toast）
+  let branches = createIssueBranches.value;
+  if (branches.length === 0) {
+    try {
+      const resp = await branchesList({ projectId: pid, limit: 50, page: 1 });
+      branches = resp.items;
+      createIssueBranches.value = branches;
+    } catch {
+      branches = [];
+    }
+  }
+
+  const target = branches.find((b) => b.name === refBranch);
+  if (!target) {
+    showToast({
+      type: 'error',
+      message: '该关联分支不在当前仓库',
+      description: '分支可能已删除，或关联的是标签/提交',
+      duration: 3500,
+    });
+    return;
+  }
+
+  branchStore.setPendingTimelineFocus({ ref: refBranch, sha: target.sha });
+  void router.push('/timeline');
 }
 // v1.4 调整（2026-06-18）：列内新建框已移除，createIssueInColumn 不再使用；
 // 保留 useBoardActions 取 undo/redo，newIssueDrafts 传空对象（createIssueInColumn 不再被调）
@@ -776,6 +823,7 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       @update:open="(v) => (issueDetailOpen = v)"
       @submit-comment="onSubmitComment"
       @update-labels="onUpdateIssueLabels"
+      @jump-to-branch="onJumpToBranch"
     />
   </div>
 </template>

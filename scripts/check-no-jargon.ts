@@ -112,6 +112,7 @@ const FORBIDDEN_TERMS = [
       'refBranch',     // v1.4 IssueCardDto 字段名（gitea ref）
       'ref-branch',    // v1.4 CSS class（issue-detail__ref-branch）
       'create-issue-branch', // v1.4 HTML id（新建议题分支选择框）
+      'jump-to-branch', // v1.4 emit 事件名（IssueDetailDialog 关联分支跳时间轴）
       '不出现',        // 注释禁用词复述
       '禁用词',
       '零术语',

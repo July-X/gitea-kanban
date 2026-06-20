@@ -1259,7 +1259,7 @@ function formatRelative(iso: string, now = Date.now()): string {
  * 注：commit-row 4 列 grid 在 1024×720 仍能完整显示（720 - 224 - 28 ≈ 468px），
  * 用 fr 单位让列宽自动按比例缩小；窄于 600px 退化为 2 列（桌面断点）。
  */
-.commit-list__inner { position: relative; min-width: 0; }
+.commit-list__inner { position: relative; min-width: 0; padding-left: var(--space-3); }
 .commit-list__edges {
   position: absolute; top: 0; left: 0;
   width: 54px; height: 100%;

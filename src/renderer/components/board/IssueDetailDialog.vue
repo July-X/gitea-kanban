@@ -42,6 +42,8 @@ const emit = defineEmits<{
   (e: 'submit-comment', payload: { issueIndex: number; body: string }): void;
   /** v1.4：标签增删（父组件调 store.updateIssueLabels） */
   (e: 'update-labels', payload: { issueIndex: number; addLabelIds: number[]; removeLabelIds: number[] }): void;
+  /** v1.4：点击关联分支跳时间轴（父组件走 branch.setPendingTimelineFocus + router.push） */
+  (e: 'jump-to-branch', refBranch: string): void;
 }>();
 
 const commentDraft = ref('');
@@ -69,6 +71,12 @@ function toggleLabel(id: number): void {
   } else {
     emit('update-labels', { issueIndex: props.issue.index, addLabelIds: [id], removeLabelIds: [] });
   }
+}
+
+/** v1.4：点击关联分支 → emit 给父组件跳时间轴（子组件不直接调 store/router） */
+function onJumpToBranch(): void {
+  if (!props.issue || !props.issue.refBranch) return;
+  emit('jump-to-branch', props.issue.refBranch);
 }
 
 function close(): void {
@@ -140,8 +148,17 @@ function fmtDate(iso: string): string {
             />
           </div>
 
-          <!-- 关联分支（v1.4） -->
-          <div v-if="props.issue.refBranch" class="issue-detail__ref-branch">
+          <!-- 关联分支（v1.4：可点击跳时间轴，高亮该分支最新提交） -->
+          <div
+            v-if="props.issue.refBranch"
+            class="issue-detail__ref-branch"
+            role="button"
+            tabindex="0"
+            title="在时间轴查看此分支"
+            @click="onJumpToBranch"
+            @keydown.enter.prevent="onJumpToBranch"
+            @keydown.space.prevent="onJumpToBranch"
+          >
             <GitBranch :size="13" :stroke-width="2" aria-hidden="true" />
             <span class="mono">{{ props.issue.refBranch }}</span>
           </div>
@@ -317,7 +334,7 @@ function fmtDate(iso: string): string {
   color: var(--color-primary);
   border-style: solid;
 }
-/* v1.4：关联分支展示 */
+/* v1.4：关联分支展示（可点击跳时间轴） */
 .issue-detail__ref-branch {
   display: inline-flex;
   align-items: center;
@@ -328,6 +345,14 @@ function fmtDate(iso: string): string {
   background: var(--color-bg);
   border-radius: var(--radius-sm);
   align-self: flex-start;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.issue-detail__ref-branch:hover,
+.issue-detail__ref-branch:focus-visible {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  outline: none;
 }
 .issue-detail__section {
   display: flex;
