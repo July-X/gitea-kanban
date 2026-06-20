@@ -351,10 +351,10 @@ watch(() => activeProjectId.value, async (id) => {
 // ============================================================
 
 const ROW_H = 32;
-/** SVG 宽度 = 起始 padding 5 + 10 lanes × 10px 步进 + 尾部 padding 15 = 120（容纳 v1.5 多 lane 场景） */
-const GRAPH_W = 120;
-/** lane 间距（10px 步进，从 x=5 开始） */
-const LANE_GAP = 10;
+/** SVG 宽度 = 起始 padding 5 + 10 lanes × 14px 步进 + 尾部 padding 5 = 150（Gitea 风格 1:1 复刻） */
+const GRAPH_W = 150;
+/** lane 间距（14px 步进，从 x=5 开始） */
+const LANE_GAP = 14;
 /** commit dot 半径（CSS dot 14px 直径对应 7px 半径；线条端点避开 dot 用） */
 const DOT_R = 7;
 
@@ -414,21 +414,20 @@ const nodeYMap = computed<Map<string, number>>(() => {
   return map;
 });
 
-/** lane.label → CSS 颜色 token（按命名约定匹配） */
+/**
+ * v1.5 Gitea 风格（任务 #timeline-graph-fix）：所有 commit dot 和 lane 线条统一绿色。
+ * Gitea 用 lane x 坐标区分 lane，不用 dot/线条颜色区分；
+ * merge edge 用 var(--color-danger) 红色单独区分（看 Gitea 截图 merge 曲线是红色）。
+ *
+ * 注：laneSoftToken 仍按 lane label 区分（用于 commit-row__branch pill chip 背景色），
+ * 分支名 chip 的视觉区分由 pill 颜色承担，不影响 dot/线条。
+ */
 function laneColorToken(laneId: string): string {
   if (!timeline.value) return 'var(--color-text-secondary)';
   const lane = timeline.value.lanes.find((l) => l.id === laneId);
   if (!lane) return 'var(--color-text-secondary)';
-  const label = lane.label.toLowerCase();
-  if (label === 'main' || label.startsWith('main')) return 'var(--color-primary)';
-  if (label.startsWith('feature/') || label.startsWith('feat/')) return 'var(--color-accent)';
-  if (label.startsWith('hotfix/') || label.startsWith('fix/')) return 'var(--color-info)';
-  if (label.includes('exp')) return 'var(--color-purple)';
-  if (label.startsWith('chore/') || label.startsWith('chore')) return 'var(--color-teal)';
-  if (label.startsWith('refactor/')) return 'var(--color-amber)';
-  if (label.startsWith('docs/')) return 'var(--color-pink)';
-  if (label.startsWith('spike/')) return 'var(--color-lime)';
-  return lane.color; // fallback: 后端给的 hex
+  // Gitea 1:1：所有 lane dot 和线条统一主色（绿）
+  return 'var(--color-primary)';
 }
 
 /**
@@ -631,8 +630,8 @@ const graphPaths = computed<GraphPath[]>(() => {
 
     const color =
       e.kind === 'merge'
-        ? 'var(--color-accent)'
-        : (lsm.get(tNode.laneId)?.color ?? 'var(--color-text-secondary)');
+        ? 'var(--color-danger)'
+        : (lsm.get(tNode.laneId)?.color ?? 'var(--color-primary)');
 
     paths.push({
       d: `M ${sx} ${startY} C ${sx} ${startY + halfGap}, ${tx} ${endY - halfGap}, ${tx} ${endY}`,
@@ -1327,8 +1326,8 @@ if (typeof window !== 'undefined') {
 .commit-list__inner { position: relative; min-width: 0; padding-left: 0; }
 .commit-list__edges {
   position: absolute; top: 0; left: 0;
-  /* GRAPH_W=120 配合 LANE_GAP=10：容纳 10 lanes (x=5+9*10=95) + 25px 尾部 padding */
-  width: 120px; height: 100%;
+  /* GRAPH_W=150 配合 LANE_GAP=14：容纳 10 lanes (x=5+9*14=131) + 19px 尾部 padding */
+  width: 150px; height: 100%;
   pointer-events: none;
   z-index: 1;
 }
@@ -1337,12 +1336,12 @@ if (typeof window !== 'undefined') {
   position: relative;
   /*
    * v1.5 Gitea 风格（任务 #timeline-graph-fix）：
-   * 第一列从 60px 扩到 130px，匹配 SVG 宽度 + commit-row__graph 宽度，
-   * 保证 dot (14px) + 多 lane 缩进（最大 x=95px + dot 半径 7px = 102px）有空间，
+   * 第一列从 60px 扩到 165px，匹配 SVG 宽度（150px）+ commit-row__graph 宽度，
+   * 保证 dot (14px) + 多 lane 缩进（最大 x=131px + dot 半径 7px = 138px）有空间，
    * hash 列不被裁切。
    */
   display: grid;
-  grid-template-columns: 130px 64px minmax(80px, 1fr) minmax(80px, 240px);
+  grid-template-columns: 165px 64px minmax(80px, 1fr) minmax(80px, 240px);
   align-items: center;
   height: var(--row-h, 32px);
   padding: 0 var(--space-3) 0 0;
@@ -1374,13 +1373,12 @@ if (typeof window !== 'undefined') {
   background: color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-primary) 8%);
 }
 
-.commit-row__graph { position: relative; width: 120px; height: 100%; }
+.commit-row__graph { position: relative; width: 150px; height: 100%; }
 /*
  * v1.5 Gitea 风格（任务 #timeline-graph-fix）：
- * dot 直径从 10px 扩到 14px（半径 7px = DOT_R 常量），
- * 跟 GRAPH_W=120 + LANE_GAP=10 视觉协调，更接近 Gitea 提交图视觉感受。
- * 删 box-shadow 外圈 divider ring（Gitea dot 边缘干净无外圈），
- * 保留内圈 bg 2px 让 dot 在 hover/highlight 时不跟同色背景融合。
+ * dot 直径 14px（半径 7px = DOT_R 常量），统一绿色（lane 不区分 dot 颜色）。
+ * 删 `.is-combined` 方形（merge commit 保持圆形，Gitea 1:1 风格）。
+ * 删 box-shadow 外圈 divider ring，保留内圈 bg 1px 防 hover 时 dot 跟同色背景融合。
  */
 .commit-row__dot {
   position: absolute;
@@ -1389,7 +1387,7 @@ if (typeof window !== 'undefined') {
   width: 14px; height: 14px;
   border-radius: 50%;
   color: var(--dot-color, var(--color-primary));
-  box-shadow: 0 0 0 2px var(--color-bg);
+  box-shadow: 0 0 0 1px var(--color-bg);
   transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
   z-index: 3;
 }
@@ -1399,11 +1397,15 @@ if (typeof window !== 'undefined') {
  * 保留 z-index 提到 5 让 dot 在 hover 时仍在 SVG edges 之上。
  */
 .commit-row:hover .commit-row__dot { z-index: 5; }
-.commit-row__dot.is-combined { border-radius: 2px; }
+/*
+ * v1.5 Gitea 风格：删 `.is-combined { border-radius: 2px }`（merge commit 保持圆形，
+ * Gitea 截图里所有 dot 都是圆形，没方形 merge 节点特殊样式）。
+ * merge 节点的视觉区分改由 §2 merge edge 红色曲线承担（graphPaths 里 e.kind === 'merge'）。
+ */
 .commit-row__dot.is-head {
   box-shadow:
-    0 0 0 2px var(--color-bg),
-    0 0 0 3px var(--color-primary),
+    0 0 0 1px var(--color-bg),
+    0 0 0 2px var(--color-primary),
     0 0 6px var(--color-primary);
 }
 .commit-row__dot.is-head::after {
