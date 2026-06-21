@@ -491,6 +491,31 @@ export function commitsGitgraphPull(args: {
   return getIpcClient().invoke('commits', 'gitgraphPull', args);
 }
 
+/**
+ * v1.5.3 应用工作区：读当前 workspace 路径
+ *
+ * main 端 lazy init 后返回 prefs.app.workspacePath（默认 ~/giteakanb/workspace）
+ */
+export function commitsGitgraphGetWorkspace(): Promise<{
+  cwd: string;
+  isDefault: boolean;
+  validated: boolean;
+}> {
+  return getIpcClient().invoke('commits', 'gitgraphGetWorkspace', {});
+}
+
+/**
+ * v1.5.3 应用工作区：设置新 workspace 路径
+ *
+ * @param args.cwd 新的工作区根目录（绝对路径；不存在会 mkdir -p）
+ * @returns new cwd + 仓库路径模板（提示后续 gitgraph 仓库放哪）
+ */
+export function commitsGitgraphSetWorkspace(args: {
+  cwd: string;
+}): Promise<{ cwd: string; suggestedRepoCwdTemplate: string }> {
+  return getIpcClient().invoke('commits', 'gitgraphSetWorkspace', args);
+}
+
 // ============================================================
 // ===== preferences.* （v1.1.3 提交号 / 分支名复制）=====
 // ============================================================

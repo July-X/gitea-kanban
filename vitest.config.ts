@@ -21,6 +21,19 @@ export default defineConfig({
     // 当前 frontend 任务 0 装新依赖,DOM 测试用最小 stub 规避
     environment: 'node',
     globals: true,
+    /**
+     * mock electron 模块（让 logger.ts 顶层 `app.isPackaged` 不炸）
+     *
+     * 背景：logger.ts 在模块顶层调 `const isDev = !app.isPackaged`；
+     * vitest 测试环境无 Electron → app undefined → TypeError。
+     * 用 vitest setupFiles 在测试启动前注入 mock electron。
+     *
+     * 覆盖：
+     * - app.isPackaged = false（dev 行为）
+     * - app.getPath('userData') = '/tmp/gitea-kanban-test'（不影响真实目录）
+     * - app.getVersion / app.getName 返回 stub
+     */
+    setupFiles: ['./tests/vitest-setup.ts'],
     include: [
       'src/main/**/*.test.ts',
       'src/preload/**/*.test.ts',

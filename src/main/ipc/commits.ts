@@ -30,9 +30,14 @@ import {
   GitGraphLinesArgsSchema,
   CloneRepoArgsSchema,
   GitGraphPullArgsSchema,
+  GitGraphSetWorkspaceArgsSchema,
+  GitGraphGetWorkspaceRespSchema,
   type GraphLinesDto,
   type GitGraphPullArgs,
   type GitGraphPullResp,
+  type GitGraphSetWorkspaceArgs,
+  type GitGraphSetWorkspaceResp,
+  type GitGraphGetWorkspaceResp,
   type CloneRepoArgs,
 } from './schema.js';
 import { listGiteaCommits, getGiteaCommit } from '../gitea/commits.js';
@@ -52,6 +57,12 @@ import {
   pullRepo,
 } from '../gitgraph/gitProcess.js';
 import { listLocalRepoPath, saveLocalRepoPath } from '../local/gitgraphPaths.js';
+import {
+  getWorkspacePath,
+  setWorkspacePath,
+  resolveDefaultWorkspacePath,
+  validateWorkspacePath,
+} from '../local/workspace.js';
 import { keychainGet } from '../gitea/keychain.js';
 import { existsSync } from 'node:fs';
 
@@ -373,8 +384,8 @@ async function commitsGitGraphCloneRepoHandler(args: CloneRepoArgs): Promise<Clo
     return { cwd: existing, stdout: '(reused)', reused: true };
   }
 
-  // 2. 决定 cwd
-  const cwd = args.cwd?.trim() || suggestLocalRepoPath(proj.owner, proj.repo);
+  // 2. 决定 cwd（await 因为 suggestLocalRepoPath 现在异步 import workspace）
+  const cwd = args.cwd?.trim() || (await suggestLocalRepoPath(proj.owner, proj.repo));
   if (repoPathExists(cwd)) {
     // 路径已存在且是 git 仓库 → 保存并复用
     saveLocalRepoPath(args.projectId, cwd);
@@ -413,6 +424,16 @@ export function registerCommitsIpc(): void {
     commitsGitGraphCloneRepoHandler,
   );
   wrapIpc(IpcChannel.COMMITS_GITGRAPH_PULL, GitGraphPullArgsSchema, commitsGitGraphPullHandler);
+  wrapIpc(
+    IpcChannel.COMMITS_GITGRAPH_GET_WORKSPACE,
+    GitGraphGetWorkspaceRespSchema,
+    commitsGitGraphGetWorkspaceHandler,
+  );
+  wrapIpc(
+    IpcChannel.COMMITS_GITGRAPH_SET_WORKSPACE,
+    GitGraphSetWorkspaceArgsSchema,
+    commitsGitGraphSetWorkspaceHandler,
+  );
 }
 
 export function unregisterCommitsIpc(): void {
@@ -421,6 +442,8 @@ export function unregisterCommitsIpc(): void {
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_LINES);
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_CLONE_REPO);
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_PULL);
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_GET_WORKSPACE);
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_SET_WORKSPACE);
 }
 
 // ===== commits.gitgraph.pull（v1.5.2 pull/merge 按钮）=====
@@ -461,4 +484,56 @@ async function commitsGitGraphPullHandler(args: GitGraphPullArgs): Promise<GitGr
       hint: (e as Error).message ?? String(e),
     });
   }
+}
+
+// ===== commits.gitgraph.getWorkspace / setWorkspace（v1.5.3 应用工作区）=====
+
+/**
+ * 读当前 workspace 路径
+ * - localStore 没存 → 用默认 ~/giteakanb/workspace 并自动 setWorkspace（lazy init）
+ * - 有 → 校验存在性 + 可写
+ */
+async function commitsGitGraphGetWorkspaceHandler(): Promise<GitGraphGetWorkspaceResp> {
+  let cwd = getWorkspacePath();
+  if (!cwd) {
+    cwd = resolveDefaultWorkspacePath();
+    setWorkspacePath(cwd);
+  }
+  const v = await validateWorkspacePath(cwd);
+  return {
+    cwd,
+    isDefault: cwd === resolveDefaultWorkspacePath(),
+    validated: v.ok,
+  };
+}
+
+/**
+ * 用户设置新 workspace 路径（SettingsView / AuthView 用）
+ * - 校验：存在 + 是目录 + 可写
+ * - mkdir -p（不存在时）
+ * - 持久化到 prefs
+ * - 返回新 cwd + 仓库路径模板（提示用户后续 gitgraph 仓库会放哪）
+ */
+async function commitsGitGraphSetWorkspaceHandler(
+  args: GitGraphSetWorkspaceArgs,
+): Promise<GitGraphSetWorkspaceResp> {
+  const cwd = args.cwd.trim();
+
+  // 校验
+  const v = await validateWorkspacePath(cwd);
+  if (!v.ok) {
+    throw new IpcError({
+      code: IpcErrorCode.VALIDATION_FAILED,
+      message: `workspace 路径不可用：${v.reason ?? '未知'}`,
+      hint: `检查路径是否正确且当前用户可写：${cwd}`,
+    });
+  }
+
+  setWorkspacePath(cwd);
+  logger.info({ cwd }, 'workspace: updated');
+
+  return {
+    cwd,
+    suggestedRepoCwdTemplate: `${cwd}${require('node:path').sep}repos${require('node:path').sep}\${owner}__\${repo}.git`,
+  };
 }

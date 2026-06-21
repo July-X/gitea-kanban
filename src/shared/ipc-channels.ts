@@ -66,6 +66,9 @@ export const IpcChannel = {
   COMMITS_GITGRAPH_CLONE_REPO: 'commits.gitgraph.cloneRepo',
   // v1.5.2 pull (merge)：git fetch + pull --rebase，Header 的 pull 按钮调
   COMMITS_GITGRAPH_PULL: 'commits.gitgraph.pull',
+  // v1.5.3 workspace：用户配置应用本地仓库工作区根目录
+  COMMITS_GITGRAPH_GET_WORKSPACE: 'commits.gitgraph.getWorkspace',
+  COMMITS_GITGRAPH_SET_WORKSPACE: 'commits.gitgraph.setWorkspace',
 
   // === pulls namespace（02-architecture.md §5.3.5 + §5.3.6）===
   // 破坏性操作清理（2026-06-15 用户拍板）：create 已从 App 移除，保留 list/get/merge/close

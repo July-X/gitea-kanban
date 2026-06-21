@@ -30,9 +30,12 @@
 
 import { spawn } from 'node:child_process';
 import { promises as fs, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import type { GraphLine, GraphLineCommit, GitRef } from '../../renderer/lib/gitgraph/types.js';
+// workspace 模块 → local/state → logger → app.isPackaged（Electron 主进程 API）
+// 测试环境（renderer/node）无 Electron → **不**静态 import，改用动态 import
+// 在 suggestLocalRepoPath 函数体内按需加载（避免测试加载链崩）
 
 /**
  * Gitea graph.go 的 format 串（与 Gitea 1:1 同步，+ %an|%ae 拿作者名/邮箱）
@@ -258,15 +261,30 @@ export function parseRefs(refsStr: string): GitRef[] {
 /**
  * 推荐本地仓库路径
  *
- * 规则：${tmpdir()}/gitea-kanban/repos/${owner}__${repo}.git
- * 用 tmpdir 而不是 user home 是因为：
- *   - macOS sandbox 下 ~ 可能写不进（AGENTS §8.7.6）
- *   - tmpdir 永远可写
+ * v1.5.3（用户拍板）：基于应用 workspace（默认 ~/giteakanb/workspace/repos/${owner}__${repo}.git）
+ * - workspacePath 来自 localStore.prefs['app.workspacePath']（启动期 main 自动 init）
+ * - 跨平台统一：macOS/Linux = $HOME/.giteakanb/workspace；Windows = %USERPROFILE%\.giteakanb\workspace
+ * - workspace 不存在时 fallback 到 tmpdir（main 端 validateWorkspacePath 失败兜底）
+ *
+ * 旧版（v1.5.0）用 tmpdir；v1.5.3 改成 workspace 路径，gitgraph 仓库都进用户可控位置。
  */
-export function suggestLocalRepoPath(owner: string, repo: string): string {
+export async function suggestLocalRepoPath(owner: string, repo: string): Promise<string> {
   const safeOwner = owner.replace(/[^A-Za-z0-9_.-]/g, '_');
   const safeRepo = repo.replace(/[^A-Za-z0-9_.-]/g, '_');
-  return join(tmpdir(), 'gitea-kanban', 'repos', `${safeOwner}__${safeRepo}.git`);
+  // workspace 优先（main 端 getWorkspacePath 已 lazy init + set）
+  // 用动态 import 避免测试加载链触发 Electron 主进程 API（app.isPackaged）
+  let base: string | null = null;
+  try {
+    const mod = (await import('../local/workspace.js')) as { getWorkspacePath: () => string | null };
+    base = mod.getWorkspacePath();
+  } catch {
+    // 静态依赖失败（renderer 测试环境）→ 用兜底
+  }
+  if (!base) {
+    // 没 workspace（main 还没跑过 initWorkspace）→ 用默认 homedir
+    base = join(homedir(), '.giteakanb', 'workspace');
+  }
+  return join(base, 'repos', `${safeOwner}__${safeRepo}.git`);
 }
 
 /**

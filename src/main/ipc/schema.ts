@@ -1374,6 +1374,31 @@ export const GitGraphPullArgsSchema = z
   .strict();
 export type GitGraphPullArgs = z.infer<typeof GitGraphPullArgsSchema>;
 
+/** commits.gitgraph.setWorkspace 入参（用户更新应用工作区根目录） */
+export const GitGraphSetWorkspaceArgsSchema = z
+  .object({
+    /** 新的工作区路径（绝对路径字符串） */
+    cwd: NonEmptyStringSchema,
+  })
+  .strict();
+export type GitGraphSetWorkspaceArgs = z.infer<typeof GitGraphSetWorkspaceArgsSchema>;
+
+/** commits.gitgraph.setWorkspace 返回 */
+export const GitGraphSetWorkspaceRespSchema = z.object({
+  cwd: NonEmptyStringSchema,
+  /** 当前 workspace 路径下默认建议的仓库路径（owner/repo 已知时可算） */
+  suggestedRepoCwdTemplate: NonEmptyStringSchema,
+});
+export type GitGraphSetWorkspaceResp = z.infer<typeof GitGraphSetWorkspaceRespSchema>;
+
+/** commits.gitgraph.getWorkspace 返回 */
+export const GitGraphGetWorkspaceRespSchema = z.object({
+  cwd: NonEmptyStringSchema,
+  isDefault: z.boolean(), // 当前路径是否 = 默认值
+  validated: z.boolean(), // 路径存在 + 是目录 + 可写
+});
+export type GitGraphGetWorkspaceResp = z.infer<typeof GitGraphGetWorkspaceRespSchema>;
+
 /** commits.gitgraph.pull 返回 */
 export const GitGraphPullRespSchema = z.object({
   /** 拉取前本地 commit 数（origin/HEAD 的 commits 不算） */

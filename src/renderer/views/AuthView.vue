@@ -17,13 +17,26 @@
  */
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Eye, EyeOff, KeyRound, LogIn, ShieldCheck } from 'lucide-vue-next';
+import { Eye, EyeOff, Folder, KeyRound, LogIn, ShieldCheck } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { showToast } from '@renderer/lib/toast';
+import { commitsGitgraphGetWorkspace, commitsGitgraphSetWorkspace, getIpcClient } from '@renderer/lib/ipc-client';
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+
+/**
+ * v1.5.3 工作区路径：默认跨平台 `~/giteakanb/workspace`（macOS/Linux = $HOME/.giteakanb/workspace；
+ * Windows = %USERPROFILE%\.giteakanb\workspace）。
+ *
+ * 计算：
+ *   - 启动期 / 切到 AuthView 时 main 端 initWorkspace 已 lazy 设默认到 prefs
+ *   - 这里读 prefs 取 cwd（用户之前设过的或默认）
+ *   - 用户改 → 提交时 setWorkspace
+ */
+const DEFAULT_WORKSPACE_LABEL =
+  '~/giteakanb/workspace（默认；macOS/Linux = $HOME/.giteakanb/workspace；Windows = %USERPROFILE%\\.giteakanb\\workspace）';
 
 /**
  * v1.4 任务 #auth-prefill-localhost:
@@ -41,9 +54,20 @@ const DEFAULT_LOCAL_URL = 'http://127.0.0.1:3000';
 
 const giteaUrl = ref(DEFAULT_LOCAL_URL);
 const token = ref('');
+const workspacePath = ref(''); // v1.5.3：用户配置的应用工作区根目录
 const showToken = ref(false);
 const localError = ref<string | null>(null);
 const tokenInputEl = ref<HTMLInputElement | null>(null);
+
+/** 启动期预填 workspace 默认值 */
+(async (): Promise<void> => {
+  try {
+    const resp = await commitsGitgraphGetWorkspace();
+    workspacePath.value = resp.cwd;
+  } catch {
+    // getWorkspace lazy init 失败 → 留空，用户提交时会回退到 main 端默认
+  }
+})();
 
 const submitting = computed(() => auth.loading);
 const hasAnyError = computed(() => Boolean(localError.value) || Boolean(auth.error));
@@ -107,6 +131,19 @@ async function onSubmit(): Promise<void> {
     localError.value = tokenErr;
     return;
   }
+
+  // v1.5.3：先 setWorkspace（用户可能改过路径）→ 再 connect gitea
+  try {
+    if (workspacePath.value.trim()) {
+      await commitsGitgraphSetWorkspace({ cwd: workspacePath.value.trim() });
+    }
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string; hint?: string };
+    const msg = err.messageText ?? err.message ?? String(e) ?? 'workspace 设置失败';
+    localError.value = `工作区路径无效：${msg}`;
+    return;
+  }
+
   try {
     await auth.connect(giteaUrl.value.trim(), token.value.trim());
     showToast({
@@ -191,6 +228,26 @@ function goNext(): void {
               >设置 → 应用 → 生成令牌</a
             >
             （需要勾选仓库、议题、用户的读写权限）
+          </p>
+        </div>
+
+        <div class="auth__field">
+          <label class="auth__label" for="workspace-path">
+            <Folder :size="13" :stroke-width="2" />
+            应用工作区（git clone 仓库的本地根目录）
+          </label>
+          <input
+            id="workspace-path"
+            v-model="workspacePath"
+            type="text"
+            class="auth__input"
+            :placeholder="DEFAULT_WORKSPACE_LABEL"
+            spellcheck="false"
+            :disabled="submitting"
+          />
+          <p class="auth__hint">
+            仓库会按 <code>${'${workspacePath}'}/repos/${'${owner}'}__${'${repo}'}.git</code> 路径 clone。
+            不填则用默认 {{ DEFAULT_WORKSPACE_LABEL }}。
           </p>
         </div>
 

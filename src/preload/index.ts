@@ -96,6 +96,9 @@ const api = {
     gitgraphCloneRepo: invoke(IpcChannel.COMMITS_GITGRAPH_CLONE_REPO),
     // v1.5.2 pull (merge)：git fetch + pull --rebase
     gitgraphPull: invoke(IpcChannel.COMMITS_GITGRAPH_PULL),
+    // v1.5.3 workspace：读 / 设置应用本地仓库工作区根目录
+    gitgraphGetWorkspace: invoke(IpcChannel.COMMITS_GITGRAPH_GET_WORKSPACE),
+    gitgraphSetWorkspace: invoke(IpcChannel.COMMITS_GITGRAPH_SET_WORKSPACE),
   },
 
   //===== pulls namespace =====
