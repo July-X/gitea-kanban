@@ -612,26 +612,37 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 }
 
 /* ===== Git Graph Wrapper ===== */
+/* Git Graph wrapper：SVG + commit 列表双栏水平排列；
+ * SVG 按真实宽度渲染不被压缩；多列时整体可横向滚动（commit 列表横向延伸） */
 .git-graph-wrapper {
   display: flex;
   align-items: flex-start;
+  /* 多列时 SVG + 列表整体超出 → 触发整体横向滚动；
+   * svg-area 内部不再独立 scroll（之前会与列表对不齐） */
+  min-width: max-content;
 }
 
-/* SVG 区域：固定最小宽度（容纳至少 8 列），左侧 sticky，背景透明 */
+/* SVG 区域：sticky 在左侧，跟随 commit 列表垂直滚动；
+ * 宽度按实际 svgWidth 自适应，不限制 max-width（git graph 多列时不让 SVG 被压缩——
+ * 否则 SVG 内部按 preserveAspectRatio 缩放，commit 列表与 dot overlay 视觉错位）
+ *
+ * 多列场景：允许内部水平滚动（保留 vertical-align 与 commit 列表一致） */
 .git-graph-svg-area {
   position: sticky;
   left: 0;
   z-index: 2;
   min-width: 120px;
-  max-width: 240px;
   background: transparent;
   border-right: 1px solid var(--color-border);
-  overflow: hidden;
+  overflow-x: auto;     /* 多列时水平滚动而非被压缩 */
+  overflow-y: hidden;
   flex-shrink: 0;
 }
 
 .git-graph-svg-inner {
   position: relative;
+  /* SVG 宽度 = svgWidthPx（×2 缩放），按真实宽度渲染不被压缩 */
+  display: inline-block;
 }
 
 .git-graph-svg {
@@ -785,17 +796,20 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
   overflow-x: auto;
 }
 
-/* 每行 commit */
+/* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐） */
 .commit-row {
   display: flex;
   align-items: center;
   gap: var(--space-2, 8px);
+  /* 严格 24px（与 SVG ×2 缩放后的 row 高度一致）—— 不能加 padding；
+   * 否则 commit-row 实际高度会大于 SVG 行高，导致 dot 圆点与 commit 文字视觉错位 */
   height: 24px;
-  padding: 8px var(--space-3, 12px);
+  padding: 0 var(--space-3, 12px);
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
   overflow: hidden;
   border-bottom: 1px solid var(--color-border);
+  box-sizing: border-box;
 }
 .commit-row:hover {
   background: var(--color-bg-hover);
