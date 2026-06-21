@@ -1,17 +1,17 @@
 /**
  * Git Graph SVG path 生成 —— 1:1 对齐 Gitea templates/repo/graph/svgcontainer.tmpl
  *
- * 坐标公式（列宽 5 unit / 行高 12 unit）：
- *   - '*' | '|'      → M (col*5 + 5) (row*12 + 0) v 12
- *                        垂直线，格顶中点 → 格底中点
- *   - '/'            → M (col*5 + 10) (row*12 + 0) l -10 12
- *                        从右上格边界斜向左下格角
- *   - '\\'           → M (col*5 + 0) (row*12 + 0) l 10 12
- *                        从左上格角斜向右下格边界
- *   - '-' | '.'      → M (col*5 + 0) (row*12 + 12) h 5
- *                        底部水平短线（左 → 中点）
- *   - '_'            → M (col*5 + 0) (row*12 + 12) h 10
- *                        底部水平长线（左 → 下一格）
+ * 坐标公式（列宽 COL_WIDTH unit / 行高 ROW_HEIGHT unit）：
+ *   - '*' | '|'      → M (col*CW + CW) (row*RH + 0) v RH
+ *                        垂直线，本列右缘
+ *   - '/'            → M (col*CW + CW) (row*RH) l -(col-parent)*CW RH
+ *                        本列右缘 → parent 列右缘（跨 dead 列也能衔接）
+ *   - '\\'           → M (parent*CW + CW) (row*RH) l (col-parent)*CW RH
+ *                        parent 列右缘 → 本列右缘（跨 dead 列也能衔接）
+ *   - '-' | '.'      → M (col*CW) (row*RH + RH) h CW
+ *                        底部水平短线（左 → 右）
+ *   - '_'            → M (col*CW) (row*RH + RH) h 2*CW
+ *                        底部水平长线（左 → 右二格）
  *
  * 这些公式直接复刻 Gitea svgcontainer.tmpl:5-16 的 {{template "shared/gitgraph/glyph"}}
  * 输出。
@@ -21,33 +21,40 @@
  */
 
 import type { Flow, Glyph } from './models.js';
+import { COL_WIDTH, ROW_HEIGHT } from './models.js';
 
 // ============================================================
 // 单字形 → path d 段
 // ============================================================
 
-/** 单字形 → path d 段字符串（与 svgcontainer.tmpl 公式一致） */
+/** 单字形 → path d 段字符串 */
 export function glyphToPathD(g: Glyph): string {
-  const x = g.column * 5;
-  const y = g.row * 12;
+  const x = g.column * COL_WIDTH;
+  const y = g.row * ROW_HEIGHT;
   switch (g.glyph) {
     case '*':
     case '|':
-      // 垂直线 v 12
-      return `M ${x + 5} ${y} v 12`;
-    case '/':
-      // 右上 → 左下对角线
-      return `M ${x + 10} ${y} l -10 12`;
-    case '\\':
-      // 左上 → 右下对角线
-      return `M ${x} ${y} l 10 12`;
+      // 垂直线 v ROW_HEIGHT（本列右缘）
+      return `M ${x + COL_WIDTH} ${y} v ${ROW_HEIGHT}`;
+    case '/': {
+      // 本列右缘 → parent 列右缘
+      const pc = g.parentColumn ?? g.column - 1;
+      const span = g.column - pc;
+      return `M ${x + COL_WIDTH} ${y} l ${-span * COL_WIDTH} ${ROW_HEIGHT}`;
+    }
+    case '\\': {
+      // parent 列右缘 → 本列右缘
+      const pc = g.parentColumn ?? g.column - 1;
+      const span = g.column - pc;
+      return `M ${pc * COL_WIDTH + COL_WIDTH} ${y} l ${span * COL_WIDTH} ${ROW_HEIGHT}`;
+    }
     case '-':
     case '.':
-      // 底部水平短线（左 → 中点）
-      return `M ${x} ${y + 12} h 5`;
+      // 底部水平短线
+      return `M ${x} ${y + ROW_HEIGHT} h ${COL_WIDTH}`;
     case '_':
-      // 底部水平长线（左 → 下一格）
-      return `M ${x} ${y + 12} h 10`;
+      // 底部水平长线
+      return `M ${x} ${y + ROW_HEIGHT} h ${2 * COL_WIDTH}`;
     default:
       return '';
   }

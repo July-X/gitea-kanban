@@ -270,6 +270,7 @@ describe('parseLines - 边界', () => {
     const { graph } = parseLines([line(0, '*', 'A')]);
     expect(graph.commits).toHaveLength(1);
     expect(graph.flows.size).toBe(1);
+    // flowId 是流在所有行中的稳定列号，glyph 和 commit 统一用 flowId 作为 column
     expect(graph.flows.get(1)!.glyphs).toEqual([{ row: 0, column: 1, glyph: '*' }]);
   });
 });
@@ -284,12 +285,22 @@ describe('glyphToPathD - SVG path 公式', () => {
     expect(glyphToPathD({ row: 2, column: 3, glyph: '|' })).toBe('M 20 24 v 12');
   });
 
-  it('/ → 右上→左下对角线（l -10 12）', () => {
-    expect(glyphToPathD({ row: 0, column: 1, glyph: '/' })).toBe('M 15 0 l -10 12');
+  it('/ → 右上→左下对角线（l -5 12）', () => {
+    expect(glyphToPathD({ row: 0, column: 1, glyph: '/' })).toBe('M 10 0 l -5 12');
   });
 
-  it('\\ → 左上→右下对角线（l 10 12）', () => {
-    expect(glyphToPathD({ row: 0, column: 1, glyph: '\\' })).toBe('M 5 0 l 10 12');
+  it('\\ → 左上→右下对角线（l 5 12）', () => {
+    expect(glyphToPathD({ row: 0, column: 1, glyph: '\\' })).toBe('M 5 0 l 5 12');
+  });
+
+  it('\\ 跨死列 → 对角线长度按 parentColumn 计算', () => {
+    // flow 3 从 flow 1 分叉（跳过已死的 flow 2）：col=3, parent=1, span=2
+    expect(glyphToPathD({ row: 0, column: 3, glyph: '\\', parentColumn: 1 })).toBe('M 10 0 l 10 12');
+  });
+
+  it('/ 跨死列 → 对角线长度按 parentColumn 计算', () => {
+    // flow 3 合并到 flow 1（跳过已死的 flow 2）：col=3, parent=1, span=2
+    expect(glyphToPathD({ row: 0, column: 3, glyph: '/', parentColumn: 1 })).toBe('M 20 0 l -10 12');
   });
 
   it('- . → 底部水平短线 h 5', () => {
@@ -449,5 +460,56 @@ describe('Gitea testglyphs 子集 - 第一列 flow = 1', () => {
     }
     // 默认 2 色，不会无限增长
     expect(parser.availableColors.length).toBeLessThanOrEqual(2);
+  });
+});
+
+// ============================================================
+// 测试 10：列压缩（compactColumns）
+// ============================================================
+
+describe('compactColumns - 列压缩', () => {
+  it('重叠 flow 不能共享列号', () => {
+    // fork + merge 产生 2 个重叠 flow (row 0-4 全部重叠) → 需要 2 列
+    const lines: GraphLine[] = [
+      line(0, '*', 'A'),
+      line(1, '|\\', 'X'),
+      line(2, '| *', 'B'),
+      line(3, '|/', 'Y'),
+      line(4, '*', 'C'),
+    ];
+    lines[1]!.commit = null;
+    lines[3]!.commit = null;
+
+    const { graph } = parseLines(lines);
+    const cols = new Set<number>();
+    for (const flow of graph.flows.values()) cols.add(flow.minColumn);
+    // 2 个 flow 全部重叠 → 需要 2 列，不能复用
+    expect(cols.size).toBe(2);
+    // 压缩后 col 应从 1 开始连续
+    expect([...cols].sort()).toEqual([1, 2]);
+  });
+
+  it('不重叠 flow 复用同一列号', () => {
+    // Flow 2 (row 1-3) 合并后 Flow 3 (row 5-6) 从 Flow 1 分叉 → 时间不重叠 → 复用列 2
+    const lines: GraphLine[] = [
+      line(0, '*', 'M1'),
+      { row: 1, glyph: '|\\', commit: null },
+      line(2, '| *', 'B2'),
+      { row: 3, glyph: '|/', commit: null },
+      line(4, '*', 'M3'),
+      { row: 5, glyph: '|\\', commit: null },
+      line(6, '| *', 'B4'),
+    ];
+
+    const { graph } = parseLines(lines);
+
+    // 压缩后 maxColumn ≤ 2：Flow 1=col 1，Flow 2 & 3 共享 col 2
+    expect(graph.maxColumn).toBeLessThanOrEqual(2);
+    // Flow 2 和 Flow 3 确实共享同一列
+    const flow2 = graph.flows.get(2);
+    const flow3 = graph.flows.get(3);
+    expect(flow2).toBeDefined();
+    expect(flow3).toBeDefined();
+    expect(flow2!.minColumn).toBe(flow3!.minColumn);
   });
 });

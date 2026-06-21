@@ -33,6 +33,9 @@ export {
   type Graph,
   type RelationCommit,
   RELATION_COMMIT_ID,
+  COL_WIDTH,
+  ROW_HEIGHT,
+  DISPLAY_SCALE,
   newGraph,
   newFlow,
   flowColorClass,
@@ -41,6 +44,7 @@ export {
   svgViewBox,
   svgWidthPx,
   svgHeightPx,
+  compactColumns,
 } from './models.js';
 
 // 与 main 端 IPC 协议共享的 DTO

@@ -44,6 +44,7 @@ import {
   newGraph,
   newFlow,
   RELATION_COMMIT_ID,
+  compactColumns,
   type Flow,
   type GitGraphCommit,
   type Glyph,
@@ -281,6 +282,10 @@ function setUpFlow(p: Parser, i: number): void {
     takePreviousFlow(p, i, i - 1);
   } else if (i < p.oldGlyphs.length && (p.oldGlyphs[i] === '|' || p.oldGlyphs[i] === '*')) {
     takePreviousFlow(p, i, i);
+  } else if (i < p.oldGlyphs.length && p.oldGlyphs[i] === '\\') {
+    // \ 在同一位置：fork 的斜线下方接 * 时继承同一 flow
+    // 例如 |\ → | * 中的 * 应从上一行的 \ 继承 flow 2
+    takePreviousFlow(p, i, i);
   } else if (i + 1 < p.oldGlyphs.length && p.oldGlyphs[i + 1] === '/') {
     takePreviousFlow(p, i, i + 1);
   } else {
@@ -514,8 +519,16 @@ export function addLineToGraph(
 
     const flowID = p.flows[columnIdx]!;
     const color = p.colors[columnIdx]!;
-    const column = flowID; // 对齐 Gitea：commit.column === commit.flowId（1-based）
-    addGlyphToGraph(graph, row, column, flowID, color, glyph);
+    const column = flowID; // flowId 是流在所有行中的稳定列号（位置索引会因 git graph 空格而漂移）
+
+    // 对角线的另一端列号（\ 从 parent 分叉，/ 合并到 parent）
+    let parentColumn: number | undefined;
+    if (glyph === '\\' && columnIdx > 0) {
+      parentColumn = p.flows[columnIdx - 1]; // \ 从左侧的 | 分叉
+    } else if (glyph === '/' && columnIdx > 0) {
+      parentColumn = p.flows[columnIdx - 1]; // / 合并到左侧的 | 
+    }
+    addGlyphToGraph(graph, row, column, flowID, color, glyph, parentColumn);
 
     if (glyph === '*') {
       if (commitDone) {
@@ -550,6 +563,7 @@ function addGlyphToGraph(
   flowID: number,
   colorNumber: number,
   glyph: string,
+  parentColumn?: number,
 ): void {
   let flow = graph.flows.get(flowID);
   if (!flow) {
@@ -557,7 +571,7 @@ function addGlyphToGraph(
     graph.flows.set(flowID, flow);
   }
   // flow 内追加 glyph + 维护 flow 包围盒
-  flow.glyphs.push({ row, column, glyph });
+  flow.glyphs.push({ row, column, glyph, parentColumn });
   if (row < flow.minRow) flow.minRow = row;
   if (row > flow.maxRow) flow.maxRow = row;
   if (column < flow.minColumn) flow.minColumn = column;
@@ -642,10 +656,30 @@ export function parseLines(
     graph.maxRow = 0;
   }
 
+  // 全局 column 包围盒归一化：newGraph() 用 sentinel 值初始化，
+  // 空图或无边时回落到 0
+  if (graph.flows.size === 0) {
+    graph.minColumn = 0;
+    graph.maxColumn = 0;
+  } else if (graph.minColumn === Number.MAX_SAFE_INTEGER) {
+    // 有 flow 但 minColumn 未被更新（理论上不会发生，防御性）
+    let mc = Infinity;
+    let Mc = -Infinity;
+    for (const f of graph.flows.values()) {
+      if (f.minColumn < mc) mc = f.minColumn;
+      if (f.maxColumn > Mc) Mc = f.maxColumn;
+    }
+    graph.minColumn = mc < Infinity ? mc : 0;
+    graph.maxColumn = Mc > -Infinity ? Mc : 0;
+  }
+
   // 把每个 flow 的 glyphs 按 (row, column) 升序排序（对齐 Gitea Graph 流式收尾）
   for (const flow of graph.flows.values()) {
     flow.glyphs.sort((a, b) => a.row - b.row || a.column - b.column);
   }
+
+  // 列压缩：复用已死 flow 的列号，让 active flows 尽量左靠
+  compactColumns(graph);
 
   // commits 按 row 升序（与 Gitea 一致）
   graph.commits.sort((a, b) => a.row - b.row);

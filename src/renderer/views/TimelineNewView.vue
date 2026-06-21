@@ -34,6 +34,9 @@ import {
   svgWidthPx,
   svgHeightPx,
   graphWidth,
+  COL_WIDTH,
+  ROW_HEIGHT,
+  DISPLAY_SCALE,
   type Flow,
   type Graph,
   type GraphLine,
@@ -42,7 +45,7 @@ import {
 // ============================================================
 // 常量
 // ============================================================
-const ROW_H = 24; // commit 行高（px），与 SVG 行高 12 unit ×2 缩放一致
+const ROW_H = ROW_HEIGHT * DISPLAY_SCALE; // commit 行高（px），与 SVG ROW_HEIGHT × SCALE 一致
 const TOGGLE_DEBOUNCE_MS = 200; // 分支切换防抖
 
 // ============================================================
@@ -496,8 +499,8 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
                   class="commit-dot"
                   :class="flowColorClass(graph.flows.get(c.flowId)?.colorNumber ?? 1)"
                   :style="{
-                    left: `${(c.column - minColumnOffset) * 10 + 10 - 4}px`,
-                    top: `${c.row * 24 + 12 - 4}px`,
+                    left: `${(c.column - minColumnOffset) * COL_WIDTH * DISPLAY_SCALE + COL_WIDTH * DISPLAY_SCALE - 4}px`,
+                    top: `${c.row * ROW_HEIGHT * DISPLAY_SCALE + ROW_HEIGHT * DISPLAY_SCALE / 2 - 4}px`,
                   }"
                   :title="c.subject"
                 />
@@ -513,6 +516,7 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
               :key="`row-${r.row}`"
               class="commit-row"
               :class="{ 'commit-row--relation': r.isRelation }"
+              :style="{ height: ROW_H + 'px' }"
             >
               <template v-if="r.commit">
                 <span
@@ -848,9 +852,7 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
   display: flex;
   align-items: center;
   gap: var(--space-2, 8px);
-  /* 严格 24px（与 SVG ×2 缩放后的 row 高度一致）—— 不能加 padding；
-   * 否则 commit-row 实际高度会大于 SVG 行高，导致 dot 圆点与 commit 文字视觉错位 */
-  height: 24px;
+  /* 高度由内联 style 绑定 ROW_H = ROW_HEIGHT * DISPLAY_SCALE */
   padding: 0 var(--space-3, 12px);
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
@@ -864,7 +866,6 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * 必须保持 24px 高度（不要合并 / 不要 display:none） */
 .commit-row--relation {
-  height: 24px;
   pointer-events: none;
   background: transparent;
 }

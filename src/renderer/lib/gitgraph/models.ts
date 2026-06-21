@@ -21,6 +21,19 @@ import type { GitRef } from './types.js';
 
 export { type GitRef };
 
+// ============================================================
+// 尺寸常量（可调整）
+// ============================================================
+
+/** SVG 单位列宽（unit），控制 flow lane 之间的间距 */
+export const COL_WIDTH = 5;
+
+/** SVG 单位行高（unit） */
+export const ROW_HEIGHT = 12;
+
+/** 显示缩放系数（1 SVG unit = SCALE px） */
+export const DISPLAY_SCALE = 2;
+
 /** 字形：git --graph 输出中的一个字符位置 */
 export interface Glyph {
   /** 行号（Y 坐标） */
@@ -29,6 +42,12 @@ export interface Glyph {
   column: number;
   /** 字形字符：* | / \ _ - . 或 ' ' */
   glyph: string;
+  /**
+   * 对角线的另一端列号（仅 \ 和 / 使用）。
+   * \ 表示从 parentColumn 分叉到 column；/ 表示从 column 合并到 parentColumn。
+   * 设为 undefined 表示与相邻列连接（column-1 或 column+1 的情况）。
+   */
+  parentColumn?: number;
 }
 
 /** 一条分支线（git flow / lane） */
@@ -112,8 +131,10 @@ export function newGraph(): Graph {
     relationCommits: [],
     minRow: 0,
     maxRow: 0,
-    minColumn: 0,
-    maxColumn: 0,
+    // 用 sentinel 值，让 addGlyphToGraph 的第一笔数据正确更新包围盒
+    // （flowId 从 1 开始，初始 0 永远不会被 < 比较覆盖）
+    minColumn: Number.MAX_SAFE_INTEGER,
+    maxColumn: Number.MIN_SAFE_INTEGER,
   };
 }
 
@@ -148,26 +169,101 @@ export function graphHeight(g: Graph): number {
 }
 
 /**
- * SVG viewBox 字符串（与 Gitea svgcontainer.tmpl 1:1）
- * - 列宽 5 unit / 行高 12 unit
- * - x = minColumn * 5；y = minRow * 12
- * - w = (maxColumn - minColumn + 1) * 5 + 5
- * - h = (maxRow - minRow + 1) * 12
+ * SVG viewBox 字符串
+ * - x = minColumn * COL_WIDTH；y = minRow * ROW_HEIGHT
+ * - w = (maxColumn - minColumn + 1) * COL_WIDTH + COL_WIDTH
+ * - h = (maxRow - minRow + 1) * ROW_HEIGHT
  */
 export function svgViewBox(g: Graph): string {
-  const x = g.minColumn * 5;
-  const y = g.minRow * 12;
-  const w = graphWidth(g) * 5 + 5;
-  const h = graphHeight(g) * 12;
+  const x = g.minColumn * COL_WIDTH;
+  const y = g.minRow * ROW_HEIGHT;
+  const w = graphWidth(g) * COL_WIDTH + COL_WIDTH;
+  const h = graphHeight(g) * ROW_HEIGHT;
   return `${x} ${y} ${w} ${h}`;
 }
 
-/** SVG 显示宽度（px，列宽 ×2 + 内边距，与 TimelineNewView 缩放系数一致） */
+/** SVG 显示宽度（px） */
 export function svgWidthPx(g: Graph): string {
-  return `${graphWidth(g) * 10 + 10}px`;
+  return `${graphWidth(g) * COL_WIDTH * DISPLAY_SCALE + COL_WIDTH * DISPLAY_SCALE}px`;
 }
 
-/** SVG 显示高度（px，行高 ×2） */
+/** SVG 显示高度（px） */
 export function svgHeightPx(g: Graph): string {
-  return `${graphHeight(g) * 24}px`;
+  return `${graphHeight(g) * ROW_HEIGHT * DISPLAY_SCALE}px`;
+}
+
+// ============================================================
+// 列压缩：flow 尽量左靠，复用已死 column
+// ============================================================
+
+/**
+ * 压缩列号分配 —— 贪心左边缘算法。
+ *
+ * 扫描所有 flow 的时间区间（minRow..maxRow），为时间上不重叠的
+ * flow 复用同一列号，把 active flows 尽可能向左压缩。
+ */
+export function compactColumns(graph: Graph): void {
+  if (graph.flows.size <= 1) return;
+
+  const sorted = [...graph.flows.values()].sort(
+    (a, b) => a.minRow - b.minRow || a.id - b.id,
+  );
+
+  const assign = new Map<number, number>(); // flowId → 新列号
+
+  for (const flow of sorted) {
+    let col = 1;
+    while (true) {
+      let conflict = false;
+      for (const [otherId, otherCol] of assign) {
+        if (otherCol !== col) continue;
+        const other = graph.flows.get(otherId)!;
+        if (flow.minRow <= other.maxRow && other.minRow <= flow.maxRow) {
+          conflict = true;
+          break;
+        }
+      }
+      if (!conflict) break;
+      col++;
+    }
+    assign.set(flow.id, col);
+  }
+
+  const offsets = new Map<number, number>();
+  for (const flow of graph.flows.values()) {
+    const newCol = assign.get(flow.id);
+    if (newCol === undefined) continue;
+    offsets.set(flow.id, newCol - flow.minColumn);
+  }
+
+  for (const flow of graph.flows.values()) {
+    const offset = offsets.get(flow.id);
+    if (!offset) continue;
+
+    flow.minColumn += offset;
+    flow.maxColumn += offset;
+    for (const g of flow.glyphs) {
+      g.column += offset;
+    }
+    for (const g of flow.glyphs) {
+      if (g.parentColumn !== undefined) {
+        const po = offsets.get(g.parentColumn);
+        if (po !== undefined) g.parentColumn += po;
+      }
+    }
+  }
+
+  for (const c of graph.commits) {
+    const offset = offsets.get(c.flowId);
+    if (offset) c.column += offset;
+  }
+
+  let minCol = Infinity;
+  let maxCol = -Infinity;
+  for (const flow of graph.flows.values()) {
+    if (flow.minColumn < minCol) minCol = flow.minColumn;
+    if (flow.maxColumn > maxCol) maxCol = flow.maxColumn;
+  }
+  graph.minColumn = minCol < Infinity ? minCol : 0;
+  graph.maxColumn = maxCol > -Infinity ? maxCol : 0;
 }
