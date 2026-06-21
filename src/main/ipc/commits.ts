@@ -524,22 +524,28 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
  *   renderer: GraphLinesDto → parseLines() → Graph → SVG
  *
  * 当前实现（v1.4）：gitea-kanban 还没接仓库本地路径，
- *   没法跑 `git log --graph` 子进程 → handler 暂时返回空 lines，
- *   抛 IpcError(code='internal') 让前端 view 显示"功能暂未启用"占位
+ *   没法跑 `git log --graph` 子进程 → handler **不抛错**，而是返
+ *   `{ disabled: true, disabledReason, lines: [] }`，让前端 view 走
+ *   "功能暂未启用"占位（避免被用户感知为"操作失败"）
  *
  * v1.5 计划：
  *   1. 引入仓库本地路径（clone 或指定 path）
  *   2. 用 src/main/gitgraph/gitProcess.ts runGraphLog(cwd, opts) 调 git 二进制
  *   3. 加上 listGiteaRefsBySha 关联 ref 装饰（与 graph.go %D 等价）
  *   4. 写 cache（30s TTL）
+ *   5. 把下面的 `disabled: true` 分支去掉，改为跑 gitProcess
  */
 async function commitsGitGraphLinesHandler(_args: GitGraphLinesArgs): Promise<GraphLinesDto> {
   // v1.4 placeholder：仓库本地路径未配置，handler 暂未实现
-  throw new IpcError({
-    code: IpcErrorCode.INTERNAL,
-    message: 'Git Graph 功能正在迁移到 v1.5（需要仓库本地路径接 git 二进制）',
-    hint: '当前版本暂未启用；请用 TimelineView（基于 commits.timeline）',
-  });
+  return {
+    disabled: true,
+    disabledReason:
+      'Git Graph 功能正在迁移到 v1.5（需要仓库本地路径接 git 二进制）；当前版本暂未启用。',
+    lines: [],
+    totalCommits: 0,
+    truncated: false,
+    range: { from: new Date(0).toISOString(), to: new Date(0).toISOString() },
+  };
 }
 
 // ===== 注册 =====

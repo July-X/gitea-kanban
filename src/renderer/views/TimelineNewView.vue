@@ -157,25 +157,25 @@ async function loadGraph(): Promise<void> {
       branches: [...selectedBranches.value],
       limit: 200,
     });
+    // v1.4 placeholder：main handler 返 disabled=true（不抛错）
+    if (dto.disabled) {
+      featureDisabled.value = true;
+      graph.value = null;
+      lines.value = [];
+      return;
+    }
     lines.value = dto.lines;
     // 前端 Parser：Gitea 字符流 → Graph（1:1 移植 Gitea parser.go）
     const { graph: parsed } = parseLines(dto.lines);
     graph.value = parsed;
   } catch (e: unknown) {
-    const err = e as { code?: string; message?: string; hint?: string };
+    // 真错误（网络 / 解析失败 / schema 不符）才走这里
     console.error('[TimelineNewView] loadGraph failed:', e);
-    if (err.code === 'internal' && err.message?.includes('v1.5')) {
-      // main handler 抛 not_implemented 占位
-      featureDisabled.value = true;
-      graph.value = null;
-      lines.value = [];
-    } else {
-      localError.value = err.hint
-        ? `${err.message ?? ''}（${err.hint}）`
-        : (err.message ?? String(e) ?? '加载失败');
-      graph.value = null;
-      lines.value = [];
-    }
+    const err = e as { messageText?: string; message?: string; hint?: string };
+    const msg = err.messageText ?? err.message ?? String(e) ?? '加载失败';
+    localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
+    graph.value = null;
+    lines.value = [];
   } finally {
     loading.value = false;
     useGlobalLoadingStore().hide('timeline');

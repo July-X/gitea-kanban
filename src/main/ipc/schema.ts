@@ -1432,6 +1432,14 @@ export type GraphLineDto = z.infer<typeof GraphLineDtoSchema>;
 
 /** commits.gitgraph.lines 端点的完整返回 */
 export const GraphLinesDtoSchema = z.object({
+  /**
+   * 是否处于"功能未启用"状态（v1.4 placeholder：缺仓库本地路径，等 v1.5 接 git 子进程）
+   *
+   * true 时 lines 为空 + frontend 显示"功能暂未启用"占位，不走错误 toast。
+   */
+  disabled: z.boolean().optional().default(false),
+  /** 禁用原因文案（仅 disabled=true 时使用；让前端展示说明） */
+  disabledReason: z.string().optional(),
   lines: z.array(GraphLineDtoSchema),
   totalCommits: z.number().int().min(0),
   truncated: z.boolean(),
