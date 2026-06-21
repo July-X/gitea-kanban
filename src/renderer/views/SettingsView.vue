@@ -32,6 +32,7 @@ import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
+import { commitsGitgraphGetWorkspace, commitsGitgraphSetWorkspace } from '@renderer/lib/ipc-client';
 
 const settings = useSettingsStore();
 const ui = useUiStore();
@@ -39,6 +40,28 @@ const auth = useAuthStore();
 const repo = useRepoStore();
 const branch = useBranchStore();
 const router = useRouter();
+
+// ============================================================
+// 工作区分组（v1.5.3 · workspace path 配置）
+// ============================================================
+const workspacePath = ref('');
+const workspaceDefault = ref(true);
+const workspaceValidated = ref(true);
+const workspaceSaving = ref(false);
+const workspaceDraft = ref('');
+
+/** 启动期加载当前 workspace 设置 */
+(async (): Promise<void> => {
+  try {
+    const resp = await commitsGitgraphGetWorkspace();
+    workspacePath.value = resp.cwd;
+    workspaceDefault.value = resp.isDefault;
+    workspaceValidated.value = resp.validated;
+    workspaceDraft.value = resp.cwd;
+  } catch {
+    // getWorkspace 失败 → 静默（不阻塞设置页）
+  }
+})();
 
 /** 外观分组 2 选 1（v1.2 收敛 · 与 tech-refine §14 token 矩阵 + §15.1 单选规格同步） */
 const themeOptions: ReadonlyArray<{ value: Theme; label: string; desc: string }> = [
@@ -107,6 +130,44 @@ async function onSave(): Promise<void> {
   } finally {
     saving.value = false;
   }
+}
+
+// ============================================================
+// 工作区保存（v1.5.3）
+// ============================================================
+async function onWorkspaceSave(): Promise<void> {
+  const cwd = workspaceDraft.value.trim();
+  if (!cwd) {
+    showToast({ type: 'error', message: '工作区路径不能为空' });
+    return;
+  }
+  if (cwd === workspacePath.value) {
+    showToast({ type: 'info', message: '工作区路径未变，无需保存' });
+    return;
+  }
+  workspaceSaving.value = true;
+  try {
+    const resp = await commitsGitgraphSetWorkspace({ cwd });
+    workspacePath.value = resp.cwd;
+    workspaceDefault.value = false;
+    showToast({
+      type: 'success',
+      message: '工作区已更新',
+      description: `Git Graph 仓库将同步到 ${resp.cwd}/repos/...`,
+    });
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string; hint?: string };
+    const msg = err.messageText ?? err.message ?? String(e) ?? '设置失败';
+    showToast({ type: 'error', message: msg });
+  } finally {
+    workspaceSaving.value = false;
+  }
+}
+
+/** 重置为默认路径 */
+function onWorkspaceReset(): void {
+  workspaceDraft.value = '~/.giteakanb/workspace（默认）';
+  showToast({ type: 'info', message: '已重置为默认路径，点「保存」生效' });
 }
 
 // ============================================================
@@ -321,6 +382,65 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
       </div>
     </section>
 
+    <!-- ============== 工作区分组（v1.5.3 · workspace path）============== -->
+    <section class="settings-group">
+      <h2>应用工作区</h2>
+      <p class="settings__hint">
+        Git Graph 自动同步所选仓库的本地根目录。
+        仓库按 <code>${'${工作区}'}/repos/${'${owner}'}__${'${repo}'}.git</code> 路径存放。
+      </p>
+
+      <div class="settings-group__account">
+        <div class="settings-group__account-row">
+          <span class="settings-group__account-label">当前路径</span>
+          <span class="settings-group__account-value mono" :title="workspacePath">
+            {{ workspacePath || '—' }}
+            <span v-if="workspaceDefault" class="settings__badge">默认</span>
+          </span>
+        </div>
+        <div class="settings-group__account-row">
+          <span class="settings-group__account-label">状态</span>
+          <span class="settings-group__account-value">
+            <span v-if="workspaceValidated" class="settings__status settings__status--ok">✓ 可用</span>
+            <span v-else class="settings__status settings__status--warn">⚠ 路径不可用</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="settings__field">
+        <label class="settings__label" for="workspace-path">修改工作区路径</label>
+        <input
+          id="workspace-path"
+          v-model="workspaceDraft"
+          type="text"
+          class="settings__input"
+          placeholder="~/giteakanb/workspace（默认）"
+          spellcheck="false"
+        />
+        <p class="settings__hint settings__hint--small">
+          跨平台默认路径：macOS/Linux = <code>$HOME/.giteakanb/workspace</code>；Windows = <code>%USERPROFILE%\.giteakanb\workspace</code>
+        </p>
+      </div>
+
+      <div class="settings__actions">
+        <button
+          type="button"
+          class="settings__save"
+          :disabled="workspaceSaving"
+          @click="onWorkspaceSave"
+        >
+          {{ workspaceSaving ? '保存中…' : '保存工作区路径' }}
+        </button>
+        <button
+          type="button"
+          class="settings__reset"
+          @click="onWorkspaceReset"
+        >
+          重置为默认
+        </button>
+      </div>
+    </section>
+
     <!-- ============== 账号更新 modal ============== -->
     <Teleport to="body">
       <div v-if="accountModalOpen" class="account-modal" role="dialog" aria-modal="true">
@@ -511,6 +631,49 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
 .settings__save:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+/* 工作区 badge + 状态 + 重置按钮 */
+.settings__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-radius: 10px;
+  vertical-align: middle;
+}
+.settings__status {
+  font-size: var(--font-xs);
+}
+.settings__status--ok {
+  color: var(--color-success, #7db233);
+}
+.settings__status--warn {
+  color: var(--color-warning, #f0ad4e);
+}
+.settings__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.settings__reset {
+  align-self: flex-start;
+  padding: 8px 20px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.settings__reset:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text);
 }
 
 /* =====================================================================
