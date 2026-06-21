@@ -127,6 +127,9 @@ export const IpcChannel = {
   // 剪贴板写入（v1.1.3 提交号复制）—— 走主进程 electron.clipboard 模块，
   // 绕过 navigator.clipboard.writeText 在 Electron renderer 窗口无 focus / 非用户激活时的不稳定行为
   CLIPBOARD_WRITE: 'preferences.clipboard.write',
+
+  // === system namespace（Electron 系统级能力）===
+  SYSTEM_SELECT_DIRECTORY: 'system.selectDirectory',
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];

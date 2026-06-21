@@ -29,6 +29,7 @@ import { registerMilestonesIpc, unregisterMilestonesIpc } from './milestones.js'
 import { registerUserIpc, unregisterUserIpc } from './user.js';
 import { registerPreferencesIpc, unregisterPreferencesIpc } from './preferences.js';
 import { registerClipboardIpc, unregisterClipboardIpc } from './clipboard.js';
+import { registerSystemIpc, unregisterSystemIpc } from './system.js';
 
 export function registerAllIpcHandlers(): void {
   registerAuthIpc();
@@ -44,6 +45,7 @@ export function registerAllIpcHandlers(): void {
   registerUserIpc();
   registerPreferencesIpc();
   registerClipboardIpc();
+  registerSystemIpc();
 }
 
 export function unregisterAllIpcHandlers(): void {
@@ -60,4 +62,5 @@ export function unregisterAllIpcHandlers(): void {
   unregisterUserIpc();
   unregisterPreferencesIpc();
   unregisterClipboardIpc();
+  unregisterSystemIpc();
 }

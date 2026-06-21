@@ -32,7 +32,7 @@ import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
-import { commitsGitgraphGetWorkspace, commitsGitgraphSetWorkspace } from '@renderer/lib/ipc-client';
+import { commitsGitgraphGetWorkspace, commitsGitgraphSetWorkspace, systemSelectDirectory } from '@renderer/lib/ipc-client';
 
 const settings = useSettingsStore();
 const ui = useUiStore();
@@ -170,6 +170,20 @@ function onWorkspaceReset(): void {
   showToast({ type: 'info', message: '已重置为默认路径，点「保存」生效' });
 }
 
+/** 打开系统目录选择器（Electron dialog wrapper） */
+async function onBrowseDirectory(): Promise<void> {
+  try {
+    const selected = await systemSelectDirectory();
+    if (selected) {
+      workspaceDraft.value = selected;
+      // 选择后立即保存
+      await onWorkspaceSave();
+    }
+  } catch (e) {
+    showToast({ type: 'error', message: '选择目录失败', description: String(e) });
+  }
+}
+
 // ============================================================
 // ===== 账号分组（v1.1.3 · task #22）=====
 // ============================================================
@@ -289,84 +303,68 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
   <div class="settings">
     <header class="settings__header">
       <h1>设置</h1>
-      <p class="settings__subtitle">调整应用行为偏好</p>
     </header>
 
-    <section class="settings__section">
-      <h2>数据同步</h2>
-      <p class="settings__hint">
-        App 默认每 <strong>{{ Math.round(settings.pollingIntervalMs / 60000) }}</strong> 分钟从 gitea 拉一次最新仓库列表。
-        你也可以点底部状态栏的刷新按钮主动拉。
-      </p>
-
-      <div class="settings__field">
-        <label class="settings__label" for="polling-min">自动刷新间隔（分钟）</label>
-        <div class="settings__row">
-          <input
-            id="polling-min"
-            type="number"
-            class="settings__input"
-            :value="minutesLabel"
-            min="1"
-            :max="Math.round(SETTINGS_LIMITS.MAX_POLLING_INTERVAL_MS / 60000)"
-            @change="onMinutesChange"
-          />
-          <span class="settings__unit">分钟</span>
+    <!-- 三栏网格布局（紧凑，避免滚动条） -->
+    <div class="settings__grid">
+      <!-- 数据同步 -->
+      <section class="settings__card">
+        <h2>数据同步</h2>
+        <div class="settings__field">
+          <label class="settings__label" for="polling-min">自动刷新间隔</label>
+          <div class="settings__row">
+            <input
+              id="polling-min"
+              type="number"
+              class="settings__input"
+              :value="minutesLabel"
+              min="1"
+              :max="Math.round(SETTINGS_LIMITS.MAX_POLLING_INTERVAL_MS / 60000)"
+              @change="onMinutesChange"
+            />
+            <span class="settings__unit">分钟</span>
+          </div>
         </div>
-        <p class="settings__hint settings__hint--small">
-          范围：1 ~ 30 分钟；当前设置保存在浏览器本地，不跨设备同步。
-        </p>
-      </div>
+        <button type="button" class="settings__save" :disabled="saving" @click="onSave">
+          {{ saving ? '保存中…' : '保存' }}
+        </button>
+      </section>
 
-      <button type="button" class="settings__save" :disabled="saving" @click="onSave">
-        {{ saving ? '保存中…' : '保存' }}
-      </button>
-    </section>
+      <!-- 外观 -->
+      <section class="settings__card">
+        <h2>外观</h2>
+        <div class="settings__theme-options" role="radiogroup" aria-label="主题">
+          <label
+            v-for="opt in themeOptions"
+            :key="opt.value"
+            class="settings__theme-opt"
+            :class="{ 'settings__theme-opt--active': ui.currentTheme === opt.value }"
+          >
+            <input
+              type="radio"
+              name="theme"
+              :value="opt.value"
+              :checked="ui.currentTheme === opt.value"
+              class="settings__theme-radio"
+              @change="onThemeChange(opt.value)"
+            />
+            <span class="settings__theme-label">{{ opt.label }}</span>
+          </label>
+        </div>
+      </section>
 
-    <section class="settings-group">
-      <h2>外观</h2>
-      <p class="settings__hint">
-        切换应用配色，点选立即生效，下次启动自动恢复。当前设置保存在本地数据库，不跨设备同步。
-      </p>
-
-      <div class="settings-group__options" role="radiogroup" aria-label="主题">
-        <label
-          v-for="opt in themeOptions"
-          :key="opt.value"
-          class="settings-group__radio"
-          :class="{ 'settings-group__radio--active': ui.currentTheme === opt.value }"
-        >
-          <input
-            type="radio"
-            name="theme"
-            :value="opt.value"
-            :checked="ui.currentTheme === opt.value"
-            class="settings-group__radio-input"
-            @change="onThemeChange(opt.value)"
-          />
-          <span class="settings-group__radio-label">{{ opt.label }}</span>
-          <span class="settings-group__radio-desc">{{ opt.desc }}</span>
-        </label>
-      </div>
-    </section>
-
-    <!-- ============== 账号分组（v1.1.3 · task #22）============== -->
-    <section class="settings-group">
-      <h2>账号</h2>
-      <p class="settings__hint">
-        当前连接的 gitea 服务器和登录用户。修改后会重新拉仓库、分支、看板数据。
-      </p>
-
-      <div class="settings-group__account">
-        <div class="settings-group__account-row">
-          <span class="settings-group__account-label">gitea 地址</span>
-          <span class="settings-group__account-value mono" :title="auth.currentGiteaUrl">
+      <!-- 账号 -->
+      <section class="settings__card">
+        <h2>账号</h2>
+        <div class="settings__info-row">
+          <span class="settings__info-label">地址</span>
+          <span class="settings__info-value mono" :title="auth.currentGiteaUrl">
             {{ auth.currentGiteaUrl || '—' }}
           </span>
         </div>
-        <div class="settings-group__account-row">
-          <span class="settings-group__account-label">登录用户</span>
-          <span class="settings-group__account-value">
+        <div class="settings__info-row">
+          <span class="settings__info-label">用户</span>
+          <span class="settings__info-value">
             {{ auth.currentUser?.login ?? '—' }}
           </span>
         </div>
@@ -379,69 +377,52 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
         >
           更新连接
         </button>
-      </div>
-    </section>
+      </section>
 
-    <!-- ============== 工作区分组（v1.5.3 · workspace path）============== -->
-    <section class="settings-group">
-      <h2>应用工作区</h2>
-      <p class="settings__hint">
-        Git Graph 自动同步所选仓库的本地根目录。
-        仓库按 <code>${'${工作区}'}/repos/${'${owner}'}__${'${repo}'}.git</code> 路径存放。
-      </p>
-
-      <div class="settings-group__account">
-        <div class="settings-group__account-row">
-          <span class="settings-group__account-label">当前路径</span>
-          <span class="settings-group__account-value mono" :title="workspacePath">
-            {{ workspacePath || '—' }}
-            <span v-if="workspaceDefault" class="settings__badge">默认</span>
-          </span>
+      <!-- 工作区 -->
+      <section class="settings__card settings__card--wide">
+        <h2>应用工作区</h2>
+        <div class="settings__workspace-row">
+          <div class="settings__workspace-info">
+            <div class="settings__info-row">
+              <span class="settings__info-label">当前路径</span>
+              <span class="settings__info-value mono" :title="workspacePath">
+                {{ workspacePath || '—' }}
+                <span v-if="workspaceDefault" class="settings__badge">默认</span>
+              </span>
+            </div>
+            <div class="settings__info-row">
+              <span class="settings__info-label">状态</span>
+              <span class="settings__info-value">
+                <span v-if="workspaceValidated" class="settings__status settings__status--ok">✓ 可用</span>
+                <span v-else class="settings__status settings__status--warn">⚠ 路径不可用</span>
+              </span>
+            </div>
+          </div>
+          <div class="settings__workspace-actions">
+            <button
+              type="button"
+              class="settings__save"
+              :disabled="workspaceSaving"
+              @click="onBrowseDirectory"
+            >
+              <span>{{ workspaceSaving ? '选择中…' : '选择目录' }}</span>
+            </button>
+            <button
+              type="button"
+              class="settings__reset"
+              @click="onWorkspaceReset"
+            >
+              重置为默认
+            </button>
+          </div>
         </div>
-        <div class="settings-group__account-row">
-          <span class="settings-group__account-label">状态</span>
-          <span class="settings-group__account-value">
-            <span v-if="workspaceValidated" class="settings__status settings__status--ok">✓ 可用</span>
-            <span v-else class="settings__status settings__status--warn">⚠ 路径不可用</span>
-          </span>
-        </div>
-      </div>
-
-      <div class="settings__field">
-        <label class="settings__label" for="workspace-path">修改工作区路径</label>
-        <input
-          id="workspace-path"
-          v-model="workspaceDraft"
-          type="text"
-          class="settings__input"
-          placeholder="~/giteakanb/workspace（默认）"
-          spellcheck="false"
-        />
-        <p class="settings__hint settings__hint--small">
-          跨平台默认路径：macOS/Linux = <code>$HOME/.giteakanb/workspace</code>；Windows = <code>%USERPROFILE%\.giteakanb\workspace</code>
+        <p class="settings__hint settings__hint--compact">
+          跨平台默认：macOS/Linux = <code>~/.giteakanb/workspace</code>；Windows = <code>%USERPROFILE%\.giteakanb\workspace</code>
         </p>
-      </div>
-
-      <div class="settings__actions">
-        <button
-          type="button"
-          class="settings__save"
-          :disabled="workspaceSaving"
-          @click="onWorkspaceSave"
-        >
-          {{ workspaceSaving ? '保存中…' : '保存工作区路径' }}
-        </button>
-        <button
-          type="button"
-          class="settings__reset"
-          @click="onWorkspaceReset"
-        >
-          重置为默认
-        </button>
-      </div>
-    </section>
-
-    <!-- ============== 账号更新 modal ============== -->
+      </section>
+    </div>
+  </div>
     <Teleport to="body">
       <div v-if="accountModalOpen" class="account-modal" role="dialog" aria-modal="true">
         <div class="account-modal__backdrop" @click="closeAccountModal" />
@@ -534,62 +515,67 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
 </template>
 
 <style scoped>
+/* ===== SettingsView v1.6 紧凑布局（三栏网格 + 不滚动） ===== */
 .settings {
   flex: 1;
-  padding: var(--space-6);
-  overflow-y: auto;
-}
-.settings__header {
-  margin-bottom: var(--space-5);
-}
-.settings__header h1 {
-  font-size: var(--font-xl);
-  font-weight: 600;
-  color: var(--color-text);
-  margin: 0 0 var(--space-2);
-}
-.settings__subtitle {
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-  margin: 0;
-}
-.settings__section {
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-md);
-  padding: var(--space-5);
-  max-width: 640px;
+  padding: var(--space-4);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
 }
-.settings__section h2 {
+.settings__header {
+  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+}
+.settings__header h1 {
   font-size: var(--font-lg);
   font-weight: 600;
   color: var(--color-text);
-  margin: 0 0 var(--space-2);
-}
-.settings__hint {
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
   margin: 0;
-  line-height: var(--line-relaxed);
 }
-.settings__hint--small {
-  font-size: var(--font-xs);
+
+/* 三栏网格（自适应，不会出现水平滚动条） */
+.settings__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+  flex: 1;
+  overflow-y: auto;
+  align-content: start;
 }
-.settings__hint--muted {
-  color: var(--color-text-muted);
+/* 工作区卡片横跨 2 列 */
+.settings__card--wide {
+  grid-column: 1 / -1;
 }
+
+/* 通用卡片 */
+.settings__card {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.settings__card h2 {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* 字段 / 行 / 提示 */
 .settings__field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 .settings__label {
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   font-weight: 500;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
 }
 .settings__row {
   display: flex;
@@ -605,25 +591,34 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
   border-radius: var(--radius-sm);
   font-size: var(--font-md);
 }
-.settings__input--inline {
-  width: 80px;
-  display: inline-block;
-  margin: 0 4px;
-}
 .settings__unit {
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   color: var(--color-text-muted);
 }
+.settings__hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+.settings__hint--compact {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* 按钮 */
 .settings__save {
   align-self: flex-start;
-  padding: 8px 20px;
+  padding: 6px 16px;
   background: var(--color-primary);
   color: var(--color-text-inverse);
   border: none;
   border-radius: var(--radius-sm);
-  font-size: var(--font-md);
+  font-size: var(--font-sm);
   font-weight: 500;
   cursor: pointer;
+  flex-shrink: 0;
 }
 .settings__save:hover:not(:disabled) {
   background: var(--color-primary-hover);
@@ -632,7 +627,104 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
   opacity: 0.6;
   cursor: not-allowed;
 }
-/* 工作区 badge + 状态 + 重置按钮 */
+.settings__reset {
+  align-self: flex-start;
+  padding: 6px 16px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.settings__reset:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text);
+}
+
+/* 主题切换 */
+.settings__theme-options {
+  display: flex;
+  gap: var(--space-2);
+}
+.settings__theme-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  flex: 1;
+}
+.settings__theme-opt:hover {
+  border-color: var(--color-primary);
+}
+.settings__theme-opt--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+.settings__theme-radio {
+  accent-color: var(--color-primary);
+  margin: 0;
+  cursor: pointer;
+}
+.settings__theme-label {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+/* 信息行（账号 / 工作区路径） */
+.settings__info-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: 20px;
+}
+.settings__info-label {
+  flex: 0 0 auto;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-width: 3.5em;
+}
+.settings__info-value {
+  flex: 1 1 auto;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings__info-value.mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+/* 工作区布局 */
+.settings__workspace-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  justify-content: space-between;
+}
+.settings__workspace-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.settings__workspace-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* badge + 状态 */
 .settings__badge {
   display: inline-flex;
   align-items: center;
@@ -653,131 +745,6 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
 }
 .settings__status--warn {
   color: var(--color-warning, #f0ad4e);
-}
-.settings__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.settings__reset {
-  align-self: flex-start;
-  padding: 8px 20px;
-  background: transparent;
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-md);
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
-}
-.settings__reset:hover {
-  border-color: var(--color-text-secondary);
-  color: var(--color-text);
-}
-
-/* =====================================================================
- * 外观分组（v1.1.2 主题切换入口 2 · tech-refine §15.1）
- *
- * 设计：
- *   - 与 polling 的 `.settings__section` 同基础（圆角 / padding / divider / max-width）
- *   - 主色装饰条（border-left: 3px solid --color-primary）区分"主题"分组的视觉权重
- *   - BEM 解耦：单独命名 .settings-group，避免与 polling 数据类分组混用
- *   - radio 行用 padding + border 凸显"可选项"，hover/active 用 --color-primary 强调
- * ===================================================================== */
-.settings-group {
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-divider);
-  border-left: 3px solid var(--color-primary);
-  border-radius: var(--radius-md);
-  padding: var(--space-5);
-  max-width: 640px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  margin-top: var(--space-5);
-}
-.settings-group h2 {
-  font-size: var(--font-lg);
-  font-weight: 600;
-  color: var(--color-text);
-  margin: 0 0 var(--space-2);
-}
-.settings-group__options {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.settings-group__radio {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg);
-  cursor: pointer;
-  transition:
-    border-color 150ms ease-out,
-    background-color 150ms ease-out;
-}
-.settings-group__radio:hover {
-  border-color: var(--color-primary);
-}
-.settings-group__radio--active {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft);
-}
-.settings-group__radio-input {
-  /* 浏览器原生 radio，accent-color 用主题主色跟随（亮/暗自动适配） */
-  accent-color: var(--color-primary);
-  margin: 0;
-  cursor: pointer;
-}
-.settings-group__radio-label {
-  font-size: var(--font-md);
-  font-weight: 500;
-  color: var(--color-text);
-}
-.settings-group__radio-desc {
-  font-size: var(--font-xs);
-  color: var(--color-text-muted);
-  margin-left: auto;
-}
-
-/* ============== v1.1.3 task #22 · 账号分组 ============== */
-.settings-group__account {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.settings-group__account-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg);
-}
-.settings-group__account-label {
-  flex: 0 0 5.5em;
-  font-size: var(--font-xs);
-  color: var(--color-text-muted);
-}
-.settings-group__account-value {
-  flex: 1 1 auto;
-  font-size: var(--font-sm);
-  color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-group__account-value.mono {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-}
-.settings-group__account .settings__save {
-  align-self: flex-start;
 }
 
 /* ============== v1.1.3 task #22 · 更新连接 modal ============== */

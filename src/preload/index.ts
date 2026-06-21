@@ -195,8 +195,12 @@ const api = {
     },
   },
 
+  //===== system namespace（Electron 系统级能力）=====
+  system: {
+    selectDirectory: invoke(IpcChannel.SYSTEM_SELECT_DIRECTORY),
+  },
+
   /**
-   *通用 on()监听主进程事件推送
    *
    * 设计（02-architecture.md §5.1 send/on）：
    * main → webContents.send('event:<name>', payload)
