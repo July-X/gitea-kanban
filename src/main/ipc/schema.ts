@@ -1461,6 +1461,24 @@ export const GitGraphLinesArgsSchema = z
   .strict();
 export type GitGraphLinesArgs = z.infer<typeof GitGraphLinesArgsSchema>;
 
+/** commits.gitgraph.cloneRepo 入参（v1.5 启用 Git Graph）*/
+export const CloneRepoArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+    /** 用户可选覆盖默认建议路径；不传走 suggestLocalRepoPath */
+    cwd: z.string().optional(),
+  })
+  .strict();
+export type CloneRepoArgs = z.infer<typeof CloneRepoArgsSchema>;
+
+/** commits.gitgraph.cloneRepo 返回 */
+export const CloneRepoRespSchema = z.object({
+  cwd: NonEmptyStringSchema,
+  stdout: z.string(),
+  reused: z.boolean(),
+});
+export type CloneRepoResp = z.infer<typeof CloneRepoRespSchema>;
+
 // ===== @deprecated 兼容导出（ADR-0002 reset 删了 board.cards.* 端点） =====
 // 这些类型 owner 在 T3 阶段会替换为 IssueCardDto + issues.* / labels.* 新端点；
 // 这里只提供 type-only stub 保证 type-check 通过（行为层面：boardCardsList 端点已删，前端调用会抛 NOT_FOUND）。

@@ -21,7 +21,7 @@ import { GitBranch, RefreshCw, GitCommit } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
-import { branchesList, commitsGitgraphLines } from '@renderer/lib/ipc-client';
+import { branchesList, commitsGitgraphLines, commitsGitgraphCloneRepo } from '@renderer/lib/ipc-client';
 import type { BranchDto, ListBranchesResp } from '../../main/ipc/schema.js';
 import EmptyState from '@renderer/components/EmptyState.vue';
 
@@ -74,8 +74,12 @@ const graph = ref<Graph | null>(null);
 const loading = ref(false);
 /** 本地错误信息 */
 const localError = ref<string | null>(null);
-/** v1.5 功能未启用提示（main handler 抛 not_implemented 时设置） */
+/** v1.5 功能未启用提示（main handler 返 disabled=true 时设置） */
 const featureDisabled = ref(false);
+/** v1.5 启用流程：是否正在 git clone */
+const cloning = ref(false);
+/** v1.5 启用流程：克隆进度 / 错误信息 */
+const cloneProgress = ref<string | null>(null);
 
 // ============================================================
 // 生命周期
@@ -203,6 +207,42 @@ async function loadGraph(): Promise<void> {
 
 function refresh(): void {
   void loadGraph();
+}
+
+/**
+ * v1.5 启用流程：用户点「启用 Git Graph」按钮 → 调 main 端 git clone
+ *
+ * 流程：
+ *   1. cloning=true，显示"正在 clone..."
+ *   2. 调 IPC commitsGitgraphCloneRepo（main 端从 keychain 读 token + git clone）
+ *   3. 成功 → cloneProgress="已完成" → 重新 loadGraph（这次有 localPath + git 子进程可用）
+ *   4. 失败 → cloneProgress=错误信息
+ *
+ * 注意：现在 main handler 还是 placeholder（return disabled），
+ *   clone 完成后再次 loadGraph 仍会返 disabled —— v1.5.1 落地 main handler
+ *   走 gitProcess.runGraphLog(listLocalRepoPath(projectId)) 后才真正显示 Git Graph
+ */
+async function enableGitGraph(): Promise<void> {
+  if (!activeProjectId.value) return;
+  cloning.value = true;
+  cloneProgress.value = '正在 clone 仓库到本地（首次可能需要几十秒）...';
+  useGlobalLoadingStore().show('timeline');
+  try {
+    const resp = await commitsGitgraphCloneRepo({
+      projectId: activeProjectId.value,
+    });
+    cloneProgress.value = `已完成：${resp.cwd}${resp.reused ? '（复用已有仓库）' : ''}`;
+    // 重新加载；这次 main handler 应该走 gitProcess 路径（v1.5.1）
+    await loadGraph();
+  } catch (e: unknown) {
+    const err = e as { messageText?: string; message?: string; hint?: string };
+    const msg = err.messageText ?? err.message ?? String(e) ?? '启用失败';
+    cloneProgress.value = `启用失败：${msg}`;
+    console.error('[TimelineNewView] enableGitGraph failed:', e);
+  } finally {
+    cloning.value = false;
+    useGlobalLoadingStore().hide('timeline');
+  }
 }
 
 // ============================================================
@@ -360,8 +400,18 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
       >
         <EmptyState
           title="Git Graph 功能暂未启用"
-          description="新版本需要等仓库本地路径接入（v1.5 计划），届时直接调 git 二进制拿字符流，与 Gitea 原版 1:1 等价。当前可使用「提交时间轴」视图。"
+          description="v1.5 新增：在本地 clone 仓库后，调 git 二进制拿 `git log --graph` 字符流，与 Gitea 原版 1:1 等价。点下面按钮一键启用（克隆完成后下次进入此页面自动加载 Git Graph）。"
         />
+        <button
+          v-if="!cloning"
+          class="enable-gitgraph-btn"
+          @click="enableGitGraph"
+        >
+          启用 Git Graph（git clone 仓库到本地）
+        </button>
+        <div v-if="cloneProgress" class="clone-progress">
+          {{ cloneProgress }}
+        </div>
       </div>
       <div
         v-else-if="!graph || (graph?.commits?.length ?? 0) === 0"
@@ -512,6 +562,29 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 .timeline-new__placeholder--feature {
   height: 400px;
   padding: var(--space-6, 24px);
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+}
+
+.enable-gitgraph-btn {
+  padding: 10px 20px;
+  background: var(--color-primary);
+  color: var(--color-primary-contrast, #fff);
+  border: none;
+  border-radius: 6px;
+  font-size: var(--font-md, 14px);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.enable-gitgraph-btn:hover {
+  background: var(--color-primary-hover, #5fa020);
+}
+
+.clone-progress {
+  font-size: var(--font-sm, 13px);
+  color: var(--color-text-secondary);
+  text-align: center;
+  max-width: 600px;
 }
 
 /* ===== Branch chips ===== */

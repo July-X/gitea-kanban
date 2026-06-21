@@ -93,6 +93,8 @@ const api = {
     timeline: invoke(IpcChannel.COMMITS_TIMELINE),
     // v1.4 重构：返 Gitea 字符流 + commit metadata；前端 Parser 解析为 Graph
     gitgraphLines: invoke(IpcChannel.COMMITS_GITGRAPH_LINES),
+    // v1.5 启用 Git Graph：自动 git clone 仓库到本地
+    gitgraphCloneRepo: invoke(IpcChannel.COMMITS_GITGRAPH_CLONE_REPO),
   },
 
   //===== pulls namespace =====

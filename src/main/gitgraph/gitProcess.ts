@@ -29,6 +29,9 @@
  */
 
 import { spawn } from 'node:child_process';
+import { promises as fs, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { GraphLine, GraphLineCommit, GitRef } from '../../renderer/lib/gitgraph/types.js';
 
 /** Gitea graph.go 的 format 串（与 Gitea 1:1 同步） */
@@ -210,4 +213,122 @@ export function parseRefs(refsStr: string): GitRef[] {
     }
   }
   return refs;
+}
+
+// ============================================================
+// git clone 封装（v1.5 Git Graph 启用流程）
+// ============================================================
+
+/**
+ * 推荐本地仓库路径
+ *
+ * 规则：${tmpdir()}/gitea-kanban/repos/${owner}__${repo}.git
+ * 用 tmpdir 而不是 user home 是因为：
+ *   - macOS sandbox 下 ~ 可能写不进（AGENTS §8.7.6）
+ *   - tmpdir 永远可写
+ */
+export function suggestLocalRepoPath(owner: string, repo: string): string {
+  const safeOwner = owner.replace(/[^A-Za-z0-9_.-]/g, '_');
+  const safeRepo = repo.replace(/[^A-Za-z0-9_.-]/g, '_');
+  return join(tmpdir(), 'gitea-kanban', 'repos', `${safeOwner}__${safeRepo}.git`);
+}
+
+/**
+ * 检查路径是否已存在（裸仓库）
+ */
+export function repoPathExists(cwd: string): boolean {
+  try {
+    return existsSync(join(cwd, 'HEAD')) && existsSync(join(cwd, 'objects'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 确保父目录存在
+ */
+async function ensureParentDir(cwd: string): Promise<void> {
+  const parent = cwd.split('/').slice(0, -1).join('/');
+  await fs.mkdir(parent, { recursive: true });
+}
+
+/**
+ * git clone 封装（带 token）
+ *
+ * 鉴权策略（v1.5）：
+ *   - 把 token 临时塞进 URL: `https://oauth2:{token}@{host}/{owner}/{repo}.git`
+ *   - 立即 `git remote set-url origin` 去掉 token，写干净的 URL
+ *     → `.git/config` 不会留存 token（防止泄漏到磁盘）
+ *   - 进程退出后 token 仅在 clone 命令子进程 argv 中瞬时存在
+ *
+ * @param args.giteaUrl 例 'https://gitea.example.com'（不带尾斜杠）
+ * @param args.owner / repo
+ * @param args.token gitea PAT（建议 oauth2 scope + read:repo）
+ * @param args.cwd 本地目标路径（已存在则报错）
+ * @param args.bare 是否裸仓库（默认 false）
+ * @returns 实际 clone 的本地路径（== cwd）
+ */
+export interface CloneRepoOpts {
+  giteaUrl: string;
+  owner: string;
+  repo: string;
+  token: string;
+  cwd: string;
+  bare?: boolean;
+}
+
+export async function cloneRepo(opts: CloneRepoOpts): Promise<{ cwd: string; stdout: string }> {
+  if (repoPathExists(opts.cwd)) {
+    throw new Error(`路径已存在（看起来是 git 仓库）：${opts.cwd}`);
+  }
+  await ensureParentDir(opts.cwd);
+
+  const cleanUrl = `${opts.giteaUrl.replace(/\/$/, '')}/${opts.owner}/${opts.repo}.git`;
+  // 把 token 塞进 URL 用于 clone；clone 完立即清掉
+  const urlWithToken = opts.token
+    ? cleanUrl.replace('https://', `https://oauth2:${encodeURIComponent(opts.token)}@`)
+    : cleanUrl;
+
+  const args = ['clone'];
+  if (opts.bare) args.push('--bare');
+  args.push(urlWithToken, opts.cwd);
+
+  const { stdout } = await execGitWithStderr(args, tmpdir());
+
+  // 立即去掉 token：set-url 改成无 token 的 cleanUrl
+  // 仅当之前 clone 用了 token 时需要
+  if (opts.token) {
+    try {
+      await execGit(['remote', 'set-url', 'origin', cleanUrl], opts.cwd);
+    } catch (e) {
+      // 裸仓库没有 origin；忽略
+      if (!opts.bare) {
+        console.warn('[gitProcess] remote set-url failed:', e);
+      }
+    }
+  }
+
+  return { cwd: opts.cwd, stdout };
+}
+
+function execGitWithStderr(args: readonly string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, env: process.env });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.on('error', (err) => reject(err));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`git ${args.join(' ')} failed (exit=${code}): ${stderr}`));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
 }

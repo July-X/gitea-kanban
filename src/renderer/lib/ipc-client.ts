@@ -459,6 +459,26 @@ export function commitsGitgraphLines(args: {
   return getIpcClient().invoke('commits', 'gitgraphLines', args);
 }
 
+/**
+ * v1.5 启用 Git Graph：自动 git clone 仓库到本地
+ *
+ * main 端从 keychain 读 token → `git clone --bare` 到默认 / 用户指定路径
+ * → 路径持久化到 localStore。
+ *
+ * UI 流程：
+ *   用户点「启用 Git Graph」按钮 → 调本函数 → clone 完成自动回到 TimelineNewView
+ *   看到真 Git Graph（git 子进程跑字符流 + 前端 Parser 1:1 渲染）
+ *
+ * @param args.projectId 当前 project uuid
+ * @param args.cwd 可选；不传走默认建议路径（${tmpdir}/gitea-kanban/repos/...）
+ */
+export function commitsGitgraphCloneRepo(args: {
+  projectId: string;
+  cwd?: string;
+}): Promise<{ cwd: string; stdout: string; reused: boolean }> {
+  return getIpcClient().invoke('commits', 'gitgraphCloneRepo', args);
+}
+
 // 时间轴 lane模式：与 IPC schema LaneModeSchema同步。
 //内部用 alias（'laneByA' / 'laneByB' / 'laneByC'）避开 check:no-jargon扫描。
 // IPC边界处还原为 schema 字面量（main端 schema = 'branch' | 'author' | 'pr'）。

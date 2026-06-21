@@ -31,7 +31,9 @@ import {
   type TimelineDto,
   type GitGraphLinesArgs,
   GitGraphLinesArgsSchema,
+  CloneRepoArgsSchema,
   type GraphLinesDto,
+  type CloneRepoArgs,
   type TimelinePR,
   type PullDto,
 } from './schema.js';
@@ -49,6 +51,24 @@ import { getTimelineCache, setTimelineCache, makeTimelineCacheKey } from '../cac
 import { buildTimeline } from '../gitea/timeline.js';
 import { resolveProject } from '../board/resolveProject.js';
 import { logger } from '../logger.js';
+import {
+  runGraphLog,
+  cloneRepo,
+  suggestLocalRepoPath,
+  repoPathExists,
+} from '../gitgraph/gitProcess.js';
+import { listLocalRepoPath, saveLocalRepoPath } from '../local/gitgraphPaths.js';
+import { keychainGet } from '../gitea/keychain.js';
+import { existsSync } from 'node:fs';
+
+/** 简洁 fs.existsSync 包装（避免上面 main 块用 fs.mkdir 时干扰） */
+function existsPath(p: string): boolean {
+  try {
+    return existsSync(p);
+  } catch {
+    return false;
+  }
+}
 
 /** 统一包装：parse → handler → error → IpcError（与 branches.ts / repos.ts 保持一致） */
 function wrapIpc<TArgs, TResult>(
@@ -535,17 +555,105 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
  *   4. 写 cache（30s TTL）
  *   5. 把下面的 `disabled: true` 分支去掉，改为跑 gitProcess
  */
-async function commitsGitGraphLinesHandler(_args: GitGraphLinesArgs): Promise<GraphLinesDto> {
-  // v1.4 placeholder：仓库本地路径未配置，handler 暂未实现
-  return {
-    disabled: true,
-    disabledReason:
-      'Git Graph 功能正在迁移到 v1.5（需要仓库本地路径接 git 二进制）；当前版本暂未启用。',
-    lines: [],
-    totalCommits: 0,
-    truncated: false,
-    range: { from: new Date(0).toISOString(), to: new Date(0).toISOString() },
-  };
+async function commitsGitGraphLinesHandler(args: GitGraphLinesArgs): Promise<GraphLinesDto> {
+  // v1.5：查 localStore 看 projectId 是否有 localPath
+  // - 有 → 跑 git log --graph 子进程拿字符流
+  // - 没有 → 返 disabled 让前端显示「启用 Git Graph」按钮
+  const localCwd = listLocalRepoPath(args.projectId);
+  if (!localCwd || !existsPath(localCwd)) {
+    return {
+      disabled: true,
+      disabledReason:
+        'Git Graph 功能需要先启用本地仓库（点击「启用 Git Graph」按钮自动 git clone 到本地）。',
+      lines: [],
+      totalCommits: 0,
+      truncated: false,
+      range: { from: new Date(0).toISOString(), to: new Date(0).toISOString() },
+    };
+  }
+
+  try {
+    const result = await runGraphLog(localCwd, {
+      branches: args.branches,
+      maxCount: args.limit,
+      hidePRRefs: args.hidePRRefs,
+    });
+    return {
+      disabled: false,
+      lines: result.lines,
+      totalCommits: result.lines.filter((l) => l.commit).length,
+      truncated: result.truncated,
+      range: result.range,
+    };
+  } catch (e) {
+    // git 子进程失败（仓库 broken / 网络断 / git 未装）→ 让前端看到错误
+    logger.warn({ op: 'commits.gitgraph.lines', err: String(e) }, 'git log --graph failed');
+    if (e instanceof IpcError) throw e;
+    throw new IpcError({
+      code: IpcErrorCode.INTERNAL,
+      message: 'git log --graph 失败',
+      hint: (e as Error).message ?? String(e),
+    });
+  }
+}
+
+// ===== commits.gitgraph.cloneRepo（v1.5 启用 Git Graph）=====
+
+interface CloneRepoResp {
+  cwd: string;
+  stdout: string;
+  /** 是否复用已有仓库（true = 没 clone，用了用户已有路径） */
+  reused: boolean;
+}
+
+/**
+ * v1.5：自动 git clone 仓库到本地（带 token），路径持久化到 localStore
+ *
+ * 流程：
+ *   1. 读 localStore 看 projectId 已有 localPath → 有就复用（只 fetch）
+ *   2. 没有 → 用 suggestLocalRepoPath(owner, repo) 算默认路径 → clone
+ *   3. clone 成功后 saveLocalRepoPath(projectId, cwd)
+ *   4. 立即 `git remote set-url` 去掉 token（防止 .git/config 留存）
+ *
+ * 鉴权：token 从 keychain 内存读，**不持久化**
+ */
+async function commitsGitGraphCloneRepoHandler(args: CloneRepoArgs): Promise<CloneRepoResp> {
+  const proj = resolveProject(args.projectId);
+  // token 从 keychain 读（async，OK 在 handler 内 await）
+  const token = (await keychainGet(proj.giteaUrl, proj.username)) ?? '';
+
+  // 1. 已有 localPath → 复用
+  const existing = listLocalRepoPath(args.projectId);
+  if (existing && repoPathExists(existing)) {
+    return { cwd: existing, stdout: '(reused)', reused: true };
+  }
+
+  // 2. 决定 cwd
+  const cwd = args.cwd?.trim() || suggestLocalRepoPath(proj.owner, proj.repo);
+  if (repoPathExists(cwd)) {
+    // 路径已存在且是 git 仓库 → 保存并复用
+    saveLocalRepoPath(args.projectId, cwd);
+    return { cwd, stdout: '(reused existing)', reused: true };
+  }
+
+  // 3. clone（带 token；clone 后立即清掉）
+  const result = await cloneRepo({
+    giteaUrl: proj.giteaUrl,
+    owner: proj.owner,
+    repo: proj.repo,
+    token,
+    cwd,
+    bare: true, // 桌面端不编辑代码，裸仓库足够，省一半磁盘
+  });
+
+  // 4. 持久化
+  saveLocalRepoPath(args.projectId, result.cwd);
+
+  logger.info(
+    { op: 'commits.gitgraph.cloneRepo', cwd: result.cwd, projectId: args.projectId },
+    'clone done',
+  );
+  return { cwd: result.cwd, stdout: result.stdout, reused: false };
 }
 
 // ===== 注册 =====
@@ -555,6 +663,11 @@ export function registerCommitsIpc(): void {
   wrapIpc(IpcChannel.COMMITS_GET, GetCommitArgsSchema, commitsGetHandler);
   wrapIpc(IpcChannel.COMMITS_TIMELINE, TimelineArgsSchema, commitsTimelineHandler);
   wrapIpc(IpcChannel.COMMITS_GITGRAPH_LINES, GitGraphLinesArgsSchema, commitsGitGraphLinesHandler);
+  wrapIpc(
+    IpcChannel.COMMITS_GITGRAPH_CLONE_REPO,
+    CloneRepoArgsSchema,
+    commitsGitGraphCloneRepoHandler,
+  );
 }
 
 export function unregisterCommitsIpc(): void {
@@ -562,4 +675,5 @@ export function unregisterCommitsIpc(): void {
   ipcMain.removeHandler(IpcChannel.COMMITS_GET);
   ipcMain.removeHandler(IpcChannel.COMMITS_TIMELINE);
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_LINES);
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_CLONE_REPO);
 }
