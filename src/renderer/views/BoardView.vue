@@ -397,8 +397,7 @@ async function confirmIssueLabelRemoval(): Promise<void> {
  * 链路（照抄 MergesView.onJumpToTimeline 模式）：
  * 1. 校验 refBranch 在当前仓库分支列表里（不在则 toast 不跳转）
  * 2. 取该分支 head commit sha（BranchDto.sha = gitea branch.commit.id）
- * 3. branchStore.setPendingTimelineFocus({ ref, sha }) → router.push('/timeline')
- * 4. TimelineView watch pendingTimelineFocus → 选分支加载 timeline + 设 prFocusSha → 滚动高亮
+ * 跳转到 Git Graph 视图查看该合并请求的分支
  *
  * 分支列表来源：优先复用 createIssueBranches（新建议题弹窗的缓存），
  * 缓存为空时按需 branchesList 拉一次。弹窗保留（不关），切回看板仍在。
@@ -430,7 +429,6 @@ async function onJumpToBranch(refBranch: string): Promise<void> {
     return;
   }
 
-  branchStore.setPendingTimelineFocus({ ref: refBranch, sha: target.sha });
   void router.push('/timeline');
 }
 // v1.4 调整（2026-06-18）：列内新建框已移除，createIssueInColumn 不再使用；

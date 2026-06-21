@@ -39,7 +39,6 @@ import type {
   LabelDto,
   PullDto,
   RepoProjectDto,
-  TimelineDto,
   GraphLinesDto,
 } from '../../main/ipc/schema.js';
 
@@ -490,35 +489,6 @@ export function commitsGitgraphPull(args: {
   projectId: string;
 }): Promise<{ beforeCount: number; afterCount: number; addedCommits: number; stdout: string }> {
   return getIpcClient().invoke('commits', 'gitgraphPull', args);
-}
-
-// 时间轴 lane模式：与 IPC schema LaneModeSchema同步。
-//内部用 alias（'laneByA' / 'laneByB' / 'laneByC'）避开 check:no-jargon扫描。
-// IPC边界处还原为 schema 字面量（main端 schema = 'branch' | 'author' | 'pr'）。
-export type LaneModeArg = 'laneByA' | 'laneByB' | 'laneByC';
-
-/** 时间轴数据 */
-export function commitsTimeline(args: {
-  projectId: string;
-  branches: string[];
-  since?: string;
-  until?: string;
-  maxNodes?: number;
-  laneMode?: LaneModeArg;
-}): Promise<TimelineDto> {
-  // 把内部 alias还原为 IPC实际接受的字面量（main端 schema = 'branch' | 'author' | 'pr'）
-  const wireLaneMode: 'branch' | 'author' | 'pr' | undefined =
-    args.laneMode === 'laneByA'
-      ? 'branch'
-      : args.laneMode === 'laneByB'
-        ? 'author'
-        : args.laneMode === 'laneByC'
-          ? 'pr'
-          : undefined;
-  return getIpcClient().invoke('commits', 'timeline', {
-    ...args,
-    ...(wireLaneMode !== undefined ? { laneMode: wireLaneMode } : {}),
-  });
 }
 
 // ============================================================

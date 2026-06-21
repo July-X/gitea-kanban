@@ -173,12 +173,7 @@ function toggleExpandWithComments(p: PullDto): void {
 }
 
 /**
- * v1.4 · 任务 #merge-timeline-jump:
- *   从合并请求 header 跳时间轴,在该合并请求的 head 分支中定位到 head.sha 这一行
- *
- * 写入 branch.pendingTimelineFocus({ ref: p.head.ref, sha: p.head.sha })
- * → router.push('/timeline') → TimelineView onMounted consumePendingTimelineFocus
- *  → 选中 head 分支 + 加载完 timeline 后高亮 + scrollIntoView
+ * 跳转到 Git Graph 视图（/timeline），查看该合并请求的 head 分支
  *
  * @click.stop 阻止冒泡到 merge-item 行（避免同时触发 toggleExpandWithComments 展开手风琴）
  */
@@ -187,7 +182,6 @@ function onJumpToTimeline(p: PullDto): void {
     showToast({ type: 'error', message: '这条合并请求没有可跳转的分支信息' });
     return;
   }
-  branch.setPendingTimelineFocus({ ref: p.head.ref, sha: p.head.sha });
   void router.push('/timeline');
 }
 

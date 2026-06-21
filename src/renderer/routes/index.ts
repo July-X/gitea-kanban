@@ -38,14 +38,8 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/timeline',
     name: 'timeline',
-    component: () => import('@renderer/views/TimelineView.vue'),
-    meta: { title: '时间轴', requiresAuth: true },
-  },
-  {
-    path: '/timeline-new',
-    name: 'timeline-new',
     component: () => import('@renderer/views/TimelineNewView.vue'),
-    meta: { title: '新时间轴', requiresAuth: true },
+    meta: { title: 'Git Graph', requiresAuth: true },
   },
   {
     path: '/merges',

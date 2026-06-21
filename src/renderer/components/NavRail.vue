@@ -59,26 +59,14 @@ const items: NavItem[] = [
   },
   {
     id: 'timeline',
-    label: '时间轴',
+    label: 'Git Graph',
     icon: Timer,
     to: '/timeline',
     devAnnotation: {
-      web: '/<owner>/<repo>/commits/<ref>',
-      api: 'GET /api/v1/repos/<owner>/<repo>/commits?sha=<ref>&limit=N',
-      ipc: 'commits.timeline',
-      notes: '按分支聚合 commit，支持跨分支横向对比（<ref> 可为分支名 / tag / sha）',
-    },
-  },
-  {
-    id: 'timeline-new',
-    label: '新时间轴',
-    icon: Timer,
-    to: '/timeline-new',
-    devAnnotation: {
       web: '/<owner>/<repo>/graphs/commits',
-      api: 'GET /api/v1/repos/<owner>/<repo>/commits + Parser DAG layout',
-      ipc: 'commits.gitgraph',
-      notes: 'Git Graph 视图：复刻 Gitea 原生提交图（SVG dot + 线条）',
+      api: 'git log --graph --date-order（git 子进程）',
+      ipc: 'commits.gitgraph.lines',
+      notes: 'Git Graph 视图：对齐 Gitea parser.go 字符流协议 + 前端 Parser 渲染',
     },
   },
   {
