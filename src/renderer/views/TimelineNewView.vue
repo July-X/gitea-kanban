@@ -17,7 +17,7 @@
  */
 
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitCommit, ArrowDownToLine } from 'lucide-vue-next';
+import { GitCommit, ArrowDownToLine, GitBranch, Tag, GitPullRequest, Crosshair } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
@@ -498,6 +498,10 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
                   class="ref-badge"
                   :style="{ color: refColor(ref.refGroup), background: refBg(ref.refGroup) }"
                 >
+                  <GitBranch v-if="ref.refGroup === 'heads'" :size="11" />
+                  <Tag v-else-if="ref.refGroup === 'tags'" :size="11" />
+                  <GitPullRequest v-else-if="ref.refGroup === 'pull'" :size="11" />
+                  <Crosshair v-else :size="11" />
                   {{ ref.shortName }}
                 </span>
                 <span class="commit-subject">{{ r.commit.subject }}</span>
@@ -850,6 +854,7 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 .ref-badge {
   display: inline-flex;
   align-items: center;
+  gap: 2px;
   padding: 1px 6px;
   border-radius: 8px;
   font-size: 11px;

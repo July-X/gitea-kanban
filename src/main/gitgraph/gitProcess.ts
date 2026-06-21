@@ -34,8 +34,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GraphLine, GraphLineCommit, GitRef } from '../../renderer/lib/gitgraph/types.js';
 
-/** Gitea graph.go 的 format 串（与 Gitea 1:1 同步） */
-const GRAPH_FORMAT = 'DATA:%D|%H|%ad|%h|%s';
+/**
+ * Gitea graph.go 的 format 串（与 Gitea 1:1 同步，+ %an|%ae 拿作者名/邮箱）
+ *
+ * 原版 Gitea graph.go 走 `%D|%H|%ad|%h|%s`，作者名靠后端 `LoadAndProcessCommits`
+ * 从 git commit 对象拿。我们走 git 二进制，直接在 format 里拿。
+ */
+const GRAPH_FORMAT = 'DATA:%D|%H|%ad|%h|%s|%an|%ae';
 
 /** Gitea graph.go 的 cmd args（与 graph.go:23-42 同步） */
 const GRAPH_ARGS: readonly string[] = [
@@ -128,12 +133,25 @@ export async function runGraphLog(
     const glyph = raw.substring(0, dataIdx);
     const dataPart = raw.substring(dataIdx + 'DATA:'.length);
 
-    // 解析 DATA: 段（Gitea NewCommit 逻辑：bytes.SplitN(line, []byte("|"), 5)）
+    // 解析 DATA: 段（格式：%D|%H|%ad|%h|%s|%an|%ae）
+    // %D=refs | %H=sha | %ad=date | %h=shortSha | %s=subject | %an=authorName | %ae=authorEmail
     const parts = dataPart.split('|');
     if (parts.length < 5) continue; // 损坏行
 
-    const [refsStr, sha, date, shortSha, ...subjectParts] = parts;
-    const subject = (subjectParts ?? []).join('|');
+    const [refsStr, sha, date, shortSha, ...subjectAndRest] = parts;
+    // subject 可能含 '|'（git commit message 本身含 |），%an|%ae 是最后两个字段
+    // 取法：subject = subjectAndRest[0]；如果 subjectAndRest >= 3 则最后两个是 an/ae
+    let subject = subjectAndRest[0] ?? '';
+    let authorName = '';
+    let authorEmail = '';
+    if (subjectAndRest.length >= 3) {
+      authorName = subjectAndRest[subjectAndRest.length - 2] ?? '';
+      authorEmail = subjectAndRest[subjectAndRest.length - 1] ?? '';
+      // subject 是中间部分（如果 > 3 个元素，说明 subject 含 |）
+      if (subjectAndRest.length > 3) {
+        subject = subjectAndRest.slice(1, -2).join('|');
+      }
+    }
 
     const refs = parseRefs(refsStr ?? '');
     const enrichedRefs = opts.shaRefs?.get(sha ?? '') ?? refs;
@@ -146,8 +164,8 @@ export async function runGraphLog(
         shortSha: shortSha ?? (sha ?? '').slice(0, 7),
         subject: subject ?? '',
         date: date ?? '',
-        authorName: '', // git log --pretty=format 没 %an，要 %an|%ae 才拿得到；目前先空
-        authorEmail: '',
+        authorName,
+        authorEmail,
         isMerge: false, // 需要 %P 才能算 isMerge；目前 false
         parents: [],
         refs: enrichedRefs,

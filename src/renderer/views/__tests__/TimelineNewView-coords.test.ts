@@ -56,11 +56,22 @@ function gitLogLines(): GraphLine[] {
     const sha = data[1] ?? '';
     const date = data[2] ?? '';
     const shortSha = data[3] ?? sha.slice(0, 7);
-    const subject = (data.slice(4) ?? []).join('|');
+    // 格式：%D|%H|%ad|%h|%s|%an|%ae（subject 可能含 |）
+    const subjectAndRest = data.slice(4);
+    let subject = subjectAndRest[0] ?? '';
+    let authorName = '';
+    let authorEmail = '';
+    if (subjectAndRest.length >= 3) {
+      authorName = subjectAndRest[subjectAndRest.length - 2] ?? '';
+      authorEmail = subjectAndRest[subjectAndRest.length - 1] ?? '';
+      if (subjectAndRest.length > 3) {
+        subject = subjectAndRest.slice(1, -2).join('|');
+      }
+    }
     return {
       row,
       glyph,
-      commit: { sha, shortSha, subject, date, authorName: '', authorEmail: '', isMerge: false, parents: [], refs },
+      commit: { sha, shortSha, subject, date, authorName, authorEmail, isMerge: false, parents: [], refs },
     };
   });
 }

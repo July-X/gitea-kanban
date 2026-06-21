@@ -67,8 +67,18 @@ function parseGitLogLines(raw: string): GraphLine[] {
     const parts = dataPart.split('|');
     if (parts.length < 5) continue;
 
-    const [refsStr, sha, date, shortSha, ...subjectParts] = parts;
-    const subject = subjectParts.join('|');
+    // 格式：%D|%H|%ad|%h|%s|%an|%ae（subject 可能含 |）
+    const [refsStr, sha, date, shortSha, ...subjectAndRest] = parts;
+    let subject = subjectAndRest[0] ?? '';
+    let authorName = '';
+    let authorEmail = '';
+    if (subjectAndRest.length >= 3) {
+      authorName = subjectAndRest[subjectAndRest.length - 2] ?? '';
+      authorEmail = subjectAndRest[subjectAndRest.length - 1] ?? '';
+      if (subjectAndRest.length > 3) {
+        subject = subjectAndRest.slice(1, -2).join('|');
+      }
+    }
 
     const refs = parseRefs(refsStr ?? '');
 
@@ -77,8 +87,8 @@ function parseGitLogLines(raw: string): GraphLine[] {
       shortSha: shortSha ?? (sha ?? '').slice(0, 7),
       subject: subject ?? '',
       date: date ?? '',
-      authorName: '',
-      authorEmail: '',
+      authorName,
+      authorEmail,
       isMerge: false,
       parents: [],
       refs,
