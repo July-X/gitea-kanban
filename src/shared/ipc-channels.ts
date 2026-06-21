@@ -65,6 +65,8 @@ export const IpcChannel = {
   COMMITS_GITGRAPH_LINES: 'commits.gitgraph.lines',
   // v1.5 启用 Git Graph：自动 git clone 仓库到本地
   COMMITS_GITGRAPH_CLONE_REPO: 'commits.gitgraph.cloneRepo',
+  // v1.5.2 pull (merge)：git fetch + pull --rebase，Header 的 pull 按钮调
+  COMMITS_GITGRAPH_PULL: 'commits.gitgraph.pull',
 
   // === pulls namespace（02-architecture.md §5.3.5 + §5.3.6）===
   // 破坏性操作清理（2026-06-15 用户拍板）：create 已从 App 移除，保留 list/get/merge/close

@@ -32,7 +32,10 @@ import {
   type GitGraphLinesArgs,
   GitGraphLinesArgsSchema,
   CloneRepoArgsSchema,
+  GitGraphPullArgsSchema,
   type GraphLinesDto,
+  type GitGraphPullArgs,
+  type GitGraphPullResp,
   type CloneRepoArgs,
   type TimelinePR,
   type PullDto,
@@ -56,6 +59,7 @@ import {
   cloneRepo,
   suggestLocalRepoPath,
   repoPathExists,
+  pullRepo,
 } from '../gitgraph/gitProcess.js';
 import { listLocalRepoPath, saveLocalRepoPath } from '../local/gitgraphPaths.js';
 import { keychainGet } from '../gitea/keychain.js';
@@ -580,6 +584,8 @@ async function commitsGitGraphLinesHandler(args: GitGraphLinesArgs): Promise<Gra
     });
     return {
       disabled: false,
+      /** 本地仓库路径（用于 Header 小字标注） */
+      localPath: localCwd,
       lines: result.lines,
       totalCommits: result.lines.filter((l) => l.commit).length,
       truncated: result.truncated,
@@ -668,6 +674,7 @@ export function registerCommitsIpc(): void {
     CloneRepoArgsSchema,
     commitsGitGraphCloneRepoHandler,
   );
+  wrapIpc(IpcChannel.COMMITS_GITGRAPH_PULL, GitGraphPullArgsSchema, commitsGitGraphPullHandler);
 }
 
 export function unregisterCommitsIpc(): void {
@@ -676,4 +683,45 @@ export function unregisterCommitsIpc(): void {
   ipcMain.removeHandler(IpcChannel.COMMITS_TIMELINE);
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_LINES);
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_CLONE_REPO);
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_PULL);
+}
+
+// ===== commits.gitgraph.pull（v1.5.2 pull/merge 按钮）=====
+
+async function commitsGitGraphPullHandler(args: GitGraphPullArgs): Promise<GitGraphPullResp> {
+  const localCwd = listLocalRepoPath(args.projectId);
+  if (!localCwd) {
+    throw new IpcError({
+      code: IpcErrorCode.NOT_FOUND,
+      message: 'Git Graph 尚未启用：没有本地仓库',
+      hint: '点击「启用 Git Graph」按钮先 git clone 仓库到本地',
+    });
+  }
+
+  try {
+    const result = await pullRepo({ cwd: localCwd });
+    logger.info(
+      {
+        op: 'commits.gitgraph.pull',
+        projectId: args.projectId,
+        cwd: localCwd,
+        addedCommits: result.addedCommits,
+      },
+      'pull done',
+    );
+    return {
+      beforeCount: result.beforeCount,
+      afterCount: result.afterCount,
+      addedCommits: result.addedCommits,
+      stdout: result.stdout,
+    };
+  } catch (e) {
+    logger.warn({ op: 'commits.gitgraph.pull', err: String(e) }, 'pull failed');
+    if (e instanceof IpcError) throw e;
+    throw new IpcError({
+      code: IpcErrorCode.INTERNAL,
+      message: 'git pull --rebase 失败',
+      hint: (e as Error).message ?? String(e),
+    });
+  }
 }

@@ -350,3 +350,73 @@ function execGitWithStderr(args: readonly string[], cwd: string): Promise<{ stdo
     });
   });
 }
+
+// ============================================================
+// pull (merge) —— git fetch + pull --rebase
+// ============================================================
+
+/**
+ * git rev-list --count HEAD —— 拿本地 commit 数（不含 origin/HEAD）
+ */
+function gitRevListCount(cwd: string): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['rev-list', '--count', 'HEAD'], { cwd, env: process.env });
+    let out = '';
+    child.stdout.on('data', (c: Buffer) => (out += c.toString('utf8')));
+    child.on('close', () => {
+      const n = parseInt(out.trim(), 10);
+      resolve(Number.isFinite(n) ? n : 0);
+    });
+    child.on('error', () => resolve(0));
+  });
+}
+
+export interface PullRepoOpts {
+  cwd: string;
+}
+
+/**
+ * git fetch + pull --rebase
+ *
+ * 流程：
+ *   1. 先统计本地 HEAD commit 数（beforeCount）
+ *   2. git fetch origin（拉远端最新 refs）
+ *   3. git pull --rebase（默认 branch 优先；无 rebase 冲突时 merge 自动 fallback）
+ *   4. 再统计本地 HEAD commit 数（afterCount）→ addedCommits = after - before
+ *
+ * 设计选择 pull 而不是 fetch + manual merge：
+ *   - 用户期望"刷新远端 commit"——pull 是最直接的操作
+ *   - 冲突由用户处理（git pull 会自动 merge；rebase 失败会保留冲突状态）
+ *   - 抛错场景：网络断 / 无 origin / rebase 冲突（抛 IpcError）
+ */
+export async function pullRepo(opts: PullRepoOpts): Promise<{
+  beforeCount: number;
+  afterCount: number;
+  addedCommits: number;
+  stdout: string;
+}> {
+  const beforeCount = await gitRevListCount(opts.cwd);
+
+  // 1. fetch
+  const fetchResult = await execGitWithStderr(['fetch', 'origin'], opts.cwd);
+
+  // 2. pull --rebase（允许自动 merge fallback）
+  let pullStdout = '';
+  try {
+    const r = await execGitWithStderr(['pull', '--rebase', '--autostash'], opts.cwd);
+    pullStdout = r.stdout + '\n' + r.stderr;
+  } catch (e) {
+    // pull 失败（rebase 冲突 / 无 upstream）—— 把 fetch stdout 一起抛
+    throw new Error(
+      `git pull --rebase failed: ${(e as Error).message}\n---fetch---\n${fetchResult.stdout}`,
+    );
+  }
+
+  const afterCount = await gitRevListCount(opts.cwd);
+  return {
+    beforeCount,
+    afterCount,
+    addedCommits: afterCount - beforeCount,
+    stdout: fetchResult.stdout + '\n' + pullStdout,
+  };
+}

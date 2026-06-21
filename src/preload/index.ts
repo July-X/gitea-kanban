@@ -95,6 +95,8 @@ const api = {
     gitgraphLines: invoke(IpcChannel.COMMITS_GITGRAPH_LINES),
     // v1.5 启用 Git Graph：自动 git clone 仓库到本地
     gitgraphCloneRepo: invoke(IpcChannel.COMMITS_GITGRAPH_CLONE_REPO),
+    // v1.5.2 pull (merge)：git fetch + pull --rebase
+    gitgraphPull: invoke(IpcChannel.COMMITS_GITGRAPH_PULL),
   },
 
   //===== pulls namespace =====

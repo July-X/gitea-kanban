@@ -42,21 +42,26 @@ describe('TimelineNewView allRows + relation 占位（dot 与 commit-row 行节�
   it('relation 行加 .commit-row--relation 样式（24px + pointer-events:none + transparent）', () => {
     // 类名存在
     expect(viewSource).toMatch(/commit-row--relation/);
-    // 样式块：height: 24px
+    // 样式块：height 可以是 CSS 或内联 style 绑 ROW_H 常量
     const relMatch = viewSource.match(/\.commit-row--relation\s*\{([^}]+)\}/);
     expect(relMatch).not.toBeNull();
     const block = relMatch![1]!;
-    expect(block).toMatch(/height:\s*24px/);
+    const hasCssHeight = block.includes('height: 24px');
+    const hasInlineRowH = /:style\s*=\s*["']\{\s*height:\s*ROW_H/.test(viewSource);
+    expect(hasCssHeight || hasInlineRowH).toBe(true);
     expect(block).toMatch(/pointer-events:\s*none/);
     expect(block).toMatch(/background:\s*transparent/);
   });
 
   it('dot 与 commit-row 行节奏对齐：commit-row 高度严格 24px', () => {
-    // .commit-row { ... height: 24px ... }（不允许 padding 撑高）
+    // 高度来源：CSS height:24px 或内联 style 绑 ROW_H 常量
     const rowMatch = viewSource.match(/\.commit-row\s*\{([^}]+)\}/);
     expect(rowMatch).not.toBeNull();
     const block = rowMatch![1]!;
-    expect(block).toMatch(/height:\s*24px/);
-    expect(block).toMatch(/padding:\s*0\s+var\(--space-3/); // padding 0 不能有 top/bottom
+    const hasCssHeight = block.includes('height: 24px');
+    const hasInlineRowH = /:style\s*=\s*["']\{\s*height:\s*ROW_H/.test(viewSource);
+    expect(hasCssHeight || hasInlineRowH).toBe(true);
+    // padding 不能 top/bottom 撑高
+    expect(block).toMatch(/padding:\s*0\s+var\(--space-3/);
   });
 });

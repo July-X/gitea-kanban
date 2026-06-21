@@ -17,13 +17,12 @@
  */
 
 import { computed, onMounted, ref, watch } from 'vue';
-import { GitBranch, RefreshCw, GitCommit } from 'lucide-vue-next';
+import { GitCommit, ArrowDownToLine } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
-import { useBranchStore } from '@renderer/stores/branch';
-import { branchesList, commitsGitgraphLines, commitsGitgraphCloneRepo } from '@renderer/lib/ipc-client';
-import type { BranchDto, ListBranchesResp } from '../../main/ipc/schema.js';
+import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
+import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import {
@@ -46,14 +45,12 @@ import {
 // 常量
 // ============================================================
 const ROW_H = ROW_HEIGHT * DISPLAY_SCALE; // commit 行高（px），与 SVG ROW_HEIGHT × SCALE 一致
-const TOGGLE_DEBOUNCE_MS = 200; // 分支切换防抖
 
 // ============================================================
 // Store & 上下文
 // ============================================================
 const auth = useAuthStore();
 const repo = useRepoStore();
-const branchStore = useBranchStore();
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const activeRepo = computed(() => {
@@ -66,8 +63,6 @@ const activeRepo = computed(() => {
 // ============================================================
 // 本地状态
 // ============================================================
-const branches = ref<BranchDto[]>([]);
-const selectedBranches = ref<Set<string>>(new Set());
 
 /** 原始字符流（main 端返） */
 const lines = ref<GraphLine[]>([]);
@@ -83,6 +78,10 @@ const featureDisabled = ref(false);
 const cloning = ref(false);
 /** v1.5 启用流程：克隆进度 / 错误信息 */
 const cloneProgress = ref<string | null>(null);
+/** v1.5 本地仓库绝对路径（Header 小字标注用） */
+const localPath = ref<string | null>(null);
+/** 是否正在 pull */
+const pulling = ref(false);
 
 // ============================================================
 // 生命周期
@@ -96,64 +95,19 @@ onMounted(async () => {
     }
   }
   if (activeProjectId.value) {
-    await loadBranches();
+    await loadGraph();
   }
 });
 
 watch(
   () => activeProjectId.value,
   async (id) => {
-    if (id) await loadBranches();
+    if (id) await loadGraph();
   },
 );
 
-async function loadBranches(): Promise<void> {
-  if (!activeProjectId.value) return;
-  try {
-    const resp = (await branchesList({
-      projectId: activeProjectId.value,
-      limit: 50,
-      page: 1,
-    })) as ListBranchesResp;
-    branches.value = resp.items;
-    if (branches.value.length > 0 && selectedBranches.value.size === 0) {
-      selectedBranches.value = new Set([
-        branches.value.find((b) => b.isDefault)?.name ?? branches.value[0]!.name,
-      ]);
-    }
-  } catch {
-    localError.value = '加载分支失败';
-    return;
-  }
-  scheduleLoadGraph();
-}
-
-/** 防抖 timer（分支切换合并请求） */
-let loadGraphTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleLoadGraph(): void {
-  if (loadGraphTimer) clearTimeout(loadGraphTimer);
-  loadGraphTimer = setTimeout(() => {
-    loadGraphTimer = null;
-    void loadGraph();
-  }, TOGGLE_DEBOUNCE_MS);
-}
-
-function toggleBranch(name: string): void {
-  const next = new Set(selectedBranches.value);
-  if (next.has(name)) next.delete(name);
-  else next.add(name);
-  selectedBranches.value = next;
-  scheduleLoadGraph();
-}
-
 async function loadGraph(): Promise<void> {
   if (!activeProjectId.value) return;
-  if (selectedBranches.value.size === 0) {
-    graph.value = null;
-    lines.value = [];
-    return;
-  }
   loading.value = true;
   localError.value = null;
   featureDisabled.value = false;
@@ -161,7 +115,6 @@ async function loadGraph(): Promise<void> {
   try {
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
-      branches: [...selectedBranches.value],
       limit: 200,
     });
     // v1.4 placeholder：main handler 返 disabled=true（不抛错）
@@ -169,9 +122,11 @@ async function loadGraph(): Promise<void> {
       featureDisabled.value = true;
       graph.value = null;
       lines.value = [];
+      localPath.value = null;
       return;
     }
     lines.value = dto.lines;
+    localPath.value = dto.localPath ?? null;
     // 前端 Parser：Gitea 字符流 → Graph（1:1 移植 Gitea parser.go）
     const { graph: parsed } = parseLines(dto.lines);
     graph.value = parsed;
@@ -187,8 +142,6 @@ async function loadGraph(): Promise<void> {
     const msg = err.messageText ?? err.message ?? String(e) ?? '加载失败';
 
     // v1.4 兼容：旧 main handler 抛 IpcError(code='internal', message 含 'v1.5')
-    // 仍识别为"功能未启用"（不弹错误 toast），走占位
-    // —— 用户在不重启 Electron 跑旧 handler 时也能看到正确 UI
     const looksLikeDisabled =
       err.code === 'internal' &&
       (msg.includes('v1.5') || msg.includes('Git Graph'));
@@ -196,20 +149,49 @@ async function loadGraph(): Promise<void> {
       featureDisabled.value = true;
       graph.value = null;
       lines.value = [];
+      localPath.value = null;
       return;
     }
 
     localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
     graph.value = null;
     lines.value = [];
+    localPath.value = null;
   } finally {
     loading.value = false;
     useGlobalLoadingStore().hide('timeline');
   }
 }
 
-function refresh(): void {
-  void loadGraph();
+/**
+ * v1.5.2 pull (merge)：git fetch + pull --rebase
+ *
+ * Header 的 pull 按钮调：拉取远端最新 commit → 成功后重新 loadGraph
+ */
+async function pullRepo(): Promise<void> {
+  if (!activeProjectId.value) return;
+  pulling.value = true;
+  useGlobalLoadingStore().show('timeline');
+  try {
+    const resp = await commitsGitgraphPull({
+      projectId: activeProjectId.value,
+    });
+    if (resp.addedCommits > 0) {
+      showToast({ type: 'info', message: `拉取了 ${resp.addedCommits} 个新提交` });
+    } else {
+      showToast({ type: 'info', message: '已是最新' });
+    }
+    // 重新加载 graph（显示最新 commit）
+    await loadGraph();
+  } catch (e: unknown) {
+    const err = e as { messageText?: string; message?: string; hint?: string };
+    const msg = err.messageText ?? err.message ?? String(e) ?? '拉取失败';
+    console.error('[TimelineNewView] pullRepo failed:', e);
+    showToast({ type: 'error', message: msg });
+  } finally {
+    pulling.value = false;
+    useGlobalLoadingStore().hide('timeline');
+  }
 }
 
 /**
@@ -398,25 +380,19 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
         <span>Git Graph</span>
         <span v-if="activeRepo" class="timeline-new__repo-name">{{ activeRepo.fullName }}</span>
         <span v-else class="timeline-new__repo-name muted">请选择仓库</span>
-      </div>
-
-      <div v-if="branches?.length" class="timeline-new__branches">
-        <span class="timeline-new__branches-label">分支：</span>
-        <button
-          v-for="b in branches"
-          :key="b.name"
-          class="branch-chip"
-          :class="{ active: selectedBranches.has(b.name) }"
-          @click="toggleBranch(b.name)"
-        >
-          <GitBranch :size="11" />
-          {{ b.name }}
-        </button>
+        <!-- 本地仓库路径小字标注（v1.5 clone 后返） -->
+        <span v-if="localPath" class="timeline-new__local-path">{{ localPath }}</span>
       </div>
 
       <div class="timeline-new__actions">
-        <button class="icon-btn" title="刷新" :disabled="loading" @click="refresh">
-          <RefreshCw :size="15" :class="{ spinning: loading }" />
+        <button
+          class="pull-btn"
+          title="拉取远端最新提交（git fetch + pull --rebase）"
+          :disabled="loading || pulling || !localPath"
+          @click="pullRepo"
+        >
+          <ArrowDownToLine :size="15" :class="{ spinning: pulling }" />
+          <span class="pull-btn__label">拉取</span>
         </button>
       </div>
     </header>
@@ -425,9 +401,6 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
     <div class="timeline-new__main">
       <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
-      </div>
-      <div v-else-if="!branches.length" class="timeline-new__placeholder">
-        <EmptyState title="加载中..." />
       </div>
       <div v-else-if="localError" class="timeline-new__placeholder">
         <EmptyState :title="localError" />
@@ -484,7 +457,7 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
                   <path
                     v-if="fg.d"
                     :d="fg.d"
-                    stroke-width="1.5"
+                    stroke-width="1"
                     fill="none"
                     stroke-linecap="round"
                   />
@@ -581,16 +554,15 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 .timeline-new__repo-name.muted {
   color: var(--color-text-disabled);
 }
-
-.timeline-new__branches {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1, 4px);
-  flex-wrap: wrap;
-}
-.timeline-new__branches-label {
+/* v1.5.2 本地仓库路径小字标注（紧接 repo-name 之后） */
+.timeline-new__local-path {
   font-size: var(--font-xs, 11px);
-  color: var(--color-text-secondary);
+  color: var(--color-text-disabled);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
 }
 .timeline-new__actions {
   display: flex;
@@ -638,28 +610,30 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
   max-width: 600px;
 }
 
-/* ===== Branch chips ===== */
-.branch-chip {
+/* ===== Pull 按钮 ===== */
+.pull-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: var(--font-xs, 11px);
+  gap: var(--space-1, 4px);
+  padding: 5px 12px;
   border: 1px solid var(--color-border);
+  border-radius: 6px;
   background: transparent;
   color: var(--color-text-secondary);
+  font-size: var(--font-sm, 13px);
   cursor: pointer;
   transition: all 0.15s;
 }
-.branch-chip:hover {
+.pull-btn:hover:not(:disabled) {
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
-.branch-chip.active {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+.pull-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pull-btn__label {
+  font-size: var(--font-xs, 11px);
 }
 
 /* ===== Git Graph Wrapper ===== */

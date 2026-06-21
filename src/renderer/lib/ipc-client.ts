@@ -479,6 +479,19 @@ export function commitsGitgraphCloneRepo(args: {
   return getIpcClient().invoke('commits', 'gitgraphCloneRepo', args);
 }
 
+/**
+ * v1.5.2 pull (merge)：git fetch + pull --rebase
+ *
+ * Header 的 pull 按钮调：拉取远端最新 commit → 成功后重新 loadGraph
+ *
+ * @param args.projectId 当前 project uuid
+ */
+export function commitsGitgraphPull(args: {
+  projectId: string;
+}): Promise<{ beforeCount: number; afterCount: number; addedCommits: number; stdout: string }> {
+  return getIpcClient().invoke('commits', 'gitgraphPull', args);
+}
+
 // 时间轴 lane模式：与 IPC schema LaneModeSchema同步。
 //内部用 alias（'laneByA' / 'laneByB' / 'laneByC'）避开 check:no-jargon扫描。
 // IPC边界处还原为 schema 字面量（main端 schema = 'branch' | 'author' | 'pr'）。

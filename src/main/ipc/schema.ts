@@ -1440,6 +1440,12 @@ export const GraphLinesDtoSchema = z.object({
   disabled: z.boolean().optional().default(false),
   /** 禁用原因文案（仅 disabled=true 时使用；让前端展示说明） */
   disabledReason: z.string().optional(),
+  /**
+   * 本地仓库绝对路径（v1.5：clone 后给 Header 小字标注用）
+   *
+   * disabled=true 时不返回（没有本地仓库）。
+   */
+  localPath: z.string().optional(),
   lines: z.array(GraphLineDtoSchema),
   totalCommits: z.number().int().min(0),
   truncated: z.boolean(),
@@ -1478,6 +1484,27 @@ export const CloneRepoRespSchema = z.object({
   reused: z.boolean(),
 });
 export type CloneRepoResp = z.infer<typeof CloneRepoRespSchema>;
+
+/** commits.gitgraph.pull 入参 */
+export const GitGraphPullArgsSchema = z
+  .object({
+    projectId: NonEmptyStringSchema,
+  })
+  .strict();
+export type GitGraphPullArgs = z.infer<typeof GitGraphPullArgsSchema>;
+
+/** commits.gitgraph.pull 返回 */
+export const GitGraphPullRespSchema = z.object({
+  /** 拉取前本地 commit 数（origin/HEAD 的 commits 不算） */
+  beforeCount: z.number().int().min(0),
+  /** 拉取后本地 commit 数 */
+  afterCount: z.number().int().min(0),
+  /** 新增 commit 数 = afterCount - beforeCount（可能为 0 表示已最新） */
+  addedCommits: z.number().int(),
+  /** git fetch / pull 的 stdout（用户可见，便于诊断冲突） */
+  stdout: z.string(),
+});
+export type GitGraphPullResp = z.infer<typeof GitGraphPullRespSchema>;
 
 // ===== @deprecated 兼容导出（ADR-0002 reset 删了 board.cards.* 端点） =====
 // 这些类型 owner 在 T3 阶段会替换为 IssueCardDto + issues.* / labels.* 新端点；

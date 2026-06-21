@@ -24,7 +24,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runGraphLog } from '@main/gitgraph/gitProcess';
+import { runGraphLog } from '../../../../main/gitgraph/gitProcess';
 
 const REPO = '/tmp/multi-branch-test-fixture';
 
@@ -71,10 +71,10 @@ describe('runGraphLog · 分支参数修复（commit Y bug 修复）', () => {
     });
 
     // 至少 4 commit（含 initial + main commit + feature1 + feature2）
-    expect(result.lines.filter((l) => l.commit).length).toBeGreaterThanOrEqual(4);
+    expect(result.lines.filter((l: { commit: unknown }) => l.commit).length).toBeGreaterThanOrEqual(4);
 
     // 必须有 merge edge：'|' 或 '/' 或 '\' 字形（flatMap 把字符串拆 char 数组）
-    const allGlyphs = result.lines.flatMap((l) => Array.from(l.glyph));
+    const allGlyphs = result.lines.flatMap((l: { glyph: string }) => Array.from(l.glyph));
     const hasMergeEdge =
       allGlyphs.includes('|') ||
       allGlyphs.includes('/') ||
@@ -93,7 +93,7 @@ describe('runGraphLog · 分支参数修复（commit Y bug 修复）', () => {
 
   it('空 branches 列表：仍走 --branches（与之前行为一致）', async () => {
     const result = await runGraphLog(REPO, { maxCount: 10 });
-    expect(result.lines.filter((l) => l.commit).length).toBeGreaterThan(0);
+    expect(result.lines.filter((l: { commit: unknown }) => l.commit).length).toBeGreaterThan(0);
   }, 10_000);
 
   it('已含 refs/heads/ 前缀的全名：原样透传', async () => {
@@ -102,6 +102,6 @@ describe('runGraphLog · 分支参数修复（commit Y bug 修复）', () => {
       maxCount: 10,
     });
     // 至少 2 commit（main + main commit）
-    expect(result.lines.filter((l) => l.commit).length).toBeGreaterThanOrEqual(2);
+    expect(result.lines.filter((l: { commit: unknown }) => l.commit).length).toBeGreaterThanOrEqual(2);
   }, 10_000);
 });
