@@ -66,17 +66,53 @@ export function getLinkedCardsForPull(_args: {
 
 /** 读 commits 缓存 */
 export function getCommitsCache(args: { projectId: string; cacheKey: string }): string | null {
-  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.projectId, key: args.cacheKey });
+  return getCache<string>({
+    resource: CACHE_RESOURCE,
+    projectId: args.projectId,
+    key: args.cacheKey,
+  });
 }
 
 /** 写 commits 缓存 */
-export function setCommitsCache(args: { projectId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+export function setCommitsCache(args: {
+  projectId: string;
+  cacheKey: string;
+  payload: string;
+  ttlSeconds?: number;
+}): void {
   setCache({
     resource: CACHE_RESOURCE,
     projectId: args.projectId,
     key: args.cacheKey,
     payload: args.payload,
     ttlSeconds: args.ttlSeconds ?? COMMITS_LIST_TTL_SECONDS,
+  });
+}
+
+// ============================================================
+// ===== gitgraph 视图缓存（v1.4 重构后保留 const；v1.5 接入 git 子进程时启用函数）=====
+// ============================================================
+
+/** gitgraph 缓存 TTL：30 秒（分支切换频繁但需保证实时性） */
+export const GITGRAPH_CACHE_TTL_SECONDS = 30;
+
+/** gitgraph 缓存 key 前缀（与 commits.list 的 'commits' 区分） */
+const GITGRAPH_CACHE_KEY_PREFIX = 'gitgraph';
+
+/**
+ * 读 gitgraph 缓存（v1.5 启用）
+ * cacheKey 格式：`${branches.join(',')}__${limit}`（branches 用 sha 排序保证 key 稳定）
+ *
+ * v1.4 重构后 `commits.gitgraph.lines` 暂时 throw IpcError('not_implemented')，
+ * 所以该函数暂未调用；保留 const + 函数体，等 v1.5 接 git 子进程后恢复 handler。
+ */
+// @ts-expect-error - v1.5 启用
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _getGitgraphCacheImpl(args: { projectId: string; cacheKey: string }): string | null {
+  return getCache<string>({
+    resource: CACHE_RESOURCE,
+    projectId: args.projectId,
+    key: `${GITGRAPH_CACHE_KEY_PREFIX}__${args.cacheKey}`,
   });
 }
 

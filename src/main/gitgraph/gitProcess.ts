@@ -1,0 +1,213 @@
+/**
+ * Git 二进制进程封装（main 端）
+ *
+ * 职责：跑 `git log --graph --date-order --decorate=full` 把字符流 + commit 元数据
+ * 切成 GraphLine[]，传给前端 Gitea parser 解析。
+ *
+ * 为什么不走"基于 commit DAG 反推布局"：
+ *   - Gitea 原版就是直接跑 `git log --graph` 然后 parser.go 解析
+ *   - 反推式布局需要自己实现 `git log --graph --date-order` 的语义
+ *     （按时间正序分配 lane + 跨列 merge edge 画斜线），会偏离 Gitea 原版
+ *   - 用户拍板绑 git 二进制：直接 exec 子进程拿 raw 输出
+ *
+ * 与 Gitea graph.go 的等价性：
+ *   - format 字符串完全一致：`%D|%H|%ad|%h|%s`
+ *   - 命令参数完全一致：`log --graph --date-order --decorate=full -C -M --date=iso-strict`
+ *   - 输出按 `\n` 切行；行首字形 + `DATA:` 分隔（与 graph.go bufio.Scanner 一致）
+ *
+ * 前置条件：
+ *   - 本机 `git` 可执行文件在 PATH 里（Electron 用户也需要）
+ *   - 仓库路径 = gitea 本地仓库路径（不是 gitea URL）
+ *
+ * 注：
+ *   - 当前 v1.4 我们还没有"仓库本地路径"概念（gitea-kanban 通过 gitea REST API
+ *     拉数据，不直连 git 仓库）；本模块为 v1.5 准备，本轮暂不接 IPC。
+ *     IPC 接入时由 gitea API 拿 commit + parents 时间戳排序，按 Gitea 字符流
+ *     协议手工生成字符流。
+ *
+ *     —— 不！我们刚刚拍了"绑 git 二进制"，所以等仓库本地路径落地后再接 IPC。
+ */
+
+import { spawn } from 'node:child_process';
+import type { GraphLine, GraphLineCommit, GitRef } from '../../renderer/lib/gitgraph/types.js';
+
+/** Gitea graph.go 的 format 串（与 Gitea 1:1 同步） */
+const GRAPH_FORMAT = 'DATA:%D|%H|%ad|%h|%s';
+
+/** Gitea graph.go 的 cmd args（与 graph.go:23-42 同步） */
+const GRAPH_ARGS: readonly string[] = [
+  'log',
+  '--graph',
+  '--date-order',
+  '--decorate=full',
+  '-C',
+  '-M',
+  '--date=iso-strict',
+  `--pretty=format:${GRAPH_FORMAT}`,
+] as const;
+
+/**
+ * runGraphLog —— 跑 git log --graph 并把输出切成 GraphLine[]
+ *
+ * 行格式（与 Gitea graph.go:66 一致）：
+ *   {glyph prefix}DATA:{refs}|{sha}|{date}|{shortSha}|{subject}
+ *
+ * 行首非 DATA: 部分 = 字形字符串；DATA: 之后 = 管道分隔的 commit 元数据。
+ *
+ * @param cwd 仓库本地路径（**绝对路径**）
+ * @param opts
+ *   - branches: 要包含的分支（空 = 全部）
+ *   - maxCount: 最大 commit 数（Gitea 走 setting.UI.GraphMaxCommitNum * page）
+ *   - hidePRRefs: 是否排除 refs/pull/* （Gitea graph.go:25-27）
+ *   - shaRefs: sha → GitRef[] 映射（由 listGiteaRefsBySha 提供；可选，ref 装饰由此覆盖）
+ * @returns 按 row 升序排列的 GraphLine[]
+ */
+export interface RunGraphLogOpts {
+  branches?: string[];
+  maxCount?: number;
+  hidePRRefs?: boolean;
+  shaRefs?: Map<string, GitRef[]>;
+}
+
+export async function runGraphLog(
+  cwd: string,
+  opts: RunGraphLogOpts = {},
+): Promise<{ lines: GraphLine[]; truncated: boolean; range: { from: string; to: string } }> {
+  const args = [...GRAPH_ARGS];
+  if (opts.hidePRRefs) {
+    args.push('--exclude=refs/pull/*');
+  }
+  if (!opts.branches || opts.branches.length === 0) {
+    args.push('--tags', '--branches');
+  } else {
+    args.push(...opts.branches);
+  }
+  if (opts.maxCount && opts.maxCount > 0) {
+    args.push(`-n`, String(opts.maxCount));
+  }
+
+  const raw = await execGit(args, cwd);
+
+  // 切行；每行：{glyph}DATA:...
+  const rawLines = raw.split('\n').filter((l) => l.length > 0);
+  const lines: GraphLine[] = [];
+
+  // 时间范围（首末 commit 的 date）
+  let minDate = '';
+  let maxDate = '';
+
+  for (let row = 0; row < rawLines.length; row++) {
+    const raw = rawLines[row]!;
+    const dataIdx = raw.indexOf('DATA:');
+    if (dataIdx < 0) {
+      // 整行无 DATA: → 纯字形（罕见；理论上不会出现在 commit 行）
+      lines.push({ row, glyph: raw, commit: null });
+      continue;
+    }
+    const glyph = raw.substring(0, dataIdx);
+    const dataPart = raw.substring(dataIdx + 'DATA:'.length);
+
+    // 解析 DATA: 段（Gitea NewCommit 逻辑：bytes.SplitN(line, []byte("|"), 5)）
+    const parts = dataPart.split('|');
+    if (parts.length < 5) continue; // 损坏行
+
+    const [refsStr, sha, date, shortSha, ...subjectParts] = parts;
+    const subject = (subjectParts ?? []).join('|');
+
+    const refs = parseRefs(refsStr ?? '');
+    const enrichedRefs = opts.shaRefs?.get(sha ?? '') ?? refs;
+
+    lines.push({
+      row,
+      glyph,
+      commit: {
+        sha: sha ?? '',
+        shortSha: shortSha ?? (sha ?? '').slice(0, 7),
+        subject: subject ?? '',
+        date: date ?? '',
+        authorName: '', // git log --pretty=format 没 %an，要 %an|%ae 才拿得到；目前先空
+        authorEmail: '',
+        isMerge: false, // 需要 %P 才能算 isMerge；目前 false
+        parents: [],
+        refs: enrichedRefs,
+      } satisfies GraphLineCommit,
+    });
+
+    if (date) {
+      if (!minDate || date < minDate) minDate = date;
+      if (date > maxDate) maxDate = date;
+    }
+  }
+
+  return {
+    lines,
+    truncated: false, // 由调用方决定（看是否达到 maxCount）
+    range: { from: minDate, to: maxDate },
+  };
+}
+
+// ============================================================
+// helper
+// ============================================================
+
+function execGit(args: readonly string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, env: process.env });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.on('error', (err) => reject(err));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`git ${args.join(' ')} failed (exit=${code}): ${stderr}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+/**
+ * 解析 `%D` 字段（Gitea graph.go `newRefsFromRefNames` 1:1）
+ *
+ * 输入：`tag: v1.0, HEAD -> main, origin/main`
+ * 输出：[{ name: 'v1.0', refGroup: 'tags', shortName: 'v1.0' },
+ *        { name: 'refs/heads/main', refGroup: 'heads', shortName: 'main' },
+ *        { name: 'refs/remotes/origin/main', refGroup: 'remotes', shortName: 'origin/main' }]
+ */
+export function parseRefs(refsStr: string): GitRef[] {
+  if (!refsStr || !refsStr.trim()) return [];
+  const parts = refsStr
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const refs: GitRef[] = [];
+  for (const part of parts) {
+    if (part.startsWith('tag: ')) {
+      refs.push({ name: `refs/tags/${part.slice(5)}`, refGroup: 'tags', shortName: part.slice(5) });
+    } else if (part.startsWith('HEAD -> ')) {
+      refs.push({
+        name: `refs/heads/${part.slice(8)}`,
+        refGroup: 'heads',
+        shortName: part.slice(8),
+      });
+    } else if (part.startsWith('remotes/')) {
+      refs.push({
+        name: `refs/remotes/${part.slice(8)}`,
+        refGroup: 'remotes',
+        shortName: part.slice(8),
+      });
+    } else if (part.includes('/')) {
+      // 其它含 / 的（如 origin/main）按 remotes 处理
+      refs.push({ name: `refs/remotes/${part}`, refGroup: 'remotes', shortName: part });
+    } else {
+      refs.push({ name: `refs/heads/${part}`, refGroup: 'heads', shortName: part });
+    }
+  }
+  return refs;
+}

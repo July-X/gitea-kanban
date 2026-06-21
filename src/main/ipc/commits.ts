@@ -18,8 +18,8 @@
 
 import { ipcMain } from 'electron';
 import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
+import { IpcChannel } from '../../shared/ipc-channels.js';
 import {
-  IpcChannel,
   ListCommitsArgsSchema,
   GetCommitArgsSchema,
   TimelineArgsSchema,
@@ -29,6 +29,9 @@ import {
   type CommitDto,
   type TimelineArgs,
   type TimelineDto,
+  type GitGraphLinesArgs,
+  GitGraphLinesArgsSchema,
+  type GraphLinesDto,
   type TimelinePR,
   type PullDto,
 } from './schema.js';
@@ -159,7 +162,10 @@ function makeBranchCommitsCacheKey(
 async function commitsListHandler(args: ListCommitsArgs): Promise<ListCommitsResp> {
   const start = Date.now();
   const op = 'commits.list';
-  logger.info({ op, args: { projectId: args.projectId, page: args.page, limit: args.limit } }, 'ipc start');
+  logger.info(
+    { op, args: { projectId: args.projectId, page: args.page, limit: args.limit } },
+    'ipc start',
+  );
 
   // 1. cache hit
   const cacheKey = makeListCacheKey(args);
@@ -167,7 +173,10 @@ async function commitsListHandler(args: ListCommitsArgs): Promise<ListCommitsRes
   if (cached) {
     try {
       const parsed = JSON.parse(cached) as ListCommitsResp;
-      logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true }, 'ipc done');
+      logger.info(
+        { op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true },
+        'ipc done',
+      );
       return parsed;
     } catch {
       // 损坏 = miss
@@ -215,16 +224,25 @@ async function commitsListHandler(args: ListCommitsArgs): Promise<ListCommitsRes
     // 5. 写缓存
     setCommitsCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(resp) });
 
-    logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
+    logger.info(
+      { op, latencyMs: Date.now() - start, resultSize: items.length, hit: false },
+      'ipc done',
+    );
     return resp;
   } catch (err) {
     if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
-      logger.warn({ op, latencyMs: Date.now() - start }, 'gitea unreachable, falling back to cache');
+      logger.warn(
+        { op, latencyMs: Date.now() - start },
+        'gitea unreachable, falling back to cache',
+      );
       if (cached) {
         try {
           const parsed = JSON.parse(cached) as ListCommitsResp;
           (parsed as unknown as Record<string, unknown>)['__offline'] = true;
-          logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, offline: true }, 'ipc done (offline)');
+          logger.info(
+            { op, latencyMs: Date.now() - start, resultSize: parsed.items.length, offline: true },
+            'ipc done (offline)',
+          );
           return parsed;
         } catch {
           // 缓存损坏
@@ -233,7 +251,10 @@ async function commitsListHandler(args: ListCommitsArgs): Promise<ListCommitsRes
       // 无缓存，返回空 offline 响应
       const offlineResp: ListCommitsResp = { items: [], total: 0, hasMore: false, nextPage: null };
       (offlineResp as unknown as Record<string, unknown>)['__offline'] = true;
-      logger.info({ op, latencyMs: Date.now() - start, offline: true }, 'ipc done (offline, no cache)');
+      logger.info(
+        { op, latencyMs: Date.now() - start, offline: true },
+        'ipc done (offline, no cache)',
+      );
       return offlineResp;
     }
     throw err;
@@ -310,7 +331,15 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
   const start = Date.now();
   const op = 'commits.timeline';
   logger.info(
-    { op, args: { projectId: args.projectId, branches: args.branches.length, laneMode: args.laneMode, maxNodes: args.maxNodes } },
+    {
+      op,
+      args: {
+        projectId: args.projectId,
+        branches: args.branches.length,
+        laneMode: args.laneMode,
+        maxNodes: args.maxNodes,
+      },
+    },
     'ipc start',
   );
 
@@ -320,7 +349,10 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
   if (cached) {
     try {
       const parsed = JSON.parse(cached) as TimelineDto;
-      logger.info({ op, latencyMs: Date.now() - start, hit: true, totalCommits: parsed.totalCommits }, 'ipc done');
+      logger.info(
+        { op, latencyMs: Date.now() - start, hit: true, totalCommits: parsed.totalCommits },
+        'ipc done',
+      );
       return parsed;
     } catch {
       // 损坏 = miss
@@ -380,7 +412,11 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
     // a3 注：PullDto.state 现在含 'all'（PullStateSchema 加了 a3 'all' 字段），
     //   但 gitea /pulls 实际只返 'open' / 'closed'；这里 narrowing 收窄到不含 'all' 的子集。
     const timelinePrs: TimelinePR[] = [...prsOpen.items, ...prsClosed.items].map((p) => {
-      const state: 'open' | 'closed' | 'merged' = p.merged ? 'merged' : (p.state === 'all' ? 'open' : p.state);
+      const state: 'open' | 'closed' | 'merged' = p.merged
+        ? 'merged'
+        : p.state === 'all'
+          ? 'open'
+          : p.state;
       return {
         id: `pr:${proj.owner}/${proj.repo}/${p.index}`,
         index: p.index,
@@ -388,7 +424,10 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
         state,
         head: p.head.ref,
         base: p.base.ref,
-        author: { name: p.author.username, ...(p.author.avatarUrl ? { avatarUrl: p.author.avatarUrl } : {}) },
+        author: {
+          name: p.author.username,
+          ...(p.author.avatarUrl ? { avatarUrl: p.author.avatarUrl } : {}),
+        },
         url: `${proj.giteaUrl.replace(/\/+$/, '')}/${proj.owner}/${proj.repo}/pulls/${p.index}`,
         ...(p.merged && p.updatedAt ? { mergedAt: p.updatedAt } : {}),
       };
@@ -404,12 +443,15 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
       repo: proj.repo,
       shas: [...allShas],
     });
-   const linkedCardIdsBySha = new Map<string, string[]>();
-   for (const [sha, links] of linkedCardsMap.entries()) {
-   // v1 stub：linkedCardsMap.value 类型是 never[]（永不返回任何 linkedCard）
-   // 真有 link 时会是 { cardId: string }，v1 不会发生
-   linkedCardIdsBySha.set(sha, (links as Array<{ cardId: string }>).map((l) => l.cardId));
-   }
+    const linkedCardIdsBySha = new Map<string, string[]>();
+    for (const [sha, links] of linkedCardsMap.entries()) {
+      // v1 stub：linkedCardsMap.value 类型是 never[]（永不返回任何 linkedCard）
+      // 真有 link 时会是 { cardId: string }，v1 不会发生
+      linkedCardIdsBySha.set(
+        sha,
+        (links as Array<{ cardId: string }>).map((l) => l.cardId),
+      );
+    }
 
     // 6. buildTimeline 归一化
     const dto = buildTimeline({ args, commitsByBranch, pulls: timelinePrs, linkedCardIdsBySha });
@@ -418,18 +460,30 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
     setTimelineCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(dto) });
 
     logger.info(
-      { op, latencyMs: Date.now() - start, totalCommits: dto.totalCommits, nodes: dto.nodes.length, truncated: dto.truncated },
+      {
+        op,
+        latencyMs: Date.now() - start,
+        totalCommits: dto.totalCommits,
+        nodes: dto.nodes.length,
+        truncated: dto.truncated,
+      },
       'ipc done',
     );
     return dto;
   } catch (err) {
     if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
-      logger.warn({ op, latencyMs: Date.now() - start }, 'gitea unreachable, falling back to timeline cache');
+      logger.warn(
+        { op, latencyMs: Date.now() - start },
+        'gitea unreachable, falling back to timeline cache',
+      );
       if (cached) {
         try {
           const parsed = JSON.parse(cached) as TimelineDto;
           (parsed as unknown as Record<string, unknown>)['__offline'] = true;
-          logger.info({ op, latencyMs: Date.now() - start, offline: true, totalCommits: parsed.totalCommits }, 'ipc done (offline)');
+          logger.info(
+            { op, latencyMs: Date.now() - start, offline: true, totalCommits: parsed.totalCommits },
+            'ipc done (offline)',
+          );
           return parsed;
         } catch {
           // 缓存损坏
@@ -451,11 +505,41 @@ async function commitsTimelineHandler(args: TimelineArgs): Promise<TimelineDto> 
         totalCommits: 0,
       };
       (offlineDto as unknown as Record<string, unknown>)['__offline'] = true;
-      logger.info({ op, latencyMs: Date.now() - start, offline: true }, 'ipc done (offline, no cache)');
+      logger.info(
+        { op, latencyMs: Date.now() - start, offline: true },
+        'ipc done (offline, no cache)',
+      );
       return offlineDto;
     }
     throw err;
   }
+}
+
+// ===== commits.gitgraph.lines =====
+/**
+ * v1.4 重构：返回 Gitea parser.go 字符流协议
+ *
+ * 数据流：
+ *   main: gitea REST → commit[]  →  (v1.5) git log --graph 子进程  → GraphLinesDto
+ *   renderer: GraphLinesDto → parseLines() → Graph → SVG
+ *
+ * 当前实现（v1.4）：gitea-kanban 还没接仓库本地路径，
+ *   没法跑 `git log --graph` 子进程 → handler 暂时返回空 lines，
+ *   抛 IpcError(code='internal') 让前端 view 显示"功能暂未启用"占位
+ *
+ * v1.5 计划：
+ *   1. 引入仓库本地路径（clone 或指定 path）
+ *   2. 用 src/main/gitgraph/gitProcess.ts runGraphLog(cwd, opts) 调 git 二进制
+ *   3. 加上 listGiteaRefsBySha 关联 ref 装饰（与 graph.go %D 等价）
+ *   4. 写 cache（30s TTL）
+ */
+async function commitsGitGraphLinesHandler(_args: GitGraphLinesArgs): Promise<GraphLinesDto> {
+  // v1.4 placeholder：仓库本地路径未配置，handler 暂未实现
+  throw new IpcError({
+    code: IpcErrorCode.INTERNAL,
+    message: 'Git Graph 功能正在迁移到 v1.5（需要仓库本地路径接 git 二进制）',
+    hint: '当前版本暂未启用；请用 TimelineView（基于 commits.timeline）',
+  });
 }
 
 // ===== 注册 =====
@@ -464,10 +548,12 @@ export function registerCommitsIpc(): void {
   wrapIpc(IpcChannel.COMMITS_LIST, ListCommitsArgsSchema, commitsListHandler);
   wrapIpc(IpcChannel.COMMITS_GET, GetCommitArgsSchema, commitsGetHandler);
   wrapIpc(IpcChannel.COMMITS_TIMELINE, TimelineArgsSchema, commitsTimelineHandler);
+  wrapIpc(IpcChannel.COMMITS_GITGRAPH_LINES, GitGraphLinesArgsSchema, commitsGitGraphLinesHandler);
 }
 
 export function unregisterCommitsIpc(): void {
   ipcMain.removeHandler(IpcChannel.COMMITS_LIST);
   ipcMain.removeHandler(IpcChannel.COMMITS_GET);
   ipcMain.removeHandler(IpcChannel.COMMITS_TIMELINE);
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_LINES);
 }

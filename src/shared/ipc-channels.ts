@@ -41,15 +41,15 @@
  */
 
 export const IpcChannel = {
- // === auth namespace（02-architecture.md §5.3.1）===
- AUTH_CONNECT: 'auth.connect',
- AUTH_DISCONNECT: 'auth.disconnect',
- AUTH_STATUS: 'auth.status',
+  // === auth namespace（02-architecture.md §5.3.1）===
+  AUTH_CONNECT: 'auth.connect',
+  AUTH_DISCONNECT: 'auth.disconnect',
+  AUTH_STATUS: 'auth.status',
 
- // === repos namespace（02-architecture.md §5.3.1）===
- REPOS_LIST: 'repos.list',
- REPOS_ADD_PROJECT: 'repos.addProject',
- REPOS_REMOVE_PROJECT: 'repos.removeProject',
+  // === repos namespace（02-architecture.md §5.3.1）===
+  REPOS_LIST: 'repos.list',
+  REPOS_ADD_PROJECT: 'repos.addProject',
+  REPOS_REMOVE_PROJECT: 'repos.removeProject',
 
   // === branches namespace（02-architecture.md §5.3.2）===
   // 破坏性操作清理（2026-06-15 用户拍板）：create/delete 已从 App 移除，保留 list/rename/star
@@ -57,42 +57,44 @@ export const IpcChannel = {
   BRANCHES_RENAME: 'branches.rename',
   BRANCHES_STAR: 'branches.star',
 
- // === commits namespace（02-architecture.md §5.3.3 + §5.3.4）===
- COMMITS_LIST: 'commits.list',
- COMMITS_GET: 'commits.get',
- COMMITS_TIMELINE: 'commits.timeline',
+  // === commits namespace（02-architecture.md §5.3.3 + §5.3.4）===
+  COMMITS_LIST: 'commits.list',
+  COMMITS_GET: 'commits.get',
+  COMMITS_TIMELINE: 'commits.timeline',
+  // v1.4 重构：返 Gitea parser.go 字符流协议（前端 Parser 解析）
+  COMMITS_GITGRAPH_LINES: 'commits.gitgraph.lines',
 
   // === pulls namespace（02-architecture.md §5.3.5 + §5.3.6）===
   // 破坏性操作清理（2026-06-15 用户拍板）：create 已从 App 移除，保留 list/get/merge/close
   PULLS_LIST: 'pulls.list',
   PULLS_GET: 'pulls.get',
   PULLS_MERGE: 'pulls.merge',
- PULLS_CLOSE: 'pulls.close',
- PULLS_UPDATE_LABELS: 'pulls.updateLabels',
- PULLS_UPDATE_ASSIGNEE: 'pulls.updateAssignee',
- PULLS_UPDATE_REVIEWERS: 'pulls.updateReviewers',
+  PULLS_CLOSE: 'pulls.close',
+  PULLS_UPDATE_LABELS: 'pulls.updateLabels',
+  PULLS_UPDATE_ASSIGNEE: 'pulls.updateAssignee',
+  PULLS_UPDATE_REVIEWERS: 'pulls.updateReviewers',
 
- // === board.columns namespace（ADR-0002 reset）===
- BOARD_COLUMNS_LIST: 'board.columns.list',
- BOARD_COLUMNS_CREATE: 'board.columns.create',
- BOARD_COLUMNS_UPDATE: 'board.columns.update',
- BOARD_COLUMNS_REORDER: 'board.columns.reorder',
- BOARD_COLUMNS_DELETE: 'board.columns.delete',
- BOARD_COLUMNS_MAP_LABEL: 'board.columns.mapLabel',
- BOARD_COLUMNS_UNMAP_LABEL: 'board.columns.unmapLabel',
- BOARD_COLUMNS_RESET: 'board.columns.reset',
+  // === board.columns namespace（ADR-0002 reset）===
+  BOARD_COLUMNS_LIST: 'board.columns.list',
+  BOARD_COLUMNS_CREATE: 'board.columns.create',
+  BOARD_COLUMNS_UPDATE: 'board.columns.update',
+  BOARD_COLUMNS_REORDER: 'board.columns.reorder',
+  BOARD_COLUMNS_DELETE: 'board.columns.delete',
+  BOARD_COLUMNS_MAP_LABEL: 'board.columns.mapLabel',
+  BOARD_COLUMNS_UNMAP_LABEL: 'board.columns.unmapLabel',
+  BOARD_COLUMNS_RESET: 'board.columns.reset',
 
- // === issues namespace（ADR-0002 reset：卡片 = gitea issue）===
- ISSUES_LIST: 'issues.list',
- ISSUES_GET: 'issues.get',
- ISSUES_CREATE: 'issues.create',
- ISSUES_UPDATE: 'issues.update',
- ISSUES_ADD_LABEL: 'issues.addLabel',
- ISSUES_REMOVE_LABEL: 'issues.removeLabel',
- ISSUES_MOVE_COLUMN: 'issues.moveColumn',
- // issues.comment 子命名空间（v1 与 issues 同 namespace暴露在 api.issues.comment）
- ISSUES_COMMENT_LIST: 'issues.comment.list',
- ISSUES_COMMENT_CREATE: 'issues.comment.create',
+  // === issues namespace（ADR-0002 reset：卡片 = gitea issue）===
+  ISSUES_LIST: 'issues.list',
+  ISSUES_GET: 'issues.get',
+  ISSUES_CREATE: 'issues.create',
+  ISSUES_UPDATE: 'issues.update',
+  ISSUES_ADD_LABEL: 'issues.addLabel',
+  ISSUES_REMOVE_LABEL: 'issues.removeLabel',
+  ISSUES_MOVE_COLUMN: 'issues.moveColumn',
+  // issues.comment 子命名空间（v1 与 issues 同 namespace暴露在 api.issues.comment）
+  ISSUES_COMMENT_LIST: 'issues.comment.list',
+  ISSUES_COMMENT_CREATE: 'issues.comment.create',
 
   // === labels namespace（ADR-0002：看板列绑 gitea label 用）===
   LABELS_LIST: 'labels.list',

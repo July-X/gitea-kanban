@@ -40,6 +40,7 @@ import type {
   PullDto,
   RepoProjectDto,
   TimelineDto,
+  GraphLinesDto,
 } from '../../main/ipc/schema.js';
 
 /** window.api 的精确类型（preload/index.ts导出） */
@@ -47,18 +48,18 @@ export type WindowApi = NonNullable<typeof window.api>;
 
 /**渲染端友好的"人话"错误形态 */
 export interface UserFacingError {
- /**原始业务错误码（snake_case英文） */
- code: IpcErrorCodeValue;
- /** 已本地化的中文提示（zh-Hans v1） */
- messageText: string;
- /**建议下一步（人话） */
- hint: string;
- /**原始 cause（开发模式 / 日志用，生产折叠） */
- cause?: string;
- /** gitea HTTP状态码（如有） */
- httpStatus?: number;
- /**是不是可恢复（如 token失效需要重连） */
- recoverable: boolean;
+  /**原始业务错误码（snake_case英文） */
+  code: IpcErrorCodeValue;
+  /** 已本地化的中文提示（zh-Hans v1） */
+  messageText: string;
+  /**建议下一步（人话） */
+  hint: string;
+  /**原始 cause（开发模式 / 日志用，生产折叠） */
+  cause?: string;
+  /** gitea HTTP状态码（如有） */
+  httpStatus?: number;
+  /**是不是可恢复（如 token失效需要重连） */
+  recoverable: boolean;
 }
 
 /**
@@ -68,43 +69,43 @@ export interface UserFacingError {
  * instanceof链，只能靠字段形状判断。
  */
 export function isIpcErrorPayload(err: unknown): err is IpcErrorPayload {
- if (typeof err !== 'object' || err === null) return false;
- const e = err as Record<string, unknown>;
- return (
- typeof e.code === 'string' &&
- typeof e.message === 'string' &&
- //业务错误码白名单 ——防止误抓 zod错误或 gitea原始错误
- KNOWN_ERROR_CODES.has(e.code as IpcErrorCodeValue)
- );
+  if (typeof err !== 'object' || err === null) return false;
+  const e = err as Record<string, unknown>;
+  return (
+    typeof e.code === 'string' &&
+    typeof e.message === 'string' &&
+    //业务错误码白名单 ——防止误抓 zod错误或 gitea原始错误
+    KNOWN_ERROR_CODES.has(e.code as IpcErrorCodeValue)
+  );
 }
 
 /**12 个已知 IpcErrorCode 值（与 src/shared/errors.ts IpcErrorCode同步） */
 const KNOWN_ERROR_CODES = new Set<IpcErrorCodeValue>([
- 'unauthenticated',
- 'token_invalid',
- 'permission_denied',
- 'not_found',
- 'conflict',
- 'rate_limited',
- 'network_offline',
- 'gitea_error',
- 'validation_failed',
- 'internal',
- 'keychain_unavailable',
- 'keychain_access_denied',
+  'unauthenticated',
+  'token_invalid',
+  'permission_denied',
+  'not_found',
+  'conflict',
+  'rate_limited',
+  'network_offline',
+  'gitea_error',
+  'validation_failed',
+  'internal',
+  'keychain_unavailable',
+  'keychain_access_denied',
 ]);
 
 /**错误码 → 中文类别前缀（OVERRIDE §本项目专属规则 #3错误人话） */
 const CODE_CATEGORY: Record<IpcErrorCodeValue, string> = {
- unauthenticated: '需要登录',
- token_invalid: '登录已过期',
- permission_denied: '权限不足',
- not_found: '找不到内容',
- conflict: '操作冲突',
- rate_limited: '请求太频繁',
- network_offline: '网络问题',
- gitea_error: '服务器开小差',
- validation_failed: '输入有误',
+  unauthenticated: '需要登录',
+  token_invalid: '登录已过期',
+  permission_denied: '权限不足',
+  not_found: '找不到内容',
+  conflict: '操作冲突',
+  rate_limited: '请求太频繁',
+  network_offline: '网络问题',
+  gitea_error: '服务器开小差',
+  validation_failed: '输入有误',
   internal: '应用出错了',
   keychain_unavailable: '本机密钥库不可用',
   keychain_access_denied: '本机密钥库拒绝访问',
@@ -116,15 +117,15 @@ const CODE_CATEGORY: Record<IpcErrorCodeValue, string> = {
 
 /**错误码 → 是否可恢复（引导用户重试 / 重连） */
 const RECOVERABLE: Record<IpcErrorCodeValue, boolean> = {
- unauthenticated: true, // 重连
- token_invalid: true, // 重连
- permission_denied: false, // 联系管理员
- not_found: false, // 内容已被删除
- conflict: true, //刷新后重试
- rate_limited: true, //稍候
- network_offline: true, // 网络恢复后重试
- gitea_error: true, // 服务器恢复后重试
- validation_failed: false, //改输入
+  unauthenticated: true, // 重连
+  token_invalid: true, // 重连
+  permission_denied: false, // 联系管理员
+  not_found: false, // 内容已被删除
+  conflict: true, //刷新后重试
+  rate_limited: true, //稍候
+  network_offline: true, // 网络恢复后重试
+  gitea_error: true, // 服务器恢复后重试
+  validation_failed: false, //改输入
   internal: true, //通用重试
   keychain_unavailable: false, //平台问题
   keychain_access_denied: true, //引导用户授权
@@ -142,22 +143,22 @@ const RECOVERABLE: Record<IpcErrorCodeValue, boolean> = {
  *   3. payload.hint（操作建议）
  */
 export function toUserFacingError(payload: IpcErrorPayload): UserFacingError {
- const code = payload.code;
- const category = CODE_CATEGORY[code] ?? '出错了';
- const hint = payload.hint ?? '请稍候重试';
- // gitea 真实消息（如"Organization can't be doer to add reviewer"）放在最前
- // 这是用户最想知道的具体原因
- const giteaCause = payload.cause ? `\n[${code}] ${payload.cause}` : '';
- // 主消息：中文摘要 + gitea 真实消息
- const messageText = `${category}：${payload.message}${giteaCause}`;
- return {
- code,
- messageText,
- hint,
- ...(payload.cause !== undefined ? { cause: payload.cause } : {}),
- ...(payload.httpStatus !== undefined ? { httpStatus: payload.httpStatus } : {}),
- recoverable: RECOVERABLE[code] ?? false,
- };
+  const code = payload.code;
+  const category = CODE_CATEGORY[code] ?? '出错了';
+  const hint = payload.hint ?? '请稍候重试';
+  // gitea 真实消息（如"Organization can't be doer to add reviewer"）放在最前
+  // 这是用户最想知道的具体原因
+  const giteaCause = payload.cause ? `\n[${code}] ${payload.cause}` : '';
+  // 主消息：中文摘要 + gitea 真实消息
+  const messageText = `${category}：${payload.message}${giteaCause}`;
+  return {
+    code,
+    messageText,
+    hint,
+    ...(payload.cause !== undefined ? { cause: payload.cause } : {}),
+    ...(payload.httpStatus !== undefined ? { httpStatus: payload.httpStatus } : {}),
+    recoverable: RECOVERABLE[code] ?? false,
+  };
 }
 
 /**
@@ -169,37 +170,37 @@ export function toUserFacingError(payload: IpcErrorPayload): UserFacingError {
  *3. 其他 unknown（null / string / object） → 包成"internal" + 占位文案
  */
 export function normalizeError(err: unknown): UserFacingError {
- if (isIpcErrorPayload(err)) {
- return toUserFacingError(err);
- }
- if (err instanceof Error) {
- // 2026-06-12 修复：Electron IPC 把 main process throw 的 plain object
- // (IpcError.toJSON()) 包装成 Error, message = "Error invoking remote method 'xxx': [object Object]"
- // code/hint 等自定义属性丢失——解析 message
- // 2026-06-14 增强：兼容 [object Object] / [object Response] / 任何 [object XXX]
- const ipcMatch = err.message.match(/Error invoking remote method '([^']+)': \[object \w+\]/);
- if (ipcMatch) {
- return {
- code: 'internal',
- messageText: `操作失败：${ipcMatch[1]}`,
- hint: '请稍候重试',
- recoverable: true,
- };
- }
- return {
- code: 'internal',
- messageText: `应用出错了：${err.message}`,
- hint: '请稍候重试',
- cause: err.stack,
- recoverable: true,
- };
- }
- return {
- code: 'internal',
- messageText: '应用出错了：未知错误',
- hint: '请稍候重试',
- recoverable: true,
- };
+  if (isIpcErrorPayload(err)) {
+    return toUserFacingError(err);
+  }
+  if (err instanceof Error) {
+    // 2026-06-12 修复：Electron IPC 把 main process throw 的 plain object
+    // (IpcError.toJSON()) 包装成 Error, message = "Error invoking remote method 'xxx': [object Object]"
+    // code/hint 等自定义属性丢失——解析 message
+    // 2026-06-14 增强：兼容 [object Object] / [object Response] / 任何 [object XXX]
+    const ipcMatch = err.message.match(/Error invoking remote method '([^']+)': \[object \w+\]/);
+    if (ipcMatch) {
+      return {
+        code: 'internal',
+        messageText: `操作失败：${ipcMatch[1]}`,
+        hint: '请稍候重试',
+        recoverable: true,
+      };
+    }
+    return {
+      code: 'internal',
+      messageText: `应用出错了：${err.message}`,
+      hint: '请稍候重试',
+      cause: err.stack,
+      recoverable: true,
+    };
+  }
+  return {
+    code: 'internal',
+    messageText: '应用出错了：未知错误',
+    hint: '请稍候重试',
+    recoverable: true,
+  };
 }
 
 /**
@@ -220,21 +221,21 @@ export function normalizeError(err: unknown): UserFacingError {
  * - 不在内部做重试（让上层 store决定要不要重试）
  */
 export class IpcClient {
- private readonly api: WindowApi;
+  private readonly api: WindowApi;
 
- constructor(api: WindowApi) {
- this.api = api;
- }
+  constructor(api: WindowApi) {
+    this.api = api;
+  }
 
   /**
-  *通用 invoke —— 把 window.api.<namespace>.<method>(args)调到 main端,
-  *错误 reject 时把 IpcErrorPayload 转成 UserFacingError 后再抛
-  *
-  * namespace 用 string 不用 `keyof WindowApi` 约束 —— A3 等后端新增 namespace
-  * （members.*）时 WindowApi 类型**先**在 preload 加，**然后**前端 store 调。
-  * 这里放宽到 string 让前端代码能"先写后端对齐"（A3 拍板的契约驱动开发）。
-  * 运行时仍然校验 ns[method] 是函数才发，**不**会泄漏到 main。
-  */
+   *通用 invoke —— 把 window.api.<namespace>.<method>(args)调到 main端,
+   *错误 reject 时把 IpcErrorPayload 转成 UserFacingError 后再抛
+   *
+   * namespace 用 string 不用 `keyof WindowApi` 约束 —— A3 等后端新增 namespace
+   * （members.*）时 WindowApi 类型**先**在 preload 加，**然后**前端 store 调。
+   * 这里放宽到 string 让前端代码能"先写后端对齐"（A3 拍板的契约驱动开发）。
+   * 运行时仍然校验 ns[method] 是函数才发，**不**会泄漏到 main。
+   */
   /**
    * 通用 invoke —— 把 window.api.<namespace>.<method>(args) 调到 main 端，
    * 错误 reject 时把 IpcErrorPayload 转成 UserFacingError 后再抛。
@@ -248,71 +249,78 @@ export class IpcClient {
    * 运行时仍然校验 ns[method] 是函数才发，**不**会泄漏到 main。
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async invoke<T = unknown>(namespace: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ns = (this.api as unknown as Record<string, any>)[namespace];
-  if (!ns || typeof ns[method] !== 'function') {
-  throw {
-  code: 'internal' as IpcErrorCodeValue,
-  messageText: `IPC端点不存在：${namespace}.${method}`,
-  hint: '请刷新应用或重启',
-  recoverable: false,
-  } satisfies UserFacingError;
-  }
-  try {
-  //唯一例外：auth.connect走 (giteaUrl, token) 双参而不是 (args) 单参
-  if (namespace === 'auth' && method === 'connect') {
-  const a = args as { giteaUrl: string; token: string };
-  const r = (await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(a.giteaUrl, a.token)) as T;
-  markUpdated();
-  return r;
-  }
-  const r = (await ns[method](args)) as T;
-  markUpdated();
-  return r;
-  } catch (err) {
-  throw normalizeError(err);
-  }
-  }
-
- /**
- *嵌套 invoke —— 处理 `board.columns.list` 这种 namespace.sub.method 三段式
- *
- * 用法：await ipc.invokeNested('board', 'columns', 'list', { projectId })
- *错误处理同 invoke()
- */
-  async invokeNested<T = unknown>(
-  namespace: string,
-  sub: string,
-  method: string,
-  args: Record<string, unknown> = {},
+  async invoke<T = unknown>(
+    namespace: string,
+    method: string,
+    args: Record<string, unknown> = {},
   ): Promise<T> {
- // ns 的类型在 TS看来是 Record<string, T> 但 T是个函数,所以 ns[sub] 不能再用 string索引
- // 用 any绕过这条狭窄的索引约束（语义上正确：sub 是动态字符串）
- // eslint-disable-next-line @typescript-eslint/no-explicit-any
- const ns = (this.api as unknown as Record<string, any>)[namespace];
- const subNs = ns?.[sub];
- if (!subNs || typeof subNs[method] !== 'function') {
- throw {
- code: 'internal' as IpcErrorCodeValue,
- messageText: `IPC端点不存在：${namespace}.${sub}.${method}`,
- hint: '请刷新应用或重启',
- recoverable: false,
- } satisfies UserFacingError;
- }
-  try {
-  const r = (await subNs[method](args)) as T;
-  markUpdated();
-  return r;
-  } catch (err) {
-  throw normalizeError(err);
-  }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ns = (this.api as unknown as Record<string, any>)[namespace];
+    if (!ns || typeof ns[method] !== 'function') {
+      throw {
+        code: 'internal' as IpcErrorCodeValue,
+        messageText: `IPC端点不存在：${namespace}.${method}`,
+        hint: '请刷新应用或重启',
+        recoverable: false,
+      } satisfies UserFacingError;
+    }
+    try {
+      //唯一例外：auth.connect走 (giteaUrl, token) 双参而不是 (args) 单参
+      if (namespace === 'auth' && method === 'connect') {
+        const a = args as { giteaUrl: string; token: string };
+        const r = (await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(
+          a.giteaUrl,
+          a.token,
+        )) as T;
+        markUpdated();
+        return r;
+      }
+      const r = (await ns[method](args)) as T;
+      markUpdated();
+      return r;
+    } catch (err) {
+      throw normalizeError(err);
+    }
   }
 
- /**通用事件监听（main → renderer推送） */
- on(event: string, cb: (payload: unknown) => void): () => void {
- return this.api.on(event, cb);
- }
+  /**
+   *嵌套 invoke —— 处理 `board.columns.list` 这种 namespace.sub.method 三段式
+   *
+   * 用法：await ipc.invokeNested('board', 'columns', 'list', { projectId })
+   *错误处理同 invoke()
+   */
+  async invokeNested<T = unknown>(
+    namespace: string,
+    sub: string,
+    method: string,
+    args: Record<string, unknown> = {},
+  ): Promise<T> {
+    // ns 的类型在 TS看来是 Record<string, T> 但 T是个函数,所以 ns[sub] 不能再用 string索引
+    // 用 any绕过这条狭窄的索引约束（语义上正确：sub 是动态字符串）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ns = (this.api as unknown as Record<string, any>)[namespace];
+    const subNs = ns?.[sub];
+    if (!subNs || typeof subNs[method] !== 'function') {
+      throw {
+        code: 'internal' as IpcErrorCodeValue,
+        messageText: `IPC端点不存在：${namespace}.${sub}.${method}`,
+        hint: '请刷新应用或重启',
+        recoverable: false,
+      } satisfies UserFacingError;
+    }
+    try {
+      const r = (await subNs[method](args)) as T;
+      markUpdated();
+      return r;
+    } catch (err) {
+      throw normalizeError(err);
+    }
+  }
+
+  /**通用事件监听（main → renderer推送） */
+  on(event: string, cb: (payload: unknown) => void): () => void {
+    return this.api.on(event, cb);
+  }
 }
 
 // ===== 单例工厂 =====
@@ -321,55 +329,69 @@ let _instance: IpcClient | null = null;
 
 /**拿到 IPC客户端单例（每次调用拿到同一引用） */
 export function getIpcClient(): IpcClient {
- if (!_instance) {
- if (typeof window === 'undefined' || !window.api) {
- throw {
- code: 'internal',
- messageText: '应用出错了：window.api 未注入',
- hint: '请检查 preload桥是否正常',
- recoverable: false,
- } satisfies UserFacingError;
- }
- _instance = new IpcClient(window.api);
- }
- return _instance;
+  if (!_instance) {
+    if (typeof window === 'undefined' || !window.api) {
+      throw {
+        code: 'internal',
+        messageText: '应用出错了：window.api 未注入',
+        hint: '请检查 preload桥是否正常',
+        recoverable: false,
+      } satisfies UserFacingError;
+    }
+    _instance = new IpcClient(window.api);
+  }
+  return _instance;
 }
 
 // =====便捷具名方法（给 store / view 用，比 ipc.invoke('namespace.method', args)直观） =====
 
 /**列出所有已连接的 gitea账号 + 当前用户（**不**含 token） */
 export function authStatus(): Promise<StatusResult> {
- return getIpcClient().invoke('auth', 'status');
+  return getIpcClient().invoke('auth', 'status');
 }
 
 /** 连接 gitea（**唯一**接收 token 的入口） */
 export function authConnect(giteaUrl: string, token: string): Promise<ConnectResult> {
- return getIpcClient().invoke('auth', 'connect', { giteaUrl, token });
+  return getIpcClient().invoke('auth', 'connect', { giteaUrl, token });
 }
 
 /**断开某个 gitea URL 的连接 */
 export function authDisconnect(giteaUrl: string): Promise<void> {
- return getIpcClient().invoke('auth', 'disconnect', { giteaUrl });
+  return getIpcClient().invoke('auth', 'disconnect', { giteaUrl });
 }
 
 /**列出某账号可访问的仓库 + 已加为 project 的标记 */
-export function reposList(args: { giteaAccountId: string; query?: string; limit?: number; page?: number }): Promise<ListReposResp> {
- return getIpcClient().invoke('repos', 'list', args);
+export function reposList(args: {
+  giteaAccountId: string;
+  query?: string;
+  limit?: number;
+  page?: number;
+}): Promise<ListReposResp> {
+  return getIpcClient().invoke('repos', 'list', args);
 }
 
 /**标记某个仓库为 project（加入本机看板） */
-export function reposAddProject(args: { giteaAccountId: string; owner: string; name: string }): Promise<RepoProjectDto> {
- return getIpcClient().invoke('repos', 'addProject', args);
+export function reposAddProject(args: {
+  giteaAccountId: string;
+  owner: string;
+  name: string;
+}): Promise<RepoProjectDto> {
+  return getIpcClient().invoke('repos', 'addProject', args);
 }
 
 /**取消标记 */
 export function reposRemoveProject(args: { projectId: string }): Promise<void> {
- return getIpcClient().invoke('repos', 'removeProject', args);
+  return getIpcClient().invoke('repos', 'removeProject', args);
 }
 
 /**列出某 project 的分支 */
-export function branchesList(args: { projectId: string; query?: string; limit?: number; page?: number }): Promise<ListBranchesResp> {
- return getIpcClient().invoke('branches', 'list', args);
+export function branchesList(args: {
+  projectId: string;
+  query?: string;
+  limit?: number;
+  page?: number;
+}): Promise<ListBranchesResp> {
+  return getIpcClient().invoke('branches', 'list', args);
 }
 
 /**
@@ -378,8 +400,12 @@ export function branchesList(args: { projectId: string; query?: string; limit?: 
  * 入参契约见 StarBranchArgsSchema。后端处理：setStarred(args)
  * （cache/branches.ts:UPSERT/DELETE）。
  */
-export function branchesStar(args: { projectId: string; branch: string; starred: boolean }): Promise<void> {
- return getIpcClient().invoke('branches', 'star', args);
+export function branchesStar(args: {
+  projectId: string;
+  branch: string;
+  starred: boolean;
+}): Promise<void> {
+  return getIpcClient().invoke('branches', 'star', args);
 }
 
 /**
@@ -398,21 +424,39 @@ export function branchesStar(args: { projectId: string; branch: string; starred:
  * 业务上需 stats 时调 `commitsGet`（单条接口走 /git/commits/{sha}，含 stats）。
  */
 export function commitsList(args: {
- projectId: string;
- sha?: string;
- path?: string;
- author?: string;
- since?: string;
- until?: string;
- page?: number;
- limit?: number;
+  projectId: string;
+  sha?: string;
+  path?: string;
+  author?: string;
+  since?: string;
+  until?: string;
+  page?: number;
+  limit?: number;
 }): Promise<ListCommitsResp> {
- return getIpcClient().invoke('commits', 'list', args);
+  return getIpcClient().invoke('commits', 'list', args);
 }
 
 /** 拿单个 commit 详情（gitea /repos/{owner}/{repo}/git/commits/{sha}，含 stats） */
 export function commitsGet(args: { projectId: string; sha: string }): Promise<CommitDto> {
- return getIpcClient().invoke('commits', 'get', args);
+  return getIpcClient().invoke('commits', 'get', args);
+}
+
+/**
+ * 拿 git graph 字符流（v1.4 重构）
+ *
+ * main 端返 Gitea parser.go 字符流协议：每行 `* | / \` 字形 + commit metadata。
+ * 前端用 src/renderer/lib/gitgraph/parser.ts 把字符流解析为 Graph → SVG。
+ *
+ * v1.4 状态：main handler 暂未实现（缺仓库本地路径）；前端 view 应展示
+ * "功能暂未启用"占位，等 v1.5 接 git 二进制后落地。
+ */
+export function commitsGitgraphLines(args: {
+  projectId: string;
+  branches?: string[];
+  limit?: number;
+  hidePRRefs?: boolean;
+}): Promise<GraphLinesDto> {
+  return getIpcClient().invoke('commits', 'gitgraphLines', args);
 }
 
 // 时间轴 lane模式：与 IPC schema LaneModeSchema同步。
@@ -431,16 +475,16 @@ export function commitsTimeline(args: {
 }): Promise<TimelineDto> {
   // 把内部 alias还原为 IPC实际接受的字面量（main端 schema = 'branch' | 'author' | 'pr'）
   const wireLaneMode: 'branch' | 'author' | 'pr' | undefined =
-  args.laneMode === 'laneByA'
-  ? 'branch'
-  : args.laneMode === 'laneByB'
-  ? 'author'
-  : args.laneMode === 'laneByC'
-  ? 'pr'
-  : undefined;
+    args.laneMode === 'laneByA'
+      ? 'branch'
+      : args.laneMode === 'laneByB'
+        ? 'author'
+        : args.laneMode === 'laneByC'
+          ? 'pr'
+          : undefined;
   return getIpcClient().invoke('commits', 'timeline', {
-  ...args,
-  ...(wireLaneMode !== undefined ? { laneMode: wireLaneMode } : {}),
+    ...args,
+    ...(wireLaneMode !== undefined ? { laneMode: wireLaneMode } : {}),
   });
 }
 
@@ -457,12 +501,12 @@ export function commitsTimeline(args: {
  * 3) 沙箱合规：renderer 不直接调系统 API
  */
 export function clipboardWrite(text: string): Promise<void> {
- // 调用 window.api.preferences.clipboard.write({text}) —— 三段式 path，
- // 必须用 invokeNested('preferences', 'clipboard', 'write', ...)；
- // 之前误用 invoke('preferences', 'clipboard.write', ...) 会把 'clipboard.write'
- // 当成 method 名查 ns['clipboard.write'] → undefined → 抛 IpcError → catch 兜底
- // "复制失败，请手动选择" toast（这是 commit 588da2b 引入时的 bug）
- return getIpcClient().invokeNested('preferences', 'clipboard', 'write', { text });
+  // 调用 window.api.preferences.clipboard.write({text}) —— 三段式 path，
+  // 必须用 invokeNested('preferences', 'clipboard', 'write', ...)；
+  // 之前误用 invoke('preferences', 'clipboard.write', ...) 会把 'clipboard.write'
+  // 当成 method 名查 ns['clipboard.write'] → undefined → 抛 IpcError → catch 兜底
+  // "复制失败，请手动选择" toast（这是 commit 588da2b 引入时的 bug）
+  return getIpcClient().invokeNested('preferences', 'clipboard', 'write', { text });
 }
 
 // ============================================================
@@ -572,30 +616,37 @@ export function pullsUpdateReviewers(args: {
 
 /**列出某 project 的看板列 */
 export function boardColumnsList(args: { projectId: string }): Promise<ColumnDto[]> {
- return getIpcClient().invokeNested('board', 'columns', 'list', args);
+  return getIpcClient().invokeNested('board', 'columns', 'list', args);
 }
 
 /** 新建看板列 */
-export function boardColumnsCreate(args: { projectId: string; title: string; position: number }): Promise<ColumnDto> {
- return getIpcClient().invokeNested('board', 'columns', 'create', args);
+export function boardColumnsCreate(args: {
+  projectId: string;
+  title: string;
+  position: number;
+}): Promise<ColumnDto> {
+  return getIpcClient().invokeNested('board', 'columns', 'create', args);
 }
 
 /** 更新看板列（标题 /位置） */
 export function boardColumnsUpdate(args: {
- columnId: string;
- patch: { title?: string; position?: number };
+  columnId: string;
+  patch: { title?: string; position?: number };
 }): Promise<ColumnDto> {
- return getIpcClient().invokeNested('board', 'columns', 'update', args);
+  return getIpcClient().invokeNested('board', 'columns', 'update', args);
 }
 
 /** 列重排序（拖动列头） */
-export function boardColumnsReorder(args: { projectId: string; orderedIds: string[] }): Promise<ColumnDto[]> {
- return getIpcClient().invokeNested('board', 'columns', 'reorder', args);
+export function boardColumnsReorder(args: {
+  projectId: string;
+  orderedIds: string[];
+}): Promise<ColumnDto[]> {
+  return getIpcClient().invokeNested('board', 'columns', 'reorder', args);
 }
 
 /** 删除看板列（**危险操作**，UI 必须二次确认） */
 export function boardColumnsDelete(args: { columnId: string }): Promise<void> {
- return getIpcClient().invokeNested('board', 'columns', 'delete', args);
+  return getIpcClient().invokeNested('board', 'columns', 'delete', args);
 }
 
 /**
@@ -604,7 +655,10 @@ export function boardColumnsDelete(args: { columnId: string }): Promise<void> {
  * @returns { resetCount, autoInitCreatedCount } 给前端 toast 文案
  */
 export function boardColumnsReset(args: { projectId: string }): Promise<{ resetCount: number }> {
- return getIpcClient().invokeNested('board', 'columns', 'reset', args) as Promise<{ resetCount: number; autoInitCreatedCount: number }>;
+  return getIpcClient().invokeNested('board', 'columns', 'reset', args) as Promise<{
+    resetCount: number;
+    autoInitCreatedCount: number;
+  }>;
 }
 
 /** 列绑一个 gitea label（issue 带这个 label 就属于这个列）
@@ -613,16 +667,19 @@ export function boardColumnsReset(args: { projectId: string }): Promise<{ resetC
  *  返 ColumnDto 含 gitea 实时 name/color（caller 不必再用 labelsList 补 color）
  */
 export function boardColumnsMapLabel(args: {
- columnId: string;
- giteaLabelId: number;
- giteaLabelName: string;
+  columnId: string;
+  giteaLabelId: number;
+  giteaLabelName: string;
 }): Promise<ColumnDto> {
- return getIpcClient().invokeNested('board', 'columns', 'mapLabel', args);
+  return getIpcClient().invokeNested('board', 'columns', 'mapLabel', args);
 }
 
 /** 列解绑一个 gitea label */
-export function boardColumnsUnmapLabel(args: { columnId: string; giteaLabelId: number }): Promise<ColumnDto> {
- return getIpcClient().invokeNested('board', 'columns', 'unmapLabel', args);
+export function boardColumnsUnmapLabel(args: {
+  columnId: string;
+  giteaLabelId: number;
+}): Promise<ColumnDto> {
+  return getIpcClient().invokeNested('board', 'columns', 'unmapLabel', args);
 }
 
 // ============================================================
@@ -653,7 +710,7 @@ export function issuesList(args: {
 
 /**拿单个 issue详情 */
 export function issuesGet(args: { projectId: string; issueIndex: number }): Promise<IssueCardDto> {
- return getIpcClient().invoke('issues', 'get', args);
+  return getIpcClient().invoke('issues', 'get', args);
 }
 
 /** 新建 issue（**看板列绑 label 时 labelIds 必填**）
@@ -673,21 +730,29 @@ export function issuesCreate(args: {
 
 /** 更新 issue（标题 / 正文 /状态 /关联分支） */
 export function issuesUpdate(args: {
- projectId: string;
- issueIndex: number;
- patch: { title?: string; body?: string; state?: 'open' | 'closed'; refBranch?: string };
+  projectId: string;
+  issueIndex: number;
+  patch: { title?: string; body?: string; state?: 'open' | 'closed'; refBranch?: string };
 }): Promise<IssueCardDto> {
- return getIpcClient().invoke('issues', 'update', args);
+  return getIpcClient().invoke('issues', 'update', args);
 }
 
 /** issue 加 label */
-export function issuesAddLabel(args: { projectId: string; issueIndex: number; labelId: number }): Promise<void> {
- return getIpcClient().invoke('issues', 'addLabel', args);
+export function issuesAddLabel(args: {
+  projectId: string;
+  issueIndex: number;
+  labelId: number;
+}): Promise<void> {
+  return getIpcClient().invoke('issues', 'addLabel', args);
 }
 
 /** issue 去 label */
-export function issuesRemoveLabel(args: { projectId: string; issueIndex: number; labelId: number }): Promise<void> {
- return getIpcClient().invoke('issues', 'removeLabel', args);
+export function issuesRemoveLabel(args: {
+  projectId: string;
+  issueIndex: number;
+  labelId: number;
+}): Promise<void> {
+  return getIpcClient().invoke('issues', 'removeLabel', args);
 }
 
 /**
@@ -697,12 +762,12 @@ export function issuesRemoveLabel(args: { projectId: string; issueIndex: number;
  *失败回滚（在 store 层做）。
  */
 export function issuesMoveColumn(args: {
- projectId: string;
- issueIndex: number;
- fromColumnId: string;
- toColumnId: string;
+  projectId: string;
+  issueIndex: number;
+  fromColumnId: string;
+  toColumnId: string;
 }): Promise<void> {
- return getIpcClient().invoke('issues', 'moveColumn', args);
+  return getIpcClient().invoke('issues', 'moveColumn', args);
 }
 
 /**
@@ -739,8 +804,12 @@ export function issuesCommentCreate(args: {
 // ============================================================
 
 /**列出某 project 的 gitea label */
-export function labelsList(args: { projectId: string; page?: number; limit?: number }): Promise<ListLabelsResp> {
- return getIpcClient().invoke('labels', 'list', args);
+export function labelsList(args: {
+  projectId: string;
+  page?: number;
+  limit?: number;
+}): Promise<ListLabelsResp> {
+  return getIpcClient().invoke('labels', 'list', args);
 }
 
 /** 新建 gitea label */

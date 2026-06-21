@@ -29,9 +29,9 @@ import { IpcChannel } from '../shared/ipc-channels.js';
 
 /**标准 invoke包装：`(args) => ipcRenderer.invoke(channel, args)` */
 const invoke =
- (channel: string) =>
- (args: object = {}): Promise<unknown> =>
- ipcRenderer.invoke(channel, args);
+  (channel: string) =>
+  (args: object = {}): Promise<unknown> =>
+    ipcRenderer.invoke(channel, args);
 
 /**
  * 白名单API（**不**含 token字段）
@@ -58,100 +58,102 @@ const invoke =
  *合计:42 个 invoke（-3：branches.create/delete, pulls.create）
  */
 const api = {
- //===== auth namespace（AGENTS §8.2 token唯一入口）=====
- auth: {
- /**
- * **唯一**接收 token的入口（AGENTS §8.2铁律）
- *签名保留 (giteaUrl, token) 双参以兼容 M0 调用方；
- * token在 main端走 keychain.setPassword，**不**留内存外。
- */
- connect: (giteaUrl: string, token: string): Promise<unknown> =>
- ipcRenderer.invoke(IpcChannel.AUTH_CONNECT, { giteaUrl, token }),
- disconnect: (args: { giteaUrl: string }): Promise<unknown> =>
- ipcRenderer.invoke(IpcChannel.AUTH_DISCONNECT, args),
- status: invoke(IpcChannel.AUTH_STATUS),
- },
+  //===== auth namespace（AGENTS §8.2 token唯一入口）=====
+  auth: {
+    /**
+     * **唯一**接收 token的入口（AGENTS §8.2铁律）
+     *签名保留 (giteaUrl, token) 双参以兼容 M0 调用方；
+     * token在 main端走 keychain.setPassword，**不**留内存外。
+     */
+    connect: (giteaUrl: string, token: string): Promise<unknown> =>
+      ipcRenderer.invoke(IpcChannel.AUTH_CONNECT, { giteaUrl, token }),
+    disconnect: (args: { giteaUrl: string }): Promise<unknown> =>
+      ipcRenderer.invoke(IpcChannel.AUTH_DISCONNECT, args),
+    status: invoke(IpcChannel.AUTH_STATUS),
+  },
 
- //===== repos namespace =====
- repos: {
- list: invoke(IpcChannel.REPOS_LIST),
- addProject: invoke(IpcChannel.REPOS_ADD_PROJECT),
- removeProject: invoke(IpcChannel.REPOS_REMOVE_PROJECT),
- },
+  //===== repos namespace =====
+  repos: {
+    list: invoke(IpcChannel.REPOS_LIST),
+    addProject: invoke(IpcChannel.REPOS_ADD_PROJECT),
+    removeProject: invoke(IpcChannel.REPOS_REMOVE_PROJECT),
+  },
 
   //===== branches namespace =====
   branches: {
-  list: invoke(IpcChannel.BRANCHES_LIST),
-  rename: invoke(IpcChannel.BRANCHES_RENAME),
-  star: invoke(IpcChannel.BRANCHES_STAR),
+    list: invoke(IpcChannel.BRANCHES_LIST),
+    rename: invoke(IpcChannel.BRANCHES_RENAME),
+    star: invoke(IpcChannel.BRANCHES_STAR),
   },
 
- //===== commits namespace =====
- commits: {
- list: invoke(IpcChannel.COMMITS_LIST),
- get: invoke(IpcChannel.COMMITS_GET),
- timeline: invoke(IpcChannel.COMMITS_TIMELINE),
- },
+  //===== commits namespace =====
+  commits: {
+    list: invoke(IpcChannel.COMMITS_LIST),
+    get: invoke(IpcChannel.COMMITS_GET),
+    timeline: invoke(IpcChannel.COMMITS_TIMELINE),
+    // v1.4 重构：返 Gitea 字符流 + commit metadata；前端 Parser 解析为 Graph
+    gitgraphLines: invoke(IpcChannel.COMMITS_GITGRAPH_LINES),
+  },
 
- //===== pulls namespace =====
+  //===== pulls namespace =====
   pulls: {
-  list: invoke(IpcChannel.PULLS_LIST),
-  get: invoke(IpcChannel.PULLS_GET),
-  merge: invoke(IpcChannel.PULLS_MERGE),
- close: invoke(IpcChannel.PULLS_CLOSE),
- updateLabels: invoke(IpcChannel.PULLS_UPDATE_LABELS),
- updateAssignee: invoke(IpcChannel.PULLS_UPDATE_ASSIGNEE),
- updateReviewers: invoke(IpcChannel.PULLS_UPDATE_REVIEWERS),
- },
+    list: invoke(IpcChannel.PULLS_LIST),
+    get: invoke(IpcChannel.PULLS_GET),
+    merge: invoke(IpcChannel.PULLS_MERGE),
+    close: invoke(IpcChannel.PULLS_CLOSE),
+    updateLabels: invoke(IpcChannel.PULLS_UPDATE_LABELS),
+    updateAssignee: invoke(IpcChannel.PULLS_UPDATE_ASSIGNEE),
+    updateReviewers: invoke(IpcChannel.PULLS_UPDATE_REVIEWERS),
+  },
 
- //===== board.columns namespace (ADR-0002 reset 后 board.cards.*已删)=====
- board: {
- columns: {
- list: invoke(IpcChannel.BOARD_COLUMNS_LIST),
- create: invoke(IpcChannel.BOARD_COLUMNS_CREATE),
- update: invoke(IpcChannel.BOARD_COLUMNS_UPDATE),
- reorder: invoke(IpcChannel.BOARD_COLUMNS_REORDER),
- delete: invoke(IpcChannel.BOARD_COLUMNS_DELETE),
- mapLabel: invoke(IpcChannel.BOARD_COLUMNS_MAP_LABEL),
- unmapLabel: invoke(IpcChannel.BOARD_COLUMNS_UNMAP_LABEL),
- reset: invoke(IpcChannel.BOARD_COLUMNS_RESET),
- },
- },
+  //===== board.columns namespace (ADR-0002 reset 后 board.cards.*已删)=====
+  board: {
+    columns: {
+      list: invoke(IpcChannel.BOARD_COLUMNS_LIST),
+      create: invoke(IpcChannel.BOARD_COLUMNS_CREATE),
+      update: invoke(IpcChannel.BOARD_COLUMNS_UPDATE),
+      reorder: invoke(IpcChannel.BOARD_COLUMNS_REORDER),
+      delete: invoke(IpcChannel.BOARD_COLUMNS_DELETE),
+      mapLabel: invoke(IpcChannel.BOARD_COLUMNS_MAP_LABEL),
+      unmapLabel: invoke(IpcChannel.BOARD_COLUMNS_UNMAP_LABEL),
+      reset: invoke(IpcChannel.BOARD_COLUMNS_RESET),
+    },
+  },
 
- //===== issues namespace (新增 ADR-0002 reset)=====
- //卡片 = gitea issue（ADR-0002 §"数据模型"）
- issues: {
- list: invoke(IpcChannel.ISSUES_LIST),
- get: invoke(IpcChannel.ISSUES_GET),
- create: invoke(IpcChannel.ISSUES_CREATE),
- update: invoke(IpcChannel.ISSUES_UPDATE),
- addLabel: invoke(IpcChannel.ISSUES_ADD_LABEL),
- removeLabel: invoke(IpcChannel.ISSUES_REMOVE_LABEL),
- //拖拽换列专用端点（issues.moveColumn = board.move-card）
- moveColumn: invoke(IpcChannel.ISSUES_MOVE_COLUMN),
- comment: {
- list: invoke(IpcChannel.ISSUES_COMMENT_LIST),
- create: invoke(IpcChannel.ISSUES_COMMENT_CREATE),
- },
- },
+  //===== issues namespace (新增 ADR-0002 reset)=====
+  //卡片 = gitea issue（ADR-0002 §"数据模型"）
+  issues: {
+    list: invoke(IpcChannel.ISSUES_LIST),
+    get: invoke(IpcChannel.ISSUES_GET),
+    create: invoke(IpcChannel.ISSUES_CREATE),
+    update: invoke(IpcChannel.ISSUES_UPDATE),
+    addLabel: invoke(IpcChannel.ISSUES_ADD_LABEL),
+    removeLabel: invoke(IpcChannel.ISSUES_REMOVE_LABEL),
+    //拖拽换列专用端点（issues.moveColumn = board.move-card）
+    moveColumn: invoke(IpcChannel.ISSUES_MOVE_COLUMN),
+    comment: {
+      list: invoke(IpcChannel.ISSUES_COMMENT_LIST),
+      create: invoke(IpcChannel.ISSUES_COMMENT_CREATE),
+    },
+  },
 
   //===== labels namespace (新增 ADR-0002)=====
   labels: {
-  list: invoke(IpcChannel.LABELS_LIST),
-  create: invoke(IpcChannel.LABELS_CREATE),
+    list: invoke(IpcChannel.LABELS_LIST),
+    create: invoke(IpcChannel.LABELS_CREATE),
   },
 
   //===== members namespace (a3 新增)=====
   //仓库成员 = gitea repo collaborators；返 `CollaboratorDto[]` 数组形态（**不**包 {items, hasMore}）
   //前端 src/renderer/stores/member.ts useMemberStore.list 直接 `as MemberDto[]` 读
   members: {
-  list: invoke(IpcChannel.MEMBERS_LIST),
+    list: invoke(IpcChannel.MEMBERS_LIST),
   },
 
   //===== milestones namespace (v1.4 新增：新建议题弹窗选里程碑用)=====
   //返 { items: MilestoneDto[], hasMore }，items 含仓库全部里程碑（state=all）
   milestones: {
-  list: invoke(IpcChannel.MILESTONES_LIST),
+    list: invoke(IpcChannel.MILESTONES_LIST),
   },
 
   //===== user namespace (M5 补齐)=====
@@ -159,14 +161,14 @@ const api = {
   //详见 02-architecture.md §5.3.9 + src/main/ipc/user.ts + src/main/board/undo.ts
   //M6 undo-by-project：args = { projectId }，防跨看板误撤销
   user: {
-  prefs: {
-  get: invoke(IpcChannel.USER_PREFS_GET),
-  set: invoke(IpcChannel.USER_PREFS_SET),
-  },
-  undo: invoke(IpcChannel.USER_UNDO),
-  redo: invoke(IpcChannel.USER_REDO),
-  //栈深度查询（UI 灰化按钮用）—— M6 undo-by-project 加
-  undoStatus: invoke(IpcChannel.USER_UNDO_STATUS),
+    prefs: {
+      get: invoke(IpcChannel.USER_PREFS_GET),
+      set: invoke(IpcChannel.USER_PREFS_SET),
+    },
+    undo: invoke(IpcChannel.USER_UNDO),
+    redo: invoke(IpcChannel.USER_REDO),
+    //栈深度查询（UI 灰化按钮用）—— M6 undo-by-project 加
+    undoStatus: invoke(IpcChannel.USER_UNDO_STATUS),
   },
 
   //===== preferences namespace (v1.2 主题切换 — design-system/pages/tech-refine.md §16.3)=====
@@ -176,15 +178,15 @@ const api = {
   //持久化走 sqlite prefs 表（main 端 src/main/ipc/preferences.ts），无需手动传 userId。
   // 命名说明：preferences.theme.get / preferences.theme.set 是 channel 字面量也是 window.api 调用路径。
   preferences: {
-  theme: {
-  get: invoke(IpcChannel.THEME_GET),
-  set: invoke(IpcChannel.THEME_SET),
-  },
-  // v1.1.3 提交号 / 分支名复制（task #20）—— 走主进程 electron.clipboard，
-  // 绕过 navigator.clipboard 在 Electron renderer 的不稳定行为
-  clipboard: {
-  write: invoke(IpcChannel.CLIPBOARD_WRITE),
-  },
+    theme: {
+      get: invoke(IpcChannel.THEME_GET),
+      set: invoke(IpcChannel.THEME_SET),
+    },
+    // v1.1.3 提交号 / 分支名复制（task #20）—— 走主进程 electron.clipboard，
+    // 绕过 navigator.clipboard 在 Electron renderer 的不稳定行为
+    clipboard: {
+      write: invoke(IpcChannel.CLIPBOARD_WRITE),
+    },
   },
 
   /**
@@ -197,11 +199,11 @@ const api = {
    * 返回 off()用于卸载监听（避免内存泄漏）
    */
   on: (event: string, cb: (payload: unknown) => void): (() => void) => {
- const channel = `event:${event}`;
- const listener = (_e: IpcRendererEvent, payload: unknown) => cb(payload);
- ipcRenderer.on(channel, listener);
- return () => ipcRenderer.removeListener(channel, listener);
- },
+    const channel = `event:${event}`;
+    const listener = (_e: IpcRendererEvent, payload: unknown) => cb(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
 };
 
 export type Api = typeof api;
