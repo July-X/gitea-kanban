@@ -171,8 +171,27 @@ async function loadGraph(): Promise<void> {
   } catch (e: unknown) {
     // 真错误（网络 / 解析失败 / schema 不符）才走这里
     console.error('[TimelineNewView] loadGraph failed:', e);
-    const err = e as { messageText?: string; message?: string; hint?: string };
+    const err = e as {
+      code?: string;
+      messageText?: string;
+      message?: string;
+      hint?: string;
+    };
     const msg = err.messageText ?? err.message ?? String(e) ?? '加载失败';
+
+    // v1.4 兼容：旧 main handler 抛 IpcError(code='internal', message 含 'v1.5')
+    // 仍识别为"功能未启用"（不弹错误 toast），走占位
+    // —— 用户在不重启 Electron 跑旧 handler 时也能看到正确 UI
+    const looksLikeDisabled =
+      err.code === 'internal' &&
+      (msg.includes('v1.5') || msg.includes('Git Graph'));
+    if (looksLikeDisabled) {
+      featureDisabled.value = true;
+      graph.value = null;
+      lines.value = [];
+      return;
+    }
+
     localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
     graph.value = null;
     lines.value = [];
