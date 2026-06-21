@@ -301,6 +301,41 @@ const flowViews = computed<FlowView[]>(() => {
   });
 });
 
+/**
+ * 完整行数组（row 0..maxRow）—— commit 与 relation 占位交错
+ *
+ * 背景 bug：之前 v-for="graph.commits" 只渲染真实 commit，跳过 transition 行（merge edge
+ * 中间段），导致：
+ *   - dot overlay 在 row 0/1/2/3/4 全分布（按 row*24 绝对定位）
+ *   - commit-row 只渲染 row 0/2/4 的 commit
+ *   - 视觉上：dot 间距 = 24px，但 commit-row 紧挨着 → **dot 与 commit-row 错位**
+ *   - 用户看到的"底部 dot 没对应 commitlog"就是这个
+ *
+ * 修复：按 row 升序铺满所有行，每行要么是真实 commit、要么是 relation 占位（空 row），
+ * 与 dot overlay 的 row*24 节奏对齐
+ */
+interface DisplayRow {
+  row: number;
+  commit: NonNullable<typeof graph.value>['commits'][number] | null;
+  isRelation: boolean;
+}
+const allRows = computed<DisplayRow[]>(() => {
+  if (!graph.value) return [];
+  const commitByRow = new Map<number, NonNullable<typeof graph.value>['commits'][number]>();
+  for (const c of graph.value.commits) commitByRow.set(c.row, c);
+  const relationByRow = new Set<number>(graph.value.relationCommits.map((r) => r.row));
+  const out: DisplayRow[] = [];
+  for (let row = 0; row <= graph.value.maxRow; row++) {
+    const c = commitByRow.get(row) ?? null;
+    out.push({
+      row,
+      commit: c,
+      isRelation: !c && relationByRow.has(row),
+    });
+  }
+  return out;
+});
+
 // ============================================================
 // ref 颜色（与 Gitea design token 对齐）
 // ============================================================
@@ -446,10 +481,9 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
                   <path
                     v-if="fg.d"
                     :d="fg.d"
-                    stroke-width="1"
+                    stroke-width="1.5"
                     fill="none"
                     stroke-linecap="round"
-                    stroke-linejoin="round"
                   />
                 </g>
               </svg>
@@ -472,23 +506,36 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
           </div>
 
           <!-- 右侧：Commit 列表（与 SVG 等高） -->
+          <!-- 右侧：Commit 列表（与 SVG 等高，按 row 0..maxRow 全渲染，含 transition 占位） -->
           <div class="git-graph-list" :style="{ minHeight: svgHeight }">
-            <div v-for="c in graph.commits" :key="c.sha" class="commit-row">
-              <span
-                v-for="ref in c.refs.slice(0, 5)"
-                :key="ref.name"
-                class="ref-badge"
-                :style="{ color: refColor(ref.refGroup), background: refBg(ref.refGroup) }"
-              >
-                {{ ref.shortName }}
-              </span>
-              <span class="commit-subject">{{ c.subject }}</span>
-              <span class="commit-meta">
-                <img v-if="c.authorAvatar" :src="c.authorAvatar" class="commit-avatar" alt="" />
-                <span class="commit-author">{{ c.authorName }}</span>
-                <span class="commit-time">{{ formatRelative(c.date) }}</span>
-              </span>
-              <span class="commit-sha">{{ c.shortSha }}</span>
+            <div
+              v-for="r in allRows"
+              :key="`row-${r.row}`"
+              class="commit-row"
+              :class="{ 'commit-row--relation': r.isRelation }"
+            >
+              <template v-if="r.commit">
+                <span
+                  v-for="ref in r.commit.refs.slice(0, 5)"
+                  :key="ref.name"
+                  class="ref-badge"
+                  :style="{ color: refColor(ref.refGroup), background: refBg(ref.refGroup) }"
+                >
+                  {{ ref.shortName }}
+                </span>
+                <span class="commit-subject">{{ r.commit.subject }}</span>
+                <span class="commit-meta">
+                  <img
+                    v-if="r.commit.authorAvatar"
+                    :src="r.commit.authorAvatar"
+                    class="commit-avatar"
+                    alt=""
+                  />
+                  <span class="commit-author">{{ r.commit.authorName }}</span>
+                  <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
+                </span>
+                <span class="commit-sha">{{ r.commit.shortSha }}</span>
+              </template>
             </div>
           </div>
         </div>
@@ -813,6 +860,16 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 }
 .commit-row:hover {
   background: var(--color-bg-hover);
+}
+/* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
+ * 必须保持 24px 高度（不要合并 / 不要 display:none） */
+.commit-row--relation {
+  height: 24px;
+  pointer-events: none;
+  background: transparent;
+}
+.commit-row--relation:hover {
+  background: transparent;
 }
 
 .ref-badge {

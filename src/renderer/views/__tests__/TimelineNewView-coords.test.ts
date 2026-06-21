@@ -19,7 +19,6 @@ import {
   svgViewBox,
   svgWidthPx,
   svgHeightPx,
-  graphWidth,
   graphHeight,
 } from '@renderer/lib/gitgraph';
 import type { GraphLine, GitRef } from '@renderer/lib/gitgraph';
