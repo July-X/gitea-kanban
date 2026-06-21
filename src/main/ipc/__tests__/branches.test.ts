@@ -54,7 +54,9 @@ afterEach(async () => {
 const PROJECT_ID = 'p-test-uuid';
 
 function getHandler(channel: string): (rawArgs: unknown) => Promise<unknown> {
-  const registry = (globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }).__ipcHandlers;
+  const registry = (
+    globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }
+  ).__ipcHandlers;
   if (!registry) throw new Error('__ipcHandlers registry not initialized');
   return (rawArgs) => {
     const fn = registry.get(channel);
@@ -76,7 +78,9 @@ async function seedProjectAndRegister() {
   const electron = await import('electron');
   const ipcMainMock = vi.mocked(electron.ipcMain);
   ipcMainMock.handle.mockImplementation((channel: unknown, cb: unknown) => {
-    const g = globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> };
+    const g = globalThis as {
+      __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>>;
+    };
     if (!g.__ipcHandlers) g.__ipcHandlers = new Map();
     g.__ipcHandlers.set(channel as string, cb as (e: unknown, a: unknown) => Promise<unknown>);
   });
@@ -206,7 +210,9 @@ describe('ipc/branches · rename (默认分支保护 + starred 同步)', () => {
     const cacheMod = await import('../../cache/branches.js');
     cacheMod.setStarred({ projectId: PROJECT_ID, branch: 'feature-1', starred: true });
 
-    mocks.renameGiteaBranch.mockResolvedValueOnce(makeBranchDto({ name: 'feature-2', sha: 'new-sha' }));
+    mocks.renameGiteaBranch.mockResolvedValueOnce(
+      makeBranchDto({ name: 'feature-2', sha: 'new-sha' }),
+    );
 
     const result = (await getHandler('branches.rename')({
       projectId: PROJECT_ID,
@@ -252,7 +258,11 @@ describe('ipc/branches · star (纯本地 op)', () => {
   beforeEach(seedProjectAndRegister);
 
   it('branches.star true → 写入 starred_branches', async () => {
-    await getHandler('branches.star')({ projectId: PROJECT_ID, branch: 'feature-1', starred: true });
+    await getHandler('branches.star')({
+      projectId: PROJECT_ID,
+      branch: 'feature-1',
+      starred: true,
+    });
     const cacheMod = await import('../../cache/branches.js');
     expect(cacheMod.listStarredBranches(PROJECT_ID).has('feature-1')).toBe(true);
   });
@@ -261,7 +271,11 @@ describe('ipc/branches · star (纯本地 op)', () => {
     const cacheMod = await import('../../cache/branches.js');
     cacheMod.setStarred({ projectId: PROJECT_ID, branch: 'feature-1', starred: true });
 
-    await getHandler('branches.star')({ projectId: PROJECT_ID, branch: 'feature-1', starred: false });
+    await getHandler('branches.star')({
+      projectId: PROJECT_ID,
+      branch: 'feature-1',
+      starred: false,
+    });
     expect(cacheMod.listStarredBranches(PROJECT_ID).has('feature-1')).toBe(false);
   });
 

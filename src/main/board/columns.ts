@@ -196,7 +196,9 @@ export async function listColumns(projectId: string): Promise<ColumnDto[]> {
 
   // 3. 每列拼 DTO：按 column 过滤已绑 label id（保证只展示该列绑的）
   return cols.map((c) => {
-    const colBoundIds = listLabelMapsByColumnWithStore(state, c.id).map((m) => Number(m.giteaLabelId));
+    const colBoundIds = listLabelMapsByColumnWithStore(state, c.id).map((m) =>
+      Number(m.giteaLabelId),
+    );
     return toColumnDto(c, colBoundIds, liveLabelsById);
   });
 }
@@ -417,8 +419,7 @@ export function unmapLabel(args: { columnId: string; giteaLabelId: number }): Co
 
   store.mutate((s) => {
     s.labelMaps = s.labelMaps.filter(
-      (m) =>
-        !(m.columnId === args.columnId && m.giteaLabelId === String(args.giteaLabelId)),
+      (m) => !(m.columnId === args.columnId && m.giteaLabelId === String(args.giteaLabelId)),
     );
   });
 

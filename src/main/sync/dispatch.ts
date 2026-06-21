@@ -53,10 +53,7 @@ const registry = new Map<string, OpHandler<unknown, unknown>>();
 /**
  * 注册 op（业务层启动时调）
  */
-export function registerOp<TArgs, TResult>(
-  op: string,
-  handler: OpHandler<TArgs, TResult>,
-): void {
+export function registerOp<TArgs, TResult>(op: string, handler: OpHandler<TArgs, TResult>): void {
   if (registry.has(op)) {
     log.warn({ op }, 'dispatch: op already registered, overwriting');
   }

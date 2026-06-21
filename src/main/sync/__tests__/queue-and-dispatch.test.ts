@@ -68,10 +68,7 @@ describe('loadQueue', () => {
       { id: 'q-1', op: 'a.b', args: {}, queuedAt: 100, attempt: 0, status: 'pending' },
       { id: 'q-2', op: 'c.d', args: {}, queuedAt: 200, attempt: 0, status: 'pending' },
     ];
-    writeFileSync(
-      resolveQueuePath(),
-      entries.map((e) => JSON.stringify(e)).join('\n') + '\n',
-    );
+    writeFileSync(resolveQueuePath(), entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
     const loaded = await loadQueue();
     expect(loaded.length).toBe(2);
     expect(loaded[0]!.id).toBe('q-1');
@@ -92,10 +89,24 @@ describe('loadQueue', () => {
   it('malformed JSON 跳过 + warn', async () => {
     writeFileSync(
       resolveQueuePath(),
-      JSON.stringify({ id: 'q-1', op: 'a', args: {}, queuedAt: 100, attempt: 0, status: 'pending' }) +
+      JSON.stringify({
+        id: 'q-1',
+        op: 'a',
+        args: {},
+        queuedAt: 100,
+        attempt: 0,
+        status: 'pending',
+      }) +
         '\n' +
         '{ this is not valid JSON\n' +
-        JSON.stringify({ id: 'q-2', op: 'b', args: {}, queuedAt: 200, attempt: 0, status: 'pending' }) +
+        JSON.stringify({
+          id: 'q-2',
+          op: 'b',
+          args: {},
+          queuedAt: 200,
+          attempt: 0,
+          status: 'pending',
+        }) +
         '\n',
     );
     const loaded = await loadQueue();

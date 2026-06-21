@@ -18,7 +18,11 @@ import type { IssueCardDto } from '../../../main/ipc/schema.js';
 import { useKanbanMouseDrag } from '../useKanbanMouseDrag';
 
 /** 模拟 SortableJS @end 事件（只需要 from / to / item 的 dataset） */
-function fakeEndEvt(fromColumnId: string, toColumnId: string, issueIndex: number | string): unknown {
+function fakeEndEvt(
+  fromColumnId: string,
+  toColumnId: string,
+  issueIndex: number | string,
+): unknown {
   return {
     from: { dataset: { columnId: fromColumnId } } as unknown as HTMLElement,
     to: { dataset: { columnId: toColumnId } } as unknown as HTMLElement,

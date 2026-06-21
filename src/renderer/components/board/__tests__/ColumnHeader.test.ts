@@ -20,7 +20,10 @@ const projectRoot = resolve(__dirname, '../../../../..');
 const columnHeaderPath = resolve(projectRoot, 'src/renderer/components/board/ColumnHeader.vue');
 const columnMenuPath = resolve(projectRoot, 'src/renderer/components/board/ColumnMenu.vue');
 const boardModalsCssPath = resolve(projectRoot, 'src/renderer/components/board/board-modals.css');
-const columnSectionPath = resolve(projectRoot, 'src/renderer/components/board/KanbanColumnSection.vue');
+const columnSectionPath = resolve(
+  projectRoot,
+  'src/renderer/components/board/KanbanColumnSection.vue',
+);
 const boardViewPath = resolve(projectRoot, 'src/renderer/views/BoardView.vue');
 
 describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
@@ -32,7 +35,9 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
     it('不引 lucide-vue-next 的 <Tag>（v1.3 用 Tag icon + · join，已弃）', () => {
       const content = readFileSync(columnHeaderPath, 'utf-8');
       expect(content).toMatch(/import\s*\{[^}]*Settings[^}]*\}\s*from\s*['"]lucide-vue-next['"]/);
-      expect(content).not.toMatch(/import\s*\{[^}]*\bTag\b[^}]*\}\s*from\s*['"]lucide-vue-next['"]/);
+      expect(content).not.toMatch(
+        /import\s*\{[^}]*\bTag\b[^}]*\}\s*from\s*['"]lucide-vue-next['"]/,
+      );
     });
 
     it('template 里有 .column__label-chip 渲染', () => {
@@ -83,7 +88,9 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
 
     it('unmatchedCount 默认值 0（withDefaults）', () => {
       const content = readFileSync(columnMenuPath, 'utf-8');
-      expect(content).toMatch(/withDefaults\(defineProps<Props>\(\),\s*\{[\s\S]+unmatchedCount:\s*0/);
+      expect(content).toMatch(
+        /withDefaults\(defineProps<Props>\(\),\s*\{[\s\S]+unmatchedCount:\s*0/,
+      );
     });
 
     it('emit 加 open-batch-create 和 bind-unmatched-to-current 事件', () => {
@@ -94,7 +101,9 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
 
     it('template 里有 .modal__unmatched banner 区', () => {
       const content = readFileSync(columnMenuPath, 'utf-8');
-      expect(content).toMatch(/v-if="props\.unmatchedCount\s*>\s*0"[\s\S]+class="modal__unmatched"/);
+      expect(content).toMatch(
+        /v-if="props\.unmatchedCount\s*>\s*0"[\s\S]+class="modal__unmatched"/,
+      );
     });
 
     it('banner 里有两个 CTA 按钮（再建几列 / 塞进当前列）', () => {
@@ -125,7 +134,10 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
           i = nextOpen + 4;
         } else {
           depth--;
-          if (depth === 0) { end = nextClose; break; }
+          if (depth === 0) {
+            end = nextClose;
+            break;
+          }
           i = nextClose + 6;
         }
       }
@@ -148,13 +160,19 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
 
     it('banner 颜色走主色 / 警告 token', () => {
       const content = readFileSync(boardModalsCssPath, 'utf-8');
-      expect(content).toMatch(/\.modal__unmatched\s*\{[\s\S]+background:\s*var\(--color-warning-soft\)/);
+      expect(content).toMatch(
+        /\.modal__unmatched\s*\{[\s\S]+background:\s*var\(--color-warning-soft\)/,
+      );
     });
 
     it('CTA disabled 样式（opacity 0.5 + cursor not-allowed）', () => {
       const content = readFileSync(boardModalsCssPath, 'utf-8');
-      expect(content).toMatch(/\.modal__unmatched-actions[\s\S]+:disabled\s*\{[\s\S]+opacity:\s*0\.5/);
-      expect(content).toMatch(/\.modal__unmatched-actions[\s\S]+:disabled\s*\{[\s\S]+cursor:\s*not-allowed/);
+      expect(content).toMatch(
+        /\.modal__unmatched-actions[\s\S]+:disabled\s*\{[\s\S]+opacity:\s*0\.5/,
+      );
+      expect(content).toMatch(
+        /\.modal__unmatched-actions[\s\S]+:disabled\s*\{[\s\S]+cursor:\s*not-allowed/,
+      );
     });
   });
 
@@ -172,7 +190,9 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
 
     it('withDefaults 兜底 unmatchedCount=0（防御性）', () => {
       const content = readFileSync(columnMenuPath, 'utf-8');
-      expect(content).toMatch(/withDefaults\(defineProps<Props>\(\),\s*\{[\s\S]+unmatchedCount:\s*0/);
+      expect(content).toMatch(
+        /withDefaults\(defineProps<Props>\(\),\s*\{[\s\S]+unmatchedCount:\s*0/,
+      );
     });
   });
 
@@ -190,7 +210,9 @@ describe('P0-2 列 = label UI 标注 · 文件指纹', () => {
     it('v1.4 占位返回 0（v1.5 改 return board.lastAutoInitBreakdown?.unmatched.length）', () => {
       const content = readFileSync(boardViewPath, 'utf-8');
       // v1.4 必须返回 0（不是 NaN/null/undefined）
-      const computedMatch = content.match(/unmatchedLabelCount\s*=\s*computed<number>\(\(\)\s*=>\s*\{[\s\S]+?\}\)/);
+      const computedMatch = content.match(
+        /unmatchedLabelCount\s*=\s*computed<number>\(\(\)\s*=>\s*\{[\s\S]+?\}\)/,
+      );
       expect(computedMatch).not.toBeNull();
       expect(computedMatch![0]).toMatch(/return\s+0/);
     });

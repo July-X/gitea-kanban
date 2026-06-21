@@ -49,9 +49,7 @@ export function findAccountByUrlAndUsernameWithStore(
   giteaUrl: string,
   username: string,
 ): GiteaAccount | null {
-  return (
-    state.accounts.find((a) => a.giteaUrl === giteaUrl && a.username === username) ?? null
-  );
+  return state.accounts.find((a) => a.giteaUrl === giteaUrl && a.username === username) ?? null;
 }
 
 /**
@@ -59,8 +57,6 @@ export function findAccountByUrlAndUsernameWithStore(
  *
  * 返回 null 时 authStatus 直接返 { accounts: [], currentUser: null }
  */
-export function getFirstAccountWithStore(state: {
-  accounts: GiteaAccount[];
-}): GiteaAccount | null {
+export function getFirstAccountWithStore(state: { accounts: GiteaAccount[] }): GiteaAccount | null {
   return state.accounts[0] ?? null;
 }

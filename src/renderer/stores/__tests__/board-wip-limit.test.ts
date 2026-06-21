@@ -31,7 +31,9 @@ vi.hoisted(() => {
     removeItem: (_k: string): void => {},
     clear: (): void => {},
     key: (_i: number): string | null => null,
-    get length(): number { return 0; },
+    get length(): number {
+      return 0;
+    },
   };
   (globalThis as unknown as { localStorage: typeof stub }).localStorage = stub;
 });
@@ -137,9 +139,7 @@ describe('board store · updateColumn WIP 上限（plan_25cc4562 · Task B）', 
   });
 
   it('3. updateColumn({ columnId, title: "新名", wipLimit: 3 }) 同时改 title + wipLimit', async () => {
-    mocks.boardColumnsUpdate.mockResolvedValue(
-      makeCol('c1', '新名', [SAMPLE_LABEL], 3),
-    );
+    mocks.boardColumnsUpdate.mockResolvedValue(makeCol('c1', '新名', [SAMPLE_LABEL], 3));
     const board = useBoardStore();
     seedColumns(board, [makeCol('c1', '旧名', [SAMPLE_LABEL], null)]);
 
@@ -154,9 +154,7 @@ describe('board store · updateColumn WIP 上限（plan_25cc4562 · Task B）', 
   });
 
   it('4. updateColumn 不传 wipLimit（只改 title）→ 原 wipLimit 不变', async () => {
-    mocks.boardColumnsUpdate.mockResolvedValue(
-      makeCol('c1', '新名', [SAMPLE_LABEL], 5),
-    );
+    mocks.boardColumnsUpdate.mockResolvedValue(makeCol('c1', '新名', [SAMPLE_LABEL], 5));
     const board = useBoardStore();
     seedColumns(board, [makeCol('c1', '旧名', [SAMPLE_LABEL], 5)]);
 
@@ -182,9 +180,9 @@ describe('board store · updateColumn WIP 上限（plan_25cc4562 · Task B）', 
     const board = useBoardStore();
     seedColumns(board, [makeCol('c1', 'ToDo', [SAMPLE_LABEL], null)]);
 
-    await expect(
-      board.updateColumn({ columnId: 'c1', wipLimit: -1 }),
-    ).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(board.updateColumn({ columnId: 'c1', wipLimit: -1 })).rejects.toMatchObject({
+      code: 'validation_failed',
+    });
 
     // 本地未变（仍然是 null）
     expect(board.columns[0]!.wipLimit).toBeNull();

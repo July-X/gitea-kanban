@@ -307,8 +307,7 @@ function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'ArrowUp') {
     e.preventDefault();
     if (state.filtered.length === 0) return;
-    state.selectedIndex =
-      (state.selectedIndex - 1 + state.filtered.length) % state.filtered.length;
+    state.selectedIndex = (state.selectedIndex - 1 + state.filtered.length) % state.filtered.length;
     updateSelection();
     return;
   }

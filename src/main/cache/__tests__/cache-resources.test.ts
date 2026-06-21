@@ -81,7 +81,9 @@ describe('cache/pulls · getPullsCache / setPullsCache / invalidatePullsCache', 
   it('自定义 ttlSeconds 生效', async () => {
     const { setPullsCache } = await import('../pulls.js');
     // ttlSeconds=1 → 应该写到 file-store（不直接验证过期，验证不抛）
-    expect(() => setPullsCache({ projectId: PROJECT_ID, cacheKey: 'k', payload: 'v', ttlSeconds: 1 })).not.toThrow();
+    expect(() =>
+      setPullsCache({ projectId: PROJECT_ID, cacheKey: 'k', payload: 'v', ttlSeconds: 1 }),
+    ).not.toThrow();
   });
 });
 
@@ -99,7 +101,8 @@ describe('cache/commits · getCommitsCache / setCommitsCache / invalidateCommits
   });
 
   it('invalidate（带 projectId）只清该项目', async () => {
-    const { setCommitsCache, getCommitsCache, invalidateCommitsCache } = await import('../commits.js');
+    const { setCommitsCache, getCommitsCache, invalidateCommitsCache } =
+      await import('../commits.js');
     setCommitsCache({ projectId: PROJECT_ID, cacheKey: 'k', payload: 'a' });
     setCommitsCache({ projectId: 'p-other', cacheKey: 'k', payload: 'b' });
     invalidateCommitsCache(PROJECT_ID);
@@ -149,16 +152,33 @@ describe('cache/timeline · getTimelineCache / setTimelineCache / makeTimelineCa
   });
 
   it('set 后 get 拿到 timeline payload', async () => {
-    const { setTimelineCache, getTimelineCache, makeTimelineCacheKey } = await import('../timeline.js');
-    const key = makeTimelineCacheKey({ projectId: PROJECT_ID, branches: ['main'], maxNodes: 200, laneMode: 'branch' });
+    const { setTimelineCache, getTimelineCache, makeTimelineCacheKey } =
+      await import('../timeline.js');
+    const key = makeTimelineCacheKey({
+      projectId: PROJECT_ID,
+      branches: ['main'],
+      maxNodes: 200,
+      laneMode: 'branch',
+    });
     setTimelineCache({ projectId: PROJECT_ID, cacheKey: key, payload: '{"lanes":[]}' });
     expect(getTimelineCache({ projectId: PROJECT_ID, cacheKey: key })).toBe('{"lanes":[]}');
   });
 
   it('invalidateTimelineCache 清所有 timeline 缓存', async () => {
-    const { setTimelineCache, getTimelineCache, invalidateTimelineCache, makeTimelineCacheKey } = await import('../timeline.js');
-    const k1 = makeTimelineCacheKey({ projectId: PROJECT_ID, branches: ['main'], maxNodes: 200, laneMode: 'branch' });
-    const k2 = makeTimelineCacheKey({ projectId: PROJECT_ID, branches: ['dev'], maxNodes: 200, laneMode: 'branch' });
+    const { setTimelineCache, getTimelineCache, invalidateTimelineCache, makeTimelineCacheKey } =
+      await import('../timeline.js');
+    const k1 = makeTimelineCacheKey({
+      projectId: PROJECT_ID,
+      branches: ['main'],
+      maxNodes: 200,
+      laneMode: 'branch',
+    });
+    const k2 = makeTimelineCacheKey({
+      projectId: PROJECT_ID,
+      branches: ['dev'],
+      maxNodes: 200,
+      laneMode: 'branch',
+    });
     setTimelineCache({ projectId: PROJECT_ID, cacheKey: k1, payload: 'a' });
     setTimelineCache({ projectId: PROJECT_ID, cacheKey: k2, payload: 'b' });
     invalidateTimelineCache();
@@ -223,7 +243,8 @@ describe('cache/branches · listStarredBranches / setStarred + 缓存层', () =>
   });
 
   it('setBranchesCache + getBranchesCache 独立 resource', async () => {
-    const { setBranchesCache, getBranchesCache, invalidateBranchesCache } = await import('../branches.js');
+    const { setBranchesCache, getBranchesCache, invalidateBranchesCache } =
+      await import('../branches.js');
     setBranchesCache({ projectId: PROJECT_ID, cacheKey: 'b1', payload: 'data' });
     expect(getBranchesCache({ projectId: PROJECT_ID, cacheKey: 'b1' })).toBe('data');
     invalidateBranchesCache(PROJECT_ID);

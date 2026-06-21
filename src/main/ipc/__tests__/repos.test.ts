@@ -52,7 +52,9 @@ afterEach(async () => {
 const ACCOUNT_ID = 'a-1';
 
 function getHandler(channel: string): (rawArgs: unknown) => Promise<unknown> {
-  const registry = (globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }).__ipcHandlers;
+  const registry = (
+    globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }
+  ).__ipcHandlers;
   if (!registry) throw new Error('__ipcHandlers registry not initialized');
   return (rawArgs) => {
     const fn = registry.get(channel);
@@ -82,7 +84,9 @@ async function seedAccountAndRegister() {
   const electron = await import('electron');
   const ipcMainMock = vi.mocked(electron.ipcMain);
   ipcMainMock.handle.mockImplementation((channel: unknown, cb: unknown) => {
-    const g = globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> };
+    const g = globalThis as {
+      __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>>;
+    };
     if (!g.__ipcHandlers) g.__ipcHandlers = new Map();
     g.__ipcHandlers.set(channel as string, cb as (e: unknown, a: unknown) => Promise<unknown>);
   });
@@ -111,7 +115,10 @@ describe('ipc/repos · list (cache hit/miss + isProject JOIN + lastSync + backfi
 
   it('cache miss → 调 gitea → isProject=false（没建项目）', async () => {
     mocks.listGiteaRepos.mockResolvedValueOnce({
-      items: [makeRepoDto(), makeRepoDto({ id: 2, owner: 'org', name: 'repo-2', fullName: 'org/repo-2' })],
+      items: [
+        makeRepoDto(),
+        makeRepoDto({ id: 2, owner: 'org', name: 'repo-2', fullName: 'org/repo-2' }),
+      ],
       total: 2,
       hasMore: false,
     });
@@ -128,7 +135,11 @@ describe('ipc/repos · list (cache hit/miss + isProject JOIN + lastSync + backfi
 
   it('cache miss + 项目已建 → isProject=true + lastSyncAt 填上', async () => {
     // 先 addProject 建一个本地项目
-    await getHandler('repos.addProject')({ giteaAccountId: ACCOUNT_ID, owner: 'org', name: 'repo-1' });
+    await getHandler('repos.addProject')({
+      giteaAccountId: ACCOUNT_ID,
+      owner: 'org',
+      name: 'repo-1',
+    });
 
     mocks.listGiteaRepos.mockResolvedValueOnce({
       items: [makeRepoDto()],
@@ -145,7 +156,11 @@ describe('ipc/repos · list (cache hit/miss + isProject JOIN + lastSync + backfi
 
   it('cache miss + 项目 defaultBranch=null + gitea 有 → 触发 backfill', async () => {
     // addProject + 手动把项目的 defaultBranch 设为 null（模拟 v1.1.3 那个 timeline polish bug 场景）
-    await getHandler('repos.addProject')({ giteaAccountId: ACCOUNT_ID, owner: 'org', name: 'repo-1' });
+    await getHandler('repos.addProject')({
+      giteaAccountId: ACCOUNT_ID,
+      owner: 'org',
+      name: 'repo-1',
+    });
     const stateMod = await import('../../local/state.js');
     stateMod.getLocalStore().mutate((s) => {
       const proj = s.projects.find((p) => p.owner === 'org' && p.name === 'repo-1');
@@ -170,7 +185,11 @@ describe('ipc/repos · list (cache hit/miss + isProject JOIN + lastSync + backfi
   });
 
   it('cache hit → 第二次不调 gitea', async () => {
-    mocks.listGiteaRepos.mockResolvedValueOnce({ items: [makeRepoDto()], total: 1, hasMore: false });
+    mocks.listGiteaRepos.mockResolvedValueOnce({
+      items: [makeRepoDto()],
+      total: 1,
+      hasMore: false,
+    });
 
     await getHandler('repos.list')({ giteaAccountId: ACCOUNT_ID });
     expect(mocks.listGiteaRepos).toHaveBeenCalledTimes(1);
@@ -180,9 +199,9 @@ describe('ipc/repos · list (cache hit/miss + isProject JOIN + lastSync + backfi
   });
 
   it('account 不存在 → NOT_FOUND', async () => {
-    await expect(
-      getHandler('repos.list')({ giteaAccountId: 'not-exist' }),
-    ).rejects.toMatchObject({ code: 'not_found' });
+    await expect(getHandler('repos.list')({ giteaAccountId: 'not-exist' })).rejects.toMatchObject({
+      code: 'not_found',
+    });
   });
 
   it('Zod 校验失败（缺 giteaAccountId）', async () => {
@@ -243,8 +262,8 @@ describe('ipc/repos · removeProject (走 dispatch)', () => {
   });
 
   it('Zod 校验失败（projectId 空字符串）', async () => {
-    await expect(
-      getHandler('repos.removeProject')({ projectId: '' }),
-    ).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(getHandler('repos.removeProject')({ projectId: '' })).rejects.toMatchObject({
+      code: 'validation_failed',
+    });
   });
 });

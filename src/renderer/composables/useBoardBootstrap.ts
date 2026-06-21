@@ -132,13 +132,18 @@ export function useBoardBootstrap(
           const compoundCount = breakdown?.compound.length ?? 0;
           const hasL2L3 = (breakdown?.prefixGroup.length ?? 0) > 0 || compoundCount > 0;
           const descriptionParts: string[] = [];
-          if (breakdown && (breakdown.literal.length + breakdown.prefixGroup.length + breakdown.compound.length) > 0) {
+          if (
+            breakdown &&
+            breakdown.literal.length + breakdown.prefixGroup.length + breakdown.compound.length > 0
+          ) {
             const literalNames = breakdown.literal.map((c) => c.columnTitle);
             const prefixNames = breakdown.prefixGroup.map((c) => c.columnTitle);
             const compoundNames = breakdown.compound.map((c) => c.columnTitle);
             const allNames = [...literalNames, ...prefixNames, ...compoundNames].slice(0, 5);
             if (allNames.length > 0) {
-              descriptionParts.push(`已建：${allNames.join(' / ')}${allNames.length === 5 ? ' ...' : ''}`);
+              descriptionParts.push(
+                `已建：${allNames.join(' / ')}${allNames.length === 5 ? ' ...' : ''}`,
+              );
             }
           } else {
             descriptionParts.push('gitea 仓库已有匹配的 label，按名字建好了列。');

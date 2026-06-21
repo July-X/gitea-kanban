@@ -146,7 +146,9 @@ export function mergeToFileChangeDtos(
     // 兜底：如果 diff 解析 status 未知，用 gitea status
     const fallbackStatus = giteaStatusByName.get(entry.filename);
     const status =
-      entry.status !== 'unknown' ? entry.status : (fallbackStatus as FileStatus | undefined) ?? 'unknown';
+      entry.status !== 'unknown'
+        ? entry.status
+        : ((fallbackStatus as FileStatus | undefined) ?? 'unknown');
 
     const functions = entry.binary ? undefined : extractFunctionsFromPatch(entry.patch);
 

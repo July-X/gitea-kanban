@@ -53,7 +53,9 @@ afterEach(async () => {
 const PROJECT_ID = 'p-test-uuid';
 
 function getHandler(channel: string): (rawArgs: unknown) => Promise<unknown> {
-  const registry = (globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }).__ipcHandlers;
+  const registry = (
+    globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }
+  ).__ipcHandlers;
   if (!registry) throw new Error('__ipcHandlers registry not initialized');
   return (rawArgs) => {
     const fn = registry.get(channel);
@@ -76,7 +78,9 @@ async function seedProjectAndRegister() {
   const electron = await import('electron');
   const ipcMainMock = vi.mocked(electron.ipcMain);
   ipcMainMock.handle.mockImplementation((channel: unknown, cb: unknown) => {
-    const g = globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> };
+    const g = globalThis as {
+      __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>>;
+    };
     if (!g.__ipcHandlers) g.__ipcHandlers = new Map();
     g.__ipcHandlers.set(channel as string, cb as (e: unknown, a: unknown) => Promise<unknown>);
   });
@@ -122,7 +126,11 @@ describe('ipc/labels · list / create', () => {
     expect(result.items[0]?.id).toBe(100);
     expect(result.hasMore).toBe(false);
     expect(mocks.listGiteaLabels).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: 'org', repo: 'repo', giteaUrl: 'https://gitea.example.com' }),
+      expect.objectContaining({
+        owner: 'org',
+        repo: 'repo',
+        giteaUrl: 'https://gitea.example.com',
+      }),
     );
   });
 
@@ -139,7 +147,9 @@ describe('ipc/labels · list / create', () => {
   });
 
   it('labels.create → 调 createGiteaLabel 返 LabelDto', async () => {
-    mocks.createGiteaLabel.mockResolvedValueOnce(makeLabelDto({ name: 'enhancement', color: '#00ff00' }));
+    mocks.createGiteaLabel.mockResolvedValueOnce(
+      makeLabelDto({ name: 'enhancement', color: '#00ff00' }),
+    );
     const result = (await getHandler('labels.create')({
       projectId: PROJECT_ID,
       name: 'enhancement',

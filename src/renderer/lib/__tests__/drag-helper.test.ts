@@ -30,9 +30,9 @@ describe('drag-helper · mapDragEndToMoveIntent', () => {
   });
 
   it('跨列 → 返回 DragMoveIntent', () => {
-    expect(
-      mapDragEndToMoveIntent({ fromColumnId: 'c1', toColumnId: 'c2', issueIndex: 5 }),
-    ).toEqual({ issueIndex: 5, fromColumnId: 'c1', toColumnId: 'c2' });
+    expect(mapDragEndToMoveIntent({ fromColumnId: 'c1', toColumnId: 'c2', issueIndex: 5 })).toEqual(
+      { issueIndex: 5, fromColumnId: 'c1', toColumnId: 'c2' },
+    );
   });
 
   it('issueIndex 透传（不被改动）', () => {

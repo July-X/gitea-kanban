@@ -100,9 +100,7 @@ export class SyncRunner {
    * 当前 pending + failed 列表（PreferencesView 待处理面板用）
    */
   listPending(): QueueEntry[] {
-    return this.entries.filter(
-      (e) => e.status === 'pending' || e.status === 'failed',
-    );
+    return this.entries.filter((e) => e.status === 'pending' || e.status === 'failed');
   }
 
   /**
@@ -135,9 +133,7 @@ export class SyncRunner {
    */
   private async runOnce(): Promise<void> {
     if (this.stopped) return;
-    const work = this.entries.filter(
-      (e) => e.status === 'pending' || e.status === 'failed',
-    );
+    const work = this.entries.filter((e) => e.status === 'pending' || e.status === 'failed');
     for (const e of work) {
       if (this.stopped) return;
       // backoff：还没到 retry 时间
@@ -168,10 +164,7 @@ export class SyncRunner {
         await handler.execute(e.args as never);
         e.status = 'done';
         await markEntryDone(e.id);
-        log.info(
-          { id: e.id, op: e.op, attempt: e.attempt },
-          'SyncRunner: entry done',
-        );
+        log.info({ id: e.id, op: e.op, attempt: e.attempt }, 'SyncRunner: entry done');
       } catch (err) {
         // 注意：e.attempt 已在上面 +1（成功也算 attempt）；这里不重复累加
         e.failedAt = Date.now();
@@ -202,10 +195,7 @@ export class SyncRunner {
    * 内部：指数退避（5s, 10s, 20s, 40s, 80s, 160s, capped 5min）
    */
   private backoffMs(attempt: number): number {
-    return Math.min(
-      RETRY_BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1),
-      RETRY_BACKOFF_MAX_MS,
-    );
+    return Math.min(RETRY_BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1), RETRY_BACKOFF_MAX_MS);
   }
 }
 

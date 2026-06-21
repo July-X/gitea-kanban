@@ -147,12 +147,18 @@ describe('TimelineDtoSchema (M9 task 2: Z3 known-issue 修后守卫)', () => {
 
   describe('嵌套 IsoDateSchema 守卫（regression：M5 fix-1 修后必须仍接受 +08:00）', () => {
     it('CommitNodeSchema.timestamp 接受 +08:00', () => {
-      const r = CommitNodeSchema.safeParse({ ...COMMIT_MAIN, timestamp: '2026-06-11T20:16:55+08:00' });
+      const r = CommitNodeSchema.safeParse({
+        ...COMMIT_MAIN,
+        timestamp: '2026-06-11T20:16:55+08:00',
+      });
       expect(r.success).toBe(true);
     });
 
     it('CommitNodeSchema.timestamp 接受 -05:00', () => {
-      const r = CommitNodeSchema.safeParse({ ...COMMIT_MAIN, timestamp: '2026-06-11T08:16:55-05:00' });
+      const r = CommitNodeSchema.safeParse({
+        ...COMMIT_MAIN,
+        timestamp: '2026-06-11T08:16:55-05:00',
+      });
       expect(r.success).toBe(true);
     });
 
@@ -162,7 +168,10 @@ describe('TimelineDtoSchema (M9 task 2: Z3 known-issue 修后守卫)', () => {
     });
 
     it('TimelinePRSchema.mergedAt 接受 +08:00', () => {
-      const r = TimelinePRSchema.safeParse({ ...PR_11_TIMELINE, mergedAt: '2026-06-11T20:16:57+08:00' });
+      const r = TimelinePRSchema.safeParse({
+        ...PR_11_TIMELINE,
+        mergedAt: '2026-06-11T20:16:57+08:00',
+      });
       expect(r.success).toBe(true);
     });
 

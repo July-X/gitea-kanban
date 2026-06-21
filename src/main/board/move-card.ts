@@ -28,11 +28,7 @@ import { IpcError, IpcErrorCode } from '@shared/errors';
 import type { MoveIssueColumnArgs, IssueCardDto } from '../ipc/schema.js';
 import { resolveProject } from './resolveProject.js';
 import { pushUndo, registerUndoHandler } from './undo.js';
-import {
-  removeGiteaIssueLabel,
-  addGiteaIssueLabel,
-  getGiteaIssue,
-} from '../gitea/issues.js';
+import { removeGiteaIssueLabel, addGiteaIssueLabel, getGiteaIssue } from '../gitea/issues.js';
 import { getLocalStore } from '../local/state.js';
 import { findColumnByIdWithStore } from '../local/columns.js';
 import { listLabelMapsByColumnWithStore } from '../local/label-maps.js';
@@ -162,12 +158,11 @@ export async function moveIssueColumn(args: MoveIssueColumnArgs): Promise<IssueC
   });
 
   // 7. push undo（M6）：reverse = 互换 from/to（moveIssueColumn 对称）
-  pushUndo(
-    'issues.moveColumn',
-    args.projectId,
-    args,
-    { ...args, fromColumnId: args.toColumnId, toColumnId: args.fromColumnId },
-  );
+  pushUndo('issues.moveColumn', args.projectId, args, {
+    ...args,
+    fromColumnId: args.toColumnId,
+    toColumnId: args.fromColumnId,
+  });
 
   return result;
 }

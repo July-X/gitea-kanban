@@ -26,9 +26,23 @@ import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
 import { useBranchStore } from '@renderer/stores/branch';
-import type { ColumnDto, IssueCardDto, RepoDto, CollaboratorDto, MilestoneDto, IssueCommentDto, BranchDto } from '../../main/ipc/schema.js';
-import { matchIssueToColumn } from '@renderer/lib/issue-column-match';
-import { membersList, milestonesList, issuesCommentList, issuesCommentCreate, branchesList } from '@renderer/lib/ipc-client';
+import type {
+  ColumnDto,
+  IssueCardDto,
+  RepoDto,
+  CollaboratorDto,
+  MilestoneDto,
+  IssueCommentDto,
+  BranchDto,
+} from '../../main/ipc/schema.js';
+import { getColumnLabelRemovalImpact, matchIssueToColumn } from '@renderer/lib/issue-column-match';
+import {
+  membersList,
+  milestonesList,
+  issuesCommentList,
+  issuesCommentCreate,
+  branchesList,
+} from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 // 全局样式（Teleport 后 .modal-overlay / .move-menu-overlay / .column__settings-btn 等）
 import '@renderer/components/board/board-modals.css';
@@ -79,7 +93,9 @@ const lockedColumn = computed<ColumnDto | null>(() => {
  * 弹窗打开时缓存已就绪则直接用（瞬时）；缓存未命中才请求（fallback）。
  * 缓存 key = projectId，切仓库时重置。
  */
-const createIssueCache = ref<Record<string, { members: CollaboratorDto[]; milestones: MilestoneDto[]; branches: BranchDto[] }>>({});
+const createIssueCache = ref<
+  Record<string, { members: CollaboratorDto[]; milestones: MilestoneDto[]; branches: BranchDto[] }>
+>({});
 let createIssuePreloading = false;
 
 /** 后台预加载 members/milestones/branches（不阻塞 UI，失败静默——弹窗打开时 fallback 重试） */
@@ -90,7 +106,10 @@ async function preloadCreateIssueData(pid: string): Promise<void> {
     const [memResp, mileResp, brResp] = await Promise.all([
       membersList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
       milestonesList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
-      branchesList({ projectId: pid, limit: 50, page: 1 }).catch(() => ({ items: [], hasMore: false })),
+      branchesList({ projectId: pid, limit: 50, page: 1 }).catch(() => ({
+        items: [],
+        hasMore: false,
+      })),
     ]);
     createIssueCache.value = {
       ...createIssueCache.value,
@@ -184,7 +203,10 @@ async function openCreateIssueDialog(): Promise<void> {
     const [memResp, mileResp, brResp] = await Promise.all([
       membersList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
       milestonesList({ projectId: pid }).catch(() => ({ items: [], hasMore: false })),
-      branchesList({ projectId: pid, limit: 50, page: 1 }).catch(() => ({ items: [], hasMore: false })),
+      branchesList({ projectId: pid, limit: 50, page: 1 }).catch(() => ({
+        items: [],
+        hasMore: false,
+      })),
     ]);
     createIssueMembers.value = memResp.items;
     createIssueMilestones.value = mileResp.items;
@@ -217,7 +239,9 @@ async function onCreateIssue(payload: {
       title: payload.title,
       ...(payload.body ? { body: payload.body } : {}),
       ...(payload.labelIds && payload.labelIds.length > 0 ? { labelIds: payload.labelIds } : {}),
-      ...(payload.assignees && payload.assignees.length > 0 ? { assignees: payload.assignees } : {}),
+      ...(payload.assignees && payload.assignees.length > 0
+        ? { assignees: payload.assignees }
+        : {}),
       ...(payload.milestoneId !== undefined ? { milestoneId: payload.milestoneId } : {}),
       refBranch: payload.refBranch,
     });
@@ -250,6 +274,12 @@ const issueDetailIssue = ref<IssueCardDto | null>(null);
 const issueDetailComments = ref<IssueCommentDto[]>([]);
 const issueDetailCommentsLoading = ref(false);
 const issueDetailSubmitting = ref(false);
+const confirmRemoveColumnLabel = ref<{
+  open: boolean;
+  payload: { issueIndex: number; addLabelIds: number[]; removeLabelIds: number[] } | null;
+  columnTitle: string;
+  labelNames: string[];
+}>({ open: false, payload: null, columnTitle: '', labelNames: [] });
 
 /** 打开议题详情：加载评论列表 */
 async function openIssueDetail(issue: IssueCardDto): Promise<void> {
@@ -292,30 +322,70 @@ async function onSubmitComment(payload: { issueIndex: number; body: string }): P
   }
 }
 
-/** v1.4：二次修改标签（IssueDetailDialog 触发 → 调 store.updateIssueLabels） */
-async function onUpdateIssueLabels(payload: {
+type IssueLabelUpdatePayload = {
   issueIndex: number;
   addLabelIds: number[];
   removeLabelIds: number[];
-}): Promise<void> {
+};
+
+async function applyIssueLabelUpdate(payload: IssueLabelUpdatePayload): Promise<void> {
   const pid = activeProjectId.value;
   if (!pid) return;
-  try {
-    await board.updateIssueLabels({
-      projectId: pid,
-      issueIndex: payload.issueIndex,
-      addLabelIds: payload.addLabelIds,
-      removeLabelIds: payload.removeLabelIds,
-    });
-    // 同步 issueDetailIssue（弹窗内展示的标签跟着变）
-    if (issueDetailIssue.value && issueDetailIssue.value.index === payload.issueIndex) {
-      const colId = board.findIssueColumnId(payload.issueIndex);
-      const updated = colId
-        ? board.issuesOf(colId).find((i) => i.index === payload.issueIndex)
-        : null;
-      issueDetailIssue.value = updated ? { ...updated } : issueDetailIssue.value;
+  await board.updateIssueLabels({
+    projectId: pid,
+    issueIndex: payload.issueIndex,
+    addLabelIds: payload.addLabelIds,
+    removeLabelIds: payload.removeLabelIds,
+  });
+  // 同步 issueDetailIssue（弹窗内展示的标签跟着变）。
+  // 标签删除后卡片可能已从原列移到新列 / 未分类 / 已关闭区，所以不能只按旧列查。
+  if (issueDetailIssue.value && issueDetailIssue.value.index === payload.issueIndex) {
+    const colId = board.findIssueColumnId(payload.issueIndex);
+    const updated =
+      (colId ? board.issuesOf(colId).find((i) => i.index === payload.issueIndex) : null) ??
+      board.unassignedIssues.find((i) => i.index === payload.issueIndex) ??
+      board.closedIssues.find((i) => i.index === payload.issueIndex) ??
+      null;
+    issueDetailIssue.value = updated ? { ...updated } : issueDetailIssue.value;
+  }
+}
+
+/** v1.4：二次修改标签（IssueDetailDialog 触发 → 调 store.updateIssueLabels） */
+async function onUpdateIssueLabels(payload: IssueLabelUpdatePayload): Promise<void> {
+  const issue = issueDetailIssue.value;
+  if (issue && payload.removeLabelIds.length > 0) {
+    const impact = getColumnLabelRemovalImpact(issue, board.columns, payload.removeLabelIds);
+    if (impact) {
+      confirmRemoveColumnLabel.value = {
+        open: true,
+        payload,
+        columnTitle: impact.columnTitle,
+        labelNames: impact.labelNames,
+      };
+      return;
     }
+  }
+
+  try {
+    await applyIssueLabelUpdate(payload);
     showToast({ type: 'success', message: '标签已更新', duration: 2000 });
+  } catch {
+    showToast({ type: 'error', message: '标签更新失败', duration: 3000 });
+  }
+}
+
+async function confirmIssueLabelRemoval(): Promise<void> {
+  const payload = confirmRemoveColumnLabel.value.payload;
+  if (!payload) return;
+  confirmRemoveColumnLabel.value = { open: false, payload: null, columnTitle: '', labelNames: [] };
+  try {
+    await applyIssueLabelUpdate(payload);
+    showToast({
+      type: 'success',
+      message: '标签已更新',
+      description: '这张卡片可能已离开原来的列',
+      duration: 3000,
+    });
   } catch {
     showToast({ type: 'error', message: '标签更新失败', duration: 3000 });
   }
@@ -470,7 +540,7 @@ type ColumnListItem = { kind: 'column'; key: string; column: ColumnDto };
  */
 const doneColumn = computed<ColumnDto | null>(() => {
   const idx = doneColumnIndex.value;
-  return idx < 0 ? null : board.columns[idx] ?? null;
+  return idx < 0 ? null : (board.columns[idx] ?? null);
 });
 const otherColumns = computed<ColumnListItem[]>(() => {
   const doneId = doneColumn.value?.id;
@@ -642,6 +712,7 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       </div>
       <UnassignedSection
         v-if="board.unassignedIssues.length"
+        class="board__unassigned-wrap"
         :issues="board.unassignedIssues"
         :loading="board.loading"
         :drag-options="columnDragOptions"
@@ -698,6 +769,18 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       @confirm="performAssign(activeProjectId)"
     />
 
+    <ConfirmDialog
+      :open="confirmRemoveColumnLabel.open"
+      title="删除当前列的标签？"
+      :description="`你正在删除标签「${confirmRemoveColumnLabel.labelNames.join('、')}」。它是列「${confirmRemoveColumnLabel.columnTitle}」用来归类卡片的标签，删除后这张卡片可能会离开当前列或进入未分类。`"
+      confirm-label="确认删除标签"
+      cancel-label="取消"
+      :danger="false"
+      confirm-keyword="删除"
+      @update:open="(v) => (confirmRemoveColumnLabel.open = v)"
+      @confirm="confirmIssueLabelRemoval"
+    />
+
     <ConfirmFinishDialog
       :open="confirmFinish.open"
       :issue="confirmFinish.issue"
@@ -710,7 +793,12 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
         <div class="modal" role="dialog" aria-modal="true" aria-label="新增列">
           <header class="modal__header">
             <h2 class="modal__title">新增列</h2>
-            <button type="button" class="modal__close" :aria-label="'关闭'" @click="closeCreateColumn">
+            <button
+              type="button"
+              class="modal__close"
+              :aria-label="'关闭'"
+              @click="closeCreateColumn"
+            >
               <span :style="{ display: 'inline-flex' }" aria-hidden="true">×</span>
             </button>
           </header>
@@ -727,10 +815,19 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
               autofocus
               @keydown.enter="confirmCreateColumn(activeProjectId)"
             />
-            <p class="modal__hint muted">列会按从左到右展示;之后可改列名、删除、或绑 gitea 仓库里的标签</p>
+            <p class="modal__hint muted">
+              列会按从左到右展示;之后可改列名、删除、或绑 gitea 仓库里的标签
+            </p>
           </div>
           <footer class="modal__footer">
-            <button type="button" class="modal__btn modal__btn--ghost" :disabled="creatingColumn" @click="closeCreateColumn">取消</button>
+            <button
+              type="button"
+              class="modal__btn modal__btn--ghost"
+              :disabled="creatingColumn"
+              @click="closeCreateColumn"
+            >
+              取消
+            </button>
             <button
               type="button"
               class="modal__btn modal__btn--primary"
@@ -860,28 +957,28 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
 }
 .board__columns {
   flex: 1;
-  /* v1.4 布局（2026-06-19）：横向单行 flex，每列高度 = 内容区高度（自适应 Window）。
-     - 列内 .column__cards overflow-y:auto 处理卡片过多（列内滚动）
-     - 内容区整体不出纵向滚动条（overflow-y:hidden）
-     - 列多时横向滚动（overflow-x:auto），符合主流看板布局 */
-  display: flex;
-  flex-direction: row;
+  /* v1.4 布局（2026-06-20）：固定 4 等分列，不再横向滚动。
+     未分类区若出现则放到下一行，避免挤占四个主列。 */
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
   gap: var(--space-3);
   padding: var(--space-4);
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
   align-items: stretch;
   min-height: 0;
 }
-/* 「已完成」+「已关闭」合成一列的 wrapper：占一个 flex item，
-   内部 flex 纵向、gap:0 紧贴 —— 视觉延续成一列。
-   高度 = 内容区高度（align-items:stretch 拉满），内部两个区块各自 overflow。 */
+/* 「已完成」+「已关闭」合成一列的 wrapper：占一个 grid cell，
+   内部 flex 纵向、gap:0 紧贴 —— 视觉延续成一列。 */
+.board__done-wrap,
+.board__unassigned-wrap {
+  min-width: 0;
+  min-height: 0;
+}
 .board__done-wrap {
   display: flex;
   flex-direction: column;
   gap: 0;
-  flex: 0 0 280px;
-  min-height: 0;
 }
 /* 已完成列在 wrapper 内：撑满 wrapper 高度，内容多时列内滚动 */
 .board__done-wrap > :deep(.column) {

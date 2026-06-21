@@ -25,7 +25,7 @@
  */
 
 import { ipcMain } from 'electron';
-import { resolveProject } from "../board/resolveProject.js";
+import { resolveProject } from '../board/resolveProject.js';
 import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
 import {
   IpcChannel,
@@ -56,17 +56,10 @@ import {
   updatePullAssignee,
   updatePullReviewers,
 } from '../gitea/pulls.js';
-import {
-  getPullsCache,
-  setPullsCache,
-  invalidatePullsCache,
-} from '../cache/pulls.js';
+import { getPullsCache, setPullsCache, invalidatePullsCache } from '../cache/pulls.js';
 import { invalidateCommitsCache } from '../cache/commits.js';
 import { invalidateBranchesCache } from '../cache/branches.js';
-import {
-  getLinkedCardsForPulls,
-  getLinkedCardsForPull,
-} from '../cache/commits.js';
+import { getLinkedCardsForPulls, getLinkedCardsForPull } from '../cache/commits.js';
 import { logger } from '../logger.js';
 
 /** 统一包装：parse → handler → error → IpcError（与 branches.ts / repos.ts 保持一致） */
@@ -129,7 +122,10 @@ function makeListCacheKey(args: ListPullsArgs): string {
 async function pullsListHandler(args: ListPullsArgs): Promise<ListPullsResp> {
   const start = Date.now();
   const op = 'pulls.list';
-  logger.info({ op, args: { projectId: args.projectId, state: args.state, page: args.page } }, 'ipc start');
+  logger.info(
+    { op, args: { projectId: args.projectId, state: args.state, page: args.page } },
+    'ipc start',
+  );
 
   // 1. cache hit
   const cacheKey = makeListCacheKey(args);
@@ -137,7 +133,10 @@ async function pullsListHandler(args: ListPullsArgs): Promise<ListPullsResp> {
   if (cached) {
     try {
       const parsed = JSON.parse(cached) as ListPullsResp;
-      logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true }, 'ipc done');
+      logger.info(
+        { op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true },
+        'ipc done',
+      );
       return parsed;
     } catch {
       // 损坏 = miss
@@ -180,16 +179,25 @@ async function pullsListHandler(args: ListPullsArgs): Promise<ListPullsResp> {
     // 5. 写缓存
     setPullsCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(resp) });
 
-    logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
+    logger.info(
+      { op, latencyMs: Date.now() - start, resultSize: items.length, hit: false },
+      'ipc done',
+    );
     return resp;
   } catch (err) {
     if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
-      logger.warn({ op, latencyMs: Date.now() - start }, 'gitea unreachable, falling back to cache');
+      logger.warn(
+        { op, latencyMs: Date.now() - start },
+        'gitea unreachable, falling back to cache',
+      );
       if (cached) {
         try {
           const parsed = JSON.parse(cached) as ListPullsResp;
           (parsed as unknown as Record<string, unknown>)['__offline'] = true;
-          logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, offline: true }, 'ipc done (offline)');
+          logger.info(
+            { op, latencyMs: Date.now() - start, resultSize: parsed.items.length, offline: true },
+            'ipc done (offline)',
+          );
           return parsed;
         } catch {
           // 缓存损坏
@@ -198,7 +206,10 @@ async function pullsListHandler(args: ListPullsArgs): Promise<ListPullsResp> {
       // 无缓存，返回空 offline 响应
       const offlineResp: ListPullsResp = { items: [], total: 0, hasMore: false };
       (offlineResp as unknown as Record<string, unknown>)['__offline'] = true;
-      logger.info({ op, latencyMs: Date.now() - start, offline: true }, 'ipc done (offline, no cache)');
+      logger.info(
+        { op, latencyMs: Date.now() - start, offline: true },
+        'ipc done (offline, no cache)',
+      );
       return offlineResp;
     }
     throw err;
@@ -258,7 +269,10 @@ async function pullsGetHandler(args: GetPullArgs): Promise<PullDto> {
 async function pullsMergeHandler(args: MergePrArgs): Promise<MergePrResult> {
   const start = Date.now();
   const op = 'pulls.merge';
-  logger.info({ op, args: { projectId: args.projectId, index: args.index, method: args.method } }, 'ipc start');
+  logger.info(
+    { op, args: { projectId: args.projectId, index: args.index, method: args.method } },
+    'ipc start',
+  );
 
   const proj = resolveProject(args.projectId);
 
@@ -280,7 +294,10 @@ async function pullsMergeHandler(args: MergePrArgs): Promise<MergePrResult> {
   invalidateCommitsCache(args.projectId);
   invalidateBranchesCache(args.projectId);
 
-  logger.info({ op, latencyMs: Date.now() - start, sha: result.sha, merged: result.merged }, 'ipc done');
+  logger.info(
+    { op, latencyMs: Date.now() - start, sha: result.sha, merged: result.merged },
+    'ipc done',
+  );
   return result;
 }
 
@@ -314,7 +331,10 @@ async function pullsCloseHandler(args: ClosePrArgs): Promise<{ closed: boolean }
 async function pullsUpdateLabelsHandler(args: UpdatePullLabelsArgs): Promise<void> {
   const start = Date.now();
   const op = 'pulls.updateLabels';
-  logger.info({ op, args: { projectId: args.projectId, index: args.index, labels: args.labels } }, 'ipc start');
+  logger.info(
+    { op, args: { projectId: args.projectId, index: args.index, labels: args.labels } },
+    'ipc start',
+  );
 
   const proj = resolveProject(args.projectId);
   await updatePullLabels({
@@ -335,7 +355,10 @@ async function pullsUpdateLabelsHandler(args: UpdatePullLabelsArgs): Promise<voi
 async function pullsUpdateAssigneeHandler(args: UpdatePullAssigneeArgs): Promise<void> {
   const start = Date.now();
   const op = 'pulls.updateAssignee';
-  logger.info({ op, args: { projectId: args.projectId, index: args.index, assignee: args.assignee } }, 'ipc start');
+  logger.info(
+    { op, args: { projectId: args.projectId, index: args.index, assignee: args.assignee } },
+    'ipc start',
+  );
 
   const proj = resolveProject(args.projectId);
   await updatePullAssignee({
@@ -356,7 +379,10 @@ async function pullsUpdateAssigneeHandler(args: UpdatePullAssigneeArgs): Promise
 async function pullsUpdateReviewersHandler(args: UpdatePullReviewersArgs): Promise<void> {
   const start = Date.now();
   const op = 'pulls.updateReviewers';
-  logger.info({ op, args: { projectId: args.projectId, index: args.index, reviewers: args.reviewers } }, 'ipc start');
+  logger.info(
+    { op, args: { projectId: args.projectId, index: args.index, reviewers: args.reviewers } },
+    'ipc start',
+  );
 
   const proj = resolveProject(args.projectId);
   await updatePullReviewers({
@@ -380,8 +406,16 @@ export function registerPullsIpc(): void {
   wrapIpc(IpcChannel.PULLS_MERGE, MergePrArgsSchema, pullsMergeHandler);
   wrapIpc(IpcChannel.PULLS_CLOSE, ClosePrArgsSchema, pullsCloseHandler);
   wrapIpc(IpcChannel.PULLS_UPDATE_LABELS, UpdatePullLabelsArgsSchema, pullsUpdateLabelsHandler);
-  wrapIpc(IpcChannel.PULLS_UPDATE_ASSIGNEE, UpdatePullAssigneeArgsSchema, pullsUpdateAssigneeHandler);
-  wrapIpc(IpcChannel.PULLS_UPDATE_REVIEWERS, UpdatePullReviewersArgsSchema, pullsUpdateReviewersHandler);
+  wrapIpc(
+    IpcChannel.PULLS_UPDATE_ASSIGNEE,
+    UpdatePullAssigneeArgsSchema,
+    pullsUpdateAssigneeHandler,
+  );
+  wrapIpc(
+    IpcChannel.PULLS_UPDATE_REVIEWERS,
+    UpdatePullReviewersArgsSchema,
+    pullsUpdateReviewersHandler,
+  );
 }
 
 export function unregisterPullsIpc(): void {

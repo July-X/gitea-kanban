@@ -44,18 +44,9 @@ vi.mock('../resolveProject.js', () => ({
   resolveProject: mocks.resolveProject,
 }));
 
-import {
-  listColumns,
-  mapLabel,
-  createColumn,
-  unmapLabel,
-} from '../columns.js';
+import { listColumns, mapLabel, createColumn, unmapLabel } from '../columns.js';
 import { IpcError, IpcErrorCode } from '@shared/errors';
-import {
-  initLocalStore,
-  getLocalStore,
-  _resetLocalStoreForTest,
-} from '../../local/state.js';
+import { initLocalStore, getLocalStore, _resetLocalStoreForTest } from '../../local/state.js';
 import type { ColumnLabelMap, BoardColumn, RepoProject } from '../../local/state.js';
 
 let TMP_DIR: string;
@@ -131,7 +122,12 @@ function seedColumn(columnId: string, projectId: string, title = 'ToDo'): void {
   });
 }
 
-function seedLabelMap(columnId: string, projectId: string, giteaLabelId: number, giteaLabelName: string): void {
+function seedLabelMap(
+  columnId: string,
+  projectId: string,
+  giteaLabelId: number,
+  giteaLabelName: string,
+): void {
   getLocalStore().mutate((s) => {
     const m: ColumnLabelMap = {
       id: `lm-${giteaLabelId}`,
@@ -157,9 +153,7 @@ describe('listColumns — Gitea 优先原则', () => {
 
     // gitea 返的是**新**的 name + color
     mocks.listGiteaLabels.mockResolvedValue({
-      items: [
-        { id: 101, name: 'live-bug', color: '#ff0000' },
-      ],
+      items: [{ id: 101, name: 'live-bug', color: '#ff0000' }],
       hasMore: false,
     });
 
@@ -168,9 +162,7 @@ describe('listColumns — Gitea 优先原则', () => {
     expect(result).toHaveLength(1);
     expect(result[0]!.id).toBe('c1');
     // **关键**：name 来自 gitea 实时数据，不是 localStore 缓存的 STALE-NAME-OLD
-    expect(result[0]!.labels).toEqual([
-      { id: 101, name: 'live-bug', color: '#ff0000' },
-    ]);
+    expect(result[0]!.labels).toEqual([{ id: 101, name: 'live-bug', color: '#ff0000' }]);
   });
 
   it('2. 过滤 gitea 端已删的 label（gitea 返的 items 缺少 boundLabelId）', async () => {
@@ -189,9 +181,7 @@ describe('listColumns — Gitea 优先原则', () => {
 
     const result = await listColumns('p1');
 
-    expect(result[0]!.labels).toEqual([
-      { id: 101, name: 'live-bug', color: '#ff0000' },
-    ]);
+    expect(result[0]!.labels).toEqual([{ id: 101, name: 'live-bug', color: '#ff0000' }]);
   });
 
   it('3. gitea 拉失败 → 透传 NETWORK_OFFLINE（不静默降级）', async () => {
@@ -251,9 +241,7 @@ describe('mapLabel — Gitea 优先原则', () => {
     seedColumn('c1', 'p1');
 
     mocks.listGiteaLabels.mockResolvedValue({
-      items: [
-        { id: 101, name: 'live-bug', color: '#ff0000' },
-      ],
+      items: [{ id: 101, name: 'live-bug', color: '#ff0000' }],
       hasMore: false,
     });
 
@@ -264,7 +252,7 @@ describe('mapLabel — Gitea 优先原则', () => {
     });
 
     // 验证 localStore 写的是 gitea 实时 name，**不**是 caller 传的
-    getLocalStore
+    getLocalStore;
     const maps = getLocalStore().get().labelMaps;
     const map = maps.find((m) => m.giteaLabelId === '101');
     expect(map).toBeDefined();
@@ -289,7 +277,7 @@ describe('mapLabel — Gitea 优先原则', () => {
     });
 
     // 关键：失败时**不**写 localStore
-    getLocalStore
+    getLocalStore;
     const maps = getLocalStore().get().labelMaps;
     expect(maps.find((m) => m.giteaLabelId === '101')).toBeUndefined();
   });
@@ -311,7 +299,7 @@ describe('mapLabel — Gitea 优先原则', () => {
       giteaLabelName: 'STALE-OLD-NAME', // caller 也传 stale
     });
 
-    getLocalStore
+    getLocalStore;
     const maps = getLocalStore().get().labelMaps;
     const map = maps.find((m) => m.giteaLabelId === '101');
     expect(map!.giteaLabelName).toBe('LIVE-NEW-NAME');
@@ -331,7 +319,7 @@ describe('回归：unmapLabel / createColumn 不调 gitea（保持原行为）',
     await unmapLabel({ columnId: 'c1', giteaLabelId: 101 });
 
     expect(mocks.listGiteaLabels).not.toHaveBeenCalled();
-    getLocalStore
+    getLocalStore;
     expect(getLocalStore().get().labelMaps).toHaveLength(0);
   });
 

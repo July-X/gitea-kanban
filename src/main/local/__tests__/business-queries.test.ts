@@ -113,9 +113,30 @@ const columns: BoardColumn[] = [
 ];
 
 const labelMaps: ColumnLabelMap[] = [
-  { id: 'm1', columnId: 'c1', projectId: 'p1', giteaLabelId: '100', giteaLabelName: 'todo', createdAt: now },
-  { id: 'm2', columnId: 'c1', projectId: 'p1', giteaLabelId: '101', giteaLabelName: 'bug', createdAt: now + 1 },
-  { id: 'm3', columnId: 'c2', projectId: 'p1', giteaLabelId: '200', giteaLabelName: 'doing', createdAt: now },
+  {
+    id: 'm1',
+    columnId: 'c1',
+    projectId: 'p1',
+    giteaLabelId: '100',
+    giteaLabelName: 'todo',
+    createdAt: now,
+  },
+  {
+    id: 'm2',
+    columnId: 'c1',
+    projectId: 'p1',
+    giteaLabelId: '101',
+    giteaLabelName: 'bug',
+    createdAt: now + 1,
+  },
+  {
+    id: 'm3',
+    columnId: 'c2',
+    projectId: 'p1',
+    giteaLabelId: '200',
+    giteaLabelName: 'doing',
+    createdAt: now,
+  },
 ];
 
 const starred: StarredBranch[] = [
@@ -191,18 +212,12 @@ describe('listProjectsByAccountWithStore', () => {
 describe('findProjectWithStore', () => {
   it('按 (account, owner, name) 命中', () => {
     expect(
-      findProjectWithStore(
-        { projects },
-        { giteaAccountId: 'a1', owner: 'org1', name: 'web' },
-      )?.id,
+      findProjectWithStore({ projects }, { giteaAccountId: 'a1', owner: 'org1', name: 'web' })?.id,
     ).toBe('p1');
   });
   it('owner 错不命中', () => {
     expect(
-      findProjectWithStore(
-        { projects },
-        { giteaAccountId: 'a1', owner: 'WRONG', name: 'web' },
-      ),
+      findProjectWithStore({ projects }, { giteaAccountId: 'a1', owner: 'WRONG', name: 'web' }),
     ).toBeNull();
   });
 });
@@ -215,15 +230,11 @@ describe('findProjectByIdWithStore', () => {
 
 describe('findProjectsByOwnerNameWithStore', () => {
   it('批量 (owner, name) 命中 → Map<key, project>', () => {
-    const m = findProjectsByOwnerNameWithStore(
-      { projects },
-      'a1',
-      [
-        { owner: 'org1', name: 'web' },
-        { owner: 'org1', name: 'api' },
-        { owner: 'org1', name: 'NOTFOUND' },
-      ],
-    );
+    const m = findProjectsByOwnerNameWithStore({ projects }, 'a1', [
+      { owner: 'org1', name: 'web' },
+      { owner: 'org1', name: 'api' },
+      { owner: 'org1', name: 'NOTFOUND' },
+    ]);
     expect(m.size).toBe(2);
     expect(m.get('org1/web')?.id).toBe('p1');
     expect(m.get('org1/api')?.id).toBe('p2');
@@ -232,11 +243,9 @@ describe('findProjectsByOwnerNameWithStore', () => {
     expect(findProjectsByOwnerNameWithStore({ projects }, 'a1', []).size).toBe(0);
   });
   it('跨 account 不串', () => {
-    const m = findProjectsByOwnerNameWithStore(
-      { projects },
-      'a2',
-      [{ owner: 'org2', name: 'lib' }],
-    );
+    const m = findProjectsByOwnerNameWithStore({ projects }, 'a2', [
+      { owner: 'org2', name: 'lib' },
+    ]);
     expect(m.get('org2/lib')?.giteaAccountId).toBe('a2');
   });
 });
@@ -245,14 +254,14 @@ describe('findProjectsByOwnerNameWithStore', () => {
 
 describe('listColumnsByProjectWithStore', () => {
   it('按 projectId 过滤 + position 升序', () => {
-    expect(
-      listColumnsByProjectWithStore({ columns }, 'p1').map((c) => c.id),
-    ).toEqual(['c1', 'c2', 'c3']);
+    expect(listColumnsByProjectWithStore({ columns }, 'p1').map((c) => c.id)).toEqual([
+      'c1',
+      'c2',
+      'c3',
+    ]);
   });
   it('跨 project 不串', () => {
-    expect(listColumnsByProjectWithStore({ columns }, 'p2').map((c) => c.id)).toEqual([
-      'c4',
-    ]);
+    expect(listColumnsByProjectWithStore({ columns }, 'p2').map((c) => c.id)).toEqual(['c4']);
   });
 });
 
@@ -285,11 +294,7 @@ describe('projectExistsInColumnsWithStore', () => {
 
 describe('columnIdsByProjectWithStore', () => {
   it('返 id 集合', () => {
-    expect(columnIdsByProjectWithStore({ columns }, 'p1').sort()).toEqual([
-      'c1',
-      'c2',
-      'c3',
-    ]);
+    expect(columnIdsByProjectWithStore({ columns }, 'p1').sort()).toEqual(['c1', 'c2', 'c3']);
   });
 });
 
@@ -326,10 +331,8 @@ describe('findLabelMapByProjectAndLabelWithStore', () => {
 describe('findLabelMapByColumnAndLabelWithStore', () => {
   it('mapLabel 幂等检查', () => {
     expect(
-      findLabelMapByColumnAndLabelWithStore(
-        { labelMaps },
-        { columnId: 'c1', giteaLabelId: '100' },
-      )?.id,
+      findLabelMapByColumnAndLabelWithStore({ labelMaps }, { columnId: 'c1', giteaLabelId: '100' })
+        ?.id,
     ).toBe('m1');
   });
 });

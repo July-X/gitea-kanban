@@ -45,9 +45,15 @@ vi.mock('@napi-rs/keyring', () => {
       this.impl = mocks.currentImpl ?? mocks.makeFakeEntry();
       mocks.AsyncEntry(service, username); // 记录构造调用
     }
-    setPassword(p: string) { return this.impl.setPassword(p); }
-    getPassword() { return this.impl.getPassword(); }
-    deletePassword() { return this.impl.deletePassword(); }
+    setPassword(p: string) {
+      return this.impl.setPassword(p);
+    }
+    getPassword() {
+      return this.impl.getPassword();
+    }
+    deletePassword() {
+      return this.impl.deletePassword();
+    }
   }
   return {
     AsyncEntry: FakeAsyncEntry,
@@ -91,7 +97,9 @@ describe('gitea/keychain · makeService / makeEntry', () => {
     const e = makeEntry('https://x', 'alice');
     expect(mocks.AsyncEntry).toHaveBeenCalledWith(`${KEYCHAIN_SERVICE_PREFIX}https://x`, 'alice');
     // 返回值是 FakeAsyncEntry 实例 —— 验证 service/username 字段
-    expect((e as unknown as { service: string }).service).toBe(`${KEYCHAIN_SERVICE_PREFIX}https://x`);
+    expect((e as unknown as { service: string }).service).toBe(
+      `${KEYCHAIN_SERVICE_PREFIX}https://x`,
+    );
     expect((e as unknown as { username: string }).username).toBe('alice');
   });
 });
@@ -320,9 +328,7 @@ describe('gitea/keychain · keychainDeleteAllForUrl', () => {
     ]);
     const entry = makeFakeEntry();
     // alice 成功，bob NoEntry 返 false
-    entry.deletePassword
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+    entry.deletePassword.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     mocks.currentImpl = entry;
 
     const n = await keychainDeleteAllForUrl('https://x');

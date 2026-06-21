@@ -26,7 +26,9 @@ vi.hoisted(() => {
     removeItem: (_k: string): void => {},
     clear: (): void => {},
     key: (_i: number): string | null => null,
-    get length(): number { return 0; },
+    get length(): number {
+      return 0;
+    },
   };
   (globalThis as unknown as { localStorage: typeof stub }).localStorage = stub;
 });
@@ -37,6 +39,8 @@ const mocks = vi.hoisted(() => ({
   labelsList: vi.fn(),
   issuesList: vi.fn(),
   issuesMoveColumn: vi.fn(),
+  issuesAddLabel: vi.fn(),
+  issuesRemoveLabel: vi.fn(),
   loadUndoStatus: vi.fn(),
   getIpcClient: vi.fn(),
 }));
@@ -46,13 +50,14 @@ vi.mock('@renderer/lib/ipc-client', () => ({
   labelsList: mocks.labelsList,
   issuesList: mocks.issuesList,
   issuesMoveColumn: mocks.issuesMoveColumn,
+  issuesAddLabel: mocks.issuesAddLabel,
+  issuesRemoveLabel: mocks.issuesRemoveLabel,
   // 业务里也用到的其它具名 export（mock 返回合理 stub）
   boardColumnsCreate: vi.fn(),
   boardColumnsDelete: vi.fn(),
   boardColumnsMapLabel: vi.fn(),
   boardColumnsUnmapLabel: vi.fn(),
   boardColumnsUpdate: vi.fn(),
-  issuesAddLabel: vi.fn(),
   issuesCreate: vi.fn(),
   issuesUpdate: vi.fn(),
   getIpcClient: mocks.getIpcClient,
@@ -112,6 +117,8 @@ describe('board store · loadBoard 基础', () => {
     mocks.labelsList.mockReset();
     mocks.issuesList.mockReset();
     mocks.issuesMoveColumn.mockReset();
+    mocks.issuesAddLabel.mockReset();
+    mocks.issuesRemoveLabel.mockReset();
   });
 
   it('loadBoard 成功：columns + issues 归类（OR 语义）', async () => {
@@ -160,7 +167,10 @@ describe('board store · loadBoard 基础', () => {
     const emptyCol = makeCol('c-empty', 'Empty', []);
     mocks.boardColumnsList.mockResolvedValueOnce([todoCol, emptyCol]);
     mocks.labelsList.mockResolvedValueOnce({ items: [LABEL_TODO], hasMore: false });
-    mocks.issuesList.mockResolvedValueOnce({ items: [makeIssue(1, 'A', [LABEL_TODO])], hasMore: false });
+    mocks.issuesList.mockResolvedValueOnce({
+      items: [makeIssue(1, 'A', [LABEL_TODO])],
+      hasMore: false,
+    });
 
     const board = useBoardStore();
     await board.loadBoard(PROJECT_ID);
@@ -177,6 +187,8 @@ describe('board store · moveIssue', () => {
     mocks.labelsList.mockReset();
     mocks.issuesList.mockReset();
     mocks.issuesMoveColumn.mockReset();
+    mocks.issuesAddLabel.mockReset();
+    mocks.issuesRemoveLabel.mockReset();
   });
 
   // 共享 setup：建好 board + 2 列 + 1 个 issue 在 todoCol
@@ -326,7 +338,10 @@ describe('board store · moveIssue', () => {
     const todoCol = makeCol('c-todo', 'To Do', [LABEL_TODO, LABEL_BUG]);
     const doingCol = makeCol('c-doing', 'Doing', [LABEL_DOING]);
     mocks.boardColumnsList.mockResolvedValueOnce([todoCol, doingCol]);
-    mocks.labelsList.mockResolvedValueOnce({ items: [LABEL_TODO, LABEL_BUG, LABEL_DOING, LABEL_FEATURE], hasMore: false });
+    mocks.labelsList.mockResolvedValueOnce({
+      items: [LABEL_TODO, LABEL_BUG, LABEL_DOING, LABEL_FEATURE],
+      hasMore: false,
+    });
     const issueWithMultiLabels = makeIssue(1, 'A', [LABEL_TODO, LABEL_BUG, LABEL_FEATURE]);
     mocks.issuesList.mockResolvedValueOnce({ items: [issueWithMultiLabels], hasMore: false });
     setActivePinia(createPinia());
@@ -350,5 +365,70 @@ describe('board store · moveIssue', () => {
     expect(labelIds).toContain(LABEL_DOING.id);
     // 应保留 FEATURE（与列绑定无关）
     expect(labelIds).toContain(LABEL_FEATURE.id);
+  });
+});
+
+describe('board store · updateIssueLabels', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    mocks.boardColumnsList.mockReset();
+    mocks.labelsList.mockReset();
+    mocks.issuesList.mockReset();
+    mocks.issuesMoveColumn.mockReset();
+    mocks.issuesAddLabel.mockReset();
+    mocks.issuesRemoveLabel.mockReset();
+  });
+
+  async function setupBoardWithIssue(
+    labels: IssueLabelDto[],
+  ): Promise<ReturnType<typeof useBoardStore>> {
+    const todoCol = makeCol('c-todo', 'To Do', [LABEL_TODO]);
+    const doingCol = makeCol('c-doing', 'Doing', [LABEL_DOING]);
+    mocks.boardColumnsList.mockResolvedValueOnce([todoCol, doingCol]);
+    mocks.labelsList.mockResolvedValueOnce({
+      items: [LABEL_TODO, LABEL_DOING, LABEL_FEATURE],
+      hasMore: false,
+    });
+    mocks.issuesList.mockResolvedValueOnce({ items: [makeIssue(1, 'A', labels)], hasMore: false });
+    const board = useBoardStore();
+    await board.loadBoard(PROJECT_ID);
+    return board;
+  }
+
+  it('删除唯一列绑定标签后，内容区从原列移到未分类', async () => {
+    const board = await setupBoardWithIssue([LABEL_TODO, LABEL_FEATURE]);
+    mocks.issuesRemoveLabel.mockResolvedValueOnce(undefined);
+
+    await board.updateIssueLabels({
+      projectId: PROJECT_ID,
+      issueIndex: 1,
+      removeLabelIds: [LABEL_TODO.id],
+    });
+
+    expect(mocks.issuesRemoveLabel).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      issueIndex: 1,
+      labelId: LABEL_TODO.id,
+    });
+    expect(board.issuesOf('c-todo')).toHaveLength(0);
+    expect(board.unassignedIssues).toHaveLength(1);
+    expect(board.unassignedIssues[0]?.index).toBe(1);
+    expect(board.unassignedIssues[0]?.labels.map((l) => l.id)).toEqual([LABEL_FEATURE.id]);
+  });
+
+  it('删除当前列标签后若仍命中其他列，内容区移到新列', async () => {
+    const board = await setupBoardWithIssue([LABEL_TODO, LABEL_DOING]);
+    mocks.issuesRemoveLabel.mockResolvedValueOnce(undefined);
+
+    await board.updateIssueLabels({
+      projectId: PROJECT_ID,
+      issueIndex: 1,
+      removeLabelIds: [LABEL_TODO.id],
+    });
+
+    expect(board.issuesOf('c-todo')).toHaveLength(0);
+    expect(board.issuesOf('c-doing')).toHaveLength(1);
+    expect(board.issuesOf('c-doing')[0]?.index).toBe(1);
+    expect(board.unassignedIssues).toHaveLength(0);
   });
 });

@@ -84,7 +84,7 @@ export async function listGiteaIssues(args: {
   repo: string;
   state?: IssueState;
   labelIds?: string[]; // 列绑的 label id列表
-  assignee?: string;   // gitea username；不传 = 不过滤（向后兼容）
+  assignee?: string; // gitea username；不传 = 不过滤（向后兼容）
   q?: string;
   page?: number;
   limit?: number;

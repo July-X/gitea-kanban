@@ -64,15 +64,30 @@ describe('clusterLabels · L1 精确匹配', () => {
 
   it('9 个预设字面量全部匹配（去重后）', () => {
     const labels = [
-      mkLabel(1, '新建'), mkLabel(2, '进行中'), mkLabel(3, '待办'),
-      mkLabel(4, '已完成'), mkLabel(5, 'Backlog'), mkLabel(6, 'To Do'),
-      mkLabel(7, 'In Progress'), mkLabel(8, 'Done'), mkLabel(9, '待处理'),
+      mkLabel(1, '新建'),
+      mkLabel(2, '进行中'),
+      mkLabel(3, '待办'),
+      mkLabel(4, '已完成'),
+      mkLabel(5, 'Backlog'),
+      mkLabel(6, 'To Do'),
+      mkLabel(7, 'In Progress'),
+      mkLabel(8, 'Done'),
+      mkLabel(9, '待处理'),
       mkLabel(10, '处理中'),
     ];
     const plan = clusterLabels(labels);
     expect(plan.literal).toHaveLength(10);
     expect(plan.literal.map((c) => c.columnTitle)).toEqual([
-      '新建', '进行中', '待办', '已完成', 'Backlog', 'To Do', 'In Progress', 'Done', '待处理', '处理中',
+      '新建',
+      '进行中',
+      '待办',
+      '已完成',
+      'Backlog',
+      'To Do',
+      'In Progress',
+      'Done',
+      '待处理',
+      '处理中',
     ]);
   });
 
@@ -102,9 +117,7 @@ describe('clusterLabels · L2 prefix 聚类（仅单段 label）', () => {
     // 实际上：allShort 要求段数 ≤ 1 → 都是 2 → 拒绝
     expect(plan.prefixGroup).toEqual([]);
     // L3 复合 'm10' 桶 2 个 → 聚类
-    expect(plan.compound).toEqual([
-      { columnTitle: 'm10-*', labelIds: [1, 2] },
-    ]);
+    expect(plan.compound).toEqual([{ columnTitle: 'm10-*', labelIds: [1, 2] }]);
   });
 
   it('组内 1 个单段 label 不到 ≥ 2 → 不聚类', () => {
@@ -141,21 +154,16 @@ describe('clusterLabels · L3 复合 prefix（user 拍板核心场景）', () =>
   });
 
   it('bugfix-m10-1, bugfix-m10-2（3 段，桶段数一致）→ 复合聚类', () => {
-    const plan = clusterLabels([
-      mkLabel(1, 'bugfix-m10-1'),
-      mkLabel(2, 'bugfix-m10-2'),
-    ]);
+    const plan = clusterLabels([mkLabel(1, 'bugfix-m10-1'), mkLabel(2, 'bugfix-m10-2')]);
     // L2: prefix 'bugfix' 桶 = [bugfix-m10-1, bugfix-m10-2] 段数都是 3 → 全部多段
     // L3: 段数 3 → 复合 prefix = 'bugfix-m10' 桶 2 个 → 聚类
     expect(plan.prefixGroup).toEqual([]);
-    expect(plan.compound).toEqual([
-      { columnTitle: 'bugfix-m10-*', labelIds: [1, 2] },
-    ]);
+    expect(plan.compound).toEqual([{ columnTitle: 'bugfix-m10-*', labelIds: [1, 2] }]);
   });
 
   it('混合 bugfix（1 段）+ bugfix-m10-*（3 段）→ 混合桶拒绝，全 unmatched', () => {
     const plan = clusterLabels([
-      mkLabel(1, 'bugfix'),        // 1 段
+      mkLabel(1, 'bugfix'), // 1 段
       mkLabel(2, 'bugfix-m10-1'), // 3 段
       mkLabel(3, 'bugfix-m10-2'), // 3 段
     ]);
@@ -181,18 +189,13 @@ describe('clusterLabels · 分隔符兼容', () => {
     ];
     // 全部多段（2 段）→ L2 拒绝 → L3 复合
     const plan = clusterLabels(labels);
-    expect(plan.compound).toEqual([
-      { columnTitle: 'm10-*', labelIds: [1, 2, 3, 4] },
-    ]);
+    expect(plan.compound).toEqual([{ columnTitle: 'm10-*', labelIds: [1, 2, 3, 4] }]);
   });
 
   it('中文 label 不带分隔符 → 各自为 prefix，不聚类', () => {
     // '前端开发a' 和 '前端开发b' 各自无分隔符 → extractPrefix 整段 = '前端开发a' / '前端开发b'
     // 2 个不同 prefix → 各 1 个 label → 不到 ≥ 2 → unmatched
-    const plan = clusterLabels([
-      mkLabel(1, '前端开发a'),
-      mkLabel(2, '前端开发b'),
-    ]);
+    const plan = clusterLabels([mkLabel(1, '前端开发a'), mkLabel(2, '前端开发b')]);
     expect(plan.prefixGroup).toEqual([]);
     expect(plan.compound).toEqual([]);
     expect(plan.unmatched).toEqual([
@@ -205,17 +208,17 @@ describe('clusterLabels · 分隔符兼容', () => {
 describe('clusterSummary', () => {
   it('统计正确', () => {
     const labels = [
-      mkLabel(1, '待办'),       // literal
-      mkLabel(2, 'm10-1'),     // compound m10-*
+      mkLabel(1, '待办'), // literal
+      mkLabel(2, 'm10-1'), // compound m10-*
       mkLabel(3, 'm10-2'),
-      mkLabel(4, 'm11-11'),    // unmatched
-      mkLabel(5, 'unique'),    // unmatched
+      mkLabel(4, 'm11-11'), // unmatched
+      mkLabel(5, 'unique'), // unmatched
     ];
     const plan = clusterLabels(labels);
     const summary = clusterSummary(plan);
     expect(summary.totalCount).toBe(5);
-    expect(summary.columnCount).toBe(2);  // '待办' + 'm10-*'
-    expect(summary.unmatchedCount).toBe(2);  // 'm11-11' + 'unique'
+    expect(summary.columnCount).toBe(2); // '待办' + 'm10-*'
+    expect(summary.unmatchedCount).toBe(2); // 'm11-11' + 'unique'
     expect(summary.literalExamples).toContain('待办');
     expect(summary.compoundExamples).toContain('m10-*');
   });

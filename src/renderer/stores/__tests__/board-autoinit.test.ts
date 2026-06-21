@@ -29,7 +29,9 @@ vi.hoisted(() => {
     removeItem: (_k: string): void => {},
     clear: (): void => {},
     key: (_i: number): string | null => null,
-    get length(): number { return 0; },
+    get length(): number {
+      return 0;
+    },
   };
   (globalThis as unknown as { localStorage: typeof stub }).localStorage = stub;
 });
@@ -102,101 +104,112 @@ beforeEach(() => {
 
 describe('board store · loadBoard autoInit 透明化（plan_25cc4562 Task C）', () => {
   it('0 列 + gitea 有 label → autoInitCreatedCount > 0（自动建列 + 绑 label）', async () => {
-  // gitea label 列表有 3 个：'To Do' / 'In Progress' / 'Done'（3 个都命中 autoInit 的预设列名）
-  mocks.labelsList.mockResolvedValue({
-  items: [LABEL_TODO, LABEL_DOING, LABEL_DONE],
-  hasMore: false,
-  });
-  // 第 1 次 boardColumnsList 返 0 列（autoInit 触发前）；第 2 次返建好的 3 列
-  let listCallCount = 0;
-  mocks.boardColumnsList.mockImplementation(async () => {
-  listCallCount += 1;
-  if (listCallCount === 1) return []; // autoInit 触发前：0 列
-  // autoInit 触发后：3 个建好且绑了 label 的列
-  return [
-  makeCol('c-1', 'To Do', [LABEL_TODO]),
-  makeCol('c-2', 'In Progress', [LABEL_DOING]),
-  makeCol('c-3', 'Done', [LABEL_DONE]),
-  ];
-  });
-  // createColumn 返带 id 的 col（autoInit 内部用）
-  let createCallCount = 0;
-  mocks.boardColumnsCreate.mockImplementation(async (args: { title: string }) => {
-  createCallCount += 1;
-  return makeCol(`c-new-${createCallCount}`, args.title, []);
-  });
-  // mapLabel 返绑好 label 的 col
-  mocks.boardColumnsMapLabel.mockImplementation(async (args: { giteaLabelId: number }) => {
-  const label = [LABEL_TODO, LABEL_DOING, LABEL_DONE].find((l) => l.id === args.giteaLabelId)!;
-  return makeCol(`c-bound-${args.giteaLabelId}`, label.name, [label]);
+    // gitea label 列表有 3 个：'To Do' / 'In Progress' / 'Done'（3 个都命中 autoInit 的预设列名）
+    mocks.labelsList.mockResolvedValue({
+      items: [LABEL_TODO, LABEL_DOING, LABEL_DONE],
+      hasMore: false,
+    });
+    // 第 1 次 boardColumnsList 返 0 列（autoInit 触发前）；第 2 次返建好的 4 个基础列
+    let listCallCount = 0;
+    mocks.boardColumnsList.mockImplementation(async () => {
+      listCallCount += 1;
+      if (listCallCount === 1) return []; // autoInit 触发前：0 列
+      // autoInit 触发后：4 个基础列；英文 label 会绑定到对应中文列
+      return [
+        makeCol('c-1', '新建', []),
+        makeCol('c-2', '待办', [LABEL_TODO]),
+        makeCol('c-3', '进行中', [LABEL_DOING]),
+        makeCol('c-4', '已完成', [LABEL_DONE]),
+      ];
+    });
+    // createColumn 返带 id 的 col（autoInit 内部用）
+    let createCallCount = 0;
+    mocks.boardColumnsCreate.mockImplementation(async (args: { title: string }) => {
+      createCallCount += 1;
+      return makeCol(`c-new-${createCallCount}`, args.title, []);
+    });
+    // mapLabel 返绑好 label 的 col
+    mocks.boardColumnsMapLabel.mockImplementation(async (args: { giteaLabelId: number }) => {
+      const label = [LABEL_TODO, LABEL_DOING, LABEL_DONE].find((l) => l.id === args.giteaLabelId)!;
+      return makeCol(`c-bound-${args.giteaLabelId}`, label.name, [label]);
+    });
+
+    const board = useBoardStore();
+    const result = await board.loadBoard(PROJECT_ID);
+
+    expect(result.autoInitCreatedCount).toBe(4);
+    expect(result.columns.map((c) => c.title)).toEqual(['新建', '待办', '进行中', '已完成']);
+    expect(result.columns.length).toBe(result.autoInitCreatedCount);
+    expect(mocks.boardColumnsCreate).toHaveBeenCalledTimes(4);
+    expect(mocks.boardColumnsCreate.mock.calls.map(([args]) => args.title)).toEqual([
+      '新建',
+      '待办',
+      '进行中',
+      '已完成',
+    ]);
+    expect(mocks.boardColumnsMapLabel).toHaveBeenCalledTimes(3);
+    expect(mocks.boardColumnsMapLabel.mock.calls.map(([args]) => args.giteaLabelId)).toEqual([
+      LABEL_TODO.id,
+      LABEL_DOING.id,
+      LABEL_DONE.id,
+    ]);
+    // store.columns 也同步了
+    expect(board.columns.length).toBe(result.columns.length);
   });
 
-  const board = useBoardStore();
-  const result = await board.loadBoard(PROJECT_ID);
+  it('0 列 + gitea 无 label → 自动创建 4 个基础列（不绑标签）', async () => {
+    // 第 1 次：0 列；第 2 次：返回 4 个基础列
+    let listCallCount = 0;
+    const canonical = [
+      makeCol('c-new', '新建', []),
+      makeCol('c-todo', '待办', []),
+      makeCol('c-doing', '进行中', []),
+      makeCol('c-done', '已完成', []),
+    ];
+    mocks.boardColumnsList.mockImplementation(async () => {
+      listCallCount += 1;
+      return listCallCount === 1 ? [] : canonical;
+    });
+    // gitea 没 label
+    mocks.labelsList.mockResolvedValue({ items: [], hasMore: false });
+    mocks.boardColumnsCreate.mockImplementation(async (args: { title: string }) =>
+      makeCol(`c-${args.title}`, args.title, []),
+    );
 
-  // autoInit 帮建了 2 列（"To Do" 和 "In Progress" 命中预设名；"Done" 也命中但本测试 mock 只给 2 个）
-  // 实际 presetColumns 含 Done → 3 个全中。修正 mock：上面我们让 listCallCount === 2 返 2 个，
-  // 业务上 autoInit 实际会建 3 个 + 重拉 3 个。检查数量大于 0 即满足 spec。
-  expect(result.autoInitCreatedCount).toBeGreaterThan(0);
-  expect(result.columns.length).toBeGreaterThan(0);
-  expect(result.columns.length).toBe(result.autoInitCreatedCount);
-  // createColumn 至少调了 1 次
-  expect(mocks.boardColumnsCreate).toHaveBeenCalled();
-  // mapLabel 至少调了 1 次
-  expect(mocks.boardColumnsMapLabel).toHaveBeenCalled();
-  // store.columns 也同步了
-  expect(board.columns.length).toBe(result.columns.length);
-  });
+    const board = useBoardStore();
+    const result = await board.loadBoard(PROJECT_ID);
 
-  it('0 列 + gitea 无 label → autoInitCreatedCount = 0（**不**触发 autoInit）', async () => {
-  // 第 1 次：0 列；第 2 次：仍 0 列（autoInit 不建列）
-  let listCallCount = 0;
-  mocks.boardColumnsList.mockImplementation(async () => {
-  listCallCount += 1;
-  return [];
-  });
-  // gitea 没 label
-  mocks.labelsList.mockResolvedValue({ items: [], hasMore: false });
-
-  const board = useBoardStore();
-  const result = await board.loadBoard(PROJECT_ID);
-
-  // autoInit 跳过 → 计数 = 0
-  expect(result.autoInitCreatedCount).toBe(0);
-  expect(result.columns).toEqual([]);
-  // createColumn / mapLabel 一次都没调
-  expect(mocks.boardColumnsCreate).not.toHaveBeenCalled();
-  expect(mocks.boardColumnsMapLabel).not.toHaveBeenCalled();
-  // store.columns 也是空
-  expect(board.columns).toEqual([]);
-  // 即使调了 boardColumnsList 一次或两次（autoInit 条件 `0 列 + gitea 无 label` 跳过 re-list），
-  // 都正常；不强制断言 listCallCount 具体值
+    expect(result.autoInitCreatedCount).toBe(4);
+    expect(result.columns.map((c) => c.title)).toEqual(['新建', '待办', '进行中', '已完成']);
+    expect(mocks.boardColumnsCreate).toHaveBeenCalledTimes(4);
+    expect(mocks.boardColumnsMapLabel).not.toHaveBeenCalled();
+    expect(board.columns.map((c) => c.title)).toEqual(['新建', '待办', '进行中', '已完成']);
   });
 
   it('N 列（已建过）→ autoInitCreatedCount = 0（不干预）', async () => {
-  // 直接返 3 个已有列（带 label）
-  const existing = [
-  makeCol('c-1', '待办', [LABEL_TODO]),
-  makeCol('c-2', '进行中', [LABEL_DOING]),
-  makeCol('c-3', '已完成', [LABEL_DONE]),
-  ];
-  mocks.boardColumnsList.mockResolvedValue(existing);
-  mocks.labelsList.mockResolvedValue({
-  items: [LABEL_TODO, LABEL_DOING, LABEL_DONE],
-  hasMore: false,
-  });
+    // 直接返 3 个已有列（带 label）
+    const existing = [
+      makeCol('c-1', '待办', [LABEL_TODO]),
+      makeCol('c-2', '进行中', [LABEL_DOING]),
+      makeCol('c-3', '已完成', [LABEL_DONE]),
+    ];
+    mocks.boardColumnsList.mockResolvedValue(existing);
+    mocks.labelsList.mockResolvedValue({
+      items: [LABEL_TODO, LABEL_DOING, LABEL_DONE],
+      hasMore: false,
+    });
 
-  const board = useBoardStore();
-  const result = await board.loadBoard(PROJECT_ID);
+    const board = useBoardStore();
+    const result = await board.loadBoard(PROJECT_ID);
 
-  // 已有列 → autoInit 不触发
-  expect(result.autoInitCreatedCount).toBe(0);
-  expect(result.columns).toEqual(existing);
-  expect(board.columns).toEqual(existing);
-  // createColumn / mapLabel 都没调
-  expect(mocks.boardColumnsCreate).not.toHaveBeenCalled();
-  expect(mocks.boardColumnsMapLabel).not.toHaveBeenCalled();
-  // boardColumnsList 只调 1 次（autoInit 不触发 → 不重拉）
-  expect(mocks.boardColumnsList).toHaveBeenCalledTimes(1);
+    // 已有列 → autoInit 不触发
+    expect(result.autoInitCreatedCount).toBe(0);
+    expect(result.columns).toEqual(existing);
+    expect(board.columns).toEqual(existing);
+    // createColumn / mapLabel 都没调
+    expect(mocks.boardColumnsCreate).not.toHaveBeenCalled();
+    expect(mocks.boardColumnsMapLabel).not.toHaveBeenCalled();
+    // boardColumnsList 只调 1 次（autoInit 不触发 → 不重拉）
+    expect(mocks.boardColumnsList).toHaveBeenCalledTimes(1);
   });
 });

@@ -94,9 +94,7 @@ export function addProject(args: {
   const store = getLocalStore();
   const stateNow = store.get();
   if (!findAccountByIdWithStore(stateNow, args.giteaAccountId)) {
-    throw new Error(
-      `gitea_accounts row not found: ${args.giteaAccountId}（先调 auth.connect）`,
-    );
+    throw new Error(`gitea_accounts row not found: ${args.giteaAccountId}（先调 auth.connect）`);
   }
 
   // 2. 幂等：localStore 已存在
@@ -153,7 +151,6 @@ export function removeProject(projectId: string): void {
 
   // 2. 失效 repos 缓存
   invalidateReposCache(existingLocal.giteaAccountId);
-
 }
 
 /**
@@ -171,9 +168,7 @@ export function touchLastSync(args: {
   store.mutate((s) => {
     const idx = s.projects.findIndex(
       (p) =>
-        p.giteaAccountId === args.giteaAccountId &&
-        p.owner === args.owner &&
-        p.name === args.name,
+        p.giteaAccountId === args.giteaAccountId && p.owner === args.owner && p.name === args.name,
     );
     if (idx >= 0) {
       s.projects[idx] = { ...s.projects[idx]!, lastSyncAt: whenMs };
@@ -209,9 +204,7 @@ export function backfillDefaultBranch(args: {
   store.mutate((s) => {
     const idx = s.projects.findIndex(
       (p) =>
-        p.giteaAccountId === args.giteaAccountId &&
-        p.owner === args.owner &&
-        p.name === args.name,
+        p.giteaAccountId === args.giteaAccountId && p.owner === args.owner && p.name === args.name,
     );
     if (idx < 0) return;
     if (s.projects[idx]!.defaultBranch !== null) return; // 已有 → noop
@@ -229,13 +222,22 @@ export function backfillDefaultBranch(args: {
  * @returns payload 字符串（JSON）；null = 缓存未命中或已过期
  */
 export function getReposCache(args: { giteaAccountId: string; cacheKey: string }): string | null {
-  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.giteaAccountId, key: args.cacheKey });
+  return getCache<string>({
+    resource: CACHE_RESOURCE,
+    projectId: args.giteaAccountId,
+    key: args.cacheKey,
+  });
 }
 
 /**
  * 写 repos 缓存
  */
-export function setReposCache(args: { giteaAccountId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+export function setReposCache(args: {
+  giteaAccountId: string;
+  cacheKey: string;
+  payload: string;
+  ttlSeconds?: number;
+}): void {
   setCache({
     resource: CACHE_RESOURCE,
     projectId: args.giteaAccountId,
@@ -270,15 +272,17 @@ export function invalidateReposCache(giteaAccountId?: string): void {
  *
  * null 入参 → null（用于 findProject 之类的"找不到"路径）
  */
-function projectRowToDto(row: {
-  id: string;
-  giteaAccountId: string;
-  owner: string;
-  name: string;
-  defaultBranch: string | null;
-  lastSyncAt: Date | number | null;
-  createdAt: Date | number;
-} | null): RepoProjectDto | null {
+function projectRowToDto(
+  row: {
+    id: string;
+    giteaAccountId: string;
+    owner: string;
+    name: string;
+    defaultBranch: string | null;
+    lastSyncAt: Date | number | null;
+    createdAt: Date | number;
+  } | null,
+): RepoProjectDto | null {
   if (!row) return null;
   return {
     id: row.id,

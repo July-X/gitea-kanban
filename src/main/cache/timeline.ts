@@ -42,11 +42,20 @@ export function makeTimelineCacheKey(args: TimelineArgs): string {
 
 /** 读 timeline 缓存 */
 export function getTimelineCache(args: { projectId: string; cacheKey: string }): string | null {
-  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.projectId, key: args.cacheKey });
+  return getCache<string>({
+    resource: CACHE_RESOURCE,
+    projectId: args.projectId,
+    key: args.cacheKey,
+  });
 }
 
 /** 写 timeline 缓存 */
-export function setTimelineCache(args: { projectId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+export function setTimelineCache(args: {
+  projectId: string;
+  cacheKey: string;
+  payload: string;
+  ttlSeconds?: number;
+}): void {
   setCache({
     resource: CACHE_RESOURCE,
     projectId: args.projectId,

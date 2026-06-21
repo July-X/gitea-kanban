@@ -118,19 +118,28 @@ async function listBoardColumnsHandler(args: ListBoardColumnsArgs): Promise<Colu
   // listColumns 调 gitea 拉 label name/color；gitea 不可达时 fallback 到 localStore
   try {
     const result = await listColumns(args.projectId);
-    logger.info({ op: 'board.columns.list', latencyMs: Date.now() - start, count: result.length }, 'ipc done');
+    logger.info(
+      { op: 'board.columns.list', latencyMs: Date.now() - start, count: result.length },
+      'ipc done',
+    );
     return result;
   } catch (err) {
     // 网络错误时 fallback 到 localStore 列（label 信息来自本地缓存，可能稍旧）
     if (err instanceof IpcError && err.code === IpcErrorCode.NETWORK_OFFLINE) {
-      logger.warn({ op: 'board.columns.list', latencyMs: Date.now() - start }, 'gitea unreachable, falling back to localStore');
+      logger.warn(
+        { op: 'board.columns.list', latencyMs: Date.now() - start },
+        'gitea unreachable, falling back to localStore',
+      );
       const state = getLocalStore().get();
       const cols = listColumnsByProjectWithStore(state, args.projectId);
       const result: ColumnDto[] = cols.map((c) => {
-        const boundLabelIds = listLabelMapsByColumnWithStore(state, c.id).map((m: { giteaLabelId: string }) => Number(m.giteaLabelId));
+        const boundLabelIds = listLabelMapsByColumnWithStore(state, c.id).map(
+          (m: { giteaLabelId: string }) => Number(m.giteaLabelId),
+        );
         const labels = boundLabelIds.map((id: number) => {
           const lm = state.labelMaps.find(
-            (m: { columnId: string; giteaLabelId: string }) => m.columnId === c.id && Number(m.giteaLabelId) === id,
+            (m: { columnId: string; giteaLabelId: string }) =>
+              m.columnId === c.id && Number(m.giteaLabelId) === id,
           );
           return lm
             ? { id, name: lm.giteaLabelName, color: '' }
@@ -147,7 +156,15 @@ async function listBoardColumnsHandler(args: ListBoardColumnsArgs): Promise<Colu
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (result as unknown as Record<string, unknown>)['__offline'] = true;
-      logger.info({ op: 'board.columns.list', latencyMs: Date.now() - start, count: result.length, __offline: true }, 'ipc done (offline)');
+      logger.info(
+        {
+          op: 'board.columns.list',
+          latencyMs: Date.now() - start,
+          count: result.length,
+          __offline: true,
+        },
+        'ipc done (offline)',
+      );
       return result;
     }
     throw err;
@@ -156,7 +173,10 @@ async function listBoardColumnsHandler(args: ListBoardColumnsArgs): Promise<Colu
 
 async function createBoardColumnHandler(args: CreateBoardColumnArgs): Promise<ColumnDto> {
   const start = Date.now();
-  logger.info({ op: 'board.columns.create', args: { projectId: args.projectId, title: args.title } }, 'ipc start');
+  logger.info(
+    { op: 'board.columns.create', args: { projectId: args.projectId, title: args.title } },
+    'ipc start',
+  );
   if (!projectExists(args.projectId)) {
     throw new IpcError({
       code: IpcErrorCode.NOT_FOUND,
@@ -165,7 +185,10 @@ async function createBoardColumnHandler(args: CreateBoardColumnArgs): Promise<Co
   }
   // ADR-0003 Phase 3：走 dispatch（纯本地 op，缺省 offlineApply = execute）
   const { result } = await dispatch<CreateBoardColumnArgs, ColumnDto>('board.columns.create', args);
-  logger.info({ op: 'board.columns.create', latencyMs: Date.now() - start, columnId: result.id }, 'ipc done');
+  logger.info(
+    { op: 'board.columns.create', latencyMs: Date.now() - start, columnId: result.id },
+    'ipc done',
+  );
   return result;
 }
 
@@ -173,13 +196,22 @@ async function updateBoardColumnHandler(args: UpdateBoardColumnArgs): Promise<Co
   const start = Date.now();
   logger.info({ op: 'board.columns.update', args: { columnId: args.columnId } }, 'ipc start');
   const { result } = await dispatch<UpdateBoardColumnArgs, ColumnDto>('board.columns.update', args);
-  logger.info({ op: 'board.columns.update', latencyMs: Date.now() - start, columnId: result.id }, 'ipc done');
+  logger.info(
+    { op: 'board.columns.update', latencyMs: Date.now() - start, columnId: result.id },
+    'ipc done',
+  );
   return result;
 }
 
 async function reorderBoardColumnsHandler(args: ReorderBoardColumnsArgs): Promise<void> {
   const start = Date.now();
-  logger.info({ op: 'board.columns.reorder', args: { projectId: args.projectId, count: args.orderedIds.length } }, 'ipc start');
+  logger.info(
+    {
+      op: 'board.columns.reorder',
+      args: { projectId: args.projectId, count: args.orderedIds.length },
+    },
+    'ipc start',
+  );
   if (!projectExists(args.projectId)) {
     throw new IpcError({
       code: IpcErrorCode.NOT_FOUND,
@@ -199,17 +231,38 @@ async function deleteBoardColumnHandler(args: DeleteBoardColumnArgs): Promise<vo
 
 async function mapColumnLabelHandler(args: MapColumnLabelArgs): Promise<ColumnDto> {
   const start = Date.now();
-  logger.info({ op: 'board.columns.mapLabel', args: { columnId: args.columnId, giteaLabelId: args.giteaLabelId } }, 'ipc start');
+  logger.info(
+    {
+      op: 'board.columns.mapLabel',
+      args: { columnId: args.columnId, giteaLabelId: args.giteaLabelId },
+    },
+    'ipc start',
+  );
   const { result } = await dispatch<MapColumnLabelArgs, ColumnDto>('board.columns.mapLabel', args);
-  logger.info({ op: 'board.columns.mapLabel', latencyMs: Date.now() - start, columnId: result.id }, 'ipc done');
+  logger.info(
+    { op: 'board.columns.mapLabel', latencyMs: Date.now() - start, columnId: result.id },
+    'ipc done',
+  );
   return result;
 }
 
 async function unmapColumnLabelHandler(args: UnmapColumnLabelArgs): Promise<ColumnDto> {
   const start = Date.now();
-  logger.info({ op: 'board.columns.unmapLabel', args: { columnId: args.columnId, giteaLabelId: args.giteaLabelId } }, 'ipc start');
-  const { result } = await dispatch<UnmapColumnLabelArgs, ColumnDto>('board.columns.unmapLabel', args);
-  logger.info({ op: 'board.columns.unmapLabel', latencyMs: Date.now() - start, columnId: result.id }, 'ipc done');
+  logger.info(
+    {
+      op: 'board.columns.unmapLabel',
+      args: { columnId: args.columnId, giteaLabelId: args.giteaLabelId },
+    },
+    'ipc start',
+  );
+  const { result } = await dispatch<UnmapColumnLabelArgs, ColumnDto>(
+    'board.columns.unmapLabel',
+    args,
+  );
+  logger.info(
+    { op: 'board.columns.unmapLabel', latencyMs: Date.now() - start, columnId: result.id },
+    'ipc done',
+  );
   return result;
 }
 
@@ -239,7 +292,11 @@ async function _resetBoardColumns(args: ResetBoardColumnsArgs): Promise<ResetBoa
   const resetCount = beforeCols.length;
   // 2. 删所有列（labelMaps 在 _deleteColumn 内部已处理）
   for (const col of beforeCols) {
-    try { await _deleteColumn({ columnId: col.id }); } catch { /* 单列失败不阻断 */ }
+    try {
+      await _deleteColumn({ columnId: col.id });
+    } catch {
+      /* 单列失败不阻断 */
+    }
   }
   // 3. 不在 main 端跑 autoInit —— renderer store.loadBoard() 内部会触发 cluster + autoInit
   return { resetCount };
@@ -273,10 +330,18 @@ export function registerBoardIpc(): void {
   // 7 个写 op 走 dispatch
   wrapIpc(IpcChannel.BOARD_COLUMNS_CREATE, CreateBoardColumnArgsSchema, createBoardColumnHandler);
   wrapIpc(IpcChannel.BOARD_COLUMNS_UPDATE, UpdateBoardColumnArgsSchema, updateBoardColumnHandler);
-  wrapIpc(IpcChannel.BOARD_COLUMNS_REORDER, ReorderBoardColumnsArgsSchema, reorderBoardColumnsHandler);
+  wrapIpc(
+    IpcChannel.BOARD_COLUMNS_REORDER,
+    ReorderBoardColumnsArgsSchema,
+    reorderBoardColumnsHandler,
+  );
   wrapIpc(IpcChannel.BOARD_COLUMNS_DELETE, DeleteBoardColumnArgsSchema, deleteBoardColumnHandler);
   wrapIpc(IpcChannel.BOARD_COLUMNS_MAP_LABEL, MapColumnLabelArgsSchema, mapColumnLabelHandler);
-  wrapIpc(IpcChannel.BOARD_COLUMNS_UNMAP_LABEL, UnmapColumnLabelArgsSchema, unmapColumnLabelHandler);
+  wrapIpc(
+    IpcChannel.BOARD_COLUMNS_UNMAP_LABEL,
+    UnmapColumnLabelArgsSchema,
+    unmapColumnLabelHandler,
+  );
   wrapIpc(IpcChannel.BOARD_COLUMNS_RESET, ResetBoardColumnsArgsSchema, _resetBoardColumns);
 }
 

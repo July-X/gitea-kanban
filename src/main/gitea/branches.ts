@@ -108,7 +108,9 @@ export async function renameGiteaBranch(args: {
 }): Promise<BranchDto> {
   const { api } = await getGiteaClient(args.giteaUrl, args.username);
 
-  const res = await api.repos.repoUpdateBranch(args.owner, args.repo, args.oldName, { name: args.newName });
+  const res = await api.repos.repoUpdateBranch(args.owner, args.repo, args.oldName, {
+    name: args.newName,
+  });
   const raw = unwrapGitea(res, `重命名分支 ${args.oldName}失败`);
 
   return branchToDto(raw);

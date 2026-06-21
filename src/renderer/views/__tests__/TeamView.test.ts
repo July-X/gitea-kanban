@@ -67,7 +67,7 @@ describe('ADR-0004 · /team 路由占位落地（4 项静态断言）', () => {
   });
 
   describe('检查 3：路由表层（routes/index.ts）', () => {
-    it("存在 /team 路由", () => {
+    it('存在 /team 路由', () => {
       const content = readFileSync(routesPath, 'utf-8');
       expect(content).toMatch(/path:\s*['"]\/team['"]/);
     });
@@ -82,7 +82,7 @@ describe('ADR-0004 · /team 路由占位落地（4 项静态断言）', () => {
       expect(content).toMatch(/placeholder:\s*['"]v2['"]/);
     });
 
-    it("路由 requiresAuth: true（跟其他业务路由一致）", () => {
+    it('路由 requiresAuth: true（跟其他业务路由一致）', () => {
       const content = readFileSync(routesPath, 'utf-8');
       // 抓 /team 段后 200 字符内必有 requiresAuth
       const teamBlock = content.match(/path:\s*['"]\/team['"][\s\S]{0,400}/);

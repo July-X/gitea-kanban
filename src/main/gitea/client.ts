@@ -52,119 +52,121 @@ async function readToken(giteaUrl: string, username: string): Promise<string | n
         const j = JSON.parse(readFileSync(p, 'utf8')) as { token?: string };
         return j.token ?? null;
       }
-    } catch { void 0; }
+    } catch {
+      void 0;
+    }
   }
   return await keychainGet(giteaUrl, username);
 }
 
 interface ClientEntry {
- api: Api<unknown>;
- baseUrl: string;
- token?: string;
- tokenFetchedAt: number;
+  api: Api<unknown>;
+  baseUrl: string;
+  token?: string;
+  tokenFetchedAt: number;
 }
 
 const cache = new Map<string, ClientEntry>();
-const TOKEN_CACHE_TTL_MS =5 *60 *1000; //5 min
+const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; //5 min
 
 function cacheKey(giteaUrl: string, username: string): string {
- return `${giteaUrl}::${username}`;
+  return `${giteaUrl}::${username}`;
 }
 
 /**
  * 把 HTTP错误映射成 IpcError
  */
 export function httpErrorToIpcError(
- status: number,
- body: unknown,
- fallbackMessage: string,
+  status: number,
+  body: unknown,
+  fallbackMessage: string,
 ): IpcError {
- const cause = typeof body === 'string' ? body : JSON.stringify(body ?? {});
- switch (status) {
- case 401:
- return new IpcError({
- code: IpcErrorCode.TOKEN_INVALID,
- message: '登录已过期或 token 无效',
- hint: '请到 gitea重新生成 token 后重新连接',
- cause,
- httpStatus: 401,
- });
- case 403:
- return new IpcError({
- code: IpcErrorCode.PERMISSION_DENIED,
- message: '没有该操作权限',
- hint: '请联系仓库管理员',
- cause,
- httpStatus: 403,
- });
- case 404:
- return new IpcError({
- code: IpcErrorCode.NOT_FOUND,
- message: '找不到该资源（可能已被删除）',
- hint: '请刷新列表',
- cause,
- httpStatus: 404,
- });
- case 405:
- // gitea "Method Not Allowed" 常表示资源状态不允许该操作
- // （如对已合并/已关闭的合并请求再调 merge）→ 走 CONFLICT
- // 参考 src/main/gitea/pulls.ts:19-22, 168-171, 220 文档说明
- return new IpcError({
- code: IpcErrorCode.CONFLICT,
- message: '操作冲突：资源状态不允许该操作（如合并请求已合并或已关闭）',
- hint: '请刷新后查看最新状态',
- cause,
- httpStatus: 405,
- });
- case 409:
- return new IpcError({
- code: IpcErrorCode.CONFLICT,
- message: '操作冲突：资源已存在或状态不允许',
- cause,
- httpStatus: 409,
- });
- case 422:
- return new IpcError({
- code: IpcErrorCode.VALIDATION_FAILED,
- message: '请求参数不被服务端接受',
- hint: '请检查输入内容',
- cause,
- httpStatus: 422,
- });
- case 429:
- return new IpcError({
- code: IpcErrorCode.RATE_LIMITED,
- message: '请求过于频繁',
- hint: '请稍后重试',
- cause,
- httpStatus: 429,
- });
- case 0:
- case 502:
- case 503:
- case 504:
- return new IpcError({
- code: IpcErrorCode.NETWORK_OFFLINE,
- message: '当前离线或远端不可达',
- hint: '请检查网络后重试',
- cause,
- httpStatus: status,
- });
- default:
- return new IpcError({
- code: IpcErrorCode.GITEA_ERROR,
- message: fallbackMessage,
- cause,
- httpStatus: status,
- });
- }
+  const cause = typeof body === 'string' ? body : JSON.stringify(body ?? {});
+  switch (status) {
+    case 401:
+      return new IpcError({
+        code: IpcErrorCode.TOKEN_INVALID,
+        message: '登录已过期或 token 无效',
+        hint: '请到 gitea重新生成 token 后重新连接',
+        cause,
+        httpStatus: 401,
+      });
+    case 403:
+      return new IpcError({
+        code: IpcErrorCode.PERMISSION_DENIED,
+        message: '没有该操作权限',
+        hint: '请联系仓库管理员',
+        cause,
+        httpStatus: 403,
+      });
+    case 404:
+      return new IpcError({
+        code: IpcErrorCode.NOT_FOUND,
+        message: '找不到该资源（可能已被删除）',
+        hint: '请刷新列表',
+        cause,
+        httpStatus: 404,
+      });
+    case 405:
+      // gitea "Method Not Allowed" 常表示资源状态不允许该操作
+      // （如对已合并/已关闭的合并请求再调 merge）→ 走 CONFLICT
+      // 参考 src/main/gitea/pulls.ts:19-22, 168-171, 220 文档说明
+      return new IpcError({
+        code: IpcErrorCode.CONFLICT,
+        message: '操作冲突：资源状态不允许该操作（如合并请求已合并或已关闭）',
+        hint: '请刷新后查看最新状态',
+        cause,
+        httpStatus: 405,
+      });
+    case 409:
+      return new IpcError({
+        code: IpcErrorCode.CONFLICT,
+        message: '操作冲突：资源已存在或状态不允许',
+        cause,
+        httpStatus: 409,
+      });
+    case 422:
+      return new IpcError({
+        code: IpcErrorCode.VALIDATION_FAILED,
+        message: '请求参数不被服务端接受',
+        hint: '请检查输入内容',
+        cause,
+        httpStatus: 422,
+      });
+    case 429:
+      return new IpcError({
+        code: IpcErrorCode.RATE_LIMITED,
+        message: '请求过于频繁',
+        hint: '请稍后重试',
+        cause,
+        httpStatus: 429,
+      });
+    case 0:
+    case 502:
+    case 503:
+    case 504:
+      return new IpcError({
+        code: IpcErrorCode.NETWORK_OFFLINE,
+        message: '当前离线或远端不可达',
+        hint: '请检查网络后重试',
+        cause,
+        httpStatus: status,
+      });
+    default:
+      return new IpcError({
+        code: IpcErrorCode.GITEA_ERROR,
+        message: fallbackMessage,
+        cause,
+        httpStatus: status,
+      });
+  }
 }
 
 /**
  *内部：根据 giteaUrl截掉尾斜杠（gitea URL容忍：/api/v1 都 ok）
  */
 function normalizeBaseUrl(giteaUrl: string): string {
- return giteaUrl.replace(/\/+$/, '');
+  return giteaUrl.replace(/\/+$/, '');
 }
 
 /**
@@ -175,13 +177,13 @@ function normalizeBaseUrl(giteaUrl: string): string {
  */
 function makeGiteaSecurityWorker() {
   return async (securityData: unknown) => {
-  if (!securityData) return;
-  return {
-  secure: true,
-  headers: {
-  Authorization: `token ${String(securityData)}`,
-  },
-  };
+    if (!securityData) return;
+    return {
+      secure: true,
+      headers: {
+        Authorization: `token ${String(securityData)}`,
+      },
+    };
   };
 }
 
@@ -196,51 +198,51 @@ function makeGiteaSecurityWorker() {
  *抛 KEYCHAIN_UNAVAILABLE / KEYCHAIN_ACCESS_DENIED透传
  */
 export async function getGiteaClient(
- giteaUrl: string,
- username: string,
+  giteaUrl: string,
+  username: string,
 ): Promise<{ api: Api<unknown>; baseUrl: string; token?: string }> {
- const key = cacheKey(giteaUrl, username);
- const now = Date.now();
- let entry = cache.get(key);
+  const key = cacheKey(giteaUrl, username);
+  const now = Date.now();
+  let entry = cache.get(key);
 
- // token是否需要刷新
- const needRefresh = !entry || !entry.token || now - entry.tokenFetchedAt > TOKEN_CACHE_TTL_MS;
- if (needRefresh) {
- const token = await readToken(giteaUrl, username);
- if (!token) {
- throw new IpcError({
- code: IpcErrorCode.UNAUTHENTICATED,
- message: '请先在 设置 →账户 连接 gitea',
- hint: '跳转到连接页',
- });
- }
-  if (!entry) {
-  //首次创建 entry：直接 new Api() 绕开 giteaApi factory 的内置 securityWorker
-  //（factory 写死 Bearer ${options.token}，覆盖我们传的 worker；gitea 习惯 token ${pat} 走不通）
-  //自己 new + 自定义 securityWorker + setSecurityData() 路径完整保留
-  entry = {
-  api: new Api({
-  baseUrl: `${normalizeBaseUrl(giteaUrl)}/api/v1`,
-  baseApiParams: { format: 'json' },
-  securityWorker: makeGiteaSecurityWorker(),
-  }),
-  baseUrl: normalizeBaseUrl(giteaUrl),
-  tokenFetchedAt:0,
-  };
-  cache.set(key, entry);
+  // token是否需要刷新
+  const needRefresh = !entry || !entry.token || now - entry.tokenFetchedAt > TOKEN_CACHE_TTL_MS;
+  if (needRefresh) {
+    const token = await readToken(giteaUrl, username);
+    if (!token) {
+      throw new IpcError({
+        code: IpcErrorCode.UNAUTHENTICATED,
+        message: '请先在 设置 →账户 连接 gitea',
+        hint: '跳转到连接页',
+      });
+    }
+    if (!entry) {
+      //首次创建 entry：直接 new Api() 绕开 giteaApi factory 的内置 securityWorker
+      //（factory 写死 Bearer ${options.token}，覆盖我们传的 worker；gitea 习惯 token ${pat} 走不通）
+      //自己 new + 自定义 securityWorker + setSecurityData() 路径完整保留
+      entry = {
+        api: new Api({
+          baseUrl: `${normalizeBaseUrl(giteaUrl)}/api/v1`,
+          baseApiParams: { format: 'json' },
+          securityWorker: makeGiteaSecurityWorker(),
+        }),
+        baseUrl: normalizeBaseUrl(giteaUrl),
+        tokenFetchedAt: 0,
+      };
+      cache.set(key, entry);
+    }
+    entry.token = token;
+    entry.tokenFetchedAt = now;
+    entry.api.setSecurityData(token);
   }
- entry.token = token;
- entry.tokenFetchedAt = now;
- entry.api.setSecurityData(token);
- }
- if (!entry) {
- // should not happen: just initialized above; defensive
- throw new IpcError({
- code: IpcErrorCode.GITEA_ERROR,
- message: 'getGiteaClient cache state corruption',
- });
- }
- return { api: entry.api, baseUrl: entry.baseUrl, token: entry.token };
+  if (!entry) {
+    // should not happen: just initialized above; defensive
+    throw new IpcError({
+      code: IpcErrorCode.GITEA_ERROR,
+      message: 'getGiteaClient cache state corruption',
+    });
+  }
+  return { api: entry.api, baseUrl: entry.baseUrl, token: entry.token };
 }
 
 /**
@@ -256,59 +258,70 @@ export async function getGiteaClient(
  * 注：新业务代码用 getGiteaClient() + gitea-js Api方法，不要再用 giteaFetch。
  */
 export async function giteaFetch<T = unknown>(
- giteaUrl: string,
- username: string,
- path: string,
- init: { method?: string; body?: unknown; query?: Record<string, string | number | boolean | undefined>; headers?: Record<string, string> } = {},
+  giteaUrl: string,
+  username: string,
+  path: string,
+  init: {
+    method?: string;
+    body?: unknown;
+    query?: Record<string, string | number | boolean | undefined>;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<T> {
- const client = await getGiteaClient(giteaUrl, username);
- const normalizedPath = path.startsWith('/') ? path : `/${path}`;
- const query = init.query
- ? Object.fromEntries(
- Object.entries(init.query).filter(([, v]) => v !== undefined) as Array<[string, string | number | boolean]>,
- )
- : undefined;
+  const client = await getGiteaClient(giteaUrl, username);
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const query = init.query
+    ? Object.fromEntries(
+        Object.entries(init.query).filter(([, v]) => v !== undefined) as Array<
+          [string, string | number | boolean]
+        >,
+      )
+    : undefined;
 
- //拼 URL：baseUrl + /api/v1 + path + (optional) query
- const baseWithApi = `${client.baseUrl.replace(/\/+$/, '')}/api/v1/`;
- const relPath = normalizedPath.replace(/^\/+/, '');
- const u = new URL(relPath, baseWithApi);
- if (query) {
- for (const [k, v] of Object.entries(query)) {
- u.searchParams.set(k, String(v));
- }
- }
+  //拼 URL：baseUrl + /api/v1 + path + (optional) query
+  const baseWithApi = `${client.baseUrl.replace(/\/+$/, '')}/api/v1/`;
+  const relPath = normalizedPath.replace(/^\/+/, '');
+  const u = new URL(relPath, baseWithApi);
+  if (query) {
+    for (const [k, v] of Object.entries(query)) {
+      u.searchParams.set(k, String(v));
+    }
+  }
 
- const res = await globalThis.fetch(u.toString(), {
- method: init.method ?? 'GET',
- ...(init.body !== undefined
- ? { body: typeof init.body === 'string' ? init.body : JSON.stringify(init.body) }
- : {}),
- headers: {
- Accept: 'application/json',
- Authorization: `token ${client.token ?? ''}`,
- ...(init.headers ?? {}),
- },
- });
+  const res = await globalThis.fetch(u.toString(), {
+    method: init.method ?? 'GET',
+    ...(init.body !== undefined
+      ? { body: typeof init.body === 'string' ? init.body : JSON.stringify(init.body) }
+      : {}),
+    headers: {
+      Accept: 'application/json',
+      Authorization: `token ${client.token ?? ''}`,
+      ...(init.headers ?? {}),
+    },
+  });
 
- if (!res.ok) {
- let body: unknown = null;
- try { body = await res.json(); } catch { body = await res.text().catch(() => null); }
- throw httpErrorToIpcError(res.status, body, `gitea ${normalizedPath}失败`);
- }
+  if (!res.ok) {
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text().catch(() => null);
+    }
+    throw httpErrorToIpcError(res.status, body, `gitea ${normalizedPath}失败`);
+  }
 
- if (res.status ===204) return null as T;
- return (await res.json()) as T;
+  if (res.status === 204) return null as T;
+  return (await res.json()) as T;
 }
 
 /** 清空 client缓存（disconnect / token失效后） */
 export function clearGiteaClientCache(): void {
- cache.clear();
+  cache.clear();
 }
 
 /** 清掉某个 (giteaUrl, username) 的缓存 */
 export function invalidateGiteaClient(giteaUrl: string, username: string): void {
- cache.delete(cacheKey(giteaUrl, username));
+  cache.delete(cacheKey(giteaUrl, username));
 }
 
 /**
@@ -326,26 +339,29 @@ export function unwrapGitea<TData, TError = unknown>(
   fallbackMessage: string,
 ): TData {
   if (!res.ok) {
-  // gitea 错误响应是 JSON {message, url?}，TError 默认 unknown 时 res.data?.message 是 string
-  // 兜底链：res.data.message -> res.data.error -> res.statusText -> "HTTP <status>"
-  const data = res.data as unknown;
-  const dataObj = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : null;
-  const errObj = (dataObj && typeof dataObj['error'] === 'object' && dataObj['error'] !== null)
-  ? (dataObj['error'] as Record<string, unknown>)
-  : null;
-  const cause =
-  (typeof dataObj?.['message'] === 'string' && (dataObj['message'] as string)) ||
-  (typeof errObj?.['message'] === 'string' && (errObj['message'] as string)) ||
-  (res.statusText || `HTTP ${res.status}`);
-  throw httpErrorToIpcError(res.status, cause, fallbackMessage);
+    // gitea 错误响应是 JSON {message, url?}，TError 默认 unknown 时 res.data?.message 是 string
+    // 兜底链：res.data.message -> res.data.error -> res.statusText -> "HTTP <status>"
+    const data = res.data as unknown;
+    const dataObj =
+      typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : null;
+    const errObj =
+      dataObj && typeof dataObj['error'] === 'object' && dataObj['error'] !== null
+        ? (dataObj['error'] as Record<string, unknown>)
+        : null;
+    const cause =
+      (typeof dataObj?.['message'] === 'string' && (dataObj['message'] as string)) ||
+      (typeof errObj?.['message'] === 'string' && (errObj['message'] as string)) ||
+      res.statusText ||
+      `HTTP ${res.status}`;
+    throw httpErrorToIpcError(res.status, cause, fallbackMessage);
   }
   return res.data;
 }
 
 //导出供测试的内部函数
 export const _testInternals = {
- cacheKey,
- normalizeBaseUrl,
- httpErrorToIpcError,
- makeGiteaSecurityWorker,
+  cacheKey,
+  normalizeBaseUrl,
+  httpErrorToIpcError,
+  makeGiteaSecurityWorker,
 };

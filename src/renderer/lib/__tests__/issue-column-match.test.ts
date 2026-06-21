@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchIssueToColumn } from '../issue-column-match';
+import { getColumnLabelRemovalImpact, matchIssueToColumn } from '../issue-column-match';
 import type { ColumnDto, IssueCardDto } from '../../../main/ipc/schema.js';
 
 function makeColumn(id: string, labelIds: number[]): ColumnDto {
@@ -13,7 +13,11 @@ function makeColumn(id: string, labelIds: number[]): ColumnDto {
   };
 }
 
-function makeIssue(idx: number, labelIds: number[], state: 'open' | 'closed' = 'open'): IssueCardDto {
+function makeIssue(
+  idx: number,
+  labelIds: number[],
+  state: 'open' | 'closed' = 'open',
+): IssueCardDto {
   return {
     id: idx,
     index: idx,
@@ -69,5 +73,32 @@ describe('matchIssueToColumn', () => {
   it('cols 为空数组 → null', () => {
     const iss = makeIssue(1, [1]);
     expect(matchIssueToColumn(iss, [])).toBeNull();
+  });
+});
+
+describe('getColumnLabelRemovalImpact', () => {
+  it('删除当前归属列绑定的标签 → 返回影响信息', () => {
+    const cols = [makeColumn('c1', [1, 2]), makeColumn('c2', [3])];
+    const iss = makeIssue(1, [2, 99]);
+
+    expect(getColumnLabelRemovalImpact(iss, cols, [2])).toEqual({
+      columnId: 'c1',
+      columnTitle: 'col-c1',
+      labelNames: ['l-2'],
+    });
+  });
+
+  it('删除非当前列绑定标签 → 不需要提醒', () => {
+    const cols = [makeColumn('c1', [1]), makeColumn('c2', [2])];
+    const iss = makeIssue(1, [1, 99]);
+
+    expect(getColumnLabelRemovalImpact(iss, cols, [99])).toBeNull();
+  });
+
+  it('未归属任何列的议题删除标签 → 不需要提醒', () => {
+    const cols = [makeColumn('c1', [1])];
+    const iss = makeIssue(1, [99]);
+
+    expect(getColumnLabelRemovalImpact(iss, cols, [99])).toBeNull();
   });
 });

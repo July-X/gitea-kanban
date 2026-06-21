@@ -70,6 +70,18 @@ const items: NavItem[] = [
     },
   },
   {
+    id: 'timeline-new',
+    label: '新时间轴',
+    icon: Timer,
+    to: '/timeline-new',
+    devAnnotation: {
+      web: '/<owner>/<repo>/graphs/commits',
+      api: 'GET /api/v1/repos/<owner>/<repo>/commits + Parser DAG layout',
+      ipc: 'commits.gitgraph',
+      notes: 'Git Graph 视图：复刻 Gitea 原生提交图（SVG dot + 线条）',
+    },
+  },
+  {
     id: 'merges',
     label: '合并请求',
     icon: GitMerge,

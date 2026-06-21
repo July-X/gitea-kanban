@@ -37,19 +37,13 @@ export function listStarredBranches(projectId: string): Set<string> {
  * star / unstar 切换 —— UPSERT 或 DELETE
  * ADR-0003：写 localStore（star 是纯本地操作）
  */
-export function setStarred(args: {
-  projectId: string;
-  branch: string;
-  starred: boolean;
-}): void {
+export function setStarred(args: { projectId: string; branch: string; starred: boolean }): void {
   const store = getLocalStore();
   if (args.starred) {
     // upsert：localStore 已存在就 nothing，不存在就 push
     const existing = store
       .get()
-      .starredBranches.some(
-        (s) => s.projectId === args.projectId && s.branch === args.branch,
-      );
+      .starredBranches.some((s) => s.projectId === args.projectId && s.branch === args.branch);
     if (!existing) {
       const newRow = {
         id: randomUUID(),
@@ -65,9 +59,7 @@ export function setStarred(args: {
     // 删除：localStore
     const existingLocal = store
       .get()
-      .starredBranches.find(
-        (s) => s.projectId === args.projectId && s.branch === args.branch,
-      );
+      .starredBranches.find((s) => s.projectId === args.projectId && s.branch === args.branch);
     if (existingLocal) {
       store.mutate((s) => {
         s.starredBranches = s.starredBranches.filter(
@@ -89,13 +81,22 @@ export function setStarred(args: {
  * 按 (projectId, resource, key) 三个字段查——避免跨 projectId 误命中
  */
 export function getBranchesCache(args: { projectId: string; cacheKey: string }): string | null {
-  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.projectId, key: args.cacheKey });
+  return getCache<string>({
+    resource: CACHE_RESOURCE,
+    projectId: args.projectId,
+    key: args.cacheKey,
+  });
 }
 
 /**
  * 写 branches 缓存
  */
-export function setBranchesCache(args: { projectId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+export function setBranchesCache(args: {
+  projectId: string;
+  cacheKey: string;
+  payload: string;
+  ttlSeconds?: number;
+}): void {
   setCache({
     resource: CACHE_RESOURCE,
     projectId: args.projectId,

@@ -18,8 +18,15 @@
  */
 
 /* ===== 列设置按钮 / 列头 BEM（v1.1）===== */
-.column__header { display: flex; align-items: flex-start; gap: var(--space-2); }
-.column__title-wrap { flex: 1; min-width: 0; }
+.column__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.column__title-wrap {
+  flex: 1;
+  min-width: 0;
+}
 .column__settings-btn {
   flex-shrink: 0;
   background: transparent;
@@ -33,7 +40,10 @@
   justify-content: center;
   transition: background var(--t-fast) var(--ease);
 }
-.column__settings-btn:hover { background: var(--color-bg-hover); color: var(--color-text); }
+.column__settings-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
 .column__label-chip {
   display: inline-flex;
   align-items: center;
@@ -52,7 +62,9 @@
   background: var(--label-color, #888);
   flex-shrink: 0;
 }
-.column__label-name { line-height: 1; }
+.column__label-name {
+  line-height: 1;
+}
 .column__label-unbind {
   background: transparent;
   border: 0;
@@ -63,7 +75,10 @@
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
-.column__label-unbind:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+.column__label-unbind:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
 .column__add-label-btn {
   background: transparent;
   border: 1px dashed var(--color-divider);
@@ -73,7 +88,10 @@
   font-size: var(--font-xs);
   cursor: pointer;
 }
-.column__add-label-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.column__add-label-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
 
 /* ===== modal 通用（v1.1 · 新增列 / 列设置 / 绑 label picker 复用）===== */
 .modal-overlay {
@@ -105,7 +123,11 @@
   padding: var(--space-4);
   border-bottom: 1px solid var(--color-divider);
 }
-.modal__title { font-size: var(--font-lg); font-weight: 600; margin: 0; }
+.modal__title {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  margin: 0;
+}
 .modal__close {
   background: transparent;
   border: 0;
@@ -115,7 +137,10 @@
   border-radius: var(--radius-sm);
   display: inline-flex;
 }
-.modal__close:hover { background: var(--color-bg-hover); color: var(--color-text); }
+.modal__close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
 .modal__body {
   padding: var(--space-4);
   overflow-y: auto;
@@ -123,7 +148,11 @@
   flex-direction: column;
   gap: var(--space-3);
 }
-.modal__label { font-size: var(--font-sm); font-weight: 500; color: var(--color-text-secondary); }
+.modal__label {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
 .modal__input {
   width: 100%;
   padding: 8px 10px;
@@ -135,24 +164,43 @@
   font-family: inherit;
   box-sizing: border-box;
 }
-.modal__input:focus { outline: none; border-color: var(--color-primary); }
-.modal__input:disabled { opacity: 0.5; cursor: not-allowed; }
+.modal__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.modal__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 /* v1.3 WIP 上限输入框非法态：红框 + 提示用户改值 */
 .modal__input--invalid,
 .modal__input--invalid:focus {
   border-color: var(--color-danger, #d33);
   background: var(--color-danger-soft, #fde8e8);
 }
-.modal__hint { font-size: var(--font-xs); margin: 0; }
-.modal__sub { display: flex; flex-direction: column; gap: var(--space-2); }
+.modal__hint {
+  font-size: var(--font-xs);
+  margin: 0;
+}
+.modal__sub {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
 .modal__sub-title {
   font-size: var(--font-sm);
   font-weight: 500;
   color: var(--color-text-secondary);
   margin: 0;
 }
-.modal__empty { margin: 0; }
-.modal__chip-list { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.modal__empty {
+  margin: 0;
+}
+.modal__chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
 .modal__chip {
   display: inline-flex;
   align-items: center;
@@ -179,7 +227,10 @@
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
-.modal__chip-rm:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+.modal__chip-rm:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
 .modal__label-list {
   list-style: none;
   padding: 0;
@@ -204,12 +255,26 @@
   font-size: var(--font-sm);
   transition: background var(--t-fast) var(--ease);
 }
-.modal__label-item:hover:not(:disabled) { background: var(--color-bg-hover); }
-.modal__label-item:disabled { opacity: 0.5; cursor: not-allowed; }
-.modal__label-item--bound { opacity: 0.7; }
-.modal__label-name { flex: 1; }
-.modal__label-state { font-size: var(--font-xs); color: var(--color-text-muted); }
-.modal__label-state--add { color: var(--color-primary); }
+.modal__label-item:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+.modal__label-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.modal__label-item--bound {
+  opacity: 0.7;
+}
+.modal__label-name {
+  flex: 1;
+}
+.modal__label-state {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+.modal__label-state--add {
+  color: var(--color-primary);
+}
 .modal__footer {
   display: flex;
   align-items: center;
@@ -218,7 +283,10 @@
   border-top: 1px solid var(--color-divider);
   background: var(--color-bg);
 }
-.modal__footer-right { display: flex; gap: var(--space-2); }
+.modal__footer-right {
+  display: flex;
+  gap: var(--space-2);
+}
 .modal__btn {
   display: inline-flex;
   align-items: center;
@@ -233,8 +301,13 @@
   font-family: inherit;
   transition: background var(--t-fast) var(--ease);
 }
-.modal__btn:hover:not(:disabled) { background: var(--color-bg-hover); }
-.modal__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.modal__btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+.modal__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .modal__btn--primary {
   background: var(--color-primary);
   border-color: var(--color-primary);
@@ -244,7 +317,9 @@
   filter: brightness(1.1);
   background: var(--color-primary);
 }
-.modal__btn--ghost { background: transparent; }
+.modal__btn--ghost {
+  background: transparent;
+}
 .modal__btn--danger {
   background: var(--color-danger-soft);
   border-color: var(--color-danger);
@@ -254,7 +329,10 @@
   background: var(--color-danger);
   color: var(--color-text-inverse, #fff);
 }
-.modal__btn--block { width: 100%; justify-content: center; }
+.modal__btn--block {
+  width: 100%;
+  justify-content: center;
+}
 
 /* ===== 换列目标菜单（v1 按钮式 + 未分类归类目标菜单共用）===== */
 .move-menu-overlay {
@@ -285,7 +363,11 @@
   justify-content: space-between;
   gap: var(--space-2);
 }
-.move-menu__title { font-size: var(--font-md); font-weight: 600; color: var(--color-text); }
+.move-menu__title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
 .move-menu__close {
   padding: 4px;
   background: transparent;
@@ -296,7 +378,10 @@
   display: inline-flex;
   align-items: center;
 }
-.move-menu__close:hover { background: var(--color-bg-hover); color: var(--color-text); }
+.move-menu__close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
 .move-menu__list {
   display: flex;
   flex-direction: column;
@@ -320,7 +405,9 @@
   text-align: left;
   transition: background var(--t-fast) var(--ease);
 }
-.move-menu__item:hover:not(:disabled) { background: var(--color-bg-hover); }
+.move-menu__item:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
 .move-menu__item:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -350,7 +437,9 @@
   opacity: 0.4;
   background: var(--color-bg-active);
 }
-.card--chosen { cursor: grabbing; }
+.card--chosen {
+  cursor: grabbing;
+}
 .card--dragging {
   cursor: grabbing;
   box-shadow: var(--shadow-md);
@@ -392,15 +481,27 @@
   color: var(--color-primary);
   font-weight: 600;
 }
-.board__drag-banner-hint { font-size: var(--font-xs); }
+.board__drag-banner-hint {
+  font-size: var(--font-xs);
+}
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 @keyframes slideUp {
-  from { transform: translateY(8px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* ============================================================

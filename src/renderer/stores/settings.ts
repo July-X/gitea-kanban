@@ -55,7 +55,9 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 写回 localStorage（key=gitea-kanban.prefs） */
   async function setPollingIntervalMs(ms: number): Promise<void> {
     if (ms < MIN_POLLING_INTERVAL_MS || ms > MAX_POLLING_INTERVAL_MS) {
-      throw new Error(`pollingInterval 必须在 ${MIN_POLLING_INTERVAL_MS}-${MAX_POLLING_INTERVAL_MS}ms 之间`);
+      throw new Error(
+        `pollingInterval 必须在 ${MIN_POLLING_INTERVAL_MS}-${MAX_POLLING_INTERVAL_MS}ms 之间`,
+      );
     }
     pollingIntervalMs.value = ms;
     writeToStorage({ pollingIntervalMs: ms });

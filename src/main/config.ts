@@ -7,10 +7,7 @@
  * - 不接用户输入（避免路径遍历，AGENTS.md §9.3）
  */
 
-import {
-  CACHE_TTL_DEFAULT_SECONDS,
-  POLL_INTERVALS_MS,
-} from '@shared/constants';
+import { CACHE_TTL_DEFAULT_SECONDS, POLL_INTERVALS_MS } from '@shared/constants';
 
 export interface AppConfig {
   /** gitea 轮询周期（毫秒） */

@@ -83,10 +83,7 @@ function buildLogger(): Logger {
     // 开发模式：直接写文件（避免 stdout fd=-1 → SonicBoom RangeError）
     // 2026-06-12 修复：EPERM 兜底 —— macOS SIP 限制某些用户目录（~/Library / ~/.gitea-kanban）
     // 时 Electron 写不进去；fallback 到 /tmp/gitea-kanban-logs
-    const candidates = [
-      join(resolveDataRoot(), 'logs', LOG_SUBDIR),
-      '/tmp/gitea-kanban-logs',
-    ];
+    const candidates = [join(resolveDataRoot(), 'logs', LOG_SUBDIR), '/tmp/gitea-kanban-logs'];
     const date = new Date().toISOString().slice(0, 10);
     for (const logDir of candidates) {
       try {
@@ -99,14 +96,17 @@ function buildLogger(): Logger {
         // 写入 OK，再正式开日志
         const filename = join(logDir, `main-${date}.log`);
         cleanupOldLogs(logDir);
-        return pino({
-          ...baseOptions,
-        }, pino.destination({
-          dest: filename,
-          sync: true,
-          mkdir: true,
-          mode: 0o600,
-        }));
+        return pino(
+          {
+            ...baseOptions,
+          },
+          pino.destination({
+            dest: filename,
+            sync: true,
+            mkdir: true,
+            mode: 0o600,
+          }),
+        );
       } catch (err) {
         // EPERM / EACCES —— 试下一个候选
         void err;

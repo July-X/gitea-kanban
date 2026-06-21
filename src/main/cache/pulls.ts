@@ -26,11 +26,20 @@ export const PULLS_GET_TTL_SECONDS = 30;
 
 /** 读 pulls 缓存 */
 export function getPullsCache(args: { projectId: string; cacheKey: string }): string | null {
-  return getCache<string>({ resource: CACHE_RESOURCE, projectId: args.projectId, key: args.cacheKey });
+  return getCache<string>({
+    resource: CACHE_RESOURCE,
+    projectId: args.projectId,
+    key: args.cacheKey,
+  });
 }
 
 /** 写 pulls 缓存 */
-export function setPullsCache(args: { projectId: string; cacheKey: string; payload: string; ttlSeconds?: number }): void {
+export function setPullsCache(args: {
+  projectId: string;
+  cacheKey: string;
+  payload: string;
+  ttlSeconds?: number;
+}): void {
   setCache({
     resource: CACHE_RESOURCE,
     projectId: args.projectId,

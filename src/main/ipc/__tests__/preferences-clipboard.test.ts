@@ -178,9 +178,7 @@ describe('ipc/clipboard · writeClipboard', () => {
   it('unregisterClipboardIpc 移除 handler', async () => {
     const { unregisterClipboardIpc } = await import('../clipboard.js');
     unregisterClipboardIpc();
-    expect(mocks.ipcMainRemoveHandler).toHaveBeenCalledWith(
-      'preferences.clipboard.write',
-    );
+    expect(mocks.ipcMainRemoveHandler).toHaveBeenCalledWith('preferences.clipboard.write');
   });
 });
 

@@ -28,7 +28,16 @@
  * - merge commit（parents.length > 1）→ lane = pr 或 head branch lane
  */
 
-import type { CommitDto, Lane, CommitNode, ParentEdge, TimelinePR, TimelineDto, LaneMode, TimelineArgs } from '../ipc/schema.js';
+import type {
+  CommitDto,
+  Lane,
+  CommitNode,
+  ParentEdge,
+  TimelinePR,
+  TimelineDto,
+  LaneMode,
+  TimelineArgs,
+} from '../ipc/schema.js';
 
 // ===== 02 §5.3.4 拍板的三色 =====
 export const LANE_COLOR_PRIMARY = '#609926'; // 主分支（main）
@@ -67,7 +76,10 @@ export function buildTimeline(input: BuildTimelineInput): TimelineDto {
           sha: c.sha,
           shortSha: c.shortSha,
           message: c.message.split('\n', 1)[0] ?? c.message,
-          author: { name: c.author.name, ...(c.author.avatarUrl ? { avatarUrl: c.author.avatarUrl } : {}) },
+          author: {
+            name: c.author.name,
+            ...(c.author.avatarUrl ? { avatarUrl: c.author.avatarUrl } : {}),
+          },
           timestamp: c.date,
           parents: [...c.parents],
           isMerge: c.parents.length > 1,
@@ -125,7 +137,9 @@ export function buildTimeline(input: BuildTimelineInput): TimelineDto {
   }
 
   // ===== step 6: 排序 + 截断 =====
-  const allNodes = [...commitMap.values()].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  const allNodes = [...commitMap.values()].sort(
+    (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+  );
   const totalCommits = allNodes.length;
   const truncated = totalCommits > maxNodes;
   // 截断策略（任务 prompt §关键约束 12）：取最近的 maxNodes
@@ -136,8 +150,10 @@ export function buildTimeline(input: BuildTimelineInput): TimelineDto {
   const edgesFiltered = edges.filter((e) => nodeShaSet.has(e.source) && nodeShaSet.has(e.target));
 
   // ===== step 7: range =====
-  const from = args.since ?? (totalCommits > 0 ? new Date(minT).toISOString() : new Date().toISOString());
-  const to = args.until ?? (totalCommits > 0 ? new Date(maxT).toISOString() : new Date().toISOString());
+  const from =
+    args.since ?? (totalCommits > 0 ? new Date(minT).toISOString() : new Date().toISOString());
+  const to =
+    args.until ?? (totalCommits > 0 ? new Date(maxT).toISOString() : new Date().toISOString());
 
   return {
     ...(args.since ? { windowStart: args.since } : {}),
@@ -166,7 +182,12 @@ function buildLanes(
       label: b,
       kind: 'branch' as const,
       // 拍板 02 §5.3.4：main 在最上用主色；其它按出现顺序交替 active/archived
-      color: idx === 0 && b === 'main' ? LANE_COLOR_PRIMARY : idx % 2 === 0 ? LANE_COLOR_ACTIVE : LANE_COLOR_ARCHIVED,
+      color:
+        idx === 0 && b === 'main'
+          ? LANE_COLOR_PRIMARY
+          : idx % 2 === 0
+            ? LANE_COLOR_ACTIVE
+            : LANE_COLOR_ARCHIVED,
       order: idx,
     }));
   }
@@ -179,7 +200,8 @@ function buildLanes(
       id: `author:${a}`,
       label: a,
       kind: 'author' as const,
-      color: idx === 0 ? LANE_COLOR_PRIMARY : idx % 2 === 0 ? LANE_COLOR_ACTIVE : LANE_COLOR_ARCHIVED,
+      color:
+        idx === 0 ? LANE_COLOR_PRIMARY : idx % 2 === 0 ? LANE_COLOR_ACTIVE : LANE_COLOR_ARCHIVED,
       order: idx,
     }));
   }
@@ -191,7 +213,8 @@ function buildLanes(
       id: `pr:${p.index}`,
       label: `#${p.index} ${p.title}`,
       kind: 'pr' as const,
-      color: idx === 0 ? LANE_COLOR_PRIMARY : idx % 2 === 0 ? LANE_COLOR_ACTIVE : LANE_COLOR_ARCHIVED,
+      color:
+        idx === 0 ? LANE_COLOR_PRIMARY : idx % 2 === 0 ? LANE_COLOR_ACTIVE : LANE_COLOR_ARCHIVED,
       order: idx,
     }));
 }

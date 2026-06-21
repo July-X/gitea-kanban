@@ -183,10 +183,7 @@ export async function getGiteaCommit(args: {
     stat: true,
     files: true,
   });
-  const raws = unwrapGitea(
-    res,
-    `获取 commit ${args.sha} 失败`,
-  ) as Commit[];
+  const raws = unwrapGitea(res, `获取 commit ${args.sha} 失败`) as Commit[];
   const raw = raws[0];
   if (!raw) {
     // 仓库可能没这个 sha；保留和原 repoGetSingleCommit 行为一致的"返回空 dto"是
@@ -223,10 +220,16 @@ export async function getGiteaCommit(args: {
     });
     if (dr.ok) {
       diffText = await dr.text();
-      logger.info({ op: 'commits.get.diff', sha: args.sha, diffLen: diffText.length }, 'diff fetched');
+      logger.info(
+        { op: 'commits.get.diff', sha: args.sha, diffLen: diffText.length },
+        'diff fetched',
+      );
     } else {
       diffFetchError = `HTTP ${dr.status}`;
-      logger.warn({ op: 'commits.get.diff', sha: args.sha, status: dr.status }, 'diff fetch non-ok');
+      logger.warn(
+        { op: 'commits.get.diff', sha: args.sha, status: dr.status },
+        'diff fetch non-ok',
+      );
     }
   } catch (e) {
     diffFetchError = (e as Error).message;
@@ -235,7 +238,10 @@ export async function getGiteaCommit(args: {
 
   if (diffText) {
     const parsed = parseUnifiedDiff(diffText);
-    logger.info({ op: 'commits.get.parse', sha: args.sha, parsedCount: parsed.length }, 'diff parsed');
+    logger.info(
+      { op: 'commits.get.parse', sha: args.sha, parsedCount: parsed.length },
+      'diff parsed',
+    );
     const giteaFiles = (raw.files ?? []) as GiteaFileEntry[];
     const files: CommitFileChangeDto[] = mergeToFileChangeDtos(parsed, giteaFiles);
     if (files.length > 0) {

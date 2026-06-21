@@ -222,8 +222,7 @@ export class LocalStore<T extends object> {
  * **不**接受用户输入的绝对路径（AGENTS §8.4）
  */
 export function resolveStatePath(): string {
-  const dataDir = process.env['GITEA_KANBAN_DATA_DIR']
-    ?? join(os.homedir(), '.gitea-kanban');
+  const dataDir = process.env['GITEA_KANBAN_DATA_DIR'] ?? join(os.homedir(), '.gitea-kanban');
   if (!isAbsolute(dataDir)) {
     throw new Error(`data dir must be absolute, got: ${dataDir}`);
   }

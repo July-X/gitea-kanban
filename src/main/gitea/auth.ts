@@ -56,7 +56,9 @@ async function persistToken(giteaUrl: string, username: string, token: string): 
     // dev fallback path
     try {
       mkdirSync(devTokenDir(), { recursive: true, mode: 0o700 });
-      writeFileSync(devTokenPath(giteaUrl, username), JSON.stringify({ token, ts: Date.now() }), { mode: 0o600 });
+      writeFileSync(devTokenPath(giteaUrl, username), JSON.stringify({ token, ts: Date.now() }), {
+        mode: 0o600,
+      });
       return;
     } catch (err) {
       // fall through to keychain
@@ -107,7 +109,11 @@ async function verifyToken(giteaUrl: string, token: string): Promise<UserDto> {
   }
   if (!res.ok) {
     let body: unknown = null;
-    try { body = await res.json(); } catch { body = await res.text().catch(() => null); }
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text().catch(() => null);
+    }
     const cause = typeof body === 'string' ? body : JSON.stringify(body ?? {});
     if (res.status === 401 || res.status === 403) {
       throw new IpcError({
@@ -209,7 +215,6 @@ export async function authConnect(args: ConnectArgs): Promise<ConnectResult> {
   });
 
   // 3b. SQLite 镜像已删（ADR-0003 Phase 3：业务表全走 localStore）
-
 
   // 4. 返回结果（**不**含 token）
   const accountDto: GiteaAccountDto = {

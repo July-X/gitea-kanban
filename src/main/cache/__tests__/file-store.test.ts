@@ -16,7 +16,14 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, utimesSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { getCache, setCache, deleteCache, invalidateCache, gcCache, resolveCacheDir } from '../file-store.js';
+import {
+  getCache,
+  setCache,
+  deleteCache,
+  invalidateCache,
+  gcCache,
+  resolveCacheDir,
+} from '../file-store.js';
 
 let TMP_DIR: string;
 let savedEnv: string | undefined;
@@ -159,7 +166,13 @@ describe('gcCache LRU', () => {
   it('超预算 → 按 mtime 升序（最旧）删到预算内', async () => {
     // 写 5 个，每个约 200 字节
     for (let i = 0; i < 5; i++) {
-      setCache({ resource: 'r', projectId: 'p', key: `k${i}`, payload: 'x'.repeat(200), ttlSeconds: 60 });
+      setCache({
+        resource: 'r',
+        projectId: 'p',
+        key: `k${i}`,
+        payload: 'x'.repeat(200),
+        ttlSeconds: 60,
+      });
       await sleep(20); // 保证 mtime 不同
     }
     // 预算 = 300 字节 → 删到 ≤ 1 个文件

@@ -17,10 +17,10 @@
  * 鼠标 hover 整张卡 → cursor 变 grab；按住变 grabbing（视觉提示"可拖"）
  * 加在 .card 上 —— 跟现有 hover transition 不冲突 */
 .card {
- cursor: grab;
+  cursor: grab;
 }
 .card:active {
- cursor: grabbing;
+  cursor: grabbing;
 }
 
 /* ===== 拖拽中（sortablejs 触发，columnDragOptions 配置）=====
@@ -28,15 +28,15 @@
  * - ghost：原位置占位（半透）—— 让用户看清"从哪里走"
  * - dragging：拖动中的卡（跟着鼠标）—— 加 box-shadow 立体感 */
 .card--chosen {
- cursor: grabbing;
+  cursor: grabbing;
 }
 .card--ghost {
- opacity: 0.4;
- background: var(--color-bg-active);
+  opacity: 0.4;
+  background: var(--color-bg-active);
 }
 .card--dragging {
- cursor: grabbing;
- box-shadow: var(--shadow-md);
+  cursor: grabbing;
+  box-shadow: var(--shadow-md);
 }
 
 /* ===== 列级光晕（v1.4 · 用户反馈：拖 card 时整列高亮，告知"会落入这列"）=====
@@ -49,43 +49,43 @@
  * - outline 2px 主色（focus 风格）
  * - 主色微光外环（暗色底也看得清） */
 .card--picked {
- outline: 2px solid var(--color-primary);
- outline-offset: -2px;
- box-shadow: 0 0 12px var(--color-primary-glow);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+  box-shadow: 0 0 12px var(--color-primary-glow);
 }
 
 /* ===== 键盘拖拽目标列（v1.3 · 方向键 hover 的列）=====
  * - dashed outline + 主色 soft 底 → "我能放这"的视觉反馈 */
 .column__cards--drag-target {
- outline: 2px dashed var(--color-primary);
- outline-offset: -2px;
- background: var(--color-primary-soft);
- border-radius: var(--radius-sm);
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -2px;
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-sm);
 }
 
 /* ===== 键盘拖拽模式提示条（v1.3 · Space 拾起后出现）=====
  * - sticky 底部（跟随主区滚动）
  * - 主色 soft 底 + 主色描边 → 跟 move-menu 同视觉语言 */
 .board__drag-banner {
- position: sticky;
- bottom: 0;
- left: 0;
- right: 0;
- display: flex;
- align-items: center;
- justify-content: space-between;
- gap: var(--space-3);
- padding: var(--space-3) var(--space-4);
- background: var(--color-primary-soft);
- color: var(--color-text);
- border-top: 1px solid var(--color-primary);
- font-size: var(--font-sm);
- z-index: 10;
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+  border-top: 1px solid var(--color-primary);
+  font-size: var(--font-sm);
+  z-index: 10;
 }
 .board__drag-banner-text strong {
- color: var(--color-primary);
- font-weight: 600;
+  color: var(--color-primary);
+  font-weight: 600;
 }
 .board__drag-banner-hint {
- font-size: var(--font-xs);
+  font-size: var(--font-xs);
 }

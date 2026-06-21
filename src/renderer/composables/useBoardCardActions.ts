@@ -175,11 +175,13 @@ export function useBoardCardActions(): UseBoardCardActionsReturn {
   }
 
   // ===== 删除议题 =====
-  const confirmDelete = ref<{ open: boolean; issue: IssueCardDto | null; columnId: string | null }>({
-    open: false,
-    issue: null,
-    columnId: null,
-  });
+  const confirmDelete = ref<{ open: boolean; issue: IssueCardDto | null; columnId: string | null }>(
+    {
+      open: false,
+      issue: null,
+      columnId: null,
+    },
+  );
   function requestDeleteIssue(issue: IssueCardDto, columnId: string): void {
     confirmDelete.value = { open: true, issue, columnId };
   }

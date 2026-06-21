@@ -33,7 +33,12 @@ const fakeIssue: IssueCardDto = {
  * 造一个看板列 DOM：`<section class="column"><ul class="column__cards" data-column-id>`
  * SortableJS 的 evt.from / evt.to 是 ul.column__cards；列容器是 section.column。
  */
-function setupBoardDOM(): { colA: HTMLElement; colB: HTMLElement; ulA: HTMLElement; ulB: HTMLElement } {
+function setupBoardDOM(): {
+  colA: HTMLElement;
+  colB: HTMLElement;
+  ulA: HTMLElement;
+  ulB: HTMLElement;
+} {
   document.body.innerHTML = '';
   const colA = document.createElement('section');
   colA.className = 'column';

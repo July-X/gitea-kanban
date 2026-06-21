@@ -65,7 +65,7 @@ function mapKeyringError(err: unknown, op: string): IpcError | null {
     msg.includes('platform failure') ||
     msg.includes('no storage access') ||
     msg.includes('nosecret') ||
-    msg.includes('no such file') ||  // libsecret shared object missing
+    msg.includes('no such file') || // libsecret shared object missing
     msg.includes('dbus') ||
     msg.includes('failed to load') ||
     msg.includes('kwallet')
@@ -73,8 +73,7 @@ function mapKeyringError(err: unknown, op: string): IpcError | null {
     return new IpcError({
       code: IpcErrorCode.KEYCHAIN_UNAVAILABLE,
       message: '系统 keychain 不可用',
-      hint:
-        'Linux：请安装 gnome-keyring 或 kwallet5；macOS：检查 Keychain Access.app 是否被禁用；Windows：检查 Credential Manager 服务',
+      hint: 'Linux：请安装 gnome-keyring 或 kwallet5；macOS：检查 Keychain Access.app 是否被禁用；Windows：检查 Credential Manager 服务',
       cause: err instanceof Error ? err.message : String(err),
     });
   }
@@ -125,10 +124,7 @@ export async function keychainSet(
  * @returns token 字符串；不存在返回 null
  * @throws IpcError(KEYCHAIN_UNAVAILABLE | KEYCHAIN_ACCESS_DENIED | INTERNAL)
  */
-export async function keychainGet(
-  giteaUrl: string,
-  username: string,
-): Promise<string | null> {
+export async function keychainGet(giteaUrl: string, username: string): Promise<string | null> {
   const entry = makeEntry(giteaUrl, username);
   try {
     const result = await entry.getPassword();
@@ -136,8 +132,10 @@ export async function keychainGet(
   } catch (err) {
     const mapped = mapKeyringError(err, 'get');
     if (mapped) {
-      if (mapped.code === IpcErrorCode.KEYCHAIN_UNAVAILABLE ||
-          mapped.code === IpcErrorCode.KEYCHAIN_ACCESS_DENIED) {
+      if (
+        mapped.code === IpcErrorCode.KEYCHAIN_UNAVAILABLE ||
+        mapped.code === IpcErrorCode.KEYCHAIN_ACCESS_DENIED
+      ) {
         throw mapped;
       }
       // INTERNAL 也抛
@@ -153,10 +151,7 @@ export async function keychainGet(
  * @returns true=删了；false=本来就不存在
  * @throws IpcError(KEYCHAIN_UNAVAILABLE | KEYCHAIN_ACCESS_DENIED | INTERNAL)
  */
-export async function keychainDelete(
-  giteaUrl: string,
-  username: string,
-): Promise<boolean> {
+export async function keychainDelete(giteaUrl: string, username: string): Promise<boolean> {
   const entry = makeEntry(giteaUrl, username);
   try {
     const ok: unknown = await entry.deletePassword();
@@ -164,8 +159,10 @@ export async function keychainDelete(
   } catch (err) {
     const mapped = mapKeyringError(err, 'delete');
     if (mapped) {
-      if (mapped.code === IpcErrorCode.KEYCHAIN_UNAVAILABLE ||
-          mapped.code === IpcErrorCode.KEYCHAIN_ACCESS_DENIED) {
+      if (
+        mapped.code === IpcErrorCode.KEYCHAIN_UNAVAILABLE ||
+        mapped.code === IpcErrorCode.KEYCHAIN_ACCESS_DENIED
+      ) {
         throw mapped;
       }
       throw mapped;

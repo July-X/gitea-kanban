@@ -253,7 +253,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
 
 <style scoped>
 .column {
-  flex: 0 0 280px;
+  min-width: 0;
   /* v1.4（2026-06-19）：高度自适应内容区（= Window 减去 topbar/statusbar），
      align-items:stretch 让列纵向拉满；min-height:0 让 .column__cards 能在列内滚动 */
   display: flex;

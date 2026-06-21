@@ -58,8 +58,8 @@ const GC_FAILED_LIMIT = 1000; // 超过这个数的旧 failed entry 删
  * - 兜底 ~/.gitea-kanban/queue.jsonl
  */
 export function resolveQueuePath(): string {
-  const dataDir = process.env['GITEA_KANBAN_DATA_DIR']
-    ?? join(process.env['HOME'] ?? '/tmp', '.gitea-kanban');
+  const dataDir =
+    process.env['GITEA_KANBAN_DATA_DIR'] ?? join(process.env['HOME'] ?? '/tmp', '.gitea-kanban');
   return join(dataDir, QUEUE_FILENAME);
 }
 
@@ -74,7 +74,10 @@ export async function loadQueue(): Promise<QueueEntry[]> {
   const file = resolveQueuePath();
   if (!existsSync(file)) return [];
   const raw = await readFile(file, 'utf8').catch((err) => {
-    log.error({ err: err instanceof Error ? err.message : String(err), file }, 'loadQueue: readFile failed');
+    log.error(
+      { err: err instanceof Error ? err.message : String(err), file },
+      'loadQueue: readFile failed',
+    );
     return '';
   });
   if (!raw) return [];

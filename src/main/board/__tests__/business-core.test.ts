@@ -167,7 +167,12 @@ describe('board/move-card · moveIssueColumn 业务流', () => {
         username: PROJ.username,
         keychainService: 'gitea-kanban',
         createdAt: Date.now(),
-        userInfo: { giteaUserId: 1, login: PROJ.username, fullName: PROJ.username, updatedAt: Date.now() },
+        userInfo: {
+          giteaUserId: 1,
+          login: PROJ.username,
+          fullName: PROJ.username,
+          updatedAt: Date.now(),
+        },
       });
       s.projects.push({
         id: PROJECT_ID,
@@ -179,12 +184,38 @@ describe('board/move-card · moveIssueColumn 业务流', () => {
         createdAt: Date.now(),
       });
       s.columns.push(
-        { id: FROM_COL_ID, projectId: PROJECT_ID, title: 'todo', position: 0, createdAt: Date.now() },
-        { id: TO_COL_ID, projectId: PROJECT_ID, title: 'doing', position: 1, createdAt: Date.now() },
+        {
+          id: FROM_COL_ID,
+          projectId: PROJECT_ID,
+          title: 'todo',
+          position: 0,
+          createdAt: Date.now(),
+        },
+        {
+          id: TO_COL_ID,
+          projectId: PROJECT_ID,
+          title: 'doing',
+          position: 1,
+          createdAt: Date.now(),
+        },
       );
       s.labelMaps.push(
-        { id: 'lm-1', columnId: FROM_COL_ID, projectId: PROJECT_ID, giteaLabelId: '100', giteaLabelName: 'from', createdAt: Date.now() },
-        { id: 'lm-2', columnId: TO_COL_ID, projectId: PROJECT_ID, giteaLabelId: '200', giteaLabelName: 'to', createdAt: Date.now() },
+        {
+          id: 'lm-1',
+          columnId: FROM_COL_ID,
+          projectId: PROJECT_ID,
+          giteaLabelId: '100',
+          giteaLabelName: 'from',
+          createdAt: Date.now(),
+        },
+        {
+          id: 'lm-2',
+          columnId: TO_COL_ID,
+          projectId: PROJECT_ID,
+          giteaLabelId: '200',
+          giteaLabelName: 'to',
+          createdAt: Date.now(),
+        },
       );
       return s;
     });

@@ -110,7 +110,9 @@ describe('P0-1 autoInit 透明化 · 文件指纹', () => {
 
     it('回调里调 openColumnMenu(col)', () => {
       const content = readFileSync(boardViewPath, 'utf-8');
-      expect(content).toMatch(/onAutoInitOpenColumnMenu:\s*\(col\)\s*=>\s*\{[\s\S]+openColumnMenu\(col\)/);
+      expect(content).toMatch(
+        /onAutoInitOpenColumnMenu:\s*\(col\)\s*=>\s*\{[\s\S]+openColumnMenu\(col\)/,
+      );
     });
   });
 });

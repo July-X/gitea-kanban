@@ -87,8 +87,8 @@ export const useBranchStore = defineStore('branch', () => {
   );
 
   /** 当前选中的分支（按 currentSelectedName 反查 items） */
-  const selectedBranch = computed<BranchDto | null>(
-    () => (currentSelectedName.value ? getByName(currentSelectedName.value) : null),
+  const selectedBranch = computed<BranchDto | null>(() =>
+    currentSelectedName.value ? getByName(currentSelectedName.value) : null,
   );
 
   /** 收藏的分支（用于"仅看收藏"过滤器） */

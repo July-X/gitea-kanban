@@ -44,10 +44,7 @@ export const DEFAULT_THEME: Theme = 'dark';
  * StatusBar cycle 顺序：dark → light → dark（暗 → 亮 → 暗）
  * 2 主题 cycle 自然；v1.1.2 的 "暗→暗→亮→暗" 顺序因 A 暗 / C 暗合并而简化。
  */
-export const THEME_CYCLE_ORDER: readonly Theme[] = [
-  'dark',
-  'light',
-] as const;
+export const THEME_CYCLE_ORDER: readonly Theme[] = ['dark', 'light'] as const;
 
 /** localStorage 缓存 key（§15.5 启动期 0 闪烁；与 settings.ts 的 'gitea-kanban.prefs' 分开） */
 export const THEME_STORAGE_KEY = 'gitea-kanban.theme';

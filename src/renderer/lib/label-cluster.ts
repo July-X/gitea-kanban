@@ -36,9 +36,16 @@ import type { IssueLabelDto } from '../../main/ipc/schema.js';
  * - 10 个去重后字面量
  */
 const LITERAL_PRESETS: readonly string[] = [
-  '新建', '进行中', '待办', '已完成',
-  'Backlog', 'To Do', 'In Progress', 'Done',
-  '待处理', '处理中',
+  '新建',
+  '进行中',
+  '待办',
+  '已完成',
+  'Backlog',
+  'To Do',
+  'In Progress',
+  'Done',
+  '待处理',
+  '处理中',
 ];
 
 /** 单一分隔符集合（v1.4 拍板：4 种） */
@@ -119,7 +126,9 @@ export function clusterLabels(labels: readonly IssueLabelDto[]): ClusterPlan {
     if (ids.length < MIN_PREFIX_GROUP_SIZE) continue;
     const bucketLabels = labels.filter((l) => ids.includes(l.id));
     const allShort = bucketLabels.every((l) => countParts(l.name) <= 1);
-    const allSameLength = bucketLabels.every((l) => countParts(l.name) === countParts(bucketLabels[0]!.name));
+    const allSameLength = bucketLabels.every(
+      (l) => countParts(l.name) === countParts(bucketLabels[0]!.name),
+    );
     if (allShort) {
       // L2 短 label：单段整体作 prefix
       result.prefixGroup.push({
@@ -131,9 +140,10 @@ export function clusterLabels(labels: readonly IssueLabelDto[]): ClusterPlan {
       // L3 多段 label：段数一致 → 复合 prefix
       // 段数 = 2 → 用首段；段数 ≥ 3 → 用前 2 段
       const sampleParts = bucketLabels[0]!.name.split(/[-_./]/).filter((p) => p.length > 0);
-      const compoundPrefix = sampleParts.length === 2
-        ? sampleParts[0]!  // 'm10-1' → 'm10'
-        : sampleParts.slice(0, 2).join('-'); // 'bugfix-m10-1' → 'bugfix-m10'
+      const compoundPrefix =
+        sampleParts.length === 2
+          ? sampleParts[0]! // 'm10-1' → 'm10'
+          : sampleParts.slice(0, 2).join('-'); // 'bugfix-m10-1' → 'bugfix-m10'
       // 桶内所有 label 必须共享同一 compound prefix
       const consistent = bucketLabels.every((l) => {
         const parts = l.name.split(/[-_./]/).filter((p) => p.length > 0);
@@ -168,10 +178,11 @@ export function clusterSummary(plan: ClusterPlan): {
   unmatchedExamples: string[];
 } {
   return {
-    totalCount: plan.literal.reduce((s, c) => s + c.labelIds.length, 0)
-      + plan.prefixGroup.reduce((s, c) => s + c.labelIds.length, 0)
-      + plan.compound.reduce((s, c) => s + c.labelIds.length, 0)
-      + plan.unmatched.length,
+    totalCount:
+      plan.literal.reduce((s, c) => s + c.labelIds.length, 0) +
+      plan.prefixGroup.reduce((s, c) => s + c.labelIds.length, 0) +
+      plan.compound.reduce((s, c) => s + c.labelIds.length, 0) +
+      plan.unmatched.length,
     columnCount: plan.literal.length + plan.prefixGroup.length + plan.compound.length,
     unmatchedCount: plan.unmatched.length,
     literalExamples: plan.literal.map((c) => c.columnTitle).slice(0, 3),

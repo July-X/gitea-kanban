@@ -9,6 +9,12 @@
  */
 import type { ColumnDto, IssueCardDto } from '../../main/ipc/schema.js';
 
+export interface ColumnLabelRemovalImpact {
+  columnId: string;
+  columnTitle: string;
+  labelNames: string[];
+}
+
 export function matchIssueToColumn(issue: IssueCardDto, cols: ColumnDto[]): string | null {
   const issueLabelIds = new Set(issue.labels.map((l) => l.id));
   for (const col of cols) {
@@ -18,4 +24,30 @@ export function matchIssueToColumn(issue: IssueCardDto, cols: ColumnDto[]): stri
     if (colLabelIds.some((id) => issueLabelIds.has(id))) return col.id;
   }
   return null;
+}
+
+/**
+ * 判断“删除标签”是否会动到当前归属列绑定的标签。
+ * 用在详情弹窗二次确认：删掉列绑定标签后，卡片可能离开当前列或变成未分类。
+ */
+export function getColumnLabelRemovalImpact(
+  issue: IssueCardDto,
+  cols: ColumnDto[],
+  removeLabelIds: number[],
+): ColumnLabelRemovalImpact | null {
+  if (removeLabelIds.length === 0) return null;
+  const currentColumnId = matchIssueToColumn(issue, cols);
+  if (!currentColumnId) return null;
+  const currentColumn = cols.find((c) => c.id === currentColumnId);
+  if (!currentColumn) return null;
+
+  const removeSet = new Set(removeLabelIds);
+  const removedColumnLabels = currentColumn.labels.filter((l) => removeSet.has(l.id));
+  if (removedColumnLabels.length === 0) return null;
+
+  return {
+    columnId: currentColumn.id,
+    columnTitle: currentColumn.title,
+    labelNames: removedColumnLabels.map((l) => l.name),
+  };
 }

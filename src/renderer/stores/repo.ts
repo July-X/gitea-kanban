@@ -9,7 +9,12 @@
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { reposAddProject, reposList, reposRemoveProject, getIpcClient } from '@renderer/lib/ipc-client';
+import {
+  reposAddProject,
+  reposList,
+  reposRemoveProject,
+  getIpcClient,
+} from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListReposResp, RepoDto, RepoProjectDto } from '../../main/ipc/schema.js';
@@ -230,7 +235,11 @@ export const useRepoStore = defineStore('repo', () => {
    * 真 uuid 只能从 addProject 返回 / currentProject.id 来
    */
   function resolveProjectUuid(input: string): string | null {
-    if (currentProject.value && (currentProject.value.id === input || `${currentProject.value.owner}/${currentProject.value.name}` === input)) {
+    if (
+      currentProject.value &&
+      (currentProject.value.id === input ||
+        `${currentProject.value.owner}/${currentProject.value.name}` === input)
+    ) {
       return currentProject.value.id;
     }
     return null;

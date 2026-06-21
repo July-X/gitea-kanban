@@ -76,11 +76,7 @@ export interface UseKanbanMouseDragOptions {
   /** 列内所有 issue getter（按 columnId 返回） */
   getColumnIssues: (columnId: string) => IssueCardDto[];
   /** 拖动完成回调（caller 调 board.moveIssue / 等价） */
-  onMove: (
-    issue: IssueCardDto,
-    fromColumnId: string,
-    toColumnId: string,
-  ) => void | Promise<void>;
+  onMove: (issue: IssueCardDto, fromColumnId: string, toColumnId: string) => void | Promise<void>;
   /**
    * 可选：判断 columnId 是不是有效目标列。
    * 不传 = 不过滤（保留旧行为）。
@@ -109,9 +105,7 @@ export interface UseKanbanMouseDragReturn {
   clearGlow: () => void;
 }
 
-export function useKanbanMouseDrag(
-  options: UseKanbanMouseDragOptions,
-): UseKanbanMouseDragReturn {
+export function useKanbanMouseDrag(options: UseKanbanMouseDragOptions): UseKanbanMouseDragReturn {
   const dragOptions: Record<string, unknown> = {
     group: 'kanban-cards',
     animation: 150,
@@ -152,11 +146,9 @@ export function useKanbanMouseDrag(
         const targetSec = findColumnSection(el as HTMLElement | null);
         if (!targetSec) return;
         // 清掉其他列的 drop-target，只保留当前目标
-        document
-          .querySelectorAll<HTMLElement>(`.${DROP_TARGET_CLASS}`)
-          .forEach((node) => {
-            if (node !== targetSec) node.classList.remove(DROP_TARGET_CLASS);
-          });
+        document.querySelectorAll<HTMLElement>(`.${DROP_TARGET_CLASS}`).forEach((node) => {
+          if (node !== targetSec) node.classList.remove(DROP_TARGET_CLASS);
+        });
         targetSec.classList.add(DROP_TARGET_CLASS);
       };
       document.addEventListener('dragover', dragoverHandler, true);
@@ -169,11 +161,9 @@ export function useKanbanMouseDrag(
     const targetSec = findColumnSection(e.to);
     if (!targetSec) return;
     // 清掉其他列的 drop-target，只保留当前目标
-    document
-      .querySelectorAll<HTMLElement>(`.${DROP_TARGET_CLASS}`)
-      .forEach((el) => {
-        if (el !== targetSec) el.classList.remove(DROP_TARGET_CLASS);
-      });
+    document.querySelectorAll<HTMLElement>(`.${DROP_TARGET_CLASS}`).forEach((el) => {
+      if (el !== targetSec) el.classList.remove(DROP_TARGET_CLASS);
+    });
     targetSec.classList.add(DROP_TARGET_CLASS);
   }
 

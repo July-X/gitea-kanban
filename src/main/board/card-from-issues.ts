@@ -60,29 +60,27 @@ export async function listIssuesFromGitea(args: ListIssuesArgs): Promise<ListIss
     labelIds = mappings.map((m) => Number(m.giteaLabelId));
   }
 
- //2.调 gitea list issues
- const result = await listGiteaIssues({
- giteaUrl: proj.giteaUrl,
- username: proj.username,
- owner: proj.owner,
- repo: proj.repo,
- ...(args.state !== undefined ? { state: args.state } : {}),
- ...(labelIds !== undefined && labelIds.length >0 ? { labelIds: labelIds.map(String) } : {}),
- ...(args.q !== undefined ? { q: args.q } : {}),
- // a3 补：透传 assignee 到 gitea /issues?assigned_by=<username>（"我的卡片"用）
- //   不传 = 走 gitea 包装层原行为（不过滤 assignee，向后兼容）
- ...(args.assignee !== undefined && args.assignee.length > 0
- ? { assignee: args.assignee }
- : {}),
- page: args.page,
- limit: args.limit,
- });
+  //2.调 gitea list issues
+  const result = await listGiteaIssues({
+    giteaUrl: proj.giteaUrl,
+    username: proj.username,
+    owner: proj.owner,
+    repo: proj.repo,
+    ...(args.state !== undefined ? { state: args.state } : {}),
+    ...(labelIds !== undefined && labelIds.length > 0 ? { labelIds: labelIds.map(String) } : {}),
+    ...(args.q !== undefined ? { q: args.q } : {}),
+    // a3 补：透传 assignee 到 gitea /issues?assigned_by=<username>（"我的卡片"用）
+    //   不传 = 走 gitea 包装层原行为（不过滤 assignee，向后兼容）
+    ...(args.assignee !== undefined && args.assignee.length > 0 ? { assignee: args.assignee } : {}),
+    page: args.page,
+    limit: args.limit,
+  });
 
- //3.过滤掉 PR（看板只看纯 issue；gitea /issues会把 PR也列出来）
- const items: IssueCardDto[] = result.items.filter((it) => !it.isPullRequest);
+  //3.过滤掉 PR（看板只看纯 issue；gitea /issues会把 PR也列出来）
+  const items: IssueCardDto[] = result.items.filter((it) => !it.isPullRequest);
 
- return {
- items,
- hasMore: result.hasMore,
- };
+  return {
+    items,
+    hasMore: result.hasMore,
+  };
 }

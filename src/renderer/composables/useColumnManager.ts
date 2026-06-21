@@ -26,14 +26,10 @@ export interface UseColumnManagerReturn {
   showCreateColumn: ReturnType<typeof ref<boolean>>;
   newColumnTitle: ReturnType<typeof ref<string>>;
   creatingColumn: ReturnType<typeof ref<boolean>>;
-  showColumnMenu: ReturnType<
-    typeof ref<{ open: boolean; column: ColumnDto | null }>
-  >;
+  showColumnMenu: ReturnType<typeof ref<{ open: boolean; column: ColumnDto | null }>>;
   editingColumnTitle: ReturnType<typeof ref<string>>;
   editingColumnWipLimit: ReturnType<typeof ref<string>>;
-  confirmDeleteColumn: ReturnType<
-    typeof ref<{ open: boolean; column: ColumnDto | null }>
-  >;
+  confirmDeleteColumn: ReturnType<typeof ref<{ open: boolean; column: ColumnDto | null }>>;
   showBindLabel: ReturnType<typeof ref<boolean>>;
   bindingLabel: ReturnType<typeof ref<boolean>>;
   // handlers

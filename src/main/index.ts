@@ -57,10 +57,12 @@ if (!app.isPackaged) {
 // dev 模式跳过单实例锁（dev 启动频繁 + Electron 41 在 macOS sandbox 限制 userData
 // 写入导致 SingletonLock 创建失败 → 直接退出；prod 必须保留）
 const skipSingleton = !app.isPackaged && process.env['GITEA_KANBAN_SKIP_SINGLETON'] !== '0';
-const gotLock = skipSingleton ? true : app.requestSingleInstanceLock({
-  name: APP_SINGLE_INSTANCE_LOCK_NAME,
-  appName: APP_NAME,
-});
+const gotLock = skipSingleton
+  ? true
+  : app.requestSingleInstanceLock({
+      name: APP_SINGLE_INSTANCE_LOCK_NAME,
+      appName: APP_NAME,
+    });
 
 if (!gotLock) {
   // 第二实例：直接退出
@@ -129,7 +131,13 @@ app.on('ready', async () => {
       );
     }
   } catch (err) {
-    logger.error({ err: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined }, 'failed during app ready');
+    logger.error(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      },
+      'failed during app ready',
+    );
     app.quit();
   }
 });

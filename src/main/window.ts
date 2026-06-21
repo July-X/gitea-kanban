@@ -45,14 +45,12 @@ export function getMainWindow(): BrowserWindow | null {
  *
  * 2026-06-11 修复 CSP 重装：cspInstalled 守卫**只**挡重复 webRequest 注册；
  * 真正的 CSP 拼接每次按 giteaUrl 重算（auth connect 后**重新设置**响应头）。
- * 实现：先 removeListener 旧的再重新注册（用 onHeadersReceived 返回的 listener 句柄）。
+ *
+ * 2026-06-20 修复 Electron 41 webRequest 重装：onHeadersReceived 不是 EventEmitter，
+ * 没有 removeListener/off；清理旧 listener 必须调用 onHeadersReceived(null)，否则首次
+ * installCspHeader(null) 的 img-src 会一直生效，后续 Gitea 头像仍被旧 CSP 拦。
  */
-let cspListener:
-  | ((
-      details: Electron.OnHeadersReceivedListenerDetails,
-      callback: (response: Electron.HeadersReceivedResponse) => void,
-    ) => void)
-  | null = null;
+let cspInstalled = false;
 
 /**
  * 主题 bootstrap inline script 的 SHA-256（对应 src/renderer/index.html line 49-58）。
@@ -119,25 +117,17 @@ export function installCspHeader(giteaUrl: string | null = null): void {
     "frame-ancestors 'none'",
   ].join('; ');
 
-  // 如果之前注册过 listener，先摘掉（重装支持 giteaUrl 变化）
-  if (cspListener) {
-    // Electron webRequest API：Node EventEmitter 用 removeListener()；
-    // Electron 41 webRequest 不暴露 .off()（曾误用报 TypeError → uncaughtException）。
-    // 兜底：优先 removeListener，fallback to off() 以兼容未来改名。
-    const wr = session.defaultSession.webRequest.onHeadersReceived as unknown as {
-      removeListener?: (l: unknown) => void;
-      off?: (l: unknown) => void;
-    };
-    if (typeof wr.removeListener === 'function') {
-      wr.removeListener(cspListener);
-    } else if (typeof wr.off === 'function') {
-      wr.off(cspListener);
-    } else {
-      logger.warn('CSP listener: cannot remove previous (no removeListener/off); skipping reinstall');
-    }
+  // 如果之前注册过 listener，先摘掉（重装支持 giteaUrl 变化）。
+  // Electron 41 的 webRequest.onHeadersReceived 不是 EventEmitter，不能 removeListener/off；
+  // 官方签名用 null 清理旧 listener，再注册新 listener。
+  if (cspInstalled) {
+    session.defaultSession.webRequest.onHeadersReceived(null);
   }
 
-  cspListener = (details, cb) => {
+  const cspListener = (
+    details: Electron.OnHeadersReceivedListenerDetails,
+    cb: (response: Electron.HeadersReceivedResponse) => void,
+  ) => {
     cb({
       responseHeaders: {
         ...details.responseHeaders,
@@ -146,6 +136,7 @@ export function installCspHeader(giteaUrl: string | null = null): void {
     });
   };
   session.defaultSession.webRequest.onHeadersReceived(cspListener);
+  cspInstalled = true;
   logger.info({ csp }, 'CSP header installed');
 }
 

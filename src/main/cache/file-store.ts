@@ -41,7 +41,16 @@
  * - 启动期 GC：扫 ~500 文件按 mtime 倒序删到 LRU 预算内 ≈ 50ms
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, readFileSync, renameSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+  readFileSync,
+  renameSync,
+} from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { pino } from 'pino';
 
@@ -62,8 +71,8 @@ function makeEntryPath(rootDir: string, resource: string, projectId: string, key
  * - 兜底 ~/.gitea-kanban/cache
  */
 export function resolveCacheDir(): string {
-  const dataDir = process.env['GITEA_KANBAN_DATA_DIR']
-    ?? join(process.env['HOME'] ?? '/tmp', '.gitea-kanban');
+  const dataDir =
+    process.env['GITEA_KANBAN_DATA_DIR'] ?? join(process.env['HOME'] ?? '/tmp', '.gitea-kanban');
   if (!isAbsolute(dataDir)) {
     throw new Error(`data dir must be absolute, got: ${dataDir}`);
   }
@@ -84,11 +93,7 @@ export function resolveCacheDir(): string {
  *    **不**主动删（等下次启动期 GC 或 invalidate 触发）
  * 4. 命中 → 返 payload
  */
-export function getCache<T>(args: {
-  resource: string;
-  projectId: string;
-  key: string;
-}): T | null {
+export function getCache<T>(args: { resource: string; projectId: string; key: string }): T | null {
   const file = makeEntryPath(resolveCacheDir(), args.resource, args.projectId, args.key);
   if (!existsSync(file)) return null;
 
@@ -161,10 +166,7 @@ export function setCache<T>(args: {
   writeFileSync(tmp, raw, { mode: 0o600 });
   renameSync(tmp, file);
 
-  log.debug(
-    { file, bytes: raw.length, ttl: args.ttlSeconds },
-    'fileStore.set: written',
-  );
+  log.debug({ file, bytes: raw.length, ttl: args.ttlSeconds }, 'fileStore.set: written');
 }
 
 /**

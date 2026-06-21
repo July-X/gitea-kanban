@@ -158,7 +158,7 @@ const showClosedLocal = ref(false);
    旧版只有 opacity:0.85，缺 background/border-radius/box-shadow + header padding/border-bottom，
    视觉跟普通列不匹配。 */
 .column--unassigned {
-  flex: 0 0 280px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   max-height: 100%;

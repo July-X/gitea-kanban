@@ -83,11 +83,7 @@ export const useMyCardStore = defineStore('my-card', () => {
    * @param assignee gitea username（用 auth.currentUser.login）
    * @param reset 强制刷新
    */
-  async function list(
-    projectId: string,
-    assignee: string,
-    reset = true,
-  ): Promise<void> {
+  async function list(projectId: string, assignee: string, reset = true): Promise<void> {
     loading.value = true;
     useGlobalLoadingStore().show('myCard');
     error.value = null;

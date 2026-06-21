@@ -44,10 +44,10 @@ type MdToken = ReturnType<MdInstance['parse']>[number];
  * 线）。v1.2 评论 / 议题正文不需要内嵌 HTML。
  */
 const md = new MarkdownIt({
-  html: false,           // 不解析原 HTML（防 XSS 突破口；交给 DOMPurify 也行但这里更省）
-  linkify: true,         // 自动识别 URL 转链接（gitea 也开）
-  breaks: true,          // 换行 → <br>（gitea 评论习惯）
-  typographer: false,    // 关闭智能引号 / 破折号（避免和中文排版冲突）
+  html: false, // 不解析原 HTML（防 XSS 突破口；交给 DOMPurify 也行但这里更省）
+  linkify: true, // 自动识别 URL 转链接（gitea 也开）
+  breaks: true, // 换行 → <br>（gitea 评论习惯）
+  typographer: false, // 关闭智能引号 / 破折号（避免和中文排版冲突）
 });
 
 // 渲染时给所有 <a> 自动加 target=_blank + rel=noopener noreferrer
@@ -98,19 +98,41 @@ md.renderer.rules.link_open = function linkOpen(
  */
 const ALLOWED_TAGS = [
   // 文本结构
-  'p', 'br', 'hr', 'blockquote',
+  'p',
+  'br',
+  'hr',
+  'blockquote',
   // 标题
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
   // 列表
-  'ul', 'ol', 'li',
+  'ul',
+  'ol',
+  'li',
   // 强调
-  'strong', 'em', 'del', 's', 'ins', 'mark',
+  'strong',
+  'em',
+  'del',
+  's',
+  'ins',
+  'mark',
   // 代码
-  'code', 'pre',
+  'code',
+  'pre',
   // 链接 / 图片
-  'a', 'img',
+  'a',
+  'img',
   // 表格
-  'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  'table',
+  'thead',
+  'tbody',
+  'tr',
+  'th',
+  'td',
   // 行内
   'span',
 ];
@@ -163,6 +185,8 @@ export function renderMarkdown(source: string | null | undefined): string {
  */
 export function renderPlain(source: string | null | undefined): string {
   if (!source) return '';
-  return DOMPurify.sanitize(source, { ALLOWED_TAGS: ['br'], ALLOWED_ATTR: [] })
-    .replace(/\n/g, '<br>');
+  return DOMPurify.sanitize(source, { ALLOWED_TAGS: ['br'], ALLOWED_ATTR: [] }).replace(
+    /\n/g,
+    '<br>',
+  );
 }

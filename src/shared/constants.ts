@@ -27,17 +27,17 @@ export const CACHE_TTL_DEFAULT_SECONDS = 300; // 5 min
 
 /** 资源级 TTL（02-architecture.md §6.2 / §6.3 表格） */
 export const CACHE_TTL = {
-  REPO: 30 * 60,         // 30 min
-  BRANCH: 5 * 60,        // 5 min
-  COMMIT: 10 * 60,       // 10 min
-  PULL: 2 * 60,          // 2 min
-  ISSUE: 5 * 60,         // 5 min
-  HOOK: 60 * 60,         // 1 h
+  REPO: 30 * 60, // 30 min
+  BRANCH: 5 * 60, // 5 min
+  COMMIT: 10 * 60, // 10 min
+  PULL: 2 * 60, // 2 min
+  ISSUE: 5 * 60, // 5 min
+  HOOK: 60 * 60, // 1 h
 } as const;
 
 /** 后台轮询周期（毫秒）—— v1 默认不开 webhook server */
 export const POLL_INTERVALS_MS = {
-  PULL: 30 * 1000,       // 30 s
+  PULL: 30 * 1000, // 30 s
   COMMIT: 2 * 60 * 1000, // 2 min
   BRANCH: 5 * 60 * 1000, // 5 min
 } as const;

@@ -99,10 +99,7 @@ function getTheme(_args: ThemeGetArgs): ThemeGetResult {
   const stored = state.prefs[THEME_PREF_KEY];
 
   if (stored === undefined) {
-    logger.info(
-      { key: THEME_PREF_KEY },
-      'theme pref not set, returning default',
-    );
+    logger.info({ key: THEME_PREF_KEY }, 'theme pref not set, returning default');
     return {
       theme: DEFAULT_THEME,
       changedAt: new Date().toISOString(),

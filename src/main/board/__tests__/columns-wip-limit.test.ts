@@ -48,16 +48,9 @@ vi.mock('../resolveProject.js', () => ({
   resolveProject: mocks.resolveProject,
 }));
 
-import {
-  createColumn,
-  updateColumn,
-} from '../columns.js';
+import { createColumn, updateColumn } from '../columns.js';
 import { IpcError, IpcErrorCode } from '@shared/errors';
-import {
-  initLocalStore,
-  getLocalStore,
-  _resetLocalStoreForTest,
-} from '../../local/state.js';
+import { initLocalStore, getLocalStore, _resetLocalStoreForTest } from '../../local/state.js';
 import type { BoardColumn, RepoProject } from '../../local/state.js';
 
 let TMP_DIR: string;
@@ -156,7 +149,9 @@ describe('updateColumn — WIP 上限（plan_25cc4562 · Task B）', () => {
     expect(updated.wipLimit).toBe(5);
 
     // 落 localStore 也确实是 5（**不**只是 DTO 透传）
-    const row = getLocalStore().get().columns.find((c) => c.id === col.id);
+    const row = getLocalStore()
+      .get()
+      .columns.find((c) => c.id === col.id);
     expect(row).toBeDefined();
     expect(row!.wipLimit).toBe(5);
   });
@@ -165,9 +160,7 @@ describe('updateColumn — WIP 上限（plan_25cc4562 · Task B）', () => {
     seedProject('p1');
     seedColumn('c1', 'p1');
 
-    expect(() =>
-      updateColumn({ columnId: 'c1', patch: { wipLimit: 0 } }),
-    ).toThrow(IpcError);
+    expect(() => updateColumn({ columnId: 'c1', patch: { wipLimit: 0 } })).toThrow(IpcError);
     try {
       updateColumn({ columnId: 'c1', patch: { wipLimit: 0 } });
     } catch (e) {
@@ -176,7 +169,9 @@ describe('updateColumn — WIP 上限（plan_25cc4562 · Task B）', () => {
     }
 
     // localStore 不动
-    const row = getLocalStore().get().columns.find((c) => c.id === 'c1');
+    const row = getLocalStore()
+      .get()
+      .columns.find((c) => c.id === 'c1');
     expect(row!.wipLimit).toBeUndefined(); // 没设过上限
   });
 
@@ -184,9 +179,7 @@ describe('updateColumn — WIP 上限（plan_25cc4562 · Task B）', () => {
     seedProject('p1');
     seedColumn('c1', 'p1');
 
-    expect(() =>
-      updateColumn({ columnId: 'c1', patch: { wipLimit: -1 } }),
-    ).toThrow(IpcError);
+    expect(() => updateColumn({ columnId: 'c1', patch: { wipLimit: -1 } })).toThrow(IpcError);
     try {
       updateColumn({ columnId: 'c1', patch: { wipLimit: -1 } });
     } catch (e) {
@@ -199,9 +192,7 @@ describe('updateColumn — WIP 上限（plan_25cc4562 · Task B）', () => {
     seedProject('p1');
     seedColumn('c1', 'p1');
 
-    expect(() =>
-      updateColumn({ columnId: 'c1', patch: { wipLimit: 3.5 } }),
-    ).toThrow(IpcError);
+    expect(() => updateColumn({ columnId: 'c1', patch: { wipLimit: 3.5 } })).toThrow(IpcError);
     try {
       updateColumn({ columnId: 'c1', patch: { wipLimit: 3.5 } });
     } catch (e) {

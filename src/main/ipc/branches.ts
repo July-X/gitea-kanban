@@ -15,7 +15,7 @@
  */
 
 import { ipcMain } from 'electron';
-import { resolveProject } from "../board/resolveProject.js";
+import { resolveProject } from '../board/resolveProject.js';
 import { IpcError, IpcErrorCode, validationFailed } from '@shared/errors';
 import {
   IpcChannel,
@@ -28,10 +28,7 @@ import {
   type ListBranchesResp,
   type BranchDto,
 } from './schema.js';
-import {
-  listGiteaBranches,
-  renameGiteaBranch,
-} from '../gitea/branches.js';
+import { listGiteaBranches, renameGiteaBranch } from '../gitea/branches.js';
 import {
   listStarredBranches,
   setStarred as _setStarred,
@@ -94,7 +91,13 @@ function makeCacheKey(args: ListBranchesArgs): string {
 async function branchesListHandler(args: ListBranchesArgs): Promise<ListBranchesResp> {
   const start = Date.now();
   const op = 'branches.list';
-  logger.info({ op, args: { projectId: args.projectId, query: args.query, page: args.page, limit: args.limit } }, 'ipc start');
+  logger.info(
+    {
+      op,
+      args: { projectId: args.projectId, query: args.query, page: args.page, limit: args.limit },
+    },
+    'ipc start',
+  );
 
   // 1. cache hit
   const cacheKey = makeCacheKey(args);
@@ -102,7 +105,10 @@ async function branchesListHandler(args: ListBranchesArgs): Promise<ListBranches
   if (cached) {
     try {
       const parsed = JSON.parse(cached) as ListBranchesResp;
-      logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true }, 'ipc done');
+      logger.info(
+        { op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true },
+        'ipc done',
+      );
       return parsed;
     } catch {
       // 损坏 = miss
@@ -143,7 +149,10 @@ async function branchesListHandler(args: ListBranchesArgs): Promise<ListBranches
   // 6. 写缓存
   setBranchesCache({ projectId: args.projectId, cacheKey, payload: JSON.stringify(resp) });
 
-  logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
+  logger.info(
+    { op, latencyMs: Date.now() - start, resultSize: items.length, hit: false },
+    'ipc done',
+  );
   return resp;
 }
 
@@ -183,7 +192,10 @@ async function branchesRenameHandler(args: RenameBranchArgs): Promise<BranchDto>
   _setStarred({ projectId: args.projectId, branch: args.newName, starred: true });
   _setStarred({ projectId: args.projectId, branch: args.oldName, starred: false });
 
-  logger.info({ op, latencyMs: Date.now() - start, oldName: args.oldName, newName: args.newName }, 'ipc done');
+  logger.info(
+    { op, latencyMs: Date.now() - start, oldName: args.oldName, newName: args.newName },
+    'ipc done',
+  );
   return { ...renamed, isDefault: false };
 }
 
@@ -192,7 +204,10 @@ async function branchesRenameHandler(args: RenameBranchArgs): Promise<BranchDto>
 async function branchesStarHandler(args: StarBranchArgs): Promise<void> {
   const start = Date.now();
   const op = 'branches.star';
-  logger.info({ op, args: { projectId: args.projectId, branch: args.branch, starred: args.starred } }, 'ipc start');
+  logger.info(
+    { op, args: { projectId: args.projectId, branch: args.branch, starred: args.starred } },
+    'ipc start',
+  );
   // ADR-0003 Phase 3：走 dispatch（纯本地 op，仅改 localStore.starredBranches）
   await dispatch('branches.star', args);
   logger.info({ op, latencyMs: Date.now() - start }, 'ipc done');

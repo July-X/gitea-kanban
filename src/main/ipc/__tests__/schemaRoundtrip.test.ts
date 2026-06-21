@@ -83,59 +83,156 @@ const giteaCollaborators = giteaCollaboratorsJson as unknown[];
 
 // ===== gitea 原始响应 raw shape（swag 1.26 实际字段；gitea-js 1.23 类型已覆盖） =====
 
-type GiteaRef = { ref?: string; sha?: string; label?: string; repo_id?: number; repo?: Record<string, unknown> };
-type GiteaUser = { login?: string; login_name?: string; full_name?: string; email?: string; avatar_url?: string; id?: number; [k: string]: unknown };
+type GiteaRef = {
+  ref?: string;
+  sha?: string;
+  label?: string;
+  repo_id?: number;
+  repo?: Record<string, unknown>;
+};
+type GiteaUser = {
+  login?: string;
+  login_name?: string;
+  full_name?: string;
+  email?: string;
+  avatar_url?: string;
+  id?: number;
+  [k: string]: unknown;
+};
 type GiteaPR = {
-  id?: number; number?: number; url?: string; diff_url?: string; patch_url?: string; html_url?: string;
-  state?: string; title?: string; body?: string; draft?: boolean; mergeable?: boolean; merged?: boolean;
-  merged_at?: string; merge_commit_sha?: string; merged_by?: GiteaUser | null;
-  base?: GiteaRef; head?: GiteaRef;
-  user?: GiteaUser; assignees?: GiteaUser[] | null; requested_reviewers?: GiteaUser[] | null;
-  milestone?: Record<string, unknown> | null; labels?: Array<Record<string, unknown>>;
-  created_at?: string; updated_at?: string; closed_at?: string; due_date?: string | null;
-  additions?: number; deletions?: number; changed_files?: number; comments?: number;
-  review_comments?: number; allow_maintainer_edit?: boolean; merge_base?: string;
-  pin_order?: number; is_locked?: boolean; content_version?: number;
+  id?: number;
+  number?: number;
+  url?: string;
+  diff_url?: string;
+  patch_url?: string;
+  html_url?: string;
+  state?: string;
+  title?: string;
+  body?: string;
+  draft?: boolean;
+  mergeable?: boolean;
+  merged?: boolean;
+  merged_at?: string;
+  merge_commit_sha?: string;
+  merged_by?: GiteaUser | null;
+  base?: GiteaRef;
+  head?: GiteaRef;
+  user?: GiteaUser;
+  assignees?: GiteaUser[] | null;
+  requested_reviewers?: GiteaUser[] | null;
+  milestone?: Record<string, unknown> | null;
+  labels?: Array<Record<string, unknown>>;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string;
+  due_date?: string | null;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+  comments?: number;
+  review_comments?: number;
+  allow_maintainer_edit?: boolean;
+  merge_base?: string;
+  pin_order?: number;
+  is_locked?: boolean;
+  content_version?: number;
 };
 type GiteaCommitFile = {
-  filename: string; status?: string; additions?: number; deletions?: number;
-  changes?: number; previous_filename?: string; binary_file?: boolean;
+  filename: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  changes?: number;
+  previous_filename?: string;
+  binary_file?: boolean;
 };
 type GiteaCommitListItem = {
-  sha: string; url?: string; html_url?: string;
-  commit?: { message?: string; author?: { name?: string; email?: string; date?: string }; committer?: { name?: string; email?: string; date?: string }; tree?: Record<string, unknown>; verification?: Record<string, unknown> };
-  author?: GiteaUser; committer?: GiteaUser;
+  sha: string;
+  url?: string;
+  html_url?: string;
+  commit?: {
+    message?: string;
+    author?: { name?: string; email?: string; date?: string };
+    committer?: { name?: string; email?: string; date?: string };
+    tree?: Record<string, unknown>;
+    verification?: Record<string, unknown>;
+  };
+  author?: GiteaUser;
+  committer?: GiteaUser;
   parents?: Array<{ sha: string; url?: string; created?: string }>;
-  files?: GiteaCommitFile[]; stats?: { total?: number; additions?: number; deletions?: number };
+  files?: GiteaCommitFile[];
+  stats?: { total?: number; additions?: number; deletions?: number };
   created?: string;
 };
 type GiteaIssue = {
-  id?: number; number?: number; url?: string; html_url?: string;
-  state?: string; title?: string; body?: string; user?: GiteaUser;
+  id?: number;
+  number?: number;
+  url?: string;
+  html_url?: string;
+  state?: string;
+  title?: string;
+  body?: string;
+  user?: GiteaUser;
   labels?: Array<{ id: number; name: string; color: string; description?: string }>;
-  assignee?: GiteaUser | null; assignees?: GiteaUser[] | null;
+  assignee?: GiteaUser | null;
+  assignees?: GiteaUser[] | null;
   milestone?: Record<string, unknown> | null;
-  created_at?: string; updated_at?: string; closed_at?: string; due_date?: string | null;
-  comments?: number; is_locked?: boolean; pin_order?: number; content_version?: number;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string;
+  due_date?: string | null;
+  comments?: number;
+  is_locked?: boolean;
+  pin_order?: number;
+  content_version?: number;
   pull_request?: Record<string, unknown> | null;
-  repository?: Record<string, unknown>; ref?: string;
-  original_author?: string; original_author_id?: number; time_estimate?: number; assets?: unknown[];
+  repository?: Record<string, unknown>;
+  ref?: string;
+  original_author?: string;
+  original_author_id?: number;
+  time_estimate?: number;
+  assets?: unknown[];
 };
 type GiteaRepo = {
-  id: number; name: string; full_name: string; description?: string;
-  default_branch?: string; private?: boolean; archived?: boolean;
-  owner?: GiteaUser; updated_at?: string;
+  id: number;
+  name: string;
+  full_name: string;
+  description?: string;
+  default_branch?: string;
+  private?: boolean;
+  archived?: boolean;
+  owner?: GiteaUser;
+  updated_at?: string;
   permissions?: { pull?: boolean; push?: boolean; admin?: boolean };
   [k: string]: unknown;
 };
 type GiteaBranch = {
-  name: string; protected?: boolean;
-  commit?: { id?: string; sha?: string; url?: string; message?: string; author?: { name?: string; email?: string; username?: string }; commit?: { message?: string; author?: { date?: string; name?: string; email?: string } } };
-  effective_branch_protection_name?: string; enable_status_check?: boolean;
-  required_approvals?: number; status_check_contexts?: string[];
-  user_can_merge?: boolean; user_can_push?: boolean;
+  name: string;
+  protected?: boolean;
+  commit?: {
+    id?: string;
+    sha?: string;
+    url?: string;
+    message?: string;
+    author?: { name?: string; email?: string; username?: string };
+    commit?: { message?: string; author?: { date?: string; name?: string; email?: string } };
+  };
+  effective_branch_protection_name?: string;
+  enable_status_check?: boolean;
+  required_approvals?: number;
+  status_check_contexts?: string[];
+  user_can_merge?: boolean;
+  user_can_push?: boolean;
 };
-type GiteaLabel = { id: number; name: string; color: string; description?: string; exclusive?: boolean; is_archived?: boolean; url?: string };
+type GiteaLabel = {
+  id: number;
+  name: string;
+  color: string;
+  description?: string;
+  exclusive?: boolean;
+  is_archived?: boolean;
+  url?: string;
+};
 type GiteaCollaborator = GiteaUser;
 
 // ===== toDto adapters (MIRRORS src/main/gitea/*.ts) =====
@@ -173,7 +270,10 @@ function toCommitDtoFromList(raw: GiteaCommitListItem): CommitDto {
     shortSha: raw.sha.slice(0, 7),
     message: c.message ?? '',
     author: { name: author.name ?? '', ...(author.email ? { email: author.email } : {}) },
-    committer: { name: committer.name ?? '', ...(committer.email ? { email: committer.email } : {}) },
+    committer: {
+      name: committer.name ?? '',
+      ...(committer.email ? { email: committer.email } : {}),
+    },
     date: author.date ?? new Date(0).toISOString(),
     parents: Array.isArray(raw.parents) ? raw.parents.map((p) => p.sha) : [],
   };
@@ -417,7 +517,9 @@ describe('schema 完整性 roundtrip — 用真实 gitea 1.x 响应（fixtures/�
   describe('BranchDtoSchema / ListBranchesRespSchema', () => {
     it('ListBranchesRespSchema.parse({items: giteaBranchList.map(toDto), ...}) PASS', () => {
       // gitea 端 branches 列表**不**含 isDefault 标志，用 fixture 第 0 条（'main'）= true
-      const items = giteaBranchList.map((b) => toBranchDto(b as GiteaBranch, (b as GiteaBranch).name === 'main'));
+      const items = giteaBranchList.map((b) =>
+        toBranchDto(b as GiteaBranch, (b as GiteaBranch).name === 'main'),
+      );
       const r = ListBranchesRespSchema.safeParse({
         items,
         total: items.length,

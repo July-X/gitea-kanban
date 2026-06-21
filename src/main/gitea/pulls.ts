@@ -42,7 +42,7 @@ function toPullDto(r: PullRequest): PullDto {
   return {
     index: number,
     title: r.title ?? '',
-    state: (r.state === 'closed' ? 'closed' : 'open'),
+    state: r.state === 'closed' ? 'closed' : 'open',
     draft: Boolean(r.draft),
     merged: Boolean(r.merged),
     head: { ref: r.head?.ref ?? '', sha: r.head?.sha ?? '' },
@@ -57,15 +57,15 @@ function toPullDto(r: PullRequest): PullDto {
     // 关键映射：gitea mergeable=false → 我们 hasConflicts=true
     hasConflicts: !mergeable,
     // ===== v1.1 补充字段 =====
-    labels: (r.labels ?? []).map(l => ({
+    labels: (r.labels ?? []).map((l) => ({
       id: l.id ?? 0,
       name: l.name ?? '',
       color: l.color ?? '#ccc',
     })),
     milestone: r.milestone ? { id: r.milestone.id ?? 0, title: r.milestone.title ?? '' } : null,
     assignee: r.assignee ? { username: r.assignee.login ?? '' } : null,
-    assignees: (r.assignees ?? []).map(a => ({ username: a.login ?? '' })),
-    reviewers: (r.requested_reviewers ?? []).map(u => ({ username: u.login ?? '' })),
+    assignees: (r.assignees ?? []).map((a) => ({ username: a.login ?? '' })),
+    reviewers: (r.requested_reviewers ?? []).map((u) => ({ username: u.login ?? '' })),
     mergedBy: r.merged_by ? { username: r.merged_by.login ?? '' } : null,
     commentsCount: r.comments ?? 0,
     body: r.body ?? '',
@@ -177,7 +177,9 @@ export async function mergeGiteaPull(args: {
   try {
     const res = await api.repos.repoMergePullRequest(args.owner, args.repo, args.index, {
       Do: args.method,
-      ...(args.deleteBranchAfter !== undefined ? { delete_branch_after_merge: args.deleteBranchAfter } : {}),
+      ...(args.deleteBranchAfter !== undefined
+        ? { delete_branch_after_merge: args.deleteBranchAfter }
+        : {}),
       ...(args.commitMessage !== undefined ? { MergeMessageField: args.commitMessage } : {}),
     });
     // 合并成功时 gitea 通常 200 + 空 body；gitea-js res.data 是 void
@@ -190,7 +192,9 @@ export async function mergeGiteaPull(args: {
       };
     }
     // 失败时 gitea-js res.data 也有内容，统一丢给 unwrapGitea 抛 IpcError
-    const raw = unwrapGitea(res, `合并 PR #${args.index}失败`) as { sha?: string; merged?: boolean; message?: string } | undefined;
+    const raw = unwrapGitea(res, `合并 PR #${args.index}失败`) as
+      | { sha?: string; merged?: boolean; message?: string }
+      | undefined;
     return {
       sha: raw?.sha ?? '',
       merged: raw?.merged ?? true,

@@ -96,7 +96,9 @@ function makeIssueDto(overrides: Record<string, unknown> = {}) {
  * 实现：ipcMain.handle mock 把 (channel, cb) 推到 globalThis.__ipcHandlers Map；
  * 这样多个 describe 共享同一份 handler registry（不会因 beforeEach 重设 mockImplementation 而丢）。*/
 function getHandler(channel: string): (rawArgs: unknown) => Promise<unknown> {
-  const registry = (globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }).__ipcHandlers;
+  const registry = (
+    globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> }
+  ).__ipcHandlers;
   if (!registry) throw new Error('__ipcHandlers registry not initialized');
   return (rawArgs) => {
     const fn = registry.get(channel);
@@ -111,7 +113,9 @@ describe('ipc/issues · list / get / create / update + label actions', () => {
     const electron = await import('electron');
     const ipcMainMock = vi.mocked(electron.ipcMain);
     ipcMainMock.handle.mockImplementation((channel: unknown, cb: unknown) => {
-      const g = globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> };
+      const g = globalThis as {
+        __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>>;
+      };
       if (!g.__ipcHandlers) g.__ipcHandlers = new Map();
       g.__ipcHandlers.set(channel as string, cb as (e: unknown, a: unknown) => Promise<unknown>);
     });
@@ -149,7 +153,7 @@ describe('ipc/issues · list / get / create / update + label actions', () => {
     const dto = makeIssueDto();
     mocks.listIssuesFromGitea.mockResolvedValueOnce({ items: [dto], hasMore: false });
     const result = (await getHandler('issues.list')({ projectId: PROJECT_ID })) as {
-      items: typeof dto[];
+      items: (typeof dto)[];
     };
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.title).toBe('A');
@@ -158,7 +162,10 @@ describe('ipc/issues · list / get / create / update + label actions', () => {
   it('issues.get → 调 getGiteaIssue 返 IssueDto', async () => {
     const dto = makeIssueDto({ index: 42 });
     mocks.getGiteaIssue.mockResolvedValueOnce(dto);
-    const result = (await getHandler('issues.get')({ projectId: PROJECT_ID, issueIndex: 42 })) as typeof dto;
+    const result = (await getHandler('issues.get')({
+      projectId: PROJECT_ID,
+      issueIndex: 42,
+    })) as typeof dto;
     expect(result.index).toBe(42);
   });
 
@@ -220,7 +227,9 @@ describe('ipc/issues · comment.list / comment.create', () => {
     const electron = await import('electron');
     const ipcMainMock = vi.mocked(electron.ipcMain);
     ipcMainMock.handle.mockImplementation((channel: unknown, cb: unknown) => {
-      const g = globalThis as { __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>> };
+      const g = globalThis as {
+        __ipcHandlers?: Map<string, (e: unknown, a: unknown) => Promise<unknown>>;
+      };
       if (!g.__ipcHandlers) g.__ipcHandlers = new Map();
       g.__ipcHandlers.set(channel as string, cb as (e: unknown, a: unknown) => Promise<unknown>);
     });
@@ -255,7 +264,13 @@ describe('ipc/issues · comment.list / comment.create', () => {
 
   it('issues.comment.list → 返 IssueCommentDto[]', async () => {
     mocks.listGiteaIssueComments.mockResolvedValueOnce([
-      { id: 100, body: 'first', createdAt: '2026-06-01T00:00:00Z', updatedAt: '2026-06-01T00:00:00Z', author: { username: 'tester' } },
+      {
+        id: 100,
+        body: 'first',
+        createdAt: '2026-06-01T00:00:00Z',
+        updatedAt: '2026-06-01T00:00:00Z',
+        author: { username: 'tester' },
+      },
     ]);
     const result = (await getHandler('issues.comment.list')({
       projectId: PROJECT_ID,
@@ -266,7 +281,13 @@ describe('ipc/issues · comment.list / comment.create', () => {
   });
 
   it('issues.comment.create → 调 createGiteaIssueComment 返 IssueCommentDto', async () => {
-    const dto = { id: 101, body: 'reply', createdAt: '2026-06-01T00:00:00Z', updatedAt: '2026-06-01T00:00:00Z', author: { username: 'tester' } };
+    const dto = {
+      id: 101,
+      body: 'reply',
+      createdAt: '2026-06-01T00:00:00Z',
+      updatedAt: '2026-06-01T00:00:00Z',
+      author: { username: 'tester' },
+    };
     mocks.createGiteaIssueComment.mockResolvedValueOnce(dto);
     const result = (await getHandler('issues.comment.create')({
       projectId: PROJECT_ID,

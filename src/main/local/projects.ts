@@ -37,9 +37,7 @@ export function findProjectWithStore(
   return (
     state.projects.find(
       (p) =>
-        p.giteaAccountId === args.giteaAccountId &&
-        p.owner === args.owner &&
-        p.name === args.name,
+        p.giteaAccountId === args.giteaAccountId && p.owner === args.owner && p.name === args.name,
     ) ?? null
   );
 }

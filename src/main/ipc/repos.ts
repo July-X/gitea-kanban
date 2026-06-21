@@ -114,7 +114,18 @@ function makeCacheKey(args: ListReposArgs): string {
 async function reposListHandler(args: ListReposArgs): Promise<ListReposResp> {
   const start = Date.now();
   const op = 'repos.list';
-  logger.info({ op, args: { accountId: args.giteaAccountId, query: args.query, page: args.page, limit: args.limit } }, 'ipc start');
+  logger.info(
+    {
+      op,
+      args: {
+        accountId: args.giteaAccountId,
+        query: args.query,
+        page: args.page,
+        limit: args.limit,
+      },
+    },
+    'ipc start',
+  );
 
   // 1. cache hit
   const cacheKey = makeCacheKey(args);
@@ -122,7 +133,10 @@ async function reposListHandler(args: ListReposArgs): Promise<ListReposResp> {
   if (cached) {
     try {
       const parsed = JSON.parse(cached) as ListReposResp;
-      logger.info({ op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true }, 'ipc done');
+      logger.info(
+        { op, latencyMs: Date.now() - start, resultSize: parsed.items.length, hit: true },
+        'ipc done',
+      );
       return parsed;
     } catch {
       // 缓存 JSON 损坏 = 当作 miss，继续走 gitea
@@ -191,7 +205,10 @@ async function reposListHandler(args: ListReposArgs): Promise<ListReposResp> {
     payload: JSON.stringify(resp),
   });
 
-  logger.info({ op, latencyMs: Date.now() - start, resultSize: items.length, hit: false }, 'ipc done');
+  logger.info(
+    { op, latencyMs: Date.now() - start, resultSize: items.length, hit: false },
+    'ipc done',
+  );
   return resp;
 }
 
@@ -207,7 +224,10 @@ async function reposAddProjectHandler(args: AddProjectArgs): Promise<RepoProject
 
   // 2. 写 localStore（ADR-0003 Phase 3：走 dispatch，纯本地 op）
   //   业务函数是同步的，wrap 成 async execute 以匹配 OpHandler.execute 签名
-  const { result: project } = await dispatch<AddProjectArgs, RepoProjectDto>('repos.addProject', args);
+  const { result: project } = await dispatch<AddProjectArgs, RepoProjectDto>(
+    'repos.addProject',
+    args,
+  );
 
   logger.info({ op, latencyMs: Date.now() - start, projectId: project.id }, 'ipc done');
   return project;
