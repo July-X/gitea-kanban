@@ -80,10 +80,28 @@ export async function runGraphLog(
   if (opts.hidePRRefs) {
     args.push('--exclude=refs/pull/*');
   }
-  if (!opts.branches || opts.branches.length === 0) {
-    args.push('--tags', '--branches');
+  // 解析策略（与 Gitea router/web/repo/commit.go:147-152 一致）：
+  //
+  // 1. 始终加 `--branches` —— 让 git 把所有 local branches 当 refs，merge edge 才能跨分支
+  //    （否则 git log feature1 feature2 各自只 walk 自己的祖先，看不到 merge edge）
+  // 2. 用户传入的 branch 名是裸名（"main" / "feature/foo"，来自 gitea REST API），
+  //    git log 不能直接识别 → 自动加 "refs/heads/" 前缀
+  // 3. 若 branch 名已是 "refs/heads/X" / "refs/remotes/X" / "refs/tags/X" 全名，不动
+  args.push('--branches');
+  const branches = opts.branches && opts.branches.length > 0 ? opts.branches : null;
+  if (branches) {
+    for (const b of branches) {
+      // 全名（已含 ref 前缀）直接传
+      if (b.startsWith('refs/')) {
+        args.push(b);
+      } else {
+        // 裸名（gitea BranchDto.name）补 refs/heads/ 前缀
+        args.push(`refs/heads/${b}`);
+      }
+    }
   } else {
-    args.push(...opts.branches);
+    // 不传 branches 时，--branches 已包含所有 local branches；不再额外加 --tags
+    // （避免混搭远端 tag 让用户困惑；Gitea 默认也只显示 heads）
   }
   if (opts.maxCount && opts.maxCount > 0) {
     args.push(`-n`, String(opts.maxCount));
