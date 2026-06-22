@@ -69,6 +69,10 @@ const api = {
       ipcRenderer.invoke(IpcChannel.AUTH_CONNECT, { giteaUrl, token }),
     disconnect: (args: { giteaUrl: string }): Promise<unknown> =>
       ipcRenderer.invoke(IpcChannel.AUTH_DISCONNECT, args),
+    // v1.6 按 URL+username 删单个账号（区别于 disconnect 删整站）
+    disconnectOne: invoke(IpcChannel.AUTH_DISCONNECT_ONE),
+    // v1.6 切换当前活跃账号（重排 accounts 顺序）
+    switchAccount: invoke(IpcChannel.AUTH_SWITCH_ACCOUNT),
     status: invoke(IpcChannel.AUTH_STATUS),
   },
 
@@ -99,6 +103,10 @@ const api = {
     // v1.5.3 workspace：读 / 设置应用本地仓库工作区根目录
     gitgraphGetWorkspace: invoke(IpcChannel.COMMITS_GITGRAPH_GET_WORKSPACE),
     gitgraphSetWorkspace: invoke(IpcChannel.COMMITS_GITGRAPH_SET_WORKSPACE),
+    // v1.6 workspace 迁移：检测旧仓库 / 迁移 / 打开目录
+    gitgraphListWorkspaceRepos: invoke(IpcChannel.COMMITS_GITGRAPH_LIST_WORKSPACE_REPOS),
+    gitgraphMigrateWorkspace: invoke(IpcChannel.COMMITS_GITGRAPH_MIGRATE_WORKSPACE),
+    gitgraphOpenDirectory: invoke(IpcChannel.COMMITS_GITGRAPH_OPEN_DIRECTORY),
   },
 
   //===== pulls namespace =====

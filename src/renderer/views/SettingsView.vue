@@ -32,7 +32,13 @@ import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
-import { commitsGitgraphGetWorkspace, commitsGitgraphSetWorkspace, systemSelectDirectory } from '@renderer/lib/ipc-client';
+import {
+  commitsGitgraphGetWorkspace,
+  commitsGitgraphSetWorkspace,
+  commitsGitgraphListWorkspaceRepos,
+  systemSelectDirectory,
+} from '@renderer/lib/ipc-client';
+import WorkspaceMigrateDialog from '@renderer/components/WorkspaceMigrateDialog.vue';
 
 const settings = useSettingsStore();
 const ui = useUiStore();
@@ -49,6 +55,95 @@ const workspaceDefault = ref(true);
 const workspaceValidated = ref(true);
 const workspaceSaving = ref(false);
 const workspaceDraft = ref('');
+
+// ===== v1.6 workspace 迁移状态 =====
+interface MigrateRepoInfo {
+  name: string;
+  fullPath: string;
+  sizeBytes: number;
+}
+const migrateDialogOpen = ref(false);
+const migrateRepos = ref<MigrateRepoInfo[]>([]);
+const migrateTotalSize = ref(0);
+const migrateOldPath = ref('');
+const migrateNewPath = ref('');
+/** 暂存用户选好的新路径（等迁移对话框关闭后再持久化） */
+let pendingNewCwd: string | null = null;
+
+/**
+ * 检查旧工作区是否有仓库，有则弹迁移对话框；没有则直接保存新路径
+ *
+ * @param newCwd 用户选的新工作区路径
+ */
+async function checkAndSetWorkspace(newCwd: string): Promise<void> {
+  const oldCwd = workspacePath.value;
+  // 路径没变 → 不处理
+  if (!oldCwd || oldCwd === newCwd) {
+    await doSetWorkspace(newCwd);
+    return;
+  }
+
+  // 检查旧工作区是否有 repos
+  try {
+    const { repos, totalSizeBytes } = await commitsGitgraphListWorkspaceRepos({ cwd: oldCwd });
+    if (repos.length > 0) {
+      // 有仓库 → 弹迁移对话框
+      migrateRepos.value = repos;
+      migrateTotalSize.value = totalSizeBytes;
+      migrateOldPath.value = oldCwd;
+      migrateNewPath.value = newCwd;
+      pendingNewCwd = newCwd;
+      migrateDialogOpen.value = true;
+      return;
+    }
+  } catch {
+    // 检查失败 → 静默，直接保存
+  }
+
+  // 旧工作区没有仓库 → 直接保存
+  await doSetWorkspace(newCwd);
+}
+
+/** 真正执行 setWorkspace IPC 并更新本地状态 */
+async function doSetWorkspace(cwd: string): Promise<void> {
+  workspaceSaving.value = true;
+  try {
+    const resp = await commitsGitgraphSetWorkspace({ cwd });
+    workspacePath.value = resp.cwd;
+    workspaceDefault.value = false;
+    workspaceValidated.value = true;
+    workspaceDraft.value = resp.cwd;
+    showToast({
+      type: 'success',
+      message: '工作区已更新',
+      description: `Git Graph 仓库将同步到 ${resp.cwd}/repos/...`,
+    });
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string; hint?: string };
+    const msg = err.messageText ?? err.message ?? String(e) ?? '设置失败';
+    showToast({ type: 'error', message: msg });
+  } finally {
+    workspaceSaving.value = false;
+  }
+}
+
+/** 迁移对话框：用户选择迁移完成 */
+function onMigrateDone(result: { migratedCount: number; failed: Record<string, string> }): void {
+  // 迁移完成后，把新路径持久化
+  if (pendingNewCwd) {
+    void doSetWorkspace(pendingNewCwd);
+    pendingNewCwd = null;
+  }
+}
+
+/** 迁移对话框：用户选择跳过迁移 */
+function onMigrateSkip(): void {
+  // 跳过迁移也要更新工作区路径（只是不复制仓库）
+  if (pendingNewCwd) {
+    void doSetWorkspace(pendingNewCwd);
+    pendingNewCwd = null;
+  }
+}
 
 /** 启动期加载当前 workspace 设置 */
 (async (): Promise<void> => {
@@ -145,28 +240,16 @@ async function onWorkspaceSave(): Promise<void> {
     showToast({ type: 'info', message: '工作区路径未变，无需保存' });
     return;
   }
-  workspaceSaving.value = true;
-  try {
-    const resp = await commitsGitgraphSetWorkspace({ cwd });
-    workspacePath.value = resp.cwd;
-    workspaceDefault.value = false;
-    showToast({
-      type: 'success',
-      message: '工作区已更新',
-      description: `Git Graph 仓库将同步到 ${resp.cwd}/repos/...`,
-    });
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string; hint?: string };
-    const msg = err.messageText ?? err.message ?? String(e) ?? '设置失败';
-    showToast({ type: 'error', message: msg });
-  } finally {
-    workspaceSaving.value = false;
-  }
+  // 检查旧工作区是否有仓库需要迁移
+  await checkAndSetWorkspace(cwd);
 }
 
 /** 重置为默认路径 */
-function onWorkspaceReset(): void {
-  workspaceDraft.value = '~/.giteakanb/workspace（默认）';
+async function onWorkspaceReset(): Promise<void> {
+  // 默认路径是 ~/.gitea-kanban/workspace（main 端 resolveDefaultWorkspacePath 的值）
+  // 这里用 getWorkspace 拿 isDefault 来判断，或者直接用已知的默认值
+  const defaultHint = '~/.gitea-kanban/workspace';
+  workspaceDraft.value = defaultHint;
   showToast({ type: 'info', message: '已重置为默认路径，点「保存」生效' });
 }
 
@@ -176,8 +259,8 @@ async function onBrowseDirectory(): Promise<void> {
     const selected = await systemSelectDirectory();
     if (selected) {
       workspaceDraft.value = selected;
-      // 选择后立即保存
-      await onWorkspaceSave();
+      // 选择后检查旧仓库是否需要迁移
+      await checkAndSetWorkspace(selected);
     }
   } catch (e) {
     showToast({ type: 'error', message: '选择目录失败', description: String(e) });
@@ -418,7 +501,7 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
           </div>
         </div>
         <p class="settings__hint settings__hint--compact">
-          跨平台默认：macOS/Linux = <code>~/.giteakanb/workspace</code>；Windows = <code>%USERPROFILE%\.giteakanb\workspace</code>
+          跨平台默认：macOS/Linux = <code>~/.gitea-kanban/workspace</code>；Windows = <code>%USERPROFILE%\.gitea-kanban\workspace</code>
         </p>
       </section>
     </div>
@@ -511,7 +594,17 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
         </div>
       </div>
     </Teleport>
-  </div>
+
+    <!-- v1.6 工作区迁移对话框 -->
+    <WorkspaceMigrateDialog
+      v-model:open="migrateDialogOpen"
+      :repos="migrateRepos"
+      :total-size-bytes="migrateTotalSize"
+      :old-path="migrateOldPath"
+      :new-path="migrateNewPath"
+      @migrated="onMigrateDone"
+      @skip="onMigrateSkip"
+    />
 </template>
 
 <style scoped>

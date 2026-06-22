@@ -50,6 +50,7 @@ import { useRouter } from 'vue-router';
 import { showToast } from '@renderer/lib/toast';
 import { formatLastUpdated } from '@renderer/lib/last-updated';
 import EmptyState from '@renderer/components/EmptyState.vue';
+import AccountManagerDialog from '@renderer/components/AccountManagerDialog.vue';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
@@ -203,28 +204,17 @@ async function onThemeCycleClick(): Promise<void> {
   await ui.applyTheme(next);
 }
 
-/** 退出当前 gitea 账号（清 keychain + 内存），跳回 /auth */
-async function onLogoutClick(): Promise<void> {
-  const url = auth.currentGiteaUrl;
-  if (!url) return;
-  try {
-    await auth.disconnect(url);
-    repo.repos.length = 0; // 清空本地仓库缓存
-    repo.selectProject(null); // 清当前仓库（v1.4：登出时连带清空）
-    // v1.4 任务 #statusbar-persist:登出时清掉持久化仓库
-    // 让下次登录引导重新选,不"复活"已退账号的旧选择
-    void repo.persistLastSelected(null, null, '');
-    showToast({ type: 'success', message: '已退出登录' });
-    await router.push('/auth');
-  } catch (e) {
-    const err = e as { messageText?: string };
-    showToast({ type: 'error', message: '退出失败', description: err.messageText ?? '请稍后重试' });
-  }
+/** 退出按钮 → 打开账号管理弹窗 */
+const accountDialogOpen = ref(false);
+
+function onLogoutClick(): void {
+  accountDialogOpen.value = true;
 }
 </script>
 
 <template>
-  <footer class="statusbar" :data-state="connState" role="status" aria-live="polite">
+  <div class="statusbar-wrap">
+    <footer class="statusbar" :data-state="connState" role="status" aria-live="polite">
     <div class="statusbar__left">
       <span class="statusbar__chip" :class="`statusbar__chip--${connState}`">
         <component :is="stateIcon" :size="12" :stroke-width="2.5" aria-hidden="true" />
@@ -340,6 +330,10 @@ async function onLogoutClick(): Promise<void> {
       </button>
     </div>
   </footer>
+
+    <!-- 账号管理弹窗 -->
+    <AccountManagerDialog v-model:open="accountDialogOpen" />
+  </div>
 </template>
 
 <style scoped>

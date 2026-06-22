@@ -4,9 +4,9 @@
  * 设计（v1.5 重构：Git Graph 自动同步所选仓库到工作区）：
  * - **全局**配置（不是 per-project）；所有 gitgraph 仓库路径派生自此
  * - 持久化到 localStore.prefs['app.workspacePath']（沿用现有 prefs 通道，无需新 IPC 端点）
- * - 默认值：跨平台都用 `~/giteakanb/workspace`
- *   - macOS/Linux: `${HOME}/giteakanb/workspace`（与 Gitea 官方风格一致）
- *   - Windows: `${USERPROFILE}\giteakanb\workspace`（`path.resolve('~')` 兼容）
+ * - 默认值：跨平台都用 `~/.gitea-kanban/workspace`
+ *   - macOS/Linux: `${HOME}/.gitea-kanban/workspace`
+ *   - Windows: `${USERPROFILE}\.gitea-kanban\workspace`
  *
  * 与现有 GITEA_KANBAN_DATA_DIR 的关系：
  *   - **不**替换 GITEA_KANBAN_DATA_DIR（那个管 state.json / cache / queue / logs）
@@ -37,15 +37,15 @@ async function log(level: 'info' | 'warn', payload: Record<string, unknown>, msg
 /** prefs key（全局 workspace 路径；非 per-project） */
 export const WORKSPACE_PATH_PREF_KEY = 'app.workspacePath';
 
-/** 默认 workspace 路径名（跨平台一致：~/giteakanb/workspace） */
-const DEFAULT_WORKSPACE_BASENAME = join('.giteakanb', 'workspace');
+/** 默认 workspace 路径名（跨平台一致：~/.gitea-kanban/workspace） */
+const DEFAULT_WORKSPACE_BASENAME = join('.gitea-kanban', 'workspace');
 
 /**
  * 解析默认 workspace 路径
  *
- * 跨平台一致返回 `${用户主目录}/giteakanb/workspace`：
- *   - macOS/Linux: `${HOME}/giteakanb/workspace`
- *   - Windows: `${USERPROFILE}\giteakanb\workspace`
+ * 跨平台一致返回 `${用户主目录}/.gitea-kanban/workspace`：
+ *   - macOS/Linux: `${HOME}/.gitea-kanban/workspace`
+ *   - Windows: `${USERPROFILE}\.gitea-kanban\workspace`
  *
  * 注意：process.env.HOME / USERPROFILE 在 Electron renderer 进程也能拿到
  * （Electron 注入），但 main 端 homedir() 更稳。

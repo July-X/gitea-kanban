@@ -2,7 +2,7 @@
  * workspace 模块单测（v1.5.3）
  *
  * 覆盖：
- * 1. resolveDefaultWorkspacePath 跨平台一致 → homedir/.giteakanb/workspace
+ * 1. resolveDefaultWorkspacePath 跨平台一致 → homedir/.gitea-kanban/workspace
  * 2. validateWorkspacePath：不存在 / 不是目录 / OK
  * 3. getWorkspacePath / setWorkspacePath 持久化（走 prefs.app.workspacePath）
  *
@@ -43,9 +43,9 @@ afterEach(async () => {
 });
 
 describe('workspace · resolveDefaultWorkspacePath 跨平台一致', () => {
-  it('macOS/Linux: 默认 = ${homedir}/.giteakanb/workspace', () => {
+  it('macOS/Linux: 默认 = ${homedir}/.gitea-kanban/workspace', () => {
     const p = resolveDefaultWorkspacePath();
-    expect(p).toBe(join(homedir(), '.giteakanb', 'workspace'));
+    expect(p).toBe(join(homedir(), '.gitea-kanban', 'workspace'));
   });
 
   it('返回的是绝对路径（不在 tmpdir / cwd 内）', () => {

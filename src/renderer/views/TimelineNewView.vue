@@ -16,12 +16,13 @@
  * - Gitea services/repository/gitgraph/graph_models.go（Graph / Flow / Commit 模型）
  */
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitCommit, ArrowDownToLine, GitBranch, Tag, GitPullRequest, Crosshair } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
+import CommitDetailDialog from '@renderer/components/CommitDetailDialog.vue';
 import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
@@ -84,6 +85,44 @@ const localPath = ref<string | null>(null);
 const pulling = ref(false);
 
 // ============================================================
+// v1.6 commit 详情弹窗
+// ============================================================
+const commitDetailOpen = ref(false);
+const selectedCommit = ref<{
+  sha: string;
+  shortSha: string;
+  subject: string;
+  date: string;
+  authorName: string;
+  authorEmail?: string;
+  authorAvatar?: string;
+  refs?: Array<{ shortName: string; refGroup: string }>;
+} | null>(null);
+
+/** Gitea 仓库 URL（用于 "在 Gitea 打开 commit" 按钮） */
+const giteaRepoUrl = computed(() => {
+  if (!repo.currentProject) return undefined;
+  const giteaUrl = auth.currentGiteaUrl;
+  if (!giteaUrl) return undefined;
+  return `${giteaUrl.replace(/\/$/, '')}/${repo.currentProject.owner}/${repo.currentProject.name}`;
+});
+
+/** 点击 commit 行 → 打开详情 */
+function openCommitDetail(commit: NonNullable<typeof graph.value>['commits'][number]): void {
+  selectedCommit.value = {
+    sha: commit.sha,
+    shortSha: commit.shortSha,
+    subject: commit.subject,
+    date: commit.date,
+    authorName: commit.authorName,
+    authorEmail: commit.authorEmail,
+    authorAvatar: commit.authorAvatar,
+    refs: commit.refs.map((r) => ({ shortName: r.shortName, refGroup: r.refGroup })),
+  };
+  commitDetailOpen.value = true;
+}
+
+// ============================================================
 // 生命周期
 // ============================================================
 onMounted(async () => {
@@ -105,6 +144,12 @@ watch(
     if (id) await loadGraph();
   },
 );
+
+/** 组件卸载时清理拖拽监听器 */
+onUnmounted(() => {
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+});
 
 async function loadGraph(): Promise<void> {
   if (!activeProjectId.value) return;
@@ -369,6 +414,65 @@ function formatRelative(iso: string): string {
 
 /** 全局图总列数（用于左侧 SVG 区域宽度） */
 const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0));
+
+// ============================================================
+// v1.6 拖拽调整 SVG 区域宽度
+// ============================================================
+/** 用户手动设定的 SVG 区域宽度（px）；null = 用自动计算值 */
+const userSvgAreaWidth = ref<number | null>(null);
+/** 是否正在拖拽 */
+const dragging = ref(false);
+/** 拖拽起始 x 和起始宽度 */
+let dragStartX = 0;
+let dragStartWidth = 0;
+
+/** SVG 区域实际宽度（用户拖拽 > 自动计算 > 最小值） */
+const svgAreaWidth = computed(() => {
+  const auto = graph.value ? svgWidthPx(graph.value) : '120px';
+  const autoNum = parseInt(auto, 10) || 120;
+  const user = userSvgAreaWidth.value;
+  if (user !== null) return `${Math.max(80, user)}px`;
+  return `${Math.max(120, autoNum)}px`;
+});
+
+function onDragStart(e: MouseEvent): void {
+  e.preventDefault();
+  dragging.value = true;
+  dragStartX = e.clientX;
+  const svgArea = document.querySelector('.git-graph-svg-area') as HTMLElement | null;
+  dragStartWidth = svgArea?.offsetWidth ?? 120;
+  document.addEventListener('mousemove', onDragMove);
+  document.addEventListener('mouseup', onDragEnd);
+}
+
+function onDragMove(e: MouseEvent): void {
+  if (!dragging.value) return;
+  const delta = e.clientX - dragStartX;
+  userSvgAreaWidth.value = Math.max(80, dragStartWidth + delta);
+}
+
+function onDragEnd(): void {
+  dragging.value = false;
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+}
+
+/** 生成 fallback avatar：取名字首字符 */
+function avatarInitial(name: string): string {
+  if (!name) return '?';
+  // 取第一个非空白字符
+  const ch = name.trim()[0];
+  return ch ? ch.toUpperCase() : '?';
+}
+
+/** 基于名字生成稳定的背景色索引（0-15） */
+function avatarColorIndex(name: string): number {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 16;
+}
 </script>
 
 <template>
@@ -398,7 +502,7 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
     </header>
 
     <!-- ===== 主内容 ===== -->
-    <div class="timeline-new__main">
+    <div class="timeline-new__main" :class="{ 'timeline-new__main--dragging': dragging }">
       <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
       </div>
@@ -435,7 +539,7 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
       <template v-else>
         <div class="git-graph-wrapper">
           <!-- 左侧：SVG 图（固定宽度，左侧 sticky） -->
-          <div class="git-graph-svg-area">
+          <div class="git-graph-svg-area" :style="{ width: svgAreaWidth }">
             <div class="git-graph-svg-inner">
               <!-- SVG：只画线条（path），圆点用 HTML overlay 固定大小） -->
               <svg
@@ -481,6 +585,14 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
             </div>
           </div>
 
+          <!-- 列宽拖拽手柄（SVG 区域右侧竖向分割线，拖拽调宽） -->
+          <div
+            class="graph-resize-handle"
+            :class="{ 'graph-resize-handle--active': dragging }"
+            title="拖拽调整图形列宽度"
+            @mousedown="onDragStart"
+          />
+
           <!-- 右侧：Commit 列表（与 SVG 等高） -->
           <!-- 右侧：Commit 列表（与 SVG 等高，按 row 0..maxRow 全渲染，含 transition 占位） -->
           <div class="git-graph-list" :style="{ minHeight: svgHeight }">
@@ -488,8 +600,16 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
               v-for="r in allRows"
               :key="`row-${r.row}`"
               class="commit-row"
-              :class="{ 'commit-row--relation': r.isRelation }"
+              :class="{
+                'commit-row--relation': r.isRelation,
+                'commit-row--clickable': r.commit,
+              }"
               :style="{ height: ROW_H + 'px' }"
+              :role="r.commit ? 'button' : undefined"
+              :tabindex="r.commit ? 0 : undefined"
+              @click="r.commit && openCommitDetail(r.commit)"
+              @keydown.enter.prevent="r.commit && openCommitDetail(r.commit)"
+              @keydown.space.prevent="r.commit && openCommitDetail(r.commit)"
             >
               <template v-if="r.commit">
                 <span
@@ -512,6 +632,12 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
                     class="commit-avatar"
                     alt=""
                   />
+                  <span
+                    v-else
+                    class="commit-avatar-fallback"
+                    :class="`flow-color-16-${avatarColorIndex(r.commit.authorName)}`"
+                    aria-hidden="true"
+                  >{{ avatarInitial(r.commit.authorName) }}</span>
                   <span class="commit-author">{{ r.commit.authorName }}</span>
                   <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
                 </span>
@@ -523,6 +649,14 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
       </template>
     </div>
   </div>
+
+  <!-- v1.6 commit 详情弹窗 -->
+  <CommitDetailDialog
+    v-model:open="commitDetailOpen"
+    :commit="selectedCommit"
+    :project-id="activeProjectId"
+    :gitea-repo-url="giteaRepoUrl"
+  />
 </template>
 
 <style scoped>
@@ -642,26 +776,21 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 
 /* ===== Git Graph Wrapper ===== */
 /* Git Graph wrapper：SVG + commit 列表双栏水平排列；
- * SVG 按真实宽度渲染不被压缩；多列时整体可横向滚动（commit 列表横向延伸） */
+ * 左侧 SVG 区域 sticky + 可拖拽调宽；右侧 commit 列表 flex:1 自适应 */
 .git-graph-wrapper {
   display: flex;
   align-items: flex-start;
-  /* 多列时 SVG + 列表整体超出 → 触发整体横向滚动；
-   * svg-area 内部不再独立 scroll（之前会与列表对不齐） */
-  min-width: max-content;
+  /* 不用 min-width: max-content —— 让 commit 列表自适应宽度，避免横向滚动条 */
 }
 
 /* SVG 区域：sticky 在左侧，跟随 commit 列表垂直滚动；
- * 宽度按实际 svgWidth 自适应，不限制 max-width（git graph 多列时不让 SVG 被压缩——
- * 否则 SVG 内部按 preserveAspectRatio 缩放，commit 列表与 dot overlay 视觉错位）
- *
- * 多列场景：允许内部水平滚动（保留 vertical-align 与 commit 列表一致） */
+ * 宽度由拖拽手柄控制（默认自动计算），flex-shrink:0 不被压缩 */
 .git-graph-svg-area {
   position: sticky;
   left: 0;
   z-index: 2;
-  min-width: 120px;
-  background: transparent;
+  min-width: 80px;
+  background: var(--color-bg, #0f1115);
   border-right: 1px solid var(--color-border);
   overflow-x: auto;     /* 多列时水平滚动而非被压缩 */
   overflow-y: hidden;
@@ -822,15 +951,19 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 /* Commit 列表 */
 .git-graph-list {
   flex: 1;
-  overflow-x: auto;
+  min-width: 0;
+  overflow-x: auto; /* 内容超宽时允许横向滚动（保证不挤压） */
 }
 
-/* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐） */
+/* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐）
+ * v1.6 策略：保持单行固定高度 → 分支名完整显示 + 提交信息省略号兜底
+ * 这样 SVG 点位永远与 commit 行对齐，不会因换行错位 */
 .commit-row {
   display: flex;
   align-items: center;
   gap: var(--space-2, 8px);
   /* 高度由内联 style 绑定 ROW_H = ROW_HEIGHT * DISPLAY_SCALE */
+  height: 24px;
   padding: 0 var(--space-3, 12px);
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
@@ -841,11 +974,23 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
 .commit-row:hover {
   background: var(--color-bg-hover);
 }
+/* v1.6 可点击的 commit 行 */
+.commit-row--clickable {
+  cursor: pointer;
+}
+.commit-row--clickable:hover {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
+}
+.commit-row--clickable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
- * 必须保持 24px 高度（不要合并 / 不要 display:none） */
+ * 必须保持 min-height: 24px（不要合并 / 不要 display:none） */
 .commit-row--relation {
   pointer-events: none;
   background: transparent;
+  height: 24px; /* 固定高度：relation 行无内容，不需要弹性 */
 }
 .commit-row--relation:hover {
   background: transparent;
@@ -859,16 +1004,17 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
   border-radius: 8px;
   font-size: 11px;
   font-weight: 500;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 不截断 —— 分支名完整显示，单行布局由 commit-row 的 overflow:hidden 兜底 */
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .commit-subject {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--color-text);
   font-size: var(--font-sm, 13px);
 }
@@ -888,9 +1034,10 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
   flex-shrink: 0;
 }
 .commit-author {
-  max-width: 100px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--font-xs, 11px);
 }
 .commit-time {
@@ -940,4 +1087,96 @@ const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0))
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ===== v1.6 列宽拖拽手柄（SVG 区域右侧竖向分割线） ===== */
+.graph-resize-handle {
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--color-border);
+  position: relative;
+  transition: background 0.15s;
+  user-select: none;
+}
+.graph-resize-handle:hover,
+.graph-resize-handle--active {
+  background: var(--color-primary, #74b830);
+}
+/* 竖向三点 grip 指示器 */
+.graph-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--color-text-muted, #666);
+  /* 三点效果：用渐变模拟 */
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--color-text-muted, #666) 0px,
+    var(--color-text-muted, #666) 2px,
+    transparent 2px,
+    transparent 5px
+  );
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.graph-resize-handle:hover::before,
+.graph-resize-handle--active::before {
+  opacity: 1;
+  background: repeating-linear-gradient(
+    to bottom,
+    #fff 0px,
+    #fff 2px,
+    transparent 2px,
+    transparent 5px
+  );
+}
+
+/* 拖拽中防止文本选中 + 全局 cursor */
+.timeline-new__main--dragging {
+  user-select: none;
+  cursor: col-resize;
+}
+.timeline-new__main--dragging * {
+  cursor: col-resize !important;
+}
+
+/* ===== v1.6 Avatar fallback（无头像时显示首字母） ===== */
+.commit-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+  /* 背景色继承 flow-color-16-N 的 fill 变量 */
+  background-color: var(--color-series-16-0);
+  line-height: 1;
+}
+
+/* fallback 胜景色：复用 16 色系列 */
+.commit-avatar-fallback.flow-color-16-0 { background-color: var(--color-series-16-0); }
+.commit-avatar-fallback.flow-color-16-1 { background-color: var(--color-series-16-1); }
+.commit-avatar-fallback.flow-color-16-2 { background-color: var(--color-series-16-2); }
+.commit-avatar-fallback.flow-color-16-3 { background-color: var(--color-series-16-3); }
+.commit-avatar-fallback.flow-color-16-4 { background-color: var(--color-series-16-4); }
+.commit-avatar-fallback.flow-color-16-5 { background-color: var(--color-series-16-5); }
+.commit-avatar-fallback.flow-color-16-6 { background-color: var(--color-series-16-6); }
+.commit-avatar-fallback.flow-color-16-7 { background-color: var(--color-series-16-7); }
+.commit-avatar-fallback.flow-color-16-8 { background-color: var(--color-series-16-8); }
+.commit-avatar-fallback.flow-color-16-9 { background-color: var(--color-series-16-9); }
+.commit-avatar-fallback.flow-color-16-10 { background-color: var(--color-series-16-10); }
+.commit-avatar-fallback.flow-color-16-11 { background-color: var(--color-series-16-11); }
+.commit-avatar-fallback.flow-color-16-12 { background-color: var(--color-series-16-12); }
+.commit-avatar-fallback.flow-color-16-13 { background-color: var(--color-series-16-13); }
+.commit-avatar-fallback.flow-color-16-14 { background-color: var(--color-series-16-14); }
+.commit-avatar-fallback.flow-color-16-15 { background-color: var(--color-series-16-15); }
 </style>

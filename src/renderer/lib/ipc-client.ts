@@ -359,6 +359,16 @@ export function authDisconnect(giteaUrl: string): Promise<void> {
   return getIpcClient().invoke('auth', 'disconnect', { giteaUrl });
 }
 
+/** v1.6 按 URL+username 断开单个账号（区别于 authDisconnect 删整站） */
+export function authDisconnectOne(args: { giteaUrl: string; username: string }): Promise<void> {
+  return getIpcClient().invoke('auth', 'disconnectOne', args);
+}
+
+/** v1.6 切换当前活跃账号（重排 accounts 顺序，指定 accountId 变成第一个） */
+export function authSwitchAccount(accountId: string): Promise<void> {
+  return getIpcClient().invoke('auth', 'switchAccount', { accountId });
+}
+
 /**列出某账号可访问的仓库 + 已加为 project 的标记 */
 export function reposList(args: {
   giteaAccountId: string;
@@ -494,7 +504,7 @@ export function commitsGitgraphPull(args: {
 /**
  * v1.5.3 应用工作区：读当前 workspace 路径
  *
- * main 端 lazy init 后返回 prefs.app.workspacePath（默认 ~/giteakanb/workspace）
+ * main 端 lazy init 后返回 prefs.app.workspacePath（默认 ~/.gitea-kanban/workspace）
  */
 export function commitsGitgraphGetWorkspace(): Promise<{
   cwd: string;
@@ -514,6 +524,65 @@ export function commitsGitgraphSetWorkspace(args: {
   cwd: string;
 }): Promise<{ cwd: string; suggestedRepoCwdTemplate: string }> {
   return getIpcClient().invoke('commits', 'gitgraphSetWorkspace', args);
+}
+
+/**
+ * v1.6 workspace 迁移：列出旧工作区里的仓库
+ *
+ * @param args.cwd 旧工作区根目录
+ * @returns repos 列表（名称 + 路径 + 大小）+ 总大小
+ */
+export function commitsGitgraphListWorkspaceRepos(args: {
+  cwd: string;
+}): Promise<{
+  repos: Array<{ name: string; fullPath: string; sizeBytes: number }>;
+  totalSizeBytes: number;
+}> {
+  return getIpcClient().invoke('commits', 'gitgraphListWorkspaceRepos', args);
+}
+
+/**
+ * v1.6 workspace 迁移：从旧工作区复制仓库到新工作区
+ *
+ * 每复制完一个仓库会通过 event:workspace:migrateProgress 推进度。
+ *
+ * @param args.oldCwd 旧工作区路径
+ * @param args.newCwd 新工作区路径
+ * @param args.repoNames 要迁移的仓库目录名列表
+ * @returns { migratedCount, failed }
+ */
+export function commitsGitgraphMigrateWorkspace(args: {
+  oldCwd: string;
+  newCwd: string;
+  repoNames: string[];
+}): Promise<{ migratedCount: number; failed: Record<string, string> }> {
+  return getIpcClient().invoke('commits', 'gitgraphMigrateWorkspace', args);
+}
+
+/**
+ * v1.6 workspace 迁移：在系统文件管理器中打开目录
+ *
+ * @param args.path 要打开的目录路径
+ */
+export function commitsGitgraphOpenDirectory(args: { path: string }): Promise<void> {
+  return getIpcClient().invoke('commits', 'gitgraphOpenDirectory', args);
+}
+
+/**
+ * v1.6 监听 workspace 迁移进度（main → renderer 推送事件）
+ *
+ * @returns off() 取消监听函数
+ */
+export function onWorkspaceMigrateProgress(
+  cb: (payload: {
+    current: number;
+    total: number;
+    repoName: string;
+    phase: 'copying' | 'done' | 'error';
+    error?: string;
+  }) => void,
+): () => void {
+  return getIpcClient().on('workspace:migrateProgress', cb as (payload: unknown) => void);
 }
 
 // ============================================================

@@ -132,10 +132,16 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* 穿透子组件 scoped style —— 让 StatusBar 内部根元素继承 shell__status 的半透明 */
+/* 穿透子组件 scoped style —— 让 StatusBar 内部 .statusbar 继承 shell__status 的半透明 */
 .shell__status :deep(.statusbar) {
   background: transparent;
   border-top-color: color-mix(in srgb, var(--color-divider) 60%, transparent);
+  /* 确保 statusbar 填满 wrapper */
+  height: 100%;
+}
+/* wrapper 透明，不干扰布局 */
+.shell__status :deep(.statusbar-wrap) {
+  height: 100%;
 }
 
 .fade-enter-active,

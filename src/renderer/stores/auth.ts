@@ -12,7 +12,7 @@
 
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { authConnect, authDisconnect, authStatus } from '@renderer/lib/ipc-client';
+import { authConnect, authDisconnect, authDisconnectOne, authStatus, authSwitchAccount } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 // 渲染端通过 @main/ipc/schema 拿到 IPC 类型（AGENTS §5.5 拍板的"IPC 单一信息源"）；
@@ -102,6 +102,31 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * v1.6 按 URL+username 断开单个账号（账号管理弹窗用）
+   */
+  async function disconnectOne(giteaUrl: string, username: string): Promise<void> {
+    loading.value = true;
+    error.value = null;
+    try {
+      await authDisconnectOne({ giteaUrl, username });
+      await refreshStatus();
+    } catch (e) {
+      error.value = normalizeError(e);
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * v1.6 切换到指定账号（重排 accounts 让它排第一 → 变成 currentUser）
+   */
+  async function switchAccount(accountId: string): Promise<void> {
+    await authSwitchAccount(accountId);
+    await refreshStatus();
+  }
+
   /** 清错误状态（UI 关闭 toast 时调） */
   function clearError(): void {
     error.value = null;
@@ -120,6 +145,8 @@ export const useAuthStore = defineStore('auth', () => {
     refreshStatus,
     connect,
     disconnect,
+    disconnectOne,
+    switchAccount,
     clearError,
   };
 });

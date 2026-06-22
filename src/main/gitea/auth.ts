@@ -124,6 +124,15 @@ async function verifyToken(giteaUrl: string, token: string): Promise<UserDto> {
         httpStatus: res.status,
       });
     }
+    if (res.status === 404 || res.status === 410) {
+      throw new IpcError({
+        code: IpcErrorCode.GITEA_ERROR,
+        message: '无法连接：服务器不是 gitea 或 API 版本不兼容',
+        hint: '请确认地址是 gitea 实例（不是 GitHub / GitLab），且 /api/v1 端点可用',
+        cause,
+        httpStatus: res.status,
+      });
+    }
     throw new IpcError({
       code: IpcErrorCode.GITEA_ERROR,
       message: `gitea 返回 ${res.status}`,
@@ -256,6 +265,50 @@ export async function authDisconnect(args: { giteaUrl: string }): Promise<void> 
 
   // 4. 删 SQLite accounts（外键 cascade 会自动删 gitea_user / repo_projects 等）
   // SQLite accounts 镜像已删（ADR-0003 Phase 3：业务表全走 localStore）
+}
+
+/** v1.6 auth.switchAccount：重排 accounts 顺序，让指定 accountId 排第一
+ *
+ * 不涉及 keychain / 网络操作，纯 localStore mutate。
+ * 切换后 currentUser 自动变成排第一的 account 的 userInfo。
+ */
+export async function authSwitchAccount(args: { accountId: string }): Promise<void> {
+  const store = getLocalStore();
+  store.mutate((s) => {
+    const idx = s.accounts.findIndex((a) => a.id === args.accountId);
+    if (idx <= 0) return; // 已经是第一个或找不到 → 不动
+    const [target] = s.accounts.splice(idx, 1);
+    if (target) s.accounts.unshift(target);
+  });
+}
+
+/** v1.6 auth.disconnectOne：按 giteaUrl + username 精确删除单个账号
+ *
+ * 区别于 authDisconnect（删整站所有账号），这里只删匹配的那一个。
+ * 用于"账号管理"弹窗的"移除此账号"功能。
+ */
+export async function authDisconnectOne(args: {
+  giteaUrl: string;
+  username: string;
+}): Promise<void> {
+  const store = getLocalStore();
+  const stateNow = store.get();
+  const target = stateNow.accounts.find(
+    (a) => a.giteaUrl === args.giteaUrl && a.username === args.username,
+  );
+
+  if (!target) return; // 没找到 = 静默成功
+
+  // 清 keychain + dev token
+  await keychainDelete(args.giteaUrl, args.username);
+  await clearDevToken(args.giteaUrl, args.username);
+  invalidateGiteaClient(args.giteaUrl, args.username);
+
+  // 删 localStore 中这一个 account
+  const removeId = target.id;
+  store.mutate((s) => {
+    s.accounts = s.accounts.filter((a) => a.id !== removeId);
+  });
 }
 
 /** auth.status：纯读 localStore，**不**读 keychain / **不**调 gitea（ADR-0003 Phase 2）

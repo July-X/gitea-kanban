@@ -231,18 +231,46 @@ export function parseRefs(refsStr: string): GitRef[] {
   const refs: GitRef[] = [];
   for (const part of parts) {
     if (part.startsWith('tag: ')) {
-      refs.push({ name: `refs/tags/${part.slice(5)}`, refGroup: 'tags', shortName: part.slice(5) });
+      // --decorate=full 时是 "tag: refs/tags/v1.0"，需要剥 refs/tags/ 前缀
+      const raw = part.slice(5);
+      const short = raw.startsWith('refs/tags/') ? raw.slice('refs/tags/'.length) : raw;
+      refs.push({ name: `refs/tags/${short}`, refGroup: 'tags', shortName: short });
     } else if (part.startsWith('HEAD -> ')) {
+      const target = part.slice(8);
+      // --decorate=full 时 target 可能是 "refs/heads/main"，需要再剥一层
+      const short = target.startsWith('refs/heads/')
+        ? target.slice('refs/heads/'.length)
+        : target;
       refs.push({
-        name: `refs/heads/${part.slice(8)}`,
+        name: `refs/heads/${short}`,
         refGroup: 'heads',
-        shortName: part.slice(8),
+        shortName: short,
+      });
+    } else if (part.startsWith('refs/remotes/')) {
+      // --decorate=full 时直接是 "refs/remotes/origin/main"
+      refs.push({
+        name: part,
+        refGroup: 'remotes',
+        shortName: part.slice('refs/remotes/'.length),
       });
     } else if (part.startsWith('remotes/')) {
       refs.push({
-        name: `refs/remotes/${part.slice(8)}`,
+        name: `refs/${part}`,
         refGroup: 'remotes',
         shortName: part.slice(8),
+      });
+    } else if (part.startsWith('refs/heads/')) {
+      // --decorate=full 时裸出现的 "refs/heads/xxx"
+      refs.push({
+        name: part,
+        refGroup: 'heads',
+        shortName: part.slice('refs/heads/'.length),
+      });
+    } else if (part.startsWith('refs/tags/')) {
+      refs.push({
+        name: part,
+        refGroup: 'tags',
+        shortName: part.slice('refs/tags/'.length),
       });
     } else if (part.includes('/')) {
       // 其它含 / 的（如 origin/main）按 remotes 处理
@@ -261,9 +289,9 @@ export function parseRefs(refsStr: string): GitRef[] {
 /**
  * 推荐本地仓库路径
  *
- * v1.5.3（用户拍板）：基于应用 workspace（默认 ~/giteakanb/workspace/repos/${owner}__${repo}.git）
+ * v1.5.3（用户拍板）：基于应用 workspace（默认 ~/.gitea-kanban/workspace/repos/${owner}__${repo}.git）
  * - workspacePath 来自 localStore.prefs['app.workspacePath']（启动期 main 自动 init）
- * - 跨平台统一：macOS/Linux = $HOME/.giteakanb/workspace；Windows = %USERPROFILE%\.giteakanb\workspace
+ * - 跨平台统一：macOS/Linux = $HOME/.gitea-kanban/workspace；Windows = %USERPROFILE%\.gitea-kanban\workspace
  * - workspace 不存在时 fallback 到 tmpdir（main 端 validateWorkspacePath 失败兜底）
  *
  * 旧版（v1.5.0）用 tmpdir；v1.5.3 改成 workspace 路径，gitgraph 仓库都进用户可控位置。
@@ -282,7 +310,7 @@ export async function suggestLocalRepoPath(owner: string, repo: string): Promise
   }
   if (!base) {
     // 没 workspace（main 还没跑过 initWorkspace）→ 用默认 homedir
-    base = join(homedir(), '.giteakanb', 'workspace');
+    base = join(homedir(), '.gitea-kanban', 'workspace');
   }
   return join(base, 'repos', `${safeOwner}__${safeRepo}.git`);
 }

@@ -31,7 +31,6 @@ import {
   CloneRepoArgsSchema,
   GitGraphPullArgsSchema,
   GitGraphSetWorkspaceArgsSchema,
-  GitGraphGetWorkspaceRespSchema,
   type GraphLinesDto,
   type GitGraphPullArgs,
   type GitGraphPullResp,
@@ -39,6 +38,14 @@ import {
   type GitGraphSetWorkspaceResp,
   type GitGraphGetWorkspaceResp,
   type CloneRepoArgs,
+  ListWorkspaceReposArgsSchema,
+  type ListWorkspaceReposArgs,
+  type ListWorkspaceReposResp,
+  MigrateWorkspaceArgsSchema,
+  type MigrateWorkspaceArgs,
+  type MigrateWorkspaceResp,
+  OpenDirectoryArgsSchema,
+  type OpenDirectoryArgs,
 } from './schema.js';
 import { listGiteaCommits, getGiteaCommit } from '../gitea/commits.js';
 import {
@@ -49,6 +56,7 @@ import {
 } from '../cache/commits.js';
 import { resolveProject } from '../board/resolveProject.js';
 import { logger } from '../logger.js';
+import { getGiteaClient, unwrapGitea } from '../gitea/client.js';
 import {
   runGraphLog,
   cloneRepo,
@@ -65,6 +73,11 @@ import {
 } from '../local/workspace.js';
 import { keychainGet } from '../gitea/keychain.js';
 import { existsSync } from 'node:fs';
+import { readdir, stat, cp, mkdir } from 'node:fs/promises';
+import { join, sep } from 'node:path';
+import { shell } from 'electron';
+import { getMainWindow } from '../window.js';
+import { IpcEvent } from '../../shared/ipc-channels.js';
 
 /** 简洁 fs.existsSync 包装（避免上面 main 块用 fs.mkdir 时干扰） */
 function existsPath(p: string): boolean {
@@ -332,6 +345,35 @@ async function commitsGitGraphLinesHandler(args: GitGraphLinesArgs): Promise<Gra
       maxCount: args.limit,
       hidePRRefs: args.hidePRRefs,
     });
+
+    // v1.6 enrich：从 Gitea API 拿协作者头像，补充到 graph line 的 authorAvatar
+    // 静默失败（不影响 graph 主流程）
+    try {
+      const proj = resolveProject(args.projectId);
+      const { api } = await getGiteaClient(proj.giteaUrl, proj.username);
+      const res = await api.repos.repoListCollaborators(proj.owner, proj.repo, { limit: 50 });
+      const users = unwrapGitea(res, '');
+      // 构建 fullName → avatarUrl 和 username → avatarUrl 映射
+      const avatarByName = new Map<string, string>();
+      const avatarByUsername = new Map<string, string>();
+      for (const u of users) {
+        const url = u.avatar_url ?? '';
+        if (!url) continue;
+        if (u.full_name) avatarByName.set(u.full_name, url);
+        if (u.login) avatarByUsername.set(u.login, url);
+      }
+      // 给每个 graph line 补头像
+      for (const line of result.lines) {
+        if (!line.commit || line.commit.authorAvatar) continue;
+        const byName = avatarByName.get(line.commit.authorName);
+        if (byName) {
+          line.commit.authorAvatar = byName;
+        }
+      }
+    } catch {
+      // enrich 失败静默（头像不是必需的）
+    }
+
     return {
       disabled: false,
       /** 本地仓库路径（用于 Header 小字标注） */
@@ -424,15 +466,32 @@ export function registerCommitsIpc(): void {
     commitsGitGraphCloneRepoHandler,
   );
   wrapIpc(IpcChannel.COMMITS_GITGRAPH_PULL, GitGraphPullArgsSchema, commitsGitGraphPullHandler);
+  // getWorkspace 无入参，用空对象 schema 避免校验出参字段
   wrapIpc(
     IpcChannel.COMMITS_GITGRAPH_GET_WORKSPACE,
-    GitGraphGetWorkspaceRespSchema,
+    { parse: () => ({}) },
     commitsGitGraphGetWorkspaceHandler,
   );
   wrapIpc(
     IpcChannel.COMMITS_GITGRAPH_SET_WORKSPACE,
     GitGraphSetWorkspaceArgsSchema,
     commitsGitGraphSetWorkspaceHandler,
+  );
+  // v1.6 workspace 迁移
+  wrapIpc(
+    IpcChannel.COMMITS_GITGRAPH_LIST_WORKSPACE_REPOS,
+    ListWorkspaceReposArgsSchema,
+    listWorkspaceReposHandler,
+  );
+  wrapIpc(
+    IpcChannel.COMMITS_GITGRAPH_MIGRATE_WORKSPACE,
+    MigrateWorkspaceArgsSchema,
+    migrateWorkspaceHandler,
+  );
+  wrapIpc(
+    IpcChannel.COMMITS_GITGRAPH_OPEN_DIRECTORY,
+    OpenDirectoryArgsSchema,
+    openDirectoryHandler,
   );
 }
 
@@ -444,6 +503,10 @@ export function unregisterCommitsIpc(): void {
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_PULL);
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_GET_WORKSPACE);
   ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_SET_WORKSPACE);
+  // v1.6 workspace 迁移
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_LIST_WORKSPACE_REPOS);
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_MIGRATE_WORKSPACE);
+  ipcMain.removeHandler(IpcChannel.COMMITS_GITGRAPH_OPEN_DIRECTORY);
 }
 
 // ===== commits.gitgraph.pull（v1.5.2 pull/merge 按钮）=====
@@ -490,7 +553,7 @@ async function commitsGitGraphPullHandler(args: GitGraphPullArgs): Promise<GitGr
 
 /**
  * 读当前 workspace 路径
- * - localStore 没存 → 用默认 ~/giteakanb/workspace 并自动 setWorkspace（lazy init）
+ * - localStore 没存 → 用默认 ~/.gitea-kanban/workspace 并自动 setWorkspace（lazy init）
  * - 有 → 校验存在性 + 可写
  */
 async function commitsGitGraphGetWorkspaceHandler(): Promise<GitGraphGetWorkspaceResp> {
@@ -534,6 +597,179 @@ async function commitsGitGraphSetWorkspaceHandler(
 
   return {
     cwd,
-    suggestedRepoCwdTemplate: `${cwd}${require('node:path').sep}repos${require('node:path').sep}\${owner}__\${repo}.git`,
+    suggestedRepoCwdTemplate: `${cwd}${sep}repos${sep}\${owner}__\${repo}.git`,
   };
+}
+
+// ===== v1.6 workspace 迁移（listRepos / migrate / openDirectory）=====
+
+/** 递归计算目录大小（字节） */
+async function dirSizeBytes(dirPath: string): Promise<number> {
+  let total = 0;
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        total += await dirSizeBytes(full);
+      } else if (entry.isFile()) {
+        try {
+          const s = await stat(full);
+          total += s.size;
+        } catch {
+          /* 跳过不可读文件 */
+        }
+      }
+    }
+  } catch {
+    /* 目录不可读 → 返回已累计值 */
+  }
+  return total;
+}
+
+/**
+ * 列出旧工作区 repos/ 子目录下的所有仓库
+ *
+ * 扫描 `{cwd}/repos/` 下的子目录（bare repo 命名为 `{owner}__{repo}.git`），
+ * 返回每个仓库的名称、完整路径和大小。
+ */
+async function listWorkspaceReposHandler(
+  args: ListWorkspaceReposArgs,
+): Promise<ListWorkspaceReposResp> {
+  const reposDir = join(args.cwd, 'repos');
+  if (!existsSync(reposDir)) {
+    return { repos: [], totalSizeBytes: 0 };
+  }
+
+  const entries = await readdir(reposDir, { withFileTypes: true });
+  const repos: ListWorkspaceReposResp['repos'] = [];
+  let totalSizeBytes = 0;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const fullPath = join(reposDir, entry.name);
+    const sizeBytes = await dirSizeBytes(fullPath);
+    repos.push({ name: entry.name, fullPath, sizeBytes });
+    totalSizeBytes += sizeBytes;
+  }
+
+  // 按名称排序，保证顺序稳定
+  repos.sort((a, b) => a.name.localeCompare(b.name));
+  return { repos, totalSizeBytes };
+}
+
+/**
+ * 迁移仓库：从旧工作区复制到新工作区
+ *
+ * 逐个仓库复制（cp -r），每复制完一个就通过 webContents.send 推进度事件给渲染端。
+ * 复制完成后更新 localStore 里的 per-project 路径。
+ */
+async function migrateWorkspaceHandler(
+  args: MigrateWorkspaceArgs,
+): Promise<MigrateWorkspaceResp> {
+  const oldReposDir = join(args.oldCwd, 'repos');
+  const newReposDir = join(args.newCwd, 'repos');
+  const win = getMainWindow();
+
+  // 确保新工作区 repos 目录存在
+  await mkdir(newReposDir, { recursive: true });
+
+  const failed: Record<string, string> = {};
+  let migratedCount = 0;
+  const total = args.repoNames.length;
+
+  for (let i = 0; i < total; i++) {
+    const name = args.repoNames[i];
+    const src = join(oldReposDir, name);
+    const dest = join(newReposDir, name);
+
+    // 推进度（当前正在处理第 i+1 个，总数 total）
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(`event:${IpcEvent.WORKSPACE_MIGRATE_PROGRESS}`, {
+        current: i + 1,
+        total,
+        repoName: name,
+        phase: 'copying' as const,
+      });
+    }
+
+    try {
+      if (!existsSync(src)) {
+        failed[name] = '源目录不存在';
+        continue;
+      }
+      if (existsSync(dest)) {
+        // 目标已存在 → 跳过（不覆盖）
+        failed[name] = '目标目录已存在，跳过';
+        continue;
+      }
+      // 递归复制（Node 16.7+ cp with recursive）
+      await cp(src, dest, { recursive: true });
+      migratedCount++;
+
+      // 推进度：该仓库复制完成
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(`event:${IpcEvent.WORKSPACE_MIGRATE_PROGRESS}`, {
+          current: i + 1,
+          total,
+          repoName: name,
+          phase: 'done' as const,
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      failed[name] = msg;
+      logger.warn({ err: e, src, dest }, 'workspace migrate: repo copy failed');
+
+      // 推进度：失败
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(`event:${IpcEvent.WORKSPACE_MIGRATE_PROGRESS}`, {
+          current: i + 1,
+          total,
+          repoName: name,
+          phase: 'error' as const,
+          error: msg,
+        });
+      }
+    }
+  }
+
+  // 更新 localStore 里的 per-project 路径（把旧路径前缀替换为新路径前缀）
+  // gitgraph.localPath.{projectId} 存的是完整路径，需要批量更新
+  const { listAllLocalRepoPaths, updateLocalRepoPaths } = await import(
+    '../local/gitgraphPaths.js'
+  );
+  const allPaths = listAllLocalRepoPaths();
+  const updates: Record<string, string> = {};
+  for (const [projectId, oldPath] of Object.entries(allPaths)) {
+    if (oldPath.startsWith(oldReposDir)) {
+      const relative = oldPath.slice(oldReposDir.length);
+      updates[projectId] = join(newReposDir, relative);
+    }
+  }
+  if (Object.keys(updates).length > 0) {
+    updateLocalRepoPaths(updates);
+    logger.info(
+      { count: Object.keys(updates).length },
+      'workspace migrate: updated per-project paths',
+    );
+  }
+
+  logger.info({ migratedCount, failedCount: Object.keys(failed).length }, 'workspace migrate: done');
+  return { migratedCount, failed };
+}
+
+/**
+ * 在系统文件管理器中打开指定目录（Finder / Explorer / xdg-open）
+ */
+async function openDirectoryHandler(args: OpenDirectoryArgs): Promise<void> {
+  const targetPath = args.path;
+  if (!existsSync(targetPath)) {
+    throw new IpcError({
+      code: IpcErrorCode.NOT_FOUND,
+      message: '目录不存在',
+      hint: `路径：${targetPath}`,
+    });
+  }
+  shell.showItemInFolder(targetPath);
 }

@@ -59,3 +59,34 @@ export function deleteLocalRepoPath(projectId: string): void {
     if (s.prefs) delete s.prefs[gitgraphLocalPathKey(projectId)];
   });
 }
+
+/**
+ * 列出所有 project → 本地仓库路径映射
+ * workspace 迁移时用来批量更新路径前缀
+ */
+export function listAllLocalRepoPaths(): Record<string, string> {
+  const store = getLocalStore();
+  const state = store.get();
+  const result: Record<string, string> = {};
+  if (!state.prefs) return result;
+  for (const [key, value] of Object.entries(state.prefs)) {
+    if (key.startsWith(KEY_PREFIX) && typeof value === 'string' && value.length > 0) {
+      const projectId = key.slice(KEY_PREFIX.length);
+      result[projectId] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * 批量更新 project → 本地仓库路径（workspace 迁移后同步）
+ */
+export function updateLocalRepoPaths(updates: Record<string, string>): void {
+  const store = getLocalStore();
+  store.mutate((s) => {
+    if (!s.prefs) s.prefs = {};
+    for (const [projectId, newPath] of Object.entries(updates)) {
+      s.prefs[gitgraphLocalPathKey(projectId)] = newPath;
+    }
+  });
+}

@@ -45,6 +45,10 @@ export const IpcChannel = {
   AUTH_CONNECT: 'auth.connect',
   AUTH_DISCONNECT: 'auth.disconnect',
   AUTH_STATUS: 'auth.status',
+  // v1.6 账号管理：按 URL+username 删除单个账号（区别于 disconnect 删整站）
+  AUTH_DISCONNECT_ONE: 'auth.disconnectOne',
+  // v1.6 账号管理：切换当前活跃账号（重排 accounts 顺序）
+  AUTH_SWITCH_ACCOUNT: 'auth.switchAccount',
 
   // === repos namespace（02-architecture.md §5.3.1）===
   REPOS_LIST: 'repos.list',
@@ -69,6 +73,10 @@ export const IpcChannel = {
   // v1.5.3 workspace：用户配置应用本地仓库工作区根目录
   COMMITS_GITGRAPH_GET_WORKSPACE: 'commits.gitgraph.getWorkspace',
   COMMITS_GITGRAPH_SET_WORKSPACE: 'commits.gitgraph.setWorkspace',
+  // v1.6 workspace 迁移：检测旧仓库 / 迁移 / 打开目录
+  COMMITS_GITGRAPH_LIST_WORKSPACE_REPOS: 'commits.gitgraph.listWorkspaceRepos',
+  COMMITS_GITGRAPH_MIGRATE_WORKSPACE: 'commits.gitgraph.migrateWorkspace',
+  COMMITS_GITGRAPH_OPEN_DIRECTORY: 'commits.gitgraph.openDirectory',
 
   // === pulls namespace（02-architecture.md §5.3.5 + §5.3.6）===
   // 破坏性操作清理（2026-06-15 用户拍板）：create 已从 App 移除，保留 list/get/merge/close
@@ -133,3 +141,14 @@ export const IpcChannel = {
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
+
+/**
+ * main → renderer 推送事件名（通过 webContents.send('event:<name>', payload)）
+ *
+ * preload 端 api.on(event, cb) 会自动加 'event:' 前缀。
+ * 这里只定义事件名本体（不含前缀）。
+ */
+export const IpcEvent = {
+  /** workspace 迁移进度（每个仓库复制完推一次） */
+  WORKSPACE_MIGRATE_PROGRESS: 'workspace:migrateProgress',
+} as const;

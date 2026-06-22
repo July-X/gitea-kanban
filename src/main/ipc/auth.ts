@@ -19,9 +19,13 @@ import { IpcError, IpcErrorCode, isIpcError, validationFailed } from '@shared/er
 import {
   ConnectArgsSchema,
   DisconnectArgsSchema,
+  DisconnectOneArgsSchema,
+  SwitchAccountArgsSchema,
   IpcChannel,
   type ConnectResult,
   type DisconnectArgs,
+  type DisconnectOneArgs,
+  type SwitchAccountArgs,
   type StatusResult,
 } from './schema.js';
 import { installCspHeader } from '../window.js';
@@ -29,6 +33,8 @@ import { dispatch, registerOp } from '../sync/dispatch.js';
 import {
   authConnect as _authConnect,
   authDisconnect as _authDisconnect,
+  authDisconnectOne as _authDisconnectOne,
+  authSwitchAccount as _authSwitchAccount,
   authStatus,
 } from '../gitea/auth.js';
 import { type ConnectArgs } from './schema.js';
@@ -138,12 +144,31 @@ export function registerAuthIpc(): void {
   ipcMain.handle(IpcChannel.AUTH_STATUS, async (): Promise<StatusResult> => {
     return authStatus();
   });
+
+  // v1.6 auth.disconnectOne：按 URL+username 删单个账号（不走 dispatch，纯本地操作）
+  wrapIpc(IpcChannel.AUTH_DISCONNECT_ONE, DisconnectOneArgsSchema, async (args: DisconnectOneArgs) => {
+    await _authDisconnectOne(args);
+    // 如果删完后没有任何 account 了，重装 CSP 清掉白名单
+    const state = (await authStatus()).accounts;
+    if (state.length === 0) {
+      installCspHeader(args.giteaUrl);
+    }
+    return undefined;
+  });
+
+  // v1.6 auth.switchAccount：重排 accounts 顺序（不走 dispatch，纯本地操作）
+  wrapIpc(IpcChannel.AUTH_SWITCH_ACCOUNT, SwitchAccountArgsSchema, async (args: SwitchAccountArgs) => {
+    await _authSwitchAccount(args);
+    return undefined;
+  });
 }
 
 export function unregisterAuthIpc(): void {
   ipcMain.removeHandler(IpcChannel.AUTH_CONNECT);
   ipcMain.removeHandler(IpcChannel.AUTH_DISCONNECT);
   ipcMain.removeHandler(IpcChannel.AUTH_STATUS);
+  ipcMain.removeHandler(IpcChannel.AUTH_DISCONNECT_ONE);
+  ipcMain.removeHandler(IpcChannel.AUTH_SWITCH_ACCOUNT);
 }
 
 // 导出供测试用：parseAndWrap 让单测能模拟 IPC 路径

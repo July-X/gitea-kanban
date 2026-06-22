@@ -118,6 +118,19 @@ export const DisconnectArgsSchema = z.object({
 });
 export type DisconnectArgs = z.infer<typeof DisconnectArgsSchema>;
 
+/** v1.6 auth.disconnectOne 入参（按 giteaUrl + username 精确删除单个账号） */
+export const DisconnectOneArgsSchema = z.object({
+  giteaUrl: GiteaUrlSchema,
+  username: NonEmptyStringSchema,
+});
+export type DisconnectOneArgs = z.infer<typeof DisconnectOneArgsSchema>;
+
+/** v1.6 auth.switchAccount 入参（按 accountId 重排 accounts 顺序） */
+export const SwitchAccountArgsSchema = z.object({
+  accountId: NonEmptyStringSchema,
+});
+export type SwitchAccountArgs = z.infer<typeof SwitchAccountArgsSchema>;
+
 /** auth.status 出参（**不**含 token） */
 export const StatusResultSchema = z
   .object({
@@ -1398,6 +1411,51 @@ export const GitGraphGetWorkspaceRespSchema = z.object({
   validated: z.boolean(), // 路径存在 + 是目录 + 可写
 });
 export type GitGraphGetWorkspaceResp = z.infer<typeof GitGraphGetWorkspaceRespSchema>;
+
+// ===== v1.6 workspace 迁移 schema =====
+
+/** commits.gitgraph.listWorkspaceRepos 返回：旧工作区里的仓库列表 */
+export const ListWorkspaceReposArgsSchema = z.object({ cwd: NonEmptyStringSchema }).strict();
+export type ListWorkspaceReposArgs = z.infer<typeof ListWorkspaceReposArgsSchema>;
+
+export const ListWorkspaceReposRespSchema = z.object({
+  repos: z.array(
+    z.object({
+      /** 目录名，如 "owner__repo.git" */
+      name: z.string(),
+      /** 完整路径 */
+      fullPath: z.string(),
+      /** 目录大小（字节） */
+      sizeBytes: z.number().int().min(0),
+    }),
+  ),
+  /** 仓库总大小（字节） */
+  totalSizeBytes: z.number().int().min(0),
+});
+export type ListWorkspaceReposResp = z.infer<typeof ListWorkspaceReposRespSchema>;
+
+/** commits.gitgraph.migrateWorkspace 参数 */
+export const MigrateWorkspaceArgsSchema = z
+  .object({
+    oldCwd: NonEmptyStringSchema,
+    newCwd: NonEmptyStringSchema,
+    /** 要迁移的仓库目录名列表（来自 listWorkspaceRepos 的 repos[].name） */
+    repoNames: z.array(z.string()).min(1),
+  })
+  .strict();
+export type MigrateWorkspaceArgs = z.infer<typeof MigrateWorkspaceArgsSchema>;
+
+export const MigrateWorkspaceRespSchema = z.object({
+  /** 成功迁移的仓库数 */
+  migratedCount: z.number().int().min(0),
+  /** 失败的仓库（目录名 → 错误原因） */
+  failed: z.record(z.string(), z.string()),
+});
+export type MigrateWorkspaceResp = z.infer<typeof MigrateWorkspaceRespSchema>;
+
+/** commits.gitgraph.openDirectory 参数 */
+export const OpenDirectoryArgsSchema = z.object({ path: NonEmptyStringSchema }).strict();
+export type OpenDirectoryArgs = z.infer<typeof OpenDirectoryArgsSchema>;
 
 /** commits.gitgraph.pull 返回 */
 export const GitGraphPullRespSchema = z.object({

@@ -27,8 +27,8 @@ const router = useRouter();
 const route = useRoute();
 
 /**
- * v1.5.3 工作区路径：默认跨平台 `~/giteakanb/workspace`（macOS/Linux = $HOME/.giteakanb/workspace；
- * Windows = %USERPROFILE%\.giteakanb\workspace）。
+ * v1.5.3 工作区路径：默认跨平台 `~/.gitea-kanban/workspace`（macOS/Linux = $HOME/.gitea-kanban/workspace；
+ * Windows = %USERPROFILE%\.gitea-kanban\workspace）。
  *
  * 计算：
  *   - 启动期 / 切到 AuthView 时 main 端 initWorkspace 已 lazy 设默认到 prefs
@@ -36,7 +36,7 @@ const route = useRoute();
  *   - 用户改 → 提交时 setWorkspace
  */
 const DEFAULT_WORKSPACE_LABEL =
-  '~/giteakanb/workspace（默认；macOS/Linux = $HOME/.giteakanb/workspace；Windows = %USERPROFILE%\\.giteakanb\\workspace）';
+  '~/.gitea-kanban/workspace（默认；macOS/Linux = $HOME/.gitea-kanban/workspace；Windows = %USERPROFILE%\\.gitea-kanban\\workspace）';
 
 /**
  * v1.4 任务 #auth-prefill-localhost:
