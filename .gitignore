@@ -4,13 +4,30 @@
 .mavis/
 .opencode/
 .claude/
-.pnpm-store/
 
-# 构建产物
-node_modules/
-out/
-dist/
-coverage/
+# === legacy Electron 项目（归档参考，不再构建）===
+legacy/electron/node_modules/
+legacy/electron/.pnpm-store/
+legacy/electron/out/
+legacy/electron/dist/
+legacy/electron/coverage/
+legacy/electron/release/
+
+# === Go / Wails 构建产物 ===
+build/
+build/bin/
+build/windows/
+build/darwin/
+build/linux/
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+# Wails 前端生成 bindings（wails dev/build 自动生成）
+frontend/wailsjs/
+# Go 测试覆盖率
+*.out
 
 # 临时/缓存
 *.log
@@ -21,22 +38,9 @@ coverage/
 # 时间轴视觉调参过程截图（M6 调参草稿，不入仓）
 notes/cap_*.png
 
-# e2e bundle 产物（worker esbuild 自动生成，跑完可重建）
-scripts/.e2e-verify-*.bundled.mjs
-
-# giteaDemo —— 本地 Gitea 测试服务目录（v1.4 polish 移除入仓）
-# 包含 docker-compose 配置 + README + .gitkeep + 内部 .gitignore
-# 整体不入仓，开发者各自在本地新建（参考 docs/dev/cdp-performance-testing.md 提示）
+# giteaDemo —— 本地 Gitea 测试服务目录（不入仓）
 giteaDemo/
-
-# 渲染端类型生成物（d.ts 编译产物）
-src/renderer/.d.ts/
-
-# drizzle studio local
-drizzle/.snapshot/
-
-# 调研用第三方 API 文档（gitea swagger yaml，不入仓）
-docs/plugin-redoc-2.yaml
 .codegraph
 .reasonix
 reasonix.toml
+node_modules/

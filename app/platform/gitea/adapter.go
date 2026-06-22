@@ -1,0 +1,426 @@
+// Package gitea 实现 PlatformAdapter 的 Gitea 版本。
+//
+// 用 Go net/http 调 Gitea REST API（/api/v1），替代旧版 gitea-js TS 客户端。
+// 鉴权：Authorization: token <pat>（Gitea 习惯，不是 OAuth2 Bearer）。
+// HTTP 错误映射沿用旧版 httpErrorToIpcError 表。
+package gitea
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"gitea-kanban/app/git"
+	"gitea-kanban/app/git/graph"
+	"gitea-kanban/app/platform"
+)
+
+// GiteaAdapter Gitea 平台适配器
+type GiteaAdapter struct {
+	httpClient *http.Client
+}
+
+// NewGiteaAdapter 创建 GiteaAdapter
+func NewGiteaAdapter() *GiteaAdapter {
+	return &GiteaAdapter{
+		httpClient: &http.Client{},
+	}
+}
+
+// Platform 返回平台标识
+func (a *GiteaAdapter) Platform() platform.Platform {
+	return platform.Gitea
+}
+
+// ===== 鉴权 =====
+
+// VerifyToken 验证 token 有效性（GET /api/v1/user）
+func (a *GiteaAdapter) VerifyToken(ctx context.Context, hostURL, token string) (*platform.UserDTO, error) {
+	var raw struct {
+		ID        int64  `json:"id"`
+		Login     string `json:"login"`
+		FullName  string `json:"full_name"`
+		Email     string `json:"email"`
+		AvatarURL string `json:"avatar_url"`
+	}
+
+	err := a.doRequest(ctx, hostURL, token, "GET", "/user", nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	return &platform.UserDTO{
+		ID:        raw.ID,
+		Login:     raw.Login,
+		FullName:  raw.FullName,
+		Email:     raw.Email,
+		AvatarURL: raw.AvatarURL,
+	}, nil
+}
+
+// ===== 仓库 =====
+
+// ListRepos 列出用户可访问的仓库（GET /api/v1/repos/search）
+func (a *GiteaAdapter) ListRepos(ctx context.Context, hostURL, username, token string, opts platform.ListReposOpts) ([]platform.RepoDTO, error) {
+	params := url.Values{}
+	if opts.Query != "" {
+		params.Set("q", opts.Query)
+	}
+	if opts.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	} else {
+		params.Set("limit", "50")
+	}
+	if opts.Page > 0 {
+		params.Set("page", fmt.Sprintf("%d", opts.Page))
+	}
+
+	var raw struct {
+		Data []struct {
+			Name          string `json:"name"`
+			FullName      string `json:"full_name"`
+			Owner         struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+			DefaultBranch string `json:"default_branch"`
+			Description   string `json:"description"`
+			Private       bool   `json:"private"`
+		} `json:"data"`
+	}
+
+	path := "/repos/search?" + params.Encode()
+	err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	repos := make([]platform.RepoDTO, 0, len(raw.Data))
+	for _, r := range raw.Data {
+		repos = append(repos, platform.RepoDTO{
+			Owner:         r.Owner.Login,
+			Name:          r.Name,
+			FullName:      r.FullName,
+			DefaultBranch: r.DefaultBranch,
+			Description:   r.Description,
+			Private:       r.Private,
+		})
+	}
+	return repos, nil
+}
+
+// ===== 分支 =====
+
+// ListBranches 列出仓库分支（GET /api/v1/repos/{owner}/{repo}/branches）
+func (a *GiteaAdapter) ListBranches(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.BranchDTO, error) {
+	var raw []struct {
+		Name       string `json:"name"`
+		Commit     struct {
+			ID string `json:"id"`
+		} `json:"commit"`
+		Protected bool `json:"protected"`
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/branches", owner, repo)
+	err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	branches := make([]platform.BranchDTO, 0, len(raw))
+	for _, b := range raw {
+		branches = append(branches, platform.BranchDTO{
+			Name:        b.Name,
+			CommitSHA:   b.Commit.ID,
+			IsProtected: b.Protected,
+		})
+	}
+	return branches, nil
+}
+
+// ===== Git Graph =====
+
+// CloneRepo clone 仓库到本地 workspace（委托 app/git.CloneRepo）
+func (a *GiteaAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath string) (string, error) {
+	result, err := git.CloneRepo(git.CloneOptions{
+		Platform:      "gitea",
+		HostURL:       hostURL,
+		Owner:         owner,
+		Repo:          repo,
+		Token:         token,
+		Username:      username,
+		WorkspacePath: workspacePath,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.LocalPath, nil
+}
+
+// LogGraph 获取 commit 历史并构建 Graph 布局
+func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts platform.LogGraphOpts) (*platform.GraphResult, error) {
+	logResult, err := git.LogCommits(git.LogOptions{
+		LocalPath: localPath,
+		Branches:  opts.Branches,
+		MaxCount:  opts.MaxCount,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	graphResult := graph.BuildGraph(logResult.Commits)
+
+	return graphResultToDTO(graphResult), nil
+}
+
+// ===== 以下首期仅 Gitea 完整实现 =====
+
+// ListIssues 列出仓库议题（GET /api/v1/repos/{owner}/{repo}/issues）
+func (a *GiteaAdapter) ListIssues(ctx context.Context, hostURL, username, token, owner, repo string, opts platform.ListIssuesOpts) ([]platform.IssueDTO, error) {
+	params := url.Values{}
+	if opts.State != "" {
+		params.Set("state", opts.State)
+	} else {
+		params.Set("state", "open")
+	}
+	if opts.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	}
+	if opts.Page > 0 {
+		params.Set("page", fmt.Sprintf("%d", opts.Page))
+	}
+
+	var raw []struct {
+		Index  int    `json:"number"`
+		Title  string `json:"title"`
+		State  string `json:"state"`
+		Body   string `json:"body"`
+		User   struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues?%s", owner, repo, params.Encode())
+	err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	issues := make([]platform.IssueDTO, 0, len(raw))
+	for _, i := range raw {
+		issues = append(issues, platform.IssueDTO{
+			Index:  i.Index,
+			Title:  i.Title,
+			State:  i.State,
+			Body:   i.Body,
+			Author: i.User.Login,
+		})
+	}
+	return issues, nil
+}
+
+// ListPulls 列出仓库合并请求（GET /api/v1/repos/{owner}/{repo}/pulls）
+func (a *GiteaAdapter) ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts platform.ListPullsOpts) ([]platform.PullDTO, error) {
+	params := url.Values{}
+	if opts.State != "" {
+		params.Set("state", opts.State)
+	} else {
+		params.Set("state", "open")
+	}
+	if opts.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	}
+	if opts.Page > 0 {
+		params.Set("page", fmt.Sprintf("%d", opts.Page))
+	}
+
+	var raw []struct {
+		Index  int    `json:"number"`
+		Title  string `json:"title"`
+		State  string `json:"state"`
+		Head   struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Merged bool `json:"merged"`
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/pulls?%s", owner, repo, params.Encode())
+	err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	pulls := make([]platform.PullDTO, 0, len(raw))
+	for _, p := range raw {
+		pulls = append(pulls, platform.PullDTO{
+			Index:  p.Index,
+			Title:  p.Title,
+			State:  p.State,
+			Head:   p.Head.Ref,
+			Base:   p.Base.Ref,
+			Merged: p.Merged,
+		})
+	}
+	return pulls, nil
+}
+
+// ListLabels 列出仓库标签（GET /api/v1/repos/{owner}/{repo}/labels）
+func (a *GiteaAdapter) ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.LabelDTO, error) {
+	var raw []struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Color       string `json:"color"`
+		Description string `json:"description"`
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/labels", owner, repo)
+	err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	labels := make([]platform.LabelDTO, 0, len(raw))
+	for _, l := range raw {
+		labels = append(labels, platform.LabelDTO{
+			ID:          l.ID,
+			Name:        l.Name,
+			Color:       l.Color,
+			Description: l.Description,
+		})
+	}
+	return labels, nil
+}
+
+// ListMembers 列出仓库成员（GET /api/v1/repos/{owner}/{repo}/collaborators）
+func (a *GiteaAdapter) ListMembers(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.MemberDTO, error) {
+	var raw []struct {
+		Login string `json:"login"`
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/collaborators", owner, repo)
+	err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	members := make([]platform.MemberDTO, 0, len(raw))
+	for _, m := range raw {
+		members = append(members, platform.MemberDTO{
+			Login: m.Login,
+		})
+	}
+	return members, nil
+}
+
+// ===== HTTP 请求封装 =====
+
+// doRequest 发送 Gitea API 请求
+//
+// 鉴权：Authorization: token <pat>（Gitea 习惯）
+// URL：${hostURL}/api/v1${path}
+func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, path string, body io.Reader, out interface{}) error {
+	base := strings.TrimRight(hostURL, "/")
+	fullURL := base + "/api/v1" + path
+
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
+	if err != nil {
+		return fmt.Errorf("构造请求失败: %w", err)
+	}
+
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return mapHTTPError(resp.StatusCode, string(bodyBytes), fullURL)
+	}
+
+	if resp.StatusCode == http.StatusNoContent {
+		return nil // 204 No Content
+	}
+
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("解析响应失败: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// mapHTTPError 把 Gitea HTTP 错误码映射为友好错误
+//
+// 对齐旧版 httpErrorToIpcError（src/main/gitea/client.ts）
+func mapHTTPError(status int, body, url string) error {
+	switch status {
+	case 401:
+		return fmt.Errorf("登录已过期或 token 无效（请到 Gitea 重新生成 token）")
+	case 403:
+		return fmt.Errorf("没有该操作权限（请联系仓库管理员）")
+	case 404:
+		return fmt.Errorf("找不到该资源（可能已被删除）")
+	case 409:
+		return fmt.Errorf("操作冲突：资源已存在或状态不允许")
+	case 422:
+		return fmt.Errorf("请求参数不被服务端接受")
+	case 429:
+		return fmt.Errorf("请求过于频繁（请稍后重试）")
+	case 502, 503, 504:
+		return fmt.Errorf("当前离线或远端不可达（请检查网络后重试）")
+	default:
+		return fmt.Errorf("Gitea 返回 %d: %s", status, body)
+	}
+}
+
+// graphResultToDTO 把 graph.GraphResult 转为 platform.GraphResult DTO
+func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
+	if r == nil {
+		return nil
+	}
+
+	nodes := make([]platform.GraphNodeDTO, 0, len(r.Nodes))
+	for _, n := range r.Nodes {
+		nodes = append(nodes, platform.GraphNodeDTO{
+			Row:         n.Row,
+			Lane:        n.Lane,
+			SHA:         n.SHA,
+			ShortSHA:    n.ShortSHA,
+			Subject:     n.Subject,
+			AuthorName:  n.AuthorName,
+			AuthorEmail: n.AuthorEmail,
+			Date:        n.Date,
+			IsMerge:     n.IsMerge,
+			Parents:     n.Parents,
+		})
+	}
+
+	edges := make([]platform.GraphEdgeDTO, 0, len(r.Edges))
+	for _, e := range r.Edges {
+		edges = append(edges, platform.GraphEdgeDTO{
+			FromRow:  e.FromRow,
+			ToRow:    e.ToRow,
+			FromLane: e.FromLane,
+			ToLane:   e.ToLane,
+			Type:     int(e.Type),
+		})
+	}
+
+	return &platform.GraphResult{
+		Nodes:     nodes,
+		Edges:     edges,
+		MaxLane:   r.MaxLane,
+		Truncated: false,
+	}
+}
