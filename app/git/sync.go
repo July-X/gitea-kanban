@@ -28,8 +28,14 @@ type PullResult struct {
 	BeforeCount int
 	// AfterCount pull 后本地 commit 数
 	AfterCount int
-	// AddedCommits 新增 commit 数
+	// AddedCommits 新增 commit 数（force push 场景可能为负）
 	AddedCommits int
+	// HeadBefore pull 前 HEAD SHA
+	HeadBefore string
+	// HeadAfter pull 后 HEAD SHA
+	HeadAfter string
+	// HeadChanged HEAD SHA 是否变化（force push 场景 commit 数减少但 SHA 变了）
+	HeadChanged bool
 }
 
 // FetchResult fetch 结果
@@ -126,10 +132,11 @@ func countCommitsReal(repo *git.Repository, from plumbing.Hash) (int, error) {
 // PullRepo fetch + 统计 commit 数变化
 //
 // 对齐旧版 pullRepo：
-//   1. 先统计本地 HEAD commit 数（beforeCount）
+//   1. 记录 pull 前 HEAD SHA + commit 数
 //   2. git fetch origin
-//   3. 再统计本地 HEAD commit 数（afterCount）
-//   4. addedCommits = after - before
+//   3. 记录 pull 后 HEAD SHA + commit 数
+//   4. AddedCommits = after - before
+//   5. HeadChanged = beforeSHA != afterSHA（force push 场景 commit 数减少但 SHA 变了）
 //
 // 注：go-git 的 worktree.Pull 需要 worktree（非 bare 仓库），
 // 本函数只做 fetch + 统计，不做 worktree merge/rebase
@@ -144,11 +151,12 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 		return nil, fmt.Errorf("打开仓库失败: %w", err)
 	}
 
-	// 1. 统计 pull 前 commit 数
+	// 1. 记录 pull 前 HEAD SHA + commit 数
 	ref, err := repo.Head()
 	if err != nil {
 		return nil, fmt.Errorf("获取 HEAD 失败: %w", err)
 	}
+	headBefore := ref.Hash().String()
 	beforeCount, err := countCommitsReal(repo, ref.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("统计 commit 数失败: %w", err)
@@ -160,7 +168,7 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 		return nil, err
 	}
 
-	// 3. 统计 pull 后 commit 数
+	// 3. 记录 pull 后 HEAD SHA + commit 数
 	// 重新打开 repo 以获取最新 refs
 	repo2, err := git.PlainOpen(opts.LocalPath)
 	if err != nil {
@@ -170,6 +178,7 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("重新获取 HEAD 失败: %w", err)
 	}
+	headAfter := ref2.Hash().String()
 	afterCount, err := countCommitsReal(repo2, ref2.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("统计 commit 数失败: %w", err)
@@ -179,6 +188,9 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 		BeforeCount:  beforeCount,
 		AfterCount:   afterCount,
 		AddedCommits: afterCount - beforeCount,
+		HeadBefore:   headBefore,
+		HeadAfter:    headAfter,
+		HeadChanged:  headBefore != headAfter,
 	}, nil
 }
 

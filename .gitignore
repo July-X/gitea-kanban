@@ -38,6 +38,13 @@ frontend/wailsjs/
 # 时间轴视觉调参过程截图（M6 调参草稿，不入仓）
 notes/cap_*.png
 
+# 调研用第三方 API 文档（gitea swagger yaml，不入仓）
+docs/plugin-redoc-2.yaml
+
+# Wails build 产物的 md5 校验文件（pnpm 生成，运行时重建）
+frontend/package.json.md5
+frontend/dist/package.json.md5
+
 # giteaDemo —— 本地 Gitea 测试服务目录（不入仓）
 giteaDemo/
 .codegraph

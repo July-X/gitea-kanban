@@ -150,20 +150,34 @@ func parseRepoDirName(name string) (owner, repo string) {
 // MigrateRepo 迁移单个仓库到新 workspace
 //
 // 从 oldPath 复制到 newPath（cp -R），返回新路径。
-func (wm *WorkspaceManager) MigrateRepo(oldPath, newWorkspacePath, owner, repo string) (string, error) {
+//
+// 沙箱校验：newWorkspacePath 必须在 allowedRoot 之下（防止恶意 caller
+// 把仓库复制到 /etc 等系统目录）。allowedRoot 通常是 dataDir。
+func (wm *WorkspaceManager) MigrateRepo(oldPath, newWorkspacePath, owner, repo, allowedRoot string) (string, error) {
+	// 1. 沙箱校验：newWorkspacePath 必须在 allowedRoot 之下
+	if allowedRoot == "" {
+		return "", fmt.Errorf("沙箱校验失败：allowedRoot 不能为空")
+	}
+	cleanNew := filepath.Clean(newWorkspacePath)
+	cleanAllowed := filepath.Clean(allowedRoot)
+	// 必须满足 cleanNew == cleanAllowed 或 cleanNew 是 cleanAllowed 的子路径
+	if cleanNew != cleanAllowed && !strings.HasPrefix(cleanNew, cleanAllowed+string(filepath.Separator)) {
+		return "", fmt.Errorf("沙箱校验失败：newWorkspacePath %q 不在 allowedRoot %q 之下", newWorkspacePath, allowedRoot)
+	}
+
 	newPath := RepoLocalPath(newWorkspacePath, owner, repo)
 
-	// 检查目标是否已存在
+	// 2. 检查目标是否已存在
 	if RepoExists(newPath) {
 		return newPath, nil // 已存在 = 幂等成功
 	}
 
-	// 确保父目录存在
+	// 3. 确保父目录存在
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
 		return "", fmt.Errorf("创建目标父目录失败: %w", err)
 	}
 
-	// 复制目录
+	// 4. 复制目录
 	if err := copyDir(oldPath, newPath); err != nil {
 		return "", fmt.Errorf("复制仓库失败: %w", err)
 	}

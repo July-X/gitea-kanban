@@ -52,6 +52,9 @@ type CloneResult struct {
 //   - clone 完成后 token 不落盘
 //
 // 路径规则：${workspacePath}/repos/${owner}__${repo}（对齐旧版 suggestLocalRepoPath）
+//
+// 并发安全：使用 per-repo 锁避免两个 CloneRepo 同时 clone 同一仓库时竞态
+// （os.Stat + PlainClone 不是原子的，可能产生损坏仓库）
 func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	if opts.HostURL == "" || opts.Owner == "" || opts.Repo == "" {
 		return nil, fmt.Errorf("hostURL, owner, repo 不能为空")
@@ -63,20 +66,27 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// 1. 计算本地路径
 	localPath := RepoLocalPath(opts.WorkspacePath, opts.Owner, opts.Repo)
 
-	// 2. 检查是否已存在
-	if _, err := os.Stat(filepath.Join(localPath, ".git")); err == nil {
+	// 2. 拿 per-repo 锁（避免并发 clone 同一仓库竞态）
+	unlock, err := lockPath(localPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	// 3. 检查是否已存在
+	if RepoExists(localPath) {
 		return nil, fmt.Errorf("路径已存在（看起来是 git 仓库）：%s", localPath)
 	}
 
-	// 3. 确保父目录存在
+	// 4. 确保父目录存在
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return nil, fmt.Errorf("创建父目录失败: %w", err)
 	}
 
-	// 4. 构造 clone URL（干净的 URL，不含 token）
+	// 5. 构造 clone URL（干净的 URL，不含 token）
 	cloneURL := CleanRepoURL(opts.HostURL, opts.Owner, opts.Repo)
 
-	// 5. 构造 auth（内存态，不落盘）
+	// 6. 构造 auth（内存态，不落盘）
 	var auth transport.AuthMethod
 	if opts.Token != "" {
 		// Gitea 和 GitHub 都支持 http.BasicAuth
@@ -92,14 +102,16 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		}
 	}
 
-	// 6. 执行 clone
+	// 7. 执行 clone
 	cloneOpts := &git.CloneOptions{
 		URL:  cloneURL,
 		Auth: auth,
 	}
 
-	_, err := git.PlainClone(localPath, opts.Bare, cloneOpts)
+	_, err = git.PlainClone(localPath, opts.Bare, cloneOpts)
 	if err != nil {
+		// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
+		os.RemoveAll(localPath)
 		return nil, fmt.Errorf("go-git clone 失败: %w", err)
 	}
 

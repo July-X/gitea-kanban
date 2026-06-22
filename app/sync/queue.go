@@ -76,6 +76,8 @@ func NewQueue(dataDir string) (*Queue, error) {
 }
 
 // Enqueue 入队一个操作（append 到 JSONL）
+//
+// 写后调 Sync() 确保内核缓冲区落盘（避免进程崩溃丢失已 enqueue 的 op）
 func (q *Queue) Enqueue(opType OpType, payload interface{}) (*Op, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -100,6 +102,10 @@ func (q *Queue) Enqueue(opType OpType, payload interface{}) (*Op, error) {
 
 	if _, err := q.file.Write(append(line, '\n')); err != nil {
 		return nil, fmt.Errorf("写入队列失败: %w", err)
+	}
+	// 显式 Sync 避免崩溃丢 op（队列是低频写，成本可接受）
+	if err := q.file.Sync(); err != nil {
+		return nil, fmt.Errorf("sync 队列失败: %w", err)
 	}
 
 	return &op, nil
@@ -157,14 +163,16 @@ func (q *Queue) LoadPending() ([]Op, error) {
 }
 
 // MarkDone 标记操作完成（append 一条 done 状态的记录）
+//
+// 写后调 Sync() 避免崩溃后 runner 重做已成功的 op（issue.update / pull.merge 不幂等）
 func (q *Queue) MarkDone(opID string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	op := Op{
-		ID:        opID,
-		State:     StateDone,
-		DoneAt:    time.Now().UnixMilli(),
+		ID:     opID,
+		State:  StateDone,
+		DoneAt: time.Now().UnixMilli(),
 	}
 
 	line, err := json.Marshal(op)
@@ -172,20 +180,24 @@ func (q *Queue) MarkDone(opID string) error {
 		return err
 	}
 
-	_, err = q.file.Write(append(line, '\n'))
-	return err
+	if _, err := q.file.Write(append(line, '\n')); err != nil {
+		return err
+	}
+	return q.file.Sync()
 }
 
 // MarkFailed 标记操作失败
+//
+// 写后调 Sync() 防止崩溃丢失"失败"标记（runner 会重新读 LoadPending 跳过已 done/failed 的 op）
 func (q *Queue) MarkFailed(opID, errMsg string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	op := Op{
-		ID:      opID,
-		State:   StateFailed,
-		Error:   errMsg,
-		DoneAt:  time.Now().UnixMilli(),
+		ID:     opID,
+		State:  StateFailed,
+		Error:  errMsg,
+		DoneAt: time.Now().UnixMilli(),
 	}
 
 	line, err := json.Marshal(op)
@@ -193,8 +205,10 @@ func (q *Queue) MarkFailed(opID, errMsg string) error {
 		return err
 	}
 
-	_, err = q.file.Write(append(line, '\n'))
-	return err
+	if _, err := q.file.Write(append(line, '\n')); err != nil {
+		return err
+	}
+	return q.file.Sync()
 }
 
 // Close 关闭队列文件

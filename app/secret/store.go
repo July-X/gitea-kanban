@@ -135,19 +135,24 @@ func (s *Store) getDevToken(service, username string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("token 不存在")
+			return "", fmt.Errorf("token 文件不存在: %s", path)
 		}
-		return "", err
+		return "", fmt.Errorf("读取 dev token 文件失败: %w", err)
 	}
 
 	var raw map[string]string
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return "", fmt.Errorf("解析 dev token 失败: %w", err)
+		return "", fmt.Errorf("dev token 文件 JSON 解析失败: %w", err)
 	}
 
 	token, ok := raw["token"]
 	if !ok {
-		return "", fmt.Errorf("dev token 格式错误")
+		// 列出实际 keys 便于诊断（不泄露值）
+		keys := make([]string, 0, len(raw))
+		for k := range raw {
+			keys = append(keys, k)
+		}
+		return "", fmt.Errorf("dev token 文件缺少 'token' 字段，实际 keys: %v", keys)
 	}
 	return token, nil
 }

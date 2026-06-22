@@ -144,7 +144,8 @@ func TestWorkspaceManager_MigrateRepo(t *testing.T) {
 
 	// 迁移到新 workspace
 	newWs := t.TempDir()
-	newPath, err := wm.MigrateRepo(srcPath, newWs, "org", "repo")
+	// 沙箱校验：newWs 必须在 workspaceDir 之下（这里 workspaceDir = newWs 本身）
+	newPath, err := wm.MigrateRepo(srcPath, newWs, "org", "repo", newWs)
 	if err != nil {
 		t.Fatalf("MigrateRepo failed: %v", err)
 	}
@@ -164,8 +165,64 @@ func TestWorkspaceManager_MigrateRepo(t *testing.T) {
 	}
 
 	// 幂等：再次迁移不报错
-	_, err = wm.MigrateRepo(srcPath, newWs, "org", "repo")
+	_, err = wm.MigrateRepo(srcPath, newWs, "org", "repo", newWs)
 	if err != nil {
 		t.Errorf("idempotent migrate should not fail: %v", err)
+	}
+}
+
+func TestWorkspaceManager_MigrateRepo_Sandbox(t *testing.T) {
+	wm := NewWorkspaceManager()
+
+	srcPath := filepath.Join(t.TempDir(), "src-repo")
+	os.MkdirAll(filepath.Join(srcPath, ".git"), 0o755)
+	os.WriteFile(filepath.Join(srcPath, "README.md"), []byte("hello"), 0o644)
+
+	allowedRoot := t.TempDir()
+
+	cases := []struct {
+		name        string
+		newWs       string
+		expectError bool
+	}{
+		{
+			name:        "newWs 恰好等于 allowedRoot（合法）",
+			newWs:       allowedRoot,
+			expectError: false,
+		},
+		{
+			name:        "newWs 是 allowedRoot 的子目录（合法）",
+			newWs:       filepath.Join(allowedRoot, "sub"),
+			expectError: false,
+		},
+		{
+			name:        "newWs 是 allowedRoot 的同级（拒绝）",
+			newWs:       t.TempDir(),
+			expectError: true,
+		},
+		{
+			name:        "newWs 是 /etc（绝对路径，强制拒绝）",
+			newWs:       "/etc",
+			expectError: true,
+		},
+		{
+			name:        "newWs 包含 .. 试图逃逸（拒绝）",
+			newWs:       filepath.Join(allowedRoot, "..", "escape"),
+			expectError: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// 用占位 srcPath + 不同 owner 避免影响其它子测试
+			_, err := wm.MigrateRepo(srcPath, c.newWs, "sandbox-test-owner", "sandbox-test-repo", allowedRoot)
+			if c.expectError && err == nil {
+				t.Errorf("expected error for newWs=%q under allowedRoot=%q, got nil",
+					c.newWs, allowedRoot)
+			}
+			if !c.expectError && err != nil {
+				t.Errorf("unexpected error for newWs=%q: %v", c.newWs, err)
+			}
+		})
 	}
 }

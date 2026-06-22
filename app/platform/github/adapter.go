@@ -245,8 +245,9 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 	}
 
 	return &platform.GraphResult{
-		Nodes:   nodes,
-		Edges:   edges,
-		MaxLane: r.MaxLane,
+		Nodes:     nodes,
+		Edges:     edges,
+		MaxLane:   r.MaxLane,
+		Truncated: r.Truncated,
 	}
 }

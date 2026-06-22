@@ -396,10 +396,13 @@ type PullRepoArgs struct {
 
 // PullRepoResult 拉取结果
 type PullRepoResult struct {
-	BeforeCount  int  `json:"beforeCount"`
-	AfterCount   int  `json:"afterCount"`
-	AddedCommits int  `json:"addedCommits"`
-	Updated      bool `json:"updated"`
+	BeforeCount  int    `json:"beforeCount"`
+	AfterCount   int    `json:"afterCount"`
+	AddedCommits int    `json:"addedCommits"`
+	HeadBefore   string `json:"headBefore"`
+	HeadAfter    string `json:"headAfter"`
+	// HeadChanged HEAD SHA 是否变化（force push 场景 commit 数减少但 SHA 变了）
+	HeadChanged bool `json:"headChanged"`
 }
 
 // PullRepo 拉取远端更新（fetch + 统计 commit 变化）
@@ -421,7 +424,9 @@ func (a *App) PullRepo(args PullRepoArgs) (PullRepoResult, error) {
 		BeforeCount:  result.BeforeCount,
 		AfterCount:   result.AfterCount,
 		AddedCommits: result.AddedCommits,
-		Updated:      true,
+		HeadBefore:   result.HeadBefore,
+		HeadAfter:    result.HeadAfter,
+		HeadChanged:  result.HeadChanged,
 	}, nil
 }
 
@@ -638,8 +643,9 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 	}
 
 	return GraphResultDTO{
-		Nodes:   nodes,
-		Edges:   edges,
-		MaxLane: r.MaxLane,
+		Nodes:     nodes,
+		Edges:     edges,
+		MaxLane:   r.MaxLane,
+		Truncated: r.Truncated,
 	}
 }

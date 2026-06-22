@@ -421,6 +421,6 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 		Nodes:     nodes,
 		Edges:     edges,
 		MaxLane:   r.MaxLane,
-		Truncated: false,
+		Truncated: r.Truncated,
 	}
 }
