@@ -52,3 +52,5 @@ giteaDemo/
 .reasonix
 reasonix.toml
 node_modules/
+.playwright-mcp/
+.github/
