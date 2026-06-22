@@ -44,19 +44,21 @@ func ResolveDataDir() string {
 	return dir
 }
 
-// NewLogger 创建 slog logger，写文件 ${dataDir}/logs/main/main-YYYY-MM-DD.log
+// NewLogger 创建 slog logger，写文件 ${dataDir}/logs/main/main.log
 //
-// 对齐 AGENTS.md §8.2：日志保留 14 天。
-// 日志级别默认 Info，可通过 GITEA_KANBAN_LOG_LEVEL 环境变量调为 debug。
+// 数据布局（v2.2 user 拍板，2026-06-22）：
+//   - ${dataDir} 放 state.json / logs/main/ / dev-tokens/
+//   - ${dataDir}/workspace 放 git repos（唯一目录，不可改）
+//   - 旧版 ${dataDir}/workspace/logs/main/main.log 路径废弃（嵌套太深）
+//
+// 对齐 AGENTS.md §8.2：日志级别默认 Info，可通过 GITEA_KANBAN_LOG_LEVEL 环境变量调为 debug。
 func NewLogger(dataDir string) *slog.Logger {
 	logDir := filepath.Join(dataDir, "logs", "main")
 	_ = os.MkdirAll(logDir, 0o755)
 
-	// 日志文件名按日期（简化：用 main.log，后续可按日期轮转）
 	logPath := filepath.Join(logDir, "main.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		// 文件打不开 → 退化到 stderr
 		return slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 

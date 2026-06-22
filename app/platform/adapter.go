@@ -33,6 +33,23 @@ type RepoDTO struct {
 	DefaultBranch string `json:"defaultBranch"`
 	Description   string `json:"description,omitempty"`
 	Private       bool   `json:"private"`
+	// v2.3 StatusBar 多行仓库管理需要这些字段：
+	ID        int64  `json:"id"`        // gitea repo id
+	Archived  bool   `json:"archived"`  // 是否归档
+	UpdatedAt string `json:"updatedAt"` // ISO 8601
+	// 前端 Permissions 是 {pull, push, admin}，gitea API /repos/search
+	// 已经包含 permissions 字段（{pull: bool, push: bool, admin: bool}）
+	Permissions *RepoPermissions `json:"permissions,omitempty"`
+	// 前端 RepoDto 必备 isProject / lastSyncAt —— App.ListRepos 拼好
+	IsProject  bool   `json:"isProject"`
+	LastSyncAt string `json:"lastSyncAt,omitempty"`
+}
+
+// RepoPermissions gitea /repos/search 返的 permissions 子字段
+type RepoPermissions struct {
+	Pull  bool `json:"pull"`
+	Push  bool `json:"push"`
+	Admin bool `json:"admin"`
 }
 
 // BranchDTO 分支信息

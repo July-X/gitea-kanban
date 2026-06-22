@@ -45,6 +45,7 @@ func TestNewLogger(t *testing.T) {
 	logger.Info("test message", "key", "value")
 
 	// 验证日志文件创建
+	// v2.2 路径：${dataDir}/logs/main/main.log
 	logPath := filepath.Join(dir, "logs", "main", "main.log")
 	data, err := os.ReadFile(logPath)
 	if err != nil {

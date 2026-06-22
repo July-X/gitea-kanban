@@ -52,10 +52,12 @@ type Store struct {
 // NewStore 创建凭证存储
 //
 // devMode=true 时走文件 fallback（对齐旧版 dev-tokens 机制）
+// 同时 lazy mkdir devTokenDir（确保目录存在，否则首次 Set 才创建会让用户看不到）
 func NewStore(devMode bool, userDataDir string) *Store {
 	s := &Store{devMode: devMode}
 	if devMode {
 		s.devTokenDir = filepath.Join(userDataDir, "dev-tokens")
+		_ = os.MkdirAll(s.devTokenDir, 0o700)
 	}
 	return s
 }

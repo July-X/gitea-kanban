@@ -40,6 +40,8 @@ export interface UserDto {
 /** gitea_accounts 行映射（不含 token） */
 export interface GiteaAccountDto {
   id: string;
+  /** v2 多平台：gitea | github */
+  platform?: 'gitea' | 'github';
   giteaUrl: string;
   username: string;
   createdAt: string;

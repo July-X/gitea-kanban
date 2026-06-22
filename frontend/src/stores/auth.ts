@@ -61,17 +61,25 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * 连接 gitea（**唯一**接收 token 的入口）
-   * @param giteaUrl gitea 实例 URL（http/https）
+   * 连接 gitea/github（**唯一**接收 token 的入口）
+   *
+   * v2 多平台：传 platform 决定走 Gitea adapter 还是 GitHub adapter
+   *
+   * @param giteaUrl gitea 实例 URL（GitHub 时传 https://github.com 即可，Go 端会忽略）
    * @param token 个人访问令牌（8+ 字符，main 端会 trim + 长度校验）
+   * @param platform "gitea" | "github"（默认 "gitea"）
    * @returns 成功时返回新账号 + 用户；失败抛 UserFacingError
    */
-  async function connect(giteaUrl: string, token: string): Promise<void> {
+  async function connect(
+    giteaUrl: string,
+    token: string,
+    platform: 'gitea' | 'github' = 'gitea',
+  ): Promise<void> {
     loading.value = true;
     useGlobalLoadingStore().show('auth');
     error.value = null;
     try {
-      await authConnect(giteaUrl, token);
+      await authConnect(giteaUrl, token, platform);
       // 连接成功后立即拉一次 status 把账号 + 用户填进 store
       await refreshStatus();
     } catch (e) {

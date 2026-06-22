@@ -73,6 +73,8 @@ export const IpcChannel = {
   // v1.5.3 workspace：用户配置应用本地仓库工作区根目录
   COMMITS_GITGRAPH_GET_WORKSPACE: 'commits.gitgraph.getWorkspace',
   COMMITS_GITGRAPH_SET_WORKSPACE: 'commits.gitgraph.setWorkspace',
+  // v2.3 检查 owner/repo 是否已 clone 本地
+  COMMITS_GITGRAPH_IS_REPO_CLONED: 'commits.gitgraph.isRepoCloned',
   // v1.6 workspace 迁移：检测旧仓库 / 迁移 / 打开目录
   COMMITS_GITGRAPH_LIST_WORKSPACE_REPOS: 'commits.gitgraph.listWorkspaceRepos',
   COMMITS_GITGRAPH_MIGRATE_WORKSPACE: 'commits.gitgraph.migrateWorkspace',
@@ -136,8 +138,11 @@ export const IpcChannel = {
   // 绕过 navigator.clipboard.writeText 在 Electron renderer 窗口无 focus / 非用户激活时的不稳定行为
   CLIPBOARD_WRITE: 'preferences.clipboard.write',
 
-  // === system namespace（Electron 系统级能力）===
+  // === system namespace（系统级能力）===
+  // v1.5.3: selectDirectory —— 系统目录选择器
   SYSTEM_SELECT_DIRECTORY: 'system.selectDirectory',
+  // v2.2: openPath —— 打开系统文件管理器到指定目录（用于"打开应用数据目录"按钮）
+  SYSTEM_OPEN_PATH: 'system.openPath',
 } as const;
 
 export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];

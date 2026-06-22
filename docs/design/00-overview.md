@@ -22,7 +22,9 @@
 > - **前端** Vue 3 / Pinia / Vue Router / lucide 保留不变
 > - **旧代码**已归档到 `legacy/electron/`
 >
-> **权威入口**：以 [AGENTS.md](../../AGENTS.md) 和 [ADR-0005](../adr/0005-electron-to-go-wails-migration.md) 为准。
+> **v2.4 迭代（2026-06-22 同日）**：v2.0 迁移完成后真实用户桌面跑暴露 6 类问题（鉴权铁律 / 业务 binding stub / 数据目录嵌套 / StatusBar localPath 拼错 / prefs 死链 / go-git 拉全 worktree），全部修复并记录在 [07-v24-iteration.md](./07-v24-iteration.md) + [ADR-0006](../adr/0006-v24-iteration-fixes.md)。
+>
+> **权威入口**：以 [AGENTS.md](../../AGENTS.md) 和 [ADR-0005](../adr/0005-electron-to-go-wails-migration.md) + [ADR-0006](../adr/0006-v24-iteration-fixes.md) 为准。
 >
 > 后续清理：本文件将在 v2.0.1 完整重写（删除 Electron 相关章节）；当前先加横幅避免误导。
 

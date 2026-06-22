@@ -264,13 +264,15 @@ export class IpcClient {
       } satisfies UserFacingError;
     }
     try {
-      //唯一例外：auth.connect走 (giteaUrl, token) 双参而不是 (args) 单参
+      // 唯一例外：auth.connect 走 (giteaUrl, token, platform) 三参而不是 (args) 单参
+      // platform 是 v2 新增（"gitea" | "github"），shim 的 connect 第三参透传到 Wails AuthConnect
       if (namespace === 'auth' && method === 'connect') {
-        const a = args as { giteaUrl: string; token: string };
-        const r = (await (this.api.auth.connect as (g: string, t: string) => Promise<unknown>)(
-          a.giteaUrl,
-          a.token,
-        )) as T;
+        const a = args as { giteaUrl: string; token: string; platform?: string };
+        const r = (await (this.api.auth.connect as (
+          g: string,
+          t: string,
+          p?: string,
+        ) => Promise<unknown>)(a.giteaUrl, a.token, a.platform)) as T;
         markUpdated();
         return r;
       }
@@ -349,9 +351,19 @@ export function authStatus(): Promise<StatusResult> {
   return getIpcClient().invoke('auth', 'status');
 }
 
-/** 连接 gitea（**唯一**接收 token 的入口） */
-export function authConnect(giteaUrl: string, token: string): Promise<ConnectResult> {
-  return getIpcClient().invoke('auth', 'connect', { giteaUrl, token });
+/**
+ * 连接 gitea/github（**唯一**接收 token 的入口）
+ *
+ * @param giteaUrl gitea 实例 URL（GitHub 时传 https://github.com 即可，后端忽略）
+ * @param token 个人访问令牌（8+ 字符，main 端会 trim + 长度校验）
+ * @param platform "gitea" | "github"（v2 新增，默认 "gitea"）
+ */
+export function authConnect(
+  giteaUrl: string,
+  token: string,
+  platform: 'gitea' | 'github' = 'gitea',
+): Promise<ConnectResult> {
+  return getIpcClient().invoke('auth', 'connect', { giteaUrl, token, platform });
 }
 
 /**断开某个 gitea URL 的连接 */
@@ -478,14 +490,37 @@ export function commitsGitgraphLines(args: {
  *   用户点「启用 Git Graph」按钮 → 调本函数 → clone 完成自动回到 TimelineNewView
  *   看到真 Git Graph（git 子进程跑字符流 + 前端 Parser 1:1 渲染）
  *
- * @param args.projectId 当前 project uuid
- * @param args.cwd 可选；不传走默认建议路径（${tmpdir}/gitea-kanban/repos/...）
+ * v2.3 修复：token 不再走 IPC（AGENTS §8.2 鉴权铁律）
+ *   - 旧版调 gitgraphCloneRepo 时传 token → 违反铁律
+ *   - 新版 Go 端 App.CloneRepo 自己从 keychain 拿（按 platform+hostUrl+username 定位）
+ *   - 前端只传 platform+hostUrl+username+owner+repo
+ *
+ * @param args.platform gitea | github（默认 gitea）
+ * @param args.hostUrl 用户连接的 gitea/github URL
+ * @param args.username 用户登录名
+ * @param args.owner 仓库 owner
+ * @param args.repo 仓库名
  */
 export function commitsGitgraphCloneRepo(args: {
-  projectId: string;
-  cwd?: string;
-}): Promise<{ cwd: string; stdout: string; reused: boolean }> {
+  platform?: 'gitea' | 'github';
+  hostUrl?: string;
+  username?: string;
+  owner: string;
+  repo: string;
+}): Promise<{ localPath: string; reused: boolean }> {
   return getIpcClient().invoke('commits', 'gitgraphCloneRepo', args);
+}
+
+/**
+ * v2.3 检查 owner/repo 是否已 clone 本地 workspace
+ *
+ * StatusBar 仓库管理面板用：判断行末按钮是"同步"还是"更新"
+ */
+export function commitsGitgraphIsRepoCloned(args: {
+  owner: string;
+  repo: string;
+}): Promise<boolean> {
+  return getIpcClient().invoke('commits', 'gitgraphIsRepoCloned', args);
 }
 
 /**
@@ -493,11 +528,24 @@ export function commitsGitgraphCloneRepo(args: {
  *
  * Header 的 pull 按钮调：拉取远端最新 commit → 成功后重新 loadGraph
  *
- * @param args.projectId 当前 project uuid
+ * v2.3：token 字段删除（AGENTS §8.2 鉴权铁律），Go 端从 localPath 反查 token
+ * v2.4：优先用 projectId（Go 端按 owner+repo 反查 localPath + token），
+ *      避免前端拼错 localPath 路径。兼容老 caller 传 localPath。
+ *
+ * @param args.projectId 优先（v2.4 推荐）
+ * @param args.localPath 兼容旧 caller
  */
 export function commitsGitgraphPull(args: {
-  projectId: string;
-}): Promise<{ beforeCount: number; afterCount: number; addedCommits: number; stdout: string }> {
+  projectId?: string;
+  localPath?: string;
+}): Promise<{
+  beforeCount: number;
+  afterCount: number;
+  addedCommits: number;
+  headChanged: boolean;
+  headBefore: string;
+  headAfter: string;
+}> {
   return getIpcClient().invoke('commits', 'gitgraphPull', args);
 }
 
@@ -607,9 +655,21 @@ export function clipboardWrite(text: string): Promise<void> {
 // ===== system.* （Electron 系统级能力）=====
 // ============================================================
 
-/** 系统目录选择器（Electron dialog.showOpenDialog wrapper） */
+/** 系统目录选择器（v1.5.3 SettingsView 用，v2.2 已移除选择目录功能，保留 stub） */
 export function systemSelectDirectory(): Promise<string | null> {
   return getIpcClient().invoke('system', 'selectDirectory');
+}
+
+/**
+ * 用系统文件管理器打开目录
+ *
+ * v2.2：设置页"打开应用数据目录"按钮调。Go 端 App.OpenDataDir 跨平台实现
+ *   - macOS: `open <path>`
+ *   - Windows: `explorer <path>`
+ *   - Linux: `xdg-open <path>`
+ */
+export function systemOpenPath(args: { path: string }): Promise<void> {
+  return getIpcClient().invoke('system', 'openPath', args);
 }
 
 // ============================================================

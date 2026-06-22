@@ -34,11 +34,9 @@ import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
 import {
   commitsGitgraphGetWorkspace,
-  commitsGitgraphSetWorkspace,
-  commitsGitgraphListWorkspaceRepos,
-  systemSelectDirectory,
+  systemOpenPath,
 } from '@renderer/lib/ipc-client';
-import WorkspaceMigrateDialog from '@renderer/components/WorkspaceMigrateDialog.vue';
+// v2.2：WorkspaceMigrateDialog 已移除（workspace 路径不可改）
 
 const settings = useSettingsStore();
 const ui = useUiStore();
@@ -48,115 +46,45 @@ const branch = useBranchStore();
 const router = useRouter();
 
 // ============================================================
-// 工作区分组（v1.5.3 · workspace path 配置）
+// 工作区分组（v1.5.3 · workspace 路径）
 // ============================================================
+//
+// v2.2 (user 拍板 2026-06-22)：
+//   - workspace 路径不可改，固定为 ${dataDir}/workspace
+//   - 设置页只读展示当前路径 + 状态
+//   - 提供"打开应用数据目录"按钮调 system.openPath
+//   - 旧版的 setWorkspace / 选目录 / 重置 / 迁移对话框 全部移除
 const workspacePath = ref('');
 const workspaceDefault = ref(true);
 const workspaceValidated = ref(true);
-const workspaceSaving = ref(false);
-const workspaceDraft = ref('');
+/** "打开应用数据目录" 按钮的 loading 态（避免双击） */
+const openingDataDir = ref(false);
 
-// ===== v1.6 workspace 迁移状态 =====
-interface MigrateRepoInfo {
-  name: string;
-  fullPath: string;
-  sizeBytes: number;
-}
-const migrateDialogOpen = ref(false);
-const migrateRepos = ref<MigrateRepoInfo[]>([]);
-const migrateTotalSize = ref(0);
-const migrateOldPath = ref('');
-const migrateNewPath = ref('');
-/** 暂存用户选好的新路径（等迁移对话框关闭后再持久化） */
-let pendingNewCwd: string | null = null;
-
-/**
- * 检查旧工作区是否有仓库，有则弹迁移对话框；没有则直接保存新路径
- *
- * @param newCwd 用户选的新工作区路径
- */
-async function checkAndSetWorkspace(newCwd: string): Promise<void> {
-  const oldCwd = workspacePath.value;
-  // 路径没变 → 不处理
-  if (!oldCwd || oldCwd === newCwd) {
-    await doSetWorkspace(newCwd);
-    return;
-  }
-
-  // 检查旧工作区是否有 repos
-  try {
-    const { repos, totalSizeBytes } = await commitsGitgraphListWorkspaceRepos({ cwd: oldCwd });
-    if (repos.length > 0) {
-      // 有仓库 → 弹迁移对话框
-      migrateRepos.value = repos;
-      migrateTotalSize.value = totalSizeBytes;
-      migrateOldPath.value = oldCwd;
-      migrateNewPath.value = newCwd;
-      pendingNewCwd = newCwd;
-      migrateDialogOpen.value = true;
-      return;
-    }
-  } catch {
-    // 检查失败 → 静默，直接保存
-  }
-
-  // 旧工作区没有仓库 → 直接保存
-  await doSetWorkspace(newCwd);
-}
-
-/** 真正执行 setWorkspace IPC 并更新本地状态 */
-async function doSetWorkspace(cwd: string): Promise<void> {
-  workspaceSaving.value = true;
-  try {
-    const resp = await commitsGitgraphSetWorkspace({ cwd });
-    workspacePath.value = resp.cwd;
-    workspaceDefault.value = false;
-    workspaceValidated.value = true;
-    workspaceDraft.value = resp.cwd;
-    showToast({
-      type: 'success',
-      message: '工作区已更新',
-      description: `Git Graph 仓库将同步到 ${resp.cwd}/repos/...`,
-    });
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string; hint?: string };
-    const msg = err.messageText ?? err.message ?? String(e) ?? '设置失败';
-    showToast({ type: 'error', message: msg });
-  } finally {
-    workspaceSaving.value = false;
-  }
-}
-
-/** 迁移对话框：用户选择迁移完成 */
-function onMigrateDone(result: { migratedCount: number; failed: Record<string, string> }): void {
-  // 迁移完成后，把新路径持久化
-  if (pendingNewCwd) {
-    void doSetWorkspace(pendingNewCwd);
-    pendingNewCwd = null;
-  }
-}
-
-/** 迁移对话框：用户选择跳过迁移 */
-function onMigrateSkip(): void {
-  // 跳过迁移也要更新工作区路径（只是不复制仓库）
-  if (pendingNewCwd) {
-    void doSetWorkspace(pendingNewCwd);
-    pendingNewCwd = null;
-  }
-}
-
-/** 启动期加载当前 workspace 设置 */
+/** 启动期加载当前 workspace 信息（只读） */
 (async (): Promise<void> => {
   try {
     const resp = await commitsGitgraphGetWorkspace();
     workspacePath.value = resp.cwd;
     workspaceDefault.value = resp.isDefault;
     workspaceValidated.value = resp.validated;
-    workspaceDraft.value = resp.cwd;
   } catch {
     // getWorkspace 失败 → 静默（不阻塞设置页）
   }
 })();
+
+/** 打开系统文件管理器到应用数据目录 */
+async function onOpenDataDir(): Promise<void> {
+  openingDataDir.value = true;
+  try {
+    await systemOpenPath({ path: workspacePath.value });
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    const msg = err.messageText ?? err.message ?? String(e) ?? '打开目录失败';
+    showToast({ type: 'error', message: msg });
+  } finally {
+    openingDataDir.value = false;
+  }
+}
 
 /** 外观分组 2 选 1（v1.2 收敛 · 与 tech-refine §14 token 矩阵 + §15.1 单选规格同步） */
 const themeOptions: ReadonlyArray<{ value: Theme; label: string; desc: string }> = [
@@ -227,45 +155,9 @@ async function onSave(): Promise<void> {
   }
 }
 
-// ============================================================
-// 工作区保存（v1.5.3）
-// ============================================================
-async function onWorkspaceSave(): Promise<void> {
-  const cwd = workspaceDraft.value.trim();
-  if (!cwd) {
-    showToast({ type: 'error', message: '工作区路径不能为空' });
-    return;
-  }
-  if (cwd === workspacePath.value) {
-    showToast({ type: 'info', message: '工作区路径未变，无需保存' });
-    return;
-  }
-  // 检查旧工作区是否有仓库需要迁移
-  await checkAndSetWorkspace(cwd);
-}
-
-/** 重置为默认路径 */
-async function onWorkspaceReset(): Promise<void> {
-  // 默认路径是 ~/.gitea-kanban/workspace（main 端 resolveDefaultWorkspacePath 的值）
-  // 这里用 getWorkspace 拿 isDefault 来判断，或者直接用已知的默认值
-  const defaultHint = '~/.gitea-kanban/workspace';
-  workspaceDraft.value = defaultHint;
-  showToast({ type: 'info', message: '已重置为默认路径，点「保存」生效' });
-}
-
-/** 打开系统目录选择器（Electron dialog wrapper） */
-async function onBrowseDirectory(): Promise<void> {
-  try {
-    const selected = await systemSelectDirectory();
-    if (selected) {
-      workspaceDraft.value = selected;
-      // 选择后检查旧仓库是否需要迁移
-      await checkAndSetWorkspace(selected);
-    }
-  } catch (e) {
-    showToast({ type: 'error', message: '选择目录失败', description: String(e) });
-  }
-}
+// v2.2 (user 拍板 2026-06-22)：原 onWorkspaceSave / onWorkspaceReset / onBrowseDirectory 全部移除
+// workspace 路径不可改，无需保存 / 重置 / 选目录
+// 替代：onOpenDataDir 调 system.openPath 打开系统文件管理器到应用数据目录
 
 // ============================================================
 // ===== 账号分组（v1.1.3 · task #22）=====
@@ -462,7 +354,11 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
         </button>
       </section>
 
-      <!-- 工作区 -->
+      <!--
+        v2.2 工作区（user 拍板 2026-06-22）：只读展示 + "打开应用数据目录"按钮
+        - 当前路径 / 状态 不可改
+        - 旧版的 "选择目录" / "重置为默认" / 迁移对话框 全部移除
+      -->
       <section class="settings__card settings__card--wide">
         <h2>应用工作区</h2>
         <div class="settings__workspace-row">
@@ -486,22 +382,19 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
             <button
               type="button"
               class="settings__save"
-              :disabled="workspaceSaving"
-              @click="onBrowseDirectory"
+              :disabled="openingDataDir || !workspacePath"
+              :title="workspacePath ? '用系统文件管理器打开 ' + workspacePath : '尚无数据目录'"
+              @click="onOpenDataDir"
             >
-              <span>{{ workspaceSaving ? '选择中…' : '选择目录' }}</span>
-            </button>
-            <button
-              type="button"
-              class="settings__reset"
-              @click="onWorkspaceReset"
-            >
-              重置为默认
+              <span>{{ openingDataDir ? '打开中…' : '打开应用数据目录' }}</span>
             </button>
           </div>
         </div>
         <p class="settings__hint settings__hint--compact">
-          跨平台默认：macOS/Linux = <code>~/.gitea-kanban/workspace</code>；Windows = <code>%USERPROFILE%\.gitea-kanban\workspace</code>
+          工作区路径不可修改，固定为
+          <code>~/.gitea-kanban/workspace</code>（macOS/Linux） /
+          <code>%USERPROFILE%\.gitea-kanban\workspace</code>（Windows）。
+          git 同步下来的仓库会放在 <code>${'${workspacePath}'}/repos/&lt;owner&gt;__&lt;repo&gt;</code>。
         </p>
       </section>
     </div>
@@ -595,16 +488,7 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
       </div>
     </Teleport>
 
-    <!-- v1.6 工作区迁移对话框 -->
-    <WorkspaceMigrateDialog
-      v-model:open="migrateDialogOpen"
-      :repos="migrateRepos"
-      :total-size-bytes="migrateTotalSize"
-      :old-path="migrateOldPath"
-      :new-path="migrateNewPath"
-      @migrated="onMigrateDone"
-      @skip="onMigrateSkip"
-    />
+    <!-- v2.2：工作区迁移对话框已移除（workspace 不可改，不需要迁移） -->
 </template>
 
 <style scoped>

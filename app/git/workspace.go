@@ -14,8 +14,14 @@ import (
 //   - 全局配置（不是 per-project），所有 gitgraph 仓库路径派生自此
 //   - 持久化到 localStore.prefs['app.workspacePath']
 //   - 默认值：~/.gitea-kanban/workspace
+//
+// 数据布局（v2.2 user 拍板 2026-06-22）：
+//   ~/.gitea-kanban/                  ← dataDir（应用根）
+//   ├── state.json / logs/main/main.log / dev-tokens/
+//   └── workspace/                    ← 本 Manager 管这一层
+//       └── repos/owner__repo/.git
 type WorkspaceManager struct {
-	// defaultPath 默认 workspace 路径
+	// defaultPath 默认 workspace 路径（git repo 专用）
 	defaultPath string
 }
 
@@ -38,7 +44,7 @@ func (wm *WorkspaceManager) DefaultPath() string {
 // ResolvePath 解析 workspace 路径
 //
 // 优先级：
-//  1. 用户配置的路径（prefs.app.workspacePath）
+//  1. 用户配置的路径（prefs.app.workspacePath）—— v2.2 已废弃，保留兼容
 //  2. 默认路径 ~/.gitea-kanban/workspace
 func (wm *WorkspaceManager) ResolvePath(userPath string) string {
 	if userPath != "" {

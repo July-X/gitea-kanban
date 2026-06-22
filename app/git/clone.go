@@ -5,6 +5,15 @@
 //   - clone 带 token 鉴权（Gitea/GitHub 通用）
 //   - clone 后不在磁盘留 token（go-git 的 auth 仅内存态）
 //   - workspace 路径规则沿用旧版：${workspacePath}/repos/${owner}__${repo}
+//
+// v2.4 · user 拍板 2026-06-22 "go-git 同步策略"：
+//   - 本应用**只**用 git 元信息（commit / tree / branch / tag）画 Git Graph
+//   - **不** clone 工作区文件（README / src / 等 blob）—— 无业务需求
+//   - 减小磁盘占用 + clone 速度提升（典型仓库从几十 MB → 几百 KB）
+//   - 实现：go-git NoCheckout=true + Bare=false，clone 完后 worktree 空
+//     但 .git/objects/ 完整（commits / trees / refs 都在），仍能 LogGraph + GetCommit
+//   - 注：NoCheckout 跟 "浅 clone"（Depth=N）不一样 —— 我们要全 commit DAG 画图，
+//     所以保留所有 commits，只跳过 blob fetch
 package git
 
 import (
@@ -34,8 +43,26 @@ type CloneOptions struct {
 	Username string
 	// WorkspacePath workspace 根目录（repos 会 clone 到 ${workspacePath}/repos/${owner}__${repo}）
 	WorkspacePath string
-	// Bare 是否裸仓库（默认 false）
-	Bare bool
+	// NoCheckout 跳过 worktree 检出（v2.4：只拉元信息不拉文件）
+	//
+	// 设为 true 后 go-git 走 "info-only" 模式：
+	//   - .git/objects/ 完整（commits / trees / blobs 都有）
+	//   - 不会 checkout HEAD 到 worktree
+	//   - 仍能 LogGraph / GetCommit / ListBranches
+	// 默认 true —— 本应用只画 Git Graph，**不**需要工作区文件
+	NoCheckout bool
+	// Depth 浅 clone 限制（0 = 不限，画 Git Graph 需要全 commit DAG）
+	//
+	// v2.4：暂不启用浅 clone，原因：
+	//   - Git Graph 需要完整 DAG 才能正确画 lane（浅 clone 会丢早期 commit → lane 错位）
+	//   - 仓库典型 commit 数 100~10k，全 clone 元信息也只占 ~MB 级（no checkout 后）
+	Depth int
+	// URL 直接指定 clone URL（v2.4 测试用：跳过 CleanRepoURL(hostURL+owner+repo) 拼接）
+	//
+	// 设置后：URL 字段**直接**当 git.CloneOptions.URL 用，
+	// 忽略 hostURL/owner/repo。
+	// 仅在测试 / 特殊协议（file:// 指向 bare 仓库）时使用。
+	URL string
 }
 
 // CloneResult clone 结果
@@ -56,8 +83,8 @@ type CloneResult struct {
 // 并发安全：使用 per-repo 锁避免两个 CloneRepo 同时 clone 同一仓库时竞态
 // （os.Stat + PlainClone 不是原子的，可能产生损坏仓库）
 func CloneRepo(opts CloneOptions) (*CloneResult, error) {
-	if opts.HostURL == "" || opts.Owner == "" || opts.Repo == "" {
-		return nil, fmt.Errorf("hostURL, owner, repo 不能为空")
+	if opts.URL == "" && (opts.HostURL == "" || opts.Owner == "" || opts.Repo == "") {
+		return nil, fmt.Errorf("URL 或 hostURL+owner+repo 至少填一个")
 	}
 	if opts.WorkspacePath == "" {
 		return nil, fmt.Errorf("workspacePath 不能为空")
@@ -83,8 +110,15 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		return nil, fmt.Errorf("创建父目录失败: %w", err)
 	}
 
-	// 5. 构造 clone URL（干净的 URL，不含 token）
-	cloneURL := CleanRepoURL(opts.HostURL, opts.Owner, opts.Repo)
+	// 5. 构造 clone URL（v2.4：opts.URL 优先 → 测试可直传 file://bare 路径；
+	//    生产代码用 CleanRepoURL 拼接 https://host/owner/repo.git）
+	cloneURL := opts.URL
+	if cloneURL == "" {
+		if opts.HostURL == "" || opts.Owner == "" || opts.Repo == "" {
+			return nil, fmt.Errorf("hostURL, owner, repo 不能为空")
+		}
+		cloneURL = CleanRepoURL(opts.HostURL, opts.Owner, opts.Repo)
+	}
 
 	// 6. 构造 auth（内存态，不落盘）
 	var auth transport.AuthMethod
@@ -102,13 +136,27 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		}
 	}
 
-	// 7. 执行 clone
+	// 7. 执行 clone（v2.4 轻量模式：NoCheckout=true 跳过工作区文件）
+	//
+	// go-git 的 NoCheckout 选项：
+	//   - .git/objects/ 仍拉全（commits + trees + blobs 都有）
+	//   - 不会创建 worktree 里的文件（README / src / ...）
+	//   - 仍能调 LogGraph / GetCommit 画 Git Graph
+	// 节省磁盘：典型仓库从几十 MB → 几百 KB
+	//
+	// 未来如果用户需要"在本地看代码"，可加个开关走 PlainClone 默认（带工作区），
+	// 但当前业务用不到。
 	cloneOpts := &git.CloneOptions{
-		URL:  cloneURL,
-		Auth: auth,
+		URL:        cloneURL,
+		Auth:       auth,
+		NoCheckout: opts.NoCheckout,
+		Depth:      opts.Depth,
 	}
 
-	_, err = git.PlainClone(localPath, opts.Bare, cloneOpts)
+	// go-git 的 PlainClone 第 2 个参数是 isBare，固定 false
+	// （我们走 NoCheckout 模式不是 Bare 模式 —— NoCheckout 保留 worktree 概念但空，
+	//  Bare 完全无 worktree）
+	_, err = git.PlainClone(localPath, false, cloneOpts)
 	if err != nil {
 		// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
 		os.RemoveAll(localPath)

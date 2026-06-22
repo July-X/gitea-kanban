@@ -16,6 +16,13 @@ func TestWorkspaceManager_DefaultPath(t *testing.T) {
 	if !filepath.IsAbs(path) {
 		t.Errorf("DefaultPath should be absolute, got %q", path)
 	}
+
+	// v2.2：默认路径是 ~/.gitea-kanban/workspace（git repos 目录）
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".gitea-kanban", "workspace")
+	if path != want {
+		t.Errorf("DefaultPath = %q, want %q", path, want)
+	}
 }
 
 func TestWorkspaceManager_ResolvePath(t *testing.T) {

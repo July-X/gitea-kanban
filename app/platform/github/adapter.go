@@ -17,6 +17,7 @@ import (
 
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
+	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/platform"
 )
 
@@ -105,6 +106,7 @@ func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token,
 		Token:         token,
 		Username:      username,
 		WorkspacePath: workspacePath,
+		NoCheckout:    true, // v2.4：只拉元信息
 	})
 	if err != nil {
 		return "", err
@@ -191,23 +193,38 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 	return nil
 }
 
-// mapHTTPError 把 GitHub HTTP 错误码映射为友好错误
+// mapHTTPError 把 GitHub HTTP 错误码映射为友好 IpcError
+//
+// 跟 Gitea mapHTTPError 保持一致的结构（main.go ErrorFormatter 会序列化到前端）
 func mapHTTPError(status int, body string) error {
+	cause := ipc.TruncateCause(body)
 	switch status {
 	case 401:
-		return fmt.Errorf("登录已过期或 token 无效（请到 GitHub Settings → Developer settings 重新生成 token）")
+		return &ipc.IpcError{
+			Code:       ipc.CodeTokenInvalid,
+			Message:    "登录已过期或 token 无效",
+			Hint:       "请到 GitHub Settings → Developer settings 重新生成 token",
+			Cause:      cause,
+			HTTPStatus: status,
+		}
 	case 403:
-		return fmt.Errorf("没有该操作权限（可能 token scope 不足）")
+		return ipc.NewPermissionDenied(cause + "（可能 token scope 不足）")
 	case 404:
-		return fmt.Errorf("找不到该资源（可能已被删除或 token 无权访问）")
+		return ipc.NewNotFound(cause + "（可能已被删除或 token 无权访问）")
 	case 422:
-		return fmt.Errorf("请求参数不被服务端接受")
+		return ipc.NewValidationFailed("请求参数不被服务端接受", cause)
 	case 429:
-		return fmt.Errorf("请求过于频繁（GitHub API 限流，请稍后重试）")
+		return &ipc.IpcError{
+			Code:       ipc.CodeRateLimited,
+			Message:    "请求过于频繁（GitHub API 限流）",
+			Hint:       "请稍候重试",
+			Cause:      cause,
+			HTTPStatus: status,
+		}
 	case 502, 503:
-		return fmt.Errorf("当前离线或远端不可达（请检查网络后重试）")
+		return ipc.NewNetworkOffline(cause)
 	default:
-		return fmt.Errorf("GitHub 返回 %d: %s", status, body)
+		return ipc.NewGiteaError("GitHub 返回错误", cause)
 	}
 }
 

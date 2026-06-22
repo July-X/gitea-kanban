@@ -17,26 +17,13 @@
  */
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Eye, EyeOff, Folder, KeyRound, LogIn, ShieldCheck } from 'lucide-vue-next';
+import { Eye, EyeOff, KeyRound, LogIn, ShieldCheck } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { showToast } from '@renderer/lib/toast';
-import { commitsGitgraphGetWorkspace, commitsGitgraphSetWorkspace, getIpcClient } from '@renderer/lib/ipc-client';
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-
-/**
- * v1.5.3 工作区路径：默认跨平台 `~/.gitea-kanban/workspace`（macOS/Linux = $HOME/.gitea-kanban/workspace；
- * Windows = %USERPROFILE%\.gitea-kanban\workspace）。
- *
- * 计算：
- *   - 启动期 / 切到 AuthView 时 main 端 initWorkspace 已 lazy 设默认到 prefs
- *   - 这里读 prefs 取 cwd（用户之前设过的或默认）
- *   - 用户改 → 提交时 setWorkspace
- */
-const DEFAULT_WORKSPACE_LABEL =
-  '~/.gitea-kanban/workspace（默认；macOS/Linux = $HOME/.gitea-kanban/workspace；Windows = %USERPROFILE%\\.gitea-kanban\\workspace）';
 
 /**
  * v1.4 任务 #auth-prefill-localhost:
@@ -49,6 +36,10 @@ const DEFAULT_WORKSPACE_LABEL =
  *   - placeholder 同步改为提示"自托管/自定义地址"
  *   - 已经在持久化 prefs 里看到 giteaUrl 时保留(v1.4 起 prefs 里有 url),
  *     走 restoreLastSelected 的 prefs 路径 —— AuthView 本身不读 prefs(职责单一)
+ *
+ * v2.2 (user 拍板 2026-06-22)：连接界面不再提供修改工作区路径的入口
+ *   - workspace 固定为 ${dataDir}/workspace，不可改
+ *   - 旧的 DEFAULT_WORKSPACE_LABEL + workspacePath 输入框 + setWorkspace 调用全部移除
  */
 const DEFAULT_LOCAL_URL = 'http://127.0.0.1:3000';
 
@@ -63,20 +54,9 @@ const platforms = [
 
 const giteaUrl = ref(DEFAULT_LOCAL_URL);
 const token = ref('');
-const workspacePath = ref(''); // v1.5.3：用户配置的应用工作区根目录
 const showToken = ref(false);
 const localError = ref<string | null>(null);
 const tokenInputEl = ref<HTMLInputElement | null>(null);
-
-/** 启动期预填 workspace 默认值 */
-(async (): Promise<void> => {
-  try {
-    const resp = await commitsGitgraphGetWorkspace();
-    workspacePath.value = resp.cwd;
-  } catch {
-    // getWorkspace lazy init 失败 → 留空，用户提交时会回退到 main 端默认
-  }
-})();
 
 const submitting = computed(() => auth.loading);
 const hasAnyError = computed(() => Boolean(localError.value) || Boolean(auth.error));
@@ -151,28 +131,12 @@ async function onSubmit(): Promise<void> {
     return;
   }
 
-  // v1.5.3：先 setWorkspace（用户可能改过路径）→ 再 connect
-  // v2 迁移说明：setWorkspace 在 shim 层是 stub 模式（Go 端 OnStartup 已建默认 workspace）
-  // → 这里只识别"已实现的错误"才阻断；"未实现"错误降级为 warn 不阻断连接
-  try {
-    if (workspacePath.value.trim()) {
-      await commitsGitgraphSetWorkspace({ cwd: workspacePath.value.trim() });
-    }
-  } catch (e) {
-    const err = e as { code?: string; messageText?: string; message?: string; hint?: string };
-    const raw = err.messageText ?? err.message ?? String(e) ?? 'workspace 设置失败';
-    // v2 迁移期 shim 可能返 "尚未实现"——仅 warn，不阻断登录
-    if (raw.includes('尚未实现') || raw.includes('not implemented') || err.code === 'internal') {
-      console.warn('[gitea-kanban] setWorkspace stub warning:', raw);
-      // 继续走 connect（Go 端默认 workspace 已 OK）
-    } else {
-      localError.value = `工作区路径无效：${raw}`;
-      return;
-    }
-  }
+  // v2.2 (user 拍板 2026-06-22)：连接界面不再提供修改 workspace 路径的入口
+  // workspace 固定为 ${dataDir}/workspace，OnStartup 已自动建好
+  // 不再调 commitsGitgraphSetWorkspace
 
   try {
-    await auth.connect(urlToConnect, token.value.trim());
+    await auth.connect(urlToConnect, token.value.trim(), selectedPlatform.value);
     showToast({
       type: 'success',
       message: '连接成功',
@@ -277,26 +241,6 @@ function goNext(): void {
               >设置 → 应用 → 生成令牌</a
             >
             （需要勾选仓库、议题、用户的读写权限）
-          </p>
-        </div>
-
-        <div class="auth__field">
-          <label class="auth__label" for="workspace-path">
-            <Folder :size="13" :stroke-width="2" />
-            应用工作区（git clone 仓库的本地根目录）
-          </label>
-          <input
-            id="workspace-path"
-            v-model="workspacePath"
-            type="text"
-            class="auth__input"
-            :placeholder="DEFAULT_WORKSPACE_LABEL"
-            spellcheck="false"
-            :disabled="submitting"
-          />
-          <p class="auth__hint">
-            仓库会按 <code>${'${workspacePath}'}/repos/${'${owner}'}__${'${repo}'}.git</code> 路径 clone。
-            不填则用默认 {{ DEFAULT_WORKSPACE_LABEL }}。
           </p>
         </div>
 

@@ -16,6 +16,7 @@ import (
 
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
+	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/platform"
 )
 
@@ -65,6 +66,8 @@ func (a *GiteaAdapter) VerifyToken(ctx context.Context, hostURL, token string) (
 // ===== 仓库 =====
 
 // ListRepos 列出用户可访问的仓库（GET /api/v1/repos/search）
+//
+// v2.3 扩展：解析 id / archived / updated_at / permissions（前端 RepoDto 需要这些字段）
 func (a *GiteaAdapter) ListRepos(ctx context.Context, hostURL, username, token string, opts platform.ListReposOpts) ([]platform.RepoDTO, error) {
 	params := url.Values{}
 	if opts.Query != "" {
@@ -81,6 +84,7 @@ func (a *GiteaAdapter) ListRepos(ctx context.Context, hostURL, username, token s
 
 	var raw struct {
 		Data []struct {
+			ID            int64  `json:"id"`
 			Name          string `json:"name"`
 			FullName      string `json:"full_name"`
 			Owner         struct {
@@ -89,6 +93,13 @@ func (a *GiteaAdapter) ListRepos(ctx context.Context, hostURL, username, token s
 			DefaultBranch string `json:"default_branch"`
 			Description   string `json:"description"`
 			Private       bool   `json:"private"`
+			Archived      bool   `json:"archived"`
+			UpdatedAt     string `json:"updated_at"`
+			Permissions   *struct {
+				Pull  bool `json:"pull"`
+				Push  bool `json:"push"`
+				Admin bool `json:"admin"`
+			} `json:"permissions"`
 		} `json:"data"`
 	}
 
@@ -100,14 +111,25 @@ func (a *GiteaAdapter) ListRepos(ctx context.Context, hostURL, username, token s
 
 	repos := make([]platform.RepoDTO, 0, len(raw.Data))
 	for _, r := range raw.Data {
-		repos = append(repos, platform.RepoDTO{
+		dto := platform.RepoDTO{
+			ID:            r.ID,
 			Owner:         r.Owner.Login,
 			Name:          r.Name,
 			FullName:      r.FullName,
 			DefaultBranch: r.DefaultBranch,
 			Description:   r.Description,
 			Private:       r.Private,
-		})
+			Archived:      r.Archived,
+			UpdatedAt:     r.UpdatedAt,
+		}
+		if r.Permissions != nil {
+			dto.Permissions = &platform.RepoPermissions{
+				Pull:  r.Permissions.Pull,
+				Push:  r.Permissions.Push,
+				Admin: r.Permissions.Admin,
+			}
+		}
+		repos = append(repos, dto)
 	}
 	return repos, nil
 }
@@ -144,6 +166,8 @@ func (a *GiteaAdapter) ListBranches(ctx context.Context, hostURL, username, toke
 // ===== Git Graph =====
 
 // CloneRepo clone 仓库到本地 workspace（委托 app/git.CloneRepo）
+//
+// v2.4 轻量模式：NoCheckout=true 跳过工作区文件（Git Graph 元信息足够）
 func (a *GiteaAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath string) (string, error) {
 	result, err := git.CloneRepo(git.CloneOptions{
 		Platform:      "gitea",
@@ -153,6 +177,7 @@ func (a *GiteaAdapter) CloneRepo(ctx context.Context, hostURL, username, token, 
 		Token:         token,
 		Username:      username,
 		WorkspacePath: workspacePath,
+		NoCheckout:    true, // v2.4：只拉元信息
 	})
 	if err != nil {
 		return "", err
@@ -360,27 +385,48 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 	return nil
 }
 
-// mapHTTPError 把 Gitea HTTP 错误码映射为友好错误
+// mapHTTPError 把 Gitea HTTP 错误码映射为友好 IpcError
 //
 // 对齐旧版 httpErrorToIpcError（src/main/gitea/client.ts）
+// 返回 *ipc.IpcError：main.go 的 ErrorFormatter 会把它结构化序列化到前端，
+// 前端 isIpcErrorPayload() 就能识别 code + message + hint。
 func mapHTTPError(status int, body, url string) error {
+	cause := ipc.TruncateCause(body)
 	switch status {
 	case 401:
-		return fmt.Errorf("登录已过期或 token 无效（请到 Gitea 重新生成 token）")
+		return &ipc.IpcError{
+			Code:       ipc.CodeTokenInvalid,
+			Message:    "登录已过期或 token 无效",
+			Hint:       "请到 Gitea 重新生成 token 后再连接",
+			Cause:      cause,
+			HTTPStatus: status,
+		}
 	case 403:
-		return fmt.Errorf("没有该操作权限（请联系仓库管理员）")
+		return ipc.NewPermissionDenied(cause)
 	case 404:
-		return fmt.Errorf("找不到该资源（可能已被删除）")
+		return ipc.NewNotFound(cause)
 	case 409:
-		return fmt.Errorf("操作冲突：资源已存在或状态不允许")
+		return &ipc.IpcError{
+			Code:       ipc.CodeConflict,
+			Message:    "操作冲突：资源已存在或状态不允许",
+			Hint:       "请刷新后重试",
+			Cause:      cause,
+			HTTPStatus: status,
+		}
 	case 422:
-		return fmt.Errorf("请求参数不被服务端接受")
+		return ipc.NewValidationFailed("请求参数不被服务端接受", cause)
 	case 429:
-		return fmt.Errorf("请求过于频繁（请稍后重试）")
+		return &ipc.IpcError{
+			Code:       ipc.CodeRateLimited,
+			Message:    "请求过于频繁",
+			Hint:       "请稍候重试",
+			Cause:      cause,
+			HTTPStatus: status,
+		}
 	case 502, 503, 504:
-		return fmt.Errorf("当前离线或远端不可达（请检查网络后重试）")
+		return ipc.NewNetworkOffline(cause)
 	default:
-		return fmt.Errorf("Gitea 返回 %d: %s", status, body)
+		return ipc.NewGiteaError("Gitea 返回错误", cause)
 	}
 }
 

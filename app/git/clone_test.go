@@ -134,3 +134,90 @@ func TestRepoExists(t *testing.T) {
 		t.Error("RepoExists should be true for dir with .git")
 	}
 }
+
+// TestCloneRepo_NoCheckout_NoWorktreeFiles 验证 v2.4 关键性质：
+//   - 源仓库 push 了 README.md → clone 后 worktree 目录**不**应有 README.md
+//   - .git/objects/ 完整 → LogCommits 能跑（Git Graph 元信息足够）
+func TestCloneRepo_NoCheckout_NoWorktreeFiles(t *testing.T) {
+	// 创建带 README.md + main.go 的源仓库
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "test-repo.git")
+	cmd := exec.Command("git", "init", "--bare", "-b", "main", repoPath)
+	if err := cmd.Run(); err != nil {
+		// 旧版 git (≤2.28) 不支持 -b，fallback
+		cmd = exec.Command("git", "init", "--bare", repoPath)
+		if err := cmd.Run(); err != nil {
+			t.Skipf("git not available: %v", err)
+		}
+		// 改 default branch → main（通过改 HEAD symbolic ref）
+		hcmd := exec.Command("git", "symbolic-ref", "HEAD", "refs/heads/main")
+		hcmd.Dir = repoPath
+		if out, err := hcmd.CombinedOutput(); err != nil {
+			t.Skipf("git symbolic-ref HEAD failed: %v\n%s", err, out)
+		}
+	}
+
+	srcPath := filepath.Join(dir, "src")
+	os.MkdirAll(srcPath, 0o755)
+	runGit := func(args ...string) {
+		c := exec.Command("git", args...)
+		c.Dir = srcPath
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	os.WriteFile(filepath.Join(srcPath, "README.md"), []byte("# Hello\n"), 0o644)
+	os.WriteFile(filepath.Join(srcPath, "main.go"), []byte("package main\n"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "initial commit")
+	runGit("branch", "-M", "main")
+	runGit("remote", "add", "origin", repoPath)
+	runGit("push", "-u", "origin", "main")
+
+	// v2.4 clone（NoCheckout=true 默认；测试显式 set 跟生产对齐）
+	workspace := t.TempDir()
+	result, err := CloneRepo(CloneOptions{
+		Platform:      "gitea",
+		URL:           "file://" + repoPath, // 直传 file:// + bare 仓库绝对路径
+		WorkspacePath: workspace,
+		NoCheckout:    true, // v2.4：只拉元信息
+	})
+	if err != nil {
+		t.Fatalf("CloneRepo failed: %v", err)
+	}
+
+	// 1. .git 目录存在
+	gitDir := filepath.Join(result.LocalPath, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		t.Errorf(".git 目录不存在: %v", err)
+	}
+
+	// 2. worktree 目录**应该没有** README.md / main.go（NoCheckout 模式）
+	readmePath := filepath.Join(result.LocalPath, "README.md")
+	mainGoPath := filepath.Join(result.LocalPath, "main.go")
+	if _, err := os.Stat(readmePath); err == nil {
+		t.Error("v2.4 轻量 clone 不应 checkout README.md 到 worktree")
+	}
+	if _, err := os.Stat(mainGoPath); err == nil {
+		t.Error("v2.4 轻量 clone 不应 checkout main.go 到 worktree")
+	}
+
+	// 3. .git/objects/ 完整 → LogCommits 能跑
+	logResult, err := LogCommits(LogOptions{
+		LocalPath: result.LocalPath,
+		Branches:  []string{"main"},
+		MaxCount:  10,
+	})
+	if err != nil {
+		t.Errorf("LogCommits failed (应该是 NoCheckout 后 .git/objects 完整): %v", err)
+	}
+	if len(logResult.Commits) == 0 {
+		t.Error("expected at least 1 commit, got 0")
+	}
+	if logResult.Commits[0].Subject != "initial commit" {
+		t.Errorf("commit subject = %q, want %q", logResult.Commits[0].Subject, "initial commit")
+	}
+}

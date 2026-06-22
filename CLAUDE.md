@@ -8,16 +8,18 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0）
+## 固定技术栈（v2.0 + v2.4）
+
+> **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.2 鉴权铁律）
 
 - 运行时：Go 1.22+ + Wails v2.12（用系统 WebView，非 Chromium）
-- git 客户端：go-git v5（纯 Go，无 CGO，替代旧的 spawn('git')）
+- git 客户端：go-git v5（纯 Go，无 CGO，替代旧的 spawn('git')；v2.4 走 NoCheckout 轻量模式）
 - 凭证：zalando/go-keyring（纯 Go，替代旧的 @napi-rs/keyring napi 二进制）
 - 本地库：**JSON 文件 + 文件 KV**（延续 ADR-0003 零 SQLite 决策）
 - 同步队列：queue.jsonl（append-only JSONL）
 - Gitea 集成：Go `net/http` 手写（替代旧的 gitea-js）+ `PlatformAdapter` 抽象层
 - 日志：`log/slog` + 文件 transport
-- 测试：Go 标准 `testing` + `httptest`（50+ 测试用例覆盖 9 个 Go 包）
+- 测试：Go 标准 `testing` + `httptest`（**60+ 测试用例覆盖 11 个 Go 包**，含 v2.4 新增 18+ 测试）
 - 前端：Vue 3 + Vite + Pinia + Vue Router（**前端 v1 完全保留**）
 - 打包：Wails build（macOS .app / Windows .exe / Linux AppImage）
 
@@ -137,7 +139,9 @@ tail -50 "$GITEA_KANBAN_DATA_DIR/logs/main/main.log"
 
 - `AGENTS.md`（**最权威**）
 - `docs/adr/0005-electron-to-go-wails-migration.md`（v2.0 迁移决策）
-- `docs/design/00-overview.md`（v1 综述，**部分已 deprecated**）
+- `docs/adr/0006-v24-iteration-fixes.md`（**v2.4 迭代修复**：鉴权铁律 / binding 补全 / 数据目录 / 反查链路 / prefs / go-git 轻量模式 6 个决策）
+- `docs/design/07-v24-iteration.md`（v2.4 迭代记录：6 类问题的症状/根因/修复/回归测试）
+- `docs/design/00-overview.md`（v1 综述，**部分已 deprecated**，v2.0/v2.4 横幅已加）
 - `docs/design/02-architecture.md`（**DEPRECATED**，基于 Electron）
 - `docs/design/03-frontend.md`（前端设计，v2 仍有效）
 - `docs/design/06-gitgraph.md`（Git Graph 设计，v2 仍有效）

@@ -33,9 +33,11 @@ function startPolling(): void {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => {
     if (!auth.isConnected) return; // 未连接就不拉
-    void repo.loadRepos('', true).catch(() => {
-      /* 静默：用户已经看到错误提示，轮询触发的错误不再弹 toast */
-    });
+    void repo.loadRepos('', true)
+      .then(() => repo.refreshClonedStatus())
+      .catch(() => {
+        /* 静默：用户已经看到错误提示，轮询触发的错误不再弹 toast */
+      });
   }, settings.pollingIntervalMs);
 }
 
@@ -79,6 +81,7 @@ watch(
       try {
         if (repo.repos.length === 0) {
           await repo.loadRepos('', true);
+          await repo.refreshClonedStatus();
         }
       } catch {
         /* 错误已在 repo.error,StatusBar 提示 */
@@ -111,6 +114,7 @@ async function tryRestoreOrPromptRepoGuide(alreadyLoadedRepos = false): Promise<
   if (!alreadyLoadedRepos && repo.repos.length === 0) {
     try {
       await repo.loadRepos('', true);
+      await repo.refreshClonedStatus();
     } catch {
       /* 错误已在 repo.error */
     }

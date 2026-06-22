@@ -10,6 +10,9 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
+  commitsGitgraphCloneRepo,
+  commitsGitgraphIsRepoCloned,
+  commitsGitgraphPull,
   reposAddProject,
   reposList,
   reposRemoveProject,
@@ -386,6 +389,161 @@ export const useRepoStore = defineStore('repo', () => {
     return final;
   }
 
+  // ===== v2.3 StatusBar 仓库管理面板：clone 状态缓存 =====
+  /**
+   * 已 clone 状态缓存：key = `${owner}/${repo}` → boolean
+   *
+   * 设计：
+   *   - 状态来自后端 IsRepoCloned 检查（查 .git 目录是否存在）
+   *   - 每次 loadRepos 后批量更新一次（按当前 repos[] 列表）
+   *   - 单独 owner/repo 也支持 query 临时检查
+   *   - clone / pull 成功后本地更新（不重新调 IsRepoCloned）
+   */
+  const clonedMap = ref<Record<string, boolean>>({});
+
+  /** key = owner/repo */
+  function cloneKey(owner: string, repo: string): string {
+    return `${owner}/${repo}`;
+  }
+
+  /**
+   * 批量刷新已 clone 状态（loadRepos 完成后调一次）
+   *
+   * 注：现在 repos store 还依赖 gitea repos list 的 stub 路径，没真后端。
+   *     真实场景下 repos[] 来自 gitea API，每个 owner/repo 都过 IsRepoCloned。
+   *     为避免 N+1 同步阻塞 UI，clone check 用 Promise.all 并发；
+   *     失败 → 当成 false（按钮显示"同步"，符合"我还没下"的预期）。
+   */
+  async function refreshClonedStatus(): Promise<void> {
+    const auth = useAuthStore();
+    if (!auth.isConnected) {
+      clonedMap.value = {};
+      return;
+    }
+    const next: Record<string, boolean> = {};
+    await Promise.all(
+      repos.value.map(async (r) => {
+        const key = cloneKey(r.owner, r.name);
+        try {
+          next[key] = await commitsGitgraphIsRepoCloned({ owner: r.owner, repo: r.name });
+        } catch {
+          next[key] = false;
+        }
+      }),
+    );
+    clonedMap.value = next;
+  }
+
+  /**
+   * clone 仓库到本地 workspace（v2.3：不传 token，Go 端从 keychain 拿）
+   *
+   * @returns localPath（成功）/ 抛 UserFacingError（失败）
+   */
+  async function cloneRepo(owner: string, repo: string): Promise<string> {
+    const auth = useAuthStore();
+    const acc = auth.accounts[0];
+    if (!acc) {
+      throw {
+        code: 'unauthenticated',
+        messageText: '需要登录：尚未连接任何 gitea 实例',
+        hint: '请先连接 gitea',
+        recoverable: true,
+      } satisfies UserFacingError;
+    }
+    loading.value = true;
+    useGlobalLoadingStore().show('repo'); // v2.3：复用 'repo' namespace
+    error.value = null;
+    try {
+      const r = await commitsGitgraphCloneRepo({
+        platform: acc.platform as 'gitea' | 'github',
+        hostUrl: acc.giteaUrl,
+        username: acc.username,
+        owner,
+        repo,
+      });
+      clonedMap.value[cloneKey(owner, repo)] = true;
+      return r.localPath;
+    } catch (e) {
+      error.value = normalizeError(e);
+      throw e;
+    } finally {
+      loading.value = false;
+      useGlobalLoadingStore().hide('repo');
+    }
+  }
+
+  /**
+   * pull 仓库最新改动（git fetch + pull --rebase）
+   *
+   * v2.3：不再传 token，Go 端从 localPath 反查（AGENTS §8.2 鉴权铁律）
+   * v2.4：仍保留，旧版 localPath 方式（cloneRepo 同步在 localStore.Projects 加记录后可用）
+   *
+   * @returns PullRepoResult（成功）/ 抛 UserFacingError（失败）
+   */
+  async function pullRepo(args: { localPath: string }): Promise<{
+    beforeCount: number;
+    afterCount: number;
+    addedCommits: number;
+    headChanged: boolean;
+  }> {
+    const auth = useAuthStore();
+    if (!auth.isConnected) {
+      throw {
+        code: 'unauthenticated',
+        messageText: '需要登录：尚未连接任何 gitea 实例',
+        hint: '请先连接 gitea',
+        recoverable: true,
+      } satisfies UserFacingError;
+    }
+    loading.value = true;
+    useGlobalLoadingStore().show('repo');
+    error.value = null;
+    try {
+      const r = await commitsGitgraphPull({
+        localPath: args.localPath,
+      });
+      return r;
+    } catch (e) {
+      error.value = normalizeError(e);
+      throw e;
+    } finally {
+      loading.value = false;
+      useGlobalLoadingStore().hide('repo');
+    }
+  }
+
+  /**
+   * pull 仓库（v2.4 · 按 projectId 走，Go 端反查 localPath + token）
+   *
+   * 修复 StatusBar 更新按钮 localPath 拼接 bug：
+   *   - 旧版前端拼 `~/.gitea-kanban/workspace/repos/...` → Go 端拒绝
+   *   - 新版只传 projectId，Go 端按 owner+repo + workspacePath 反算
+   */
+  async function pullRepoByProjectId(args: { projectId: string }): Promise<{
+    beforeCount: number;
+    afterCount: number;
+    addedCommits: number;
+    headChanged: boolean;
+    headBefore: string;
+    headAfter: string;
+  }> {
+    loading.value = true;
+    useGlobalLoadingStore().show('repo');
+    error.value = null;
+    try {
+      const r = await commitsGitgraphPull({
+        projectId: args.projectId,
+      });
+      return r;
+    } catch (e) {
+      error.value = normalizeError(e);
+      throw e;
+    } finally {
+      loading.value = false;
+      useGlobalLoadingStore().hide('repo');
+    }
+  }
+
   return {
     // state
     repos,
@@ -396,6 +554,7 @@ export const useRepoStore = defineStore('repo', () => {
     loading,
     error,
     guideOnConnect,
+    clonedMap,
     // getters
     currentRepo,
     projects,
@@ -408,5 +567,11 @@ export const useRepoStore = defineStore('repo', () => {
     consumeGuideOnConnect,
     persistLastSelected,
     restoreLastSelected,
+    // v2.3
+    refreshClonedStatus,
+    cloneRepo,
+    pullRepo,
+    // v2.4
+    pullRepoByProjectId,
   };
 });

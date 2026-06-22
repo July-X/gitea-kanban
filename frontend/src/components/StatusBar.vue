@@ -2,29 +2,33 @@
 /**
  * StatusBar —— 底部状态栏
  *
- * 设计（v1.4 · 任务 #statusbar-picker 重构）：
- *   - 高度 33px（var(--statusbar-height)）+5px，留出 dropdown 触发器 + 浮层空间
- *   - 左侧：连接状态 + 当前仓库 dropdown + gitea URL + 刷新按钮 + 主题切换按钮
- *   - 右侧：当前用户（avatar + login）+ 退出登录
- *   - 仓库切换为**全局唯一切换入口**：本组件 dropdown 是状态栏唯一 picker，
- *     BoardTopbar / MyCardsView / TimelineView / MergesView / MembersView 内的 picker 全删,
- *     后续所有视图共用此仓库上下文（v1.4 拍板"全局保存,后续操作都针对这个仓库"）
- *   - 颜色 + 文字 + 图标三重编码（OVERRIDE §本项目专属规则 #8）
+ * v1.4 · 任务 #statusbar-picker 重构：左侧连接状态 + 仓库 dropdown + URL + 刷新 + 主题
+ *                                  + 右侧当前用户 + 退出
  *
- * 主题按钮（v1.2 · tech-refine §15.1 入口 1）：
- *   - 点一下 cycle: 暗色 → 浅色 → 暗色
- *   - 调用 useUiStore.applyTheme(nextThemeInCycle(currentTheme)) —— store 同步改
- *     state/DOM/localStorage + 异步 IPC set（不阻塞 UI）
+ * v2.3 · user 拍板 2026-06-22 StatusBar 仓库管理面板：
+ *   - App.vue 启动期自动 fetch 用户可管理的仓库（已有：App.vue mount 调 loadRepos）
+ *   - 仓库 dropdown 升级：每个仓库多行显示（fullName + 描述 + 状态），行末操作按钮
+ *   - 未同步本地的仓库 → 行末按钮 = "同步"（调 gitgraphCloneRepo）
+ *   - 已同步本地的仓库 → 行末按钮 = "更新"（调 gitgraphPull）
+ *   - 旧的"切换仓库"语义**保留**：点 fullName 文字区域仍调 useBoardActions.selectProject
+ *   - 行末按钮 click 不触发切换（独立按钮 stop propagation）
  *
- * 仓库 dropdown：
- *   - trigger：图标 + 仓库 fullName + chevron，点击切换显隐
- *   - 面板：搜索框 + 仓库列表（v-if filtered.length）+ 空态
- *   - 选中：调 useBoardActions.selectProject(r)（= addProject → selectProject →
- *     router.replace(query.project=fullName) → loadBoard）—— 与原 BoardTopbar picker 行为一致
- *   - 已加为 project 的项显示"已加入" chip
+ * 多行布局：
+ *   ┌────────────────────────────────────────────────────────┐
+ *   │ org/repo-name                       [✓ 已同步]  [更新] │
+ *   │ 描述文字...                                             │
+ *   │ ──────────────────────────────────────────────────────  │
+ *   │ other/repo                                              │
+ *   │ 描述文字...                           [同步]            │
+ *   └────────────────────────────────────────────────────────┘
  *
- * AGENTS §8.5：离线降级不可省。gitea API 失败时**不**直接报"Network Error"，
- * 这里显著提示"当前为离线/缓存模式"。
+ * 状态管理：
+ *   - 仓库列表来自 repo store (repos.value)
+ *   - 同步状态来自 clonedMap (key = owner/repo → boolean)
+ *   - loadRepos 后调 repo.refreshClonedStatus() 批量更新
+ *   - clone/pull 成功后立即更新 clonedMap
+ *
+ * AGENTS §8.5 离线降级：gitea API 失败时不直接报 Network Error，显著提示"离线模式"
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
@@ -40,28 +44,28 @@ import {
   Palette,
   Search,
   User,
+  Download,
+  RotateCw,
+  Loader2,
 } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useSettingsStore } from '@renderer/stores/settings';
 import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stores/ui';
 import { useBoardActions } from '@renderer/composables/useBoardActions';
-import { useRouter } from 'vue-router';
 import { showToast } from '@renderer/lib/toast';
 import { formatLastUpdated } from '@renderer/lib/last-updated';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import AccountManagerDialog from '@renderer/components/AccountManagerDialog.vue';
+import type { RepoDto } from '@renderer/types/dto';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
 const settings = useSettingsStore();
 const ui = useUiStore();
-const router = useRouter();
 
 /**
  * 仓库切换统一走 useBoardActions.selectProject —— 与原 BoardTopbar picker 行为一致
- * （addProject → selectProject → router.replace(query.project=fullName) → loadBoard）。
- * activeProjectId 用 repo.currentProjectId 的 computed 引用，避免 watch 重复注册。
  */
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const { selectProject } = useBoardActions({
@@ -91,7 +95,6 @@ const stateText = computed(() => {
     case 'connected':
       return '已连接';
     case 'offline': {
-      // v1.4 polish：离线时显示缓存数据年龄（用户最想知道"看到的是多旧的数据"）
       const age = formatLastUpdated();
       return age ? `离线 · 缓存来自 ${age}` : '离线模式（使用本地缓存）';
     }
@@ -115,14 +118,13 @@ const stateIcon = computed(() => {
   }
 });
 
-// ===== 仓库 dropdown（v1.4 任务 #statusbar-picker） =====
+// ===== 仓库 dropdown（v1.4 任务 #statusbar-picker + v2.3 多行重写） =====
 
 const pickerOpen = ref(false);
 const pickerSearch = ref('');
 
 /**
  * 过滤后的仓库列表（按 fullName / description 模糊匹配，大小写不敏感）
- * 取 repo.repos 全量，不限 isProject —— 用户可以从"未加入看板"的仓库里临时选一个切过去看
  */
 const filteredRepos = computed(() => {
   const q = pickerSearch.value.trim().toLowerCase();
@@ -132,7 +134,6 @@ const filteredRepos = computed(() => {
   );
 });
 
-/** 点击 trigger 切换下拉：第一次打开自动 focus 搜索框 */
 const pickerEl = ref<HTMLElement | null>(null);
 const searchInputEl = ref<HTMLInputElement | null>(null);
 
@@ -140,21 +141,90 @@ function togglePicker(): void {
   pickerOpen.value = !pickerOpen.value;
   if (pickerOpen.value) {
     pickerSearch.value = '';
-    // 等下拉挂载完再 focus
     requestAnimationFrame(() => searchInputEl.value?.focus());
   }
 }
 
-async function pickRepo(r: { fullName: string; owner: string; name: string }): Promise<void> {
-  // RepoDto 的 id 类型是 number；这里把 fullName 凑回去走 useBoardActions.selectProject
-  const found = repo.repos.find((x) => x.fullName === r.fullName);
-  if (!found) return;
-  pickerOpen.value = false;
-  pickerSearch.value = '';
-  await selectProject(found);
+/**
+ * 打开 picker 时如果 clonedMap 是空 → 批量刷一次
+ * （启动期 App.vue mount 也会调一次，但用户中途连接新账号后状态是空）
+ */
+watch(pickerOpen, async (open) => {
+  if (open && auth.isConnected) {
+    if (Object.keys(repo.clonedMap).length === 0) {
+      await repo.refreshClonedStatus();
+    }
+  }
+});
+
+/** 是否已 clone 本地（从 clonedMap 读） */
+function isCloned(r: RepoDto): boolean {
+  return repo.clonedMap[`${r.owner}/${r.name}`] === true;
 }
 
-/** 点击下拉外部关闭（用 capture + document 监听,避免点 trigger 自己又触发 toggle） */
+/** 当前正在操作哪个仓库（clone/pull 按钮的 loading 态） */
+const busyRepoKey = ref<string | null>(null);
+function repoKey(r: RepoDto): string {
+  return `${r.owner}/${r.name}`;
+}
+
+/** 同步（clone）仓库 */
+async function onSyncClick(r: RepoDto, e: Event): Promise<void> {
+  e.stopPropagation();
+  const key = repoKey(r);
+  busyRepoKey.value = key;
+  try {
+    await repo.cloneRepo(r.owner, r.name);
+    showToast({ type: 'success', message: '同步成功', description: `${r.fullName} 已同步到本地` });
+  } catch (err) {
+    const e2 = err as { messageText?: string; message?: string };
+    showToast({ type: 'error', message: '同步失败', description: e2.messageText ?? e2.message ?? '请稍后重试' });
+  } finally {
+    busyRepoKey.value = null;
+  }
+}
+
+/** 更新（pull）仓库 —— v2.4 修复 localPath 拼接 bug
+ *
+ * 旧版用 `import.meta.env.VITE_GITEA_KANBAN_WORKSPACE` 拼 `~/.gitea-kanban/workspace/...`
+ * 但 Go 端 workspacePath 是绝对路径（如 `/Users/xxx/.gitea-kanban/workspace`），
+ * 带 `~` 的 localPath 被 Go 端 resolveTokenByLocalPath 拒绝。
+ *
+ * v2.4：传 projectId，Go 端按 owner+repo + workspacePath 反算
+ */
+async function onUpdateClick(r: RepoDto, e: Event): Promise<void> {
+  e.stopPropagation();
+  const key = repoKey(r);
+  busyRepoKey.value = key;
+  try {
+    // 用 projectId 让 Go 端按 owner+repo 反算 localPath（避免前端拼错）
+    const currentProjectId = repo.currentProjectId;
+    if (!currentProjectId) {
+      showToast({ type: 'error', message: '更新失败', description: '请先在仓库行上点一下选中该仓库' });
+      return;
+    }
+    const result = await repo.pullRepoByProjectId({ projectId: currentProjectId });
+    const added = (result as { addedCommits?: number }).addedCommits ?? 0;
+    showToast({
+      type: 'success',
+      message: '更新成功',
+      description: added > 0 ? `${r.fullName} 新增 ${added} 个提交` : `${r.fullName} 已是最新`,
+    });
+  } catch (err) {
+    const e2 = err as { messageText?: string; message?: string };
+    showToast({ type: 'error', message: '更新失败', description: e2.messageText ?? e2.message ?? '请稍后重试' });
+  } finally {
+    busyRepoKey.value = null;
+  }
+}
+
+/** 点仓库行（不含按钮区域）= 切到该仓库上下文 */
+async function pickRepo(r: RepoDto): Promise<void> {
+  pickerOpen.value = false;
+  pickerSearch.value = '';
+  await selectProject(r);
+}
+
 function onDocClick(e: MouseEvent): void {
   if (!pickerOpen.value) return;
   const target = e.target as Node | null;
@@ -173,14 +243,12 @@ onBeforeUnmount(() => {
 /**
  * v1.4 任务 #statusbar-picker：App.vue 在登录完成 / 启动已登录未选仓库时设 true
  * 这里监听 → 自动打开 picker;用户在 picker 里点了仓库 → store 调 consumeGuideOnConnect 清掉
- * （防止后续 watch 误触发）
  */
 watch(
   () => repo.guideOnConnect,
   (now) => {
     if (now && !pickerOpen.value) {
       togglePicker();
-      // 引导完成 = picker 打开即消费（用户关掉也算消费过）
       repo.consumeGuideOnConnect();
     }
   },
@@ -188,10 +256,12 @@ watch(
 
 // ===== 刷新 / 主题 / 退出 =====
 
-/** 主动刷新：拉最新仓库列表（gitea API + 本地 project 标记聚合） */
+/** 主动刷新：拉最新仓库列表 + 重新检查 clone 状态 */
 async function onRefreshClick(): Promise<void> {
   try {
     await repo.loadRepos('', true);
+    // 刷新 clone 状态缓存
+    await repo.refreshClonedStatus();
   } catch (e) {
     const err = e as { messageText?: string };
     showToast({ type: 'error', message: '刷新失败', description: err.messageText ?? '请稍后重试' });
@@ -206,7 +276,6 @@ async function onThemeCycleClick(): Promise<void> {
 
 /** 退出按钮 → 打开账号管理弹窗 */
 const accountDialogOpen = ref(false);
-
 function onLogoutClick(): void {
   accountDialogOpen.value = true;
 }
@@ -215,121 +284,159 @@ function onLogoutClick(): void {
 <template>
   <div class="statusbar-wrap">
     <footer class="statusbar" :data-state="connState" role="status" aria-live="polite">
-    <div class="statusbar__left">
-      <span class="statusbar__chip" :class="`statusbar__chip--${connState}`">
-        <component :is="stateIcon" :size="12" :stroke-width="2.5" aria-hidden="true" />
-        <span>{{ stateText }}</span>
-      </span>
+      <div class="statusbar__left">
+        <span class="statusbar__chip" :class="`statusbar__chip--${connState}`">
+          <component :is="stateIcon" :size="12" :stroke-width="2.5" aria-hidden="true" />
+          <span>{{ stateText }}</span>
+        </span>
 
-      <!-- 仓库 dropdown trigger（v1.4 任务 #statusbar-picker：全局唯一 picker 入口） -->
-      <div
-        v-if="auth.isConnected"
-        ref="pickerEl"
-        class="statusbar__picker"
-        :class="{ 'statusbar__picker--open': pickerOpen, 'statusbar__picker--empty': !repo.currentRepo }"
-      >
-        <button
-          type="button"
-          class="statusbar__picker-trigger"
-          :title="repo.currentRepo ? `切换仓库（当前：${repo.currentRepo.fullName}）` : '选择仓库'"
-          @click="togglePicker"
+        <!--
+          v2.3 仓库 dropdown：每个仓库多行显示 + 行末操作按钮
+          - 未同步 → 按钮"同步"（调 gitgraphCloneRepo）
+          - 已同步 → 按钮"更新"（调 gitgraphPull）
+          - 点 fullName 文字区域 → 切到该仓库上下文
+          - 点行末按钮 → 只触发按钮 action（不切换仓库）
+        -->
+        <div
+          v-if="auth.isConnected"
+          ref="pickerEl"
+          class="statusbar__picker"
+          :class="{ 'statusbar__picker--open': pickerOpen, 'statusbar__picker--empty': !repo.currentRepo }"
         >
-          <KeyRound :size="12" :stroke-width="2" aria-hidden="true" />
-          <span class="statusbar__repo-name">
-            {{ repo.currentRepo?.fullName ?? '请选择仓库' }}
-          </span>
-          <ChevronDown :size="12" :stroke-width="2" aria-hidden="true" />
-        </button>
+          <button
+            type="button"
+            class="statusbar__picker-trigger"
+            :title="repo.currentRepo ? `切换仓库（当前：${repo.currentRepo.fullName}）` : '选择仓库'"
+            @click="togglePicker"
+          >
+            <KeyRound :size="12" :stroke-width="2" aria-hidden="true" />
+            <span class="statusbar__repo-name">
+              {{ repo.currentRepo?.fullName ?? '请选择仓库' }}
+            </span>
+            <ChevronDown :size="12" :stroke-width="2" aria-hidden="true" />
+          </button>
 
-        <div v-if="pickerOpen" class="statusbar__dropdown" role="dialog" aria-label="选择仓库">
-          <div class="statusbar__dropdown-search">
-            <Search :size="12" :stroke-width="2" aria-hidden="true" />
-            <input
-              ref="searchInputEl"
-              v-model="pickerSearch"
-              type="text"
-              class="statusbar__dropdown-input"
-              placeholder="搜索仓库（按名称 / 描述）"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-          <ul v-if="filteredRepos.length" class="statusbar__dropdown-list">
-            <li v-for="r in filteredRepos" :key="r.id">
-              <button
-                type="button"
-                class="statusbar__dropdown-item"
+          <div v-if="pickerOpen" class="statusbar__dropdown" role="dialog" aria-label="仓库管理">
+            <div class="statusbar__dropdown-search">
+              <Search :size="12" :stroke-width="2" aria-hidden="true" />
+              <input
+                ref="searchInputEl"
+                v-model="pickerSearch"
+                type="text"
+                class="statusbar__dropdown-input"
+                placeholder="搜索仓库（按名称 / 描述）"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <ul v-if="filteredRepos.length" class="statusbar__dropdown-list">
+              <li
+                v-for="r in filteredRepos"
+                :key="r.id"
+                class="statusbar__row"
                 :class="{
-                  'statusbar__dropdown-item--active': r.fullName === repo.currentRepo?.fullName,
+                  'statusbar__row--active': r.fullName === repo.currentRepo?.fullName,
+                  'statusbar__row--cloned': isCloned(r),
                 }"
                 @click="pickRepo(r)"
               >
-                <span class="statusbar__dropdown-item-name">{{ r.fullName }}</span>
-                <span v-if="r.isProject" class="statusbar__dropdown-item-tag">已加入</span>
-              </button>
-            </li>
-          </ul>
-          <div v-else-if="repo.repos.length === 0" class="statusbar__dropdown-empty">
-            <EmptyState
-              title="仓库列表为空"
-              description="刷新一下试试，或去 gitea 添加新仓库"
-            />
+                <div class="statusbar__row-main">
+                  <div class="statusbar__row-line1">
+                    <span class="statusbar__row-name">{{ r.fullName }}</span>
+                    <span v-if="r.isProject" class="statusbar__row-tag">已加入</span>
+                    <span v-if="isCloned(r)" class="statusbar__row-tag statusbar__row-tag--cloned">已同步</span>
+                  </div>
+                  <p v-if="r.description" class="statusbar__row-desc">{{ r.description }}</p>
+                </div>
+                <div class="statusbar__row-actions" @click.stop>
+                  <button
+                    v-if="!isCloned(r)"
+                    type="button"
+                    class="statusbar__row-btn statusbar__row-btn--sync"
+                    :disabled="busyRepoKey === repoKey(r)"
+                    :title="`同步 ${r.fullName} 到本地 workspace`"
+                    @click="onSyncClick(r, $event)"
+                  >
+                    <Loader2 v-if="busyRepoKey === repoKey(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
+                    <Download v-else :size="12" :stroke-width="2" />
+                    <span>{{ busyRepoKey === repoKey(r) ? '同步中…' : '同步' }}</span>
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="statusbar__row-btn statusbar__row-btn--update"
+                    :disabled="busyRepoKey === repoKey(r)"
+                    :title="`从远端拉取 ${r.fullName} 最新 commit`"
+                    @click="onUpdateClick(r, $event)"
+                  >
+                    <Loader2 v-if="busyRepoKey === repoKey(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
+                    <RotateCw v-else :size="12" :stroke-width="2" />
+                    <span>{{ busyRepoKey === repoKey(r) ? '更新中…' : '更新' }}</span>
+                  </button>
+                </div>
+              </li>
+            </ul>
+            <div v-else-if="repo.repos.length === 0" class="statusbar__dropdown-empty">
+              <EmptyState
+                title="仓库列表为空"
+                description="刷新一下试试，或去 gitea 添加新仓库"
+              />
+            </div>
+            <EmptyState v-else title="没有匹配的仓库" description="试试别的搜索词" />
           </div>
-          <EmptyState v-else title="没有匹配的仓库" description="试试别的搜索词" />
         </div>
+
+        <span v-if="auth.currentGiteaUrl" class="statusbar__url mono" :title="auth.currentGiteaUrl">
+          {{ auth.currentGiteaUrl }}
+        </span>
+
+        <button
+          v-if="auth.isConnected"
+          type="button"
+          class="statusbar__action"
+          :disabled="repo.loading"
+          :title="`刷新仓库（每 ${Math.round(settings.pollingIntervalMs / 60000)} 分钟自动）`"
+          @click="onRefreshClick"
+        >
+          <RefreshCw :size="12" :stroke-width="2" :class="{ 'statusbar__action--spin': repo.loading }" />
+        </button>
+        <button
+          type="button"
+          class="statusbar__action"
+          :title="`当前：${THEME_DISPLAY_NAME[ui.currentTheme]}（点切换）`"
+          @click="onThemeCycleClick"
+        >
+          <Palette :size="12" :stroke-width="2" aria-hidden="true" />
+          <span>{{ THEME_SHORT_LABEL[ui.currentTheme] ?? ui.currentTheme }}</span>
+        </button>
       </div>
-
-      <span v-if="auth.currentGiteaUrl" class="statusbar__url mono" :title="auth.currentGiteaUrl">
-        {{ auth.currentGiteaUrl }}
-      </span>
-
-      <button
-        v-if="auth.isConnected"
-        type="button"
-        class="statusbar__action"
-        :disabled="repo.loading"
-        :title="`刷新仓库（每 ${Math.round(settings.pollingIntervalMs / 60000)} 分钟自动）`"
-        @click="onRefreshClick"
-      >
-        <RefreshCw :size="12" :stroke-width="2" :class="{ 'statusbar__action--spin': repo.loading }" />
-      </button>
-      <button
-        type="button"
-        class="statusbar__action"
-        :title="`当前：${THEME_DISPLAY_NAME[ui.currentTheme]}（点切换）`"
-        @click="onThemeCycleClick"
-      >
-        <Palette :size="12" :stroke-width="2" aria-hidden="true" />
-        <span>{{ THEME_SHORT_LABEL[ui.currentTheme] ?? ui.currentTheme }}</span>
-      </button>
-    </div>
-    <div class="statusbar__right">
-      <span v-if="repo.repos.length" class="statusbar__repo-count">
-        <Package :size="12" :stroke-width="2" aria-hidden="true" />
-        <span>共 {{ repo.repos.length }} 个</span>
-      </span>
-      <span v-if="auth.currentUser" class="statusbar__user">
-        <img
-          v-if="auth.currentUser.avatarUrl"
-          :src="auth.currentUser.avatarUrl"
-          :alt="`${auth.currentUser.login} 头像`"
-          class="statusbar__avatar"
-        />
-        <User v-else :size="12" :stroke-width="2" aria-hidden="true" />
-        <span>{{ auth.currentUser.login }}</span>
-      </span>
-      <button
-        v-if="auth.isConnected"
-        type="button"
-        class="statusbar__action statusbar__action--danger"
-        title="退出当前 gitea 账号"
-        @click="onLogoutClick"
-      >
-        <LogOut :size="12" :stroke-width="2" />
-        <span>退出</span>
-      </button>
-    </div>
-  </footer>
+      <div class="statusbar__right">
+        <span v-if="repo.repos.length" class="statusbar__repo-count">
+          <Package :size="12" :stroke-width="2" aria-hidden="true" />
+          <span>共 {{ repo.repos.length }} 个</span>
+        </span>
+        <span v-if="auth.currentUser" class="statusbar__user">
+          <img
+            v-if="auth.currentUser.avatarUrl"
+            :src="auth.currentUser.avatarUrl"
+            :alt="`${auth.currentUser.login} 头像`"
+            class="statusbar__avatar"
+          />
+          <User v-else :size="12" :stroke-width="2" aria-hidden="true" />
+          <span>{{ auth.currentUser.login }}</span>
+        </span>
+        <button
+          v-if="auth.isConnected"
+          type="button"
+          class="statusbar__action statusbar__action--danger"
+          title="退出当前 gitea 账号"
+          @click="onLogoutClick"
+        >
+          <LogOut :size="12" :stroke-width="2" />
+          <span>退出</span>
+        </button>
+      </div>
+    </footer>
 
     <!-- 账号管理弹窗 -->
     <AccountManagerDialog v-model:open="accountDialogOpen" />
@@ -342,7 +449,6 @@ function onLogoutClick(): void {
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--space-3);
-  /* v1.1.2 改：半透明让 grid 透出（HUD 风），半透明由 AppShell .shell__status 容器提供 */
   background: transparent;
   border-top: 1px solid color-mix(in srgb, var(--color-divider) 60%, transparent);
   font-size: var(--font-xs);
@@ -447,13 +553,7 @@ function onLogoutClick(): void {
   }
 }
 
-/* ===== 仓库 dropdown（v1.4 任务 #statusbar-picker）=====
- * 视觉对齐 BoardTopbar picker：
- *   - trigger：浅 chip 底 + 主色边 hover
- *   - 面板：背景 elevated + 圆角 + 主色光晕阴影，向**上**弹（bottom: 100%）
- *   - 列表项：hover bg-hover、当前项 primary-soft + primary
- *   - 整体高度适配 33px 状态栏：trigger 紧凑，padding 2-6px
- */
+/* ===== 仓库 dropdown（v1.4 + v2.3 多行重写）===== */
 .statusbar__picker {
   position: relative;
 }
@@ -511,12 +611,13 @@ function onLogoutClick(): void {
   font-weight: 400;
 }
 
+/* dropdown 容器升级：宽 480 容纳多行 + 描述 */
 .statusbar__dropdown {
   position: absolute;
-  bottom: calc(100% + 6px); /* 向上弹,贴 trigger 顶部留 6px 缝 */
+  bottom: calc(100% + 6px);
   left: 0;
-  width: 360px;
-  max-height: 480px;
+  width: 480px;
+  max-height: 540px;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-elevated);
@@ -557,52 +658,154 @@ function onLogoutClick(): void {
   margin: 0;
 }
 
-.statusbar__dropdown-item {
+/* ===== v2.3 多行仓库行（替代旧 dropdown-item）=====
+ * 布局：左侧 main（fullName + 描述），右侧 actions（按钮）
+ * hover：行底色变 bg-hover
+ * active（当前选中）：底色 primary-soft
+ * cloned（已同步）：行末有"已同步" chip + 按钮换"更新"
+ */
+.statusbar__row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   text-align: left;
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
   cursor: pointer;
   background: transparent;
+  border: none;
   transition:
     background var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease);
 }
-
-.statusbar__dropdown-item:hover {
+.statusbar__row + .statusbar__row {
+  margin-top: 2px;
+}
+.statusbar__row:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
 }
-
-.statusbar__dropdown-item--active {
+.statusbar__row--active {
   background: var(--color-primary-soft);
   color: var(--color-primary);
 }
-
-.statusbar__dropdown-item--active:hover {
+.statusbar__row--active:hover {
   background: var(--color-primary-soft);
   color: var(--color-primary);
 }
+.statusbar__row--cloned {
+  /* 已同步的仓库加左侧 2px 指示条（绿色） */
+  border-left: 2px solid var(--color-success);
+  padding-left: 8px;
+}
 
-.statusbar__dropdown-item-name {
+.statusbar__row-main {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statusbar__row-line1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.statusbar__row-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
 }
 
-.statusbar__dropdown-item-tag {
+.statusbar__row-desc {
+  margin: 0;
   font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  line-height: var(--line-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.statusbar__row--active .statusbar__row-desc {
+  color: var(--color-primary);
+  opacity: 0.85;
+}
+
+.statusbar__row-tag {
+  font-size: 10px;
   background: var(--color-primary-soft);
   color: var(--color-primary);
-  padding: 1px 8px;
+  padding: 1px 6px;
   border-radius: var(--radius-pill);
   flex-shrink: 0;
+  font-weight: 500;
+}
+.statusbar__row-tag--cloned {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.statusbar__row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  margin-left: var(--space-2);
+}
+
+.statusbar__row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--color-divider);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+  min-width: 64px;
+  justify-content: center;
+}
+.statusbar__row-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.statusbar__row-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.statusbar__row-btn--sync:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.statusbar__row-btn--update:hover:not(:disabled) {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.statusbar__spin {
+  animation: statusbar-spin 1s linear infinite;
 }
 
 .statusbar__dropdown-empty {

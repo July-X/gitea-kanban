@@ -1,5 +1,115 @@
 export namespace main {
 	
+	export class UserInfo {
+	    giteaUserId: number;
+	    login: string;
+	    fullName?: string;
+	    email?: string;
+	    avatarUrl?: string;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UserInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.giteaUserId = source["giteaUserId"];
+	        this.login = source["login"];
+	        this.fullName = source["fullName"];
+	        this.email = source["email"];
+	        this.avatarUrl = source["avatarUrl"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class AccountDTO {
+	    id: string;
+	    platform: string;
+	    giteaUrl: string;
+	    username: string;
+	    keychainService: string;
+	    createdAt: string;
+	    userInfo?: UserInfo;
+	
+	    static createFrom(source: any = {}) {
+	        return new AccountDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.platform = source["platform"];
+	        this.giteaUrl = source["giteaUrl"];
+	        this.username = source["username"];
+	        this.keychainService = source["keychainService"];
+	        this.createdAt = source["createdAt"];
+	        this.userInfo = this.convertValues(source["userInfo"], UserInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AddProjectArgs {
+	    giteaAccountId: string;
+	    owner: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AddProjectArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.giteaAccountId = source["giteaAccountId"];
+	        this.owner = source["owner"];
+	        this.name = source["name"];
+	    }
+	}
+	export class AddProjectResult {
+	    project: store.RepoProject;
+	
+	    static createFrom(source: any = {}) {
+	        return new AddProjectResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project = this.convertValues(source["project"], store.RepoProject);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AppInfo {
 	    version: string;
 	    dataDir: string;
@@ -36,10 +146,8 @@ export namespace main {
 	    platform: string;
 	    hostUrl: string;
 	    username: string;
-	    token: string;
 	    owner: string;
 	    repo: string;
-	    workspacePath: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CloneRepoArgs(source);
@@ -50,14 +158,13 @@ export namespace main {
 	        this.platform = source["platform"];
 	        this.hostUrl = source["hostUrl"];
 	        this.username = source["username"];
-	        this.token = source["token"];
 	        this.owner = source["owner"];
 	        this.repo = source["repo"];
-	        this.workspacePath = source["workspacePath"];
 	    }
 	}
 	export class CloneRepoResult {
 	    localPath: string;
+	    reused: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new CloneRepoResult(source);
@@ -66,6 +173,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.localPath = source["localPath"];
+	        this.reused = source["reused"];
 	    }
 	}
 	export class ColumnDTO {
@@ -114,6 +222,74 @@ export namespace main {
 	        this.parents = source["parents"];
 	    }
 	}
+	export class ConnectArgs {
+	    platform: string;
+	    giteaUrl: string;
+	    token: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.platform = source["platform"];
+	        this.giteaUrl = source["giteaUrl"];
+	        this.token = source["token"];
+	    }
+	}
+	export class UserDTO {
+	    id: number;
+	    login: string;
+	    fullName?: string;
+	    email?: string;
+	    avatarUrl?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UserDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.login = source["login"];
+	        this.fullName = source["fullName"];
+	        this.email = source["email"];
+	        this.avatarUrl = source["avatarUrl"];
+	    }
+	}
+	export class ConnectResult {
+	    account: AccountDTO;
+	    user: UserDTO;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.account = this.convertValues(source["account"], AccountDTO);
+	        this.user = this.convertValues(source["user"], UserDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class CreateColumnArgs {
 	    projectId: string;
 	    title: string;
@@ -142,6 +318,32 @@ export namespace main {
 	        this.columnId = source["columnId"];
 	    }
 	}
+	export class DisconnectArgs {
+	    giteaUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DisconnectArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.giteaUrl = source["giteaUrl"];
+	    }
+	}
+	export class DisconnectOneArgs {
+	    giteaUrl: string;
+	    username: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DisconnectOneArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.giteaUrl = source["giteaUrl"];
+	        this.username = source["username"];
+	    }
+	}
 	export class FetchRepoResultDTO {
 	    updated: boolean;
 	
@@ -166,6 +368,82 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.localPath = source["localPath"];
 	        this.sha = source["sha"];
+	    }
+	}
+	export class GetGitGraphArgs {
+	    projectId: string;
+	    branches?: string[];
+	    maxCount?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetGitGraphArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.branches = source["branches"];
+	        this.maxCount = source["maxCount"];
+	    }
+	}
+	export class GetRepoByIdArgs {
+	    projectId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetRepoByIdArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	    }
+	}
+	export class GetRepoByIdResult {
+	    project: store.RepoProject;
+	    account: AccountDTO;
+	    localPath: string;
+	    cloned: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetRepoByIdResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project = this.convertValues(source["project"], store.RepoProject);
+	        this.account = this.convertValues(source["account"], AccountDTO);
+	        this.localPath = source["localPath"];
+	        this.cloned = source["cloned"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GetUserPrefsArgs {
+	    keys: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GetUserPrefsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.keys = source["keys"];
 	    }
 	}
 	export class GraphEdgeDTO {
@@ -254,6 +532,20 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class IsRepoClonedArgs {
+	    owner: string;
+	    repo: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IsRepoClonedArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.owner = source["owner"];
+	        this.repo = source["repo"];
+	    }
+	}
 	export class IssueDTO {
 	    index: number;
 	    title: string;
@@ -332,6 +624,60 @@ export namespace main {
 	        this.state = source["state"];
 	    }
 	}
+	export class ListReposArgs {
+	    giteaAccountId: string;
+	    query?: string;
+	    limit: number;
+	    page: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListReposArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.giteaAccountId = source["giteaAccountId"];
+	        this.query = source["query"];
+	        this.limit = source["limit"];
+	        this.page = source["page"];
+	    }
+	}
+	export class ListReposResp {
+	    items: platform.RepoDTO[];
+	    total: number;
+	    page: number;
+	    hasMore: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListReposResp(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], platform.RepoDTO);
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.hasMore = source["hasMore"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ListStarredBranchesArgs {
 	    projectId: string;
 	
@@ -364,8 +710,6 @@ export namespace main {
 	}
 	export class PullRepoArgs {
 	    localPath: string;
-	    token: string;
-	    username: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PullRepoArgs(source);
@@ -374,8 +718,18 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.localPath = source["localPath"];
-	        this.token = source["token"];
-	        this.username = source["username"];
+	    }
+	}
+	export class PullRepoByProjectIdArgs {
+	    projectId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PullRepoByProjectIdArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
 	    }
 	}
 	export class PullRepoResult {
@@ -398,6 +752,30 @@ export namespace main {
 	        this.headBefore = source["headBefore"];
 	        this.headAfter = source["headAfter"];
 	        this.headChanged = source["headChanged"];
+	    }
+	}
+	export class RemoveProjectArgs {
+	    projectId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoveProjectArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	    }
+	}
+	export class SetUserPrefsArgs {
+	    entries: Record<string, any>;
+	
+	    static createFrom(source: any = {}) {
+	        return new SetUserPrefsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.entries = source["entries"];
 	    }
 	}
 	export class SetWorkspaceArgs {
@@ -426,6 +804,50 @@ export namespace main {
 	        this.branch = source["branch"];
 	    }
 	}
+	export class StatusResult {
+	    accounts: AccountDTO[];
+	    currentUser?: UserDTO;
+	
+	    static createFrom(source: any = {}) {
+	        return new StatusResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.accounts = this.convertValues(source["accounts"], AccountDTO);
+	        this.currentUser = this.convertValues(source["currentUser"], UserDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SwitchAccountArgs {
+	    accountId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SwitchAccountArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.accountId = source["accountId"];
+	    }
+	}
 	export class UnstarBranchArgs {
 	    projectId: string;
 	    branch: string;
@@ -438,6 +860,130 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
 	        this.branch = source["branch"];
+	    }
+	}
+	
+	
+	export class WorkspaceInfo {
+	    cwd: string;
+	    isDefault: boolean;
+	    validated: boolean;
+	    dataDir: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cwd = source["cwd"];
+	        this.isDefault = source["isDefault"];
+	        this.validated = source["validated"];
+	        this.dataDir = source["dataDir"];
+	    }
+	}
+
+}
+
+export namespace platform {
+	
+	export class RepoPermissions {
+	    pull: boolean;
+	    push: boolean;
+	    admin: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RepoPermissions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pull = source["pull"];
+	        this.push = source["push"];
+	        this.admin = source["admin"];
+	    }
+	}
+	export class RepoDTO {
+	    owner: string;
+	    name: string;
+	    fullName: string;
+	    defaultBranch: string;
+	    description?: string;
+	    private: boolean;
+	    id: number;
+	    archived: boolean;
+	    updatedAt: string;
+	    permissions?: RepoPermissions;
+	    isProject: boolean;
+	    lastSyncAt?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RepoDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.owner = source["owner"];
+	        this.name = source["name"];
+	        this.fullName = source["fullName"];
+	        this.defaultBranch = source["defaultBranch"];
+	        this.description = source["description"];
+	        this.private = source["private"];
+	        this.id = source["id"];
+	        this.archived = source["archived"];
+	        this.updatedAt = source["updatedAt"];
+	        this.permissions = this.convertValues(source["permissions"], RepoPermissions);
+	        this.isProject = source["isProject"];
+	        this.lastSyncAt = source["lastSyncAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace store {
+	
+	export class RepoProject {
+	    id: string;
+	    platform: string;
+	    accountId: string;
+	    owner: string;
+	    name: string;
+	    defaultBranch: string;
+	    lastSyncAt: number;
+	    createdAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RepoProject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.platform = source["platform"];
+	        this.accountId = source["accountId"];
+	        this.owner = source["owner"];
+	        this.name = source["name"];
+	        this.defaultBranch = source["defaultBranch"];
+	        this.lastSyncAt = source["lastSyncAt"];
+	        this.createdAt = source["createdAt"];
 	    }
 	}
 

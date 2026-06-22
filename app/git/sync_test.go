@@ -172,7 +172,7 @@ func TestPullRepo(t *testing.T) {
 	runGit("commit", "-m", "C2-pull")
 	runGit("push", "origin", "master")
 
-	// PullRepo（只 fetch + 统计，不 merge）
+	// PullRepo（v2.4 适配 NoCheckout：fetch + 更新 HEAD 指向新 commit + 统计）
 	result, err := PullRepo(PullOptions{
 		LocalPath: localPath,
 	})
@@ -181,9 +181,18 @@ func TestPullRepo(t *testing.T) {
 	}
 
 	if result.BeforeCount != 1 {
-		t.Errorf("BeforeCount = %d, want 1", result.BeforeCount)
+		t.Errorf("BeforeCount = %d, want 1 (old HEAD)", result.BeforeCount)
 	}
-	// fetch 后 HEAD 还是旧的（fetch 不 merge），所以 afterCount 可能还是 1
-	// 但 fetch 拉取了新 refs，下次 pull/rebase 才会更新 HEAD
-	// 这里验证函数不报错 + BeforeCount 正确即可
+	if result.AfterCount != 2 {
+		t.Errorf("AfterCount = %d, want 2 (new HEAD includes both C1 + C2-pull)", result.AfterCount)
+	}
+	if result.AddedCommits != 1 {
+		t.Errorf("AddedCommits = %d, want 1", result.AddedCommits)
+	}
+	if !result.HeadChanged {
+		t.Error("HeadChanged should be true after pulling new commits")
+	}
+	if result.HeadBefore == result.HeadAfter {
+		t.Errorf("HeadBefore == HeadAfter (%q), should differ", result.HeadBefore)
+	}
 }
