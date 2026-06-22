@@ -152,15 +152,23 @@ async function onSubmit(): Promise<void> {
   }
 
   // v1.5.3：先 setWorkspace（用户可能改过路径）→ 再 connect
+  // v2 迁移说明：setWorkspace 在 shim 层是 stub 模式（Go 端 OnStartup 已建默认 workspace）
+  // → 这里只识别"已实现的错误"才阻断；"未实现"错误降级为 warn 不阻断连接
   try {
     if (workspacePath.value.trim()) {
       await commitsGitgraphSetWorkspace({ cwd: workspacePath.value.trim() });
     }
   } catch (e) {
-    const err = e as { messageText?: string; message?: string; hint?: string };
-    const msg = err.messageText ?? err.message ?? String(e) ?? 'workspace 设置失败';
-    localError.value = `工作区路径无效：${msg}`;
-    return;
+    const err = e as { code?: string; messageText?: string; message?: string; hint?: string };
+    const raw = err.messageText ?? err.message ?? String(e) ?? 'workspace 设置失败';
+    // v2 迁移期 shim 可能返 "尚未实现"——仅 warn，不阻断登录
+    if (raw.includes('尚未实现') || raw.includes('not implemented') || err.code === 'internal') {
+      console.warn('[gitea-kanban] setWorkspace stub warning:', raw);
+      // 继续走 connect（Go 端默认 workspace 已 OK）
+    } else {
+      localError.value = `工作区路径无效：${raw}`;
+      return;
+    }
   }
 
   try {

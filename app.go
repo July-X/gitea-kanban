@@ -208,6 +208,42 @@ func (a *App) GetWorkspace() map[string]string {
 	}
 }
 
+// SetWorkspaceArgs 设置 workspace 参数
+type SetWorkspaceArgs struct {
+	Cwd string `json:"cwd"`
+}
+
+// SetWorkspace 设置 workspace 路径（持久化到 localStore + mkdir）
+//
+// 用户在 AuthView 改了 workspace 路径 → 立即落盘 → 后续 git 操作都用新路径
+func (a *App) SetWorkspace(args SetWorkspaceArgs) error {
+	if args.Cwd == "" {
+		return fmt.Errorf("workspace 路径不能为空")
+	}
+
+	if a.localStore == nil {
+		return fmt.Errorf("localStore 未初始化")
+	}
+
+	// 1. 持久化到 prefs['app.workspacePath']
+	a.localStore.Mutate(func(s *store.LocalState) {
+		if s.Prefs == nil {
+			s.Prefs = map[string]any{}
+		}
+		s.Prefs[store.WorkspacePathPrefKey] = args.Cwd
+	})
+
+	// 2. 确保目录存在
+	if err := os.MkdirAll(args.Cwd, 0o755); err != nil {
+		return fmt.Errorf("创建 workspace 目录失败: %w", err)
+	}
+
+	if a.logger != nil {
+		a.logger.Info("workspace updated", "path", args.Cwd)
+	}
+	return nil
+}
+
 // ListWorkspaceRepos 列出 workspace 中已 clone 的仓库
 func (a *App) ListWorkspaceRepos() ([]map[string]string, error) {
 	wsPath := store.GetWorkspacePath(a.localStore)
