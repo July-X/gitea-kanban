@@ -9,6 +9,25 @@
 
 ---
 
+> ## ⚠️ v2.0 重大更新（2026-06-22）
+>
+> **本文件大部分内容（§1-§5 特性清单、§3 架构图、§6 路线图等）**仍**反映 v1 现状**。
+> **v2.0 重大变更**（与本文件部分章节冲突）：
+>
+> - **客户端技术栈**：`Electron + TypeScript + Vue 3` → **`Go 1.22+ + Wails v2 + Vue 3`**
+> - **git 客户端**：`spawn('git', ...)` 子进程 → **`go-git v5`（纯 Go，无 CGO）**
+> - **凭证存储**：`@napi-rs/keyring`（Rust napi）→ **`zalando/go-keyring`（纯 Go）**
+> - **多平台支持**：单 Gitea → **Gitea（完整）+ GitHub（仅 Git Graph）**
+> - **Gitea 集成**：`gitea-js`（TS 客户端）→ **Go `net/http` 手写 + PlatformAdapter 抽象**
+> - **前端** Vue 3 / Pinia / Vue Router / lucide 保留不变
+> - **旧代码**已归档到 `legacy/electron/`
+>
+> **权威入口**：以 [AGENTS.md](../../AGENTS.md) 和 [ADR-0005](../adr/0005-electron-to-go-wails-migration.md) 为准。
+>
+> 后续清理：本文件将在 v2.0.1 完整重写（删除 Electron 相关章节）；当前先加横幅避免误导。
+
+---
+
 ## 1. 一句话定位
 
 > **gitea-kanban = 给 gitea 用户的桌面端看板 + 时间轴工具，专注强 git 集成 + 零术语界面 + 单二进制轻量自托管。**

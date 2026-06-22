@@ -1,5 +1,20 @@
 # 架构 + 后端设计：gitea-kanban
 
+> ## ⚠️ DEPRECATED（2026-06-22）
+>
+> **本文件描述的是 v1 时代的 Electron+TypeScript+SQLite 架构，已被 v2.0 取代。**
+>
+> v2.0 迁移到 **Go + Wails v2 + go-git + 多平台（Gitea/GitHub）**，详见：
+>
+> - 📋 [ADR-0005: Electron→Go+Wails 迁移 + 多平台架构](../adr/0005-electron-to-go-wails-migration.md)
+> - 📋 [AGENTS.md](../../AGENTS.md) v2.0 入口规范
+>
+> **不要再按本文件实施**。本文件保留作为 v1 决策历史参考，**不**会被删除。
+>
+> 如需查找 v2 架构，请直接看 [AGENTS.md §6 架构要点](../../AGENTS.md) 或 ADR-0005。
+>
+> ---
+
 > 任务编号：architecture
 > 输出时间：2026-06-10
 > 上游依赖：`docs/design/01-research.md`
