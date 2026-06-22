@@ -39,7 +39,7 @@ import type {
   LabelDto,
   PullDto,
   RepoProjectDto,
-  GraphLinesDto,
+  GraphResultDto,
 } from '@renderer/types/dto';
 
 /** window.api 的精确类型（preload/index.ts导出） */
@@ -476,7 +476,7 @@ export function commitsGitgraphLines(args: {
   branches?: string[];
   limit?: number;
   hidePRRefs?: boolean;
-}): Promise<GraphLinesDto> {
+}): Promise<GraphResultDto> {
   return getIpcClient().invoke('commits', 'gitgraphLines', args);
 }
 
@@ -502,11 +502,13 @@ export function commitsGitgraphLines(args: {
  * @param args.repo 仓库名
  */
 export function commitsGitgraphCloneRepo(args: {
+  /** v2.4 推荐：传 projectId，Go 端按 owner+repo 反查 localPath + token */
+  projectId?: string;
   platform?: 'gitea' | 'github';
   hostUrl?: string;
   username?: string;
-  owner: string;
-  repo: string;
+  owner?: string;
+  repo?: string;
 }): Promise<{ localPath: string; reused: boolean }> {
   return getIpcClient().invoke('commits', 'gitgraphCloneRepo', args);
 }

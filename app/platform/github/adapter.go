@@ -257,6 +257,7 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 			ToRow:    e.ToRow,
 			FromLane: e.FromLane,
 			ToLane:   e.ToLane,
+			Color:    e.Color,
 			Type:     int(e.Type),
 		})
 	}

@@ -177,22 +177,24 @@ func TestCloneRepo_NoCheckout_NoWorktreeFiles(t *testing.T) {
 	runGit("remote", "add", "origin", repoPath)
 	runGit("push", "-u", "origin", "main")
 
-	// v2.4 clone（NoCheckout=true 默认；测试显式 set 跟生产对齐）
+	// v2.5 clone（Mirror=true 同步所有分支；NoCheckout=true 跳过工作区文件）
 	workspace := t.TempDir()
 	result, err := CloneRepo(CloneOptions{
 		Platform:      "gitea",
 		URL:           "file://" + repoPath, // 直传 file:// + bare 仓库绝对路径
 		WorkspacePath: workspace,
 		NoCheckout:    true, // v2.4：只拉元信息
+		// Mirror=true 时 go-git 创建 bare 仓库，没有 .git 目录
+		// 但 RepoExists 会检查 HEAD + objects 目录
 	})
 	if err != nil {
 		t.Fatalf("CloneRepo failed: %v", err)
 	}
 
-	// 1. .git 目录存在
-	gitDir := filepath.Join(result.LocalPath, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		t.Errorf(".git 目录不存在: %v", err)
+	// 1. Mirror=true 时 go-git 创建 bare 仓库（无 .git 目录，HEAD + objects 在根目录）
+	// RepoExists 会检查 HEAD + objects 目录
+	if !RepoExists(result.LocalPath) {
+		t.Errorf("仓库应该存在（Mirror 模式：HEAD + objects 在根目录）: %s", result.LocalPath)
 	}
 
 	// 2. worktree 目录**应该没有** README.md / main.go（NoCheckout 模式）
@@ -219,5 +221,98 @@ func TestCloneRepo_NoCheckout_NoWorktreeFiles(t *testing.T) {
 	}
 	if logResult.Commits[0].Subject != "initial commit" {
 		t.Errorf("commit subject = %q, want %q", logResult.Commits[0].Subject, "initial commit")
+	}
+}
+
+// TestCloneRepo_AllBranchesSynced 验证 v2.5 关键性质：
+//   - Mirror=true 时应同步所有分支的 commit
+//   - LogCommits 不指定 branches 时应返回所有分支的 commit
+func TestCloneRepo_AllBranchesSynced(t *testing.T) {
+	// 创建带多个分支的源仓库
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "test-repo.git")
+	cmd := exec.Command("git", "init", "--bare", "-b", "main", repoPath)
+	if err := cmd.Run(); err != nil {
+		cmd = exec.Command("git", "init", "--bare", repoPath)
+		if err := cmd.Run(); err != nil {
+			t.Skipf("git not available: %v", err)
+		}
+		hcmd := exec.Command("git", "symbolic-ref", "HEAD", "refs/heads/main")
+		hcmd.Dir = repoPath
+		hcmd.Run()
+	}
+
+	srcPath := filepath.Join(dir, "src")
+	os.MkdirAll(srcPath, 0o755)
+	runGit := func(args ...string) {
+		c := exec.Command("git", args...)
+		c.Dir = srcPath
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+
+	// main 分支 1 个 commit
+	os.WriteFile(filepath.Join(srcPath, "main.txt"), []byte("main"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "main commit")
+	runGit("branch", "-M", "main")
+	runGit("remote", "add", "origin", repoPath)
+	runGit("push", "-u", "origin", "main")
+
+	// feature 分支 1 个 commit
+	runGit("checkout", "-b", "feature")
+	os.WriteFile(filepath.Join(srcPath, "feature.txt"), []byte("feature"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "feature commit")
+	runGit("push", "-u", "origin", "feature")
+
+	// v2.5 clone（Mirror=true 同步所有分支）
+	workspace := t.TempDir()
+	result, err := CloneRepo(CloneOptions{
+		Platform:      "gitea",
+		URL:           "file://" + repoPath,
+		WorkspacePath: workspace,
+		NoCheckout:    true,
+	})
+	if err != nil {
+		t.Fatalf("CloneRepo failed: %v", err)
+	}
+
+	// 1. LogCommits 不指定 branches 时应返回所有分支的 commit
+	logResult, err := LogCommits(LogOptions{
+		LocalPath: result.LocalPath,
+		MaxCount:  10,
+	})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+
+	// 应该看到 2 个 commit：main commit + feature commit
+	if len(logResult.Commits) != 2 {
+		t.Errorf("expected 2 commits (main + feature), got %d", len(logResult.Commits))
+		for i, c := range logResult.Commits {
+			t.Logf("  commit[%d]: %s", i, c.Subject)
+		}
+	}
+
+	hasMain := false
+	hasFeature := false
+	for _, c := range logResult.Commits {
+		if c.Subject == "main commit" {
+			hasMain = true
+		}
+		if c.Subject == "feature commit" {
+			hasFeature = true
+		}
+	}
+	if !hasMain {
+		t.Error("expected 'main commit' in LogCommits result")
+	}
+	if !hasFeature {
+		t.Error("expected 'feature commit' in LogCommits result (Mirror mode should sync all branches)")
 	}
 }

@@ -83,9 +83,13 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		}
 	}
 
-	// fetch
+	// fetch（v2.5 修复：同步所有分支）
+	// 旧版只 fetch 默认分支，导致其他分支的 commit 看不到。
 	err = remote.Fetch(&git.FetchOptions{
 		Auth: auth,
+		RefSpecs: []config.RefSpec{
+			config.RefSpec("+refs/heads/*:refs/remotes/origin/*"),
+		},
 	})
 	if err != nil {
 		if err == git.NoErrAlreadyUpToDate {

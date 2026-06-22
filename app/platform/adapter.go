@@ -163,7 +163,8 @@ type GraphEdgeDTO struct {
 	ToRow    int `json:"toRow"`
 	FromLane int `json:"fromLane"`
 	ToLane   int `json:"toLane"`
-	Type     int `json:"type"` // 0=normal, 1=branch, 2=merge
+	Color    int `json:"color"` // 0..15，对齐 Gitea Color16()，前端按此染色
+	Type     int `json:"type"`  // 0=normal, 1=branch, 2=merge
 }
 
 // IssueDTO 议题信息（首期简化，仅 Git Graph 场景不需要完整字段）

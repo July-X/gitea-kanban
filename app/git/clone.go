@@ -146,11 +146,18 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	//
 	// 未来如果用户需要"在本地看代码"，可加个开关走 PlainClone 默认（带工作区），
 	// 但当前业务用不到。
+	//
+	// v2.5 修复：同步所有分支（Mirror=true）
+	// 旧版只 clone 默认分支，导致其他分支的 commit 看不到。
+	// Mirror 模式会映射所有 refs（包括远程跟踪分支），并设置 refspec
+	// 使后续 remote update 能覆盖所有 refs。
 	cloneOpts := &git.CloneOptions{
 		URL:        cloneURL,
 		Auth:       auth,
 		NoCheckout: opts.NoCheckout,
 		Depth:      opts.Depth,
+		// Mirror 模式拉取所有 refs（分支、tags、notes 等）
+		Mirror: true,
 	}
 
 	// go-git 的 PlainClone 第 2 个参数是 isBare，固定 false

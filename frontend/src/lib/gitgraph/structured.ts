@@ -35,6 +35,8 @@ export interface GraphEdgeDto {
   toRow: number;
   fromLane: number;
   toLane: number;
+  /** 颜色号 0..15，对齐 Gitea Color16()（v2.6 后端生成，前端不再 % N 自算） */
+  color: number;
   type: EdgeTypeDto;
 }
 
@@ -57,10 +59,12 @@ export const NODE_RADIUS = 4;
 
 // ===== SVG path 生成 =====
 
-/** 一条 SVG path（d 字符串 + 颜色号） */
+/** 一条 SVG path（d 字符串 + 颜色号 + hex） */
 export interface SvgPath {
   d: string;
-  colorIndex: number;
+  colorIndex: number; // 0..15，对齐 Gitea Color16()
+  /** 内联 hex 颜色（v2.6 fix：用 SVG attribute 而非 CSS 变量，兼容 WebKit + scoped CSS） */
+  colorHex: string;
 }
 
 /** 一条 SVG 节点（圆点 + commit 关联） */
@@ -77,6 +81,8 @@ export interface SvgNode {
   isMerge: boolean;
   row: number;
   lane: number;
+  /** 内联 hex 颜色（v2.6 fix：与 path 同策略，不依赖 CSS 变量） */
+  colorHex: string;
 }
 
 /** SVG 渲染结果 */
@@ -90,11 +96,17 @@ export interface SvgRenderResult {
 /**
  * 从结构化 GraphResult 生成 SVG 渲染数据
  *
+ * v2.6 重写：
+ * - 颜色来自后端 GraphEdge.color（0..15，对齐 Gitea Color16()），前端不再 % N 自算
+ * - 按 color 分组 paths，便于 SVG <g class="flow-color-16-N"> 染色
+ * - 路径公式 1:1 对齐 Gitea svgcontainer.tmpl（同 lane 直线 v 12，跨 lane 贝塞尔）
+ *
  * @param graph Go 后端 BuildGraph 输出
- * @returns SVG paths + nodes + 尺寸
+ * @returns SVG paths（按 color 分组）+ nodes + 尺寸
  */
 export function renderGraph(graph: GraphResultDto): SvgRenderResult {
-  const paths: SvgPath[] = [];
+  // 按 color 分组的 paths：每个 color 一组（对应一个 SVG <g class="flow-color-16-N">）
+  const pathsByColor = new Map<number, string[]>();
   const nodes: SvgNode[] = [];
 
   // 1. 生成 edges → SVG paths
@@ -106,22 +118,41 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
 
     let d: string;
     if (edge.fromLane === edge.toLane) {
-      // 同 lane → 直线
+      // 同 lane → 直线（对齐 Gitea `v 12` 风格，但用整段 L 更清晰）
       d = `M ${x1} ${y1} L ${x2} ${y2}`;
     } else {
-      // 跨 lane → 贝塞尔曲线（更美观）
+      // 跨 lane → 贝塞尔曲线
       const midY = (y1 + y2) / 2;
       d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
     }
 
+    const color = edge.color;
+    const arr = pathsByColor.get(color) ?? [];
+    arr.push(d);
+    pathsByColor.set(color, arr);
+  }
+
+  // 2. 展平成 SvgPath 数组（每 color 一条 path d，便于复用 <g class="flow-color-16-N">）
+  const paths: SvgPath[] = [];
+  for (const [colorIndex, ds] of pathsByColor.entries()) {
     paths.push({
-      d,
-      colorIndex: edge.fromLane % 8, // 8 色循环
+      d: ds.join(' '),
+      colorIndex,
+      colorHex: LANE_COLORS[colorIndex] ?? LANE_COLORS[0],
     });
   }
 
-  // 2. 生成 nodes → SVG circles
+  // 3. 生成 nodes → SVG circles
   for (const node of graph.nodes) {
+    // node 颜色取**该 commit 所在 lane 的主流颜色**：
+    // 简化：取第一个 inbound edge color；无 inbound edge（root commit）取 lane 0 的色
+    let colorHex = LANE_COLORS[0];
+    for (const e of graph.edges) {
+      if (e.toRow === node.row && e.toLane === node.lane) {
+        colorHex = LANE_COLORS[e.color] ?? LANE_COLORS[0];
+        break;
+      }
+    }
     nodes.push({
       cx: node.lane * LANE_WIDTH + LANE_WIDTH / 2,
       cy: node.row * ROW_HEIGHT + ROW_HEIGHT / 2,
@@ -135,25 +166,35 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
       isMerge: node.isMerge,
       row: node.row,
       lane: node.lane,
+      colorHex,
     });
   }
 
-  // 3. 计算尺寸
-  const width = (graph.maxLane + 1) * LANE_WIDTH + LANE_WIDTH;
+  // 4. 计算尺寸（基于实际用到的最大 lane）
+  const maxLane = graph.nodes.reduce((m, n) => Math.max(m, n.lane), 0);
+  const width = (maxLane + 1) * LANE_WIDTH + LANE_WIDTH;
   const height = graph.nodes.length * ROW_HEIGHT + ROW_HEIGHT;
 
   return { paths, nodes, width, height };
 }
 
-// ===== 颜色表（8 色循环，对齐 Gitea flow-color-16 系列）=====
-
+// ===== 颜色表（16 色循环，对齐 Gitea flow-color-16-N 系列）=====
+// 颜色定义对齐 Gitea web_src/css/themes/theme-gitlight.css 与 themedark.css 的 --color-series-16-N
 export const LANE_COLORS = [
-  '#4fc4d6', // 青
-  '#74b830', // 绿
-  '#f76707', // 橙
-  '#db2828', // 红
-  '#6366f1', // 靛
-  '#a855f7', // 紫
-  '#eab308', // 黄
-  '#14b8a6', // 蓝绿
+  '#4fc4d6', // 0  青
+  '#74b830', // 1  绿
+  '#f76707', // 2  橙
+  '#db2828', // 3  红
+  '#6366f1', // 4  靛
+  '#a855f7', // 5  紫
+  '#eab308', // 6  黄
+  '#14b8a6', // 7  蓝绿
+  '#0ea5e9', // 8  天蓝
+  '#ec4899', // 9  粉
+  '#84cc16', // 10 柠檬绿
+  '#f43f5e', // 11 玫红
+  '#8b5cf6', // 12 紫罗兰
+  '#06b6d4', // 13 青蓝
+  '#facc15', // 14 金
+  '#10b981', // 15 翠绿
 ];

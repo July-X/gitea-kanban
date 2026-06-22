@@ -26,18 +26,33 @@ func createTestRepoWithCommits(t *testing.T) string {
 	runGit("config", "user.email", "test@test.com")
 	runGit("config", "user.name", "Test User")
 
-	// 3 个 commit
+	// 用 GIT_COMMITTER_DATE/GIT_AUTHOR_DATE 显式设置不同时间
+	// 避免秒级时间戳相同导致 LogCommits 排序不稳定
+	commitAt := func(msg, date string) {
+		env := append(os.Environ(),
+			"GIT_AUTHOR_DATE="+date,
+			"GIT_COMMITTER_DATE="+date,
+		)
+		cmd := exec.Command("git", "commit", "-m", msg)
+		cmd.Dir = dir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, out)
+		}
+	}
+
+	// 3 个 commit，时间严格递增
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
 	runGit("add", ".")
-	runGit("commit", "-m", "first commit")
+	commitAt("first commit", "2026-01-01T10:00:00Z")
 
 	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644)
 	runGit("add", ".")
-	runGit("commit", "-m", "second commit")
+	commitAt("second commit", "2026-01-01T11:00:00Z")
 
 	os.WriteFile(filepath.Join(dir, "c.txt"), []byte("c"), 0o644)
 	runGit("add", ".")
-	runGit("commit", "-m", "third commit")
+	commitAt("third commit", "2026-01-01T12:00:00Z")
 
 	return dir
 }
@@ -77,10 +92,10 @@ func TestLogCommits_BasicHistory(t *testing.T) {
 		t.Errorf("AuthorEmail = %q, want 'test@test.com'", result.Commits[0].AuthorEmail)
 	}
 
-	// 验证时间
-	now := time.Now()
-	if result.Commits[0].AuthorWhen.After(now) || result.Commits[0].AuthorWhen.Before(now.Add(-time.Hour)) {
-		t.Errorf("AuthorWhen = %v, expected recent", result.Commits[0].AuthorWhen)
+	// 验证时间（用显式 GIT_COMMITTER_DATE 设置的固定时间，不校验"最近"）
+	expectedTime, _ := time.Parse(time.RFC3339, "2026-01-01T12:00:00Z")
+	if !result.Commits[0].AuthorWhen.Equal(expectedTime) {
+		t.Errorf("AuthorWhen = %v, want %v", result.Commits[0].AuthorWhen, expectedTime)
 	}
 
 	// 验证 parents（线性历史）

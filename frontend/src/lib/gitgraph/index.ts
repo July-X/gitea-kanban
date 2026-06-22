@@ -53,5 +53,8 @@ export type { GitRef, RefGroup, GraphLine, GraphLineCommit, GraphLinesDto } from
 // Parser
 export { Parser, parseGlyphs, addLineToGraph, parseLines } from './parser.js';
 
+// v2.6：直接消费 Go GraphResultDto（nodes+edges+16 色），无需任何适配器
+// 旧 adapter.ts / graphResultToGraph 已删除
+
 // SVG 工具
 export { glyphToPathD, flowToPathD } from './svg.js';

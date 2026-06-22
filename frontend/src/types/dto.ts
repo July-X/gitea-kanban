@@ -556,6 +556,8 @@ export interface GraphEdgeDto {
   toRow: number;
   fromLane: number;
   toLane: number;
+  /** 颜色号 0..15，对齐 Gitea Color16() = ColorNumber % 16（v2.6 后端生成，前端不再 % N 自算） */
+  color: number;
   type: GraphEdgeTypeDto;
 }
 

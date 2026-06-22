@@ -257,6 +257,14 @@ const apiShim = {
             giteaAccountId: a.giteaAccountId ?? '',
             owner: a.owner ?? '',
             name: a.name ?? '',
+          }).then((res: unknown) => {
+            // Go 端返回 { project: store.RepoProject }，前端期望 { ...RepoProjectDto }
+            // 把嵌套的 project 字段展开，让 repo store 拿到正确的 uuid
+            const r = res as Record<string, unknown>;
+            if (r && typeof r === 'object' && 'project' in r) {
+              return r.project;
+            }
+            return res;
           });
         },
       );

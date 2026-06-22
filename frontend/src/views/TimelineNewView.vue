@@ -1,23 +1,21 @@
 <script setup lang="ts">
 /**
- * TimelineNewView —— 新版 git graph 视图（v1.4 重构：对齐 Gitea parser.go）
+ * TimelineNewView —— 新版 git graph 视图（v2.6 重写：直接消费 Go 端 GraphResultDto）
  *
- * v1.4 关键变化：
- * - 数据来源：commits.gitgraph.lines（main 端返 Gitea 字符流协议）
- * - 算法位置：**前端** src/renderer/lib/gitgraph/parser.ts（1:1 移植 Gitea parser.go）
- * - SVG 渲染：前端按 Graph 直接画（与 Gitea svgcontainer.tmpl 1:1）
+ * v2.6 关键变化：
+ * - 数据来源：Go 后端 GetGitGraph → GraphResultDto（nodes + edges + 16 色字段）
+ * - 渲染：前端 lib/gitgraph/structured.ts 的 renderGraph() 直接生成 SVG path + 节点
+ * - 颜色：来自后端 GraphEdge.color（对齐 Gitea Color16()），前端不再 % N 自算
+ * - 彻底删除 v1 字符流往返（parser.ts / adapter.ts / Flow+Glyph+Column 模型）
  *
- * v1.4 状态：main handler 暂未实现（缺仓库本地路径），
- *   view 走"功能暂未启用"占位提示 + emoji 海豚 loading
- *
- * 设计参考（与 src/renderer/lib/gitgraph/ 对齐）：
- * - Gitea services/repository/gitgraph/parser.go（字符流状态机）
- * - Gitea templates/repo/graph/svgcontainer.tmpl（SVG path 公式）
- * - Gitea services/repository/gitgraph/graph_models.go（Graph / Flow / Commit 模型）
+ * 设计参考：
+ * - Gitea services/repository/gitgraph/parser.go（lane + 16 色分配算法，已移植到 Go）
+ * - Gitea templates/repo/graph/svgcontainer.tmpl（SVG path 公式，1:1 对齐）
+ * - Gitea web_src/css/features/gitgraph.css（flow-color-16-N 16 色变量）
  */
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { GitCommit, ArrowDownToLine, GitBranch, Tag, GitPullRequest, Crosshair } from 'lucide-vue-next';
+import { GitCommit, ArrowDownToLine } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
@@ -27,25 +25,16 @@ import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import {
-  parseLines,
-  flowColorClass,
-  flowToPathD,
-  svgViewBox,
-  svgWidthPx,
-  svgHeightPx,
-  graphWidth,
-  COL_WIDTH,
-  ROW_HEIGHT,
-  DISPLAY_SCALE,
-  type Flow,
-  type Graph,
-  type GraphLine,
-} from '@renderer/lib/gitgraph';
+  renderGraph,
+  ROW_HEIGHT as STRUCTURED_ROW_HEIGHT,
+  type GraphResultDto,
+  type SvgRenderResult,
+} from '@renderer/lib/gitgraph/structured';
 
 // ============================================================
 // 常量
 // ============================================================
-const ROW_H = ROW_HEIGHT * DISPLAY_SCALE; // commit 行高（px），与 SVG ROW_HEIGHT × SCALE 一致
+// ROW_H 在下方 SVG 渲染坐标节定义（v2.6：直接用 STRUCTURED_ROW_HEIGHT）
 
 // ============================================================
 // Store & 上下文
@@ -65,10 +54,10 @@ const activeRepo = computed(() => {
 // 本地状态
 // ============================================================
 
-/** 原始字符流（main 端返） */
-const lines = ref<GraphLine[]>([]);
-/** 前端 Parser 解析出的 Graph（包含 flows / commits / relationCommits） */
-const graph = ref<Graph | null>(null);
+/** v2.6：Go 后端直接返回的结构化 Graph（含 nodes+edges+16 色字段） */
+const graphDto = ref<GraphResultDto | null>(null);
+/** v2.6：前端从 GraphResultDto 渲染出的 SVG 数据（paths 按 color 分组） */
+const svgRender = ref<SvgRenderResult | null>(null);
 /** 加载态 */
 const loading = ref(false);
 /** 本地错误信息 */
@@ -107,17 +96,16 @@ const giteaRepoUrl = computed(() => {
   return `${giteaUrl.replace(/\/$/, '')}/${repo.currentProject.owner}/${repo.currentProject.name}`;
 });
 
-/** 点击 commit 行 → 打开详情 */
-function openCommitDetail(commit: NonNullable<typeof graph.value>['commits'][number]): void {
+/** 点击 commit 行 → 打开详情（v2.6：直接从 GraphNodeDto 取数据） */
+function openCommitDetail(node: NonNullable<GraphResultDto['nodes']>[number]): void {
   selectedCommit.value = {
-    sha: commit.sha,
-    shortSha: commit.shortSha,
-    subject: commit.subject,
-    date: commit.date,
-    authorName: commit.authorName,
-    authorEmail: commit.authorEmail,
-    authorAvatar: commit.authorAvatar,
-    refs: commit.refs.map((r) => ({ shortName: r.shortName, refGroup: r.refGroup })),
+    sha: node.sha,
+    shortSha: node.shortSha,
+    subject: node.subject,
+    date: node.date,
+    authorName: node.authorName,
+    authorEmail: node.authorEmail,
+    refs: [], // v2.6 简化：refs 由 commitDetail dialog 内部按需拉
   };
   commitDetailOpen.value = true;
 }
@@ -158,25 +146,27 @@ async function loadGraph(): Promise<void> {
   featureDisabled.value = false;
   useGlobalLoadingStore().show('timeline');
   try {
+    // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
+    // 跳过 v1 字符流往返（adapter.ts 反编码 → parser.ts 解析），消除 bug1-bug4
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
       limit: 200,
     });
-    // v1.4 placeholder：main handler 返 disabled=true（不抛错）
-    if (dto.disabled) {
+
+    // 兼容 disabled 提示（main handler 可能返 disabled）
+    const nodes = dto?.nodes ?? [];
+    if (nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
       featureDisabled.value = true;
-      graph.value = null;
-      lines.value = [];
+      graphDto.value = null;
+      svgRender.value = null;
       localPath.value = null;
       return;
     }
-    lines.value = dto.lines;
-    localPath.value = dto.localPath ?? null;
-    // 前端 Parser：Gitea 字符流 → Graph（1:1 移植 Gitea parser.go）
-    const { graph: parsed } = parseLines(dto.lines);
-    graph.value = parsed;
+
+    graphDto.value = dto;
+    // 直接渲染为 SVG（path 按 color 分组、节点含坐标）
+    svgRender.value = renderGraph(dto);
   } catch (e: unknown) {
-    // 真错误（网络 / 解析失败 / schema 不符）才走这里
     console.error('[TimelineNewView] loadGraph failed:', e);
     const err = e as {
       code?: string;
@@ -186,21 +176,20 @@ async function loadGraph(): Promise<void> {
     };
     const msg = err.messageText ?? err.message ?? String(e) ?? '加载失败';
 
-    // v1.4 兼容：旧 main handler 抛 IpcError(code='internal', message 含 'v1.5')
     const looksLikeDisabled =
       err.code === 'internal' &&
       (msg.includes('v1.5') || msg.includes('Git Graph'));
     if (looksLikeDisabled) {
       featureDisabled.value = true;
-      graph.value = null;
-      lines.value = [];
+      graphDto.value = null;
+      svgRender.value = null;
       localPath.value = null;
       return;
     }
 
     localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
-    graph.value = null;
-    lines.value = [];
+    graphDto.value = null;
+    svgRender.value = null;
     localPath.value = null;
   } finally {
     loading.value = false;
@@ -261,7 +250,7 @@ async function enableGitGraph(): Promise<void> {
     const resp = await commitsGitgraphCloneRepo({
       projectId: activeProjectId.value,
     });
-    cloneProgress.value = `已完成：${resp.cwd}${resp.reused ? '（复用已有仓库）' : ''}`;
+    cloneProgress.value = `已完成：${resp.localPath}${resp.reused ? '（复用已有仓库）' : ''}`;
     // 重新加载；这次 main handler 应该走 gitProcess 路径（v1.5.1）
     await loadGraph();
   } catch (e: unknown) {
@@ -276,123 +265,81 @@ async function enableGitGraph(): Promise<void> {
 }
 
 // ============================================================
-// SVG 渲染坐标
+// SVG 渲染坐标（v2.6：对齐 structured.ts 的 LANE_WIDTH/ROW_HEIGHT）
 // ============================================================
 //
-// 与 Gitea svgcontainer.tmpl 1:1：
-// - 列宽 5 unit / 行高 12 unit
-// - viewBox 用 backend Graph 全局坐标 → 由前端 svgViewBox() 计算
-// - 显示尺寸：×2 缩放（10px / 列、24px / 行）→ svgWidthPx / svgHeightPx
+// v2.6 改用结构化渲染（不再走字符流）：
+// - viewBox = `0 0 width height`（width/height 由 renderGraph 计算）
+// - SVG 单位：LANE_WIDTH = 24 px / lane，ROW_HEIGHT = 28 px / row
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
 
-const viewBox = computed(() => (graph.value ? svgViewBox(graph.value) : '0 0 0 0'));
-const svgWidth = computed(() => (graph.value ? svgWidthPx(graph.value) : '0px'));
-const svgHeight = computed(() => (graph.value ? svgHeightPx(graph.value) : '0px'));
-const minColumnOffset = computed(() => graph.value?.minColumn ?? 0);
+const ROW_H = STRUCTURED_ROW_HEIGHT; // commit 行高（px），与 SVG 一致
 
-/** dot 圆心 x（SVG unit） */
-function dotCx(column: number): number {
-  return column * 5 + 5;
-}
-/** dot 圆心 y（SVG unit） */
-function dotCy(row: number): number {
-  return row * 12 + 6;
-}
+const viewBox = computed(() => {
+  const r = svgRender.value;
+  return r ? `0 0 ${r.width} ${r.height}` : '0 0 0 0';
+});
+const svgWidth = computed(() => {
+  const r = svgRender.value;
+  return r ? `${r.width}px` : '0px';
+});
+const svgHeight = computed(() => {
+  const r = svgRender.value;
+  return r ? `${r.height}px` : '0px';
+});
 
 // ============================================================
-// Flow 分组（按 flowId 聚合）
+// Path 分组（按 color 分组，对齐 Gitea flow-color-16-N 染色）
 // ============================================================
-interface FlowView {
-  flowId: number;
-  colorClass: string;
-  d: string;
-  commits: typeof graph.value extends null ? never[] : NonNullable<typeof graph.value>['commits'];
+interface PathGroup {
+  colorIndex: number; // 0..15，对齐 Gitea Color16()
+  colorClass: string; // 'flow-color-16-N'
+  colorHex: string; // v2.6 fix：内联 hex（用于 path stroke 属性）
+  d: string; // 一组 path 的 d（拼接）
 }
 
-const flowViews = computed<FlowView[]>(() => {
-  if (!graph.value) return [];
-  // flowId → commits 聚合
-  const commitsByFlow = new Map<number, NonNullable<typeof graph.value>['commits']>();
-  for (const c of graph.value.commits) {
-    const arr = commitsByFlow.get(c.flowId) ?? [];
-    arr.push(c);
-    commitsByFlow.set(c.flowId, arr);
-  }
-  // 渲染顺序：按 flowId 升序（与 Gitea svgcontainer.tmpl 一致）
-  const sortedFlowIds = Array.from(graph.value.flows.keys()).sort((a, b) => a - b);
-  return sortedFlowIds.map((flowId) => {
-    const flow: Flow = graph.value!.flows.get(flowId)!;
-    return {
-      flowId,
-      colorClass: flowColorClass(flow.colorNumber),
-      d: flowToPathD(flow),
-      commits: commitsByFlow.get(flowId) ?? [],
-    };
-  });
+const pathGroups = computed<PathGroup[]>(() => {
+  const r = svgRender.value;
+  if (!r) return [];
+  // 按 colorIndex 升序，保证 SVG 渲染顺序稳定
+  return [...r.paths]
+    .sort((a, b) => a.colorIndex - b.colorIndex)
+    .map((p) => ({
+      colorIndex: p.colorIndex,
+      colorClass: `flow-color-16-${p.colorIndex}`,
+      colorHex: p.colorHex,
+      d: p.d,
+    }));
 });
 
 /**
- * 完整行数组（row 0..maxRow）—— commit 与 relation 占位交错
+ * 完整行数组（row 0..maxRow）—— v2.6 简化：
+ * 每个 GraphNodeDto 对应一行；后端 lane 算法保证 commit 连续，无 relation 占位
  *
- * 背景 bug：之前 v-for="graph.commits" 只渲染真实 commit，跳过 transition 行（merge edge
- * 中间段），导致：
- *   - dot overlay 在 row 0/1/2/3/4 全分布（按 row*24 绝对定位）
- *   - commit-row 只渲染 row 0/2/4 的 commit
- *   - 视觉上：dot 间距 = 24px，但 commit-row 紧挨着 → **dot 与 commit-row 错位**
- *   - 用户看到的"底部 dot 没对应 commitlog"就是这个
- *
- * 修复：按 row 升序铺满所有行，每行要么是真实 commit、要么是 relation 占位（空 row），
- * 与 dot overlay 的 row*24 节奏对齐
+ * 背景 bug（v1）：字符流往返会让 merge edge 中间出现"空 row"（relation 行），
+ *   需要前后端共同维护 relationCommits。v2.6 后端 BuildGraph 直接给 row+lane，
+ *   前端按 row 平铺，无需任何占位行。
  */
 interface DisplayRow {
   row: number;
-  commit: NonNullable<typeof graph.value>['commits'][number] | null;
-  isRelation: boolean;
+  commit: NonNullable<GraphResultDto['nodes']>[number] | null;
 }
 const allRows = computed<DisplayRow[]>(() => {
-  if (!graph.value) return [];
-  const commitByRow = new Map<number, NonNullable<typeof graph.value>['commits'][number]>();
-  for (const c of graph.value.commits) commitByRow.set(c.row, c);
-  const relationByRow = new Set<number>(graph.value.relationCommits.map((r) => r.row));
+  const dto = graphDto.value;
+  if (!dto) return [];
+  const sorted = [...dto.nodes].sort((a, b) => a.row - b.row);
+  const maxRow = sorted.length > 0 ? sorted[sorted.length - 1].row : 0;
+  const byRow = new Map<number, NonNullable<GraphResultDto['nodes']>[number]>();
+  for (const n of sorted) byRow.set(n.row, n);
   const out: DisplayRow[] = [];
-  for (let row = 0; row <= graph.value.maxRow; row++) {
-    const c = commitByRow.get(row) ?? null;
-    out.push({
-      row,
-      commit: c,
-      isRelation: !c && relationByRow.has(row),
-    });
+  for (let row = 0; row <= maxRow; row++) {
+    out.push({ row, commit: byRow.get(row) ?? null });
   }
   return out;
 });
 
 // ============================================================
-// ref 颜色（与 Gitea design token 对齐）
-// ============================================================
-function refColor(refGroup: string): string {
-  switch (refGroup) {
-    case 'heads':
-      return 'var(--color-primary)';
-    case 'tags':
-      return 'var(--color-info)';
-    case 'pull':
-      return 'var(--color-secondary)';
-    default:
-      return 'var(--color-text-secondary)';
-  }
-}
-function refBg(refGroup: string): string {
-  switch (refGroup) {
-    case 'heads':
-      return 'var(--color-primary-soft)';
-    case 'tags':
-      return 'rgba(0, 98, 158, 0.12)';
-    case 'pull':
-      return 'rgba(108, 117, 125, 0.12)';
-    default:
-      return 'var(--color-bg-hover)';
-  }
-}
+// ref 颜色（v2.6：refs 由 CommitDetailDialog 内部按需拉，此处不再需要 refColor/refBg）
 
 // ============================================================
 // 辅助
@@ -412,11 +359,17 @@ function formatRelative(iso: string): string {
   return `${Math.floor(mo / 12)}年前`;
 }
 
-/** 全局图总列数（用于左侧 SVG 区域宽度） */
-const totalColumns = computed(() => (graph.value ? graphWidth(graph.value) : 0));
+/** SVG 区域实际宽度（用户拖拽 > 自动计算 > 最小值） */
+const svgAreaWidth = computed(() => {
+  const r = svgRender.value;
+  const autoNum = r ? r.width : 120;
+  const user = userSvgAreaWidth.value;
+  if (user !== null) return `${Math.max(80, user)}px`;
+  return `${Math.max(120, autoNum)}px`;
+});
 
 // ============================================================
-// v1.6 拖拽调整 SVG 区域宽度
+// v1.6 拖拽调整 SVG 区域宽度（v2.6 保留：结构化渲染后仍可用）
 // ============================================================
 /** 用户手动设定的 SVG 区域宽度（px）；null = 用自动计算值 */
 const userSvgAreaWidth = ref<number | null>(null);
@@ -425,15 +378,6 @@ const dragging = ref(false);
 /** 拖拽起始 x 和起始宽度 */
 let dragStartX = 0;
 let dragStartWidth = 0;
-
-/** SVG 区域实际宽度（用户拖拽 > 自动计算 > 最小值） */
-const svgAreaWidth = computed(() => {
-  const auto = graph.value ? svgWidthPx(graph.value) : '120px';
-  const autoNum = parseInt(auto, 10) || 120;
-  const user = userSvgAreaWidth.value;
-  if (user !== null) return `${Math.max(80, user)}px`;
-  return `${Math.max(120, autoNum)}px`;
-});
 
 function onDragStart(e: MouseEvent): void {
   e.preventDefault();
@@ -529,7 +473,7 @@ function avatarColorIndex(name: string): number {
         </div>
       </div>
       <div
-        v-else-if="!graph || (graph?.commits?.length ?? 0) === 0"
+        v-else-if="!graphDto || (graphDto?.nodes?.length ?? 0) === 0"
         class="timeline-new__placeholder"
       >
         <EmptyState title="没有提交记录" />
@@ -549,18 +493,20 @@ function avatarColorIndex(name: string): number {
                 :height="svgHeight"
                 style="display: block"
               >
-                <!-- 按 flow 分组（对齐 Gitea svgcontainer.tmpl：每 flow 一个 <g>） -->
+                <!-- v2.6：按 color 分组 path（对齐 Gitea svgcontainer.tmpl：每 flow 一个 <g>） -->
                 <g
-                  v-for="fg in flowViews"
-                  :key="`flow-${fg.flowId}`"
+                  v-for="pg in pathGroups"
+                  :key="`flow-${pg.colorIndex}`"
                   class="flow-group"
-                  :class="fg.colorClass"
-                  :data-flow="fg.flowId"
+                  :class="pg.colorClass"
+                  :data-color="pg.colorIndex"
                 >
-                  <!-- 该 flow 的所有字形拼成一条 path（前端 flowToPathD 生成，1:1 对齐 Gitea svgcontainer.tmpl 公式） -->
+                  <!-- v2.6 fix：用 inline stroke 属性（不依赖 scoped CSS / CSS 变量），
+                       修复 WebKit (Wails macOS WebView) 不显示连线的问题 -->
                   <path
-                    v-if="fg.d"
-                    :d="fg.d"
+                    v-if="pg.d"
+                    :d="pg.d"
+                    :stroke="pg.colorHex"
                     stroke-width="1"
                     fill="none"
                     stroke-linecap="round"
@@ -568,16 +514,16 @@ function avatarColorIndex(name: string): number {
                 </g>
               </svg>
 
-              <!-- 圆点 overlay：固定大小，不受 SVG 缩放影响） -->
+              <!-- 圆点 overlay：固定大小，不受 SVG 缩放影响 -->
               <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
                 <div
-                  v-for="c in graph.commits"
+                  v-for="c in svgRender?.nodes ?? []"
                   :key="`dot-${c.sha}`"
                   class="commit-dot"
-                  :class="flowColorClass(graph.flows.get(c.flowId)?.colorNumber ?? 1)"
                   :style="{
-                    left: `${(c.column - minColumnOffset) * COL_WIDTH * DISPLAY_SCALE + COL_WIDTH * DISPLAY_SCALE - 4}px`,
-                    top: `${c.row * ROW_HEIGHT * DISPLAY_SCALE + ROW_HEIGHT * DISPLAY_SCALE / 2 - 4}px`,
+                    left: `${c.cx - 4}px`,
+                    top: `${c.cy - 4}px`,
+                    backgroundColor: c.colorHex,
                   }"
                   :title="c.subject"
                 />
@@ -593,15 +539,14 @@ function avatarColorIndex(name: string): number {
             @mousedown="onDragStart"
           />
 
-          <!-- 右侧：Commit 列表（与 SVG 等高） -->
-          <!-- 右侧：Commit 列表（与 SVG 等高，按 row 0..maxRow 全渲染，含 transition 占位） -->
+          <!-- 右侧：Commit 列表（与 SVG 等高，按 row 0..maxRow 全渲染） -->
           <div class="git-graph-list" :style="{ minHeight: svgHeight }">
             <div
               v-for="r in allRows"
               :key="`row-${r.row}`"
               class="commit-row"
               :class="{
-                'commit-row--relation': r.isRelation,
+                'commit-row--relation': !r.commit,
                 'commit-row--clickable': r.commit,
               }"
               :style="{ height: ROW_H + 'px' }"
@@ -612,28 +557,10 @@ function avatarColorIndex(name: string): number {
               @keydown.space.prevent="r.commit && openCommitDetail(r.commit)"
             >
               <template v-if="r.commit">
-                <span
-                  v-for="ref in r.commit.refs.slice(0, 5)"
-                  :key="ref.name"
-                  class="ref-badge"
-                  :style="{ color: refColor(ref.refGroup), background: refBg(ref.refGroup) }"
-                >
-                  <GitBranch v-if="ref.refGroup === 'heads'" :size="11" />
-                  <Tag v-else-if="ref.refGroup === 'tags'" :size="11" />
-                  <GitPullRequest v-else-if="ref.refGroup === 'pull'" :size="11" />
-                  <Crosshair v-else :size="11" />
-                  {{ ref.shortName }}
-                </span>
+                <!-- v2.6：refs 由 CommitDetailDialog 内部按需拉（GraphNodeDto 不含 refs 字段） -->
                 <span class="commit-subject">{{ r.commit.subject }}</span>
                 <span class="commit-meta">
-                  <img
-                    v-if="r.commit.authorAvatar"
-                    :src="r.commit.authorAvatar"
-                    class="commit-avatar"
-                    alt=""
-                  />
                   <span
-                    v-else
                     class="commit-avatar-fallback"
                     :class="`flow-color-16-${avatarColorIndex(r.commit.authorName)}`"
                     aria-hidden="true"
