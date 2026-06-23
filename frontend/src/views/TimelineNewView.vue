@@ -460,6 +460,19 @@ function refBadgeClass(refType?: string): string {
 
 <template>
   <div class="timeline-new">
+    <!-- DEBUG 信息面板 -->
+    <div v-if="true" style="position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: lime; padding: 10px; font-family: monospace; font-size: 11px; z-index: 9999; max-width: 400px; border-radius: 4px;">
+      <div>DEBUG INFO:</div>
+      <div>activeProjectId: {{ activeProjectId }}</div>
+      <div>activeRepo: {{ activeRepo?.fullName || 'null' }}</div>
+      <div>loading: {{ loading }}</div>
+      <div>graphDto nodes: {{ graphDto?.nodes?.length || 0 }}</div>
+      <div>svgRender: {{ svgRender ? 'yes' : 'no' }}</div>
+      <div>localError: {{ localError || 'none' }}</div>
+      <div>featureDisabled: {{ featureDisabled }}</div>
+      <div>repos.length: {{ repo.repos.length }}</div>
+    </div>
+
     <!-- ===== 顶部栏 ===== -->
     <header class="timeline-new__topbar">
       <div class="timeline-new__title">
