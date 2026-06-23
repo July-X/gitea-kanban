@@ -98,8 +98,11 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
    * .shell__main 不补 padding 就会被状态栏压住最后一行（TimelineView list 519→491） */
   padding-bottom: var(--statusbar-height);
   overflow: hidden;
-  /* v1.5：右侧主区走画布色（与左导航的 elevated 形成微弱层次区分） */
-  background: var(--color-bg);
+  /* v1.6.1：右侧主区走专属 token (--color-shell-main-bg)
+   * 亮色 = #F8FAFC 极浅灰白（跟左导航/状态栏/卡片的 #FFFFFF 协调，Linear / Notion 风）
+   * 暗色 = --color-bg (#0F1115) 最深画布（跟 elevated 卡片 #181C24 形成 9 阶亮度差）
+   * 区域分区靠 1px --color-divider-region 边界线 + 4 档单层柔和阴影 */
+  background: var(--color-shell-main-bg);
   /* v1.5：右侧主区**不**强制顶部边界线 —— 每个 view 的 topbar 内部已有
    *   border-bottom: 1px solid var(--color-divider) 自带 Header↔Body 分界，
    *   AppShell 不重复添加，避免双线/线偏移

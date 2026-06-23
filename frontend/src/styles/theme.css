@@ -154,6 +154,12 @@ html[data-theme='dark'] {
   --shadow-sm: 0 1px 3px rgba(var(--shadow-rgb), 0.2), 0 1px 2px rgba(var(--shadow-rgb), 0.12);
   --shadow-md: 0 4px 8px rgba(var(--shadow-rgb), 0.24), 0 2px 4px rgba(var(--shadow-rgb), 0.16);
   --shadow-lg: 0 12px 24px rgba(var(--shadow-rgb), 0.32), 0 4px 8px rgba(var(--shadow-rgb), 0.2);
+
+  /* === 右侧主区背景色（v1.6.1 新增）===
+   * 暗色走 --color-bg（最深画布）—— 跟 elevated (#181C24) 形成 9 阶亮度差
+   * 卡片 (elevated) 浮在主区 (canvas) 上，符合 elevation 逻辑
+   * 亮色走专属 #F8FAFC（极浅灰白）见 light 主题块 */
+  --color-shell-main-bg: var(--color-bg);
 }
 
 :root,
@@ -378,6 +384,14 @@ html[data-theme='light'] {
   --shadow-sm: 0 1px 3px rgba(var(--shadow-rgb), 0.08), 0 1px 2px rgba(var(--shadow-rgb), 0.04);
   --shadow-md: 0 4px 8px rgba(var(--shadow-rgb), 0.08), 0 2px 4px rgba(var(--shadow-rgb), 0.04);
   --shadow-lg: 0 12px 24px rgba(var(--shadow-rgb), 0.1), 0 4px 8px rgba(var(--shadow-rgb), 0.05);
+
+  /* === 右侧主区背景色（v1.6.1 新增）===
+   * 亮色用 #F8FAFC（极浅灰白，slate-50）替代 #E8F1F5 浅苍蓝画布
+   * 原因：浅苍蓝画布 + 纯白卡片 对比不协调（"画布多余"感）
+   * Linear / Notion 主流：中性色画布 + 纯白卡片，靠 1px 边界线分区
+   * 暗色保持 --color-bg（最深画布）—— hover 态底反而比 elevated 更亮，
+   *   暗色用 hover 会让卡片看起来"陷进去"，违反 elevation 逻辑 */
+  --color-shell-main-bg: #f8fafc;
 
   /* === 滚动条（v1.6 弱化 · 走主色软底 + hover 实色 · 无 glow） === */
   --scrollbar-thumb: rgba(70, 107, 22, 0.25);
