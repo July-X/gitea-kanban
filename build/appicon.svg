@@ -5,17 +5,44 @@
       <stop offset="0.58" stop-color="#0f1714"/>
       <stop offset="1" stop-color="#263a1f"/>
     </linearGradient>
+    <radialGradient id="dolphinHalo" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(258 248) rotate(90) scale(214 198)">
+      <stop offset="0" stop-color="#eefae4" stop-opacity="0.2"/>
+      <stop offset="0.55" stop-color="#8ddf6d" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#8ddf6d" stop-opacity="0"/>
+    </radialGradient>
     <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(362 126) rotate(125) scale(244 216)">
       <stop offset="0" stop-color="#74b830" stop-opacity="0.32"/>
       <stop offset="0.56" stop-color="#3ddc84" stop-opacity="0.1"/>
       <stop offset="1" stop-color="#3ddc84" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="rainbow" x1="2" y1="26" x2="28" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff3b6b"/>
+      <stop offset="20%" stop-color="#ff8a3d"/>
+      <stop offset="40%" stop-color="#ffd23f"/>
+      <stop offset="60%" stop-color="#3ddc84"/>
+      <stop offset="80%" stop-color="#3da9ff"/>
+      <stop offset="100%" stop-color="#a64dff"/>
+    </linearGradient>
+    <linearGradient id="belly" x1="0" y1="13" x2="0" y2="27" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="52%" stop-color="#f7fff2" stop-opacity="0.62"/>
+      <stop offset="100%" stop-color="#fff8dd" stop-opacity="0.96"/>
+    </linearGradient>
+    <linearGradient id="bodyFill" x1="5" y1="11" x2="26" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#d7efe0" stop-opacity="0.74"/>
+      <stop offset="58%" stop-color="#8e9f93" stop-opacity="0.52"/>
+      <stop offset="100%" stop-color="#5c625f" stop-opacity="0.36"/>
+    </linearGradient>
+    <clipPath id="bodyClip">
+      <path d="M27 19 C 25 16, 22 14, 18 13.5 C 16 13.3, 14 13.3, 12 13.6 C 10 14, 8 14.8, 6 16 C 4.5 17, 3.5 18.5, 4 20 C 3.5 21, 3 22, 4 23.5 C 8 26, 16 27, 22 25.5 C 25 24.5, 27 22, 27 19.5 Z"/>
+    </clipPath>
   </defs>
 
   <rect x="20" y="20" width="472" height="472" rx="108" fill="url(#bg)"/>
   <rect x="20" y="20" width="472" height="472" rx="108" fill="url(#glow)"/>
+  <ellipse cx="258" cy="248" rx="156" ry="144" fill="url(#dolphinHalo)"/>
 
-  <g opacity="0.28" fill="none" stroke-linecap="round">
+  <g opacity="0.16" fill="none" stroke-linecap="round">
     <path d="M106 360V288c0-34 28-62 62-62h58" stroke="#74b830" stroke-width="10"/>
     <path d="M226 226h90c35 0 64-29 64-64v-36" stroke="#3da9ff" stroke-width="10"/>
     <circle cx="106" cy="360" r="15" fill="#74b830" stroke="none"/>
@@ -24,27 +51,17 @@
   </g>
 
   <!-- 直接内嵌原始 32x32 海豚原型，保留彩虹色和 45° 姿态 -->
-  <svg x="86" y="78" width="340" height="340" viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <defs>
-      <linearGradient id="rainbow" x1="2" y1="26" x2="28" y2="14" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stop-color="#ff3b6b"/>
-        <stop offset="20%" stop-color="#ff8a3d"/>
-        <stop offset="40%" stop-color="#ffd23f"/>
-        <stop offset="60%" stop-color="#3ddc84"/>
-        <stop offset="80%" stop-color="#3da9ff"/>
-        <stop offset="100%" stop-color="#a64dff"/>
-      </linearGradient>
-      <linearGradient id="belly" x1="0" y1="13" x2="0" y2="27" gradientUnits="userSpaceOnUse">
-        <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
-        <stop offset="60%" stop-color="#ffffff" stop-opacity="0.45"/>
-        <stop offset="100%" stop-color="#ffffff" stop-opacity="0.85"/>
-      </linearGradient>
-      <clipPath id="bodyClip">
-        <path d="M27 19 C 25 16, 22 14, 18 13.5 C 16 13.3, 14 13.3, 12 13.6 C 10 14, 8 14.8, 6 16 C 4.5 17, 3.5 18.5, 4 20 C 3.5 21, 3 22, 4 23.5 C 8 26, 16 27, 22 25.5 C 25 24.5, 27 22, 27 19.5 Z"/>
-      </clipPath>
-    </defs>
-
+  <g transform="translate(74 68) scale(11.375)" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <g transform="translate(-1.8 -5.5) rotate(-45 16 16)">
+      <g stroke="#08100c" stroke-opacity="0.72" stroke-width="2.7" fill="none">
+        <path d="M27 19 C 25 16, 22 14, 18 13.5 C 16 13.3, 14 13.3, 12 13.6 C 10 14, 8 14.8, 6 16 C 4.5 17, 3.5 18.5, 4 20 C 3.5 21, 3 22, 4 23.5"/>
+        <path d="M4 23.5 C 8 26, 16 27, 22 25.5 C 25 24.5, 27 22, 27 19.5"/>
+        <path d="M25 19.2 C 26 19.8, 26.8 19.8, 27 19.2"/>
+        <path d="M4 23.5 L 1 18.5 L 3 22 L 1 25.5"/>
+        <path d="M12 13.6 C 13 10.5, 15 10, 15.5 12 C 16 10, 18 10.5, 18 13.5"/>
+        <path d="M14 25.5 C 14.5 27.5, 16 27.5, 16.5 25.8"/>
+      </g>
+
       <g stroke="url(#rainbow)" stroke-width="1.6" fill="none">
         <path d="M27 19 C 25 16, 22 14, 18 13.5 C 16 13.3, 14 13.3, 12 13.6 C 10 14, 8 14.8, 6 16 C 4.5 17, 3.5 18.5, 4 20 C 3.5 21, 3 22, 4 23.5"/>
         <path d="M4 23.5 C 8 26, 16 27, 22 25.5 C 25 24.5, 27 22, 27 19.5"/>
@@ -55,13 +72,14 @@
       </g>
 
       <g clip-path="url(#bodyClip)">
+        <path d="M27 19 C 25 16, 22 14, 18 13.5 C 16 13.3, 14 13.3, 12 13.6 C 10 14, 8 14.8, 6 16 C 4.5 17, 3.5 18.5, 4 20 C 3.5 21, 3 22, 4 23.5 C 8 26, 16 27, 22 25.5 C 25 24.5, 27 22, 27 19.5 Z" fill="url(#bodyFill)"/>
         <rect x="0" y="13" width="32" height="14" fill="url(#belly)"/>
       </g>
 
       <circle cx="23" cy="17" r="1.3" fill="#1a1a2e"/>
       <circle cx="23.5" cy="16.5" r="0.4" fill="#ffffff" opacity="0.95"/>
     </g>
-  </svg>
+  </g>
 
   <rect x="20" y="20" width="472" height="472" rx="108" stroke="#dff4d8" stroke-opacity="0.14" stroke-width="4"/>
 </svg>
