@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -21,6 +22,29 @@ type CommitInfo struct {
 	AuthorWhen  time.Time // 作者时间
 	Parents     []string  // parent SHA 列表
 	IsMerge     bool      // 是否 merge commit（parents >= 2）
+	// Refs 关联的 ref 名称列表（branch / tag / PR 编号等）
+	// v2.7 增量：从 go-git References() 收集所有指向此 commit 的 ref。
+	// 顺序：本地分支 → 远程跟踪分支 → tag（顺序固定，前端可直接按顺序渲染）。
+	// 名称已剥掉 `refs/heads/`、`refs/remotes/origin/`、`refs/tags/` 前缀。
+	Refs []string
+}
+
+// RefType ref 类型
+type RefType string
+
+const (
+	RefTypeBranch      RefType = "branch"      // 本地分支（refs/heads/...）
+	RefTypeRemoteBranch RefType = "remoteBranch" // 远程跟踪分支（refs/remotes/<remote>/...）
+	RefTypeTag         RefType = "tag"         // tag（refs/tags/...）
+)
+
+// CommitRef commit 关联的 ref（带类型）
+type CommitRef struct {
+	Name string  // ref 短名（已剥前缀）：main, v1.0, origin/main
+	Type RefType // branch / remoteBranch / tag
+	// IsHEAD 标记是否是 HEAD 指向（如 main 当前指向的 commit）
+	// 用于前端给 HEAD 引用特殊样式（v2.8 暂未消费，预留）
+	IsHEAD bool
 }
 
 // LogOptions log 遍历参数
@@ -90,6 +114,11 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		return nil, fmt.Errorf("收集分支列表失败: %w", err)
 	}
 
+	// 收集所有 ref 名称（branch / tag）并按 SHA 索引
+	// v2.7 增量：让 commit 列表附带 refs 名称，前端右侧 commit 行直接渲染
+	// 格式：[branch/ref-name-1, branch/ref-name-2, tag/v1.0]
+	refNameByHash := collectRefNamesByHash(repo)
+
 	commits := make([]CommitInfo, 0)
 	seen := make(map[string]bool)
 	truncated := false
@@ -130,6 +159,7 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				AuthorWhen:  c.Author.When,
 				Parents:     parents,
 				IsMerge:     len(parents) >= 2,
+				Refs:        refNameByHash[c.Hash.String()],
 			})
 			return nil
 		})
@@ -222,4 +252,56 @@ func collectAllBranchHeads(repo *git.Repository) ([]plumbing.Hash, error) {
 	}
 
 	return heads, nil
+}
+
+// collectRefNamesByHash 收集仓库所有 ref 名称（branch + tag）并按 SHA 索引
+//
+// 返回 map[SHA][]string。每个 SHA 对应的 ref 列表顺序固定：本地分支 → 远程跟踪分支 → tag。
+// ref 名称已剥掉标准前缀（refs/heads/、refs/remotes/<remote>/、refs/tags/），
+//   远程跟踪分支保留 `<remote>/<branch>` 形式（如 `origin/main`），与 Gitea 行为一致。
+//
+// v2.7 增量：让 LogCommits 返回的每条 CommitInfo 自带 refs，前端右侧 commit 行
+// 直接渲染分支/tag badge，无需额外 API 调用。
+func collectRefNamesByHash(repo *git.Repository) map[string][]string {
+	result := make(map[string][]string)
+
+	refs, err := repo.References()
+	if err != nil {
+		// 收集失败不致命：log 命令仍可工作，只是 ref 列表为空
+		return result
+	}
+
+	_ = refs.ForEach(func(ref *plumbing.Reference) error {
+		// 跳过 symbolic ref（如 HEAD → refs/heads/main）
+		if ref.Type() != plumbing.HashReference {
+			return nil
+		}
+
+		name := ref.Name().String()
+		var shortName string
+		switch {
+		case strings.HasPrefix(name, "refs/heads/"):
+			// 本地分支 → 剥前缀，保留 main、feature/xxx 等
+			shortName = strings.TrimPrefix(name, "refs/heads/")
+		case strings.HasPrefix(name, "refs/remotes/"):
+			// 远程跟踪分支 → 保留 origin/main 形式（与 Gitea 一致）
+			shortName = strings.TrimPrefix(name, "refs/remotes/")
+		case strings.HasPrefix(name, "refs/tags/"):
+			// tag → 剥前缀
+			shortName = strings.TrimPrefix(name, "refs/tags/")
+		default:
+			// 其他 ref（notes、stash 等）跳过
+			return nil
+		}
+
+		if shortName == "" {
+			return nil
+		}
+
+		sha := ref.Hash().String()
+		result[sha] = append(result[sha], shortName)
+		return nil
+	})
+
+	return result
 }

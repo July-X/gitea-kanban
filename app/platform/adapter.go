@@ -145,16 +145,19 @@ type GraphResult struct {
 
 // GraphNodeDTO 图节点
 type GraphNodeDTO struct {
-	Row         int    `json:"row"`
-	Lane        int    `json:"lane"`
-	SHA         string `json:"sha"`
-	ShortSHA    string `json:"shortSha"`
-	Subject     string `json:"subject"`
-	AuthorName  string `json:"authorName"`
-	AuthorEmail string `json:"authorEmail"`
-	Date        string `json:"date"`
-	IsMerge     bool   `json:"isMerge"`
+	Row         int      `json:"row"`
+	Lane        int      `json:"lane"`
+	SHA         string   `json:"sha"`
+	ShortSHA    string   `json:"shortSha"`
+	Subject     string   `json:"subject"`
+	AuthorName  string   `json:"authorName"`
+	AuthorEmail string   `json:"authorEmail"`
+	Date        string   `json:"date"`
+	IsMerge     bool     `json:"isMerge"`
 	Parents     []string `json:"parents"`
+	// Refs 关联的 ref 名称（branch / tag 短名）
+	// v2.7 增量：透传自 GraphNode.Refs，前端右侧 commit 行渲染
+	Refs []string `json:"refs,omitempty"`
 }
 
 // GraphEdgeDTO 图边

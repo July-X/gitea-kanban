@@ -417,6 +417,29 @@ function avatarColorIndex(name: string): number {
   }
   return Math.abs(hash) % 16;
 }
+
+/**
+ * ref badge 类型判断
+ *
+ * 区分 branch / remoteBranch / tag 三大类,前端可按类型给不同视觉样式。
+ * Gitea 行为：tag 用浅灰底,branch 用绿底,remote branch 用蓝底。
+ *
+ * v2.7 后端 Refs 已是短名（已剥前缀），所以：
+ *   - 含 `/` 的（如 origin/main）→ remote branch
+ *   - 不含 `/` 且非 tag 关键字的 → 本地 branch
+ *   - tag 无区分字段，前端按名称 hash 给色（与 Gitea 不同但够用）
+ *
+ * v2.8 可在 CommitInfo 增 RefType 字段严格区分，前端 v2.7 暂用启发式。
+ */
+function refBadgeClass(ref: string): string {
+  if (ref.includes('/')) {
+    // 远程跟踪分支（如 origin/main、origin/feature-xxx）
+    return 'ref-badge--remote';
+  }
+  // 本地分支 vs tag：tag 名称常含 'v' 前缀或版本号格式，但启发式不可靠
+  // v2.7 简化：默认当作 branch（绿色），用户最常见是分支
+  return 'ref-badge--branch';
+}
 </script>
 
 <template>
@@ -557,7 +580,18 @@ function avatarColorIndex(name: string): number {
               @keydown.space.prevent="r.commit && openCommitDetail(r.commit)"
             >
               <template v-if="r.commit">
-                <!-- v2.6：refs 由 CommitDetailDialog 内部按需拉（GraphNodeDto 不含 refs 字段） -->
+                <!-- v2.7：refs 字段由后端 LogCommits 在收集 commit 时附带（branch / tag 短名），
+                     这里直接渲染 badge，无需额外 API 调用。
+                     PR 编号（#N）v2.8 再加。 -->
+                <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
+                  <span
+                    v-for="ref in r.commit.refs"
+                    :key="`ref-${r.commit.sha}-${ref}`"
+                    class="ref-badge"
+                    :class="refBadgeClass(ref)"
+                    :title="ref"
+                  >{{ ref }}</span>
+                </span>
                 <span class="commit-subject">{{ r.commit.subject }}</span>
                 <span class="commit-meta">
                   <span
@@ -889,8 +923,8 @@ function avatarColorIndex(name: string): number {
   display: flex;
   align-items: center;
   gap: var(--space-2, 8px);
-  /* 高度由内联 style 绑定 ROW_H = ROW_HEIGHT * DISPLAY_SCALE */
-  height: 24px;
+  /* 高度由内联 style 绑定 ROW_H（= ROW_HEIGHT = 28px），与 SVG 行高 1:1 对齐 */
+  height: 28px;
   padding: 0 var(--space-3, 12px);
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
@@ -917,7 +951,7 @@ function avatarColorIndex(name: string): number {
 .commit-row--relation {
   pointer-events: none;
   background: transparent;
-  height: 24px; /* 固定高度：relation 行无内容，不需要弹性 */
+  height: 28px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
 }
 .commit-row--relation:hover {
   background: transparent;
@@ -934,6 +968,38 @@ function avatarColorIndex(name: string): number {
   /* 不截断 —— 分支名完整显示，单行布局由 commit-row 的 overflow:hidden 兜底 */
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* v2.7：refs badge 类型区分（branch 绿、remote 蓝、tag 灰）
+ * 后端 LogCommits 收集 refs 时已剥前缀：
+ *   - 本地分支: refs/heads/main → "main"
+ *   - 远程跟踪分支: refs/remotes/origin/main → "origin/main"
+ *   - tag: refs/tags/v1.0 → "v1.0"
+ * v2.7 简化按是否含 `/` 区分 branch vs remote（tag v2.8 加 RefType 字段后严格区分）
+ */
+.ref-badge--branch {
+  background-color: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
+  color: var(--color-primary, #74b830);
+  border: 1px solid var(--color-primary-soft, rgba(116, 184, 48, 0.3));
+}
+.ref-badge--remote {
+  background-color: rgba(100, 116, 139, 0.12);
+  color: #64748b;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+.ref-badge--tag {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* commit-refs 容器：多个 badge 横向排列 */
+.commit-refs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  /* 与 commit-subject 之间的间距由 commit-row gap 提供 */
 }
 
 .commit-subject {

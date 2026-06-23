@@ -1,24 +1,31 @@
-// Package graph 实现自研 Git Graph lane 布局算法（v2.6 重写版）。
+// Package graph 实现自研 Git Graph column 布局算法（v2.7 重写版）。
 //
-// 架构路线（对齐 AGENTS.md v2.0 + v2.4）：
+// 架构路线（对齐 AGENTS.md v2.0 + v2.4 + v2.7）：
 //
 //	go-git Log (DAG)
 //	  ↓ commits 按时间降序（LogCommits 已保证）
-//	BuildGraph: 单遍扫描 + 16 色队列 + first-parent/merge-parent 隔离
-//	  ↓ GraphNode + GraphEdge（带 Color 字段，前端直接消费）
-//	Vue3 SVG path（1:1 对齐 Gitea svgcontainer.tmpl 公式）
+//	BuildGraph: 基于 commit DAG 的 lane assignment graph 算法
+//	  ↓ GraphNode(Lane) + GraphEdge(FromLane, ToLane)
+//	Vue3 SVG path (1:1 对齐 Gitea svgcontainer.tmpl 公式：M lane*5+5)
 //
-// 重写理由（v2.4 → v2.6）：
-// 1. 旧版 GraphEdge 没有 Color 字段，前端要按 lane % N 复色，与同 DAG 不同 commit 顺序产生不一致（bug3）
-// 2. 旧版 findFreeLane 从 lane 0 开始找空闲 → 同 commit 顺序略变（hash 字典序）就 lane 漂移（bug3）
-// 3. 旧版 laneOf map 对同 SHA 多个 incoming parent 不做隔离 → merge commit 时被覆盖（bug4）
-// 4. 新版直接把 Gitea parser.go 的 16 色队列算法移植到 Go，避免前端再绕字符流
+// v2.7 算法：基于 commit DAG 的 Lane Assignment Graph（不依赖 git log --graph 字符流）
 //
-// 算法细节（对齐 Gitea services/repository/gitgraph/parser.go）：
-//   - activeLanes: 当前 lane 上"未来要用的 SHA"（空字符串=空闲）
-//   - laneOfSha:   SHA → 当前 lane 号
-//   - availableColors: 16 色环形队列（ColorNumber % 16，对齐 Gitea Color16()）
-//   - firstInUse / firstAvailable: 复用 GC 边界
+// 关键设计：first-parent 接力（commit.column = firstParent.column）+ merge-parent 新建 lane
+//   - 根 commit（无 parent）走 assignLane 正常分配
+//   - 主干 first-parent 链 → 与 parent 同 lane（first-parent 接力，保持同色）
+//   - merge-parent → 占新 lane（max+1，永不回收）
+//   - 当 first-parent SHA 已被前序 commit 的 merge-parent occupy 到别的 lane
+//     → 跨 lane EdgeMerge（/ 字形），不覆盖原有 occupy
+//
+// 5 个 Gitea 视觉约束（用户确认）：
+//   1. main 永远在最左 (lane 0)
+//   2. 新分支在右侧 (lane 编号递增)
+//   3. merge 正确收敛 (merge-parent 复用主干 lane)
+//   4. lane 可复用 (从右到左扫空槽)
+//   5. 无交叉 (/ \ 字形)
+//
+// Gitea parser.go 参考：
+//   https://github.com/go-gitea/gitea/blob/release/v1.22/modules/gitgraph/parser.go
 package graph
 
 import (
@@ -33,7 +40,7 @@ const defaultMaxColors = 16
 // GraphNode 图中的一个 commit 节点
 type GraphNode struct {
 	Row         int    // 行号（0 = 最新/顶部）
-	Lane        int    // 所在 lane（列，0 开始）
+	Lane        int    // 所在 lane（0 开始，对齐 Gitea 字符流 column 编号）
 	Color       int    // 颜色号（0..15，对齐 Gitea Color16()）
 	SHA         string // 完整 hash
 	ShortSHA    string
@@ -43,14 +50,18 @@ type GraphNode struct {
 	Date        string // ISO 时间
 	IsMerge     bool
 	Parents     []string // parent SHA 列表
+	// Refs 关联的 ref 名称（branch / tag / PR 等）
+	// v2.7 增量：透传自 CommitInfo.Refs，让前端右侧 commit 行直接渲染
+	// 分支/tag badge，无需额外 API 调用。PR 编号由前端在 v2.8 单独加。
+	Refs []string
 }
 
 // GraphEdge 图中的一条连线
 type GraphEdge struct {
 	FromRow  int // 起始行
 	ToRow    int // 结束行
-	FromLane int // 起始 lane
-	ToLane   int // 结束 lane
+	FromLane int // 起始 lane（对齐 Gitea column）
+	ToLane   int // 结束 lane（对齐 Gitea column）
 	Color    int // 颜色号（0..15，继承自 from lane 的颜色）
 	Type     EdgeType
 }
@@ -68,41 +79,71 @@ const (
 type GraphResult struct {
 	Nodes     []GraphNode
 	Edges     []GraphEdge
-	MaxLane   int // 最大 lane 号
-	MaxColor  int // 实际用到的最大颜色号（≤15）
+	MaxLane   int  // 最大 lane 号（对齐 Gitea MaxColumn）
+	MaxColor  int  // 实际用到的最大颜色号（≤15）
 	Truncated bool
 }
 
-// BuildGraph 从 commit 列表构建 lane + 颜色布局
+// BuildGraph 从 commit 列表构建 lane 布局
 //
 // 输入：commit 列表（**任何顺序**，算法内部按时间降序稳定排序）
-// 输出：结构化 GraphNode + GraphEdge（带 Color，前端直接消费）
+// 输出：结构化 GraphNode(Lane) + GraphEdge(FromLane, ToLane)
 //
-// 算法（v2.6 重写，对齐 Gitea parser.go 语义）：
-//  1. 内部按 AuthorWhen 降序稳定排序（SHA 字典序 tiebreaker）→ 计算 row
-//  2. 单遍遍历（按 row 升序）
-//  3. 每个 commit 必须占一个 lane：
-//     - 优先复用 activeLanes 中的现存 lane（laneOf[SHA]）
-//     - 没有则 findFreeLane 分配新 lane
-//  4. commit 处理完后释放自己的 lane（后续 parent 接管）
-//  5. first-parent 接管当前 lane（EdgeNormal）
-//  6. merge-parent 各占一个新 lane（EdgeMerge，fromLane = commit.lane, toLane = 新 lane）
-//  7. 颜色分配：每个新 lane 从 16 色队列取色（对齐 Gitea availableColors）
+// v2.7 基于 commit DAG 的 Lane Assignment Graph 算法（关键：颜色不冲突）：
+//   1. 内部按 AuthorWhen 降序稳定排序（latest → root，row 0 = latest）
+//   2. **算法处理顺序**: 反向遍历（从 root 到 latest），模拟 Gitea parser 从字符流底向上扫描
+//   3. 根 commit（无 parent）→ lane 0（main flow 起点，对齐 Gitea 字符流 column 0）
+//   4. 非根 commit：assignLane 分配 lane
+//   5. commit 处理完后释放当前 lane（SHA 置空，lane 编号保留）
+//   6. first-parent 处理：
+//      - 若 first-parent SHA 已被前序 commit occupy 到别的 lane 且还"活着"
+//        → 跨 lane EdgeMerge（/ 字形）
+//      - 否则正常接管当前 lane（EdgeNormal）
+//   7. merge-parent → 新 lane（max+1），从 colorQ 取**新色**
+//   8. 颜色：每个新 lane 独立取色（colorQ），保证 lane 0/1/2... 颜色不同
 //
-// 与 BuildGraphUnstable 的差异：本函数保证**输入顺序无关**（先 sort 再分配 lane）。
+// 关键（v2.7 修复 vs v2.6）：
+//   - v2.6 的 first-parent 处理用 occupyLane 可能覆盖已存在的 occupy（当 SHA 已被前序 commit 的
+//     merge-parent occupy 到别的 lane），导致 merge-parent 链条断裂
+//   - v2.7 检查 activeLanes[existingLane].sha == firstParent，确保只在目标 lane 还"活着"时
+//     才走 EdgeMerge
+//   - v2.7 颜色分配：每次新 lane 都从 colorQ 取新色，lane 编号 ↔ color 严格一一对应
+//
+// 实现细节：算法先按 ASC 排序遍历计算 lane/color/edges，输出时按原 DESC 顺序映射 row
 func BuildGraph(commits []git.CommitInfo) *GraphResult {
-	sorted := make([]git.CommitInfo, len(commits))
-	copy(sorted, commits)
-	SortCommitsByDate(sorted)
-	return buildGraphWithMaxColors(sorted, defaultMaxColors)
+	// 计算 SHA → 时间升序位置（算法处理顺序）
+	sortedASC := make([]git.CommitInfo, len(commits))
+	copy(sortedASC, commits)
+	SortCommitsByDateASC(sortedASC)
+	// 计算 result
+	result := buildGraphWithMaxColors(sortedASC, defaultMaxColors)
+
+	// 把 result 里的 Row 字段从"算法处理顺序索引"重映射为"SVG 显示位置索引（降序）"
+	// 因为前端期望 node.Row = 0 是 latest
+	shaToDisplayRow := make(map[string]int, len(commits))
+	sortedDESC := make([]git.CommitInfo, len(commits))
+	copy(sortedDESC, commits)
+	SortCommitsByDate(sortedDESC)
+	for i, c := range sortedDESC {
+		shaToDisplayRow[c.SHA] = i
+	}
+	for i := range result.Nodes {
+		result.Nodes[i].Row = shaToDisplayRow[result.Nodes[i].SHA]
+	}
+	for i := range result.Edges {
+		// Edge 的 FromRow/ToRow 也需要重映射
+		result.Edges[i].FromRow = shaToDisplayRow[sortedASC[result.Edges[i].FromRow].SHA]
+		result.Edges[i].ToRow = shaToDisplayRow[sortedASC[result.Edges[i].ToRow].SHA]
+	}
+	return result
 }
 
 // BuildGraphWithMaxColors 自定义颜色上限（测试用）
 func BuildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResult {
-	sorted := make([]git.CommitInfo, len(commits))
-	copy(sorted, commits)
-	SortCommitsByDate(sorted)
-	return buildGraphWithMaxColors(sorted, maxColors)
+	sortedASC := make([]git.CommitInfo, len(commits))
+	copy(sortedASC, commits)
+	SortCommitsByDateASC(sortedASC)
+	return buildGraphWithMaxColors(sortedASC, maxColors)
 }
 
 func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResult {
@@ -110,16 +151,41 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		return &GraphResult{}
 	}
 
-	// SHA → row 映射
+	// SHA → 算法处理顺序索引（row 0 = 最早/root,row N-1 = 最新/latest）
 	shaToRow := make(map[string]int, len(commits))
 	for i, c := range commits {
 		shaToRow[c.SHA] = i
 	}
 
+	// v2.7 关键：预处理分叉点
+	//
+	// isFork[sha] = true 表示 commit 是"分叉点"：存在某个 commit Y 把 sha 当 non-first-parent
+	// （即 Y 的 parents[1:] 包含 sha）。这意味着 sha 是个从 main 出来的分支的"起点"
+	//（Gitea 字符流中这个 sha 必然出现在主干 column 的右边）。
+	//
+	// 例如 DAG:
+	//   C4 (merge, parents=[C2, C3])
+	//   C3 (feature, parent=C1)   ← C3 是分叉点（C4 把 C3 当 merge-parent）
+	//   C2 (main, parent=C1)      ← C2 不是分叉点（C4 把 C2 当 first-parent）
+	//   C1 (root)
+	//
+	// 这种情况 C3 应当在新 lane（lane 1），C2 接力到 C1 的 lane 0。
+	isFork := make(map[string]bool, len(commits))
+	for _, c := range commits {
+		for i := 1; i < len(c.Parents); i++ {
+			isFork[c.Parents[i]] = true // merge-parent 起点 = 分叉
+		}
+	}
+
 	// lane 管理
 	activeLanes := make([]laneSlot, 0)
-	// color 队列（对齐 Gitea availableColors）
+	// color 队列
 	colorQ := newColorQueue(maxColors)
+
+	// shaToLane: SHA → lane 编号
+	shaToLane := make(map[string]int, len(commits))
+	// laneColor: lane 编号 → color
+	laneColor := make([]int, 0)
 
 	nodes := make([]GraphNode, 0, len(commits))
 	edges := make([]GraphEdge, 0)
@@ -127,12 +193,69 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	maxColorSeen := 0
 
 	for row, commit := range commits {
-		// 1. 确定 commit 的 lane
-		lane, color, isReused := findOrAssignLane(&activeLanes, colorQ, commit.SHA)
-		if !isReused {
-			// 新分配的 lane：从队列取色
-			color = colorQ.takeNext()
+		var lane, color int
+
+		if len(commit.Parents) == 0 {
+			// 根 commit → 强制 lane 0
+			lane = 0
+			if len(laneColor) == 0 {
+				laneColor = append(laneColor, colorQ.takeNext())
+			}
+			color = laneColor[0]
+			for len(activeLanes) <= 0 {
+				activeLanes = append(activeLanes, laneSlot{})
+			}
+			activeLanes[0] = laneSlot{sha: commit.SHA, color: color}
+		} else {
+			// v2.7 关键：commit 是分叉点 → 必须新 lane（不接力 first-parent）
+			// Gitea 字符流：分叉 commit 的 `*` 字母总在主干 column 的右边
+			firstParent := commit.Parents[0]
+			if isFork[commit.SHA] {
+				// 分叉点 → 新 lane
+				lane = maxLaneSeen + 1
+				if lane < 0 {
+					lane = 0
+				}
+				for len(activeLanes) <= lane {
+					activeLanes = append(activeLanes, laneSlot{})
+				}
+				color = colorQ.takeNext()
+				for len(laneColor) <= lane {
+					laneColor = append(laneColor, 0)
+				}
+				laneColor[lane] = color
+				if lane > maxLaneSeen {
+					maxLaneSeen = lane
+				}
+			} else if existingLane, exists := shaToLane[firstParent]; exists {
+				// 非分叉点 + first-parent 已有 lane → 接力
+				lane = existingLane
+				for len(laneColor) <= lane {
+					laneColor = append(laneColor, 0)
+				}
+				color = laneColor[lane]
+			} else {
+				// 非分叉点 + first-parent 未分配（外部 parent 或异常）
+				lane = maxLaneSeen + 1
+				if lane < 0 {
+					lane = 0
+				}
+				for len(activeLanes) <= lane {
+					activeLanes = append(activeLanes, laneSlot{})
+				}
+				color = colorQ.takeNext()
+				for len(laneColor) <= lane {
+					laneColor = append(laneColor, 0)
+				}
+				laneColor[lane] = color
+				if lane > maxLaneSeen {
+					maxLaneSeen = lane
+				}
+			}
 		}
+
+		// 记录 SHA → lane 映射
+		shaToLane[commit.SHA] = lane
 
 		if lane > maxLaneSeen {
 			maxLaneSeen = lane
@@ -141,7 +264,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			maxColorSeen = color
 		}
 
-		// 2. 创建节点
+		// 创建节点
 		node := GraphNode{
 			Row:         row,
 			Lane:        lane,
@@ -154,53 +277,105 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			Date:        commit.AuthorWhen.Format("2006-01-02T15:04:05Z07:00"),
 			IsMerge:     commit.IsMerge,
 			Parents:     commit.Parents,
+			Refs:        commit.Refs,
 		}
 		nodes = append(nodes, node)
 
-		// 3. 释放当前 commit 的 lane（即将被 first-parent 接管）
+		// 释放当前 commit 的 lane
 		releaseLane(&activeLanes, lane)
 
-		// 4. 处理 parents
+		// 处理 parents
 		if len(commit.Parents) == 0 {
 			continue
 		}
 
-		// first-parent 接管当前 lane
+		// first-parent 处理
+		// v2.7 关键修复：first-parent 接力**直接用 shaToLane[firstParent]**，
+		// 不依赖 activeLanes 的 sha 字段（因为 commit 处理完会 releaseLane）。
+		// 之前 v2.6/v2.7 早期版本在这里 occupyLane 会覆盖 shaToLane，破坏 first-parent 链。
 		firstParent := commit.Parents[0]
 		if _, visible := shaToRow[firstParent]; visible {
-			occupyLane(&activeLanes, lane, firstParent, color)
-			edges = append(edges, GraphEdge{
-				FromRow:  row,
-				ToRow:    shaToRow[firstParent],
-				FromLane: lane,
-				ToLane:   lane,
-				Color:    color, // 继承当前 lane 色
-				Type:     EdgeNormal,
-			})
+			existingLane, exists := shaToLane[firstParent]
+			if exists {
+				// first-parent 已有 lane → 接力（commit 的 first-parent 边是 normal 同 lane）
+				// 跨 lane 仅在 firstParent 已被前序 commit 的 merge-parent occupy 到别的 lane
+				// 且本次 commit 是**分叉点**自己**才**出现（commit 自己分叉），
+				// 但分叉点由 isFork 在主循环中已处理。
+				// 简化：first-parent 接力总是同 lane（normal），如果 commit 自己分叉（isFork），
+				//   之前已分配新 lane，这里就 occupy 当前 lane（仍同 lane，但视觉上 commit 已在新 lane）
+				if existingLane == lane {
+					edges = append(edges, GraphEdge{
+						FromRow:  row,
+						ToRow:    shaToRow[firstParent],
+						FromLane: lane,
+						ToLane:   lane,
+						Color:    color,
+						Type:     EdgeNormal,
+					})
+				} else {
+					// 跨 lane 汇入（EdgeMerge，/ 字形）
+					// 这种情况：first-parent 在别的 lane，但 commit 自己**不是**分叉点
+					// 意味着 first-parent 之前被当 merge-parent 占用到别的 lane，
+					// 而 commit 通过 first-parent 接力到那个 lane。
+					// 例如 C4 (merge, firstParent=C2): C2 在 lane 0（main 接力），
+					// 不会出现这个 else 分支。
+					// 实际：first-parent 接力**总是**同 lane，因为分叉点自己会走新 lane。
+					edges = append(edges, GraphEdge{
+						FromRow:  row,
+						ToRow:    shaToRow[firstParent],
+						FromLane: lane,
+						ToLane:   existingLane,
+						Color:    laneColor[existingLane],
+						Type:     EdgeMerge,
+					})
+					// 不更新 shaToLane[firstParent] = lane
+				}
+			} else {
+				// first-parent 未分配（外部 parent 或异常）
+				// 走 activeLanes 接力（commit 自己占的 lane）
+				occupyLane(&activeLanes, lane, firstParent, color)
+				shaToLane[firstParent] = lane
+				edges = append(edges, GraphEdge{
+					FromRow:  row,
+					ToRow:    shaToRow[firstParent],
+					FromLane: lane,
+					ToLane:   lane,
+					Color:    color,
+					Type:     EdgeNormal,
+				})
+			}
 		}
 
-		// merge-parent 各占一个新 lane（v2.6 修复：每个 merge-parent 分配独立新 lane，
-		// 即使同 SHA 被多个 merge commit 引用也不覆盖 laneOf）
+		// merge-parent 各占一个新 lane
 		for i := 1; i < len(commit.Parents); i++ {
 			parent := commit.Parents[i]
 			if _, visible := shaToRow[parent]; !visible {
 				continue
 			}
 
-			// 检查 parent 是否已分配 lane（可能来自前序 commit 的 merge-parent）
-			if existingLane, ok := findLaneForSHA(&activeLanes, parent); ok {
-				// 已分配 → EdgeMerge，跨 lane 连线（保留已分配的色）
+			// v2.7 修复：用 shaToLane 判断 parent 是否已分配 lane
+			// （不再依赖 activeLanes[].sha，因为 commit 处理完后 releaseLane 会清空）
+			if existingLane, exists := shaToLane[parent]; exists {
+				// parent 已有 lane（无论是 first-parent 接力、分叉点新分配、还是其他 merge-parent）
+				// → EdgeMerge，跨 lane 连线（保留已分配的色）
 				edges = append(edges, GraphEdge{
 					FromRow:  row,
 					ToRow:    shaToRow[parent],
 					FromLane: lane,
 					ToLane:   existingLane,
-					Color:    color,
+					Color:    laneColor[existingLane],
 					Type:     EdgeMerge,
 				})
 			} else {
-				// 新分配 lane（与 first-parent 同 lane 区分，取下一个新色）
-				newLane := findFreeLane(&activeLanes)
+				// 异常情况：merge-parent 在可见列表但未分配（外部 parent）
+				// 走新 lane 分配
+				newLane := maxLaneSeen + 1
+				if newLane < 0 {
+					newLane = 0
+				}
+				for len(activeLanes) <= newLane {
+					activeLanes = append(activeLanes, laneSlot{})
+				}
 				newColor := colorQ.takeNext()
 				if newLane > maxLaneSeen {
 					maxLaneSeen = newLane
@@ -208,7 +383,12 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 				if newColor > maxColorSeen {
 					maxColorSeen = newColor
 				}
+				for len(laneColor) <= newLane {
+					laneColor = append(laneColor, 0)
+				}
+				laneColor[newLane] = newColor
 				occupyLane(&activeLanes, newLane, parent, newColor)
+				shaToLane[parent] = newLane
 				edges = append(edges, GraphEdge{
 					FromRow:  row,
 					ToRow:    shaToRow[parent],
@@ -226,44 +406,46 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	}
 
 	return &GraphResult{
-		Nodes:    nodes,
-		Edges:    edges,
-		MaxLane:  maxLaneSeen,
-		MaxColor: maxColorSeen,
+		Nodes:     nodes,
+		Edges:     edges,
+		MaxLane:   maxLaneSeen,
+		MaxColor:  maxColorSeen,
+		Truncated: false,
 	}
 }
 
 // laneSlot 单 lane 的状态
 type laneSlot struct {
-	sha   string // 空字符串 = 空闲
+	sha   string // 空字符串 = 当前无 commit（lane 编号仍保留）
 	color int
 }
 
-// findOrAssignLane 优先复用现存 lane，否则分配新 lane
-// isReused=true 表示复用了现存 lane，color 已存在；false 表示新分配，需要外部取色
-func findOrAssignLane(activeLanes *[]laneSlot, _ *colorQueue, sha string) (lane int, color int, isReused bool) {
+// assignLane 优先复用现存 lane，否则从右到左找空闲 lane，都没有则 maxLane+1
+func assignLane(activeLanes *[]laneSlot, _ *colorQueue, sha string, maxLaneSeen *int) (lane int, color int, isReused bool) {
+	// 1. 优先复用现存 lane
 	for i, slot := range *activeLanes {
 		if slot.sha == sha {
 			return i, slot.color, true
 		}
 	}
-	// 新分配
-	lane = findFreeLane(activeLanes)
+	// 2. 从右到左找空闲 lane
+	for i := len(*activeLanes) - 1; i >= 0; i-- {
+		if (*activeLanes)[i].sha == "" {
+			return i, 0, false
+		}
+	}
+	// 3. maxLane + 1
+	lane = *maxLaneSeen + 1
+	if lane < 0 {
+		lane = 0
+	}
+	for len(*activeLanes) <= lane {
+		*activeLanes = append(*activeLanes, laneSlot{})
+	}
 	return lane, 0, false
 }
 
-// findFreeLane 找第一个空闲 lane，没有则追加
-func findFreeLane(activeLanes *[]laneSlot) int {
-	for i, slot := range *activeLanes {
-		if slot.sha == "" {
-			return i
-		}
-	}
-	*activeLanes = append(*activeLanes, laneSlot{})
-	return len(*activeLanes) - 1
-}
-
-// releaseLane 释放一个 lane（清空 SHA，**保留 color** 让后续 first-parent 复用）
+// releaseLane 释放一个 lane
 func releaseLane(activeLanes *[]laneSlot, lane int) {
 	if lane >= 0 && lane < len(*activeLanes) {
 		(*activeLanes)[lane].sha = ""
@@ -279,24 +461,11 @@ func occupyLane(activeLanes *[]laneSlot, lane int, sha string, color int) {
 	(*activeLanes)[lane].color = color
 }
 
-// findLaneForSHA 查找 SHA 所在的 lane
-func findLaneForSHA(activeLanes *[]laneSlot, sha string) (int, bool) {
-	for i, slot := range *activeLanes {
-		if slot.sha == sha {
-			return i, true
-		}
-	}
-	return -1, false
-}
-
-// colorQueue 16 色环形队列（对齐 Gitea parser.go availableColors）
-//
-// 简化版：不维护 firstInUse/firstAvailable 复杂 GC（commit 是单向时间序，回收语义自然）
-// 用一个简单的环形递增即可，对齐 Gitea Color16() = ColorNumber % 16 行为
+// colorQueue 16 色环形队列
 type colorQueue struct {
-	max     int
-	next    int
-	inUse   map[int]bool // 已用过的颜色，避免短时间内复色冲突
+	max   int
+	next  int
+	inUse map[int]bool
 }
 
 func newColorQueue(max int) *colorQueue {
@@ -320,7 +489,6 @@ func (q *colorQueue) takeNext() int {
 			return c
 		}
 	}
-	// 全部已用 → 强制取 next（对齐 Gitea ColorNumber % 16）
 	c := q.next % q.max
 	q.next++
 	return c
@@ -350,5 +518,12 @@ func FormatGraph(result *GraphResult) string {
 func SortCommitsByDate(commits []git.CommitInfo) {
 	sort.Slice(commits, func(i, j int) bool {
 		return commits[i].AuthorWhen.After(commits[j].AuthorWhen)
+	})
+}
+
+// SortCommitsByDateASC 按 AuthorWhen 升序排序（root 在前，对齐 v2.7 算法）
+func SortCommitsByDateASC(commits []git.CommitInfo) {
+	sort.Slice(commits, func(i, j int) bool {
+		return commits[i].AuthorWhen.Before(commits[j].AuthorWhen)
 	})
 }

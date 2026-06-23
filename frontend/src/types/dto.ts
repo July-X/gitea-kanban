@@ -545,6 +545,13 @@ export interface GraphNodeDto {
   date: string;
   isMerge: boolean;
   parents: string[];
+  /**
+   * 关联的 ref 名称列表（branch / tag 短名，已剥 refs/heads/、refs/remotes/<remote>/、refs/tags/ 前缀）
+   * 远程跟踪分支保留 `<remote>/<branch>` 形式（如 `origin/main`）
+   * v2.7 增量：后端 LogCommits 在收集时附带，前端右侧 commit 行直接渲染 badge
+   * PR 编号 v2.8 单独加
+   */
+  refs?: string[];
 }
 
 /** 边类型：0=normal(直线下行), 1=branch(分支), 2=merge(合并) */

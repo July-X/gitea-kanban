@@ -175,3 +175,123 @@ func TestLogCommits_NonExistentRepo(t *testing.T) {
 		t.Errorf("error should mention repo open failure: %v", err)
 	}
 }
+
+// createTestRepoWithRefs 创建一个有 branch + tag 的测试仓库
+func createTestRepoWithRefs(t *testing.T) string {
+	t.Helper()
+	dir := createTestRepoWithCommits(t)
+
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// 创建 feature 分支指向最新 commit
+	runGit("checkout", "-b", "feature")
+
+	// 创建一个 tag 指向中间 commit（second commit）
+	// 用 git rev-parse 找 commit SHA
+	cmd := exec.Command("git", "rev-parse", "HEAD~1")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rev-parse: %v\n%s", err, out)
+	}
+	secondCommitSHA := strings.TrimSpace(string(out))
+	runGit("tag", "v1.0", secondCommitSHA)
+
+	// 切回默认分支（兼容 master / main，v2.6 后老 git init 仍默认 master）
+	defaultBranch := currentDefaultBranch(t, dir)
+	runGit("checkout", defaultBranch)
+
+	return dir
+}
+
+// currentDefaultBranch 返回 git 默认分支名（master / main 兼容）
+func currentDefaultBranch(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("symbolic-ref: %v\n%s", err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestLogCommits_RefsAttached 验证 LogCommits 返回的每条 CommitInfo 都附带 refs
+//
+// v2.7 增量：前端右侧 commit 行需要渲染分支/tag badge，
+// 后端必须在 LogCommits 时收集 refs 并附加到 CommitInfo。
+//
+// 测试场景：
+//   - default 分支指向最新 commit → 最新 commit 的 Refs 应包含默认分支名
+//   - feature 分支指向最新 commit → 最新 commit 的 Refs 应包含 "feature"
+//   - v1.0 tag 指向 second commit → second commit 的 Refs 应包含 "v1.0"
+func TestLogCommits_RefsAttached(t *testing.T) {
+	repoPath := createTestRepoWithRefs(t)
+	defaultBranch := currentDefaultBranch(t, repoPath)
+
+	result, err := LogCommits(LogOptions{
+		LocalPath: repoPath,
+	})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+	if len(result.Commits) != 3 {
+		t.Fatalf("expected 3 commits, got %d", len(result.Commits))
+	}
+
+	// 最新 commit (third commit) → Refs 应包含默认分支和 feature
+	head := result.Commits[0]
+	if !contains(head.Refs, defaultBranch) {
+		t.Errorf("head commit Refs missing %q: got %v", defaultBranch, head.Refs)
+	}
+	if !contains(head.Refs, "feature") {
+		t.Errorf("head commit Refs missing 'feature': got %v", head.Refs)
+	}
+
+	// 中间 commit (second commit) → Refs 应包含 v1.0 tag
+	middle := result.Commits[1]
+	if !contains(middle.Refs, "v1.0") {
+		t.Errorf("middle commit Refs missing 'v1.0': got %v", middle.Refs)
+	}
+
+	// 最早 commit (first commit) → 无 ref
+	root := result.Commits[2]
+	if len(root.Refs) != 0 {
+		t.Errorf("root commit should have no refs, got %v", root.Refs)
+	}
+}
+
+// TestLogCommits_NoRefsOnEmpty 验证没有任何 ref 的 commit Refs 为空 slice（不是 nil）
+func TestLogCommits_NoRefsOnEmpty(t *testing.T) {
+	repoPath := createTestRepoWithCommits(t)
+
+	result, err := LogCommits(LogOptions{LocalPath: repoPath})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+
+	// 默认 main 分支指向最新 commit，所以 head 有 "main" ref
+	// 但中间和最早 commit 应无 ref
+	if len(result.Commits[1].Refs) != 0 {
+		t.Errorf("middle commit Refs should be empty, got %v", result.Commits[1].Refs)
+	}
+	if len(result.Commits[2].Refs) != 0 {
+		t.Errorf("root commit Refs should be empty, got %v", result.Commits[2].Refs)
+	}
+}
+
+// contains 检查字符串 slice 是否包含指定字符串
+func contains(slice []string, target string) bool {
+	for _, s := range slice {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}

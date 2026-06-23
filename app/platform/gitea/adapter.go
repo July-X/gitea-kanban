@@ -449,6 +449,7 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 			Date:        n.Date,
 			IsMerge:     n.IsMerge,
 			Parents:     n.Parents,
+			Refs:        n.Refs,
 		})
 	}
 

@@ -107,7 +107,7 @@ type WailsApp = {
   }>;
   /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token） */
   GetGitGraph?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<{
-    nodes: Array<{ row: number; lane: number; sha: string; shortSha: string; subject: string; authorName: string; authorEmail: string; date: string; isMerge: boolean; parents: string[] }>;
+    nodes: Array<{ row: number; lane: number; sha: string; shortSha: string; subject: string; authorName: string; authorEmail: string; date: string; isMerge: boolean; parents: string[]; refs?: string[] }>;
     edges: Array<{ fromRow: number; toRow: number; fromLane: number; toLane: number; type: number }>;
     maxLane: number;
     truncated: boolean;
