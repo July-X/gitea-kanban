@@ -431,7 +431,9 @@ function isCurrent(account: GiteaAccountDto): boolean {
   padding: 0 var(--space-3);
   font-size: var(--font-sm);
   color: var(--color-text);
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强 */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   outline: none;

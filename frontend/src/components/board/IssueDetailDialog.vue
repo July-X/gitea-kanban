@@ -343,7 +343,9 @@ function fmtDate(iso: string): string {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   padding: 2px 8px;
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强 */
+  background: var(--color-bg-elevated);
   border-radius: var(--radius-sm);
   align-self: flex-start;
   cursor: pointer;
@@ -372,7 +374,8 @@ function fmtDate(iso: string): string {
 .issue-detail__count {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色 */
+  background: var(--color-bg-elevated);
   padding: 1px 6px;
   border-radius: var(--radius-pill);
 }
@@ -431,7 +434,9 @@ function fmtDate(iso: string): string {
 .issue-detail__comment-input {
   flex: 1;
   padding: 8px 10px;
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强 */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   color: var(--color-text);

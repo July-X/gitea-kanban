@@ -156,7 +156,8 @@
 .modal__input {
   width: 100%;
   padding: 8px 10px;
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色 */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -245,7 +246,8 @@
   gap: var(--space-2);
   width: 100%;
   padding: 8px 10px;
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色 */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -281,7 +283,10 @@
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--color-divider);
-  background: var(--color-bg);
+  /* v1.6.1 改用主区中性色（--color-shell-main-bg），跟新主区同色
+   * 弹窗 footer = 工具栏区域, 跟主区背景对齐, 靠 1px 顶边线分层
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗主面板白底对比过强 ("白→浅蓝→白" 跳色) */
+  background: var(--color-shell-main-bg);
 }
 .modal__footer-right {
   display: flex;

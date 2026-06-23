@@ -301,7 +301,10 @@ function submit(): void {
 .create-issue__select {
   width: 100%;
   padding: 8px 10px;
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强 ("白→浅蓝→白" 跳色)
+   * 区分靠 1px --color-divider 边框 */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   color: var(--color-text);
@@ -330,7 +333,9 @@ function submit(): void {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强 */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
@@ -364,7 +369,10 @@ function submit(): void {
   align-items: center;
   gap: var(--space-2);
   padding: 8px 10px;
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强
+   * 区分靠 1px --color-divider 边框 */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
 }

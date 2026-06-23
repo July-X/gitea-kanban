@@ -301,7 +301,9 @@ onUnmounted(() => {
   overflow-y: auto;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强 */
+  background: var(--color-bg-elevated);
 }
 
 .migrate-dialog__repo-item {
@@ -404,7 +406,9 @@ onUnmounted(() => {
   max-height: 150px;
   overflow-y: auto;
   padding: var(--space-2) var(--space-3);
-  background: var(--color-bg);
+  /* v1.6.1 改 --color-bg-elevated（白），跟弹窗主面板同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟弹窗白底对比过强 */
+  background: var(--color-bg-elevated);
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-divider);
 }
