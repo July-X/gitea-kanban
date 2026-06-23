@@ -84,6 +84,7 @@ export interface SvgPath {
   colorIndex: number; // 0..15，对齐 Gitea Color16()
   /** 内联 hex 颜色（v2.6 fix：用 SVG attribute 而非 CSS 变量，兼容 WebKit + scoped CSS） */
   colorHex: string;
+  order: number; // 保留原始 edge 顺序，避免 regroup 后覆盖主干竖线
 }
 
 /** 一条 SVG 节点（圆点 + commit 关联） */
@@ -117,7 +118,7 @@ export interface SvgRenderResult {
  *
  * v2.7 重写（修复 bug1 宽度过大 + bug2 分叉/合并连线方向错误）：
  * - 颜色来自后端 GraphEdge.color（0..15，对齐 Gitea Color16()），前端不再 % N 自算
- * - 按 color 分组 paths，便于 SVG <g class="flow-color-16-N"> 染色
+ * - 保留 edges 原始顺序输出 path，避免按颜色 regroup 后改变覆盖层级
  * - 路径公式使用 SourceTree 风格 flow segment：
  *   · 同 lane (EdgeNormal) → 当前 flow 自己的垂直 segment
  *   · 向右分叉（类似 '\'）→ 先局部斜出，再在目标 lane 继续下行
@@ -132,8 +133,7 @@ export interface SvgRenderResult {
  * @returns SVG paths（按 color 分组）+ nodes + 尺寸
  */
 export function renderGraph(graph: GraphResultDto): SvgRenderResult {
-  // 按 color 分组的 paths：每个 color 一组（对应一个 SVG <g class="flow-color-16-N">）
-  const pathsByColor = new Map<number, string[]>();
+  const paths: SvgPath[] = [];
   const nodes: SvgNode[] = [];
 
   // ===== 计算最大 lane（用于 viewBox 宽度）=====
@@ -158,10 +158,13 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
     laneNodes.sort((a, b) => a.row - b.row);
   }
 
-  const addPath = (color: number, d: string): void => {
-    const arr = pathsByColor.get(color) ?? [];
-    arr.push(d);
-    pathsByColor.set(color, arr);
+  const addPath = (color: number, d: string, order: number): void => {
+    paths.push({
+      d,
+      colorIndex: color,
+      colorHex: LANE_COLORS[color] ?? LANE_COLORS[0],
+      order,
+    });
   };
 
   const rowCenter = (row: number): number => row * ROW_HEIGHT + ROW_HEIGHT / 2;
@@ -183,7 +186,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   };
 
   const mergeSiblings = new Map<string, GraphEdgeDto[]>();
-  for (const edge of graph.edges) {
+  for (const [index, edge] of graph.edges.entries()) {
     if (edge.fromLane <= edge.toLane) {
       continue;
     }
@@ -201,7 +204,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   }
 
   // ===== 1. 生成 edges → SVG paths =====
-  for (const edge of graph.edges) {
+  for (const [index, edge] of graph.edges.entries()) {
     const x1 = laneX(edge.fromLane);
     const y1 = rowCenter(edge.fromRow);
     const x2 = laneX(edge.toLane);
@@ -239,20 +242,10 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
       d = `M ${x1} ${y1} L ${x1} ${branchY} L ${x2} ${y2}`;
     }
 
-    addPath(edge.color, d);
+    addPath(edge.color, d, index);
   }
 
-  // ===== 2. 展平成 SvgPath 数组 =====
-  const paths: SvgPath[] = [];
-  for (const [colorIndex, ds] of pathsByColor.entries()) {
-    paths.push({
-      d: ds.join(' '),
-      colorIndex,
-      colorHex: LANE_COLORS[colorIndex] ?? LANE_COLORS[0],
-    });
-  }
-
-  // ===== 3. 生成 nodes → SVG circles =====
+  // ===== 2. 生成 nodes → SVG circles =====
   for (const node of graph.nodes) {
     const colorHex = LANE_COLORS[node.color] ?? LANE_COLORS[0];
     nodes.push({
@@ -272,7 +265,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
     });
   }
 
-  // ===== 4. 计算尺寸（基于实际用到的最大 lane）=====
+  // ===== 3. 计算尺寸（基于实际用到的最大 lane）=====
   const width = (maxRenderLane + 1) * LANE_WIDTH + LANE_WIDTH;
   const height = graph.nodes.length * ROW_HEIGHT + ROW_HEIGHT;
 

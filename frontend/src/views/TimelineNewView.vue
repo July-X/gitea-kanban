@@ -300,19 +300,21 @@ const svgHeight = computed(() => {
 // Path 分组（按 color 分组，对齐 Gitea flow-color-16-N 染色）
 // ============================================================
 interface PathGroup {
+  order: number;
   colorIndex: number; // 0..15，对齐 Gitea Color16()
   colorClass: string; // 'flow-color-16-N'
   colorHex: string; // v2.6 fix：内联 hex（用于 path stroke 属性）
-  d: string; // 一组 path 的 d（拼接）
+  d: string; // 单条 path 的 d
 }
 
 const pathGroups = computed<PathGroup[]>(() => {
   const r = svgRender.value;
   if (!r) return [];
-  // 按 colorIndex 升序，保证 SVG 渲染顺序稳定
+  // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
   return [...r.paths]
-    .sort((a, b) => a.colorIndex - b.colorIndex)
+    .sort((a, b) => a.order - b.order)
     .map((p) => ({
+      order: p.order,
       colorIndex: p.colorIndex,
       colorClass: `flow-color-16-${p.colorIndex}`,
       colorHex: p.colorHex,

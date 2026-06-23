@@ -468,3 +468,123 @@ func TestBuildGraph_FutureReferencedBranchMustReserveLaneAgainstOverlappingSibli
 		t.Fatalf("overlapping branches collapsed to same lane %d", xh.Lane)
 	}
 }
+
+// TestBuildGraph_BranchMergedBackIntoAnotherBranchKeepsFlowColor
+// 验证一个显式分支 head（branch-b）在 merge 回自己的目标分支后，
+// 即使 merge commit 的 parent 顺序被反过来，[merged-in, branch-b]，
+// branch-b 这条 flow 在 merge 点前后也必须保持同一 lane / color。
+func TestBuildGraph_BranchMergedBackIntoAnotherBranchKeepsFlowColor(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, when time.Time, parents []string) git.CommitInfo {
+		full := sha + "0000000000000000000000000000000000000000"[:40-len(sha)]
+		fullParents := make([]string, len(parents))
+		for i, p := range parents {
+			fullParents[i] = p + "0000000000000000000000000000000000000000"[:40-len(p)]
+		}
+		return git.CommitInfo{
+			SHA:        full,
+			ShortSHA:   sha,
+			Subject:    sha,
+			AuthorWhen: when,
+			Parents:    fullParents,
+			IsMerge:    len(parents) >= 2,
+		}
+	}
+
+	commits := []git.CommitInfo{
+		mk("m4", t0, []string{"m3"}),
+		mk("b4", t0.Add(-time.Minute), []string{"bm"}),
+		mk("bm", t0.Add(-2*time.Minute), []string{"a2", "b2"}), // parent 顺序反转
+		mk("a2", t0.Add(-3*time.Minute), []string{"a1"}),
+		mk("b2", t0.Add(-4*time.Minute), []string{"b1"}),
+		mk("a1", t0.Add(-5*time.Minute), []string{"b1"}),
+		mk("b1", t0.Add(-6*time.Minute), []string{"m2"}),
+		mk("m3", t0.Add(-7*time.Minute), []string{"m2"}),
+		mk("m2", t0.Add(-8*time.Minute), []string{"m1"}),
+		mk("m1", t0.Add(-9*time.Minute), []string{}),
+	}
+	commits[0].Refs = []string{"main"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+	commits[1].Refs = []string{"branch-b"}
+	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraph(commits)
+	nodeBySHA := map[string]GraphNode{}
+	for _, n := range result.Nodes {
+		nodeBySHA[n.ShortSHA] = n
+	}
+
+	head := nodeBySHA["b4"]
+	for _, sha := range []string{"b4", "bm", "b2", "b1"} {
+		node := nodeBySHA[sha]
+		if node.Lane != head.Lane {
+			t.Fatalf("%s lane = %d, want branch-b lane %d", sha, node.Lane, head.Lane)
+		}
+		if node.Color != head.Color {
+			t.Fatalf("%s color = %d, want branch-b color %d", sha, node.Color, head.Color)
+		}
+	}
+
+	for _, sha := range []string{"a2", "a1"} {
+		node := nodeBySHA[sha]
+		if node.Color == head.Color {
+			t.Fatalf("%s color collapsed into branch-b color %d", sha, head.Color)
+		}
+	}
+}
+
+// TestBuildGraph_MergeEdgeToMergedBranchUsesParentFlowColor
+// 验证 merge commit 指向“被合入分支 parent”的那条边，颜色必须跟随 parent flow，
+// 不能继承 merge commit 自己的颜色，否则 UI 上会把分支上半段误涂成主干色。
+func TestBuildGraph_MergeEdgeToMergedBranchUsesParentFlowColor(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, when time.Time, parents []string) git.CommitInfo {
+		full := sha + "0000000000000000000000000000000000000000"[:40-len(sha)]
+		fullParents := make([]string, len(parents))
+		for i, p := range parents {
+			fullParents[i] = p + "0000000000000000000000000000000000000000"[:40-len(p)]
+		}
+		return git.CommitInfo{
+			SHA:        full,
+			ShortSHA:   sha,
+			Subject:    sha,
+			AuthorWhen: when,
+			Parents:    fullParents,
+			IsMerge:    len(parents) >= 2,
+		}
+	}
+
+	commits := []git.CommitInfo{
+		mk("m4", t0, []string{"m3", "f1"}),
+		mk("m3", t0.Add(-time.Minute), []string{"m2"}),
+		mk("f1", t0.Add(-2*time.Minute), []string{"m2"}),
+		mk("m2", t0.Add(-3*time.Minute), []string{}),
+	}
+	commits[0].Refs = []string{"main"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraph(commits)
+	nodeBySHA := map[string]GraphNode{}
+	for _, n := range result.Nodes {
+		nodeBySHA[n.ShortSHA] = n
+	}
+
+	mainColor := nodeBySHA["m4"].Color
+	featureColor := nodeBySHA["f1"].Color
+	if featureColor == mainColor {
+		t.Fatalf("fixture invalid: feature color collapsed into main color %d", mainColor)
+	}
+
+	found := false
+	for _, e := range result.Edges {
+		if e.FromRow == nodeBySHA["m4"].Row && e.ToRow == nodeBySHA["f1"].Row {
+			found = true
+			if e.Color != featureColor {
+				t.Fatalf("merge edge color = %d, want merged-branch color %d", e.Color, featureColor)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("merge edge m4 -> f1 not found")
+	}
+}

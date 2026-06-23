@@ -142,12 +142,22 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		shaToRow[c.SHA] = i
 	}
 
+	// 默认展示 parent：先尊重原始 first-parent，后面只对显式锚定 chain 做局部覆写。
+	displayParentOf := make(map[string]string, len(sorted))
+	for _, commit := range sorted {
+		if len(commit.Parents) == 0 {
+			continue
+		}
+		displayParentOf[commit.SHA] = commit.Parents[0]
+	}
+
 	// 预处理 main 链：优先从显式主分支 ref（main/master/origin/main/origin/master）
 	// 对应的最新 commit 开始沿 first-parent 一路到底；找不到再退回当前列表第一个 commit。
 	// main 链上的 commit 全部标记为 lane 0 候选，保证 main 永远在最左。
 	// 这样 feature 分支的 first-parent 不会抢占 main 链上 commit 的 lane。
 	isMainChain := make(map[string]bool, len(sorted))
 	primaryHeadSHA := ""
+	preferredChildByParent := make(map[string]string, len(sorted))
 	if len(sorted) > 0 {
 		cur := sorted[0]
 		for _, candidate := range sorted {
@@ -171,7 +181,100 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			if !ok {
 				break // first-parent 不在可见列表（截断边界）
 			}
+			displayParentOf[cur.SHA] = fp
+			preferredChildByParent[fp] = cur.SHA
 			cur = sorted[fpRow]
+		}
+	}
+
+	// 为显式非主干 branch head 补 continuation chain：
+	// 目标不是把它压回 main lane，而是让“这条 branch 自己的 flow”
+	// 在 merge 回其它分支时仍保持同一条 lane/color。
+	distMemo := make(map[string]int, len(sorted))
+	const hugeDistance = int(^uint(0) >> 1)
+	var distanceToMain func(string) int
+	distanceToMain = func(sha string) int {
+		if dist, ok := distMemo[sha]; ok {
+			return dist
+		}
+		if isMainChain[sha] {
+			distMemo[sha] = 0
+			return 0
+		}
+		row, ok := shaToRow[sha]
+		if !ok {
+			return hugeDistance
+		}
+		commit := sorted[row]
+		if len(commit.Parents) == 0 {
+			distMemo[sha] = hugeDistance
+			return hugeDistance
+		}
+		best := hugeDistance
+		for _, parent := range commit.Parents {
+			if _, visible := shaToRow[parent]; !visible {
+				continue
+			}
+			parentDist := distanceToMain(parent)
+			if parentDist == hugeDistance {
+				continue
+			}
+			if parentDist+1 < best {
+				best = parentDist + 1
+			}
+		}
+		distMemo[sha] = best
+		return best
+	}
+
+	branchOwnerOf := make(map[string]string, len(sorted))
+	for _, head := range sorted {
+		if head.SHA == primaryHeadSHA || isMainChain[head.SHA] || !hasNonPrimaryBranchRef(head) {
+			continue
+		}
+		cur := head
+		visited := make(map[string]bool, len(sorted))
+		for {
+			if visited[cur.SHA] {
+				break
+			}
+			visited[cur.SHA] = true
+			if owner, exists := branchOwnerOf[cur.SHA]; exists && owner != head.SHA {
+				break
+			}
+			branchOwnerOf[cur.SHA] = head.SHA
+
+			if len(cur.Parents) == 0 {
+				break
+			}
+			nextParent := cur.Parents[0]
+			if len(cur.Parents) > 1 {
+				bestParent := nextParent
+				bestDistance := hugeDistance
+				for _, parent := range cur.Parents {
+					if _, visible := shaToRow[parent]; !visible {
+						continue
+					}
+					parentDistance := distanceToMain(parent)
+					if parentDistance < bestDistance {
+						bestDistance = parentDistance
+						bestParent = parent
+					}
+				}
+				nextParent = bestParent
+			}
+			if _, visible := shaToRow[nextParent]; !visible {
+				break
+			}
+			displayParentOf[cur.SHA] = nextParent
+			if isMainChain[nextParent] {
+				break
+			}
+			if _, exists := preferredChildByParent[nextParent]; !exists {
+				preferredChildByParent[nextParent] = cur.SHA
+			}
+			nextRow := shaToRow[nextParent]
+			cur = sorted[nextRow]
 		}
 	}
 
@@ -183,29 +286,25 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		if len(commit.Parents) == 0 {
 			continue
 		}
-		firstParent := commit.Parents[0]
+		firstParent := displayParentOf[commit.SHA]
+		if firstParent == "" {
+			continue
+		}
 		if _, visible := shaToRow[firstParent]; !visible {
 			continue
 		}
 		firstParentChildren[firstParent] = append(firstParentChildren[firstParent], commit.SHA)
 	}
 	primaryFirstParentChild := make(map[string]string, len(firstParentChildren))
+	for parentSHA, childSHA := range preferredChildByParent {
+		primaryFirstParentChild[parentSHA] = childSHA
+	}
 	for parentSHA, children := range firstParentChildren {
-		if len(children) == 0 {
+		if len(children) == 0 || primaryFirstParentChild[parentSHA] != "" {
 			continue
 		}
-		chosen := ""
-		for _, childSHA := range children {
-			if isMainChain[childSHA] {
-				chosen = childSHA
-				break
-			}
-		}
-		if chosen == "" && len(children) == 1 {
-			chosen = children[0]
-		}
-		if chosen != "" {
-			primaryFirstParentChild[parentSHA] = chosen
+		if len(children) == 1 {
+			primaryFirstParentChild[parentSHA] = children[0]
 		}
 	}
 
@@ -257,7 +356,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			continue
 		}
 		startRow := shaToRow[commit.SHA]
-		endRow := branchSpanEndRow(commit.SHA, sorted, shaToRow, isMainChain)
+		endRow := branchSpanEndRow(commit.SHA, sorted, shaToRow, isMainChain, displayParentOf)
 
 		lane := -1
 		for candidate := 1; candidate <= maxLaneSeen; candidate++ {
@@ -336,7 +435,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			// 其余 sibling child 视为真正分叉，必须占独立 lane。
 			firstParent := ""
 			if len(commit.Parents) > 0 {
-				firstParent = commit.Parents[0]
+				firstParent = displayParentOf[commit.SHA]
 			}
 			if fpLane, ok := shaToLane[firstParent]; ok && firstParent != "" {
 				if primaryFirstParentChild[firstParent] == commit.SHA {
@@ -398,7 +497,10 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		}
 
 		// first-parent
-		firstParent := commit.Parents[0]
+		firstParent := displayParentOf[commit.SHA]
+		if firstParent == "" {
+			continue
+		}
 		if _, visible := shaToRow[firstParent]; visible {
 			if fpLane, exists := shaToLane[firstParent]; exists {
 				laneRefCount[fpLane]++
@@ -417,8 +519,10 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		}
 
 		// merge-parents：各占一条 lane（预分配）
-		for i := 1; i < len(commit.Parents); i++ {
-			parent := commit.Parents[i]
+		for _, parent := range commit.Parents {
+			if parent == firstParent {
+				continue
+			}
 			if _, visible := shaToRow[parent]; !visible {
 				continue
 			}
@@ -451,7 +555,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		childLane := shaToLane[commit.SHA]
 
 		// first-parent
-		firstParent := commit.Parents[0]
+		firstParent := displayParentOf[commit.SHA]
 		if parentRow, visible := shaToRow[firstParent]; visible {
 			parentLane := shaToLane[firstParent]
 			if parentLane == childLane {
@@ -474,24 +578,30 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		}
 
 		// merge-parents
-		for i := 1; i < len(commit.Parents); i++ {
-			parent := commit.Parents[i]
+		for _, parent := range commit.Parents {
+			if parent == firstParent {
+				continue
+			}
 			parentRow, visible := shaToRow[parent]
 			if !visible {
 				continue
 			}
 			parentLane := shaToLane[parent]
+			parentColor := shaToColor[parent]
+			if parentColor == 0 && !isMainChain[parent] {
+				parentColor = shaToColor[commit.SHA]
+			}
 			if parentLane == childLane {
 				edges = append(edges, GraphEdge{
 					FromRow: row, ToRow: parentRow,
 					FromLane: childLane, ToLane: parentLane,
-					Color: shaToColor[commit.SHA], Type: EdgeNormal,
+					Color: parentColor, Type: EdgeNormal,
 				})
 			} else {
 				edges = append(edges, GraphEdge{
 					FromRow: row, ToRow: parentRow,
 					FromLane: childLane, ToLane: parentLane,
-					Color: shaToColor[commit.SHA], Type: EdgeMerge,
+					Color: parentColor, Type: EdgeMerge,
 				})
 			}
 		}
@@ -556,6 +666,7 @@ func branchSpanEndRow(
 	sorted []git.CommitInfo,
 	shaToRow map[string]int,
 	isMainChain map[string]bool,
+	displayParentOf map[string]string,
 ) int {
 	row, ok := shaToRow[sha]
 	if !ok {
@@ -578,11 +689,10 @@ func branchSpanEndRow(
 		endRow = curRow
 
 		commit := sorted[curRow]
-		if len(commit.Parents) == 0 {
+		firstParent := displayParentOf[commit.SHA]
+		if firstParent == "" {
 			return endRow
 		}
-
-		firstParent := commit.Parents[0]
 		parentRow, visible := shaToRow[firstParent]
 		if !visible {
 			return endRow
