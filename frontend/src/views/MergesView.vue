@@ -1500,7 +1500,9 @@ function formatRelative(iso: string | undefined): string {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: var(--color-bg);
+  /* v1.6.1 改主区中性色（--color-shell-main-bg），跟 topbar / 主体内容同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 在新主区 #F8FAFC 上对比过强 */
+  background: var(--color-shell-main-bg);
   border-radius: var(--radius-sm);
   font-size: var(--font-xs);
   color: var(--color-text-secondary);
@@ -1521,7 +1523,9 @@ function formatRelative(iso: string | undefined): string {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background: var(--color-bg);
+  /* v1.6.1 改主区中性色（--color-shell-main-bg），跟 topbar / 主体内容同色
+   * 工具栏 = topbar 跟主体内容之间的"内嵌工具区", 视觉上跟两边同色 */
+  background: var(--color-shell-main-bg);
   border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
   flex-wrap: wrap;
@@ -1563,7 +1567,8 @@ function formatRelative(iso: string | undefined): string {
 
 .merges__tab-count {
   font-size: var(--font-xs);
-  background: var(--color-bg);
+  /* v1.6.1 改主区中性色（--color-shell-main-bg），跟主区同色 */
+  background: var(--color-shell-main-bg);
   color: var(--color-text-muted);
   padding: 0 5px;
   border-radius: var(--radius-pill);
