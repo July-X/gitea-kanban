@@ -19,25 +19,9 @@
  *   - 不挡内容、不蒙版、不模糊 —— 跟 view 内容同框渲染
  *   - 路由切换 fade 过渡时 overlay 跟 router-view 平级，位置稳定
  */
-import { useRoute } from 'vue-router';
-import { watch } from 'vue';
 import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
 import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
-
-const route = useRoute();
-
-watch(() => route.path, (newPath, oldPath) => {
-  console.log('[AppShell] route changed from', oldPath, 'to', newPath);
-});
-
-function onComponentMounted() {
-  console.log('[AppShell] component mounted for route:', route.path);
-}
-
-function onComponentError(err: Error) {
-  console.error('[AppShell] component error for route:', route.path, err);
-}
 </script>
 
 <template>
@@ -52,10 +36,8 @@ function onComponentError(err: Error) {
     <NavRail class="shell__nav" />
     <main class="shell__main">
       <div class="shell__content">
-        <router-view v-slot="{ Component, route }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" :key="route.path" @vue:mounted="onComponentMounted" @vue:error="onComponentError" />
-          </transition>
+        <router-view v-slot="{ Component }">
+          <component :is="Component" />
         </router-view>
         <!--
           v1.4 第六轮：overlay 挂在 .shell__content 内，跟 router-view 平级

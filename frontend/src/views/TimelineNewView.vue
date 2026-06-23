@@ -121,7 +121,6 @@ function onAppRefresh(): void {
 }
 
 onMounted(async () => {
-  console.log('[TimelineNewView] onMounted - activeProjectId:', activeProjectId.value);
   if (repo.repos.length === 0) {
     try {
       await repo.loadRepos('', true);
@@ -130,10 +129,7 @@ onMounted(async () => {
     }
   }
   if (activeProjectId.value) {
-    console.log('[TimelineNewView] onMounted - calling loadGraph');
     await loadGraph();
-  } else {
-    console.warn('[TimelineNewView] onMounted - no activeProjectId, skipping loadGraph');
   }
   // 注册全局刷新事件监听器
   document.addEventListener('app:refresh', onAppRefresh);
@@ -154,9 +150,7 @@ onUnmounted(() => {
 });
 
 async function loadGraph(): Promise<void> {
-  console.log('[TimelineNewView] loadGraph called - activeProjectId:', activeProjectId.value);
   if (!activeProjectId.value) {
-    console.warn('[TimelineNewView] loadGraph - no activeProjectId, returning early');
     return;
   }
   loading.value = true;
@@ -164,14 +158,12 @@ async function loadGraph(): Promise<void> {
   featureDisabled.value = false;
   useGlobalLoadingStore().show('timeline');
   try {
-    console.log('[TimelineNewView] loadGraph - calling commitsGitgraphLines');
     // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
     // 跳过 v1 字符流往返（adapter.ts 反编码 → parser.ts 解析），消除 bug1-bug4
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
       limit: 200,
     });
-    console.log('[TimelineNewView] loadGraph - received dto:', dto);
 
     // 兼容 disabled 提示（main handler 可能返 disabled）
     const nodes = dto?.nodes ?? [];
@@ -460,19 +452,6 @@ function refBadgeClass(refType?: string): string {
 
 <template>
   <div class="timeline-new">
-    <!-- DEBUG 信息面板 -->
-    <div v-if="true" style="position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: lime; padding: 10px; font-family: monospace; font-size: 11px; z-index: 9999; max-width: 400px; border-radius: 4px;">
-      <div>DEBUG INFO:</div>
-      <div>activeProjectId: {{ activeProjectId }}</div>
-      <div>activeRepo: {{ activeRepo?.fullName || 'null' }}</div>
-      <div>loading: {{ loading }}</div>
-      <div>graphDto nodes: {{ graphDto?.nodes?.length || 0 }}</div>
-      <div>svgRender: {{ svgRender ? 'yes' : 'no' }}</div>
-      <div>localError: {{ localError || 'none' }}</div>
-      <div>featureDisabled: {{ featureDisabled }}</div>
-      <div>repos.length: {{ repo.repos.length }}</div>
-    </div>
-
     <!-- ===== 顶部栏 ===== -->
     <header class="timeline-new__topbar">
       <div class="timeline-new__title">
