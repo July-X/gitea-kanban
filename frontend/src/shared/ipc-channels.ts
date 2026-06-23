@@ -64,7 +64,7 @@ export const IpcChannel = {
   // === commits namespace（02-architecture.md §5.3.3 + §5.3.4）===
   COMMITS_LIST: 'commits.list',
   COMMITS_GET: 'commits.get',
-  // v1.4 重构：返 Gitea parser.go 字符流协议（前端 Parser 解析）
+  // v2：名称沿用历史 `gitgraph.lines`，实际返回 GraphResultDto（结构化 nodes + edges）
   COMMITS_GITGRAPH_LINES: 'commits.gitgraph.lines',
   // v1.5 启用 Git Graph：自动 git clone 仓库到本地
   COMMITS_GITGRAPH_CLONE_REPO: 'commits.gitgraph.cloneRepo',

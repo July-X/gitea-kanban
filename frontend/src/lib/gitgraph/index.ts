@@ -1,7 +1,13 @@
 /**
- * Git Graph renderer 端子系统 —— 入口
+ * Git Graph renderer 端 legacy 入口
  *
- * 子模块（与 Gitea 同构）：
+ * 历史上这里暴露过“字符流 Parser”子系统；当前实现已经切到：
+ *   - Go 端 `app/git/graph/layout.go` 输出结构化 nodes + edges
+ *   - 前端 `structured.ts` 直接渲染 SVG
+ *
+ * 下面这些导出仅保留给旧代码/参考实现，不再是当前 Git Graph 主路径。
+ *
+ * legacy 子模块：
  *   - models.ts : Graph / Flow / Glyph / GitGraphCommit 数据模型
  *   - types.ts  : 与 main 端 IPC 协议共享的 DTO（GraphLine / GraphLineCommit / GitRef）
  *   - parser.ts : Parser 状态机（1:1 移植 Gitea parser.go）

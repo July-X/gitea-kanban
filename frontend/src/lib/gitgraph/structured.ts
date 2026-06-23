@@ -64,14 +64,17 @@ export interface GraphResultDto {
 
 /** 列宽（每个 lane 的水平间距）
  *
- * v2.7：24 → 16。Gitea 原版用 5 unit × 2 缩放 = 10px/lane；旧值 24px 导致 lane
- * 间距过宽、整体图形稀疏。16px 在可读性与紧凑性之间取平衡（dot 8px + 8px 间隙）。
+ * v2.8：16 → 10。分叉 flow 需要按相邻列固定 10px 递增：
+ * flow2 相对 flow1 = 10px，flow3 相对 flow2 = 10px，依次类推。
+ * 这样更接近 Gitea/SourceTree 的紧凑 column 视觉，避免分叉横向被拉得过宽。
  */
-export const LANE_WIDTH = 16;
+export const LANE_WIDTH = 10;
 /** 行高（每个 commit 的垂直间距） */
 export const ROW_HEIGHT = 28;
 /** 节点半径 */
 export const NODE_RADIUS = 4;
+/** 多条 merge 同时汇入同一 parent 时的错层步进，避免外侧斜线压住内侧竖线 */
+export const MERGE_STAGGER = 10;
 
 // ===== SVG path 生成 =====
 
@@ -117,9 +120,11 @@ export interface SvgRenderResult {
  * - 按 color 分组 paths，便于 SVG <g class="flow-color-16-N"> 染色
  * - 路径公式使用 SourceTree 风格 flow segment：
  *   · 同 lane (EdgeNormal) → 当前 flow 自己的垂直 segment
- *   · 跨 lane (EdgeMerge) → 从具体 commit 点用局部折线接到 parent 行前方。
- *     不在起点横向拉到临时列，避免出现大矩形折线；lane 复用时只截断冲突段，
- *     不把前后不同 flow 强行连成一条。
+ *   · 向右分叉（类似 '\'）→ 先局部斜出，再在目标 lane 继续下行
+ *   · 向左回收（类似 '/'）→ 先沿当前 lane 下行，最后一段再斜回主干
+ *     这样能保留 SourceTree/Gitea 的“右开左收”视觉语义，而不是把所有跨 lane
+ *     边都画成同一种直角折线。
+ *   · lane 复用时只截断冲突段，不把前后不同 flow 强行连成一条。
  *   · 旧版用贝塞尔曲线，不符合 Gitea 真实 `git log --graph` 的折线表现
  * - node 颜色：直接使用后端 GraphNode.color，避免 merge edge 污染节点颜色
  *
@@ -177,6 +182,24 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
     );
   };
 
+  const mergeSiblings = new Map<string, GraphEdgeDto[]>();
+  for (const edge of graph.edges) {
+    if (edge.fromLane <= edge.toLane) {
+      continue;
+    }
+    const key = `${edge.toRow}:${edge.toLane}`;
+    const arr = mergeSiblings.get(key) ?? [];
+    arr.push(edge);
+    mergeSiblings.set(key, arr);
+  }
+  const mergeRankByEdge = new Map<GraphEdgeDto, { rank: number; total: number }>();
+  for (const edges of mergeSiblings.values()) {
+    edges.sort((a, b) => a.fromLane - b.fromLane || a.fromRow - b.fromRow);
+    for (let i = 0; i < edges.length; i++) {
+      mergeRankByEdge.set(edges[i], { rank: i, total: edges.length });
+    }
+  }
+
   // ===== 1. 生成 edges → SVG paths =====
   for (const edge of graph.edges) {
     const x1 = laneX(edge.fromLane);
@@ -195,9 +218,24 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
       } else {
         d = `M ${x1} ${y1} L ${x2} ${y2}`;
       }
+    } else if (edge.toLane > edge.fromLane) {
+      // 向右分叉：模仿 '\' 语义，尽快斜出到新 lane，再沿目标 lane 继续向下。
+      // 这样 feature 分支不会被画成“先在主干上垂直坠落，再最后一刻拐过去”的直角折线。
+      const branchY = rowTop(Math.min(edge.fromRow + 1, edge.toRow));
+      d = `M ${x1} ${y1} L ${x2} ${branchY} L ${x2} ${y2}`;
     } else {
-      // SourceTree 风格：线从具体 commit 点分叉出来，只在局部折到 parent 行前方。
-      const branchY = edge.toRow > edge.fromRow ? rowTop(edge.toRow) : rowBottom(edge.toRow);
+      // 向左回收：同一 parent 的多条 merge 线不能在同一高度一起左拐，
+      // 否则外侧分支的斜线会压住内侧分支的竖线。这里按 lane 从内到外错层回收：
+      // 越靠近主干的分支越早左拐，越外侧的分支越晚左拐。
+      const mergeRank = mergeRankByEdge.get(edge);
+      const defaultBranchY = edge.toRow > edge.fromRow ? rowTop(edge.toRow) : rowBottom(edge.toRow);
+      const minBranchY = rowTop(Math.min(edge.fromRow + 1, edge.toRow));
+      const desiredOffset =
+        mergeRank && mergeRank.total > 1
+          ? (mergeRank.total - mergeRank.rank - 1) * MERGE_STAGGER
+          : 0;
+      const maxOffset = Math.max(0, defaultBranchY - minBranchY);
+      const branchY = defaultBranchY - Math.min(desiredOffset, maxOffset);
       d = `M ${x1} ${y1} L ${x1} ${branchY} L ${x2} ${y2}`;
     }
 

@@ -38,6 +38,7 @@ package graph
 
 import (
 	"sort"
+	"strings"
 
 	"gitea-kanban/app/git"
 )
@@ -141,12 +142,25 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		shaToRow[c.SHA] = i
 	}
 
-	// 预处理 main 链：从第一个 commit（HEAD）沿 first-parent 一路到底。
+	// 预处理 main 链：优先从显式主分支 ref（main/master/origin/main/origin/master）
+	// 对应的最新 commit 开始沿 first-parent 一路到底；找不到再退回当前列表第一个 commit。
 	// main 链上的 commit 全部标记为 lane 0 候选，保证 main 永远在最左。
 	// 这样 feature 分支的 first-parent 不会抢占 main 链上 commit 的 lane。
 	isMainChain := make(map[string]bool, len(sorted))
+	primaryHeadSHA := ""
 	if len(sorted) > 0 {
 		cur := sorted[0]
+		for _, candidate := range sorted {
+			if !hasPrimaryBranchRef(candidate) {
+				continue
+			}
+			cur = candidate
+			primaryHeadSHA = candidate.SHA
+			break
+		}
+		if primaryHeadSHA == "" {
+			primaryHeadSHA = cur.SHA
+		}
 		for {
 			isMainChain[cur.SHA] = true
 			if len(cur.Parents) == 0 {
@@ -158,6 +172,40 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 				break // first-parent 不在可见列表（截断边界）
 			}
 			cur = sorted[fpRow]
+		}
+	}
+
+	// 预处理 first-parent 子节点：
+	// 一个 parent 的多个 first-parent 子节点里，只允许一个“主继续 flow”继承 parent lane。
+	// 其余 sibling child 必须占独立 lane，否则会被错误压回同一个 column。
+	firstParentChildren := make(map[string][]string, len(sorted))
+	for _, commit := range sorted {
+		if len(commit.Parents) == 0 {
+			continue
+		}
+		firstParent := commit.Parents[0]
+		if _, visible := shaToRow[firstParent]; !visible {
+			continue
+		}
+		firstParentChildren[firstParent] = append(firstParentChildren[firstParent], commit.SHA)
+	}
+	primaryFirstParentChild := make(map[string]string, len(firstParentChildren))
+	for parentSHA, children := range firstParentChildren {
+		if len(children) == 0 {
+			continue
+		}
+		chosen := ""
+		for _, childSHA := range children {
+			if isMainChain[childSHA] {
+				chosen = childSHA
+				break
+			}
+		}
+		if chosen == "" && len(children) == 1 {
+			chosen = children[0]
+		}
+		if chosen != "" {
+			primaryFirstParentChild[parentSHA] = chosen
 		}
 	}
 
@@ -185,13 +233,89 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		shaToLane[sha] = 0
 		shaToColor[sha] = mainColor
 	}
+	maxLaneSeen = 0
+
+	// 非主分支 head 预占独立 lane：
+	// 如果某个 commit 带分支 ref（feature/x 等）且不在 main chain，
+	// 说明它是一个显式 branch head，应先固定到独立 column。
+	//
+	// 但这里不能简单 maxLaneSeen++，否则两个“纵向区间不重叠”的 branch head
+	// 也会被永久推到更右侧，导致 flow2 / flow3 与主干的间距被空列撑大。
+	// 预分配阶段同样要按 first-parent 链的可见区间做 lane 复用：
+	//   - 区间重叠：不能复用（否则会纵向覆盖）
+	//   - 区间不重叠：优先复用最靠左的已空闲 lane
+	branchLaneOccupiedUntil := make(map[int]int)
+	branchLaneReservedFrom := make(map[int]int)
+	for _, commit := range sorted {
+		if commit.SHA == primaryHeadSHA || isMainChain[commit.SHA] {
+			continue
+		}
+		if !hasNonPrimaryBranchRef(commit) {
+			continue
+		}
+		if _, exists := shaToLane[commit.SHA]; exists {
+			continue
+		}
+		startRow := shaToRow[commit.SHA]
+		endRow := branchSpanEndRow(commit.SHA, sorted, shaToRow, isMainChain)
+
+		lane := -1
+		for candidate := 1; candidate <= maxLaneSeen; candidate++ {
+			if branchLaneOccupiedUntil[candidate] < startRow {
+				lane = candidate
+				break
+			}
+		}
+		if lane < 0 {
+			lane = maxLaneSeen + 1
+		}
+		if lane > maxLaneSeen {
+			maxLaneSeen = lane
+		}
+		branchLaneReservedFrom[lane] = startRow
+		branchLaneOccupiedUntil[lane] = endRow
+		shaToLane[commit.SHA] = lane
+		shaToColor[commit.SHA] = assignNewFlowColor()
+	}
 
 	// lane 引用计数：记录 lane 还有多少条"待处理 parent 连线"占用它，用于复用。
 	laneRefCount := make(map[int]int)
+	// cross-lane 的 first-parent 分叉需要把 child lane 一直占到 parent 收拢点，
+	// 否则 sibling branch 会过早复用同一 column。
+	laneBlockedUntil := make(map[int]int)
 
-	findFreeLane := func(maxLane int) int {
-		for l := maxLane; l >= 0; l-- {
-			if laneRefCount[l] == 0 {
+	findFreeLane := func(maxLane int, currentRow int, allowLaneZero bool) int {
+		minLane := 1
+		if allowLaneZero {
+			minLane = 0
+		}
+		for l := maxLane; l >= minLane; l-- {
+			if reservedFrom, reserved := branchLaneReservedFrom[l]; reserved {
+				if reservedFrom > currentRow && branchLaneOccupiedUntil[l] >= currentRow {
+					continue
+				}
+			}
+			if laneRefCount[l] == 0 && laneBlockedUntil[l] <= currentRow {
+				return l
+			}
+		}
+		return -1
+	}
+	findFreeLaneExcept := func(maxLane int, forbidden int, currentRow int, allowLaneZero bool) int {
+		minLane := 1
+		if allowLaneZero {
+			minLane = 0
+		}
+		for l := maxLane; l >= minLane; l-- {
+			if l == forbidden {
+				continue
+			}
+			if reservedFrom, reserved := branchLaneReservedFrom[l]; reserved {
+				if reservedFrom > currentRow && branchLaneOccupiedUntil[l] >= currentRow {
+					continue
+				}
+			}
+			if laneRefCount[l] == 0 && laneBlockedUntil[l] <= currentRow {
 				return l
 			}
 		}
@@ -201,27 +325,37 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	for row, commit := range sorted {
 		var lane int
 
-		if row == 0 || isMainChain[commit.SHA] {
-			// main 链 commit → lane 0（HEAD 及其 first-parent 链，保证 main 永远最左）
+		if isMainChain[commit.SHA] {
+			// main 链 commit → lane 0（显式主分支及其 first-parent 链，保证 main 永远最左）
 			lane = 0
 		} else if selfLane, ok := shaToLane[commit.SHA]; ok {
 			// commit 自己已被前序 commit 当 merge-parent 预分配了 lane → 复用
 			lane = selfLane
 		} else {
-			// first-parent 接力：若 first-parent 已有 lane，复用它
+			// first-parent 接力：只有 parent 的“主继续 child”才允许继承同一 lane；
+			// 其余 sibling child 视为真正分叉，必须占独立 lane。
 			firstParent := ""
 			if len(commit.Parents) > 0 {
 				firstParent = commit.Parents[0]
 			}
 			if fpLane, ok := shaToLane[firstParent]; ok && firstParent != "" {
-				lane = fpLane
+				if primaryFirstParentChild[firstParent] == commit.SHA {
+					lane = fpLane
+				} else {
+					free := findFreeLaneExcept(maxLaneSeen, fpLane, row, false)
+					if free >= 0 {
+						lane = free
+					} else {
+						lane = max(maxLaneSeen+1, 1)
+					}
+				}
 			} else {
 				// first-parent 未分配 → 从右到左找空闲 lane；都没有则 max+1
-				free := findFreeLane(maxLaneSeen)
+				free := findFreeLane(maxLaneSeen, row, false)
 				if free >= 0 {
 					lane = free
 				} else {
-					lane = maxLaneSeen + 1
+					lane = max(maxLaneSeen+1, 1)
 				}
 			}
 		}
@@ -268,6 +402,11 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		if _, visible := shaToRow[firstParent]; visible {
 			if fpLane, exists := shaToLane[firstParent]; exists {
 				laneRefCount[fpLane]++
+				if fpLane != lane {
+					if parentRow := shaToRow[firstParent]; parentRow > laneBlockedUntil[lane] {
+						laneBlockedUntil[lane] = parentRow
+					}
+				}
 			} else {
 				// first-parent 未分配 → occupy 当前 lane（接力）
 				// main 链的 first-parent 也在 lane 0（main 链预处理已覆盖），这里统一 occupy
@@ -286,12 +425,12 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			if existingLane, exists := shaToLane[parent]; exists {
 				laneRefCount[existingLane]++
 			} else {
-				free := findFreeLane(maxLaneSeen)
+				free := findFreeLane(maxLaneSeen, row, false)
 				var newLane int
 				if free >= 0 {
 					newLane = free
 				} else {
-					newLane = maxLaneSeen + 1
+					newLane = max(maxLaneSeen+1, 1)
 				}
 				if newLane > maxLaneSeen {
 					maxLaneSeen = newLane
@@ -322,10 +461,14 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 					Color: shaToColor[commit.SHA], Type: EdgeNormal,
 				})
 			} else {
+				edgeType := EdgeMerge
+				if parentLane > childLane {
+					edgeType = EdgeBranch
+				}
 				edges = append(edges, GraphEdge{
 					FromRow: row, ToRow: parentRow,
 					FromLane: childLane, ToLane: parentLane,
-					Color: shaToColor[commit.SHA], Type: EdgeMerge,
+					Color: shaToColor[commit.SHA], Type: edgeType,
 				})
 			}
 		}
@@ -364,6 +507,91 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 		MaxLane:   maxLaneSeen,
 		MaxColor:  maxColorSeen,
 		Truncated: false,
+	}
+}
+
+func hasPrimaryBranchRef(commit git.CommitInfo) bool {
+	for i, refName := range commit.Refs {
+		refType := git.RefType("")
+		if i < len(commit.RefTypes) {
+			refType = commit.RefTypes[i]
+		}
+		if refType != git.RefTypeBranch && refType != git.RefTypeRemoteBranch {
+			continue
+		}
+		short := refName
+		if slash := strings.LastIndex(short, "/"); slash >= 0 {
+			short = short[slash+1:]
+		}
+		switch short {
+		case "main", "master":
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonPrimaryBranchRef(commit git.CommitInfo) bool {
+	for i, refName := range commit.Refs {
+		refType := git.RefType("")
+		if i < len(commit.RefTypes) {
+			refType = commit.RefTypes[i]
+		}
+		if refType != git.RefTypeBranch && refType != git.RefTypeRemoteBranch {
+			continue
+		}
+		short := refName
+		if slash := strings.LastIndex(short, "/"); slash >= 0 {
+			short = short[slash+1:]
+		}
+		if short != "main" && short != "master" {
+			return true
+		}
+	}
+	return false
+}
+
+func branchSpanEndRow(
+	sha string,
+	sorted []git.CommitInfo,
+	shaToRow map[string]int,
+	isMainChain map[string]bool,
+) int {
+	row, ok := shaToRow[sha]
+	if !ok {
+		return -1
+	}
+
+	endRow := row
+	seen := map[string]bool{}
+	curSHA := sha
+	for {
+		if seen[curSHA] {
+			return endRow
+		}
+		seen[curSHA] = true
+
+		curRow, ok := shaToRow[curSHA]
+		if !ok {
+			return endRow
+		}
+		endRow = curRow
+
+		commit := sorted[curRow]
+		if len(commit.Parents) == 0 {
+			return endRow
+		}
+
+		firstParent := commit.Parents[0]
+		parentRow, visible := shaToRow[firstParent]
+		if !visible {
+			return endRow
+		}
+		endRow = parentRow
+		if isMainChain[firstParent] {
+			return endRow
+		}
+		curSHA = firstParent
 	}
 }
 

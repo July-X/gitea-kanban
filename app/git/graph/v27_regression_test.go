@@ -238,3 +238,233 @@ func TestBuildGraph_TruncatedSegmentMainStaysLane0(t *testing.T) {
 		t.Errorf("MaxLane = %d, want 0 (linear segment)", result.MaxLane)
 	}
 }
+
+// TestBuildGraph_MultipleChildrenOfSameParentSplitIntoIndependentLanes
+// 验证同一个 parent 分叉出的多个子 flow 不会挤在同一 column。
+//
+// DAG (新→旧):
+//
+//	H1 (head of feature-b, parent=[B1])   row 0
+//	B1 (feature-b, parent=[P])            row 1
+//	A1 (feature-a, parent=[P])            row 2
+//	P  (parent/main, parent=[R])          row 3
+//	R  (root, parent=[])                  row 4
+//
+// 语义要求：
+//   - P 是共同分叉点
+//   - A1 / B1 是两条独立 flow，必须占两个独立 lane
+//   - 不能因为都 first-parent 指向 P，就把 A1/B1 压到同一个 column
+func TestBuildGraph_MultipleChildrenOfSameParentSplitIntoIndependentLanes(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, when time.Time, parents []string) git.CommitInfo {
+		full := sha + "0000000000000000000000000000000000000000"[:40-len(sha)]
+		fullParents := make([]string, len(parents))
+		for i, p := range parents {
+			fullParents[i] = p + "0000000000000000000000000000000000000000"[:40-len(p)]
+		}
+		return git.CommitInfo{SHA: full, ShortSHA: sha, Subject: sha, AuthorWhen: when, Parents: fullParents}
+	}
+
+	commits := []git.CommitInfo{
+		mk("h1", t0, []string{"b1"}),
+		mk("b1", t0.Add(-time.Minute), []string{"p"}),
+		mk("a1", t0.Add(-2*time.Minute), []string{"p"}),
+		mk("p", t0.Add(-3*time.Minute), []string{"r"}),
+		mk("r", t0.Add(-4*time.Minute), []string{}),
+	}
+	commits[0].Refs = []string{"feature-b"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+	commits[2].Refs = []string{"feature-a"}
+	commits[2].RefTypes = []git.RefType{git.RefTypeBranch}
+	commits[3].Refs = []string{"main"}
+	commits[3].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraph(commits)
+	nodeBySHA := map[string]GraphNode{}
+	for _, n := range result.Nodes {
+		nodeBySHA[n.ShortSHA] = n
+	}
+
+	p := nodeBySHA["p"]
+	a1 := nodeBySHA["a1"]
+	b1 := nodeBySHA["b1"]
+	h1 := nodeBySHA["h1"]
+
+	if p.Lane != 0 {
+		t.Fatalf("P lane = %d, want 0 (main parent stays left)", p.Lane)
+	}
+	if h1.Lane != b1.Lane {
+		t.Fatalf("H1 lane = %d, want same branch lane as B1 = %d", h1.Lane, b1.Lane)
+	}
+	if a1.Lane == p.Lane {
+		t.Fatalf("A1 lane = %d, should split from parent lane %d", a1.Lane, p.Lane)
+	}
+	if b1.Lane == p.Lane {
+		t.Fatalf("B1 lane = %d, should split from parent lane %d", b1.Lane, p.Lane)
+	}
+	if a1.Lane == b1.Lane {
+		t.Fatalf("A1/B1 collapsed to same lane %d, want independent lanes", a1.Lane)
+	}
+
+	foundA1Branch := false
+	foundB1Branch := false
+	for _, e := range result.Edges {
+		if e.FromRow == a1.Row && e.ToRow == p.Row {
+			if e.FromLane == e.ToLane {
+				t.Fatalf("A1→P should be cross-lane, got %d→%d", e.FromLane, e.ToLane)
+			}
+			foundA1Branch = true
+		}
+		if e.FromRow == b1.Row && e.ToRow == p.Row {
+			if e.FromLane == e.ToLane {
+				t.Fatalf("B1→P should be cross-lane, got %d→%d", e.FromLane, e.ToLane)
+			}
+			foundB1Branch = true
+		}
+	}
+	if !foundA1Branch || !foundB1Branch {
+		t.Fatalf("missing branch edges: A1=%v B1=%v", foundA1Branch, foundB1Branch)
+	}
+}
+
+// TestBuildGraph_NonOverlappingBranchHeadsReuseLane
+// 验证带 branch ref 的两个独立分支 head，如果纵向区间不重叠，应该尽量复用同一 column。
+//
+// DAG (新→旧):
+//
+//	M7  (main, parent=[M6])             row 0
+//	F2H (feature2 head, parent=[F2A])   row 1
+//	M6  (main, parent=[M5])             row 2
+//	F2A (feature2, parent=[M5])         row 3
+//	M5  (main, parent=[M4])             row 4
+//	F1H (feature1 head, parent=[F1A])   row 5
+//	M4  (main, parent=[M3])             row 6
+//	F1A (feature1, parent=[M3])         row 7
+//	M3  (main, parent=[M2])             row 8
+//	M2  (main, parent=[M1])             row 9
+//	M1  (root)                          row 10
+//
+// 语义要求：
+//   - feature2 占用 lane 1，区间结束于 M5（row 4）
+//   - feature1 从 row 5 才开始，和 feature2 不发生纵向重叠
+//   - 因此 feature1 应复用 lane 1，而不是被预分配到 lane 2
+func TestBuildGraph_NonOverlappingBranchHeadsReuseLane(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, when time.Time, parents []string) git.CommitInfo {
+		full := sha + "0000000000000000000000000000000000000000"[:40-len(sha)]
+		fullParents := make([]string, len(parents))
+		for i, p := range parents {
+			fullParents[i] = p + "0000000000000000000000000000000000000000"[:40-len(p)]
+		}
+		return git.CommitInfo{SHA: full, ShortSHA: sha, Subject: sha, AuthorWhen: when, Parents: fullParents}
+	}
+
+	commits := []git.CommitInfo{
+		mk("m7", t0, []string{"m6"}),
+		mk("f2h", t0.Add(-time.Minute), []string{"f2a"}),
+		mk("m6", t0.Add(-2*time.Minute), []string{"m5"}),
+		mk("f2a", t0.Add(-3*time.Minute), []string{"m5"}),
+		mk("m5", t0.Add(-4*time.Minute), []string{"m4"}),
+		mk("f1h", t0.Add(-5*time.Minute), []string{"f1a"}),
+		mk("m4", t0.Add(-6*time.Minute), []string{"m3"}),
+		mk("f1a", t0.Add(-7*time.Minute), []string{"m3"}),
+		mk("m3", t0.Add(-8*time.Minute), []string{"m2"}),
+		mk("m2", t0.Add(-9*time.Minute), []string{"m1"}),
+		mk("m1", t0.Add(-10*time.Minute), []string{}),
+	}
+	commits[0].Refs = []string{"main"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+	commits[1].Refs = []string{"feature2"}
+	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
+	commits[5].Refs = []string{"feature1"}
+	commits[5].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraph(commits)
+	nodeBySHA := map[string]GraphNode{}
+	for _, n := range result.Nodes {
+		nodeBySHA[n.ShortSHA] = n
+	}
+
+	if nodeBySHA["f2h"].Lane != 1 {
+		t.Fatalf("F2H lane = %d, want 1", nodeBySHA["f2h"].Lane)
+	}
+	if nodeBySHA["f2a"].Lane != 1 {
+		t.Fatalf("F2A lane = %d, want 1", nodeBySHA["f2a"].Lane)
+	}
+	if nodeBySHA["f1h"].Lane != 1 {
+		t.Fatalf("F1H lane = %d, want 1 (reuse non-overlapping branch lane)", nodeBySHA["f1h"].Lane)
+	}
+	if nodeBySHA["f1a"].Lane != 1 {
+		t.Fatalf("F1A lane = %d, want 1 (reuse non-overlapping branch lane)", nodeBySHA["f1a"].Lane)
+	}
+	if result.MaxLane != 1 {
+		t.Fatalf("MaxLane = %d, want 1 (compact lane reuse)", result.MaxLane)
+	}
+}
+
+// TestBuildGraph_FutureReferencedBranchMustReserveLaneAgainstOverlappingSibling
+// 验证未来会出现的 branch head（带 ref）如果与当前 sibling branch 纵向区间重叠，
+// 必须提前保留 lane，不能让上方无 ref 的 branch 抢进来，否则会出现：
+// 1. 多分支错误走同一个 column
+// 2. 同一 column 中途换色
+//
+// DAG (新→旧):
+//
+//	XH (branch-x head, parent=[XA])      row 0   无 ref
+//	M3 (main, parent=[M2])               row 1
+//	XA (branch-x, parent=[P])            row 2
+//	YH (branch-y head, parent=[YA])      row 3   有 ref
+//	M2 (main, parent=[M1])               row 4
+//	YA (branch-y, parent=[P])            row 5
+//	P  (main split point, parent=[M1])   row 6
+//	M1 (root, parent=[])                 row 7
+//
+// branch-x 区间 [0..6]，branch-y 区间 [3..6]，两者显然重叠。
+// 因此 X/YA 不允许共用同一 lane。
+func TestBuildGraph_FutureReferencedBranchMustReserveLaneAgainstOverlappingSibling(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, when time.Time, parents []string) git.CommitInfo {
+		full := sha + "0000000000000000000000000000000000000000"[:40-len(sha)]
+		fullParents := make([]string, len(parents))
+		for i, p := range parents {
+			fullParents[i] = p + "0000000000000000000000000000000000000000"[:40-len(p)]
+		}
+		return git.CommitInfo{SHA: full, ShortSHA: sha, Subject: sha, AuthorWhen: when, Parents: fullParents}
+	}
+
+	commits := []git.CommitInfo{
+		mk("xh", t0, []string{"xa"}),
+		mk("m3", t0.Add(-time.Minute), []string{"m2"}),
+		mk("xa", t0.Add(-2*time.Minute), []string{"p"}),
+		mk("yh", t0.Add(-3*time.Minute), []string{"ya"}),
+		mk("m2", t0.Add(-4*time.Minute), []string{"m1"}),
+		mk("ya", t0.Add(-5*time.Minute), []string{"p"}),
+		mk("p", t0.Add(-6*time.Minute), []string{"m1"}),
+		mk("m1", t0.Add(-7*time.Minute), []string{}),
+	}
+	commits[1].Refs = []string{"main"}
+	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
+	commits[3].Refs = []string{"feature-y"}
+	commits[3].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraph(commits)
+	nodeBySHA := map[string]GraphNode{}
+	for _, n := range result.Nodes {
+		nodeBySHA[n.ShortSHA] = n
+	}
+
+	xh := nodeBySHA["xh"]
+	xa := nodeBySHA["xa"]
+	yh := nodeBySHA["yh"]
+	ya := nodeBySHA["ya"]
+
+	if xh.Lane != xa.Lane {
+		t.Fatalf("X branch lane drift: XH=%d XA=%d", xh.Lane, xa.Lane)
+	}
+	if yh.Lane != ya.Lane {
+		t.Fatalf("Y branch lane drift: YH=%d YA=%d", yh.Lane, ya.Lane)
+	}
+	if xh.Lane == yh.Lane {
+		t.Fatalf("overlapping branches collapsed to same lane %d", xh.Lane)
+	}
+}

@@ -1,10 +1,14 @@
 /**
  * Git Graph 渲染层共享类型
  *
- * 这些类型**只在 renderer 端** git graph 子系统使用，与 Gitea 对齐：
- * - GitRef：分支 / tag / 远程 / PR 装饰（对应 gitea %D 字段）
- * - GraphLine：来自 main 端 `commits.gitgraph.lines` 的单行结构
- *   （一行的字符流 + 该行 commit 元数据，None 表示行中无 *）
+ * 这些类型属于旧版“字符流 Parser”链路的遗留定义。
+ *
+ * 当前实现（v2.6+）已经改为：
+ * - Go 端 `app/git/graph` 直接输出结构化 `GraphResultDto`
+ * - 前端 `structured.ts` 直接按 nodes + edges 渲染 SVG
+ *
+ * 本文件仍保留，只用于兼容尚未删除的 legacy parser/symbol 定义；
+ * 新逻辑请不要继续依赖 `GraphLine*` 协议。
  */
 
 /** ref 类型（对齐 Gitea modules/git/ref.go RefName.RefGroup） */

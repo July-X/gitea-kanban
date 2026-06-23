@@ -278,7 +278,7 @@ async function enableGitGraph(): Promise<void> {
 //
 // v2.6 改用结构化渲染（不再走字符流）：
 // - viewBox = `0 0 width height`（width/height 由 renderGraph 计算）
-// - SVG 单位：LANE_WIDTH = 24 px / lane，ROW_HEIGHT = 28 px / row
+// - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 28 px / row
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
 
 const ROW_H = STRUCTURED_ROW_HEIGHT; // commit 行高（px），与 SVG 一致
