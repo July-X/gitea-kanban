@@ -115,16 +115,13 @@ export interface SvgRenderResult {
  * v2.7 重写（修复 bug1 宽度过大 + bug2 分叉/合并连线方向错误）：
  * - 颜色来自后端 GraphEdge.color（0..15，对齐 Gitea Color16()），前端不再 % N 自算
  * - 按 color 分组 paths，便于 SVG <g class="flow-color-16-N"> 染色
- * - 路径公式对齐 Gitea svgcontainer.tmpl 字形语义：
- *   · 同 lane (EdgeNormal) → 垂直线 `M x y1 L x y2`（对齐 Gitea `|` / `v 12`）
- *   · 跨 lane (EdgeMerge) → 当前 flow 先从 commit 点后方补一段短竖线，再只画一行
- *     `/` 或 `\` glyph。lane 会复用，不能沿目标 lane 继续找节点，否则会把前后不同
- *     flow 粘在一起；也不能直接画到远端 parent dot。
- *     fromLane > toLane（向左汇入主干）→ `/` 字形（斜线从右上到左下）
- *     fromLane < toLane（向右分叉）→ `\` 字形（斜线从左上到右下）
+ * - 路径公式使用 SourceTree 风格 flow segment：
+ *   · 同 lane (EdgeNormal) → 当前 flow 自己的垂直 segment
+ *   · 跨 lane (EdgeMerge) → 从 commit 点所在 flow 延伸到 parent commit 前方，再折线接回
+ *     分叉起点。lane 复用时如果中间已有其它颜色节点，则临时分配 synthetic render
+ *     lane 绕行，避免前后不同 flow 粘连。
  *   · 旧版用贝塞尔曲线，不符合 Gitea 真实 `git log --graph` 的折线表现
- * - node 颜色：建立 lane → color 映射（从 inbound edges 推断），
- *   避免合并边颜色污染（旧版取第一个 inbound edge，merge commit 节点色错乱）
+ * - node 颜色：直接使用后端 GraphNode.color，避免 merge edge 污染节点颜色
  *
  * @param graph Go 后端 BuildGraph 输出
  * @returns SVG paths（按 color 分组）+ nodes + 尺寸
@@ -132,7 +129,6 @@ export interface SvgRenderResult {
 export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   // 按 color 分组的 paths：每个 color 一组（对应一个 SVG <g class="flow-color-16-N">）
   const pathsByColor = new Map<number, string[]>();
-  // 节点数组（v2.7：颜色从 laneColorMap 推断，避免合并边颜色污染）
   const nodes: SvgNode[] = [];
 
   // ===== 计算最大 lane（用于 viewBox 宽度）=====
@@ -145,6 +141,17 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   //   总是占 column 0（= 最左位置）
   //   结论：lane 0 = main 在最左，lane N = 最新分叉在右（v2.6+ 标准）
   const maxLaneRaw = graph.nodes.reduce((m, n) => Math.max(m, n.lane), 0);
+  let maxRenderLane = maxLaneRaw;
+
+  const nodesByLane = new Map<number, GraphNodeDto[]>();
+  for (const node of graph.nodes) {
+    const laneNodes = nodesByLane.get(node.lane) ?? [];
+    laneNodes.push(node);
+    nodesByLane.set(node.lane, laneNodes);
+  }
+  for (const laneNodes of nodesByLane.values()) {
+    laneNodes.sort((a, b) => a.row - b.row);
+  }
 
   const addPath = (color: number, d: string): void => {
     const arr = pathsByColor.get(color) ?? [];
@@ -153,8 +160,27 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   };
 
   const rowCenter = (row: number): number => row * ROW_HEIGHT + ROW_HEIGHT / 2;
+  const rowTop = (row: number): number => row * ROW_HEIGHT;
   const rowBottom = (row: number): number => (row + 1) * ROW_HEIGHT;
   const laneX = (lane: number): number => lane * LANE_WIDTH + LANE_WIDTH / 2;
+
+  const hasForeignNodeBetween = (
+    lane: number,
+    fromRow: number,
+    toRow: number,
+    color: number,
+  ): boolean => {
+    const minRow = Math.min(fromRow, toRow);
+    const maxRow = Math.max(fromRow, toRow);
+    return (nodesByLane.get(lane) ?? []).some(
+      (node) => node.row > minRow && node.row < maxRow && node.color !== color,
+    );
+  };
+
+  const nextSyntheticLane = (): number => {
+    maxRenderLane += 1;
+    return maxRenderLane;
+  };
 
   // ===== 1. 生成 edges → SVG paths =====
   for (const edge of graph.edges) {
@@ -165,14 +191,24 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
 
     let d: string;
     if (edge.fromLane === edge.toLane) {
-      // 同 lane → 垂直直线（对齐 Gitea `|` / `v 12`）
-      d = `M ${x1} ${y1} L ${x2} ${y2}`;
+      if (hasForeignNodeBetween(edge.fromLane, edge.fromRow, edge.toRow, edge.color)) {
+        // 理论上后端 lane 复用不应让同 lane edge 穿过其它 flow；若发生，渲染层
+        // 分配临时列绕行，优先保证不同 flow 不粘连。
+        const syntheticX = laneX(nextSyntheticLane());
+        d = `M ${x1} ${y1} L ${syntheticX} ${y1} L ${syntheticX} ${y2} L ${x2} ${y2}`;
+      } else {
+        d = `M ${x1} ${y1} L ${x2} ${y2}`;
+      }
     } else {
-      // 跨 lane 是当前 flow 的结束 glyph：从 commit 点后方补短竖线，
-      // 再画一行斜线。不要沿目标 lane 继续延伸，否则 column 复用时会把不同 flow 粘连。
-      const joinStartY = rowBottom(edge.fromRow);
-      const joinY = Math.min(rowBottom(edge.fromRow + 1), rowBottom(edge.toRow));
-      d = `M ${x1} ${y1} L ${x1} ${joinStartY} L ${x2} ${joinY}`;
+      // SourceTree 风格：线从具体 commit 点分叉出来，flow 主线在自己的 column
+      // 延伸到 parent commit 前方，再折回分叉起点。
+      const branchY = edge.toRow > edge.fromRow ? rowTop(edge.toRow) : rowBottom(edge.toRow);
+      if (hasForeignNodeBetween(edge.fromLane, edge.fromRow, edge.toRow, edge.color)) {
+        const syntheticX = laneX(nextSyntheticLane());
+        d = `M ${x1} ${y1} L ${syntheticX} ${y1} L ${syntheticX} ${branchY} L ${x2} ${y2}`;
+      } else {
+        d = `M ${x1} ${y1} L ${x1} ${branchY} L ${x2} ${y2}`;
+      }
     }
 
     addPath(edge.color, d);
@@ -209,7 +245,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   }
 
   // ===== 4. 计算尺寸（基于实际用到的最大 lane）=====
-  const width = (maxLaneRaw + 1) * LANE_WIDTH + LANE_WIDTH;
+  const width = (maxRenderLane + 1) * LANE_WIDTH + LANE_WIDTH;
   const height = graph.nodes.length * ROW_HEIGHT + ROW_HEIGHT;
 
   return { paths, nodes, width, height };
