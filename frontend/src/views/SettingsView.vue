@@ -752,7 +752,8 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-elevated, 0 12px 32px rgba(0, 0, 0, 0.24));
+  /* v1.6 统一到 --shadow-lg 新柔和 token（去掉旧 --shadow-elevated 硬编码 fallback） */
+  box-shadow: var(--shadow-lg);
   padding: var(--space-4);
   animation: account-modal-pop 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
