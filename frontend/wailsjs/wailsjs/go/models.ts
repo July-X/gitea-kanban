@@ -451,6 +451,7 @@ export namespace main {
 	    toRow: number;
 	    fromLane: number;
 	    toLane: number;
+	    color: number;
 	    type: number;
 	
 	    static createFrom(source: any = {}) {
@@ -463,12 +464,14 @@ export namespace main {
 	        this.toRow = source["toRow"];
 	        this.fromLane = source["fromLane"];
 	        this.toLane = source["toLane"];
+	        this.color = source["color"];
 	        this.type = source["type"];
 	    }
 	}
 	export class GraphNodeDTO {
 	    row: number;
 	    lane: number;
+	    color: number;
 	    sha: string;
 	    shortSha: string;
 	    subject: string;
@@ -477,6 +480,8 @@ export namespace main {
 	    date: string;
 	    isMerge: boolean;
 	    parents: string[];
+	    refs?: string[];
+	    refTypes?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new GraphNodeDTO(source);
@@ -486,6 +491,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.row = source["row"];
 	        this.lane = source["lane"];
+	        this.color = source["color"];
 	        this.sha = source["sha"];
 	        this.shortSha = source["shortSha"];
 	        this.subject = source["subject"];
@@ -494,6 +500,8 @@ export namespace main {
 	        this.date = source["date"];
 	        this.isMerge = source["isMerge"];
 	        this.parents = source["parents"];
+	        this.refs = source["refs"];
+	        this.refTypes = source["refTypes"];
 	    }
 	}
 	export class GraphResultDTO {

@@ -462,15 +462,7 @@ export function commitsGet(args: { projectId: string; sha: string }): Promise<Co
   return getIpcClient().invoke('commits', 'get', args);
 }
 
-/**
- * 拿 git graph 字符流（v1.4 重构）
- *
- * main 端返 Gitea parser.go 字符流协议：每行 `* | / \` 字形 + commit metadata。
- * 前端用 src/renderer/lib/gitgraph/parser.ts 把字符流解析为 Graph → SVG。
- *
- * v1.4 状态：main handler 暂未实现（缺仓库本地路径）；前端 view 应展示
- * "功能暂未启用"占位，等 v1.5 接 git 二进制后落地。
- */
+/** 拿结构化 Git Graph（Go 端基于 go-git commit DAG 生成 nodes + edges） */
 export function commitsGitgraphLines(args: {
   projectId: string;
   branches?: string[];
@@ -481,14 +473,11 @@ export function commitsGitgraphLines(args: {
 }
 
 /**
- * v1.5 启用 Git Graph：自动 git clone 仓库到本地
- *
- * main 端从 keychain 读 token → `git clone --bare` 到默认 / 用户指定路径
- * → 路径持久化到 localStore。
+ * 启用 Git Graph：自动用 go-git 轻量 clone 仓库元信息到本地
  *
  * UI 流程：
  *   用户点「启用 Git Graph」按钮 → 调本函数 → clone 完成自动回到 TimelineNewView
- *   看到真 Git Graph（git 子进程跑字符流 + 前端 Parser 1:1 渲染）
+ *   看到基于本地 commit DAG 渲染的 Git Graph
  *
  * v2.3 修复：token 不再走 IPC（AGENTS §8.2 鉴权铁律）
  *   - 旧版调 gitgraphCloneRepo 时传 token → 违反铁律

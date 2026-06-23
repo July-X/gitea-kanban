@@ -253,11 +253,34 @@ func TestLogCommits_RefsAttached(t *testing.T) {
 	if !contains(head.Refs, "feature") {
 		t.Errorf("head commit Refs missing 'feature': got %v", head.Refs)
 	}
+	// v2.8：head 的两个 ref 都应该是 branch 类型
+	if len(head.RefTypes) != len(head.Refs) {
+		t.Errorf("head RefTypes len = %d, want %d", len(head.RefTypes), len(head.Refs))
+	}
+	for _, rt := range head.RefTypes {
+		if rt != RefTypeBranch {
+			t.Errorf("head ref type = %v, want %v", rt, RefTypeBranch)
+		}
+	}
+	// v2.8：head 的 Refs 应全部是 branch 类型（defaultBranch + feature 都是本地分支）
+	for i, rt := range head.RefTypes {
+		if rt != RefTypeBranch {
+			t.Errorf("head commit RefTypes[%d] = %v, want %v (local branch)", i, rt, RefTypeBranch)
+		}
+	}
 
 	// 中间 commit (second commit) → Refs 应包含 v1.0 tag
 	middle := result.Commits[1]
 	if !contains(middle.Refs, "v1.0") {
 		t.Errorf("middle commit Refs missing 'v1.0': got %v", middle.Refs)
+	}
+	// v2.8：middle 的 ref 应该是 tag 类型
+	if len(middle.RefTypes) != 1 || middle.RefTypes[0] != RefTypeTag {
+		t.Errorf("middle RefTypes = %v, want [tag]", middle.RefTypes)
+	}
+	// v2.8：middle 的 ref 应该是 tag 类型
+	if len(middle.RefTypes) != 1 || middle.RefTypes[0] != RefTypeTag {
+		t.Errorf("middle RefTypes = %v, want [tag]", middle.RefTypes)
 	}
 
 	// 最早 commit (first commit) → 无 ref

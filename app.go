@@ -19,8 +19,8 @@ import (
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
-	"gitea-kanban/app/platform/github"
 	"gitea-kanban/app/platform/gitea"
+	"gitea-kanban/app/platform/github"
 	"gitea-kanban/app/secret"
 	"gitea-kanban/app/store"
 )
@@ -275,6 +275,7 @@ type GraphResultDTO struct {
 type GraphNodeDTO struct {
 	Row         int      `json:"row"`
 	Lane        int      `json:"lane"`
+	Color       int      `json:"color"`
 	SHA         string   `json:"sha"`
 	ShortSHA    string   `json:"shortSha"`
 	Subject     string   `json:"subject"`
@@ -283,6 +284,8 @@ type GraphNodeDTO struct {
 	Date        string   `json:"date"`
 	IsMerge     bool     `json:"isMerge"`
 	Parents     []string `json:"parents"`
+	Refs        []string `json:"refs,omitempty"`
+	RefTypes    []string `json:"refTypes,omitempty"`
 }
 
 // GraphEdgeDTO 图边
@@ -291,6 +294,7 @@ type GraphEdgeDTO struct {
 	ToRow    int `json:"toRow"`
 	FromLane int `json:"fromLane"`
 	ToLane   int `json:"toLane"`
+	Color    int `json:"color"`
 	Type     int `json:"type"`
 }
 
@@ -486,11 +490,11 @@ type GetGitGraphArgs struct {
 // GetGitGraph 获取项目的 commit DAG（用 projectId 反查 localPath + token）
 //
 // 步骤：
-//   1. localStore.Projects 找 project → owner/name/accountID
-//   2. localStore.Accounts 找 account → platform/hostURL/username
-//   3. workspacePath + /repos/<owner>__<repo> = localPath
-//   4. secretStore 拿 token
-//   5. adapter.LogGraph → 自研 layout → 返 GraphResultDTO
+//  1. localStore.Projects 找 project → owner/name/accountID
+//  2. localStore.Accounts 找 account → platform/hostURL/username
+//  3. workspacePath + /repos/<owner>__<repo> = localPath
+//  4. secretStore 拿 token
+//  5. adapter.LogGraph → 自研 layout → 返 GraphResultDTO
 func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 	if a.logger != nil {
 		a.logger.Info("GetGitGraph", "projectId", args.ProjectID, "branches", args.Branches)
@@ -677,11 +681,11 @@ type ConnectArgs struct {
 // AuthConnect 验证 token + 写 keychain + 写 localStore 账号元信息
 //
 // 链路：
-//   1. 校验 platform + url + token 非空（trim + 长度）
-//   2. 调 adapter.VerifyToken 验证 token 有效性 + 拿用户信息
-//   3. token 写 secret.Store（go-keyring / dev fallback）
-//   4. localStore.Mutate 加 GiteaAccount（GiteaAccount.Platform 标 gitea/github）
-//   5. 返 { account, user } 给前端
+//  1. 校验 platform + url + token 非空（trim + 长度）
+//  2. 调 adapter.VerifyToken 验证 token 有效性 + 拿用户信息
+//  3. token 写 secret.Store（go-keyring / dev fallback）
+//  4. localStore.Mutate 加 GiteaAccount（GiteaAccount.Platform 标 gitea/github）
+//  5. 返 { account, user } 给前端
 //
 // 错误处理：
 //   - 任何环节失败 → 返 *ipc.IpcError（前端 normalizeError 能正确识别）
@@ -1085,10 +1089,10 @@ func (a *App) SetWorkspace(args SetWorkspaceArgs) error {
 // resolveTokenByLocalPath 从本地仓库路径反查 keychain 里的 token
 //
 // 步骤：
-//   1. localPath 形如 ${workspacePath}/repos/<owner>__<repo>，从路径解析 owner/repo
-//   2. 在 localStore.Projects 里找匹配的 project（owner+name 匹配 + 平台一致）
-//   3. 用 project.AccountID 找到 GiteaAccount → 拿 hostURL/username
-//   4. 从 secretStore 拿 token
+//  1. localPath 形如 ${workspacePath}/repos/<owner>__<repo>，从路径解析 owner/repo
+//  2. 在 localStore.Projects 里找匹配的 project（owner+name 匹配 + 平台一致）
+//  3. 用 project.AccountID 找到 GiteaAccount → 拿 hostURL/username
+//  4. 从 secretStore 拿 token
 //
 // 失败模式：路径不在 workspace 下 / project 没找到 / 账号被删 → 返 NotFound
 func (a *App) resolveTokenByLocalPath(localPath string) (token string, username string, err error) {
@@ -1229,10 +1233,10 @@ type ListReposResp struct {
 // ListRepos 列出某账号可访问的仓库
 //
 // 步骤：
-//   1. localStore.Accounts 找 giteaAccountID 对应的 account
-//   2. secretStore.Get 拿 token
-//   3. adapter.ListRepos 拉远端列表
-//   4. merge localStore.Projects 标记 isProject / lastSyncAt
+//  1. localStore.Accounts 找 giteaAccountID 对应的 account
+//  2. secretStore.Get 拿 token
+//  3. adapter.ListRepos 拉远端列表
+//  4. merge localStore.Projects 标记 isProject / lastSyncAt
 func (a *App) ListRepos(args ListReposArgs) (ListReposResp, error) {
 	if a.logger != nil {
 		a.logger.Info("ListRepos", "giteaAccountId", args.GiteaAccountID, "query", args.Query, "page", args.Page)
@@ -1520,13 +1524,13 @@ func filterStarredBranches(branches []store.StarredBranch, projectID, branch str
 
 // CommitDetailDTO commit 详情（暴露给前端）
 type CommitDetailDTO struct {
-	SHA         string `json:"sha"`
-	ShortSHA    string `json:"shortSha"`
-	Subject     string `json:"subject"`
-	AuthorName  string `json:"authorName"`
-	AuthorEmail string `json:"authorEmail"`
-	AuthorWhen  string `json:"authorWhen"`
-	Message     string `json:"message"`
+	SHA         string   `json:"sha"`
+	ShortSHA    string   `json:"shortSha"`
+	Subject     string   `json:"subject"`
+	AuthorName  string   `json:"authorName"`
+	AuthorEmail string   `json:"authorEmail"`
+	AuthorWhen  string   `json:"authorWhen"`
+	Message     string   `json:"message"`
 	Parents     []string `json:"parents"`
 }
 
@@ -1866,6 +1870,7 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 		nodes = append(nodes, GraphNodeDTO{
 			Row:         n.Row,
 			Lane:        n.Lane,
+			Color:       n.Color,
 			SHA:         n.SHA,
 			ShortSHA:    n.ShortSHA,
 			Subject:     n.Subject,
@@ -1874,6 +1879,8 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 			Date:        n.Date,
 			IsMerge:     n.IsMerge,
 			Parents:     n.Parents,
+			Refs:        n.Refs,
+			RefTypes:    n.RefTypes,
 		})
 	}
 
@@ -1884,6 +1891,7 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 			ToRow:    e.ToRow,
 			FromLane: e.FromLane,
 			ToLane:   e.ToLane,
+			Color:    e.Color,
 			Type:     e.Type,
 		})
 	}

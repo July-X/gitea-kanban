@@ -23,10 +23,13 @@ type CommitInfo struct {
 	Parents     []string  // parent SHA 列表
 	IsMerge     bool      // 是否 merge commit（parents >= 2）
 	// Refs 关联的 ref 名称列表（branch / tag / PR 编号等）
-	// v2.7 增量：从 go-git References() 收集所有指向此 commit 的 ref。
-	// 顺序：本地分支 → 远程跟踪分支 → tag（顺序固定，前端可直接按顺序渲染）。
-	// 名称已剥掉 `refs/heads/`、`refs/remotes/origin/`、`refs/tags/` 前缀。
+	// 顺序固定：本地分支 → 远程跟踪分支 → tag（collectRefNamesByHash 已排序）。
+	// 名称已剥掉 `refs/heads/`、`refs/remotes/origin/`、`refs/tags/` 前缀；
+	// 远程跟踪分支保留 `<remote>/<branch>` 形式（如 `origin/main`）。
 	Refs []string
+	// RefTypes 与 Refs 一一对应的 ref 类型（v2.8 新增）
+	// 让前端严格区分 branch / remoteBranch / tag，不再用启发式猜。
+	RefTypes []RefType
 }
 
 // RefType ref 类型
@@ -114,10 +117,9 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		return nil, fmt.Errorf("收集分支列表失败: %w", err)
 	}
 
-	// 收集所有 ref 名称（branch / tag）并按 SHA 索引
-	// v2.7 增量：让 commit 列表附带 refs 名称，前端右侧 commit 行直接渲染
-	// 格式：[branch/ref-name-1, branch/ref-name-2, tag/v1.0]
-	refNameByHash := collectRefNamesByHash(repo)
+	// 收集所有 ref 名称（branch / remote / tag）并按 SHA 索引
+	// v2.8：返回名称 + 类型，且按「本地分支 → 远程跟踪分支 → tag」稳定排序
+	refDataByHash := collectRefNamesByHash(repo)
 
 	commits := make([]CommitInfo, 0)
 	seen := make(map[string]bool)
@@ -159,7 +161,8 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				AuthorWhen:  c.Author.When,
 				Parents:     parents,
 				IsMerge:     len(parents) >= 2,
-				Refs:        refNameByHash[c.Hash.String()],
+				Refs:        refDataByHash[c.Hash.String()].Names,
+				RefTypes:    refDataByHash[c.Hash.String()].Types,
 			})
 			return nil
 		})
@@ -254,21 +257,38 @@ func collectAllBranchHeads(repo *git.Repository) ([]plumbing.Hash, error) {
 	return heads, nil
 }
 
-// collectRefNamesByHash 收集仓库所有 ref 名称（branch + tag）并按 SHA 索引
+// refData 单个 SHA 对应的 ref 名称 + 类型（顺序一一对应）
+type refData struct {
+	Names []string
+	Types []RefType
+}
+
+// refOrder 定义 ref 类型的排序优先级（本地分支 → 远程跟踪分支 → tag）
+var refOrder = map[RefType]int{
+	RefTypeBranch:       0,
+	RefTypeRemoteBranch: 1,
+	RefTypeTag:          2,
+}
+
+// collectRefNamesByHash 收集仓库所有 ref 名称（branch + remote + tag）并按 SHA 索引
 //
-// 返回 map[SHA][]string。每个 SHA 对应的 ref 列表顺序固定：本地分支 → 远程跟踪分支 → tag。
-// ref 名称已剥掉标准前缀（refs/heads/、refs/remotes/<remote>/、refs/tags/），
-//   远程跟踪分支保留 `<remote>/<branch>` 形式（如 `origin/main`），与 Gitea 行为一致。
+// 返回 map[SHA]refData。每个 SHA 对应的 ref 列表顺序固定：本地分支 → 远程跟踪分支 → tag，
+// 同类型内按名称字典序。ref 名称已剥掉标准前缀（refs/heads/、refs/remotes/、refs/tags/），
+// 远程跟踪分支保留 `<remote>/<branch>` 形式（如 `origin/main`），与 Gitea 行为一致。
 //
-// v2.7 增量：让 LogCommits 返回的每条 CommitInfo 自带 refs，前端右侧 commit 行
-// 直接渲染分支/tag badge，无需额外 API 调用。
-func collectRefNamesByHash(repo *git.Repository) map[string][]string {
-	result := make(map[string][]string)
+// v2.8 修复：go-git References().ForEach 遍历顺序由 storer 决定、不保证稳定，
+// 这里收集后按 (类型优先级, 名称) 排序，保证 badge 显示顺序稳定。
+func collectRefNamesByHash(repo *git.Repository) map[string]refData {
+	type entry struct {
+		name    string
+		refType RefType
+	}
+	byHash := make(map[string][]entry)
 
 	refs, err := repo.References()
 	if err != nil {
 		// 收集失败不致命：log 命令仍可工作，只是 ref 列表为空
-		return result
+		return map[string]refData{}
 	}
 
 	_ = refs.ForEach(func(ref *plumbing.Reference) error {
@@ -279,16 +299,18 @@ func collectRefNamesByHash(repo *git.Repository) map[string][]string {
 
 		name := ref.Name().String()
 		var shortName string
+		var refType RefType
 		switch {
 		case strings.HasPrefix(name, "refs/heads/"):
-			// 本地分支 → 剥前缀，保留 main、feature/xxx 等
 			shortName = strings.TrimPrefix(name, "refs/heads/")
+			refType = RefTypeBranch
 		case strings.HasPrefix(name, "refs/remotes/"):
-			// 远程跟踪分支 → 保留 origin/main 形式（与 Gitea 一致）
+			// 保留 origin/main 形式（与 Gitea 一致）
 			shortName = strings.TrimPrefix(name, "refs/remotes/")
+			refType = RefTypeRemoteBranch
 		case strings.HasPrefix(name, "refs/tags/"):
-			// tag → 剥前缀
 			shortName = strings.TrimPrefix(name, "refs/tags/")
+			refType = RefTypeTag
 		default:
 			// 其他 ref（notes、stash 等）跳过
 			return nil
@@ -299,9 +321,27 @@ func collectRefNamesByHash(repo *git.Repository) map[string][]string {
 		}
 
 		sha := ref.Hash().String()
-		result[sha] = append(result[sha], shortName)
+		byHash[sha] = append(byHash[sha], entry{name: shortName, refType: refType})
 		return nil
 	})
 
+	result := make(map[string]refData, len(byHash))
+	for sha, entries := range byHash {
+		// 按 (类型优先级, 名称) 排序，保证顺序稳定
+		sort.Slice(entries, func(i, j int) bool {
+			oi, oj := refOrder[entries[i].refType], refOrder[entries[j].refType]
+			if oi != oj {
+				return oi < oj
+			}
+			return entries[i].name < entries[j].name
+		})
+		names := make([]string, len(entries))
+		types := make([]RefType, len(entries))
+		for i, e := range entries {
+			names[i] = e.name
+			types[i] = e.refType
+		}
+		result[sha] = refData{Names: names, Types: types}
+	}
 	return result
 }

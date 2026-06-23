@@ -54,9 +54,9 @@ type RepoPermissions struct {
 
 // BranchDTO 分支信息
 type BranchDTO struct {
-	Name       string `json:"name"`
-	CommitSHA  string `json:"commitSha"`
-	IsProtected bool  `json:"isProtected"`
+	Name        string `json:"name"`
+	CommitSHA   string `json:"commitSha"`
+	IsProtected bool   `json:"isProtected"`
 }
 
 // PlatformAdapter 平台抽象层
@@ -147,6 +147,7 @@ type GraphResult struct {
 type GraphNodeDTO struct {
 	Row         int      `json:"row"`
 	Lane        int      `json:"lane"`
+	Color       int      `json:"color"`
 	SHA         string   `json:"sha"`
 	ShortSHA    string   `json:"shortSha"`
 	Subject     string   `json:"subject"`
@@ -155,9 +156,12 @@ type GraphNodeDTO struct {
 	Date        string   `json:"date"`
 	IsMerge     bool     `json:"isMerge"`
 	Parents     []string `json:"parents"`
-	// Refs 关联的 ref 名称（branch / tag 短名）
-	// v2.7 增量：透传自 GraphNode.Refs，前端右侧 commit 行渲染
+	// Refs 关联的 ref 名称（branch / remote / tag 短名）
+	// 透传自 GraphNode.Refs，前端右侧 commit 行渲染 badge
 	Refs []string `json:"refs,omitempty"`
+	// RefTypes 与 Refs 一一对应的 ref 类型（v2.8 新增）
+	// "branch" / "remoteBranch" / "tag"，让前端严格区分，不再用启发式猜
+	RefTypes []string `json:"refTypes,omitempty"`
 }
 
 // GraphEdgeDTO 图边
@@ -172,11 +176,11 @@ type GraphEdgeDTO struct {
 
 // IssueDTO 议题信息（首期简化，仅 Git Graph 场景不需要完整字段）
 type IssueDTO struct {
-	Index    int    `json:"index"`
-	Title    string `json:"title"`
-	State    string `json:"state"`
-	Body     string `json:"body,omitempty"`
-	Author   string `json:"author"`
+	Index  int    `json:"index"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+	Body   string `json:"body,omitempty"`
+	Author string `json:"author"`
 }
 
 // PullDTO 合并请求信息（首期简化）

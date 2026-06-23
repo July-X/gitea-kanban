@@ -236,9 +236,14 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 
 	nodes := make([]platform.GraphNodeDTO, 0, len(r.Nodes))
 	for _, n := range r.Nodes {
+		refTypes := make([]string, len(n.RefTypes))
+		for i, t := range n.RefTypes {
+			refTypes[i] = string(t)
+		}
 		nodes = append(nodes, platform.GraphNodeDTO{
 			Row:         n.Row,
 			Lane:        n.Lane,
+			Color:       n.Color,
 			SHA:         n.SHA,
 			ShortSHA:    n.ShortSHA,
 			Subject:     n.Subject,
@@ -248,6 +253,7 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 			IsMerge:     n.IsMerge,
 			Parents:     n.Parents,
 			Refs:        n.Refs,
+			RefTypes:    refTypes,
 		})
 	}
 

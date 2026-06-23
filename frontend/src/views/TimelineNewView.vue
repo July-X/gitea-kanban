@@ -15,7 +15,7 @@
  */
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { GitCommit, ArrowDownToLine } from 'lucide-vue-next';
+import { GitCommit, ArrowDownToLine, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
@@ -229,17 +229,13 @@ async function pullRepo(): Promise<void> {
 }
 
 /**
- * v1.5 启用流程：用户点「启用 Git Graph」按钮 → 调 main 端 git clone
+ * 启用流程：用户点「启用 Git Graph」按钮 → Go 端用 go-git 轻量同步仓库
  *
  * 流程：
- *   1. cloning=true，显示"正在 clone..."
- *   2. 调 IPC commitsGitgraphCloneRepo（main 端从 keychain 读 token + git clone）
- *   3. 成功 → cloneProgress="已完成" → 重新 loadGraph（这次有 localPath + git 子进程可用）
+ *   1. cloning=true，显示"正在同步..."
+ *   2. 调 IPC commitsGitgraphCloneRepo（Go 端从 keychain 读 token + go-git NoCheckout clone）
+ *   3. 成功 → cloneProgress="已完成" → 重新 loadGraph（基于本地 commit DAG 渲染）
  *   4. 失败 → cloneProgress=错误信息
- *
- * 注意：现在 main handler 还是 placeholder（return disabled），
- *   clone 完成后再次 loadGraph 仍会返 disabled —— v1.5.1 落地 main handler
- *   走 gitProcess.runGraphLog(listLocalRepoPath(projectId)) 后才真正显示 Git Graph
  */
 async function enableGitGraph(): Promise<void> {
   if (!activeProjectId.value) return;
@@ -251,7 +247,7 @@ async function enableGitGraph(): Promise<void> {
       projectId: activeProjectId.value,
     });
     cloneProgress.value = `已完成：${resp.localPath}${resp.reused ? '（复用已有仓库）' : ''}`;
-    // 重新加载；这次 main handler 应该走 gitProcess 路径（v1.5.1）
+    // 重新加载；Go binding 会从 projectId 反查本地路径并返回结构化 GraphResult。
     await loadGraph();
   } catch (e: unknown) {
     const err = e as { messageText?: string; message?: string; hint?: string };
@@ -419,26 +415,26 @@ function avatarColorIndex(name: string): number {
 }
 
 /**
- * ref badge 类型判断
+ * ref badge 类型判断（v2.8：用后端 refTypes 严格区分，不再启发式猜）
  *
- * 区分 branch / remoteBranch / tag 三大类,前端可按类型给不同视觉样式。
- * Gitea 行为：tag 用浅灰底,branch 用绿底,remote branch 用蓝底。
+ * 区分 branch / remoteBranch / tag 三大类，前端按类型给不同视觉样式。
+ * Gitea 行为：tag 用浅灰底，branch 用绿底，remote branch 用蓝底。
  *
- * v2.7 后端 Refs 已是短名（已剥前缀），所以：
- *   - 含 `/` 的（如 origin/main）→ remote branch
- *   - 不含 `/` 且非 tag 关键字的 → 本地 branch
- *   - tag 无区分字段，前端按名称 hash 给色（与 Gitea 不同但够用）
- *
- * v2.8 可在 CommitInfo 增 RefType 字段严格区分，前端 v2.7 暂用启发式。
+ * 后端 CommitInfo.RefTypes 与 Refs 一一对应：
+ *   - "branch"      → 本地分支
+ *   - "remoteBranch" → 远程跟踪分支
+ *   - "tag"         → tag
  */
-function refBadgeClass(ref: string): string {
-  if (ref.includes('/')) {
-    // 远程跟踪分支（如 origin/main、origin/feature-xxx）
-    return 'ref-badge--remote';
+function refBadgeClass(refType?: string): string {
+  switch (refType) {
+    case 'tag':
+      return 'ref-badge--tag';
+    case 'remoteBranch':
+      return 'ref-badge--remote';
+    case 'branch':
+    default:
+      return 'ref-badge--branch';
   }
-  // 本地分支 vs tag：tag 名称常含 'v' 前缀或版本号格式，但启发式不可靠
-  // v2.7 简化：默认当作 branch（绿色），用户最常见是分支
-  return 'ref-badge--branch';
 }
 </script>
 
@@ -482,7 +478,7 @@ function refBadgeClass(ref: string): string {
       >
         <EmptyState
           title="Git Graph 功能暂未启用"
-          description="v1.5 新增：在本地 clone 仓库后，调 git 二进制拿 `git log --graph` 字符流，与 Gitea 原版 1:1 等价。点下面按钮一键启用（克隆完成后下次进入此页面自动加载 Git Graph）。"
+          description="使用 go-git 轻量同步仓库元信息后，基于 commit DAG 渲染接近 Gitea 官方效果的 Git Graph。点下面按钮一键启用，克隆完成后下次进入此页面自动加载。"
         />
         <button
           v-if="!cloning"
@@ -580,17 +576,30 @@ function refBadgeClass(ref: string): string {
               @keydown.space.prevent="r.commit && openCommitDetail(r.commit)"
             >
               <template v-if="r.commit">
-                <!-- v2.7：refs 字段由后端 LogCommits 在收集 commit 时附带（branch / tag 短名），
-                     这里直接渲染 badge，无需额外 API 调用。
-                     PR 编号（#N）v2.8 再加。 -->
+                <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
+                     这里按类型渲染 badge 颜色，不再用启发式猜。 -->
                 <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
                   <span
-                    v-for="ref in r.commit.refs"
+                    v-for="(ref, idx) in r.commit.refs"
                     :key="`ref-${r.commit.sha}-${ref}`"
                     class="ref-badge"
-                    :class="refBadgeClass(ref)"
+                    :class="refBadgeClass(r.commit.refTypes?.[idx])"
                     :title="ref"
-                  >{{ ref }}</span>
+                  >
+                    <Tag
+                      v-if="r.commit.refTypes?.[idx] === 'tag'"
+                      :size="11"
+                      class="ref-badge__icon"
+                      aria-hidden="true"
+                    />
+                    <GitBranch
+                      v-else
+                      :size="11"
+                      class="ref-badge__icon"
+                      aria-hidden="true"
+                    />
+                    <span>{{ ref }}</span>
+                  </span>
                 </span>
                 <span class="commit-subject">{{ r.commit.subject }}</span>
                 <span class="commit-meta">
@@ -960,7 +969,7 @@ function refBadgeClass(ref: string): string {
 .ref-badge {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   padding: 1px 6px;
   border-radius: 8px;
   font-size: 11px;
@@ -968,6 +977,10 @@ function refBadgeClass(ref: string): string {
   /* 不截断 —— 分支名完整显示，单行布局由 commit-row 的 overflow:hidden 兜底 */
   flex-shrink: 0;
   white-space: nowrap;
+}
+.ref-badge__icon {
+  flex: 0 0 auto;
+  stroke-width: 2;
 }
 
 /* v2.7：refs badge 类型区分（branch 绿、remote 蓝、tag 灰）

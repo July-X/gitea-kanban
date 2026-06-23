@@ -84,10 +84,10 @@ func (a *GiteaAdapter) ListRepos(ctx context.Context, hostURL, username, token s
 
 	var raw struct {
 		Data []struct {
-			ID            int64  `json:"id"`
-			Name          string `json:"name"`
-			FullName      string `json:"full_name"`
-			Owner         struct {
+			ID       int64  `json:"id"`
+			Name     string `json:"name"`
+			FullName string `json:"full_name"`
+			Owner    struct {
 				Login string `json:"login"`
 			} `json:"owner"`
 			DefaultBranch string `json:"default_branch"`
@@ -139,8 +139,8 @@ func (a *GiteaAdapter) ListRepos(ctx context.Context, hostURL, username, token s
 // ListBranches 列出仓库分支（GET /api/v1/repos/{owner}/{repo}/branches）
 func (a *GiteaAdapter) ListBranches(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.BranchDTO, error) {
 	var raw []struct {
-		Name       string `json:"name"`
-		Commit     struct {
+		Name   string `json:"name"`
+		Commit struct {
 			ID string `json:"id"`
 		} `json:"commit"`
 		Protected bool `json:"protected"`
@@ -219,11 +219,11 @@ func (a *GiteaAdapter) ListIssues(ctx context.Context, hostURL, username, token,
 	}
 
 	var raw []struct {
-		Index  int    `json:"number"`
-		Title  string `json:"title"`
-		State  string `json:"state"`
-		Body   string `json:"body"`
-		User   struct {
+		Index int    `json:"number"`
+		Title string `json:"title"`
+		State string `json:"state"`
+		Body  string `json:"body"`
+		User  struct {
 			Login string `json:"login"`
 		} `json:"user"`
 	}
@@ -263,10 +263,10 @@ func (a *GiteaAdapter) ListPulls(ctx context.Context, hostURL, username, token, 
 	}
 
 	var raw []struct {
-		Index  int    `json:"number"`
-		Title  string `json:"title"`
-		State  string `json:"state"`
-		Head   struct {
+		Index int    `json:"number"`
+		Title string `json:"title"`
+		State string `json:"state"`
+		Head  struct {
 			Ref string `json:"ref"`
 		} `json:"head"`
 		Base struct {
@@ -438,9 +438,14 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 
 	nodes := make([]platform.GraphNodeDTO, 0, len(r.Nodes))
 	for _, n := range r.Nodes {
+		refTypes := make([]string, len(n.RefTypes))
+		for i, t := range n.RefTypes {
+			refTypes[i] = string(t)
+		}
 		nodes = append(nodes, platform.GraphNodeDTO{
 			Row:         n.Row,
 			Lane:        n.Lane,
+			Color:       n.Color,
 			SHA:         n.SHA,
 			ShortSHA:    n.ShortSHA,
 			Subject:     n.Subject,
@@ -450,6 +455,7 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 			IsMerge:     n.IsMerge,
 			Parents:     n.Parents,
 			Refs:        n.Refs,
+			RefTypes:    refTypes,
 		})
 	}
 

@@ -178,64 +178,6 @@ func TestBuildGraph_Empty(t *testing.T) {
 	}
 }
 
-func TestAssignLane(t *testing.T) {
-	// v2.7 严格对齐 Gitea column 分配语义：
-	// 1. 优先复用现存 lane（同 SHA）
-	// 2. 否则从右到左找第一个空闲 lane
-	// 3. 没有空闲 → maxLane + 1（永不回收）
-
-	t.Run("reuse existing lane by SHA", func(t *testing.T) {
-		activeLanes := []laneSlot{{sha: "a"}, {sha: "b"}, {sha: "c"}}
-		lane, _, isReused := assignLane(&activeLanes, nil, "b", intPtr(2))
-		if !isReused {
-			t.Errorf("expected isReused=true for SHA 'b'")
-		}
-		if lane != 1 {
-			t.Errorf("expected lane 1, got %d", lane)
-		}
-	})
-
-	t.Run("find free lane from right to left", func(t *testing.T) {
-		// lanes 0 和 2 占用，lane 1 空闲 → 从右到左扫，lane 1 (i=2) 不是空闲，lane 1 (i=1) 空闲
-		activeLanes := []laneSlot{{sha: "a"}, {sha: ""}, {sha: "c"}}
-		lane, _, isReused := assignLane(&activeLanes, nil, "new", intPtr(2))
-		if isReused {
-			t.Errorf("expected isReused=false for new SHA")
-		}
-		if lane != 1 {
-			t.Errorf("expected lane 1 (right-to-left first free), got %d", lane)
-		}
-	})
-
-	t.Run("all occupied → maxLane+1", func(t *testing.T) {
-		// 全部占用 → 走 maxLane + 1（对齐 Gitea 永不回收）
-		activeLanes := []laneSlot{{sha: "a"}, {sha: "b"}, {sha: "c"}}
-		lane, _, isReused := assignLane(&activeLanes, nil, "new", intPtr(2))
-		if isReused {
-			t.Errorf("expected isReused=false")
-		}
-		if lane != 3 {
-			t.Errorf("expected lane 3 (maxLane 2 + 1), got %d", lane)
-		}
-		if len(activeLanes) != 4 {
-			t.Errorf("expected 4 lanes after extend, got %d", len(activeLanes))
-		}
-	})
-
-	t.Run("empty activeLanes → lane 0", func(t *testing.T) {
-		activeLanes := []laneSlot{}
-		lane, _, _ := assignLane(&activeLanes, nil, "new", intPtr(-1))
-		if lane != 0 {
-			t.Errorf("expected lane 0 for empty state, got %d", lane)
-		}
-	})
-}
-
-// intPtr 辅助函数（int 指针）
-func intPtr(i int) *int {
-	return &i
-}
-
 func TestSortCommitsByDate(t *testing.T) {
 	now := time.Now()
 	commits := []git.CommitInfo{

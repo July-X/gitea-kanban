@@ -64,7 +64,7 @@ const items: NavItem[] = [
     to: '/timeline',
     devAnnotation: {
       web: '/<owner>/<repo>/graphs/commits',
-      api: 'git log --graph --date-order（git 子进程）',
+      api: 'go-git DAG 图渲染',
       ipc: 'commits.gitgraph.lines',
       notes: 'Git Graph 视图：对齐 Gitea parser.go 字符流协议 + 前端 Parser 渲染',
     },
