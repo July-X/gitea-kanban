@@ -18,6 +18,14 @@
  *   - 现在 overlay 是主区的兄弟节点，position: absolute 居中在 .shell__content
  *   - 不挡内容、不蒙版、不模糊 —— 跟 view 内容同框渲染
  *   - 路由切换 fade 过渡时 overlay 跟 router-view 平级，位置稳定
+ *
+ * v1.5（2026-06-22 · user 拍板）：
+ *   - 移除全屏 HUD 背景网格（v1.1.2 引入的 .canvas-grid）—— 网格装饰被砍
+ *   - 改为"区域边界线"分区视觉：
+ *     · 左侧 NavRail 右边界  1px --color-divider-region
+ *     · 右侧主区顶 Header 下边界 1px --color-divider（Header / Body 分界）
+ *     · 底部 StatusBar 上边界 1px --color-divider-strong（区域边界强度更高）
+ *   - 区域边界 token 已在 theme.css 提档（dark 10% / light 12%）保证可读
  */
 import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
@@ -27,12 +35,9 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
 <template>
   <div class="shell">
     <!--
-      HUD 背景网格（v1.1.2 落地 · tech-refine §6.1）
-      挂 .shell 根覆盖整个应用窗口（NavRail 后面也透出）——
-      NavRail / StatusBar 改半透明 + backdrop-filter，
-      让 grid 当"窗口地"全屏露出，HUD 风才完整
+      v1.5：移除 HUD 背景网格（v1.1.2 .shell__grid / .canvas-grid 全删）——
+      背景改成纯 --color-bg，每个区域靠 1px 边界线视觉分区
     -->
-    <div class="shell__grid canvas-grid" aria-hidden="true" />
     <NavRail class="shell__nav" />
     <main class="shell__main">
       <div class="shell__content">
@@ -60,15 +65,8 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  /* v1.5：删透明透网格 → 走纯色背景，让各区域边界线清晰可读 */
   background: var(--color-bg);
-}
-
-.shell__grid {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  /* 极弱 8% alpha · 走 --grid-color token 3 主题自适应 */
 }
 
 .shell__nav {
@@ -77,18 +75,16 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
   /* v1.4 任务 #statusbar-picker：高度让出底部状态栏 33px，避免左下角折叠按钮被遮
    * 旧值 height: 100%（状态栏 28px 时已经盖住 28px，33px 之后更明显） */
   height: calc(100% - var(--statusbar-height));
-  /* 半透明 + **移除 backdrop-filter** —— blur 把 grid 8% alpha 弱线条糊掉看不见
-   * alpha 从 60% 降到 35% · 让 24px grid 清晰透出侧栏背景 */
-  background: color-mix(in srgb, var(--color-bg-elevated) 35%, transparent);
-  /* 强边界阴影（--shadow-navrail token · 3 主题自适应）——
-   * 三件套：深底色阴影向右 + 1px 冷白内描边 + 主色外环 glow（亮色关） */
-  box-shadow: var(--shadow-navrail);
+  /* v1.5：移除半透明 + backdrop-filter（已经无网格透出） → 走实色 elevated 背景 */
+  background: var(--color-bg-elevated);
+  /* v1.5：HUD 三件套 box-shadow 移除 → 改为 1px 右边描边作为区域边界
+   * --color-divider-region 是区域边界专用 token（dark 10% / light 12%） */
+  border-right: 1px solid var(--color-divider-region);
 }
 
-/* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的半透明 */
+/* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的实色背景 */
 .shell__nav :deep(.navrail) {
   background: transparent;
-  border-right-color: transparent; /* 描边让位给 box-shadow 冷白内描边 */
 }
 
 .shell__main {
@@ -102,7 +98,12 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
    * .shell__main 不补 padding 就会被状态栏压住最后一行（TimelineView list 519→491） */
   padding-bottom: var(--statusbar-height);
   overflow: hidden;
-  background: transparent;
+  /* v1.5：右侧主区走画布色（与左导航的 elevated 形成微弱层次区分） */
+  background: var(--color-bg);
+  /* v1.5：右侧主区**不**强制顶部边界线 —— 每个 view 的 topbar 内部已有
+   *   border-bottom: 1px solid var(--color-divider) 自带 Header↔Body 分界，
+   *   AppShell 不重复添加，避免双线/线偏移
+   * 顶部那条线由 view 自己控制（NavRail 也不顶到顶部，缺这条线不影响视觉） */
 }
 
 .shell__content {
@@ -124,16 +125,17 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
   right: 0;
   /* 固定高度 —— 让 .shell__main 的 padding-bottom 精确匹配，list 不会被切 */
   height: var(--statusbar-height);
-  /* 半透明 · 让 grid 透出 · HUD 风 */
-  background: color-mix(in srgb, var(--color-bg-elevated) 60%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* v1.5：实色背景替代半透明 + backdrop-filter */
+  background: var(--color-bg-elevated);
+  /* v1.5：状态栏上边界用更强的 --color-divider-strong
+   * —— 状态栏是"独立工具栏"区域，边界强度要高于一般内容分隔 */
+  border-top: 1px solid var(--color-divider-strong);
 }
 
-/* 穿透子组件 scoped style —— 让 StatusBar 内部 .statusbar 继承 shell__status 的半透明 */
+/* 穿透子组件 scoped style —— 让 StatusBar 内部 .statusbar 继承 shell__status 的实色 */
 .shell__status :deep(.statusbar) {
   background: transparent;
-  border-top-color: color-mix(in srgb, var(--color-divider) 60%, transparent);
+  border-top-color: transparent; /* 让位给 wrapper 的 border-top */
   /* 确保 statusbar 填满 wrapper */
   height: 100%;
 }

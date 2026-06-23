@@ -502,6 +502,10 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
 }
 .settings__header {
   margin-bottom: var(--space-3);
+  /* v1.5 区域边界：与其他 view 的 topbar 对齐，Header 与 Body 加 1px 分隔线 */
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
 }
 .settings__header h1 {

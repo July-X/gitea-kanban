@@ -215,14 +215,16 @@
   --color-lime: #b8d946;
   --color-lime-soft: rgba(184, 217, 70, 0.18);
 
-  /* === 描边 / 分隔 === */
+  /* === 描边 / 分隔（强档用于区域边界） === */
   --color-border: transparent;
+  /* --color-divider：通用分隔线（卡片内 / 表格行内）
+   * --color-divider-strong：区域边界（侧栏右边 / 顶栏下边 / 状态栏上边） */
   --color-divider: rgba(220, 233, 240, 0.08);
-  --color-divider-strong: rgba(220, 233, 240, 0.16);
+  --color-divider-strong: rgba(220, 233, 240, 0.14);
+  --color-divider-region: rgba(220, 233, 240, 0.1); /* 区域边界专用 · 不进内容卡片 */
 
   /* === 阴影 / glow 起点 === */
   --shadow-rgb: 0, 0, 0; /* 中性黑（暗色用纯黑阴影） */
-  --grid-color: rgba(220, 233, 240, 0.08);
   --kpi-glow: 0 0 8px rgba(116, 184, 48, 0.4);
   --signal-halo: 0 0 4px rgba(116, 184, 48, 0.6);
   --breath-glow: rgba(116, 184, 48, 0.4);
@@ -345,14 +347,14 @@
   --color-lime: #6e8b1a;
   --color-lime-soft: rgba(110, 139, 26, 0.16);
 
-  /* === 描边 / 分隔（亮色用冷黑 alpha） === */
+  /* === 描边 / 分隔（亮色用冷黑 alpha · 区域边界提亮保证可读） === */
   --color-border: transparent;
   --color-divider: rgba(15, 26, 36, 0.08);
-  --color-divider-strong: rgba(15, 26, 36, 0.16);
+  --color-divider-strong: rgba(15, 26, 36, 0.18);
+  --color-divider-region: rgba(15, 26, 36, 0.12); /* 区域边界专用 */
 
   /* === 阴影 / glow 起点 === */
   --shadow-rgb: 15, 26, 36; /* 冷黑 */
-  --grid-color: rgba(15, 26, 36, 0.08);
   --kpi-glow: 0 0 0 0 transparent; /* 不用 glow */
   --signal-halo: 0 0 0 1px rgba(70, 107, 22, 0.35); /* 改为实色描边 */
   --breath-glow: rgba(70, 107, 22, 0.25);
@@ -661,26 +663,20 @@ p {
 }
 
 /* ==========================================================================
- * HUD 背景装饰（v1.1.2 落地 · tech-refine §6）
+ * HUD 装饰（v1.5 · 移除 canvas-grid 网格）
  *
- * 极弱 · 8% alpha · 不进阅读区
- * - .canvas-grid：主画布 24px 网格（不进卡片 / 列 / 弹窗）
- * - .corner-dots：窗口顶角 4×4 装饰点阵（HUD 风 · pointer-events: none）
+ * 原本（v1.1.2 落地）的 .canvas-grid 全屏网格装饰已被砍（user 拍板 2026-06-22），
+ * 改为"区域边界线"分区视觉（见 AppShell.vue）：
+ *   · 左侧 NavRail  右边界 1px --color-divider-region
+ *   · 右侧主区     Header 与 Body 间 1px --color-divider（view 内部 topbar 自带）
+ *   · 底部 StatusBar 上边界 1px --color-divider-strong
  *
+ * 仍保留：
+ *   .corner-dots：窗口顶角 4×4 装饰点阵（HUD 风 · pointer-events: none）
  * 颜色走主题 token —— 2 主题自适应（v1.2 提亮主色到 #74B830）：
- * - --grid-color：dark  = rgba(220,233,240,.08) 冷白
- *                 light = rgba(15,26,36,.08)    冷黑
  * - --dot-color：  dark  = rgba(116,184,48,.45) 主色 45%（v1.2 提亮）
  *                 light = rgba(70,107,22,.5)   主色加深 50%
  * ========================================================================== */
-
-.canvas-grid {
-  background-image:
-    linear-gradient(var(--grid-color) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-  background-size: 24px 24px;
-  background-position: 0 0;
-}
 
 .corner-dots {
   position: fixed;
@@ -711,6 +707,3 @@ p {
   border-radius: 50%;
   background: var(--dot-color);
 }
-
-/* prefers-reduced-motion 时 grid 静态无动画（无 transition/ animation，
-   留此 block 仅文档化：grid 是静态背景，不参与运动） */
