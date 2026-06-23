@@ -14,6 +14,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func main() {
 	// 创建后端应用实例
 	app := NewApp()
@@ -42,6 +45,7 @@ func main() {
 			About: &mac.AboutInfo{
 				Title:   "Gitea Kanban",
 				Message: "版本 2.0.0\n基于 Gitea/GitHub 的桌面端看板 + 时间轴工具",
+				Icon:    appIcon,
 			},
 		},
 	})
