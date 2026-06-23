@@ -448,7 +448,8 @@
 .card--picked {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
-  box-shadow: 0 0 12px var(--color-primary-glow);
+  /* v1.6 弱化：去 12px glow · 改 primary-soft 4px ring */
+  box-shadow: 0 0 0 4px var(--color-primary-soft);
 }
 
 /* 拖拽高亮（键盘拖拽模式下的目标列）

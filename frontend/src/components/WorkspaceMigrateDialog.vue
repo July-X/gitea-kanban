@@ -464,9 +464,8 @@ onUnmounted(() => {
   background: var(--color-primary);
   color: var(--color-text-inverse);
   border: none;
-  box-shadow:
-    0 0 0 1px var(--color-primary-active),
-    0 0 12px var(--color-primary-glow);
+  /* v1.6 去 v1.1 主色外环 glow · 走单层柔和阴影 */
+  box-shadow: var(--shadow-sm);
 }
 
 .migrate-dialog__btn--primary:hover:not(:disabled) {

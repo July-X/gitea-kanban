@@ -328,7 +328,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
   padding: 5px 12px;
   font-size: 12px;
   color: var(--color-primary, #609926);
-  background: var(--color-primary-glow, rgba(96, 153, 38, 0.1));
+  background: var(--color-primary-soft, rgba(96, 153, 38, 0.18));
   border: 1px solid var(--color-primary, #609926);
   border-radius: var(--radius-sm, 4px);
   cursor: pointer;
@@ -439,9 +439,8 @@ const displayIssues = computed<IssueCardDto[]>(() => {
   transition: box-shadow 120ms ease-out;
 }
 .column--drop-target {
-  box-shadow:
-    0 0 0 2px var(--color-primary),
-    0 0 24px 4px var(--color-primary-glow);
+  /* v1.6 弱化 drag-over 反馈：去 24px glow · 走主色 2px 实环 + 4px soft halo */
+  box-shadow: 0 0 0 2px var(--color-primary), 0 0 0 6px var(--color-primary-soft);
   transition: box-shadow 120ms ease-out;
 }
 

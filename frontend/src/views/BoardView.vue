@@ -949,9 +949,8 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
   border-radius: var(--radius-sm);
   font-size: var(--font-sm);
   cursor: pointer;
-  box-shadow:
-    0 0 0 1px var(--color-primary-active),
-    0 0 12px var(--color-primary-glow);
+  /* v1.6 去 v1.1 主色外环 glow · 走单层柔和阴影 */
+  box-shadow: var(--shadow-sm);
 }
 .board__columns {
   flex: 1;

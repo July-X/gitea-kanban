@@ -51,7 +51,8 @@
 .card--picked {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
-  box-shadow: 0 0 12px var(--color-primary-glow);
+  /* v1.6 弱化主色外环：12px glow 改 4px + primary-soft 弱版（保持功能可见） */
+  box-shadow: 0 0 0 4px var(--color-primary-soft);
 }
 
 /* ===== 键盘拖拽目标列（v1.3 · 方向键 hover 的列）=====

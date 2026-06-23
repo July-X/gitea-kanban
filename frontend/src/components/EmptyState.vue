@@ -88,9 +88,8 @@ function onAction(): void {
   font-weight: 500;
   font-size: var(--font-md);
   cursor: pointer;
-  box-shadow:
-    0 0 0 1px var(--color-primary-active),
-    0 0 16px var(--color-primary-glow);
+  /* v1.6 去 v1.1 主色外环 glow · 走单层柔和阴影（Minimalism 风） */
+  box-shadow: var(--shadow-sm);
   transition:
     background var(--t-fast) var(--ease),
     transform var(--t-fast) var(--ease);

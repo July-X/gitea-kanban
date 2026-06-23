@@ -453,7 +453,8 @@ function onLogoutClick(): void {
   justify-content: space-between;
   padding: 0 var(--space-3);
   background: transparent;
-  border-top: 1px solid color-mix(in srgb, var(--color-divider) 60%, transparent);
+  /* v1.5：border-top 由 .shell__status (AppShell.vue) 接管，避免双线 */
+  border-top: 1px solid transparent;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   user-select: none;

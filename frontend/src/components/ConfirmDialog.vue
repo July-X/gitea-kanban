@@ -236,9 +236,8 @@ function onKeydown(e: KeyboardEvent): void {
 .dialog__btn--primary {
   background: var(--color-primary);
   color: var(--color-text-inverse);
-  box-shadow:
-    0 0 0 1px var(--color-primary-active),
-    0 0 12px var(--color-primary-glow);
+  /* v1.6 去 v1.1 主色外环 glow · 走单层柔和阴影 */
+  box-shadow: var(--shadow-sm);
 }
 
 .dialog__btn--primary:hover {

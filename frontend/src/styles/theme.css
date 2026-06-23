@@ -1,33 +1,44 @@
 /* ==========================================================================
- * Gitea Kanban — 双主题 token 系统（v1.2 · 2026-06-13）
+ * Gitea Kanban — 双主题 token 系统（v1.6 · 2026-06-22 · Minimalism + Functional Density）
  *
- * 设计来源（SSOT）：
- *   - design-system/pages/tech-refine.md §14.1-§14.4（2 主题系统 + 完整 token 矩阵）
- *   - design-system/gitea-kanban/OVERRIDE.md v1.2 决策
- *   - docs/design/wireframe/theme-tech.html（demo 截图，token 已实调过）
+ * 设计方向（2026-06-22 user 拍板）：
+ *   - 从 v1.1「技术工具科技感 / HUD 装饰」方向 改为 Minimalism + Functional Density
+ *   - 代表产品：Linear / Notion / Vercel Dashboard / GitHub Issues
+ *   - 视觉公式：中性画布 + 单色主色 + 6-8px 微圆角 + 单层柔和阴影 + 高对比文字 + 大量留白
  *
  * 拍板沿革（AGENTS §8.1 #3）：
- *   - v5（2026-06-10 12:12）：v1 单主题暗色，不提供切换（**已推翻**）
- *   - v1.1.2（2026-06-12 15:25）：**3 主题切换**（A 暗 / C 暗 / Light），默认 A 暗
- *     —— 已被 v1.2 推翻：A 暗苍蓝 / C 暗中性 视觉差异仅在冷暖，非技术用户分不清；
- *     3 主题产生认知负担而非自由度。
- *   - v1.2（2026-06-13）：**2 主题切换**（dark / light），默认 dark；
- *     - dark = 原 C 暗基底 #0F1115（中性近黑 · VSCode / Linear 主流）
- *     - light = 原 Light 保留 #E8F1F5
- *     - 主色 gitea 绿 **提亮到 #74B830（dark）/ 压暗到 #466B16（light）过 WCAG AA 4.5:1**
- *     - 滚动条 thumb 改用主色软底 + hover 提亮 + glow（dark）/ 实色描边（light）
+ *   - v5（2026-06-10）：v1 单主题暗色（**已推翻**）
+ *   - v1.1（2026-06-12）：A 暗提饱和 + 主文字 #C5D4DD + HUD 装饰（**部分推翻**）
+ *   - v1.1.2（2026-06-12）：3 主题切换（**被 v1.2 推翻**）
+ *   - v1.2（2026-06-13）：2 主题切换（dark / light），主色提亮/压暗过 AA 4.5:1（**保留**）
+ *   - v1.5（2026-06-22）：移除 HUD 背景网格（**保留**）
+ *   - v1.6（2026-06-22 · 当前）：
+ *     · 删 v1.1 科技感精修整套：装饰角 / 标题前缀条 / 键帽 / KPI 发光 / 角落点阵
+ *     · 阴影从"深底+inset+glow 三件套"→ "4 档单层柔和阴影"（Notion / Linear 风）
+ *     · 边角中等柔化：卡片 8 / 按钮 6 / 标签 4
+ *     · 保留 gitea 绿品牌色、字体三件套、2 主题切换、零术语、二次确认
  *
  * 关键设计：
- *   - 主色 gitea 绿 #609926 是**品牌色锚**（dot / 装饰角 / 进度条 / 状态点），2 主题通用
- *   - **主色 token（按钮 / 链接 / 高亮文字）走"过 AA 4.5:1"调档版**：
- *     - dark  #74B830（vs #0F1115 4.74:1 ✅）
- *     - light #466B16（vs #E8F1F5 5.55:1 ✅）
- *   - shadow / glow 主题差异最大：dark = "纯黑阴影 + 1px 冷白 inset + 主色外环"，
- *     light = "纯冷黑阴影 + 无 glow（白底上糊）"
+ *   - 主色 gitea 绿 #609926 仍是品牌色锚（dot / 状态点 / 进度条），2 主题通用
+ *   - 主色 token（按钮 / 链接 / 高亮文字）走"过 AA 4.5:1"调档版（v1.2 沿用）：
+ *     · dark  #74B830（vs #0F1115 4.74:1 ✅）
+ *     · light #466B16（vs #E8F1F5 5.55:1 ✅）
+ *   - 阴影：4 档（xs/sm/md/lg），2 主题**纯冷黑**（--shadow-rgb），无 inset 无 glow
+ *     · dark  --shadow-rgb: 0,0,0  中性黑
+ *     · light --shadow-rgb: 15,26,36  冷黑
  *   - 主题切换走 `data-theme` 属性（dark / light），`:root` 默认 = dark
  *   - 主题切换瞬间平滑过渡：background-color / color 150ms ease-out
- *   - 旧 token 名称保留为别名 → 新主题 token，**不破坏**现有 Vue 组件引用
- *     （88 处 `-soft` / `-glow` / `-hover` / `-active` / `accent` / `danger` 等旧名引用零回归）
+ *
+ * 已删除的 token（v1.1 装饰套 · 无 Vue 组件引用，放心删）：
+ *   - --decor-corner-size / --decor-corner-color（装饰角）
+ *   - --signal-halo / --breath-glow / --breath-glow-bright（状态点 halo）
+ *   - --kpi-glow（KPI 大字发光）
+ *   - --dot-color / --dot-halo（角落装饰点阵）
+ *   - --card-hover-tint（卡片 hover 主色微亮，dark 专属）
+ *   - --progress-fill-glow（进度条填充发光）
+ *   - --shadow-navrail-base / --shadow-navrail-glow / --shadow-navrail（NavRail 三件套）
+ *   - --is-light（亮色判定 flag）
+ *   - 工具类 .canvas-grid / .corner-dots（HUD 装饰）
  * ========================================================================== */
 
 /* ==========================================================================
@@ -35,17 +46,18 @@
  * ========================================================================== */
 
 :root {
-  /* === 边角（v1.1 锐化） === */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-pill: 999px;
-  --radius-card: 6px;
-  --radius-btn: 4px;
-  --radius-input: 4px;
-  --radius-chip: 2px;
-  --radius-modal: 8px;
-  --radius-tag: 2px;
+  /* === 边角（v1.6 中等柔化 · Linear / Notion / GitHub 主流 6-8px 范围） === */
+  --radius-xs: 4px;        /* 标签 / chip · 极小 */
+  --radius-sm: 6px;        /* 按钮 / 输入框 / 小型 chip */
+  --radius-md: 8px;        /* 卡片 / 弹窗 / 抽屉 */
+  --radius-lg: 12px;       /* 大型弹窗 / 浮层 */
+  --radius-pill: 999px;    /* 状态点 / 圆角 chip */
+  --radius-card: 8px;      /* 卡片统一 */
+  --radius-btn: 6px;       /* 按钮统一 */
+  --radius-input: 6px;     /* 输入框统一 */
+  --radius-chip: 4px;      /* chip / 标签 */
+  --radius-modal: 8px;     /* 弹窗 */
+  --radius-tag: 4px;       /* 标签 */
 
   /* === 间距 === */
   --space-1: 4px;
@@ -71,7 +83,7 @@
   --font-caption: 11px;
   --font-mono: 12px;
   --font-mono-sm: 11px;
-  --font-kpi: 36px;
+  --font-kpi: 28px; /* v1.6 从 36px 降到 28px · 取消"强发光"超大数字 */
 
   /* === 行高 === */
   --line-tight: 1.3;
@@ -97,7 +109,7 @@
   /* === 布局 === */
   --navrail-width: 224px;
   --navrail-collapsed-width: 56px;
-  --statusbar-height: 33px; /* 28 → 33（v1.4 · 任务 #statusbar-picker：留出下拉空间放仓库触发器） */
+  --statusbar-height: 33px; /* v1.4 · 任务 #statusbar-picker：留出下拉空间放仓库触发器 */
   --topbar-height: 48px;
 
   /* === z-index === */
@@ -107,13 +119,10 @@
   --z-modal: 2000;
   --z-modal-overlay: 1999;
 
-  /* === HUD 装饰（3 主题通用） === */
-  --decor-corner-size: 6px;
-
-  /* === 进度条（3 主题通用：主色 8% 底 + 1px 描边 + 渐变填充） === */
+  /* === 进度条（v1.6 弱化：去 glow / 去渐变 · 走主色实色 + 8% 底） === */
   --progress-track-bg: rgba(96, 153, 38, 0.08);
   --progress-track-border: 1px solid rgba(96, 153, 38, 0.2);
-  --progress-fill-bg: linear-gradient(90deg, #609926 0%, #7cb342 100%);
+  --progress-fill-bg: #609926; /* 去渐变 · 走主色实色 */
 }
 
 /* ==========================================================================
@@ -215,35 +224,21 @@
   --color-lime: #b8d946;
   --color-lime-soft: rgba(184, 217, 70, 0.18);
 
-  /* === 描边 / 分隔（强档用于区域边界） === */
+  /* === 描边 / 分隔（v1.6 强化区域边界 · Minimalism 风） === */
   --color-border: transparent;
-  /* --color-divider：通用分隔线（卡片内 / 表格行内）
-   * --color-divider-strong：区域边界（侧栏右边 / 顶栏下边 / 状态栏上边） */
   --color-divider: rgba(220, 233, 240, 0.08);
-  --color-divider-strong: rgba(220, 233, 240, 0.14);
-  --color-divider-region: rgba(220, 233, 240, 0.1); /* 区域边界专用 · 不进内容卡片 */
+  --color-divider-strong: rgba(220, 233, 240, 0.16); /* 区域边界 · v1.6 提档保证可读 */
+  --color-divider-region: rgba(220, 233, 240, 0.12);
 
-  /* === 阴影 / glow 起点 === */
-  --shadow-rgb: 0, 0, 0; /* 中性黑（暗色用纯黑阴影） */
-  --kpi-glow: 0 0 8px rgba(116, 184, 48, 0.4);
-  --signal-halo: 0 0 4px rgba(116, 184, 48, 0.6);
-  --breath-glow: rgba(116, 184, 48, 0.4);
-  --breath-glow-bright: rgba(116, 184, 48, 0.8);
-  --dot-color: rgba(116, 184, 48, 0.45);
-  --dot-halo: rgba(0, 0, 0, 0.45);
-  --progress-fill-glow: 0 0 6px rgba(116, 184, 48, 0.4);
-  --decor-corner-color: rgba(116, 184, 48, 0.3);
+  /* === 阴影（v1.6 单层柔和 · 4 档） ===
+   * dark 用中性黑阴影，4 档强度递增，无 inset 无 glow
+   * 派生 --shadow-xs/-sm/-md/-lg 在 :root 通用块计算 */
+  --shadow-rgb: 0, 0, 0;
 
-  /* === 滚动条（v1.2 美化 · thumb 主色软底 + hover 提亮 + glow） === */
+  /* === 滚动条（v1.6 弱化 · 去 glow · 走主色软底 + hover 实色） === */
   --scrollbar-thumb: rgba(116, 184, 48, 0.22);
-  --scrollbar-thumb-hover: rgba(116, 184, 48, 0.45);
-  --scrollbar-thumb-glow: 0 0 6px rgba(116, 184, 48, 0.4);
-
-  /* === 卡片 hover 主色微亮（dark 专属 · 亮色不糊） === */
-  --card-hover-tint: rgba(116, 184, 48, 0.08);
-
-  /* === 主题 flag（亮色判定用） === */
-  --is-light: 0;
+  --scrollbar-thumb-hover: rgba(116, 184, 48, 0.5);
+  --scrollbar-thumb-active: #74b830; /* thumb active 态 = 主色实色 */
 }
 
 /* ==========================================================================
@@ -347,41 +342,31 @@
   --color-lime: #6e8b1a;
   --color-lime-soft: rgba(110, 139, 26, 0.16);
 
-  /* === 描边 / 分隔（亮色用冷黑 alpha · 区域边界提亮保证可读） === */
+  /* === 描边 / 分隔（v1.6 强化区域边界 · 冷黑 alpha） === */
   --color-border: transparent;
   --color-divider: rgba(15, 26, 36, 0.08);
-  --color-divider-strong: rgba(15, 26, 36, 0.18);
-  --color-divider-region: rgba(15, 26, 36, 0.12); /* 区域边界专用 */
+  --color-divider-strong: rgba(15, 26, 36, 0.16);
+  --color-divider-region: rgba(15, 26, 36, 0.12);
 
-  /* === 阴影 / glow 起点 === */
-  --shadow-rgb: 15, 26, 36; /* 冷黑 */
-  --kpi-glow: 0 0 0 0 transparent; /* 不用 glow */
-  --signal-halo: 0 0 0 1px rgba(70, 107, 22, 0.35); /* 改为实色描边 */
-  --breath-glow: rgba(70, 107, 22, 0.25);
-  --breath-glow-bright: rgba(70, 107, 22, 0.45);
-  --dot-color: rgba(70, 107, 22, 0.5);
-  --dot-halo: rgba(15, 26, 36, 0.12);
-  --progress-fill-glow: 0 0 4px rgba(70, 107, 22, 0.25);
-  --decor-corner-color: rgba(70, 107, 22, 0.5);
+  /* === 阴影（v1.6 单层柔和 · 4 档 · 冷黑） === */
+  --shadow-rgb: 15, 26, 36;
 
-  /* === 滚动条（v1.2 美化 · thumb 主色软底 + hover 提亮 + 1px 实色描边，glow 在白底上糊） === */
+  /* === 滚动条（v1.6 弱化 · 走主色软底 + hover 实色 · 无 glow） === */
   --scrollbar-thumb: rgba(70, 107, 22, 0.25);
-  --scrollbar-thumb-hover: rgba(70, 107, 22, 0.5);
-  --scrollbar-thumb-glow: 0 0 0 1px rgba(70, 107, 22, 0.4);
-
-  /* === 卡片 hover 不加主色 tint（亮色背景不糊） === */
-  --card-hover-tint: transparent;
-
-  /* === 亮色主题关闭 NavRail 主色外环 glow（白底上糊 · tech-refine §14.4） ===
-   * base 阴影保留 —— 纯冷黑阴影（= --shadow-rgb = 15,26,36）足够"浮"起侧栏 */
-  --shadow-navrail-glow: 0 0 0 0 transparent;
-
-  --is-light: 1;
+  --scrollbar-thumb-hover: rgba(70, 107, 22, 0.55);
+  --scrollbar-thumb-active: #466b16;
 }
 
 /* ==========================================================================
- * 派生 token（2 主题通用 · 依赖 --shadow-rgb / --color-primary-soft / -glow）
- * 这些是合成的"工具 token"，由主题块的值自动重新组合
+ * 派生 token（2 主题通用 · 依赖 --shadow-rgb / --color-primary-soft）
+ *
+ * v1.6 重大变化：阴影从"三件套（深底+inset+glow）"改为 4 档单层柔和阴影
+ *   - --shadow-xs：内嵌控件 / 小型按钮按下
+ *   - --shadow-sm：卡片 / 列 / chip（最常用）
+ *   - --shadow-md：浮层 / 抽屉 / 弹窗
+ *   - --shadow-lg：模态对话框 / 强浮层
+ *
+ * 2 主题都走 --shadow-rgb（dark 中性黑 / light 冷黑），无 inset 无 glow
  * ========================================================================== */
 
 :root,
@@ -392,28 +377,20 @@
   --color-bg-elevated: var(--color-elevated);
   --color-bg-hover: var(--color-hover);
   --color-bg-active: var(--color-active);
-  --color-bg-overlay: rgba(var(--shadow-rgb), 0.7);
+  --color-bg-overlay: rgba(var(--shadow-rgb), 0.5);
 
   /* 旧名 → 新名 映射（文字 · secondary 在新系统重命名为 muted） */
   --color-text-secondary: var(--color-text-muted);
 
-  /* 阴影（基于 --shadow-rgb 合成 · 3 主题自动变） */
-  --shadow-sm: 0 1px 2px rgba(var(--shadow-rgb), 0.3);
-  --shadow-md: 0 4px 12px rgba(var(--shadow-rgb), 0.45), 0 0 0 1px rgba(220, 233, 240, 0.04);
-  --shadow-lg:
-    0 8px 32px rgba(var(--shadow-rgb), 0.55), 0 0 0 1px rgba(220, 233, 240, 0.06),
-    0 0 24px var(--color-primary-glow);
-  --shadow-focus: 0 0 0 4px var(--color-primary-soft);
-  --shadow-focus-strong: 0 0 0 4px var(--color-primary-glow);
+  /* === 4 档单层柔和阴影（v1.6 取代 v1.1 三件套） === */
+  --shadow-xs: 0 1px 2px rgba(var(--shadow-rgb), 0.06);
+  --shadow-sm: 0 1px 3px rgba(var(--shadow-rgb), 0.08), 0 1px 2px rgba(var(--shadow-rgb), 0.04);
+  --shadow-md: 0 4px 8px rgba(var(--shadow-rgb), 0.08), 0 2px 4px rgba(var(--shadow-rgb), 0.04);
+  --shadow-lg: 0 12px 24px rgba(var(--shadow-rgb), 0.1), 0 4px 8px rgba(var(--shadow-rgb), 0.05);
 
-  /* === NavRail 强边界阴影（侧栏从主区"浮"起 · 3 主题自动变） ===
-   * 三件套（tech-refine §2.1）：
-   *   - base：向右偏移 4px + 12px 深底色阴影 + 1px 冷白描边（暗色基础）
-   *   - glow：主色外环（暗色启用 / 亮色关闭 —— tech-refine §14.4）
-   * light 主题在专属块覆盖 --shadow-navrail-glow 为 transparent */
-  --shadow-navrail-base: 4px 0 12px rgba(var(--shadow-rgb), 0.5), 1px 0 0 rgba(220, 233, 240, 0.06);
-  --shadow-navrail-glow: 0 0 16px var(--color-primary-glow);
-  --shadow-navrail: var(--shadow-navrail-base), var(--shadow-navrail-glow);
+  /* focus 环 · 仅 1 层主色软底（去 glow） */
+  --shadow-focus: 0 0 0 3px var(--color-primary-soft);
+  --shadow-focus-strong: 0 0 0 4px var(--color-primary-soft);
 }
 
 /* ==========================================================================
@@ -576,11 +553,10 @@ p {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
-  box-shadow: var(--scrollbar-thumb-glow);
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background: var(--color-primary);
+  background: var(--scrollbar-thumb-active);
 }
 
 /* Firefox 兼容（scrollbar-color 接受 color + color；track 用 transparent） */
@@ -663,47 +639,31 @@ p {
 }
 
 /* ==========================================================================
- * HUD 装饰（v1.5 · 移除 canvas-grid 网格）
+ * HUD 装饰（v1.6 · 全部移除）
  *
- * 原本（v1.1.2 落地）的 .canvas-grid 全屏网格装饰已被砍（user 拍板 2026-06-22），
- * 改为"区域边界线"分区视觉（见 AppShell.vue）：
- *   · 左侧 NavRail  右边界 1px --color-divider-region
- *   · 右侧主区     Header 与 Body 间 1px --color-divider（view 内部 topbar 自带）
- *   · 底部 StatusBar 上边界 1px --color-divider-strong
+ * v1.1「技术工具科技感」方向的装饰元素已全部移除（2026-06-22 user 拍板）：
+ *   - .canvas-grid：全屏背景网格（v1.5 已删）
+ *   - .corner-dots：窗口顶角 4×4 装饰点阵（v1.6 删）
+ *   - .decor-corner：卡片装饰角（v1.6 删，token 已删）
+ *   - .decor-stripe：标题前缀条（v1.6 删，token 已删）
+ *   - .key-cap：键帽（v1.6 删，token 未落地）
  *
- * 仍保留：
- *   .corner-dots：窗口顶角 4×4 装饰点阵（HUD 风 · pointer-events: none）
- * 颜色走主题 token —— 2 主题自适应（v1.2 提亮主色到 #74B830）：
- * - --dot-color：  dark  = rgba(116,184,48,.45) 主色 45%（v1.2 提亮）
- *                 light = rgba(70,107,22,.5)   主色加深 50%
+ * 替代方案：纯 Minimalism + Functional Density，区域靠 1px 边界线分区
+ * （见 AppShell.vue / 各 view topbar border-bottom）
  * ========================================================================== */
 
 .corner-dots {
-  position: fixed;
-  width: 16px;
-  height: 16px;
-  display: grid;
-  grid-template-columns: repeat(4, 3px);
-  grid-template-rows: repeat(4, 3px);
-  gap: 1px;
-  pointer-events: none;
-  z-index: 1;
-  /* HUD 顶角位置：右上 / 右下（科技稿 §6.2 拍板仅右上+右下） */
+  display: none; /* v1.6 移除 HUD 装饰点阵 · 保留选择器避免引用 break */
 }
 
 .corner-dots--tr {
-  top: var(--space-3);
-  right: var(--space-3);
+  display: none;
 }
 
 .corner-dots--br {
-  bottom: var(--space-3);
-  right: var(--space-3);
+  display: none;
 }
 
 .corner-dots__dot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--dot-color);
+  display: none;
 }
