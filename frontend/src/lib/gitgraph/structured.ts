@@ -117,9 +117,9 @@ export interface SvgRenderResult {
  * - 按 color 分组 paths，便于 SVG <g class="flow-color-16-N"> 染色
  * - 路径公式使用 SourceTree 风格 flow segment：
  *   · 同 lane (EdgeNormal) → 当前 flow 自己的垂直 segment
- *   · 跨 lane (EdgeMerge) → 从 commit 点所在 flow 延伸到 parent commit 前方，再折线接回
- *     分叉起点。lane 复用时如果中间已有其它颜色节点，则临时分配 synthetic render
- *     lane 绕行，避免前后不同 flow 粘连。
+ *   · 跨 lane (EdgeMerge) → 从具体 commit 点用局部折线接到 parent 行前方。
+ *     不在起点横向拉到临时列，避免出现大矩形折线；lane 复用时只截断冲突段，
+ *     不把前后不同 flow 强行连成一条。
  *   · 旧版用贝塞尔曲线，不符合 Gitea 真实 `git log --graph` 的折线表现
  * - node 颜色：直接使用后端 GraphNode.color，避免 merge edge 污染节点颜色
  *
@@ -164,22 +164,17 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   const rowBottom = (row: number): number => (row + 1) * ROW_HEIGHT;
   const laneX = (lane: number): number => lane * LANE_WIDTH + LANE_WIDTH / 2;
 
-  const hasForeignNodeBetween = (
+  const firstForeignNodeBetween = (
     lane: number,
     fromRow: number,
     toRow: number,
     color: number,
-  ): boolean => {
+  ): GraphNodeDto | undefined => {
     const minRow = Math.min(fromRow, toRow);
     const maxRow = Math.max(fromRow, toRow);
-    return (nodesByLane.get(lane) ?? []).some(
+    return (nodesByLane.get(lane) ?? []).find(
       (node) => node.row > minRow && node.row < maxRow && node.color !== color,
     );
-  };
-
-  const nextSyntheticLane = (): number => {
-    maxRenderLane += 1;
-    return maxRenderLane;
   };
 
   // ===== 1. 生成 edges → SVG paths =====
@@ -191,24 +186,19 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
 
     let d: string;
     if (edge.fromLane === edge.toLane) {
-      if (hasForeignNodeBetween(edge.fromLane, edge.fromRow, edge.toRow, edge.color)) {
-        // 理论上后端 lane 复用不应让同 lane edge 穿过其它 flow；若发生，渲染层
-        // 分配临时列绕行，优先保证不同 flow 不粘连。
-        const syntheticX = laneX(nextSyntheticLane());
-        d = `M ${x1} ${y1} L ${syntheticX} ${y1} L ${syntheticX} ${y2} L ${x2} ${y2}`;
+      const foreignNode = firstForeignNodeBetween(edge.fromLane, edge.fromRow, edge.toRow, edge.color);
+      if (foreignNode) {
+        // 如果同 lane edge 会穿过其它颜色的 commit，说明这个 column 已被后续 flow 复用。
+        // 这里截断到外来 flow 前一行，避免大矩形绕行和不同 flow 粘连。
+        const stopY = edge.toRow > edge.fromRow ? rowTop(foreignNode.row) : rowBottom(foreignNode.row);
+        d = `M ${x1} ${y1} L ${x1} ${stopY}`;
       } else {
         d = `M ${x1} ${y1} L ${x2} ${y2}`;
       }
     } else {
-      // SourceTree 风格：线从具体 commit 点分叉出来，flow 主线在自己的 column
-      // 延伸到 parent commit 前方，再折回分叉起点。
+      // SourceTree 风格：线从具体 commit 点分叉出来，只在局部折到 parent 行前方。
       const branchY = edge.toRow > edge.fromRow ? rowTop(edge.toRow) : rowBottom(edge.toRow);
-      if (hasForeignNodeBetween(edge.fromLane, edge.fromRow, edge.toRow, edge.color)) {
-        const syntheticX = laneX(nextSyntheticLane());
-        d = `M ${x1} ${y1} L ${syntheticX} ${y1} L ${syntheticX} ${branchY} L ${x2} ${y2}`;
-      } else {
-        d = `M ${x1} ${y1} L ${x1} ${branchY} L ${x2} ${y2}`;
-      }
+      d = `M ${x1} ${y1} L ${x1} ${branchY} L ${x2} ${y2}`;
     }
 
     addPath(edge.color, d);
