@@ -502,9 +502,10 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
 }
 .settings__header {
   margin-bottom: var(--space-3);
-  /* v1.5 区域边界：与其他 view 的 topbar 对齐，Header 与 Body 加 1px 分隔线 */
+  /* v1.5 区域边界 + v1.6.1 改主区中性色
+   * 跟主区同色 (#F8FAFC 亮色 / #0F1115 暗色), 靠 border-bottom 1px 分层 */
   padding: var(--space-3) var(--space-4);
-  background: var(--color-bg-elevated);
+  background: var(--color-shell-main-bg);
   border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
 }

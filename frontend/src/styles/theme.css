@@ -506,11 +506,14 @@ select {
   font-size: inherit;
   color: var(--color-text);
   background: var(--color-bg-elevated);
-  border: none;
+  /* v1.6.1 加 1px 边框：input 跟新主区 (#F8FAFC 亮色) 融成一片
+   * 旧值 border: none 在主区改中性色后视觉边界完全消失
+   * 用 1px --color-divider 边框（暗色 10% alpha 冷白 / 亮色 10% alpha 冷黑） */
+  border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   outline: none;
-  transition: background var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 
 input::placeholder,
@@ -521,13 +524,15 @@ textarea::placeholder {
 input:hover,
 textarea:hover,
 select:hover {
-  background: var(--color-bg-hover);
+  /* v1.6.1 hover 用主色边框反馈（替代原 --color-bg-hover，亮色下反馈太弱） */
+  border-color: var(--color-primary);
 }
 
 input:focus,
 textarea:focus,
 select:focus {
-  background: var(--color-bg-hover);
+  /* v1.6.1 focus 走主色边框 + 主色 soft glow（替代 --color-bg-hover bg） */
+  border-color: var(--color-primary);
   box-shadow: var(--shadow-focus);
 }
 

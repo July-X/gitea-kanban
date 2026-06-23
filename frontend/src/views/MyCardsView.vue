@@ -291,7 +291,9 @@ function formatDate(iso: string | undefined): string {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background: var(--color-bg-elevated);
+  /* v1.6.1 改用主区中性色（--color-shell-main-bg），跟主区同色
+   * 区别靠 1px --color-divider 底边线分层（替代纯白 #FFFFFF 跟主区融成片） */
+  background: var(--color-shell-main-bg);
   border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
 }

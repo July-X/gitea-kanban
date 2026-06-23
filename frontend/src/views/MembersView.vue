@@ -278,7 +278,11 @@ function permissionClass(m: MemberDto): string {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
-  background: var(--color-bg-elevated);
+  /* v1.6.1 topbar 改用主区中性色 (--color-shell-main-bg) · 跟主区同色
+   * 区别靠 1px --color-divider 底边线（暗色 10% / 亮色 10% 提档版）分层
+   * 原因：旧 --color-bg-elevated #FFFFFF 跟新主区 #F8FAFC 差 2.5% 亮度,
+   *   视觉上融成一片, "按钮区" 跟 "主区" 边界消失 */
+  background: var(--color-shell-main-bg);
   border-bottom: 1px solid var(--color-divider);
   flex-shrink: 0;
   gap: var(--space-3);

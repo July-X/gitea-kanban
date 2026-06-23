@@ -769,12 +769,16 @@ function refBadgeClass(refType?: string): string {
 
 /* SVG 区域：sticky 在左侧，跟随 commit 列表垂直滚动；
  * 宽度由拖拽手柄控制（默认自动计算），flex-shrink:0 不被压缩 */
+/* ===== git-graph 背景（v1.6.1 合并到主区中性色）=====
+ * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟新主区 (#F8FAFC 极浅灰白) 对比过强,
+ * "工具面板区域" 跟 "主内容区" 跳出来, 不协调
+ * v1.6.1 改用 --color-shell-main-bg (跟主区同色), 靠 1px 右边线分区 */
 .git-graph-svg-area {
   position: sticky;
   left: 0;
   z-index: 2;
   min-width: 80px;
-  background: var(--color-bg, #0f1115);
+  background: var(--color-shell-main-bg);
   border-right: 1px solid var(--color-border);
   overflow-x: auto;     /* 多列时水平滚动而非被压缩 */
   overflow-y: hidden;
