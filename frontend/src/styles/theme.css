@@ -129,13 +129,39 @@
  * 主题 token：dark（默认 · 中性近黑 · 原 v1.1.2 C 暗基底 · v1.2 提亮主色到 #74B830 过 AA 4.5:1）
  * ========================================================================== */
 
+/* === v1.6.1 暗色专属提档：只有 [data-theme="dark"] 真正应用时才用 0.16-0.32 提档值
+ * （:root 默认值在派生通用块是 0.06-0.10 · 亮色主题也走这个）
+ * 这样保证亮色主题不会"被传染"到暗色强阴影（白底糊）
+ * 用 html[data-theme="dark"] (specificity 0,1,1) 覆盖 :root/[data-theme="dark"] (0,1,0)
+ * —— 避免 CSS 声明位置导致覆盖失败 */
+html[data-theme='dark'] {
+  /* === 背景梯度（v1.6.1 暗色提档 · 左导航 elevated 跟主区 canvas 拉开 14 阶） ===
+   * 旧值 #1E222A vs #0F1115 = 9 阶（亮度差 4%）肉眼几乎看不出
+   * 新值 #181C24 vs #0F1115 = 14 阶（亮度差 7%）有可见但克制的层次 */
+  --color-elevated: #181c24; /* v1.6.1 提档（原 #1E222A 跟 canvas 差太小） */
+  --color-hover: #262b34; /* v1.6.1 同步提档 */
+  --color-active: #353b46;
+
+  /* === 描边 / 分隔（v1.6.1 提档 · 暗色下"克制 = 看不见"的修复） === */
+  --color-divider: rgba(220, 233, 240, 0.1);              /* 8% → 10% */
+  --color-divider-strong: rgba(220, 233, 240, 0.2);      /* 16% → 20% · 区域边界 */
+  --color-divider-region: rgba(220, 233, 240, 0.16);     /* 12% → 16% · 区域边界 */
+
+  /* === 阴影（v1.6.1 暗色专属提档） ===
+   * v1.6 共用 4 档在暗色下太弱（0.06-0.10 alpha 黑 vs #0F1115 几乎不可见）
+   * 暗色提档到 0.16-0.30，亮色保持 0.06-0.10（不糊） */
+  --shadow-xs: 0 1px 2px rgba(var(--shadow-rgb), 0.16);
+  --shadow-sm: 0 1px 3px rgba(var(--shadow-rgb), 0.2), 0 1px 2px rgba(var(--shadow-rgb), 0.12);
+  --shadow-md: 0 4px 8px rgba(var(--shadow-rgb), 0.24), 0 2px 4px rgba(var(--shadow-rgb), 0.16);
+  --shadow-lg: 0 12px 24px rgba(var(--shadow-rgb), 0.32), 0 4px 8px rgba(var(--shadow-rgb), 0.2);
+}
+
 :root,
 [data-theme='dark'] {
-  /* === 背景梯度（中性黑 4 层） === */
+  /* === 背景梯度（暗色基底 · :root 默认 + [data-theme='dark'] 应用） === */
   --color-canvas: #0f1115; /* H220° S17% L7% */
-  --color-elevated: #1e222a;
-  --color-hover: #2d333f;
-  --color-active: #3c4453;
+  /* --color-elevated 在 [data-theme="dark"] 单独块提档（v1.6.1） */
+  /* --color-hover / --color-active 在 [data-theme="dark"] 单独块提档（v1.6.1） */
 
   /* === 文字（vs #0F1115 验证过 AA 4.5:1） === */
   --color-text: #c5d4dd; /* 7.37:1 ✅ */
@@ -224,16 +250,12 @@
   --color-lime: #b8d946;
   --color-lime-soft: rgba(184, 217, 70, 0.18);
 
-  /* === 描边 / 分隔（v1.6 强化区域边界 · Minimalism 风） === */
+  /* === 描边 / 分隔（暗色基底 · v1.6.1 提档值在 [data-theme="dark"] 单独块） === */
   --color-border: transparent;
-  --color-divider: rgba(220, 233, 240, 0.08);
-  --color-divider-strong: rgba(220, 233, 240, 0.16); /* 区域边界 · v1.6 提档保证可读 */
-  --color-divider-region: rgba(220, 233, 240, 0.12);
 
-  /* === 阴影（v1.6 单层柔和 · 4 档） ===
-   * dark 用中性黑阴影，4 档强度递增，无 inset 无 glow
-   * 派生 --shadow-xs/-sm/-md/-lg 在 :root 通用块计算 */
+  /* === 阴影 RGB 起点（暗色中性黑） === */
   --shadow-rgb: 0, 0, 0;
+  /* --shadow-xs/sm/md/lg 在 [data-theme="dark"] 单独块提档（v1.6.1） */
 
   /* === 滚动条（v1.6 弱化 · 去 glow · 走主色软底 + hover 实色） === */
   --scrollbar-thumb: rgba(116, 184, 48, 0.22);
@@ -251,7 +273,7 @@
  *   - 滚动条 thumb 主色软底 + hover 提亮 + 1px 实色描边（dark 改用 glow）
  * ========================================================================== */
 
-[data-theme='light'] {
+html[data-theme='light'] {
   /* === 背景梯度（浅苍蓝 4 层） === */
   --color-canvas: #e8f1f5;
   --color-elevated: #ffffff;
@@ -342,14 +364,20 @@
   --color-lime: #6e8b1a;
   --color-lime-soft: rgba(110, 139, 26, 0.16);
 
-  /* === 描边 / 分隔（v1.6 强化区域边界 · 冷黑 alpha） === */
+  /* === 描边 / 分隔（v1.6.1 提档 · 亮色下保证边界线可见） === */
   --color-border: transparent;
-  --color-divider: rgba(15, 26, 36, 0.08);
-  --color-divider-strong: rgba(15, 26, 36, 0.16);
-  --color-divider-region: rgba(15, 26, 36, 0.12);
+  --color-divider: rgba(15, 26, 36, 0.1);              /* 8% → 10% */
+  --color-divider-strong: rgba(15, 26, 36, 0.2);      /* 16% → 20% · 区域边界 */
+  --color-divider-region: rgba(15, 26, 36, 0.16);     /* 12% → 16% · 区域边界 */
 
   /* === 阴影（v1.6 单层柔和 · 4 档 · 冷黑） === */
   --shadow-rgb: 15, 26, 36;
+  /* v1.6.1 亮色走克制版（白底不能糊）· 0.06-0.10 alpha 冷黑
+   * 暗色专属提档值在 [data-theme="dark"] 单独块（v1.6.1 修复"克制=看不见"） */
+  --shadow-xs: 0 1px 2px rgba(var(--shadow-rgb), 0.06);
+  --shadow-sm: 0 1px 3px rgba(var(--shadow-rgb), 0.08), 0 1px 2px rgba(var(--shadow-rgb), 0.04);
+  --shadow-md: 0 4px 8px rgba(var(--shadow-rgb), 0.08), 0 2px 4px rgba(var(--shadow-rgb), 0.04);
+  --shadow-lg: 0 12px 24px rgba(var(--shadow-rgb), 0.1), 0 4px 8px rgba(var(--shadow-rgb), 0.05);
 
   /* === 滚动条（v1.6 弱化 · 走主色软底 + hover 实色 · 无 glow） === */
   --scrollbar-thumb: rgba(70, 107, 22, 0.25);
@@ -382,11 +410,10 @@
   /* 旧名 → 新名 映射（文字 · secondary 在新系统重命名为 muted） */
   --color-text-secondary: var(--color-text-muted);
 
-  /* === 4 档单层柔和阴影（v1.6 取代 v1.1 三件套） === */
-  --shadow-xs: 0 1px 2px rgba(var(--shadow-rgb), 0.06);
-  --shadow-sm: 0 1px 3px rgba(var(--shadow-rgb), 0.08), 0 1px 2px rgba(var(--shadow-rgb), 0.04);
-  --shadow-md: 0 4px 8px rgba(var(--shadow-rgb), 0.08), 0 2px 4px rgba(var(--shadow-rgb), 0.04);
-  --shadow-lg: 0 12px 24px rgba(var(--shadow-rgb), 0.1), 0 4px 8px rgba(var(--shadow-rgb), 0.05);
+  /* === --shadow-xs/sm/md/lg 在 dark / light 主题块各自定义（v1.6.1 拆开） ===
+   * 暗色提档到 0.16-0.32（v1.6.1 修复"克制=看不见"）
+   * 亮色走 0.06-0.10 防止白底糊
+   * 本通用块不再覆盖，避免 specificity 相同情况下覆盖暗色提档值 */
 
   /* focus 环 · 仅 1 层主色软底（去 glow） */
   --shadow-focus: 0 0 0 3px var(--color-primary-soft);
