@@ -15,6 +15,10 @@ legacy/electron/release/
 
 # === Go / Wails 构建产物 ===
 build/
+!build/
+build/*
+!build/appicon.png
+!build/appicon.svg
 build/bin/
 build/windows/
 build/darwin/
