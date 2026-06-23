@@ -5,9 +5,9 @@
  *   - §14    2 主题 token 系统（dark / light）—— theme.css 已落地
  *   - §15.1  3 入口（StatusBar cycle / Settings 外观 / 命令面板 ⌘K）→ 同一 store
  *   - §15.2  切换瞬间：localStorage 写 + DOM 改 + IPC set + 失败提示（不阻塞 UI）
- *   - §15.4  数据流：user → preload api.theme.set → main handler → sqlite → return → store applyTheme
- *   - §15.5  启动期：localStorage 同步（0ms） + IPC get 异步（50-200ms）reconcile
- *   - §16    IPC 契约：preferences.theme.{get,set}，ThemeName enum = 'dark' | 'light'
+ *   - §15.4  数据流：user → store applyTheme → user.prefs.set → main → state.json → return
+ *   - §15.5  启动期：localStorage 同步（0ms） + user.prefs.get 异步（50-200ms）reconcile
+ *   - §16    IPC 契约：user.prefs.{get,set}，key='theme'，ThemeName = 'dark' | 'light'
  *
  * 150ms 过渡说明：
  *   - theme.css 的 `*` 选择器已加 `transition: background-color 150ms ease-out, color 150ms ease-out`
@@ -16,14 +16,19 @@
  *   - 不阻塞 UI：IPC set 失败时**只**弹 toast，**不**回滚 currentTheme
  *     （localStorage 已写，DOM 已改——撤销反而让用户觉得"按了按钮没反应"）
  *
+ * v2.4 持久化通道修复（ADR-0006 §2.5 prefs 死链）：
+ *   - 旧版 preferences.theme.{get,set} 是 v1 shim stub，**从未**连到 Go 后端
+ *   - 新版：走通用 user.prefs.{get,set}（Go 端 SetUserPrefs / GetUserPrefs 已在 app.go 实现）
+ *   - state.json 中持久化为 prefs.theme = 'dark' | 'light'（与 v1 时代 sqlite prefs 表平铺形式一致）
+ *
  * 边界（AGENTS §5.2 frontend agent）：
  *   - ✅ 不碰 src/main/**
  *   - ✅ 不改 src/shared/ipc-types.ts（只 import 类型 if 必要）
  *   - ✅ 不动 src/preload/**
  *   - ✅ 不动 src/renderer/styles/theme.css
  *   - ✅ 调用 IPC 通过 @renderer/lib/ipc-client 的 getIpcClient().invokeNested 通用入口
- *     （不新增 preferencesThemeGet/Set 具名 helper —— 与 board.columns.list 等
- *      嵌套 namespace 一致用 invokeNested；后续如多 store 复用可补 helper）
+ *     （不新增 userPrefsGet/Set 具名 helper —— 与 board.columns.list 等
+ *      嵌套 namespace 一致用 invokeNested；navCollapsed 同样模式）
  */
 
 import { defineStore } from 'pinia';
@@ -31,10 +36,15 @@ import { ref } from 'vue';
 import { getIpcClient } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
 
-// ============================================================================
-// 主题枚举（与 src/main/ipc/schema.ts ThemeEnumSchema 同步 · single source of truth）
-// ============================================================================
-
+/** 主题枚举（与 src/main/ipc/schema.ts ThemeEnumSchema 同步 · single source of truth）
+ *
+ * v2.4 落地：
+ *   - 持久化通道从 v1 时代的 `preferences.theme.{get,set}` 迁移到通用 `user.prefs.{get,set}`
+ *     （与 AGENTS §6.4 业务态 Prefs 平铺一致 + ADR-0006 §2.5 prefs 死链修复）
+ *   - key = 'theme'（与 Go 端 state.Prefs 字段名一致）
+ *   - 旧的 `preferences.theme.*` 在 shim 里仍是 notImplemented（v1 stub），保留以兼容历史 caller
+ *     但**不**再用 —— store 这里全部走 user.prefs 通道
+ */
 export type Theme = 'dark' | 'light';
 
 /** 默认主题（dark · v1.2 拍板 · 桌面工具主流） */
@@ -75,22 +85,23 @@ export function isValidTheme(s: unknown): s is Theme {
 }
 
 // ============================================================================
-// IPC 调用（窄封装，避免 store action 体积膨胀）
+// 持久化通道（v2.4 · 走通用 user.prefs 而非 v1 时代的 preferences.theme.*）
 // ============================================================================
 
-/**
- * preferences.theme.get 出参（与 src/main/ipc/schema.ts ThemeGetResultSchema 同步）
- *
- * 这里**不**import schema.ts —— renderer 跨边界读 schema 是历史模式（auth.ts 那样），
- * 但本 task 只需要这个 DTO 类型，独立定义更轻；后续如 v2 收紧可统一抽到 src/shared/ipc-types.ts。
- */
+/** user.prefs 中主题的 key（与 Go 端 state.Prefs 平铺一致） */
+export const THEME_PREF_KEY = 'theme';
+
+/** ThemeGetResult —— user.prefs.get({ keys: ['theme'] }) 的出参形态 */
 interface ThemeGetResult {
   theme: Theme;
-  changedAt: string;
+  changedAt?: string; // 当前 user.prefs 不带时间戳，保留字段位便于将来扩展
 }
 
 /**
- * preferences.theme.get —— 拉远端持久化的主题
+ * fetchPersistedTheme —— 拉远端持久化的主题
+ *
+ * v2.4：从 user.prefs 通用通道取，key = 'theme'（Go 端 SetUserPrefs 已支持任意 key）
+ * 旧版 preferences.theme.get 是 stubEmpty → 永远返 'dark'，跨重启后无法恢复用户选择
  *
  * 错误处理：
  * - DATABASE_UNAVAILABLE / NETWORK_OFFLINE → 静默，调用方保持 localStorage 值
@@ -98,14 +109,12 @@ interface ThemeGetResult {
  */
 async function fetchPersistedTheme(): Promise<Theme | null> {
   try {
-    const result = (await getIpcClient().invokeNested(
-      'preferences',
-      'theme',
-      'get',
-      {},
-    )) as ThemeGetResult | null;
-    if (!result || !isValidTheme(result.theme)) return null;
-    return result.theme;
+    const result = (await getIpcClient().invokeNested('user', 'prefs', 'get', {
+      keys: [THEME_PREF_KEY],
+    })) as Record<string, unknown> | null;
+    const v = result?.[THEME_PREF_KEY];
+    if (!isValidTheme(v)) return null;
+    return v;
   } catch {
     // 启动期任何错误都静默 —— localStorage 是兜底
     return null;
@@ -113,13 +122,18 @@ async function fetchPersistedTheme(): Promise<Theme | null> {
 }
 
 /**
- * preferences.theme.set —— 持久化主题到 sqlite（异步，不阻塞 UI）
+ * persistTheme —— 持久化主题到 state.json（异步，不阻塞 UI）
+ *
+ * v2.4：走 user.prefs.set 通用通道（Go 端 SetUserPrefs 已实现，ADR-0006 §2.5 修复了
+ * 旧 shim 的 notImplemented 死链）
  *
  * 错误处理：失败抛 Error（normalizeError 已把 IpcError → UserFacingError），
  * 由 applyTheme 调方决定 toast 提示策略。
  */
 async function persistTheme(theme: Theme): Promise<void> {
-  await getIpcClient().invokeNested('preferences', 'theme', 'set', { theme });
+  await getIpcClient().invokeNested('user', 'prefs', 'set', {
+    entries: { [THEME_PREF_KEY]: theme },
+  });
 }
 
 // ============================================================================
@@ -136,10 +150,10 @@ export const useUiStore = defineStore('ui', () => {
   /**
    * applyTheme —— 用户触发主题切换（StatusBar / Settings / ⌘K 都调它）
    *
-   * 数据流（§15.4）：
+   * 数据流（§15.4 · v2.4 修订）：
    *   1. 写 currentTheme ref + documentElement.dataset.theme（CSS 150ms 过渡接管）
    *   2. 写 localStorage 同步缓存（启动期 initTheme 用，**不**是持久化主路径）
-   *   3. 异步调 IPC preferences.theme.set（不阻塞 UI）
+   *   3. 异步调 IPC user.prefs.set({ entries: { theme } })（不阻塞 UI）
    *   4. 失败 → toast '主题保存失败，请重试'（不回滚 currentTheme）
    *
    * 不做 rollback 的理由：localStorage + DOM 已经改了，回滚会让用户感觉"按钮无反应"；
@@ -166,7 +180,7 @@ export const useUiStore = defineStore('ui', () => {
       // localStorage 不可用（隐私模式 / quota）—— 静默，下次启动 initTheme 走默认
     }
 
-    // 3. 异步持久化到 sqlite（不 await 阻塞 UI）
+    // 3. 异步持久化到 state.json（v2.4 · 不 await 阻塞 UI）
     //    注：调用方也可以 await，但 UI 上**不**应该等
     persistTheme(theme).catch(() => {
       showToast({ type: 'error', message: '主题保存失败，请重试' });
