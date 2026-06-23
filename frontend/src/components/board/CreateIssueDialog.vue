@@ -342,7 +342,8 @@ function submit(): void {
   border-color: var(--color-primary);
 }
 .create-issue__chip--active {
-  background: var(--color-primary-glow);
+  /* v1.6：去 v1.1 强底色，降到 --color-primary-soft */
+  background: var(--color-primary-soft);
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
@@ -369,7 +370,8 @@ function submit(): void {
 }
 .create-issue__locked-tag {
   padding: 2px 8px;
-  background: var(--color-primary-glow);
+  /* v1.6：去 v1.1 强底色，降到 --color-primary-soft */
+  background: var(--color-primary-soft);
   color: var(--color-primary);
   border-radius: var(--radius-pill);
   font-size: var(--font-xs);

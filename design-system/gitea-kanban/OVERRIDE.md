@@ -116,10 +116,11 @@
    - 状态点 halo 走实色描边或 4-6px 软扩散（**不**用 v1.1 12px primary-glow）
    - 视觉锚：主色 token 用于"激活 / 选中 / 强调"；非激活态全走中性色（不滥用主色）
 
-8. **lane / 列卡片化原则**（v1.1 精修）
+8. **lane / 列卡片化原则**（v1.1 沿用 · v1.6 调整投影）
    - 时间轴的每条 lane / 看板的每列 / 合并管理的每张 PR 卡，**都是独立 elevated 卡片**
-   - 卡片特征：bg 比 canvas 提一档（lane-bg `#1F6171` / column 提一档）+ 1px 描边 + 8-20px 投影
+   - 卡片特征：bg = `--color-bg-elevated`（比 canvas 提一档）+ 8px 圆角（`--radius-card`）+ 1px 描边 / `--shadow-sm` 柔和阴影
    - 卡片之间 **14-16px gap**（gap 区域显出 canvas 色作为"分隔"）
+   - v1.1 三件套投影（base + inset + glow）**已废弃** —— 卡片只用 `--shadow-sm` 1 层柔和阴影
    - 这条覆盖"全局去描边"原则——卡片边界例外允许 1px 描边
 
 9. **a11y 加强**（非技术用户友好）
@@ -186,6 +187,25 @@
 - ✅ 通过 → 写 `docs/design/wireframe/theme-tech.html` 验证（已包含）→ Phase 1 改 `src/renderer/styles/theme.css` + `hud-decor.css`
 - ⏸ 暂缓 → `tech-refine.md` 留作 reference，落地推迟到 v1.2
 - ❌ 拒绝 → 回 v1 现状（卡片 12px / 按钮 8px / 标签 12px），OVERRIDE 本节标注"已撤回"
+
+### v1.6 推翻对账（2026-06-22 · 当前生效）
+
+> 本表对照 v1.1 决策，标记每个 v1.1 项在 v1.6 里的最终处理（保留 / 废弃 / 调整）。
+
+| v1.1 决策 | v1.6 处理 | 原因 |
+|---|---|---|
+| 卡片 6 / 按钮 4 / 标签 2（锐化） | **调整为 8 / 6 / 4**（中等柔化） | v1.6 走 Linear / Notion 6-8px 主流，不跟 MASTER 12px 也不跟 v1.1 锐化 2-4px |
+| 阴影三件套（base + inset + glow） | **改为 4 档单层柔和**（xs/sm/md/lg） | glow 在内容密集工具里是噪音；单层柔和更克制 |
+| 主按钮 glow（1px 主色 + 12-16px 主色光） | **去掉 glow**，主按钮 = background + `--shadow-sm` | 视觉权重靠 background，不靠 glow |
+| 装饰角 / 标题前缀条 / 键帽 | **全部移除** | 装饰元素跟 Minimalism 冲突 |
+| 主画布 24px grid + 角落点阵 | **全部移除**（v1.5 + v1.6 分两步删） | 工具类应用背景装饰是噪音 |
+| KPI 大数字 36-48px + 主色 text-shadow | **降到 28px**，**去掉 text-shadow** | 业务 UI 走专业克制路线 |
+| 进度条渐变填充 + glow | **去渐变去 glow**，走主色实色 | 进度条用实色足够表达 |
+| 状态点呼吸（1500ms） | **保留** | 等待 / 同步状态点的呼吸是功能性视觉 |
+| mono 字体强制 9 + 推荐 6 | **保留** | 跟 Minimalism 不冲突（mono 是信息层级） |
+| 顶部 StatusBar | **保留**（v1.4 高度从 24 → 33） | 业务需要 |
+| 状态色新增 4 色（红 / 青 / 等待灰 / 离线灰） | **保留** | 三重编码（颜色 + 图标 + 文字）需要 |
+| 过渡时长 150-240ms 分级 | **保留** | 跟 Minimalism 不冲突 |
 
 ---
 

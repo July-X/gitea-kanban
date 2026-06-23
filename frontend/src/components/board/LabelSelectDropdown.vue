@@ -315,10 +315,12 @@ function onBlur(): void {
   background: var(--color-bg-hover);
 }
 .label-dropdown__option--active {
-  background: var(--color-primary-glow);
+  /* v1.6：去 v1.1 强底色，降到 --color-primary-soft */
+  background: var(--color-primary-soft);
 }
 .label-dropdown__option--active.label-dropdown__option--hover {
-  background: color-mix(in srgb, var(--color-primary-glow) 70%, var(--color-bg-hover));
+  /* v1.6：去 v1.1 primary-glow 70% mix, 改 primary-soft + bg-hover mix */
+  background: color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-bg-hover));
 }
 .label-dropdown__option-dot {
   width: 10px;

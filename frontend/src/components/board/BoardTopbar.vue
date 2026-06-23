@@ -193,7 +193,8 @@ function openGiteaSource(): void {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: var(--color-primary-glow);
+  /* v1.6：32% alpha 强底色降到 --color-primary-soft (18% alpha) · Minimalism 克制 */
+  background: var(--color-primary-soft);
   color: var(--color-primary);
   border-radius: var(--radius-sm);
   font-size: var(--font-xs);
