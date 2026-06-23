@@ -432,14 +432,13 @@ const displayIssues = computed<IssueCardDto[]>(() => {
  *
  * box-shadow：drop-target 用主色 2px 实线 + 24px glow 扩散；
  * drag-source 用更弱的 soft 描边（区别于目标列强光）。 */
+/* v1.6 弱化 drag-source：去 12px soft 扩散 · 改 1px primary-soft 描边（更克制） */
 .column--drag-source {
-  box-shadow:
-    0 0 0 1px var(--color-primary-soft),
-    0 0 12px 2px var(--color-primary-soft);
+  box-shadow: 0 0 0 1px var(--color-primary-soft);
   transition: box-shadow 120ms ease-out;
 }
 .column--drop-target {
-  /* v1.6 弱化 drag-over 反馈：去 24px glow · 走主色 2px 实环 + 4px soft halo */
+  /* v1.6 弱化 drag-over 反馈：去 24px glow · 走主色 2px 实环 + 6px soft halo */
   box-shadow: 0 0 0 2px var(--color-primary), 0 0 0 6px var(--color-primary-soft);
   transition: box-shadow 120ms ease-out;
 }
