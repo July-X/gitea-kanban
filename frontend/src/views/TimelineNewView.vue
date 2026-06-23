@@ -113,6 +113,13 @@ function openCommitDetail(node: NonNullable<GraphResultDto['nodes']>[number]): v
 // ============================================================
 // 生命周期
 // ============================================================
+/** v2.8：响应 StatusBar 全局刷新按钮，重新加载 Git Graph */
+function onAppRefresh(): void {
+  if (activeProjectId.value) {
+    loadGraph();
+  }
+}
+
 onMounted(async () => {
   if (repo.repos.length === 0) {
     try {
@@ -124,6 +131,8 @@ onMounted(async () => {
   if (activeProjectId.value) {
     await loadGraph();
   }
+  // 注册全局刷新事件监听器
+  document.addEventListener('app:refresh', onAppRefresh);
 });
 
 watch(
@@ -133,10 +142,11 @@ watch(
   },
 );
 
-/** 组件卸载时清理拖拽监听器 */
+/** 组件卸载时清理拖拽监听器和事件监听器 */
 onUnmounted(() => {
   document.removeEventListener('mousemove', onDragMove);
   document.removeEventListener('mouseup', onDragEnd);
+  document.removeEventListener('app:refresh', onAppRefresh);
 });
 
 async function loadGraph(): Promise<void> {
