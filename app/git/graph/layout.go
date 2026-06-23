@@ -348,7 +348,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 				edges = append(edges, GraphEdge{
 					FromRow: row, ToRow: parentRow,
 					FromLane: childLane, ToLane: parentLane,
-					Color: shaToColor[parent], Type: EdgeMerge,
+					Color: shaToColor[commit.SHA], Type: EdgeMerge,
 				})
 			}
 		}

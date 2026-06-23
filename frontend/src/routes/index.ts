@@ -90,9 +90,11 @@ export const router = createRouter({
  * 全局守卫：未连接时强制进 /auth
  * 已经在 /auth 时不重定向（避免死循环）
  */
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
+  console.log('[Router] beforeEach - navigating from', from.path, 'to', to.path);
   if (to.meta.requiresAuth) {
     const auth = useAuthStore();
+    console.log('[Router] requiresAuth - isConnected:', auth.isConnected);
     if (!auth.isConnected) {
       // 首次进入尝试拉一次状态（避免 main 端已接好但 store 还没 hydrate）
       if (auth.accounts.length === 0 && !auth.loading) {
@@ -103,15 +105,18 @@ router.beforeEach(async (to) => {
         }
       }
       if (!auth.isConnected) {
+        console.warn('[Router] not connected, redirecting to auth');
         return { name: 'auth', query: { from: to.fullPath } };
       }
     }
   }
+  console.log('[Router] navigation allowed to', to.path);
   return true;
 });
 
 /** 路由 title 同步到 document.title */
 router.afterEach((to) => {
+  console.log('[Router] afterEach - arrived at', to.path, 'name:', to.name);
   const base = 'gitea-kanban';
   const title = typeof to.meta.title === 'string' ? to.meta.title : '';
   document.title = title ? `${title} · ${base}` : base;

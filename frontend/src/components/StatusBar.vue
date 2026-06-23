@@ -256,12 +256,15 @@ watch(
 
 // ===== 刷新 / 主题 / 退出 =====
 
-/** 主动刷新：拉最新仓库列表 + 重新检查 clone 状态 */
+/** 主动刷新：拉最新仓库列表 + 重新检查 clone 状态，并广播全局刷新事件 */
 async function onRefreshClick(): Promise<void> {
   try {
     await repo.loadRepos('', true);
     // 刷新 clone 状态缓存
     await repo.refreshClonedStatus();
+    // v2.8 修复：StatusBar 刷新按钮不能只刷新仓库列表，
+    // 还要通知当前活动视图重新加载自身数据（Git Graph / 看板 / 合并请求等）
+    window.dispatchEvent(new CustomEvent('app:refresh'));
   } catch (e) {
     const err = e as { messageText?: string };
     showToast({ type: 'error', message: '刷新失败', description: err.messageText ?? '请稍后重试' });
