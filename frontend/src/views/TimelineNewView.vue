@@ -121,6 +121,7 @@ function onAppRefresh(): void {
 }
 
 onMounted(async () => {
+  console.log('[TimelineNewView] onMounted - activeProjectId:', activeProjectId.value);
   if (repo.repos.length === 0) {
     try {
       await repo.loadRepos('', true);
@@ -129,7 +130,10 @@ onMounted(async () => {
     }
   }
   if (activeProjectId.value) {
+    console.log('[TimelineNewView] onMounted - calling loadGraph');
     await loadGraph();
+  } else {
+    console.warn('[TimelineNewView] onMounted - no activeProjectId, skipping loadGraph');
   }
   // 注册全局刷新事件监听器
   document.addEventListener('app:refresh', onAppRefresh);
@@ -150,18 +154,24 @@ onUnmounted(() => {
 });
 
 async function loadGraph(): Promise<void> {
-  if (!activeProjectId.value) return;
+  console.log('[TimelineNewView] loadGraph called - activeProjectId:', activeProjectId.value);
+  if (!activeProjectId.value) {
+    console.warn('[TimelineNewView] loadGraph - no activeProjectId, returning early');
+    return;
+  }
   loading.value = true;
   localError.value = null;
   featureDisabled.value = false;
   useGlobalLoadingStore().show('timeline');
   try {
+    console.log('[TimelineNewView] loadGraph - calling commitsGitgraphLines');
     // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
     // 跳过 v1 字符流往返（adapter.ts 反编码 → parser.ts 解析），消除 bug1-bug4
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
       limit: 200,
     });
+    console.log('[TimelineNewView] loadGraph - received dto:', dto);
 
     // 兼容 disabled 提示（main handler 可能返 disabled）
     const nodes = dto?.nodes ?? [];
@@ -170,12 +180,12 @@ async function loadGraph(): Promise<void> {
       graphDto.value = null;
       svgRender.value = null;
       localPath.value = null;
-      return;
+      // 不要在这里 return，让 finally 块清理状态
+    } else {
+      graphDto.value = dto;
+      // 直接渲染为 SVG（path 按 color 分组、节点含坐标）
+      svgRender.value = renderGraph(dto);
     }
-
-    graphDto.value = dto;
-    // 直接渲染为 SVG（path 按 color 分组、节点含坐标）
-    svgRender.value = renderGraph(dto);
   } catch (e: unknown) {
     console.error('[TimelineNewView] loadGraph failed:', e);
     const err = e as {
@@ -194,13 +204,13 @@ async function loadGraph(): Promise<void> {
       graphDto.value = null;
       svgRender.value = null;
       localPath.value = null;
-      return;
+      // 不要在这里 return，让 finally 块清理状态
+    } else {
+      localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
+      graphDto.value = null;
+      svgRender.value = null;
+      localPath.value = null;
     }
-
-    localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
-    graphDto.value = null;
-    svgRender.value = null;
-    localPath.value = null;
   } finally {
     loading.value = false;
     useGlobalLoadingStore().hide('timeline');
