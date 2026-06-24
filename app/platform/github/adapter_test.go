@@ -3,13 +3,21 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
+	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/platform"
 )
+
+// errorsAs 引用 errors.As（避免和 package 内的 errorsAs shadow）
+func errorsAs(err error, target **ipc.IpcError) bool {
+	return errors.As(err, target)
+}
 
 func TestGitHubAdapter_VerifyToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -342,16 +350,33 @@ func TestGitHubAdapter_ListRepos_Empty(t *testing.T) {
 	}
 }
 
-// TestGitHubAdapter_ListRepos_AuthError 401/403/404/429 走 mapHTTPError → IpcError
+// TestGitHubAdapter_ListRepos_AuthError 400/401/403/404/415/422/429/5xx/default 全部走 mapHTTPError
+//
+// v2.x 修复重点：每个分支都必须带 HTTPStatus（前端 toast 显示具体码）；
+// 5xx 一律走 network_offline，不再出现"服务器开小差"模糊文案；
+// default 兜底 message 必须包含状态码（不再写死"GitHub 返回错误"）。
 func TestGitHubAdapter_ListRepos_AuthError(t *testing.T) {
 	cases := []struct {
-		status int
-		body   string
+		status     int
+		body       string
+		wantCode   string
+		wantStatus int
 	}{
-		{401, `{"message":"Bad credentials"}`},
-		{403, `{"message":"Resource not accessible by integration"}`},
-		{404, `{"message":"Not Found"}`},
-		{429, `{"message":"API rate limit exceeded"}`},
+		{400, `{"message":"Invalid query"}`, ipc.CodeValidationFailed, 400},
+		{401, `{"message":"Bad credentials"}`, ipc.CodeTokenInvalid, 401},
+		{403, `{"message":"Resource not accessible"}`, ipc.CodePermissionDenied, 403},
+		{404, `{"message":"Not Found"}`, ipc.CodeNotFound, 404},
+		{406, `{"message":"Not Acceptable"}`, ipc.CodeValidationFailed, 406},
+		{415, `{"message":"Unsupported 'Accept' header"}`, ipc.CodeValidationFailed, 415},
+		{422, `{"message":"Validation Failed"}`, ipc.CodeValidationFailed, 422},
+		{429, `{"message":"API rate limit exceeded"}`, ipc.CodeRateLimited, 429},
+		// 5xx 全走 network_offline（不再走 default → 用户不再看到"服务器开小差"模糊文案）
+		{500, `{"message":"Internal Server Error"}`, ipc.CodeNetworkOffline, 500},
+		{502, `{"message":"Bad Gateway"}`, ipc.CodeNetworkOffline, 502},
+		{503, `{"message":"Service Unavailable"}`, ipc.CodeNetworkOffline, 503},
+		{504, `{"message":"Gateway Timeout"}`, ipc.CodeNetworkOffline, 504},
+		// 418 Teapot 兜底：必须带 HTTPStatus + message 含状态码
+		{418, `{"message":"I'm a teapot"}`, ipc.CodeGiteaError, 418},
 	}
 
 	for _, c := range cases {
@@ -366,6 +391,74 @@ func TestGitHubAdapter_ListRepos_AuthError(t *testing.T) {
 
 		if err == nil {
 			t.Errorf("status %d: expected error, got nil", c.status)
+			continue
+		}
+
+		var ipcErr *ipc.IpcError
+		if !errorsAs(err, &ipcErr) {
+			t.Errorf("status %d: error is not *ipc.IpcError: %v", c.status, err)
+			continue
+		}
+		if ipcErr.Code != c.wantCode {
+			t.Errorf("status %d: code = %q, want %q", c.status, ipcErr.Code, c.wantCode)
+		}
+		// 关键断言：每个分支都必须带 HTTPStatus —— 前端 toast 才能显示具体码
+		if ipcErr.HTTPStatus != c.wantStatus {
+			t.Errorf(
+				"status %d: HTTPStatus = %d, want %d (前端 toast 看不到具体码 = 用户体验差)",
+				c.status, ipcErr.HTTPStatus, c.wantStatus,
+			)
+		}
+		// 5xx message 应该提及"GitHub"，让用户知道是 GitHub 端的问题
+		if c.status >= 500 && c.status <= 599 {
+			if !strings.Contains(ipcErr.Message, "GitHub") {
+				t.Errorf("status %d: 5xx message should mention GitHub, got %q", c.status, ipcErr.Message)
+			}
+		}
+	}
+}
+
+// TestGitHubAdapter_MapHTTPError_DefaultIncludesStatus 单独验证 default 兜底带具体码
+//
+// 用户反馈 "服务器开小差：GitHub 返回错误" 完全看不到状态码。
+// 期望：message 形如 "GitHub 返回 418"，HTTPStatus = 418，code = gitea_error
+func TestGitHubAdapter_MapHTTPError_DefaultIncludesStatus(t *testing.T) {
+	err := mapHTTPError(418, `{"message":"I'm a teapot"}`)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var ipcErr *ipc.IpcError
+	if !errorsAs(err, &ipcErr) {
+		t.Fatalf("not IpcError: %v", err)
+	}
+	if ipcErr.HTTPStatus != 418 {
+		t.Errorf("HTTPStatus = %d, want 418", ipcErr.HTTPStatus)
+	}
+	if !strings.Contains(ipcErr.Message, "418") {
+		t.Errorf("message should contain 418, got %q", ipcErr.Message)
+	}
+	// 不能继续用写死的"GitHub 返回错误"——必须能区分 4xx 和 5xx
+	if ipcErr.Message == "GitHub 返回错误" {
+		t.Error("message 仍写死为 'GitHub 返回错误', 用户看不到具体状态码")
+	}
+}
+
+// TestGitHubAdapter_MapHTTPError_5xxNotGiteaError 验证 5xx 不再走 default（不再被分类为 gitea_error）
+//
+// 用户原本看到 "服务器开小差：GitHub 返回错误"（category=gitea_error）。
+// 现在 5xx 应该走 network_offline（category=网络问题），文案明确写"GitHub 服务暂不可用"。
+func TestGitHubAdapter_MapHTTPError_5xxNotGiteaError(t *testing.T) {
+	for _, status := range []int{500, 502, 503, 504} {
+		err := mapHTTPError(status, "body")
+		var ipcErr *ipc.IpcError
+		if !errorsAs(err, &ipcErr) {
+			t.Fatalf("status %d: not IpcError: %v", status, err)
+		}
+		if ipcErr.Code == ipc.CodeGiteaError {
+			t.Errorf("status %d: 5xx 不应被归类为 gitea_error, code=%q", status, ipcErr.Code)
+		}
+		if ipcErr.Code != ipc.CodeNetworkOffline {
+			t.Errorf("status %d: code=%q, want %q", status, ipcErr.Code, ipc.CodeNetworkOffline)
 		}
 	}
 }

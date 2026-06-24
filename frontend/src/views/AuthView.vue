@@ -432,6 +432,9 @@ function goNext(): void {
   font-size: var(--font-sm);
   font-weight: 500;
   margin: 0 0 2px 0;
+  /* 让 cause 里的 \n 能换行（ipc-client.ts 的 messageText 把 cause 拼成 \n[...] cause）*/
+  white-space: pre-line;
+  word-break: break-word;
 }
 
 .auth__error-hint {

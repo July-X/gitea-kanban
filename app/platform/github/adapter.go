@@ -298,35 +298,82 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 // mapHTTPError 把 GitHub HTTP 错误码映射为友好 IpcError
 //
 // 跟 Gitea mapHTTPError 保持一致的结构（main.go ErrorFormatter 会序列化到前端）
+//
+// 设计（v2.x · 修复"服务器开小差：GitHub 返回错误"模糊提示）：
+//   - 任何分支都带 HTTPStatus（前端 messageText 拼接显示具体码）
+//   - 400/415 走 validation_failed（请求参数/header 不被接受）
+//   - 500/501/504 走 network_offline（远端暂时不可达，与 502/503 一致）
+//   - default 兜底必须带状态码（让用户能看到"GitHub 返回 5xx"具体是什么）
+//     → 不能继续走 ipc.NewGiteaError（message 是写死的"GitHub 返回错误"，不显示状态码）
 func mapHTTPError(status int, body string) error {
 	cause := ipc.TruncateCause(body)
+	// 带 HTTPStatus 的 helper（对齐 errors.go FromHTTPStatus 模式）
+	withStatus := func(err *ipc.IpcError) *ipc.IpcError {
+		err.HTTPStatus = status
+		return err
+	}
+
 	switch status {
+	case 400:
+		// GitHub 偶尔返 400 表示请求参数错误（如 affiliations 值非法）
+		return withStatus(ipc.NewValidationFailed("请求参数不被 GitHub 接受", cause))
 	case 401:
-		return &ipc.IpcError{
+		return withStatus(&ipc.IpcError{
 			Code:       ipc.CodeTokenInvalid,
 			Message:    "登录已过期或 token 无效",
 			Hint:       "请到 GitHub Settings → Developer settings 重新生成 token",
 			Cause:      cause,
 			HTTPStatus: status,
-		}
+		})
 	case 403:
-		return ipc.NewPermissionDenied(cause + "（可能 token scope 不足）")
+		return withStatus(ipc.NewPermissionDenied(cause + "（可能 token scope 不足，或需要补 User-Agent header）"))
 	case 404:
-		return ipc.NewNotFound(cause + "（可能已被删除或 token 无权访问）")
+		return withStatus(ipc.NewNotFound(cause + "（可能已被删除或 token 无权访问）"))
+	case 406:
+		// 406 Not Acceptable：GitHub 严格匹配 Accept 头，应用送了它不支持的 MIME
+		// 我们当前固定 application/vnd.github+json，正常情况下不会触发；
+		// 如果触发了，几乎肯定是 GitHub 服务端临时状态，提示稍后重试 + 检查版本
+		return withStatus(&ipc.IpcError{
+			Code:       ipc.CodeValidationFailed,
+			Message:    "GitHub 不接受请求格式（HTTP 406）",
+			Hint:       "通常是 GitHub 端临时状态，稍后重试即可；如持续出现请升级应用",
+			Cause:      cause,
+			HTTPStatus: status,
+		})
+	case 415:
+		// GitHub 偶尔对 Accept 头挑剔（如 /user/repos 不接受 application/vnd.github+json 时）
+		// 当成请求参数错误，让用户重试或检查应用版本
+		return withStatus(ipc.NewValidationFailed("GitHub 不接受请求头（Accept 不匹配）", cause))
 	case 422:
-		return ipc.NewValidationFailed("请求参数不被服务端接受", cause)
+		return withStatus(ipc.NewValidationFailed("请求参数不被服务端接受", cause))
 	case 429:
-		return &ipc.IpcError{
+		return withStatus(&ipc.IpcError{
 			Code:       ipc.CodeRateLimited,
 			Message:    "请求过于频繁（GitHub API 限流）",
 			Hint:       "请稍候重试",
 			Cause:      cause,
 			HTTPStatus: status,
-		}
-	case 502, 503:
-		return ipc.NewNetworkOffline(cause)
+		})
+	case 500, 501, 502, 503, 504:
+		// 5xx 一律视为远端暂时不可达（network_offline + 提示"GitHub 服务暂不可用"）
+		// 不再走 default → 用户不再看到"服务器开小差"模糊文案
+		return withStatus(&ipc.IpcError{
+			Code:       ipc.CodeNetworkOffline,
+			Message:    "GitHub 服务暂不可用（HTTP " + strconv.Itoa(status) + "）",
+			Hint:       "这是 GitHub 端的问题，不是你的 token；稍候重试即可",
+			Cause:      cause,
+			HTTPStatus: status,
+		})
 	default:
-		return ipc.NewGiteaError("GitHub 返回错误", cause)
+		// 兜底：必须把 HTTP 状态码塞进 message，让前端能显示具体码
+		// 不要再用 ipc.NewGiteaError（message 写死"GitHub 返回错误"，看不到具体码）
+		return withStatus(&ipc.IpcError{
+			Code:       ipc.CodeGiteaError,
+			Message:    "GitHub 返回 " + strconv.Itoa(status),
+			Hint:       "请稍候重试；如果是 4xx 请检查 token 权限，5xx 请稍后再试",
+			Cause:      cause,
+			HTTPStatus: status,
+		})
 	}
 }
 
