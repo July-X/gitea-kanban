@@ -105,6 +105,8 @@ type WailsApp = {
     localPath: string;
     cloned: boolean;
   }>;
+  /** v2.15：按本地仓库路径读取 commit 详情（含 files / +/- stats） */
+  GetCommitDetail?: (args: { localPath: string; sha: string }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token） */
   GetGitGraph?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<{
     nodes: Array<{ row: number; lane: number; sha: string; shortSha: string; subject: string; authorName: string; authorEmail: string; date: string; isMerge: boolean; parents: string[]; refs?: string[] }>;
@@ -298,7 +300,31 @@ const apiShim = {
 
   commits: {
     list: (_args: unknown): Promise<unknown> => stubEmpty({ items: [], hasMore: false }),
-    get: (_args: unknown): Promise<unknown> => notImplemented('commits', 'get'),
+    get: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId?: string; sha?: string };
+      return forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'commits.get 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        async (app) => {
+          if (!app.GetRepoById || !app.GetCommitDetail) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 GetRepoById / GetCommitDetail',
+              hint: '请重新构建应用',
+            });
+          }
+          const repoInfo = await app.GetRepoById({ projectId: a.projectId ?? '' });
+          return app.GetCommitDetail({
+            localPath: repoInfo.localPath ?? '',
+            sha: a.sha ?? '',
+          });
+        },
+      );
+    },
     /**
      * gitgraphLines —— v2.4 修复 StatusBar 选完仓库后 Git Graph 不可用
      *

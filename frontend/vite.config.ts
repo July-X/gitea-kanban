@@ -12,11 +12,6 @@ export default defineConfig({
       '@shared': resolve(__dirname, 'src/shared'),
     },
   },
-  server: {
-    // Wails dev 模式通过代理注入，端口由 Wails 管理
-    port: 5173,
-    strictPort: true,
-  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
