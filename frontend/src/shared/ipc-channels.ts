@@ -27,7 +27,7 @@
  * issues ×7 : list / get / create / update / addLabel / removeLabel / moveColumn
  * labels ×2 : list / create
  * issues.comment ×2 : list / create（注：在 issues.comment.* 命名空间下；callable via issues.comment.list/create）
- * members ×1 : list（a3 新增：仓库成员 = gitea repo collaborators；返 `CollaboratorDto[]` 数组形态）
+ * members ×1 : list（a3 新增：仓库成员 = gitea repo collaborators；前端统一吃 `{items, hasMore}`）
  * user ×5 : prefs.get / prefs.set / undo / redo / undoStatus（M5 +4；M6 undo-by-project +1）
  * preferences ×3 : theme.get / theme.set（v1.1.2 主题切换 —— §16 tech-refine.md 拍板）/ clipboard.write（M6 补：分支/提交号复制）
  *

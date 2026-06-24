@@ -984,11 +984,21 @@ export function labelsCreate(args: {
  *
  * A3 拍板：channel = `members.list`，后端 src/main/gitea/repos.ts listRepoCollaborators 包装。
  *
- * v1 简化：直接返 CollaboratorDto[]，**不**做分页（gitea collaborators 接口无 page 参数）。
- * 二次过滤（按权限 / 名称）放 store 层。
+ * 兼容层：
+ * - 旧实现可能直接返数组
+ * - 当前前端统一吃 `{ items, hasMore }`
+ *
+ * gitea collaborators 接口无分页，统一包装时 `hasMore=false`。
  */
 export function membersList(args: { projectId: string }): Promise<ListMembersResp> {
-  return getIpcClient().invoke('members', 'list', args);
+  return getIpcClient()
+    .invoke('members', 'list', args)
+    .then((resp) => {
+      if (Array.isArray(resp)) {
+        return { items: resp, hasMore: false } satisfies ListMembersResp;
+      }
+      return resp as ListMembersResp;
+    });
 }
 
 /** 列仓库里程碑（v1.4 新增：新建议题弹窗选里程碑用）

@@ -443,26 +443,31 @@ const apiShim = {
       );
     },
     gitgraphGetWorkspace: (): Promise<unknown> => {
-      // 优先走 Wails binding（已生成：App.GetWorkspace）
-      // Wails 没启动时 fallback 到默认路径
-      const wailsApp = (window as unknown as { go?: { main?: { App?: { GetWorkspace?: () => Promise<Record<string, string>> } } } })?.go?.main?.App;
-      if (wailsApp?.GetWorkspace) {
-        return wailsApp.GetWorkspace();
-      }
-      return stubEmpty({
-        cwd: '~/.gitea-kanban/workspace',
-        suggestedRepoCwdTemplate: '${workspacePath}/repos/${owner}__${repo}.git',
-      });
+      return forwardToWails(
+        () =>
+          stubEmpty({
+            cwd: '~/.gitea-kanban/workspace',
+            suggestedRepoCwdTemplate: '${workspacePath}/repos/${owner}__${repo}.git',
+          }),
+        (app) =>
+          app.GetWorkspace?.() ??
+          stubEmpty({
+            cwd: '~/.gitea-kanban/workspace',
+            suggestedRepoCwdTemplate: '${workspacePath}/repos/${owner}__${repo}.git',
+          }),
+      );
     },
     gitgraphSetWorkspace: (args: { cwd: string }): Promise<unknown> => {
-      // 优先走 Wails binding（App.SetWorkspace）— 持久化到 localStore
-      const wailsApp = (window as unknown as { go?: { main?: { App?: { SetWorkspace?: (a: { cwd: string }) => Promise<void> } } } })?.go?.main?.App;
-      if (wailsApp?.SetWorkspace) {
-        return wailsApp.SetWorkspace({ cwd: args.cwd });
-      }
-      // Wails 未启动（前端独立运行）— 接受用户输入但仅 console.warn
-      console.warn('[gitea-kanban] setWorkspace stub: Wails not running, path not persisted:', args.cwd);
-      return stubEmpty({ cwd: args.cwd });
+      return forwardToWails(
+        () => {
+          // Wails 未启动（前端独立运行）— 接受用户输入但仅 console.warn
+          console.warn('[gitea-kanban] setWorkspace stub: Wails not running, path not persisted:', args.cwd);
+          return stubEmpty({ cwd: args.cwd });
+        },
+        (app) =>
+          app.SetWorkspace?.({ cwd: args.cwd }).then(() => ({ cwd: args.cwd })) ??
+          stubEmpty({ cwd: args.cwd }),
+      );
     },
     gitgraphListWorkspaceRepos: (_args: unknown): Promise<unknown> => stubEmpty([]),
     gitgraphMigrateWorkspace: (_args: unknown): Promise<unknown> =>

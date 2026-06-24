@@ -20,28 +20,12 @@ import { membersList } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
+import type { MemberDto as RendererMemberDto } from '@renderer/types/dto';
 
 /** 视图层权限维度 */
 export type MemberFilter = 'all' | 'admin' | 'write' | 'read';
 
-/** 单个成员 DTO（A3 拍板，src/main/ipc/schema.ts CollaboratorDto）
- *
- * 注：v1 渲染端**不**引 schema 的具体类型（避免前端硬绑 main 端内部类型）；
- * 字段就 username / avatarUrl / permission / fullName（v1.2+），runtime 校验。
- * gitea permission 字段实际值可能为 'read' | 'write' | 'admin'（v8 API 文档），
- * 旧版本可能为 'pull' | 'push' | 'owner'，v1 简化只处理新值。
- *
- * A-3 P3 · W7 修法（2026-06-14）：加 fullName 用于"按姓名搜索"，
- * 旧 gitea 实例 fullName 不存在 → undefined，search 退化为按 username 匹配。
- */
-export interface MemberDto {
-  username: string;
-  avatarUrl?: string;
-  /** gitea user.full_name，可选（旧版 gitea 无此字段） */
-  fullName?: string;
-  /** gitea 'read' | 'write' | 'admin' */
-  permission: 'read' | 'write' | 'admin' | string;
-}
+export type MemberDto = RendererMemberDto;
 
 export const useMemberStore = defineStore('member', () => {
   // ===== state =====
@@ -109,8 +93,8 @@ export const useMemberStore = defineStore('member', () => {
       currentSelectedItem.value = null;
     }
     try {
-      const resp = (await membersList({ projectId })) as MemberDto[];
-      items.value = Array.isArray(resp) ? resp : [];
+      const resp = await membersList({ projectId });
+      items.value = resp.items as MemberDto[];
       currentProjectId.value = projectId;
     } catch (e) {
       error.value = normalizeError(e);

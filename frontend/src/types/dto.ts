@@ -14,8 +14,7 @@
  *   - `.strict()`                     → 运行时约束，类型层面忽略（interface 默认即开放，但 DTO 形态已固定）
  *   - ISO 日期字符串（z.string().datetime）→ `string`
  *
- * 注：MemberDto 来源于 frontend/src/stores/member.ts（前端本地对 CollaboratorDto 的视图镜像），
- *     非 schema.ts 产物，按需一并收录于此。
+ * 注：成员类型在这里统一收口；store/view 直接复用，不再各自镜像一份。
  */
 
 // ============================================================
@@ -242,6 +241,8 @@ export interface CommitDto {
   linkedCards?: LinkedCardDto[];
 }
 
+export type CommitDetailDTO = CommitDto;
+
 export interface ListCommitsArgs {
   projectId: string;
   sha?: string;
@@ -464,21 +465,8 @@ export interface ListMembersResp {
   hasMore: boolean;
 }
 
-/**
- * 单个成员 DTO（前端视图镜像，来源于 frontend/src/stores/member.ts）
- *
- * 注：v1 渲染端不直接引 schema 的 CollaboratorDto，字段一致但 permission 收窄为 union。
- * gitea permission 字段实际值可能为 'read' | 'write' | 'admin'（v8 API 文档），
- * 旧版本可能为 'pull' | 'push' | 'owner'，v1 简化只处理新值。
- */
-export interface MemberDto {
-  username: string;
-  avatarUrl?: string;
-  /** gitea user.full_name，可选（旧版 gitea 无此字段） */
-  fullName?: string;
-  /** gitea 'read' | 'write' | 'admin' */
-  permission: 'read' | 'write' | 'admin' | string;
-}
+/** 视图层成员类型：当前直接复用 CollaboratorDto，避免多一份镜像类型。 */
+export type MemberDto = CollaboratorDto;
 
 // ============================================================
 // ===== gitgraph 命名空间（git graph 视图）=====

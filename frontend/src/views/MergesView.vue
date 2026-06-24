@@ -20,38 +20,34 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronRight, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
-import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
 import { renderMarkdown } from '@renderer/lib/markdown';
-import { issuesCommentCreate, issuesCommentList } from '@renderer/lib/ipc-client';
+import {
+  issuesCommentCreate,
+  issuesCommentList,
+  labelsCreate,
+  labelsList,
+  membersList,
+  pullsUpdateAssignee,
+  pullsUpdateLabels,
+  pullsUpdateReviewers,
+} from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
-import type { PullDto, RepoDto, MergeMethod } from '@renderer/types/dto';
+import type { CollaboratorDto, PullDto, RepoDto, MergeMethod } from '@renderer/types/dto';
 import type { IssueCommentDto } from '@renderer/types/dto';
 
 const repo = useRepoStore();
 const pull = usePullStore();
 const auth = useAuthStore();
-const branch = useBranchStore();
 const router = useRouter();
-
-/** 去掉 URL 末尾的 `/` 字符（gitea URL 拼接用）
- *
- * 为什么不用 template 里的 inline regex literal：
- * Vue 3 SFC compiler 在 attribute expression 里 parse regex literal 时
- * 对 `\\` 转义处理不一致，写 `/\\/$/` 会触发 "Invalid regular expression flag"。
- * 抽成函数 + string method 是最稳的写法。
- */
-function stripTrailingSlash(s: string): string {
-  return s.endsWith('/') ? s.slice(0, -1) : s;
-}
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
@@ -290,17 +286,22 @@ async function openAttrEditor(p: PullDto): Promise<void> {
   // 加载可用标签和成员
   if (activeProjectId.value) {
     try {
-      const labelsResp = await window.api.labels.list(toPlain({ projectId: String(activeProjectId.value) })) as { items: { name: string; color: string }[] };
+      const labelsResp = await labelsList({ projectId: String(activeProjectId.value) });
       availableLabels.value = labelsResp.items ?? [];
     } catch { /* 忽略 */ }
     try {
-      // members.list 返回直接是数组（不是 {items}）
-      const membersResp = await window.api.members.list(toPlain({ projectId: String(activeProjectId.value) })) as { username: string }[];
-      availableMembers.value = (membersResp ?? []).map(m => m.username);
+      const membersResp = await membersList({ projectId: String(activeProjectId.value) });
+      const members = membersResp.items ?? [];
+      availableMembers.value = members.map((m) => m.username);
       // 识别组织账号（gitea 1.x 限制：组织不能作评审人，但可以作指派人）
-      nonReviewableMembers.value = new Set(membersResp
-        .filter((m: { login_type?: string; username: string }) => m.login_type === 'Organization' || m.login_type === 'organization')
-        .map((m: { username: string }) => m.username));
+      nonReviewableMembers.value = new Set(
+        members
+          .filter(
+            (m: CollaboratorDto & { login_type?: string }) =>
+              m.login_type === 'Organization' || m.login_type === 'organization',
+          )
+          .map((m) => m.username),
+      );
     } catch { /* 忽略 */ }
   }
 }
@@ -332,11 +333,11 @@ async function createNewLabel(): Promise<void> {
   try {
     // 去掉 # 前缀
     const color = newLabelColor.value.replace(/^#/, '');
-    const newLabel = await window.api.labels.create(toPlain({
+    const newLabel = await labelsCreate({
       projectId: String(activeProjectId.value),
       name: newLabelName.value.trim(),
       color,
-    })) as { name: string; color: string };
+    });
     // 立即加到可用列表和已选列表
     availableLabels.value = [...availableLabels.value, { name: newLabel.name, color: newLabel.color }];
     if (!editingLabels.value.includes(newLabel.name)) {
@@ -354,16 +355,6 @@ async function createNewLabel(): Promise<void> {
   }
 }
 
-/** 把任意对象深拷贝成可被 structured clone 的纯 plain object
- *
- * Vue 3 ref/computed 在跨 contextBridge 时会被结构化克隆
- * → "An object could not be cloned"
- * 用 JSON parse/stringify 强制展开成 plain data
- */
-function toPlain<T>(v: T): T {
-  return JSON.parse(JSON.stringify(v));
-}
-
 /** 保存属性（逐字段尝试，一个失败不影响其他） */
 async function saveAttrs(p: PullDto): Promise<void> {
   if (!activeProjectId.value) return;
@@ -372,11 +363,11 @@ async function saveAttrs(p: PullDto): Promise<void> {
 
   // 1. 更新标签（替换所有标签）
   try {
-    await window.api.pulls.updateLabels(toPlain({
+    await pullsUpdateLabels({
       projectId,
       index: p.index,
       labels: editingLabels.value,
-    }));
+    });
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     errors.push(`标签: ${err.messageText ?? err.message ?? '失败'}`);
@@ -384,11 +375,11 @@ async function saveAttrs(p: PullDto): Promise<void> {
 
   // 2. 更新指派人（空串 = 清除指派人）
   try {
-    await window.api.pulls.updateAssignee(toPlain({
+    await pullsUpdateAssignee({
       projectId,
       index: p.index,
       assignee: editingAssignee.value,
-    }));
+    });
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     errors.push(`指派人: ${err.messageText ?? err.message ?? '失败'}`);
@@ -397,11 +388,11 @@ async function saveAttrs(p: PullDto): Promise<void> {
   // 3. 更新评审人（过滤掉组织账号——gitea 1.x 不允许）
   const validReviewers = editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r));
   try {
-    await window.api.pulls.updateReviewers(toPlain({
+    await pullsUpdateReviewers({
       projectId,
       index: p.index,
       reviewers: validReviewers,
-    }));
+    });
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     const msg = err.messageText ?? err.message ?? '失败';
@@ -498,7 +489,7 @@ const commentDrafts = ref<Map<number, string>>(new Map());
 const mentionState = ref<Map<number, { key: string; cursor: number; activeIdx: number }>>(new Map());
 
 /** 当前用户 username（用来在评论旁标"我" / 加视觉高亮） */
-const currentUsername = computed<string | null>(() => auth.currentUsername ?? null);
+const currentUsername = computed<string | null>(() => auth.currentUser?.login ?? null);
 
 /** @ 提及下拉是否打开 */
 function isMentionOpen(idx: number): boolean {
@@ -694,7 +685,6 @@ async function postComment(p: PullDto): Promise<void> {
     showToast({
       type: 'error',
       message: err.messageText ?? '发送失败',
-      hint: err.hint ?? '请检查网络或稍后重试',
       persistent: true,
     });
   } finally {
