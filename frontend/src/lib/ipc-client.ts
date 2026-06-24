@@ -33,7 +33,7 @@ import type {
   ListMilestonesResp,
   ListIssuesResp,
   ColumnDto,
-  CommitDto,
+  CommitDetailDTO,
   IssueCardDto,
   IssueCommentDto,
   LabelDto,
@@ -458,7 +458,7 @@ export function commitsList(args: {
 }
 
 /** 拿单个 commit 详情（gitea /repos/{owner}/{repo}/git/commits/{sha}，含 stats） */
-export function commitsGet(args: { projectId: string; sha: string }): Promise<CommitDto> {
+export function commitsGet(args: { projectId: string; sha: string }): Promise<CommitDetailDTO> {
   return getIpcClient().invoke('commits', 'get', args);
 }
 

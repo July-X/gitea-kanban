@@ -1523,15 +1523,39 @@ func filterStarredBranches(branches []store.StarredBranch, projectID, branch str
 // ===== commit 详情 + diff（步骤 3.3）=====
 
 // CommitDetailDTO commit 详情（暴露给前端）
+//
+// v2.15 扩展：新增 Files / Additions / Deletions / FilesChanged 字段
+// （从 GetCommitDiff + commit.Stats() 合并而来）。
+// 修复"展开 commit 后手风琴无文件信息"bug —— 之前 DTO 只有 8 个元信息字段，
+// 完全没有文件变更数据，前端 CommitDetailPanel 永远拿不到 files。
 type CommitDetailDTO struct {
-	SHA         string   `json:"sha"`
-	ShortSHA    string   `json:"shortSha"`
-	Subject     string   `json:"subject"`
-	AuthorName  string   `json:"authorName"`
-	AuthorEmail string   `json:"authorEmail"`
-	AuthorWhen  string   `json:"authorWhen"`
-	Message     string   `json:"message"`
-	Parents     []string `json:"parents"`
+	SHA          string           `json:"sha"`
+	ShortSHA     string           `json:"shortSha"`
+	Subject      string           `json:"subject"`
+	AuthorName   string           `json:"authorName"`
+	AuthorEmail  string           `json:"authorEmail"`
+	AuthorWhen   string           `json:"authorWhen"`
+	Message      string           `json:"message"`
+	Parents      []string         `json:"parents"`
+	Files        []FileChangeDTO  `json:"files,omitempty"`        // 变更文件列表（含 +/- 行数）
+	Additions    int              `json:"additions,omitempty"`     // 总新增行数
+	Deletions    int              `json:"deletions,omitempty"`     // 总删除行数
+	FilesChanged int              `json:"filesChanged,omitempty"`  // 变更文件数
+}
+
+// FileChangeDTO 文件变更（前端 CommitDetailPanel 用）
+//
+// 字段命名跟前端 interface 对齐：
+//   - Filename    （对应后端 Path）
+//   - PreviousFilename （对应后端 OldPath）
+//   - Status      （对应后端 Action：added/modified/deleted/renamed）
+type FileChangeDTO struct {
+	Filename         string `json:"filename"`
+	PreviousFilename string `json:"previousFilename,omitempty"`
+	Status           string `json:"status"` // added / modified / deleted / renamed
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	Binary           bool   `json:"binary,omitempty"` // v2.15 暂不支持（go-git 无标记）
 }
 
 // GetCommitDetailArgs 获取 commit 详情参数
@@ -1541,6 +1565,10 @@ type GetCommitDetailArgs struct {
 }
 
 // GetCommitDetail 获取单个 commit 的详情（go-git）
+//
+// v2.15 扩展：除了元信息（message / author），还调 GetCommitDiff 拿文件变更列表，
+// 计算 totals（Additions / Deletions / FilesChanged）填到 DTO。
+// 修复"展开 commit 后手风琴无文件信息"bug —— 之前 handler 只填元信息字段。
 func (a *App) GetCommitDetail(args GetCommitDetailArgs) (CommitDetailDTO, error) {
 	repo, err := git.OpenRepo(args.LocalPath)
 	if err != nil {
@@ -1552,7 +1580,7 @@ func (a *App) GetCommitDetail(args GetCommitDetailArgs) (CommitDetailDTO, error)
 		return CommitDetailDTO{}, err
 	}
 
-	return CommitDetailDTO{
+	dto := CommitDetailDTO{
 		SHA:         commit.SHA,
 		ShortSHA:    commit.ShortSHA,
 		Subject:     commit.Subject,
@@ -1561,7 +1589,30 @@ func (a *App) GetCommitDetail(args GetCommitDetailArgs) (CommitDetailDTO, error)
 		AuthorWhen:  commit.AuthorWhen,
 		Message:     commit.Message,
 		Parents:     commit.Parents,
-	}, nil
+	}
+
+	// v2.15：调 GetCommitDiff 拿文件变更 + 累计 +/- 行数
+	files, diffErr := repo.GetCommitDiff(args.SHA)
+	if diffErr != nil {
+		// diff 失败不阻塞主流程（meta 数据仍返回），只 log 警告
+		a.logger.Warn("GetCommitDetail: GetCommitDiff failed", "sha", args.SHA, "err", diffErr)
+	} else {
+		dto.Files = make([]FileChangeDTO, 0, len(files))
+		for _, f := range files {
+			dto.Files = append(dto.Files, FileChangeDTO{
+				Filename:         f.Path,
+				PreviousFilename: f.OldPath,
+				Status:           f.Action,
+				Additions:        f.Additions,
+				Deletions:        f.Deletions,
+			})
+			dto.Additions += f.Additions
+			dto.Deletions += f.Deletions
+		}
+		dto.FilesChanged = len(files)
+	}
+
+	return dto, nil
 }
 
 // ===== 拉取/同步（步骤 3.4）=====
