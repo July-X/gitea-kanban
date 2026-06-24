@@ -65,11 +65,11 @@ function onEnter(e: MouseEvent): void {
   }, props.delay);
 }
 
-function onLeave(e: MouseEvent): void {
-  const trigger = e.currentTarget as HTMLElement;
-  const to = e.relatedTarget as Node | null;
+function onLeave(e?: MouseEvent): void {
+  const trigger = e?.currentTarget as HTMLElement | undefined;
+  const to = e?.relatedTarget as Node | null | undefined;
   // 鼠标进入 trigger 的子元素时不要关闭
-  if (to && trigger.contains(to)) return;
+  if (trigger && to && trigger.contains(to)) return;
   clearTimer();
   visible.value = false;
   triggerRef.value = null;

@@ -421,12 +421,6 @@ function formatRelative(iso: string): string {
 }
 
 /**
- * v2.10：手风琴最大高度（同时决定 spacer 占位高度）
- * 用户拍板：固定 260px → 超过出纵向滚动条
- */
-const ACCORDION_MAX_HEIGHT = 260;
-
-/**
  * v2.10：当前展开的 commit node（直接从 allRows 拿，懒加载 detail 用）
  */
 const expandedCommitNode = computed<

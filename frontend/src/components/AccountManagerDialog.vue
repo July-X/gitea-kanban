@@ -9,7 +9,7 @@
  *   - 底部"退出并移除"→ 移除当前账号并跳回 /auth
  *   - 底部"添加新账号"→ 内嵌连接表单
  */
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { X, User, LogOut, UserPlus, Check } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';

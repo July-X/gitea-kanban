@@ -186,7 +186,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   };
 
   const mergeSiblings = new Map<string, GraphEdgeDto[]>();
-  for (const [index, edge] of graph.edges.entries()) {
+  for (const edge of graph.edges) {
     if (edge.fromLane <= edge.toLane) {
       continue;
     }

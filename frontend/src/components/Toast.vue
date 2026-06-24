@@ -13,7 +13,7 @@
  *   - 移除 body 整块 @click 关闭（避免误触 + 避免 action 按钮 click 穿透关闭）
  *   - 只 × 按钮关闭（明确语义）
  */
-import { toast, dismissToast, TOAST_ICONS } from '@renderer/lib/toast';
+import { toast, dismissToast, TOAST_ICONS, type ToastAction } from '@renderer/lib/toast';
 
 function onDismiss(): void {
   dismissToast();
@@ -24,13 +24,7 @@ function onDismiss(): void {
  * - 调 onClick（异步也行，await 完才决定是否关闭）
  * - dismissAfter 决定是否关 toast（默认 true）
  */
-async function onActionClick(action: (typeof toast.value) extends infer T
-  ? T extends { actions: infer A }
-    ? A extends Array<infer Item>
-      ? Item
-      : never
-    : never
-  : never): Promise<void> {
+async function onActionClick(action: ToastAction): Promise<void> {
   try {
     await action.onClick();
   } catch {
@@ -236,4 +230,3 @@ async function onActionClick(action: (typeof toast.value) extends infer T
   opacity: 0;
 }
 </style>
-

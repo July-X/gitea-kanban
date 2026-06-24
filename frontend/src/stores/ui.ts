@@ -91,12 +91,6 @@ export function isValidTheme(s: unknown): s is Theme {
 /** user.prefs 中主题的 key（与 Go 端 state.Prefs 平铺一致） */
 export const THEME_PREF_KEY = 'theme';
 
-/** ThemeGetResult —— user.prefs.get({ keys: ['theme'] }) 的出参形态 */
-interface ThemeGetResult {
-  theme: Theme;
-  changedAt?: string; // 当前 user.prefs 不带时间戳，保留字段位便于将来扩展
-}
-
 /**
  * fetchPersistedTheme —— 拉远端持久化的主题
  *

@@ -119,14 +119,6 @@ function onMinutesChange(e: Event): void {
   }
 }
 
-function onSecondsChange(e: Event): void {
-  const target = e.target as HTMLInputElement;
-  const n = Number(target.value);
-  if (Number.isFinite(n)) {
-    draftMs.value = Math.max(1, Math.round(n)) * 1000;
-  }
-}
-
 async function onSave(): Promise<void> {
   if (
     draftMs.value < SETTINGS_LIMITS.MIN_POLLING_INTERVAL_MS ||

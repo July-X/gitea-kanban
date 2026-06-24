@@ -25,7 +25,6 @@ import { showToast } from '@renderer/lib/toast';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBoardStore } from '@renderer/stores/board';
-import { useBranchStore } from '@renderer/stores/branch';
 import type {
   ColumnDto,
   IssueCardDto,
@@ -70,7 +69,6 @@ const repo = useRepoStore();
 const board = useBoardStore();
 const auth = useAuthStore();
 const router = useRouter();
-const branchStore = useBranchStore();
 
 // v1.4 调整（2026-06-18）：列内 inline 新建框已移除，新建议题改走 Header 弹窗
 const createIssueDialogOpen = ref(false);
@@ -694,9 +692,9 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
           :over-limit-tooltip="wipOverLimitTooltip(doneColumn)"
           :drag-options="columnDragOptions"
           @open-settings="openColumnMenu(doneColumn)"
-          @drag-start="(evt) => onColumnDragStart(doneColumn, evt)"
-          @drag-move="(evt) => onColumnDragMove(doneColumn, evt)"
-          @drag-end="(evt) => onColumnDragEnd(doneColumn, evt)"
+          @drag-start="(evt) => onColumnDragStart(doneColumn!, evt)"
+          @drag-move="(evt) => onColumnDragMove(doneColumn!, evt)"
+          @drag-end="(evt) => onColumnDragEnd(doneColumn!, evt)"
           @open-move-menu="({ issue, fromColumnId }) => openMoveMenu(issue, fromColumnId)"
           @request-delete-issue="({ issue, columnId }) => requestDeleteIssue(issue, columnId)"
           @toggle-show-closed="(columnId) => toggleColumnShowClosed(columnId)"
@@ -721,29 +719,29 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
 
     <!-- 弹窗 / 菜单 收口 -->
     <MoveColumnPicker
-      :open="moveMenu.open"
-      :issue-index="moveMenu.issue?.index"
+      :open="moveMenu?.open ?? false"
+      :issue-index="moveMenu?.issue?.index"
       :columns="board.columns"
-      :from-column-id="moveMenu.fromColumnId"
+      :from-column-id="moveMenu?.fromColumnId ?? null"
       mode="move"
-      @update:open="(v) => (moveMenu.open = v)"
+      @update:open="(v) => moveMenu && (moveMenu.open = v)"
       @pick="(id) => pickTargetColumn(id, activeProjectId)"
     />
     <MoveColumnPicker
-      :open="assignMenu.open"
-      :issue-index="assignMenu.issue?.index"
+      :open="assignMenu?.open ?? false"
+      :issue-index="assignMenu?.issue?.index"
       :columns="board.columns.filter((c) => c.labels.length > 0)"
       :from-column-id="null"
       mode="assign"
-      @update:open="(v) => (assignMenu.open = v)"
+      @update:open="(v) => assignMenu && (assignMenu.open = v)"
       @pick="(id) => pickAssignTarget(id)"
     />
 
     <ConfirmDialog
-      :open="confirmDelete.open"
+      :open="confirmDelete?.open ?? false"
       title="关闭这张议题？"
       :description="
-        confirmDelete.issue
+        confirmDelete?.issue
           ? `议题 #${confirmDelete.issue.index}「${confirmDelete.issue.title}」将在 gitea 上标记为已关闭（v1 不真删除）。关闭后你仍能在 gitea 的「已关闭」列表里找到它。`
           : ''
       "
@@ -751,19 +749,19 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       cancel-label="取消"
       :danger="true"
       confirm-keyword="关闭"
-      @update:open="(v) => (confirmDelete.open = v)"
+      @update:open="(v) => confirmDelete && (confirmDelete.open = v)"
       @confirm="performDelete(activeProjectId)"
     />
 
     <ConfirmDialog
-      :open="confirmAssign.open"
+      :open="confirmAssign?.open ?? false"
       title="归类这张议题？"
       :description="confirmAssignDescription"
       confirm-label="确认归类"
       cancel-label="取消"
       :danger="false"
       confirm-keyword="归类"
-      @update:open="(v) => (confirmAssign.open = v)"
+      @update:open="(v) => confirmAssign && (confirmAssign.open = v)"
       @confirm="performAssign(activeProjectId)"
     />
 
@@ -780,9 +778,9 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
     />
 
     <ConfirmFinishDialog
-      :open="confirmFinish.open"
-      :issue="confirmFinish.issue"
-      @update:open="(v) => (confirmFinish.open = v)"
+      :open="confirmFinish?.open ?? false"
+      :issue="confirmFinish?.issue ?? null"
+      @update:open="(v) => confirmFinish && (confirmFinish.open = v)"
       @confirm="performFinishMove(activeProjectId)"
     />
 
@@ -829,7 +827,7 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
             <button
               type="button"
               class="modal__btn modal__btn--primary"
-              :disabled="!newColumnTitle.trim() || creatingColumn"
+              :disabled="!(newColumnTitle ?? '').trim() || !!creatingColumn"
               @click="confirmCreateColumn(activeProjectId)"
             >
               {{ creatingColumn ? '创建中...' : '新增列' }}
@@ -840,15 +838,15 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
     </Teleport>
 
     <ColumnMenu
-      :open="showColumnMenu.open"
-      :column="showColumnMenu.column"
-      :editing-title="editingColumnTitle"
-      :editing-wip-limit="editingColumnWipLimit"
+      :open="showColumnMenu?.open ?? false"
+      :column="showColumnMenu?.column ?? null"
+      :editing-title="editingColumnTitle ?? ''"
+      :editing-wip-limit="editingColumnWipLimit ?? ''"
       :is-wip-invalid="isWipLimitInputInvalid()"
       :is-dirty="isColumnMenuDirty()"
-      :binding-label="bindingLabel"
+      :binding-label="bindingLabel ?? false"
       :unmatched-count="unmatchedLabelCount"
-      @update:open="(v) => (showColumnMenu.open = v)"
+      @update:open="(v) => showColumnMenu && (showColumnMenu.open = v)"
       @update:editing-title="(v) => (editingColumnTitle = v)"
       @update:editing-wip-limit="(v) => (editingColumnWipLimit = v)"
       @save="confirmUpdateColumn"
@@ -858,23 +856,23 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
     />
 
     <LabelPicker
-      :open="showBindLabel"
-      :column="showColumnMenu.column"
+      :open="showBindLabel ?? false"
+      :column="showColumnMenu?.column ?? null"
       :labels="board.labelsByProject"
-      :binding="bindingLabel"
+      :binding="bindingLabel ?? false"
       @update:open="(v) => (showBindLabel = v)"
       @bind-label="({ id, name }) => bindLabel(id, name)"
     />
 
     <ConfirmDialog
-      :open="confirmDeleteColumn.open"
-      :title="'删除列 ' + (confirmDeleteColumn.column ? confirmDeleteColumn.column.title : '')"
+      :open="confirmDeleteColumn?.open ?? false"
+      :title="'删除列 ' + (confirmDeleteColumn?.column ? confirmDeleteColumn.column.title : '')"
       description="删除后无法恢复。如果列里有议题,它们不会消失,只是不再被这个看板列归类。"
       confirm-label="我了解风险,仍要删除"
       cancel-label="取消"
       :danger="true"
       confirm-keyword="删除"
-      @update:open="(v) => (confirmDeleteColumn.open = v)"
+      @update:open="(v) => confirmDeleteColumn && (confirmDeleteColumn.open = v)"
       @confirm="performDeleteColumn"
     />
 

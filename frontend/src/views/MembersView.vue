@@ -16,7 +16,7 @@
  *     走"维护者"；本视图用"管理员"更通俗，PM 更易理解 —— 此项已在
  *     OVERRIDE §本项目专属规则 #1 范围内，**不**算新增）
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { Users2, RefreshCw, Search } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useMemberStore, type MemberFilter, type MemberDto } from '@renderer/stores/member';

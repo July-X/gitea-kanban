@@ -18,14 +18,14 @@
  *   - 截止日期列 v1 显示"暂无"（**不**接 gitea issue.due_date——schema 暂未含）
  *   - **不**做"卡片详情抽屉"（v1 只读列表；点行打开 gitea web）
  */
-import { computed, onMounted, ref, watch } from 'vue';
-import { ListChecks, RefreshCw, Search } from 'lucide-vue-next';
+import { computed, onMounted, watch } from 'vue';
+import { RefreshCw, Search } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useMyCardStore, type MyCardFilter } from '@renderer/stores/my-card';
 import { showToast } from '@renderer/lib/toast';
 import EmptyState from '@renderer/components/EmptyState.vue';
-import type { IssueCardDto, RepoDto } from '@renderer/types/dto';
+import type { RepoDto } from '@renderer/types/dto';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
