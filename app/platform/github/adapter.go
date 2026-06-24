@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,6 +32,11 @@ import (
 
 // GitHubAPIBase GitHub API 基础 URL
 const GitHubAPIBase = "https://api.github.com"
+
+// GitHubAdapterVersion 发请求时塞进 User-Agent 的应用版本号
+//
+// 改版本号时同步更新 README + CHANGELOG.md
+const GitHubAdapterVersion = "2.4.0"
 
 // GitHubAdapter GitHub 平台适配器（首期仅 Git Graph）
 type GitHubAdapter struct {
@@ -259,6 +265,20 @@ func (a *GitHubAdapter) ListMembers(ctx context.Context, hostURL, username, toke
 //
 // 鉴权：Authorization: Bearer <token>（与 Gitea 的 token <pat> 不同）
 // URL：${hostURL}${path}（GitHub API 不需要 /api/v1 前缀）
+//
+// 必备请求头（GitHub REST API 文档要求）：
+//   - Authorization: Bearer <token>
+//   - Accept: application/vnd.github+json
+//   - User-Agent: gitea-kanban/<version>
+//     * Go http.Client 默认 UA 是 "Go-http-client/1.1" —— GitHub 偶尔会拒绝
+//     * 文档明确"Requests without a valid User-Agent header will be rejected"
+//     * 设成应用名 + 版本号让 GitHub 出问题时能联系到我们
+//   - X-GitHub-Api-Version: 2022-11-28
+//     * 文档推荐显式指定 API 版本,避免 GitHub 升级后端点行为变更导致 406
+//
+// 错误诊断：非 2xx 时把 status + URL + body 前 200 字符写到 slog
+// （路径 app/config/,文件 ${dataDir}/logs/main/main.log）
+// 用户下次遇到问题时能直接 cat 日志给我看具体响应
 func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, path string, body io.Reader, out interface{}) error {
 	base := strings.TrimRight(hostURL, "/")
 	fullURL := base + path
@@ -270,15 +290,30 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "gitea-kanban/"+GitHubAdapterVersion)
+	// 钉死 API 版本：避免 GitHub 升级后默认行为变更触发 406 / 415
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
+		// 网络层错误（含 TLS、DNS、连接被拒）→ 写 slog + 返回 generic error
+		slog.Default().Warn("GitHub HTTP request failed",
+			"method", method, "url", fullURL, "err", err.Error())
 		return fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyStr := ipc.TruncateCause(string(bodyBytes))
+		// 关键诊断：每次非 2xx 都写一条 slog,这样用户报错时
+		// ${dataDir}/logs/main/main.log 里有完整 status + url + body
+		slog.Default().Warn("GitHub HTTP non-2xx",
+			"method", method,
+			"url", fullURL,
+			"status", resp.StatusCode,
+			"body", bodyStr,
+		)
 		return mapHTTPError(resp.StatusCode, string(bodyBytes))
 	}
 
@@ -330,13 +365,13 @@ func mapHTTPError(status int, body string) error {
 	case 404:
 		return withStatus(ipc.NewNotFound(cause + "（可能已被删除或 token 无权访问）"))
 	case 406:
-		// 406 Not Acceptable：GitHub 严格匹配 Accept 头，应用送了它不支持的 MIME
-		// 我们当前固定 application/vnd.github+json，正常情况下不会触发；
-		// 如果触发了，几乎肯定是 GitHub 服务端临时状态，提示稍后重试 + 检查版本
+		// 406 Not Acceptable：GitHub 严格匹配 Accept 头,应用送了它不支持的 MIME
+		// 我们现在固定 application/vnd.github+json + 钉死 X-GitHub-Api-Version: 2022-11-28
+		// 正常情况下不会触发;如果触发了,可能是 GitHub 服务端临时状态或账户被风控
 		return withStatus(&ipc.IpcError{
 			Code:       ipc.CodeValidationFailed,
 			Message:    "GitHub 不接受请求格式（HTTP 406）",
-			Hint:       "通常是 GitHub 端临时状态，稍后重试即可；如持续出现请升级应用",
+			Hint:       "请把应用日志（设置页\"打开应用数据目录\" → logs/main/main.log）发给开发者,里面有完整 status + body",
 			Cause:      cause,
 			HTTPStatus: status,
 		})

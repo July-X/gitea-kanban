@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -347,6 +348,47 @@ func TestGitHubAdapter_ListRepos_Empty(t *testing.T) {
 	}
 	if len(repos) != 0 {
 		t.Errorf("len(repos) = %d, want 0", len(repos))
+	}
+}
+
+// TestGitHubAdapter_RequestHeaders 验证请求头符合 GitHub 文档要求
+//
+// 用户曾报告 406 Not Acceptable:GitHub 文档明确要求
+//   - User-Agent: 应用名(Go 默认 Go-http-client/1.1 偶尔被拒)
+//   - X-GitHub-Api-Version: 2022-11-28(钉死避免 API 升级导致兼容问题)
+//   - Accept: application/vnd.github+json
+// 这两个 header 缺失是 GitHub 返 406/415 的常见根因
+func TestGitHubAdapter_RequestHeaders(t *testing.T) {
+	var capturedHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+		w.WriteHeader(200)
+		// 返最小可用 JSON,让 /user VerifyToken 走通
+		fmt.Fprintln(w, `{"id":1,"login":"octocat"}`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	if _, err := adapter.VerifyToken(context.Background(), server.URL, "test-token"); err != nil {
+		t.Fatalf("VerifyToken failed: %v", err)
+	}
+
+	if got := capturedHeaders.Get("Accept"); got != "application/vnd.github+json" {
+		t.Errorf("Accept = %q, want application/vnd.github+json", got)
+	}
+	if got := capturedHeaders.Get("Authorization"); got != "Bearer test-token" {
+		t.Errorf("Authorization = %q, want 'Bearer test-token'", got)
+	}
+	// 关键:User-Agent 不能是默认 Go-http-client/1.1,必须是应用名
+	if got := capturedHeaders.Get("User-Agent"); got == "" || got == "Go-http-client/1.1" {
+		t.Errorf("User-Agent = %q (must be gitea-kanban/<version>, GitHub 文档要求)", got)
+	}
+	if !strings.HasPrefix(capturedHeaders.Get("User-Agent"), "gitea-kanban/") {
+		t.Errorf("User-Agent = %q, want prefix gitea-kanban/", capturedHeaders.Get("User-Agent"))
+	}
+	// 关键:X-GitHub-Api-Version 钉死,避免 GitHub 升级后行为变更
+	if got := capturedHeaders.Get("X-GitHub-Api-Version"); got == "" {
+		t.Error("X-GitHub-Api-Version is empty, GitHub API 行为可能因版本升级而变化")
 	}
 }
 
