@@ -154,22 +154,34 @@ watch(
 );
 
 /**
- * v2.9：展开 commit 时，平滑滚到该行（手风琴展开后该 commit 行被推到上面）。
- * 多次切换展开时滚到正确位置。
+ * v2.10：展开 commit 时，计算手风琴绝对定位 top + 平滑滚动到该行。
+ *
+ * 手风琴是 .git-graph-wrapper 的绝对定位子元素，
+ *   top = 展开 commit-row 相对 wrapper 顶部的偏移
+ *
+ * 用 DOM 测量：拿展开 commit-row 相对 wrapper 的 offsetTop。
+ * 然后用 scrollTo 把该行滚到视口偏上 15% 位置。
  */
 watch(expandedSha, async (sha) => {
   if (!sha) return;
-  // 等 commit-accordion DOM 插入并完成高度变化
+  // 等 commit-row 渲染完成
   await nextTick();
-  const el = document.querySelector(`.commit-accordion[data-sha="${sha}"]`) as HTMLElement | null;
-  if (!el) return;
-  // 把该 commit 行（accordion 的前一个兄弟）滚到视口偏上 1/4 位置
-  const row = el.previousElementSibling as HTMLElement | null;
-  const scrollContainer = el.closest('.timeline-new__main') as HTMLElement | null;
-  if (!row || !scrollContainer) return;
-  const rowTop = row.offsetTop;
-  const targetTop = rowTop - scrollContainer.clientHeight * 0.15;
-  scrollContainer.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+  const wrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
+  const expandedRow = document.querySelector(
+    '.commit-row--expanded',
+  ) as HTMLElement | null;
+  const scrollContainer = document.querySelector('.timeline-new__main') as HTMLElement | null;
+  if (!wrapper || !expandedRow || !scrollContainer) return;
+  // 手风琴 top = 展开 commit-row 相对 wrapper 顶部的偏移
+  const rowTop = expandedRow.getBoundingClientRect().top - wrapper.getBoundingClientRect().top;
+  // 累加 wrapper.scrollTop（wrapper 是相对定位祖先，不滚动；不需加）
+  // 但 expandedRow 在 list 内部，list 顶部到 wrapper 顶部是 0（list 是 flex 子元素、无 margin）
+  // → 直接用相对偏移
+  accordionTop.value = rowTop;
+  // 平滑滚动到该 commit-row（留 15% 顶部空间）
+  const absoluteTop = rowTop + wrapper.offsetTop;
+  const targetScroll = absoluteTop - scrollContainer.clientHeight * 0.15;
+  scrollContainer.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
 });
 
 /** 组件卸载时清理拖拽监听器和事件监听器 */
@@ -401,6 +413,49 @@ function formatRelative(iso: string): string {
   return `${Math.floor(mo / 12)}年前`;
 }
 
+/**
+ * v2.10：手风琴最大高度（同时决定 spacer 占位高度）
+ * 用户拍板：固定 260px → 超过出纵向滚动条
+ */
+const ACCORDION_MAX_HEIGHT = 260;
+
+/**
+ * v2.10：当前展开的 commit node（直接从 allRows 拿，懒加载 detail 用）
+ */
+const expandedCommitNode = computed<
+  NonNullable<GraphResultDto['nodes']>[number] | null
+>(() => {
+  if (!expandedSha.value) return null;
+  const rows = allRows.value;
+  for (const r of rows) {
+    if (r.commit && r.commit.sha === expandedSha.value) return r.commit;
+  }
+  return null;
+});
+
+/**
+ * v2.10：手风琴绝对定位 top —— 展开 commit-row 相对 .git-graph-wrapper 顶部的偏移
+ * 计算方法：拿展开 commit-row 的 offsetTop（list 内 offsetTop - list 自身到 wrapper 的偏移）
+ *
+ * 这里用一种简单可靠的方式：nextTick 后用 DOM API 拿
+ * 不用 DOM 测量也行：top = expandedRowIndex * ROW_H（commit-row 高度固定 28px）
+ * （list 自身相对 wrapper 顶部可能因为 wrapper 顶部 padding/margin 有偏移 → 用 ROW_H * index 简单）
+ */
+const accordionTop = ref<number>(0);
+
+/**
+ * v2.10：手风琴位置样式 —— 绝对定位 + 跨整宽
+ * 高度固定 ACCORDION_MAX_HEIGHT = 260px
+ */
+const accordionPositionStyle = computed(() => ({
+  position: 'absolute' as const,
+  left: '0',
+  right: '0',
+  top: `${accordionTop.value}px`,
+  height: `${ACCORDION_MAX_HEIGHT}px`,
+  maxHeight: `${ACCORDION_MAX_HEIGHT}px`,
+}));
+
 /** SVG 区域实际宽度（用户拖拽 > 自动计算 > 最小值） */
 const svgAreaWidth = computed(() => {
   const r = svgRender.value;
@@ -547,6 +602,7 @@ function refBadgeClass(refType?: string): string {
       <!-- Git Graph -->
       <template v-else>
         <div class="git-graph-wrapper">
+          <!-- 左侧：SVG 图（grid-column:1，跨所有 row，sticky 跟随滚动） -->
           <!-- 左侧：SVG 图（固定宽度，左侧 sticky） -->
           <div class="git-graph-svg-area" :style="{ width: svgAreaWidth }">
             <div class="git-graph-svg-inner">
@@ -661,21 +717,35 @@ function refBadgeClass(refType?: string): string {
                   <span class="commit-sha">{{ r.commit.shortSha }}</span>
                 </template>
               </div>
-              <!-- v2.9：行下手风琴（inline 展开）—— 只在展开的 commit 行下方插入面板
-                   与 commit-row 同行号的 SVG lane 不画板（面板横跨整个列表宽度） -->
+              <!-- v2.10：手风琴占位 —— 紧跟展开 commit-row 之后插入 spacer，
+                   把下方所有 commit-row 推下去（避免手风琴覆盖后面的 commit） -->
               <div
                 v-if="r.commit && expandedSha === r.commit.sha"
-                class="commit-accordion"
-                :data-sha="r.commit.sha"
-              >
-                <CommitDetailPanel
-                  :commit="buildBasicCommit(r.commit)"
-                  :project-id="activeProjectId"
-                  :gitea-repo-url="giteaRepoUrl"
-                  variant="panel"
-                />
-              </div>
+                class="commit-accordion-spacer"
+                :style="{ height: `${ACCORDION_MAX_HEIGHT}px` }"
+                aria-hidden="true"
+              />
             </template>
+          </div>
+
+          <!-- v2.10：行下手风琴（绝对定位，跨整宽覆盖左侧 SVG）——
+               位置由 :style="accordionPositionStyle" 动态算（基于展开 commit-row 的 offsetTop）
+               z-index 3 浮在 SVG 之上
+               同时在 .git-graph-list 内部插入一个 .commit-accordion-spacer 占位，
+               把下方 commit-row 推开（避免手风琴覆盖后面的 commit） -->
+          <div
+            v-if="expandedSha !== null"
+            class="commit-accordion"
+            :data-sha="expandedSha"
+            :style="accordionPositionStyle"
+          >
+            <CommitDetailPanel
+              v-if="expandedCommitNode"
+              :commit="buildBasicCommit(expandedCommitNode)"
+              :project-id="activeProjectId"
+              :gitea-repo-url="giteaRepoUrl"
+              variant="panel"
+            />
           </div>
         </div>
       </template>
@@ -799,12 +869,13 @@ function refBadgeClass(refType?: string): string {
 }
 
 /* ===== Git Graph Wrapper ===== */
-/* Git Graph wrapper：SVG + commit 列表双栏水平排列；
+/* v2.10：flex 布局 —— 3 子元素横排（SVG / 6px 拖拽手柄 / commit 列表）
+ * 手风琴是 wrapper 的绝对定位子元素，跨整宽覆盖左侧 SVG
  * 左侧 SVG 区域 sticky + 可拖拽调宽；右侧 commit 列表 flex:1 自适应 */
 .git-graph-wrapper {
   display: flex;
   align-items: flex-start;
-  /* 不用 min-width: max-content —— 让 commit 列表自适应宽度，避免横向滚动条 */
+  position: relative; /* 给手风琴绝对定位用锚点 */
 }
 
 /* SVG 区域：sticky 在左侧，跟随 commit 列表垂直滚动；
@@ -823,6 +894,8 @@ function refBadgeClass(refType?: string): string {
   overflow-x: auto;     /* 多列时水平滚动而非被压缩 */
   overflow-y: hidden;
   flex-shrink: 0;
+  /* v2.10：宽度由 inline style 控制（grid 模式已撤） */
+  align-self: flex-start;
 }
 
 .git-graph-svg-inner {
@@ -1013,13 +1086,19 @@ function refBadgeClass(refType?: string): string {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
-/* v2.9：行下手风琴——已展开的 commit 行高亮 + 去掉底部分割线（与面板融合） */
-.commit-row--expanded {
-  background: var(--color-primary-soft, rgba(116, 184, 48, 0.08));
+/* v2.11：行下手风琴 —— 展开 commit 行背景改为 --color-bg-hover（中性 hover 灰），
+ * 让手风琴卡片（elevated 灰白）成为视觉主体，展开行只保留轻量状态指示。
+ * 旧值 --color-primary-soft（绿色高亮）跟 elevated 卡片"双高亮"视觉割裂，
+ * 跟 vscode 的"展开行不突出、面板是重点"风格不一致。
+ * 选择器用 .commit-row--clickable.commit-row--expanded 提高 specificity，
+ * 覆盖默认 .commit-row--clickable:hover 的绿色高亮 */
+.commit-row--clickable.commit-row--expanded {
+  background: var(--color-bg-hover);
   border-bottom-color: transparent;
 }
-.commit-row--expanded:hover {
-  background: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
+.commit-row--clickable.commit-row--expanded:hover {
+  background: var(--color-bg-hover);
+  filter: brightness(1.08);
 }
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * 必须保持 min-height: 24px（不要合并 / 不要 display:none） */
@@ -1124,19 +1203,44 @@ function refBadgeClass(refType?: string): string {
   flex-shrink: 0;
 }
 
-/* ===== v2.9 行下手风琴（commit-accordion）=====
- * 容器 max-height 固定 260px → 超出显示纵向滚动条。
- * 用户拍板：固定 260px 阈值，与 VSCode Git Graph 行为对齐。
- * 容器自身负责纵向滚动，panel 内部不再叠滚动条（避免双滚动条）。
+/* ===== v2.11 行下手风琴（commit-accordion · 复刻 VSCode Git Graph）=====
+ * 跨整宽（position: absolute + left/right: 0）覆盖左侧 SVG 区，
+ * 让"展开区域"在视觉上左右对齐成一条横带（左侧 graph 区下方自然留白，
+ * 跟 VSCode Git Graph "左侧 lane 在展开行止步"的行为一致）。
+ *
+ * v2.11 视觉升级（区分度强化 · 复刻 vscode 卡片化原则）：
+ *   - bg 改为 --color-bg-elevated（vs 主区 canvas 暗色 +14 阶 / 亮色 +9 阶），
+ *     之前的 --color-bg-soft fallback (rgba 0,0,0,0.04) 跟主区背景几乎无区分
+ *   - 加 8px 圆角（vscode / Linear 卡片主流）+ 1px 描边
+ *   - 加 --shadow-sm 单层柔和阴影（v1.6 卡片投影规范），让色块"浮"在 commit-row 之上
+ *   - 展开 commit-row 用 --color-primary-soft 软底 + 顶/底去边框，
+ *     跟手风琴卡片"无缝衔接"（看起来像一张大卡片）
+ *
+ * max-height 固定 260px → 超出显示纵向滚动条（用户拍板固定阈值，
+ *   跟 VSCode Git Graph 行为对齐）；手风琴内部 commit message / file 列表
+ *   不再叠滚动条（避免双滚动条）。
+ *
+ * 布局：手风琴是 .git-graph-wrapper 的绝对定位子元素；
+ *      list 内部插 .commit-accordion-spacer 占位把下方 commit-row 推开
  */
 .commit-accordion {
-  background: var(--color-bg-soft, rgba(255, 255, 255, 0.02));
-  border-bottom: 1px solid var(--color-border);
+  position: absolute;
+  left: 4px;        /* 跟 SVG 区域左边留 4px 视觉呼吸（避免压边） */
+  right: 4px;       /* 同理右边 */
+  /* top / height 由 :style="accordionPositionStyle" 绑定 */
+  /* v2.11：elevated 卡片化 —— bg 提档 + 描边 + 圆角 + 阴影 */
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-card, 8px);
+  box-shadow: var(--shadow-sm);
   max-height: 260px;
   overflow-y: auto;
-  /* 滚动条样式：贴合 shell 主题，避免默认灰色突兀 */
+  z-index: 3; /* 浮在 SVG 之上 */
+  /* 滚动条样式：贴合 shell 主题 */
   scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  /* 入场动画 */
+  animation: cdAccordionOpen 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .commit-accordion::-webkit-scrollbar {
   width: 8px;
@@ -1145,16 +1249,44 @@ function refBadgeClass(refType?: string): string {
   background: transparent;
 }
 .commit-accordion::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 .commit-accordion::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted, #666);
+  background: var(--scrollbar-thumb-hover);
 }
-/* 手风琴内嵌的 panel：撑满父容器 */
-.commit-accordion > :deep(.cd-panel) {
-  /* 取消 panel 自带顶部分割线（容器已有） */
+/* 手风琴内嵌的 panel：撑满父容器；去掉 panel 自带顶部分割线（容器已有）
+ * v2.11：panel 自身背景透明，继承手风琴卡片的 elevated 底色，
+ * 让"手风琴壳 + panel 内容"看起来是同一张大卡片 */
+.commit-accordion > :deep(.cd-panel),
+.commit-accordion > :deep(.cd-panel--panel) {
   border-top: none;
+  background: transparent;
+}
+
+/* v2.10：手风琴占位 —— 推开下方 commit-row（避免手风琴覆盖后面的 commit） */
+.commit-accordion-spacer {
+  /* height 由 :style 绑定（= ACCORDION_MAX_HEIGHT = 260px） */
+  flex-shrink: 0;
+  /* 透明占位，不可见 */
+  pointer-events: none;
+}
+
+/* 展开动画 */
+@keyframes cdAccordionOpen {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .commit-accordion {
+    animation: none;
+  }
 }
 
 /* 刷新旋转 */
@@ -1202,6 +1334,7 @@ function refBadgeClass(refType?: string): string {
   position: relative;
   transition: background 0.15s;
   user-select: none;
+  align-self: stretch;
 }
 .graph-resize-handle:hover,
 .graph-resize-handle--active {
