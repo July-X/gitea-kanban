@@ -154,12 +154,20 @@ watch(
 );
 
 /**
- * v2.10：展开 commit 时，计算手风琴绝对定位 top + 平滑滚动到该行。
+ * v2.13：展开 commit 时，计算手风琴绝对定位 top + 平滑滚动到该行。
  *
  * 手风琴是 .git-graph-wrapper 的绝对定位子元素，
- *   top = 展开 commit-row 相对 wrapper 顶部的偏移
+ *   top = 展开 commit-row 底部 相对 wrapper 顶部的偏移
  *
- * 用 DOM 测量：拿展开 commit-row 相对 wrapper 的 offsetTop。
+ * v2.13 修复（user 反馈）：手风琴必须**出现在展开行的紧邻下方**，
+ * 不能覆盖展开行本身 —— 否则用户二次点击展开行想收起手风琴时，
+ * 点的可能是手风琴卡片内部（不是 commit-row）→ 不会触发 toggle。
+ *
+ * 修复方法：用 expandedRow.getBoundingClientRect().bottom（行底）
+ * 而不是 .top（行顶）作为手风琴 top，这样手风琴从 row 紧邻下方开始显示，
+ * row 本身完整保留可点击区域。
+ *
+ * 用 DOM 测量：拿展开 commit-row 的 bottom 相对 wrapper 顶部。
  * 然后用 scrollTo 把该行滚到视口偏上 15% 位置。
  */
 watch(expandedSha, async (sha) => {
@@ -172,14 +180,12 @@ watch(expandedSha, async (sha) => {
   ) as HTMLElement | null;
   const scrollContainer = document.querySelector('.timeline-new__main') as HTMLElement | null;
   if (!wrapper || !expandedRow || !scrollContainer) return;
-  // 手风琴 top = 展开 commit-row 相对 wrapper 顶部的偏移
-  const rowTop = expandedRow.getBoundingClientRect().top - wrapper.getBoundingClientRect().top;
-  // 累加 wrapper.scrollTop（wrapper 是相对定位祖先，不滚动；不需加）
-  // 但 expandedRow 在 list 内部，list 顶部到 wrapper 顶部是 0（list 是 flex 子元素、无 margin）
-  // → 直接用相对偏移
-  accordionTop.value = rowTop;
+  // v2.13：手风琴 top = 展开 commit-row 底部（不是顶部），避免覆盖展开行
+  const rowBottom =
+    expandedRow.getBoundingClientRect().bottom - wrapper.getBoundingClientRect().top;
+  accordionTop.value = rowBottom;
   // 平滑滚动到该 commit-row（留 15% 顶部空间）
-  const absoluteTop = rowTop + wrapper.offsetTop;
+  const absoluteTop = rowBottom + wrapper.offsetTop;
   const targetScroll = absoluteTop - scrollContainer.clientHeight * 0.15;
   scrollContainer.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
 });
