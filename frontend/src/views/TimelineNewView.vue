@@ -14,13 +14,14 @@
  * - Gitea web_src/css/features/gitgraph.css（flow-color-16-N 16 色变量）
  */
 
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitCommit, ArrowDownToLine, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
-import CommitDetailDialog from '@renderer/components/CommitDetailDialog.vue';
+import CommitDetailPanel from '@renderer/components/CommitDetailPanel.vue';
+import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
 import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
@@ -74,19 +75,13 @@ const localPath = ref<string | null>(null);
 const pulling = ref(false);
 
 // ============================================================
-// v1.6 commit 详情弹窗
+// v2.9 commit 详情：行下手风琴（inline 展开）
 // ============================================================
-const commitDetailOpen = ref(false);
-const selectedCommit = ref<{
-  sha: string;
-  shortSha: string;
-  subject: string;
-  date: string;
-  authorName: string;
-  authorEmail?: string;
-  authorAvatar?: string;
-  refs?: Array<{ shortName: string; refGroup: string }>;
-} | null>(null);
+// 同时只展开 1 个 commit（VSCode Git Graph 默认行为）。
+// 展开面板高度上限 260px → 超出出纵向滚动条（panel 内部已 max-height）。
+// 复用 CommitDetailPanel 组件（与 CommitDetailDialog 共用同一份面板 + 缓存）。
+/** 当前展开的 commit SHA；null = 全部收起 */
+const expandedSha = ref<string | null>(null);
 
 /** Gitea 仓库 URL（用于 "在 Gitea 打开 commit" 按钮） */
 const giteaRepoUrl = computed(() => {
@@ -96,18 +91,34 @@ const giteaRepoUrl = computed(() => {
   return `${giteaUrl.replace(/\/$/, '')}/${repo.currentProject.owner}/${repo.currentProject.name}`;
 });
 
-/** 点击 commit 行 → 打开详情（v2.6：直接从 GraphNodeDto 取数据） */
-function openCommitDetail(node: NonNullable<GraphResultDto['nodes']>[number]): void {
-  selectedCommit.value = {
+/**
+ * 点击 commit 行 → 切换展开
+ * v2.9：直接从 GraphNodeDto 取数据，inline 展开 CommitDetailPanel
+ * - 若点的是已展开的 → 收起
+ * - 若点的是另一个 → 切到新 SHA（前一个自动收起）
+ */
+function toggleCommitDetail(node: NonNullable<GraphResultDto['nodes']>[number]): void {
+  if (expandedSha.value === node.sha) {
+    expandedSha.value = null;
+    return;
+  }
+  expandedSha.value = node.sha;
+}
+
+/** 构造展开面板的 commit prop（与 GraphNodeDto 字段对齐） */
+function buildBasicCommit(
+  node: NonNullable<GraphResultDto['nodes']>[number],
+): BasicCommit {
+  return {
     sha: node.sha,
     shortSha: node.shortSha,
     subject: node.subject,
     date: node.date,
     authorName: node.authorName,
     authorEmail: node.authorEmail,
-    refs: [], // v2.6 简化：refs 由 commitDetail dialog 内部按需拉
+    refs: node.refs,
+    refTypes: node.refTypes,
   };
-  commitDetailOpen.value = true;
 }
 
 // ============================================================
@@ -141,6 +152,25 @@ watch(
     if (id) await loadGraph();
   },
 );
+
+/**
+ * v2.9：展开 commit 时，平滑滚到该行（手风琴展开后该 commit 行被推到上面）。
+ * 多次切换展开时滚到正确位置。
+ */
+watch(expandedSha, async (sha) => {
+  if (!sha) return;
+  // 等 commit-accordion DOM 插入并完成高度变化
+  await nextTick();
+  const el = document.querySelector(`.commit-accordion[data-sha="${sha}"]`) as HTMLElement | null;
+  if (!el) return;
+  // 把该 commit 行（accordion 的前一个兄弟）滚到视口偏上 1/4 位置
+  const row = el.previousElementSibling as HTMLElement | null;
+  const scrollContainer = el.closest('.timeline-new__main') as HTMLElement | null;
+  if (!row || !scrollContainer) return;
+  const rowTop = row.offsetTop;
+  const targetTop = rowTop - scrollContainer.clientHeight * 0.15;
+  scrollContainer.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+});
 
 /** 组件卸载时清理拖拽监听器和事件监听器 */
 onUnmounted(() => {
@@ -178,6 +208,8 @@ async function loadGraph(): Promise<void> {
       // 直接渲染为 SVG（path 按 color 分组、节点含坐标）
       svgRender.value = renderGraph(dto);
     }
+    // v2.9：新数据加载完收起展开（防 SHA 失效）
+    expandedSha.value = null;
   } catch (e: unknown) {
     console.error('[TimelineNewView] loadGraph failed:', e);
     const err = e as {
@@ -574,73 +606,81 @@ function refBadgeClass(refType?: string): string {
 
           <!-- 右侧：Commit 列表（与 SVG 等高，按 row 0..maxRow 全渲染） -->
           <div class="git-graph-list" :style="{ minHeight: svgHeight }">
-            <div
-              v-for="r in allRows"
-              :key="`row-${r.row}`"
-              class="commit-row"
-              :class="{
-                'commit-row--relation': !r.commit,
-                'commit-row--clickable': r.commit,
-              }"
-              :style="{ height: ROW_H + 'px' }"
-              :role="r.commit ? 'button' : undefined"
-              :tabindex="r.commit ? 0 : undefined"
-              @click="r.commit && openCommitDetail(r.commit)"
-              @keydown.enter.prevent="r.commit && openCommitDetail(r.commit)"
-              @keydown.space.prevent="r.commit && openCommitDetail(r.commit)"
-            >
-              <template v-if="r.commit">
-                <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
-                     这里按类型渲染 badge 颜色，不再用启发式猜。 -->
-                <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
-                  <span
-                    v-for="(ref, idx) in r.commit.refs"
-                    :key="`ref-${r.commit.sha}-${ref}`"
-                    class="ref-badge"
-                    :class="refBadgeClass(r.commit.refTypes?.[idx])"
-                    :title="ref"
-                  >
-                    <Tag
-                      v-if="r.commit.refTypes?.[idx] === 'tag'"
-                      :size="11"
-                      class="ref-badge__icon"
-                      aria-hidden="true"
-                    />
-                    <GitBranch
-                      v-else
-                      :size="11"
-                      class="ref-badge__icon"
-                      aria-hidden="true"
-                    />
-                    <span>{{ ref }}</span>
+            <template v-for="r in allRows" :key="`row-${r.row}`">
+              <div
+                class="commit-row"
+                :class="{
+                  'commit-row--relation': !r.commit,
+                  'commit-row--clickable': r.commit,
+                  'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
+                }"
+                :style="{ height: ROW_H + 'px' }"
+                :role="r.commit ? 'button' : undefined"
+                :tabindex="r.commit ? 0 : undefined"
+                :aria-expanded="r.commit ? expandedSha === r.commit.sha : undefined"
+                @click="r.commit && toggleCommitDetail(r.commit)"
+                @keydown.enter.prevent="r.commit && toggleCommitDetail(r.commit)"
+                @keydown.space.prevent="r.commit && toggleCommitDetail(r.commit)"
+              >
+                <template v-if="r.commit">
+                  <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
+                       这里按类型渲染 badge 颜色，不再用启发式猜。 -->
+                  <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
+                    <span
+                      v-for="(ref, idx) in r.commit.refs"
+                      :key="`ref-${r.commit.sha}-${ref}`"
+                      class="ref-badge"
+                      :class="refBadgeClass(r.commit.refTypes?.[idx])"
+                      :title="ref"
+                    >
+                      <Tag
+                        v-if="r.commit.refTypes?.[idx] === 'tag'"
+                        :size="11"
+                        class="ref-badge__icon"
+                        aria-hidden="true"
+                      />
+                      <GitBranch
+                        v-else
+                        :size="11"
+                        class="ref-badge__icon"
+                        aria-hidden="true"
+                      />
+                      <span>{{ ref }}</span>
+                    </span>
                   </span>
-                </span>
-                <span class="commit-subject">{{ r.commit.subject }}</span>
-                <span class="commit-meta">
-                  <span
-                    class="commit-avatar-fallback"
-                    :class="`flow-color-16-${avatarColorIndex(r.commit.authorName)}`"
-                    aria-hidden="true"
-                  >{{ avatarInitial(r.commit.authorName) }}</span>
-                  <span class="commit-author">{{ r.commit.authorName }}</span>
-                  <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
-                </span>
-                <span class="commit-sha">{{ r.commit.shortSha }}</span>
-              </template>
-            </div>
+                  <span class="commit-subject">{{ r.commit.subject }}</span>
+                  <span class="commit-meta">
+                    <span
+                      class="commit-avatar-fallback"
+                      :class="`flow-color-16-${avatarColorIndex(r.commit.authorName)}`"
+                      aria-hidden="true"
+                    >{{ avatarInitial(r.commit.authorName) }}</span>
+                    <span class="commit-author">{{ r.commit.authorName }}</span>
+                    <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
+                  </span>
+                  <span class="commit-sha">{{ r.commit.shortSha }}</span>
+                </template>
+              </div>
+              <!-- v2.9：行下手风琴（inline 展开）—— 只在展开的 commit 行下方插入面板
+                   与 commit-row 同行号的 SVG lane 不画板（面板横跨整个列表宽度） -->
+              <div
+                v-if="r.commit && expandedSha === r.commit.sha"
+                class="commit-accordion"
+                :data-sha="r.commit.sha"
+              >
+                <CommitDetailPanel
+                  :commit="buildBasicCommit(r.commit)"
+                  :project-id="activeProjectId"
+                  :gitea-repo-url="giteaRepoUrl"
+                  variant="panel"
+                />
+              </div>
+            </template>
           </div>
         </div>
       </template>
     </div>
   </div>
-
-  <!-- v1.6 commit 详情弹窗 -->
-  <CommitDetailDialog
-    v-model:open="commitDetailOpen"
-    :commit="selectedCommit"
-    :project-id="activeProjectId"
-    :gitea-repo-url="giteaRepoUrl"
-  />
 </template>
 
 <style scoped>
@@ -973,6 +1013,14 @@ function refBadgeClass(refType?: string): string {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
+/* v2.9：行下手风琴——已展开的 commit 行高亮 + 去掉底部分割线（与面板融合） */
+.commit-row--expanded {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.08));
+  border-bottom-color: transparent;
+}
+.commit-row--expanded:hover {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
+}
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * 必须保持 min-height: 24px（不要合并 / 不要 display:none） */
 .commit-row--relation {
@@ -1074,6 +1122,39 @@ function refBadgeClass(refType?: string): string {
   font-size: 11px;
   color: var(--color-text-secondary);
   flex-shrink: 0;
+}
+
+/* ===== v2.9 行下手风琴（commit-accordion）=====
+ * 容器 max-height 固定 260px → 超出显示纵向滚动条。
+ * 用户拍板：固定 260px 阈值，与 VSCode Git Graph 行为对齐。
+ * 容器自身负责纵向滚动，panel 内部不再叠滚动条（避免双滚动条）。
+ */
+.commit-accordion {
+  background: var(--color-bg-soft, rgba(255, 255, 255, 0.02));
+  border-bottom: 1px solid var(--color-border);
+  max-height: 260px;
+  overflow-y: auto;
+  /* 滚动条样式：贴合 shell 主题，避免默认灰色突兀 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+.commit-accordion::-webkit-scrollbar {
+  width: 8px;
+}
+.commit-accordion::-webkit-scrollbar-track {
+  background: transparent;
+}
+.commit-accordion::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+.commit-accordion::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted, #666);
+}
+/* 手风琴内嵌的 panel：撑满父容器 */
+.commit-accordion > :deep(.cd-panel) {
+  /* 取消 panel 自带顶部分割线（容器已有） */
+  border-top: none;
 }
 
 /* 刷新旋转 */

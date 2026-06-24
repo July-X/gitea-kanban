@@ -1,0 +1,784 @@
+<script setup lang="ts">
+/**
+ * CommitDetailPanel —— Git Graph commit 详情面板（纯展示组件）
+ *
+ * 两种宿主：
+ *   1. CommitDetailDialog（弹窗壳 + Teleport overlay）
+ *   2. TimelineNewView（行下手风琴 inline 展开，固定 260px 高度上限 → 滚动条）
+ *
+ * props：
+ *   - commit:     基础 commit 信息（来自 GraphNodeDto，秒开）
+ *   - projectId:  懒加载 commitsGet 用的项目 ID
+ *   - giteaRepoUrl: "在 Gitea 打开" 链接用
+ *   - variant:    'panel'（默认，inline 用）| 'dialog'（弹窗内用，meta 间距更宽松）
+ *
+ * 数据加载策略：
+ *   - module 级 detailCache（跨 CommitDetailPanel 实例共享，弹窗和手风琴互不重复请求）
+ *   - watch(commit) 切 commit 时清 detail → 重新加载
+ */
+
+import { ref, watch, computed, onUnmounted } from 'vue';
+import {
+  Copy,
+  ExternalLink,
+  GitCommit,
+  FileText,
+  Plus,
+  Minus,
+  Link2,
+} from 'lucide-vue-next';
+import { commitsGet } from '@renderer/lib/ipc-client';
+import { showToast } from '@renderer/lib/toast';
+
+/** 基础 commit 信息（从 graph 数据直接传入，不需要额外请求） */
+export interface BasicCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  date: string;
+  authorName: string;
+  authorEmail?: string;
+  authorAvatar?: string;
+  /** 引用（branch / remote / tag），v2.6 起直接从 GraphNodeDto 读 */
+  refs?: string[];
+  /** refs 对应类型（后端 GraphNodeDto.refTypes 是 string[]；运行时取 'branch' | 'remoteBranch' | 'tag'） */
+  refTypes?: string[];
+}
+
+interface Props {
+  commit: BasicCommit | null;
+  /** 当前项目 ID（用于 commitsGet 请求）；不传则只显示基本信息不懒加载详情 */
+  projectId?: string | null;
+  /** Gitea 仓库地址（用于 "在 Gitea 打开" 按钮） */
+  giteaRepoUrl?: string;
+  /** 视觉变体：panel（inline 手风琴，紧凑）| dialog（弹窗内，宽松） */
+  variant?: 'panel' | 'dialog';
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  projectId: null,
+  giteaRepoUrl: undefined,
+  variant: 'panel',
+});
+
+// ===== 懒加载详情 =====
+// 缓存放在 module 作用域 → 多个 CommitDetailPanel 实例共享（弹窗 + 手风琴不重复请求同一 SHA）
+interface CommitDetail {
+  message: string;
+  additions?: number;
+  deletions?: number;
+  filesChanged?: number;
+  files?: Array<{
+    filename: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
+    binary?: boolean;
+    previousFilename?: string;
+    functions?: string[];
+  }>;
+  linkedCards?: Array<{ cardId: string; columnName: string }>;
+}
+const detailCache = new Map<string, CommitDetail>();
+
+const loading = ref(false);
+const detail = ref<CommitDetail | null>(null);
+
+/** 加载 commit 详情（带缓存）。失败回退到 subject 作为 message */
+async function loadDetail(): Promise<void> {
+  if (!props.commit) return;
+  const sha = props.commit.sha;
+
+  // 缓存命中
+  const cached = detailCache.get(sha);
+  if (cached) {
+    detail.value = cached;
+    return;
+  }
+
+  if (!props.projectId) {
+    // 没传 projectId → 跳过懒加载，detail 留空（调用方决定是否显示 loading）
+    detail.value = null;
+    return;
+  }
+
+  loading.value = true;
+  try {
+    const dto = await commitsGet({ projectId: props.projectId, sha });
+    const d: CommitDetail = {
+      message: dto.message,
+      additions: dto.additions,
+      deletions: dto.deletions,
+      filesChanged: dto.filesChanged,
+      files: dto.files,
+      linkedCards: dto.linkedCards,
+    };
+    detailCache.set(sha, d);
+    detail.value = d;
+  } catch {
+    // 失败时用基本信息（subject 作为 message）
+    const fallback: CommitDetail = {
+      message: props.commit.subject,
+    };
+    detail.value = fallback;
+  } finally {
+    loading.value = false;
+  }
+}
+
+// commit 切换 → 重新加载
+watch(
+  () => props.commit?.sha,
+  async (_newSha, oldSha) => {
+    if (!props.commit) {
+      detail.value = null;
+      return;
+    }
+    if (props.commit.sha === oldSha) return;
+    detail.value = null;
+    await loadDetail();
+  },
+  { immediate: true },
+);
+
+// ===== 辅助 =====
+function formatFullDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+async function copySha(): Promise<void> {
+  if (!props.commit) return;
+  try {
+    await navigator.clipboard.writeText(props.commit.sha);
+    showToast({ type: 'success', message: '已复制 SHA' });
+  } catch {
+    showToast({ type: 'error', message: '复制失败' });
+  }
+}
+
+function openInGitea(): void {
+  if (!props.commit || !props.giteaRepoUrl) return;
+  const url = `${props.giteaRepoUrl.replace(/\/$/, '')}/commit/${props.commit.sha}`;
+  window.open(url, '_blank');
+}
+
+/** 文件状态中文 */
+function fileStatusLabel(status?: string): string {
+  switch (status) {
+    case 'added':
+      return '新增';
+    case 'modified':
+      return '修改';
+    case 'deleted':
+      return '删除';
+    case 'renamed':
+      return '重命名';
+    case 'binary':
+      return '二进制';
+    default:
+      return status ?? '';
+  }
+}
+
+/** 文件状态颜色 */
+function fileStatusColor(status?: string): string {
+  switch (status) {
+    case 'added':
+      return 'var(--color-success, #7db233)';
+    case 'deleted':
+      return 'var(--color-danger, #dc2626)';
+    case 'renamed':
+      return 'var(--color-info, #3b82f6)';
+    default:
+      return 'var(--color-text-secondary)';
+  }
+}
+
+/** 多行 message 拆分：第一行是标题，其余是正文 */
+const messageTitle = computed(() => {
+  const msg = detail.value?.message ?? props.commit?.subject ?? '';
+  return msg.split('\n')[0]?.trim() ?? '';
+});
+const messageBody = computed(() => {
+  const msg = detail.value?.message ?? '';
+  const lines = msg.split('\n');
+  // 跳过第一行 + 紧跟的空行
+  let start = 1;
+  while (start < lines.length && !lines[start]?.trim()) start++;
+  return lines.slice(start).join('\n').trim();
+});
+
+/** refs 类型 → badge 类名（与 TimelineNewView 中的 refBadgeClass 保持一致） */
+function refBadgeClass(refType?: string): string {
+  switch (refType) {
+    case 'tag':
+      return 'cd-ref-badge--tag';
+    case 'remoteBranch':
+      return 'cd-ref-badge--remote';
+    case 'branch':
+    default:
+      return 'cd-ref-badge--branch';
+  }
+}
+
+// 弹窗内用：监听 Esc（Teleport 到 body 后需要手动捕获）
+function onGlobalKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && props.variant === 'dialog') {
+    e.preventDefault();
+    // 由父组件（dialog 壳）负责关闭；这里只阻止默认行为
+  }
+}
+if (typeof document !== 'undefined') {
+  // 仅 dialog 变体需要监听；panel 变体在 TimelineNewView 自行处理
+  watch(
+    () => props.variant,
+    (v) => {
+      if (v === 'dialog') {
+        document.addEventListener('keydown', onGlobalKeydown);
+      } else {
+        document.removeEventListener('keydown', onGlobalKeydown);
+      }
+    },
+    { immediate: true },
+  );
+  onUnmounted(() => {
+    document.removeEventListener('keydown', onGlobalKeydown);
+  });
+}
+</script>
+
+<template>
+  <div v-if="props.commit" class="cd-panel" :class="`cd-panel--${props.variant}`">
+    <!-- 标题栏（短 SHA + 完整日期 + 复制 / 在 Gitea 打开） -->
+    <header class="cd-panel__header">
+      <div class="cd-panel__header-left">
+        <GitCommit :size="14" class="cd-panel__icon" />
+        <code class="cd-sha mono">{{ props.commit.shortSha }}</code>
+        <span class="cd-date">{{ formatFullDate(props.commit.date) }}</span>
+      </div>
+      <div class="cd-panel__header-right">
+        <button
+          type="button"
+          class="cd-icon-btn"
+          title="复制完整 SHA"
+          @click="copySha"
+        >
+          <Copy :size="13" />
+        </button>
+        <button
+          v-if="props.giteaRepoUrl"
+          type="button"
+          class="cd-icon-btn"
+          title="在 Gitea 中打开"
+          @click="openInGitea"
+        >
+          <ExternalLink :size="13" />
+        </button>
+      </div>
+    </header>
+
+    <!-- 提交信息 -->
+    <div class="cd-panel__message">
+      <div class="cd-message__title">{{ messageTitle }}</div>
+      <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
+    </div>
+
+    <!-- 作者 / 统计 / 引用 -->
+    <div class="cd-panel__meta">
+      <div class="cd-meta__row">
+        <span class="cd-meta__label">作者</span>
+        <div class="cd-meta__value">
+          <span
+            class="cd-avatar-fallback"
+            :class="`cd-flow-${(props.commit.authorName.charCodeAt(0) || 0) % 16}`"
+            aria-hidden="true"
+          >{{ props.commit.authorName.trim().charAt(0).toUpperCase() || '?' }}</span>
+          <span>{{ props.commit.authorName }}</span>
+          <span v-if="props.commit.authorEmail" class="cd-meta__email mono">
+            &lt;{{ props.commit.authorEmail }}&gt;
+          </span>
+        </div>
+      </div>
+      <div
+        v-if="detail && (detail.additions != null || detail.deletions != null)"
+        class="cd-meta__row"
+      >
+        <span class="cd-meta__label">统计</span>
+        <div class="cd-meta__value cd-stats">
+          <span v-if="detail.additions != null" class="cd-stats__add">
+            <Plus :size="12" />{{ detail.additions }}
+          </span>
+          <span v-if="detail.deletions != null" class="cd-stats__del">
+            <Minus :size="12" />{{ detail.deletions }}
+          </span>
+          <span v-if="detail.filesChanged != null" class="cd-stats__files">
+            <FileText :size="12" />{{ detail.filesChanged }} 个文件
+          </span>
+        </div>
+      </div>
+      <div
+        v-if="props.commit.refs && props.commit.refs.length > 0"
+        class="cd-meta__row"
+      >
+        <span class="cd-meta__label">引用</span>
+        <div class="cd-meta__value cd-refs">
+          <span
+            v-for="(ref, idx) in props.commit.refs"
+            :key="`cd-ref-${idx}-${ref}`"
+            class="cd-ref-badge"
+            :class="refBadgeClass(props.commit.refTypes?.[idx])"
+            :title="ref"
+          >
+            {{ ref }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 加载中 -->
+    <div v-if="loading" class="cd-loading">加载详情中…</div>
+
+    <!-- 文件变更列表 -->
+    <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
+      <div class="cd-section-title">
+        <FileText :size="13" />
+        文件变更（{{ detail.files.length }}）
+      </div>
+      <div class="cd-files__list">
+        <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
+          <span class="cd-file-status" :style="{ color: fileStatusColor(f.status) }">
+            {{ fileStatusLabel(f.status) }}
+          </span>
+          <span class="cd-file-name mono" :title="f.filename">
+            {{ f.filename }}
+            <span v-if="f.previousFilename" class="cd-file-rename">
+              ← {{ f.previousFilename }}
+            </span>
+          </span>
+          <span class="cd-file-stats">
+            <span v-if="f.additions" class="cd-stats__add">+{{ f.additions }}</span>
+            <span v-if="f.deletions" class="cd-stats__del">-{{ f.deletions }}</span>
+            <span v-if="f.binary" class="cd-file-binary">二进制</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 关联看板卡片 -->
+    <div v-if="detail?.linkedCards && detail.linkedCards.length > 0" class="cd-cards">
+      <div class="cd-section-title">
+        <Link2 :size="13" />
+        关联卡片（{{ detail.linkedCards.length }}）
+      </div>
+      <div class="cd-cards__list">
+        <span v-for="card in detail.linkedCards" :key="card.cardId" class="cd-card-chip">
+          {{ card.cardId }}
+          <span v-if="card.columnName" class="cd-card-col">{{ card.columnName }}</span>
+        </span>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* ===== Panel 根容器 ===== */
+.cd-panel {
+  display: flex;
+  flex-direction: column;
+  color: var(--color-text);
+  font-size: var(--font-sm, 13px);
+  /* dialog 变体：从弹窗壳继承背景；panel 变体：浅色描边区分 */
+}
+
+/* panel 变体（inline 手风琴）：有边框和上分割线 */
+.cd-panel--panel {
+  background: var(--color-bg-soft, rgba(255, 255, 255, 0.02));
+  border-top: 1px solid var(--color-border);
+  /* 行内嵌入手风琴需要更紧凑的 padding */
+  padding: 0;
+}
+
+/* dialog 变体：弹窗内，padding 更宽松 */
+.cd-panel--dialog {
+  padding: 0;
+}
+
+/* ===== Header ===== */
+.cd-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-elevated, rgba(255, 255, 255, 0.03));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-shrink: 0;
+}
+.cd-panel--panel .cd-panel__header {
+  padding: 6px var(--space-3, 12px);
+}
+.cd-panel__header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.cd-panel__icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.cd-sha {
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 600;
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.1));
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.cd-date {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cd-panel__header-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.cd-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.cd-icon-btn:hover {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--color-text);
+}
+
+/* ===== Message ===== */
+.cd-panel__message {
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.cd-panel--dialog .cd-panel__message {
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+}
+.cd-message__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.cd-panel--dialog .cd-message__title {
+  font-size: var(--font-md, 14px);
+}
+.cd-message__body {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  font-family: inherit;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ===== Meta ===== */
+.cd-panel__meta {
+  padding: 6px var(--space-3, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.cd-panel--dialog .cd-panel__meta {
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  gap: var(--space-2, 8px);
+}
+.cd-meta__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2, 8px);
+}
+.cd-meta__label {
+  flex: 0 0 36px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-align: right;
+  flex-shrink: 0;
+}
+.cd-panel--dialog .cd-meta__label {
+  flex: 0 0 48px;
+  font-size: 11px;
+}
+.cd-meta__value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text);
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.cd-panel--dialog .cd-meta__value {
+  font-size: 13px;
+  gap: 8px;
+}
+.cd-meta__email {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cd-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.cd-panel--dialog .cd-avatar-fallback {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+}
+/* fallback 背景：复用 16 色变量（与 gitgraph 保持视觉一致） */
+.cd-flow-0 { background-color: var(--color-series-16-0); }
+.cd-flow-1 { background-color: var(--color-series-16-1); }
+.cd-flow-2 { background-color: var(--color-series-16-2); }
+.cd-flow-3 { background-color: var(--color-series-16-3); }
+.cd-flow-4 { background-color: var(--color-series-16-4); }
+.cd-flow-5 { background-color: var(--color-series-16-5); }
+.cd-flow-6 { background-color: var(--color-series-16-6); }
+.cd-flow-7 { background-color: var(--color-series-16-7); }
+.cd-flow-8 { background-color: var(--color-series-16-8); }
+.cd-flow-9 { background-color: var(--color-series-16-9); }
+.cd-flow-10 { background-color: var(--color-series-16-10); }
+.cd-flow-11 { background-color: var(--color-series-16-11); }
+.cd-flow-12 { background-color: var(--color-series-16-12); }
+.cd-flow-13 { background-color: var(--color-series-16-13); }
+.cd-flow-14 { background-color: var(--color-series-16-14); }
+.cd-flow-15 { background-color: var(--color-series-16-15); }
+
+/* Stats */
+.cd-stats {
+  gap: 10px;
+}
+.cd-panel--dialog .cd-stats {
+  gap: 12px;
+}
+.cd-stats__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-success, #7db233);
+  font-weight: 500;
+  font-size: 12px;
+}
+.cd-stats__del {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-danger, #dc2626);
+  font-weight: 500;
+  font-size: 12px;
+}
+.cd-stats__files {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+/* Refs */
+.cd-refs {
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.cd-ref-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.cd-ref-badge--branch {
+  background-color: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
+  color: var(--color-primary, #74b830);
+}
+.cd-ref-badge--remote {
+  background-color: rgba(100, 116, 139, 0.12);
+  color: #64748b;
+}
+.cd-ref-badge--tag {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+
+/* Loading */
+.cd-loading {
+  padding: var(--space-3, 12px);
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+/* ===== Files ===== */
+.cd-files {
+  padding: 6px var(--space-3, 12px);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.cd-panel--dialog .cd-files {
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+}
+.cd-section-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 4px;
+}
+.cd-panel--dialog .cd-section-title {
+  font-size: 13px;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.cd-files__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 140px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg);
+}
+.cd-panel--dialog .cd-files__list {
+  max-height: 240px;
+}
+.cd-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--color-divider, var(--color-border));
+}
+.cd-file-row:last-child {
+  border-bottom: none;
+}
+.cd-file-status {
+  flex: 0 0 36px;
+  font-weight: 500;
+  font-size: 10px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.cd-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+.cd-file-rename {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+.cd-file-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.cd-file-binary {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding: 0 4px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+}
+
+/* ===== Linked Cards ===== */
+.cd-cards {
+  padding: 6px var(--space-3, 12px);
+  flex-shrink: 0;
+}
+.cd-panel--dialog .cd-cards {
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+}
+.cd-cards__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.cd-card-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.1));
+  color: var(--color-primary);
+  font-weight: 500;
+}
+.cd-card-col {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+/* ===== Utility ===== */
+.mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+</style>
