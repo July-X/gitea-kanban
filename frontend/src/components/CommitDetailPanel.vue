@@ -259,7 +259,7 @@ if (typeof document !== 'undefined') {
 
 <template>
   <div v-if="props.commit" class="cd-panel" :class="`cd-panel--${props.variant}`">
-    <!-- 标题栏（短 SHA + 完整日期 + 复制 / 在 Gitea 打开） -->
+    <!-- 标题栏（短 SHA + 完整日期 + 复制 / 在 Gitea 打开）—— 跨整宽 -->
     <header class="cd-panel__header">
       <div class="cd-panel__header-left">
         <GitCommit :size="14" class="cd-panel__icon" />
@@ -287,106 +287,215 @@ if (typeof document !== 'undefined') {
       </div>
     </header>
 
-    <!-- 提交信息 -->
-    <div class="cd-panel__message">
-      <div class="cd-message__title">{{ messageTitle }}</div>
-      <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
-    </div>
+    <!-- v2.12：手风琴双栏布局 —— 左 4 (commit message + meta) | 右 6 (files + cards)
+         复刻 vscode git graph：左右各独立纵向滚动，互不干扰
+         dialog 变体保留单列垂直流（弹窗宽屏更适合纵向堆叠）-->
+    <div v-if="props.variant === 'panel'" class="cd-panel__body">
+      <!-- 左 4/10：commit message + meta -->
+      <div class="cd-panel__left">
+        <div class="cd-panel__message">
+          <div class="cd-message__title">{{ messageTitle }}</div>
+          <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
+        </div>
 
-    <!-- 作者 / 统计 / 引用 -->
-    <div class="cd-panel__meta">
-      <div class="cd-meta__row">
-        <span class="cd-meta__label">作者</span>
-        <div class="cd-meta__value">
-          <span
-            class="cd-avatar-fallback"
-            :class="`cd-flow-${(props.commit.authorName.charCodeAt(0) || 0) % 16}`"
-            aria-hidden="true"
-          >{{ props.commit.authorName.trim().charAt(0).toUpperCase() || '?' }}</span>
-          <span>{{ props.commit.authorName }}</span>
-          <span v-if="props.commit.authorEmail" class="cd-meta__email mono">
-            &lt;{{ props.commit.authorEmail }}&gt;
-          </span>
-        </div>
-      </div>
-      <div
-        v-if="detail && (detail.additions != null || detail.deletions != null)"
-        class="cd-meta__row"
-      >
-        <span class="cd-meta__label">统计</span>
-        <div class="cd-meta__value cd-stats">
-          <span v-if="detail.additions != null" class="cd-stats__add">
-            <Plus :size="12" />{{ detail.additions }}
-          </span>
-          <span v-if="detail.deletions != null" class="cd-stats__del">
-            <Minus :size="12" />{{ detail.deletions }}
-          </span>
-          <span v-if="detail.filesChanged != null" class="cd-stats__files">
-            <FileText :size="12" />{{ detail.filesChanged }} 个文件
-          </span>
-        </div>
-      </div>
-      <div
-        v-if="props.commit.refs && props.commit.refs.length > 0"
-        class="cd-meta__row"
-      >
-        <span class="cd-meta__label">引用</span>
-        <div class="cd-meta__value cd-refs">
-          <span
-            v-for="(ref, idx) in props.commit.refs"
-            :key="`cd-ref-${idx}-${ref}`"
-            class="cd-ref-badge"
-            :class="refBadgeClass(props.commit.refTypes?.[idx])"
-            :title="ref"
+        <div class="cd-panel__meta">
+          <div class="cd-meta__row">
+            <span class="cd-meta__label">作者</span>
+            <div class="cd-meta__value">
+              <span
+                class="cd-avatar-fallback"
+                :class="`cd-flow-${(props.commit.authorName.charCodeAt(0) || 0) % 16}`"
+                aria-hidden="true"
+              >{{ props.commit.authorName.trim().charAt(0).toUpperCase() || '?' }}</span>
+              <span>{{ props.commit.authorName }}</span>
+              <span v-if="props.commit.authorEmail" class="cd-meta__email mono">
+                &lt;{{ props.commit.authorEmail }}&gt;
+              </span>
+            </div>
+          </div>
+          <div
+            v-if="detail && (detail.additions != null || detail.deletions != null)"
+            class="cd-meta__row"
           >
-            {{ ref }}
-          </span>
+            <span class="cd-meta__label">统计</span>
+            <div class="cd-meta__value cd-stats">
+              <span v-if="detail.additions != null" class="cd-stats__add">
+                <Plus :size="12" />{{ detail.additions }}
+              </span>
+              <span v-if="detail.deletions != null" class="cd-stats__del">
+                <Minus :size="12" />{{ detail.deletions }}
+              </span>
+              <span v-if="detail.filesChanged != null" class="cd-stats__files">
+                <FileText :size="12" />{{ detail.filesChanged }} 个文件
+              </span>
+            </div>
+          </div>
+          <div
+            v-if="props.commit.refs && props.commit.refs.length > 0"
+            class="cd-meta__row"
+          >
+            <span class="cd-meta__label">引用</span>
+            <div class="cd-meta__value cd-refs">
+              <span
+                v-for="(ref, idx) in props.commit.refs"
+                :key="`cd-ref-${idx}-${ref}`"
+                class="cd-ref-badge"
+                :class="refBadgeClass(props.commit.refTypes?.[idx])"
+                :title="ref"
+              >
+                {{ ref }}
+              </span>
+            </div>
+          </div>
+          <div v-if="loading" class="cd-loading">加载详情中…</div>
         </div>
       </div>
-    </div>
 
-    <!-- 加载中 -->
-    <div v-if="loading" class="cd-loading">加载详情中…</div>
+      <!-- 右 6/10：files + cards -->
+      <div class="cd-panel__right">
+        <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
+          <div class="cd-section-title">
+            <FileText :size="13" />
+            文件变更（{{ detail.files.length }}）
+          </div>
+          <div class="cd-files__list">
+            <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
+              <span class="cd-file-status" :style="{ color: fileStatusColor(f.status) }">
+                {{ fileStatusLabel(f.status) }}
+              </span>
+              <span class="cd-file-name mono" :title="f.filename">
+                {{ f.filename }}
+                <span v-if="f.previousFilename" class="cd-file-rename">
+                  ← {{ f.previousFilename }}
+                </span>
+              </span>
+              <span class="cd-file-stats">
+                <span v-if="f.additions" class="cd-stats__add">+{{ f.additions }}</span>
+                <span v-if="f.deletions" class="cd-stats__del">-{{ f.deletions }}</span>
+                <span v-if="f.binary" class="cd-file-binary">二进制</span>
+              </span>
+            </div>
+          </div>
+        </div>
 
-    <!-- 文件变更列表 -->
-    <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
-      <div class="cd-section-title">
-        <FileText :size="13" />
-        文件变更（{{ detail.files.length }}）
-      </div>
-      <div class="cd-files__list">
-        <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
-          <span class="cd-file-status" :style="{ color: fileStatusColor(f.status) }">
-            {{ fileStatusLabel(f.status) }}
-          </span>
-          <span class="cd-file-name mono" :title="f.filename">
-            {{ f.filename }}
-            <span v-if="f.previousFilename" class="cd-file-rename">
-              ← {{ f.previousFilename }}
+        <div v-if="detail?.linkedCards && detail.linkedCards.length > 0" class="cd-cards">
+          <div class="cd-section-title">
+            <Link2 :size="13" />
+            关联卡片（{{ detail.linkedCards.length }}）
+          </div>
+          <div class="cd-cards__list">
+            <span v-for="card in detail.linkedCards" :key="card.cardId" class="cd-card-chip">
+              {{ card.cardId }}
+              <span v-if="card.columnName" class="cd-card-col">{{ card.columnName }}</span>
             </span>
-          </span>
-          <span class="cd-file-stats">
-            <span v-if="f.additions" class="cd-stats__add">+{{ f.additions }}</span>
-            <span v-if="f.deletions" class="cd-stats__del">-{{ f.deletions }}</span>
-            <span v-if="f.binary" class="cd-file-binary">二进制</span>
-          </span>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 关联看板卡片 -->
-    <div v-if="detail?.linkedCards && detail.linkedCards.length > 0" class="cd-cards">
-      <div class="cd-section-title">
-        <Link2 :size="13" />
-        关联卡片（{{ detail.linkedCards.length }}）
+    <!-- dialog 变体：单列垂直流（弹窗宽屏适合纵向堆叠）-->
+    <template v-else>
+      <!-- 提交信息 -->
+      <div class="cd-panel__message">
+        <div class="cd-message__title">{{ messageTitle }}</div>
+        <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
       </div>
-      <div class="cd-cards__list">
-        <span v-for="card in detail.linkedCards" :key="card.cardId" class="cd-card-chip">
-          {{ card.cardId }}
-          <span v-if="card.columnName" class="cd-card-col">{{ card.columnName }}</span>
-        </span>
+
+      <!-- 作者 / 统计 / 引用 -->
+      <div class="cd-panel__meta">
+        <div class="cd-meta__row">
+          <span class="cd-meta__label">作者</span>
+          <div class="cd-meta__value">
+            <span
+              class="cd-avatar-fallback"
+              :class="`cd-flow-${(props.commit.authorName.charCodeAt(0) || 0) % 16}`"
+              aria-hidden="true"
+            >{{ props.commit.authorName.trim().charAt(0).toUpperCase() || '?' }}</span>
+            <span>{{ props.commit.authorName }}</span>
+            <span v-if="props.commit.authorEmail" class="cd-meta__email mono">
+              &lt;{{ props.commit.authorEmail }}&gt;
+            </span>
+          </div>
+        </div>
+        <div
+          v-if="detail && (detail.additions != null || detail.deletions != null)"
+          class="cd-meta__row"
+        >
+          <span class="cd-meta__label">统计</span>
+          <div class="cd-meta__value cd-stats">
+            <span v-if="detail.additions != null" class="cd-stats__add">
+              <Plus :size="12" />{{ detail.additions }}
+            </span>
+            <span v-if="detail.deletions != null" class="cd-stats__del">
+              <Minus :size="12" />{{ detail.deletions }}
+            </span>
+            <span v-if="detail.filesChanged != null" class="cd-stats__files">
+              <FileText :size="12" />{{ detail.filesChanged }} 个文件
+            </span>
+          </div>
+        </div>
+        <div
+          v-if="props.commit.refs && props.commit.refs.length > 0"
+          class="cd-meta__row"
+        >
+          <span class="cd-meta__label">引用</span>
+          <div class="cd-meta__value cd-refs">
+            <span
+              v-for="(ref, idx) in props.commit.refs"
+              :key="`cd-ref-${idx}-${ref}`"
+              class="cd-ref-badge"
+              :class="refBadgeClass(props.commit.refTypes?.[idx])"
+              :title="ref"
+            >
+              {{ ref }}
+            </span>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <!-- 加载中 -->
+      <div v-if="loading" class="cd-loading">加载详情中…</div>
+
+      <!-- 文件变更列表 -->
+      <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
+        <div class="cd-section-title">
+          <FileText :size="13" />
+          文件变更（{{ detail.files.length }}）
+        </div>
+        <div class="cd-files__list">
+          <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
+            <span class="cd-file-status" :style="{ color: fileStatusColor(f.status) }">
+              {{ fileStatusLabel(f.status) }}
+            </span>
+            <span class="cd-file-name mono" :title="f.filename">
+              {{ f.filename }}
+              <span v-if="f.previousFilename" class="cd-file-rename">
+                ← {{ f.previousFilename }}
+              </span>
+            </span>
+            <span class="cd-file-stats">
+              <span v-if="f.additions" class="cd-stats__add">+{{ f.additions }}</span>
+              <span v-if="f.deletions" class="cd-stats__del">-{{ f.deletions }}</span>
+              <span v-if="f.binary" class="cd-file-binary">二进制</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 关联看板卡片 -->
+      <div v-if="detail?.linkedCards && detail.linkedCards.length > 0" class="cd-cards">
+        <div class="cd-section-title">
+          <Link2 :size="13" />
+          关联卡片（{{ detail.linkedCards.length }}）
+        </div>
+        <div class="cd-cards__list">
+          <span v-for="card in detail.linkedCards" :key="card.cardId" class="cd-card-chip">
+            {{ card.cardId }}
+            <span v-if="card.columnName" class="cd-card-col">{{ card.columnName }}</span>
+          </span>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -397,15 +506,19 @@ if (typeof document !== 'undefined') {
   flex-direction: column;
   color: var(--color-text);
   font-size: var(--font-sm, 13px);
-  /* dialog 变体：从弹窗壳继承背景；panel 变体：浅色描边区分 */
+  /* dialog 变体：从弹窗壳继承背景；panel 变体：透明（继承手风琴卡片底色） */
 }
 
-/* panel 变体（inline 手风琴）：有边框和上分割线 */
+/* panel 变体（inline 手风琴）：
+ *   - 高 100% 撑满父容器（手风琴卡片 max-height: 260px）
+ *   - flex column：header 顶 + body 撑开
+ *   - 让内部子元素可以各自滚动 */
 .cd-panel--panel {
-  background: var(--color-bg-soft, rgba(255, 255, 255, 0.02));
-  border-top: 1px solid var(--color-border);
-  /* 行内嵌入手风琴需要更紧凑的 padding */
+  background: transparent;
+  border-top: none;
   padding: 0;
+  height: 100%;
+  min-height: 0;
 }
 
 /* dialog 变体：弹窗内，padding 更宽松 */
@@ -428,6 +541,69 @@ if (typeof document !== 'undefined') {
 }
 .cd-panel--panel .cd-panel__header {
   padding: 6px var(--space-3, 12px);
+}
+
+/* ===== v2.12 双栏布局（panel 变体专用）=====
+ * 复刻 vscode git graph：左 4 (commit meta + message) | 右 6 (files + cards)
+ * 左右各自独立纵向滚动（各自 overflow-y: auto），互不干扰。
+ * 父容器（手风琴卡片）max-height: 260px 减去 header 高度 ~32px ≈ 228px 是 body 高度上限。
+ * min-height: 0 是关键 —— 否则 grid 子元素无法收缩，会撑爆 228px */
+.cd-panel__body {
+  display: grid;
+  grid-template-columns: 4fr 6fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* 4:6 之间的纵向分隔线 */
+  border-top: 1px solid var(--color-divider);
+}
+.cd-panel__left {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-divider);
+  /* 滚动条样式 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.cd-panel__right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚动条样式 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.cd-panel__left::-webkit-scrollbar,
+.cd-panel__right::-webkit-scrollbar {
+  width: 8px;
+}
+.cd-panel__left::-webkit-scrollbar-track,
+.cd-panel__right::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cd-panel__left::-webkit-scrollbar-thumb,
+.cd-panel__right::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+.cd-panel__left::-webkit-scrollbar-thumb:hover,
+.cd-panel__right::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+/* panel 变体下的 message / meta / files 都不再需要 border-bottom（左右两栏 + header 已分割） */
+.cd-panel--panel .cd-panel__message,
+.cd-panel--panel .cd-panel__meta,
+.cd-panel--panel .cd-files,
+.cd-panel--panel .cd-cards {
+  border-bottom: none;
+  flex-shrink: 0;
+}
+/* panel 变体下的 message body 不再叠 120px max-height 滚动（外层已是滚动容器） */
+.cd-panel--panel .cd-message__body {
+  max-height: none;
 }
 .cd-panel__header-left {
   display: flex;
@@ -694,14 +870,19 @@ if (typeof document !== 'undefined') {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 140px;
-  overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm, 6px);
   background: var(--color-bg);
 }
+/* dialog 变体单列流：files__list 自身需 max-height + 滚动（避免文件多撑爆弹窗） */
 .cd-panel--dialog .cd-files__list {
   max-height: 240px;
+  overflow-y: auto;
+}
+/* panel 变体：右栏父容器已经滚动，files__list 不再叠滚动条 */
+.cd-panel--panel .cd-files__list {
+  max-height: none;
+  overflow-y: visible;
 }
 .cd-file-row {
   display: flex;

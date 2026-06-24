@@ -1203,45 +1203,44 @@ function refBadgeClass(refType?: string): string {
   flex-shrink: 0;
 }
 
-/* ===== v2.11 行下手风琴（commit-accordion · 复刻 VSCode Git Graph）=====
- * 跨整宽（position: absolute + left/right: 0）覆盖左侧 SVG 区，
- * 让"展开区域"在视觉上左右对齐成一条横带（左侧 graph 区下方自然留白，
- * 跟 VSCode Git Graph "左侧 lane 在展开行止步"的行为一致）。
- *
- * v2.11 视觉升级（区分度强化 · 复刻 vscode 卡片化原则）：
- *   - bg 改为 --color-bg-elevated（vs 主区 canvas 暗色 +14 阶 / 亮色 +9 阶），
- *     之前的 --color-bg-soft fallback (rgba 0,0,0,0.04) 跟主区背景几乎无区分
- *   - 加 8px 圆角（vscode / Linear 卡片主流）+ 1px 描边
- *   - 加 --shadow-sm 单层柔和阴影（v1.6 卡片投影规范），让色块"浮"在 commit-row 之上
- *   - 展开 commit-row 用 --color-primary-soft 软底 + 顶/底去边框，
- *     跟手风琴卡片"无缝衔接"（看起来像一张大卡片）
- *
- * max-height 固定 260px → 超出显示纵向滚动条（用户拍板固定阈值，
- *   跟 VSCode Git Graph 行为对齐）；手风琴内部 commit message / file 列表
- *   不再叠滚动条（避免双滚动条）。
- *
- * 布局：手风琴是 .git-graph-wrapper 的绝对定位子元素；
- *      list 内部插 .commit-accordion-spacer 占位把下方 commit-row 推开
- */
-.commit-accordion {
-  position: absolute;
-  left: 4px;        /* 跟 SVG 区域左边留 4px 视觉呼吸（避免压边） */
-  right: 4px;       /* 同理右边 */
-  /* top / height 由 :style="accordionPositionStyle" 绑定 */
-  /* v2.11：elevated 卡片化 —— bg 提档 + 描边 + 圆角 + 阴影 */
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-card, 8px);
-  box-shadow: var(--shadow-sm);
-  max-height: 260px;
-  overflow-y: auto;
-  z-index: 3; /* 浮在 SVG 之上 */
-  /* 滚动条样式：贴合 shell 主题 */
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-  /* 入场动画 */
-  animation: cdAccordionOpen 180ms cubic-bezier(0.16, 1, 0.3, 1);
-}
+/* ===== v2.12 行下手风琴（commit-accordion · 复刻 VSCode Git Graph）=====
+     * 跨整宽（position: absolute + left/right: 0）覆盖左侧 SVG 区，
+     * 让"展开区域"在视觉上左右对齐成一条横带（左侧 graph 区下方自然留白，
+     * 跟 VSCode Git Graph "左侧 lane 在展开行止步"的行为一致）。
+     *
+     * v2.12 布局变化：panel 改成双栏 4:6，左右各自滚动
+     * - overflow-y: hidden 让 panel 内部 grid 消化滚动（避免双滚动条）
+     * - 兜底 overflow-y: auto 在 panel 高度异常时滚动整个手风琴
+     *
+     * 视觉卡片化（v2.11）：
+     *   - bg = --color-bg-elevated（vs 主区 canvas 暗色 +14 阶 / 亮色 +9 阶）
+     *   - 8px 圆角 + 1px --color-divider 描边
+     *   - --shadow-sm 单层柔和阴影
+     *
+     * max-height 固定 260px（用户拍板固定阈值，跟 VSCode Git Graph 行为对齐）
+     */
+    .commit-accordion {
+      position: absolute;
+      left: 4px;        /* 跟 SVG 区域左边留 4px 视觉呼吸（避免压边） */
+      right: 4px;       /* 同理右边 */
+      /* top / height 由 :style="accordionPositionStyle" 绑定 */
+      background: var(--color-bg-elevated);
+      border: 1px solid var(--color-divider);
+      border-radius: var(--radius-card, 8px);
+      box-shadow: var(--shadow-sm);
+      max-height: 260px;
+      /* v2.12：panel 内部 grid 4:6 各自滚，accordion 本身隐藏外层滚动避免双滚动条 */
+      overflow: hidden;
+      z-index: 3; /* 浮在 SVG 之上 */
+      /* 滚动条样式：兜底滚动时使用（理论上不会触发） */
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb) transparent;
+      /* 入场动画 */
+      animation: cdAccordionOpen 180ms cubic-bezier(0.16, 1, 0.3, 1);
+      /* 让内部 panel 能用 height: 100% 撑满手风琴（v2.12 双栏 4:6 必需） */
+      display: flex;
+      flex-direction: column;
+    }
 .commit-accordion::-webkit-scrollbar {
   width: 8px;
 }
