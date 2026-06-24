@@ -48,8 +48,8 @@ const selectedPlatform = ref<'gitea' | 'github'>('gitea');
 
 /** 平台选项 */
 const platforms = [
-  { value: 'gitea' as const, label: 'Gitea（自托管）', hint: '连接自托管 Gitea 实例' },
-  { value: 'github' as const, label: 'GitHub', hint: '连接 GitHub（首期仅 Git Graph）' },
+  { value: 'gitea' as const, label: 'Gitea（自托管）', hint: '连接自托管 Gitea 实例，看板 + Git Graph 完整功能' },
+  { value: 'github' as const, label: 'GitHub', hint: '连接 GitHub（列仓库 + 看 Git Graph）' },
 ];
 
 const giteaUrl = ref(DEFAULT_LOCAL_URL);
@@ -233,14 +233,26 @@ function goNext(): void {
             </button>
           </div>
           <p class="auth__hint">
-            不知道怎么获取？去 gitea 的
-            <a
-              href="https://docs.gitea.com/usage/api-usage#generating-an-access-token"
-              target="_blank"
-              rel="noopener noreferrer"
-              >设置 → 应用 → 生成令牌</a
-            >
-            （需要勾选仓库、议题、用户的读写权限）
+            <template v-if="selectedPlatform === 'github'">
+              不知道怎么获取？
+              <a
+                href="https://github.com/settings/tokens?type=beta"
+                target="_blank"
+                rel="noopener noreferrer"
+                >GitHub → Settings → Developer settings → Personal access tokens</a
+              >
+              （classic PAT 勾选 <code>repo</code> 即可；fine-grained token 需要 Repository 读权限）
+            </template>
+            <template v-else>
+              不知道怎么获取？去 gitea 的
+              <a
+                href="https://docs.gitea.com/usage/api-usage#generating-an-access-token"
+                target="_blank"
+                rel="noopener noreferrer"
+                >设置 → 应用 → 生成令牌</a
+              >
+              （需要勾选仓库、议题、用户的读写权限）
+            </template>
           </p>
         </div>
 

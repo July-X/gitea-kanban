@@ -1,10 +1,16 @@
-// Package github 实现 PlatformAdapter 的 GitHub 版本（首期仅 Git Graph）。
+// Package github 实现 PlatformAdapter 的 GitHub 版本。
 //
-// 首期范围（对齐迁移计划 §2.4）：
+// 支持范围（v2.x）：
 //   - VerifyToken：GET /user，Authorization: Bearer <token>
+//   - ListRepos：GET /user/repos，列当前登录用户可访问的仓库（含 collaborator）
 //   - CloneRepo：go-git clone（与 Gitea 共用 app/git.CloneRepo）
 //   - LogGraph：go-git DAG Log + 自研 lane 布局（与 Gitea 共用）
 //   - 其余方法返回 ErrNotSupported
+//
+// GitHub PAT scope 要求：
+//   - ListRepos：classic PAT 勾选 repo（public_repo 不够拉 private 仓库）
+//   - CloneRepo：classic PAT 勾选 repo（同上）
+//   - 两者共用 repo scope 即可，首期最小权限。
 package github
 
 import (
@@ -13,6 +19,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"gitea-kanban/app/git"
@@ -73,11 +81,105 @@ func (a *GitHubAdapter) VerifyToken(ctx context.Context, hostURL, token string) 
 	}, nil
 }
 
-// ===== 仓库（首期不支持，UI 隐藏）=====
+// ===== 仓库 =====
 
-// ListRepos 首期不支持
+// ListRepos 列出登录用户可访问的仓库（GET /user/repos）
+//
+// GitHub 的"可访问"含义：
+//   - owner = 当前 PAT 持有者本人：owner 的所有 public + private
+//   - collaborator：作为 collaborator 加入的仓库
+//   - organization_member：通过 org 间接可访问的仓库
+//   - 三个关系用 affiliation=owner,collaborator,organization_member 一次性拉回
+//   - 默认排序：pushed desc（最近 push 在前）；前端不需要重排
+//
+// 鉴权：Bearer <token>，跟 VerifyToken 一致
+// 鉴权失败（401/403）走 mapHTTPError → 友好 IpcError
+//
+// 分页 / 搜索：
+//   - opts.Limit 映射 ?per_page=（GitHub 上限 100，默认 50）
+//   - opts.Page 映射 ?page=
+//   - opts.Query 在**客户端**做大小写不敏感模糊匹配（GitHub /user/repos
+//     不支持服务端 q 参数，要搜全靠客户端过滤 —— 仓库量 < 上千够用）
+//   - 客户端过滤后 hasMore 按"服务端返满 per_page"判断（与 Gitea adapter 对齐）
 func (a *GitHubAdapter) ListRepos(ctx context.Context, hostURL, username, token string, opts platform.ListReposOpts) ([]platform.RepoDTO, error) {
-	return nil, platform.ErrNotSupported
+	if hostURL == "" {
+		hostURL = GitHubAPIBase
+	}
+
+	perPage := opts.Limit
+	if perPage <= 0 {
+		perPage = 50
+	}
+	if perPage > 100 {
+		// GitHub /user/repos 单页硬上限 100；超出截断
+		perPage = 100
+	}
+	page := opts.Page
+	if page <= 0 {
+		page = 1
+	}
+
+	// 三个 affiliation 全要：让登录用户能拉到 collaborator + org member 的仓库
+	// 而不仅是 owner 自己 —— "想看哪个仓库就能同步哪个"是产品目标
+	params := url.Values{}
+	params.Set("per_page", strconv.Itoa(perPage))
+	params.Set("page", strconv.Itoa(page))
+	params.Set("affiliation", "owner,collaborator,organization_member")
+	// sort + direction：默认是 full_name asc，但产品上 "最近 push 在前" 更有用
+	params.Set("sort", "pushed")
+	params.Set("direction", "desc")
+
+	var raw []struct {
+		ID            int64  `json:"id"`
+		Name          string `json:"name"`
+		FullName      string `json:"full_name"`
+		DefaultBranch string `json:"default_branch"`
+		Description   string `json:"description"`
+		Private       bool   `json:"private"`
+		Archived      bool   `json:"archived"`
+		UpdatedAt     string `json:"updated_at"`
+		Owner         struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		// GitHub /user/repos 不返 permissions 子对象（只有 /repos/{owner}/{repo} 才返）
+		// 前端用 isProject 标记代替；Permissions 字段留空即可
+	}
+
+	path := "/user/repos?" + params.Encode()
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+
+	repos := make([]platform.RepoDTO, 0, len(raw))
+	for _, r := range raw {
+		repos = append(repos, platform.RepoDTO{
+			ID:            r.ID,
+			Owner:         r.Owner.Login,
+			Name:          r.Name,
+			FullName:      r.FullName,
+			DefaultBranch: r.DefaultBranch,
+			Description:   r.Description,
+			Private:       r.Private,
+			Archived:      r.Archived,
+			UpdatedAt:     r.UpdatedAt,
+			// Permissions 留空 —— GitHub /user/repos 不返回
+		})
+	}
+
+	// 客户端过滤 query（GitHub /user/repos 不支持服务端 search）
+	if opts.Query != "" {
+		q := strings.ToLower(opts.Query)
+		filtered := repos[:0]
+		for _, r := range repos {
+			if strings.Contains(strings.ToLower(r.FullName), q) ||
+				strings.Contains(strings.ToLower(r.Description), q) {
+				filtered = append(filtered, r)
+			}
+		}
+		repos = filtered
+	}
+
+	return repos, nil
 }
 
 // ===== 分支 =====
