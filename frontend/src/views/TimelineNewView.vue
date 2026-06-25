@@ -72,7 +72,7 @@ const hasCompleteHistory = ref(false);
 /** v2.10：是否显示「加载更多」按钮 */
 const canLoadMore = computed(() => {
   // 必须有当前项目和 commits
-  if (!activeProjectId.value || !graphResult.value?.nodes?.length) return false;
+  if (!activeProjectId.value || !graphDto.value?.nodes?.length) return false;
   // 已加载完整历史则不显示
   if (hasCompleteHistory.value) return false;
   // 超大仓库才显示（判断是否用了浅克隆）
@@ -855,7 +855,7 @@ function refBadgeClass(refType?: string): string {
                 @click="handleLoadMore"
               >
                 <span v-if="loadingMore">加载中...</span>
-                <span v-else>加载更多提交记录（当前 {{ graphResult?.nodes?.length || 0 }} 个）</span>
+                <span v-else>加载更多提交记录（当前 {{ graphDto?.nodes?.length || 0 }} 个）</span>
               </button>
             </div>
 
