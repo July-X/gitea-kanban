@@ -48,6 +48,15 @@ func main() {
 				Icon:    appIcon,
 			},
 		},
+		// Debug 选项（仅 wails dev 生效,production build 会忽略）：
+		//   - OpenInspectorOnStartup: 启动时自动弹出 Web Inspector(DevTools)
+		//   - 用来排查前端 console.log / 前端日志通道 / 性能问题
+		// 配合 frontend-log.ts 的 [frontend-log] 前缀 console 输出,
+		// 排错时可以直接在 DevTools Console 里看 send() 是否真的被调
+		// 不影响生产:wails build 不会读 Debug 字段
+		Debug: options.Debug{
+			OpenInspectorOnStartup: true,
+		},
 	})
 	if err != nil {
 		println("Error:", err.Error())
