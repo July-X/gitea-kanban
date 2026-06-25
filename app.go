@@ -2010,9 +2010,10 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 
 	if singleBranch {
 		if isHugeRepo {
-			// 超大仓库：只取最近 50 个 commit
-			depth = 50
-			countLimit = 50
+			// 超大仓库：只取最近 10 个 commit（极致优化）
+			// 用户可以在需要时手动"加载更多"来增量拉取
+			depth = 10
+			countLimit = 10
 		} else {
 			depth = 500
 		}
