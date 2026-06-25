@@ -152,6 +152,38 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// SSH 失败时自动回退到 HTTPS + token
 	auth, finalURL, authMethod := BuildAuth(cloneURL, opts.Username, opts.Token)
 
+	// v2.9：超大仓库优化 - 使用原生 git + --filter=blob:none
+	//
+	// 问题：go-git 不支持 partial clone（--filter=blob:none）
+	// 对于超大仓库（如 UnrealEngine），即使 depth=10，仍需下载大量 blob
+	//
+	// 解决方案：检测超大仓库，使用原生 git 命令（支持 --filter=blob:none）
+	// 只下载 commits 和 trees，不下载文件内容（blob），大幅减少下载量
+	//
+	// 启发式规则：仓库名包含已知超大仓库关键词
+	isHugeRepo := strings.Contains(strings.ToLower(opts.Repo), "unreal") ||
+		strings.Contains(strings.ToLower(opts.Repo), "chromium") ||
+		strings.Contains(strings.ToLower(opts.Repo), "linux") ||
+		strings.Contains(strings.ToLower(opts.Repo), "webkit")
+
+	if isHugeRepo && opts.Depth > 0 {
+		// 尝试使用原生 git（如果系统有 git 命令）
+		nativeURL := finalURL
+		nativeToken := opts.Token
+
+		// SSH 模式不需要 token
+		if authMethod == AuthMethodSSH {
+			nativeToken = ""
+		}
+
+		err = CloneWithFilter(nativeURL, localPath, opts.Depth, nativeToken)
+		if err == nil {
+			// 原生 git 成功，直接返回
+			return &CloneResult{LocalPath: localPath}, nil
+		}
+		// 原生 git 失败（可能系统没装 git），继续使用 go-git
+	}
+
 	// 7. 执行 clone（v2.4 轻量模式：NoCheckout=true 跳过工作区文件）
 	//
 	// go-git 的 NoCheckout 选项：
