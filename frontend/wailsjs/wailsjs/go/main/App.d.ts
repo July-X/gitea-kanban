@@ -48,6 +48,8 @@ export function ListStarredBranches(arg1:main.ListStarredBranchesArgs):Promise<A
 
 export function ListWorkspaceRepos():Promise<Array<Record<string, string>>>;
 
+export function LogFrontend(arg1:main.LogFrontendArgs):Promise<void>;
+
 export function LogGraph(arg1:main.LogGraphArgs):Promise<main.GraphResultDTO>;
 
 export function OpenDataDir():Promise<void>;

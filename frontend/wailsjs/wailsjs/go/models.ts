@@ -747,6 +747,24 @@ export namespace main {
 	        this.projectId = source["projectId"];
 	    }
 	}
+	export class LogFrontendArgs {
+	    level: string;
+	    message: string;
+	    description?: string;
+	    source?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogFrontendArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.level = source["level"];
+	        this.message = source["message"];
+	        this.description = source["description"];
+	        this.source = source["source"];
+	    }
+	}
 	export class LogGraphArgs {
 	    platform: string;
 	    localPath: string;

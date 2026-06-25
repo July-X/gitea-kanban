@@ -25,6 +25,7 @@ import { router } from './routes';
 import { mountCommandPalette } from './lib/command-palette';
 import { useUiStore } from './stores/ui';
 import { showToast } from './lib/toast';
+import { logError } from './lib/frontend-log';
 
 // Wails 迁移：注入 window.api shim（替代 Electron preload bridge）
 // 必须在 createApp / 任何 store 调用前执行（ipc-client 依赖 window.api）
@@ -55,6 +56,13 @@ if (import.meta.env.DEV) {
 }
 
 // ===== 全局错误处理 =====
+//
+// 设计:所有错误源都走两路
+//   1. console.error / showToast:开发者 / 用户当下看得到
+//   2. logError:走 Go 端 slog → ${dataDir}/logs/main/main.log → 反馈问题时留痕
+// (showToast 内已对 warn / error 调 logWarn / logError,所以 errorHandler 触发
+//  的 toast 会自动写日志;但我们这里也直接 logError 一次,留原始 info / stack 信息,
+//  避免 toast description 只剩 messageText 缺上下文)
 
 /**
  * 组件内未捕获错误（如 setup 抛错、render 抛错）
@@ -64,11 +72,19 @@ if (import.meta.env.DEV) {
 app.config.errorHandler = (err, _instance, info) => {
   // eslint-disable-next-line no-console -- 渲染端 console 兜底（开发期可看）
   console.error('[gitea-kanban] 组件错误：', err, '\n触发位置：', info);
+  const errMsg = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  // 文件日志（带 stack / 触发位置,排错关键信息）
+  logError(
+    'vue.errorHandler',
+    errMsg,
+    stack ? `info=${info}\nstack=${stack}` : `info=${info}`,
+  );
   // toast 是 lib（不是 SFC），直接 static import；之前的 dynamic import 是历史误判 + 触发 vite dynamic+static warning
   showToast({
     type: 'error',
     message: '界面出错了',
-    description: err instanceof Error ? err.message : String(err),
+    description: errMsg,
     duration: 5000,
   });
 };
@@ -77,14 +93,65 @@ app.config.errorHandler = (err, _instance, info) => {
 window.addEventListener('error', (e) => {
   // eslint-disable-next-line no-console
   console.error('[gitea-kanban] window error：', e.error ?? e.message);
+  const err = e.error ?? e.message;
+  const msg = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  logError(
+    'window.error',
+    msg,
+    [
+      `filename=${e.filename ?? ''}`,
+      `lineno=${e.lineno ?? ''}`,
+      `colno=${e.colno ?? ''}`,
+      stack ? `stack=${stack}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
 });
 
 /** 未处理的 Promise reject（如 IPC 调用没人 await） */
 window.addEventListener('unhandledrejection', (e) => {
   // eslint-disable-next-line no-console
   console.error('[gitea-kanban] unhandled rejection：', e.reason);
+  const reason = e.reason;
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack : undefined;
+  logError('window.unhandledrejection', msg, stack ?? `reason=${String(reason)}`);
   e.preventDefault(); // 阻止默认控制台报错
 });
+
+/**
+ * 全局 console.error 拦截 —— 把所有 console.error 调用也写文件
+ *
+ * 触发场景:库代码 / 第三方组件 / 业务代码自己 console.error
+ * 不影响开发期 DevTools 看(走原 console.error),只是再写一份到文件
+ *
+ * 注意:不要覆盖 console.error 本身——会让上面的 console.error + Vue errorHandler
+ * 都失效。这里改的是 console.error 的引用,让它调原 console.error + 再调 logError
+ */
+const originalConsoleError = console.error.bind(console);
+console.error = (...args: unknown[]) => {
+  originalConsoleError(...args);
+  // 避免递归:logError 失败时 fallback 到 console.error(已经被替换),
+  // 但 logError 内部不用 console.error,所以这里安全
+  try {
+    const msg = args
+      .map((a) => {
+        if (a instanceof Error) return a.message;
+        if (typeof a === 'string') return a;
+        try {
+          return JSON.stringify(a);
+        } catch {
+          return String(a);
+        }
+      })
+      .join(' ');
+    logError('console.error', msg);
+  } catch {
+    // 静默:拦截器本身不能抛
+  }
+};
 
 app.mount('#app');
 

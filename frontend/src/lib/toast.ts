@@ -15,6 +15,7 @@
  */
 import { ref } from 'vue';
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, type LucideIcon } from 'lucide-vue-next';
+import { logWarn, logError } from './frontend-log';
 
 export type ToastType = 'success' | 'info' | 'warn' | 'error';
 
@@ -96,6 +97,17 @@ export function showToast(
     timer = setTimeout(() => {
       toast.value = null;
     }, toast.value.duration);
+  }
+
+  // 写日志：warn / error 级别的 toast 都进文件日志，方便用户反馈问题排查
+  //   - success / info 不写（克隆成功、列变更这些高频低价值提示会爆文件）
+  //   - description 可能很长（包含 cause、httpStatus 等诊断信息）—— 写全文
+  //   - source 标记 'toast' 方便 grep
+  //   - logWarn / logError fire-and-forget，不阻塞 UI
+  if (state.type === 'warn') {
+    logWarn('toast', state.message, state.description);
+  } else if (state.type === 'error') {
+    logError('toast', state.message, state.description);
   }
 }
 

@@ -94,6 +94,10 @@ export function ListWorkspaceRepos() {
   return window['go']['main']['App']['ListWorkspaceRepos']();
 }
 
+export function LogFrontend(arg1) {
+  return window['go']['main']['App']['LogFrontend'](arg1);
+}
+
 export function LogGraph(arg1) {
   return window['go']['main']['App']['LogGraph'](arg1);
 }

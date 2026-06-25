@@ -169,6 +169,90 @@ func (a *App) OpenDataDir() error {
 	return nil
 }
 
+// ===== v2.x 前端日志统一记录（前后端共用 slog）=====
+//
+// 设计动机：
+//   - 旧版前端 console.error / toast.error 只在开发者工具里看，用户截图反馈问题时
+//     信息丢失严重（renderer 重启就清空）
+//   - 后端已有 slog 写 ${dataDir}/logs/main/main.log，按时间索引
+//   - 现在前端把 warn / error 级 toast + console.error + window.onerror + unhandledrejection
+//     都走 Go → 同一份文件
+//   - 用户反馈问题 → 直接打开数据目录翻 main.log,看到时间戳 + 来源 + 内容
+//
+// 写入策略：
+//   - 前端 fire-and-forget 调 LogFrontend,失败静默（不阻塞 UI,不弹 toast）
+//   - Wails binding 自动把字符串参数转 JSON,前端不传 token / 敏感信息
+//   - Go 端统一加 "src" 字段标识来源(toast / console / window / unhandledrejection)
+//
+// 安全：
+//   - 不接受任意 level 字符串,固定白名单（防前端伪造日志级别）
+//   - 不在日志里写 token / cookie / localStorage 内容
+//   - description 字段最大 1KB 截断（防恶意前端打爆文件）
+
+// LogFrontendLevel 前端日志级别（与 Go slog.Level 对应）
+//
+// 设计:导出为 const string 而不是 enum int,这样 Wails 自动生成的 TS 类型
+// 直接是字面量联合类型,前端可以传 'debug' | 'info' | 'warn' | 'error'。
+type LogFrontendLevel string
+
+const (
+	LogLevelDebug LogFrontendLevel = "debug"
+	LogLevelInfo  LogFrontendLevel = "info"
+	LogLevelWarn  LogFrontendLevel = "warn"
+	LogLevelError LogFrontendLevel = "error"
+)
+
+// LogFrontendArgs 前端日志参数
+//
+// source 标识调用方(toast / console / window.onerror / unhandledrejection / 其它),
+// 写日志时落到 src 字段方便过滤。
+type LogFrontendArgs struct {
+	Level       LogFrontendLevel `json:"level"`
+	Message     string           `json:"message"`
+	Description string           `json:"description,omitempty"`
+	Source      string           `json:"source,omitempty"`
+}
+
+// LogFrontend 前端日志统一入口（fire-and-forget）
+//
+// 设计：
+//   - logger 未初始化时（启动期极早或异常路径）静默忽略
+//   - level 不在白名单 → 当成 info（防前端传 'panic' / 'fatal' 等让 slog 不识别）
+//   - description 截断到 1024 字符（防恶意前端打爆日志文件）
+//   - 永远不返回 error（Wails binding 抛错会触发前端 unhandledrejection 死循环）
+func (a *App) LogFrontend(args LogFrontendArgs) {
+	if a.logger == nil {
+		return
+	}
+
+	// 截断 description（防爆文件）
+	desc := args.Description
+	if len(desc) > 1024 {
+		desc = desc[:1024] + "...(truncated)"
+	}
+
+	// 过滤非法 level（白名单）
+	var slogLevel slog.Level
+	switch args.Level {
+	case LogLevelDebug:
+		slogLevel = slog.LevelDebug
+	case LogLevelInfo:
+		slogLevel = slog.LevelInfo
+	case LogLevelWarn:
+		slogLevel = slog.LevelWarn
+	case LogLevelError:
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+
+	// 写日志：source 字段方便 grep,desc 留原文方便定位
+	a.logger.Log(a.ctx, slogLevel, args.Message,
+		"src", args.Source,
+		"desc", desc,
+	)
+}
+
 // ===== v2.4 用户偏好（prefs）=====
 //
 // 修复 v2.0 stub bug：
