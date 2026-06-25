@@ -251,13 +251,13 @@ async function handleLoadMore() {
     // 3. 检查是否已到根节点
     if (result.message && result.message.includes('完整历史')) {
       hasCompleteHistory.value = true;
-      showToast('success', '已加载完整历史记录');
+      showToast({ type: 'success', message: '已加载完整历史记录' });
     } else {
-      showToast('success', result.message || '成功加载更多提交记录');
+      showToast({ type: 'success', message: result.message || '成功加载更多提交记录' });
     }
   } catch (error) {
     console.error('[TimelineNewView] handleLoadMore failed:', error);
-    showToast('error', '加载失败，请重试');
+    showToast({ type: 'error', message: '加载失败，请重试' });
   } finally {
     loadingMore.value = false;
   }

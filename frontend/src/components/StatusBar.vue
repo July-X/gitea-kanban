@@ -168,8 +168,15 @@ function repoKey(r: RepoDto): string {
 }
 
 const activeProgressRepo = computed<RepoDto | null>(() => {
-  if (!busyRepoKey.value) return null;
-  return repo.repos.find((r) => repoKey(r) === busyRepoKey.value) ?? repo.currentRepo;
+  if (busyRepoKey.value) {
+    return repo.repos.find((r) => repoKey(r) === busyRepoKey.value) ?? repo.currentRepo;
+  }
+
+  // Git Graph 顶部的“加载更多”不经过 StatusBar 行末按钮，但复用同一条
+  // git:sync:progress 事件流；当前仓库有进度时也要在触发器里显示细进度条。
+  const current = repo.currentRepo;
+  if (current && syncProgress(current)) return current;
+  return null;
 });
 
 // ===== v2.6 进度条渲染辅助 =====
