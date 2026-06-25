@@ -21,6 +21,8 @@ import {
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListReposResp, RepoDto, RepoProjectDto } from '@renderer/types/dto';
+import type { SyncProgress, GitSyncProgressPayload } from '@renderer/types/sync-progress';
+import { GitSyncProgressEvent } from '@renderer/types/sync-progress';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 
@@ -406,6 +408,55 @@ export const useRepoStore = defineStore('repo', () => {
     return `${owner}/${repo}`;
   }
 
+  // ===== v2.6 同步进度（StatusBar 行末按钮下方的进度条数据源）=====
+  /**
+   * 同步进度缓存：key = `${owner}/${repo}` → SyncProgress
+   *
+   * 数据来源：后端 wails runtime.EventsEmit("git:sync:progress", payload)
+   * 订阅在 setup 里挂一次（onMounted → store.initProgressEvents()），写入 progressByRepo
+   *
+   * UI 消费：StatusBar.vue:onSyncClick / onUpdateClick 时把 busyRepoKey + progressByRepo[key] 渲染
+   * 完成后（success 或 error）后端最后会发 StageDone / StageError 事件，
+   * 前端在 doneProgressWithDelay 里延迟清掉（让用户能看到 100% / 错误态一帧）
+   */
+  const progressByRepo = ref<Record<string, SyncProgress>>({});
+
+  /**
+   * v2.6 初始化进度事件订阅
+   *
+   * 调用时机：App.vue mount 时（store 是单例，必须确保只挂一次）
+   * 实际上 Pinia store setup 只跑一次，所以 onMounted 在 App.vue 里挂一次也够。
+   * 这里暴露成函数方便 useRepoStore() 直接调
+   */
+  function initProgressEvents(): () => void {
+    // 前端 ipc-client 已有 on(event, cb) 通用监听；用 getIpcClient() 拿单例
+    // 通过 window.go.events.on(...) 也行，但 ipc-client 是抽象层，更稳
+    const client = getIpcClient();
+    const off = client.on(GitSyncProgressEvent, (payload: unknown) => {
+      // Wails JSON 解码：Go 的 `RepoKey` / `Stage` 自动转成 camelCase `repoKey` / `stage`
+      const p = payload as GitSyncProgressPayload;
+      if (!p || !p.repoKey) return;
+      // StageDone / StageError：100ms 后清掉（让 UI 渲染一帧最终态）
+      if (p.stage === 'done' || p.stage === 'error') {
+        progressByRepo.value = { ...progressByRepo.value, [p.repoKey]: p };
+        // 用 setTimeout 避免 setTimeout 嵌套在 Vue 渲染路径里
+        const key = p.repoKey;
+        setTimeout(() => {
+          // 防御：期间又被新进度覆盖 → 不删
+          const cur = progressByRepo.value[key];
+          if (cur && cur.stage === p.stage) {
+            const next = { ...progressByRepo.value };
+            delete next[key];
+            progressByRepo.value = next;
+          }
+        }, 1200);
+        return;
+      }
+      progressByRepo.value = { ...progressByRepo.value, [p.repoKey]: p };
+    });
+    return off;
+  }
+
   /**
    * 批量刷新已 clone 状态（loadRepos 完成后调一次）
    *
@@ -579,5 +630,8 @@ export const useRepoStore = defineStore('repo', () => {
     pullRepo,
     // v2.4
     pullRepoByProjectId,
+    // v2.6 同步进度（StatusBar 行末进度条）
+    progressByRepo,
+    initProgressEvents,
   };
 });

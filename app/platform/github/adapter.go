@@ -250,7 +250,7 @@ func (a *GitHubAdapter) ListBranches(ctx context.Context, hostURL, username, tok
 //   - "https://api.github.com"                 → "https://github.com"  (老账号 localStore 存了 API URL,要 reverse)
 //   - "https://github.com"                     → 不变
 //   - 自托管 GHES: https://github.acme.com     → 不变(保留 host,git clone 走自己的 host)
-func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath, accountUsername string) (string, error) {
+func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath, accountUsername string, progress git.ProgressCallback) (string, error) {
 	hostURL = strings.TrimRight(strings.TrimSpace(hostURL), "/")
 	if hostURL == "" {
 		hostURL = "https://github.com"
@@ -269,6 +269,7 @@ func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token,
 		WorkspacePath:   workspacePath,
 		AccountUsername: accountUsername,
 		NoCheckout:      true, // v2.4：只拉元信息
+		Progress:        progress,
 	})
 	if err != nil {
 		return "", err

@@ -54,6 +54,12 @@ onMounted(async () => {
   // 注:此处只恢复 currentProject;不自动 loadBoard —— 避免启动期一堆 IPC 并发,
   // 用户点导航到具体 view 时由各 view 自行 load(更可控)
   await tryRestoreOrPromptRepoGuide();
+  // v2.6:订阅后端 git:sync:progress 事件 → 写入 repo.progressByRepo
+  // StatusBar 行末按钮下方进度条的数据源
+  const offProgress = repo.initProgressEvents();
+  onBeforeUnmount(() => {
+    offProgress();
+  });
 });
 
 // 用户改了 polling interval → 重启 timer

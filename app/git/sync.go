@@ -21,6 +21,11 @@ type PullOptions struct {
 	Username string
 	// RemoteName 远程名（默认 "origin"）
 	RemoteName string
+	// Progress 进度回调（v2.6：可选，给前端实时推送百分比）
+	//
+	// fetch 阶段 go-git 的 sideband 输出会被解析成 SyncProgress 事件
+	// 通过本 callback 推给 caller。nil = 不推送（向后兼容）。
+	Progress ProgressCallback
 }
 
 // PullResult pull 结果
@@ -85,12 +90,20 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 
 	// fetch（v2.5 修复：同步所有分支）
 	// 旧版只 fetch 默认分支，导致其他分支的 commit 看不到。
-	err = remote.Fetch(&git.FetchOptions{
+	fetchOpts := &git.FetchOptions{
 		Auth: auth,
 		RefSpecs: []config.RefSpec{
 			config.RefSpec("+refs/heads/*:refs/remotes/origin/*"),
 		},
-	})
+		// v2.6：progress 回调（go-git sideband → 前端）
+		//
+		// fetch 阶段 sideband 输出跟 clone 走同一格式（Receiving objects / Resolving deltas 等），
+		// 复用 SidebandWriter 解析
+	}
+	if opts.Progress != nil {
+		fetchOpts.Progress = NewSidebandWriter(SafeWrap(opts.Progress))
+	}
+	err = remote.Fetch(fetchOpts)
 	if err != nil {
 		if err == git.NoErrAlreadyUpToDate {
 			return &FetchResult{Updated: false}, nil

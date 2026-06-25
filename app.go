@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"gitea-kanban/app/config"
 	"gitea-kanban/app/git"
@@ -485,11 +486,69 @@ type CloneRepoResult struct {
 	Reused    bool   `json:"reused"` // 仓库已存在 = 复用没重新 clone
 }
 
+// ===== v2.6 进度事件（git clone / pull）=====
+//
+// 实现：go-git sideband → ProgressCallback → runtime.EventsEmit("git:sync:progress", payload)
+// 前端订阅：repo store init 时挂一个 onMounted 监听，写到 progressByRepo[repoKey]
+// StatusBar 消费：行末按钮下方渲染 <progress> + tooltip 显示百分比
+//
+// 设计取舍：
+//   - Wails EventsEmit 是 push 模型（后端 → 前端单向），不需要前端订阅单独的 stream
+//     不需要为进度开新 IPC endpoint，零额外 schema
+//   - Event name 用单一 `git:sync:progress` 避免事件命名爆炸；payload 内区分 stage / repoKey
+//   - repoKey 用 `<platform>/<hostURL>/<owner>/<repo>` 前缀（v2.5+ 账号隔离之后，
+//     同 owner/repo 在不同账号下是不同的物理路径，前端 key 必须包含 hostURL/platform）
+const GitSyncProgressEvent = "git:sync:progress"
+
+// GitSyncProgressPayload 进度事件 payload（前端订阅用）
+//
+// 与 app/git.SyncProgress 同结构（透传）—— 这里不复用是避免前端 import Go 类型
+// （前端 wailsjs 也不直接暴露 Go struct 给 TS，TS 这边手动声明更稳）。
+type GitSyncProgressPayload struct {
+	Stage   string `json:"stage"`
+	Percent int    `json:"percent"`
+	Message string `json:"message"`
+	Cur     int    `json:"cur"`
+	Total   int    `json:"total"`
+	// RepoKey 仓库 key（前端用这个 map 到 clonedMap / progressByRepo）
+	// 格式：`<platform>/<hostURL>/<owner>/<repo>`（与 useRepoStore.refreshClonedStatus 一致风格）
+	RepoKey string `json:"repoKey"`
+}
+
+// buildSyncProgressCallback 构造 ProgressCallback，把每条 SyncProgress 包装成 Wails event
+//
+// 用法：CloneRepo / PullRepoByProjectId 调本函数生成 cb，传给 git.CloneRepo / git.PullRepo
+//
+// 参数：
+//   - repoKey:前端用于 map 的仓库标识（建议 `${owner}/${repo}`，前端 clonedMap 风格）
+//   - extra:可选 extra fields（占位，保留用于未来加 progressId / correlationId 等）
+func (a *App) buildSyncProgressCallback(repoKey string) git.ProgressCallback {
+	if a.ctx == nil {
+		// 没初始化 context 时 EventsEmit 不能用，返 no-op（避免 nil panic）
+		return func(p git.SyncProgress) {}
+	}
+	return func(p git.SyncProgress) {
+		payload := GitSyncProgressPayload{
+			Stage:   string(p.Stage),
+			Percent: p.Percent,
+			Message: p.Message,
+			Cur:     p.Cur,
+			Total:   p.Total,
+			RepoKey: repoKey,
+		}
+		// 异步发，不阻塞 go-git sideband goroutine
+		// （Wails EventsEmit 本身线程安全；wails dev 终端 + production 都行）
+		wailsruntime.EventsEmit(a.ctx, GitSyncProgressEvent, payload)
+	}
+}
+
 // CloneRepo clone 仓库到本地 workspace
 //
 // v2.3：token 走 secret.Store 从 keychain 拿（前端**不**传 token）
 // 校验当前账号的 hostURL+username 必须匹配 localStore.Accounts 里某条记录
 // （防 user 拿错 token clone 到别账号仓库 —— 但 hostURL 一样所以问题不大）
+//
+// v2.6：装上 progress 回调，通过 Wails EventsEmit 实时推百分比到前端
 func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 	if a.logger != nil {
 		a.logger.Info("CloneRepo",
@@ -565,7 +624,9 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 	// v2.5：clone 到账号隔离的子目录
 	//   旧布局：${workspacePath}/repos/<owner>__<repo>/
 	//   新布局：${workspacePath}/repos/<username>/<owner>__<repo>/
-	localPath, err := adapter.CloneRepo(a.ctx, hostURL, username, token, args.Owner, args.Repo, a.workspacePath, matchedAccount.Username)
+	//
+	// v2.6：progress 回调（把 sideband 解析结果通过 EventsEmit 推到前端）
+	localPath, err := adapter.CloneRepo(a.ctx, hostURL, username, token, args.Owner, args.Repo, a.workspacePath, matchedAccount.Username, a.buildSyncProgressCallback(args.Owner+"/"+args.Repo))
 	if err != nil {
 		return CloneRepoResult{}, err
 	}
@@ -1933,11 +1994,12 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 		return PullRepoResult{}, ipc.NewInternal("token 为空")
 	}
 
-	// 5. 调 git.PullRepo
+	// 5. 调 git.PullRepo（v2.6：装 progress 回调）
 	result, err := git.PullRepo(git.PullOptions{
 		LocalPath: localPath,
 		Token:     token,
 		Username:  account.Username,
+		Progress:  a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
 	})
 	if err != nil {
 		return PullRepoResult{}, err

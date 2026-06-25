@@ -11,6 +11,8 @@ package platform
 import (
 	"context"
 	"errors"
+
+	"gitea-kanban/app/git"
 )
 
 // ErrNotSupported 平台不支持该功能（如 GitHub 首期不支持 issue/PR）
@@ -90,7 +92,9 @@ type PlatformAdapter interface {
 	// v2.5：accountUsername 用于按账号隔离的子目录布局
 	//   旧布局：${workspacePath}/repos/<owner>__<repo>/
 	//   新布局：${workspacePath}/repos/<accountUsername>/<owner>__<repo>/
-	CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath, accountUsername string) (localPath string, err error)
+	//
+	// v2.6：progress 可选进度回调（nil = 不推送，向后兼容）
+	CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath, accountUsername string, progress git.ProgressCallback) (localPath string, err error)
 
 	// LogGraph 获取 commit 历史并构建 Graph 布局
 	LogGraph(ctx context.Context, localPath string, opts LogGraphOpts) (*GraphResult, error)

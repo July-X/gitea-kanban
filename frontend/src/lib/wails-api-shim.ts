@@ -626,8 +626,14 @@ const apiShim = {
       ),
   },
 
-  on: (_event: string, _cb: (payload: unknown) => void): (() => void) => {
-    // 桩化事件监听（Wails 用 EventsOn/EventsOff，后续步骤接入）
+  on: (event: string, cb: (payload: unknown) => void): (() => void) => {
+    // v2.6 进度事件订阅：转发到 window.runtime.EventsOn
+    // （Wails 启动期由 ipc.js 注入 window.runtime；浏览器独立 dev 模式没 runtime，
+    //  走 no-op 兜底）
+    const runtime = (window as unknown as { runtime?: { EventsOn?: (e: string, c: (...args: unknown[]) => void) => () => void } }).runtime;
+    if (runtime?.EventsOn) {
+      return runtime.EventsOn(event, cb as (...args: unknown[]) => void);
+    }
     return () => undefined;
   },
 };

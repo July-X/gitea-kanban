@@ -70,6 +70,11 @@ type CloneOptions struct {
 	// 忽略 hostURL/owner/repo。
 	// 仅在测试 / 特殊协议（file:// 指向 bare 仓库）时使用。
 	URL string
+	// Progress 进度回调（v2.6：可选，给前端实时推送百分比）
+	//
+	// 设为非 nil 后，clone 过程中 go-git 的 sideband 输出会被解析成 SyncProgress 事件
+	// 通过本 callback 推给 caller。nil = 不推送（保持原行为，向后兼容）。
+	Progress ProgressCallback
 }
 
 // CloneResult clone 结果
@@ -174,6 +179,14 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		Depth:      opts.Depth,
 		// Mirror 模式拉取所有 refs（分支、tags、notes 等）
 		Mirror: true,
+		// v2.6：progress 回调（go-git sideband → 前端）
+		//
+		// opts.Progress 为 nil 时不设这一字段（go-git 会用默认空 writer，无 sideband 输出）
+		// opts.Progress 非 nil 时包成 sideband.Progress（实现 io.Writer），
+		// 每次 sideband 行触发一次 ParseProgress → cb(SyncProgress)
+	}
+	if opts.Progress != nil {
+		cloneOpts.Progress = NewSidebandWriter(SafeWrap(opts.Progress))
 	}
 
 	// go-git 的 PlainClone 第 2 个参数是 isBare，固定 false

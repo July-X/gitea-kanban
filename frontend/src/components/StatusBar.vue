@@ -44,8 +44,6 @@ import {
   Palette,
   Search,
   User,
-  Download,
-  RotateCw,
   Loader2,
 } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -55,6 +53,7 @@ import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stor
 import { useBoardActions } from '@renderer/composables/useBoardActions';
 import { showToast } from '@renderer/lib/toast';
 import { formatLastUpdated } from '@renderer/lib/last-updated';
+import type { SyncProgress } from '@renderer/types/sync-progress';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import AccountManagerDialog from '@renderer/components/AccountManagerDialog.vue';
 import type { RepoDto } from '@renderer/types/dto';
@@ -166,6 +165,80 @@ function isCloned(r: RepoDto): boolean {
 const busyRepoKey = ref<string | null>(null);
 function repoKey(r: RepoDto): string {
   return `${r.owner}/${r.name}`;
+}
+
+// ===== v2.6 进度条渲染辅助 =====
+
+/**
+ * 同步按钮文案：根据进度阶段显示 "同步"/"同步中 N%"/"同步完成" 等
+ *   - 有进度且 percent >= 0 → "同步中 45%"
+ *   - 有进度但 percent < 0（go-git 还没出百分比） → "同步中…"
+ *   - StageDone → "同步完成"
+ *   - StageError → "同步失败"
+ *   - 无进度（未点过）→ "同步"
+ */
+function syncButtonLabel(r: RepoDto): string {
+  const p = syncProgress(r);
+  if (!p) return '同步';
+  if (p.stage === 'done') return '同步完成';
+  if (p.stage === 'error') return '同步失败';
+  if (p.percent >= 0) return `同步中 ${p.percent}%`;
+  return '同步中…';
+}
+
+/** 更新按钮文案：同上但词换成"更新" */
+function updateButtonLabel(r: RepoDto): string {
+  const p = syncProgress(r);
+  if (!p) return '更新';
+  if (p.stage === 'done') return '更新完成';
+  if (p.stage === 'error') return '更新失败';
+  if (p.percent >= 0) return `更新中 ${p.percent}%`;
+  return '更新中…';
+}
+
+/** 取出当前 repo 的 SyncProgress（无则 undefined） */
+function syncProgress(r: RepoDto): SyncProgress | undefined {
+  return repo.progressByRepo[repoKey(r)];
+}
+
+/** 进度条 class：根据 stage 切换颜色（done=绿，error=红，普通=主色） */
+function progressClass(r: RepoDto): string {
+  const p = syncProgress(r);
+  if (!p) return '';
+  if (p.stage === 'done') return 'statusbar__progress--done';
+  if (p.stage === 'error') return 'statusbar__progress--error';
+  return '';
+}
+
+/** 进度条宽度：percent 0..100 → width%；percent<0 → indeterminate（CSS keyframe 走） */
+function progressStyle(r: RepoDto): Record<string, string> {
+  const p = syncProgress(r);
+  if (!p) return { width: '0%' };
+  if (p.percent < 0) {
+    // indeterminate:用 CSS 动画，width 给一个基线值；left 由 keyframe 控制
+    return { '--progress-indeterminate': '1' } as Record<string, string>;
+  }
+  return { width: `${Math.min(100, Math.max(0, p.percent))}%` };
+}
+
+/** 进度条 tooltip：完整侧带消息文本 */
+function progressTooltip(r: RepoDto): string {
+  const p = syncProgress(r);
+  if (!p) return '';
+  const stageZh: Record<string, string> = {
+    counting: '计数中',
+    compressing: '压缩中',
+    receiving: '接收对象',
+    resolving: '解析增量',
+    checkout: '签出文件',
+    updating: '更新文件',
+    done: '完成',
+    error: '失败',
+    unknown: p.stage,
+  };
+  const stage = stageZh[p.stage] ?? p.stage;
+  if (p.percent >= 0) return `${stage} ${p.percent}% · ${p.cur}/${p.total}`;
+  return stage;
 }
 
 /** 同步（clone）仓库 */
@@ -360,9 +433,8 @@ function onLogoutClick(): void {
                     :title="`同步 ${r.fullName} 到本地 workspace`"
                     @click="onSyncClick(r, $event)"
                   >
-                    <Loader2 v-if="busyRepoKey === repoKey(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
-                    <Download v-else :size="12" :stroke-width="2" />
-                    <span>{{ busyRepoKey === repoKey(r) ? '同步中…' : '同步' }}</span>
+                    <Loader2 v-if="busyRepoKey === repoKey(r) && !syncProgress(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
+                    <span>{{ syncButtonLabel(r) }}</span>
                   </button>
                   <button
                     v-else
@@ -372,10 +444,26 @@ function onLogoutClick(): void {
                     :title="`从远端拉取 ${r.fullName} 最新 commit`"
                     @click="onUpdateClick(r, $event)"
                   >
-                    <Loader2 v-if="busyRepoKey === repoKey(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
-                    <RotateCw v-else :size="12" :stroke-width="2" />
-                    <span>{{ busyRepoKey === repoKey(r) ? '更新中…' : '更新' }}</span>
+                    <Loader2 v-if="busyRepoKey === repoKey(r) && !syncProgress(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
+                    <span>{{ updateButtonLabel(r) }}</span>
                   </button>
+                  <!--
+                    v2.6 进度条：同步/更新进行中时按钮下方显示一条细进度条
+                    - percent >= 0 时显示具体百分比
+                    - percent < 0（go-git 还没出百分比）时显示 indeterminate 动效
+                    - StageDone / StageError 短时间内保留一帧最终态，再被 setTimeout 清掉
+                  -->
+                  <div
+                    v-if="busyRepoKey === repoKey(r) && syncProgress(r)"
+                    class="statusbar__progress"
+                    :class="progressClass(r)"
+                    :title="progressTooltip(r)"
+                  >
+                    <div
+                      class="statusbar__progress-bar"
+                      :style="progressStyle(r)"
+                    />
+                  </div>
                 </div>
               </li>
             </ul>
@@ -810,6 +898,56 @@ function onLogoutClick(): void {
 
 .statusbar__spin {
   animation: statusbar-spin 1s linear infinite;
+}
+
+/* ===== v2.6 同步进度条 =====
+ * 位置：仓库行内、按钮下方（不在 dropdown 底部，独立于全局海豚 overlay）
+ * 高度 2px（极细），避免 dropdown 内容膨胀
+ * 三种状态：
+ *   - 普通（蓝）：进行中
+ *   - done（绿）：完成后短暂保留
+ *   - error（红）：失败后短暂保留
+ * indeterminate（percent < 0）用 keyframe 滑条动画，给"在动"的反馈
+ */
+.statusbar__progress {
+  position: relative;
+  flex: 1;
+  min-width: 80px;
+  height: 2px;
+  background: var(--color-bg-hover);
+  border-radius: 1px;
+  overflow: hidden;
+  align-self: stretch;
+  margin-left: var(--space-2);
+}
+
+.statusbar__progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-primary);
+  border-radius: 1px;
+  transition: width 200ms ease-out;
+}
+
+.statusbar__progress--done .statusbar__progress-bar {
+  background: var(--color-success);
+}
+.statusbar__progress--error .statusbar__progress-bar {
+  background: var(--color-danger);
+}
+
+/* indeterminate（go-git 还没出百分比时）—— 50% 宽的滑条从左滑到右循环 */
+@keyframes statusbar-progress-indeterminate {
+  0% {
+    left: -50%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+.statusbar__progress-bar[style*='--progress-indeterminate'] {
+  width: 50%;
+  animation: statusbar-progress-indeterminate 1.4s ease-in-out infinite;
 }
 
 .statusbar__dropdown-empty {
