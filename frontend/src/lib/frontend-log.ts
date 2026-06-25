@@ -38,29 +38,55 @@ export interface FrontendLogArgs {
 /**
  * 调用 window.go.main.App.LogFrontend 的最小化封装
  *
- * - 未注入(单测 / 极早启动期)→ 走 console
+ * - 未注入(单测 / 极早启动期)→ 走 console（用原始 console.error，避免 main.ts monkey-patch 死循环）
  * - 注入但调用失败(IPC 异常)→ 静默降级到 console（不抛 unhandledrejection 死循环）
  * - description 截断到 1024 字符（与 Go 端一致）
  *
  * v2.x 增强:每次 send() 都在 DevTools 打一条 console 记录（带 [frontend-log] 前缀）
  * 这样开发期 / 反馈问题期用户能立刻确认 "send() 被调了",
  * 排错"日志没出现"时区分是 send() 没被调,还是 IPC 链路断。
+ *
+ * v2.5 修复:DevTools 打 console 必须走原始 console.error（window.__originalConsoleError），
+ * 否则会被 main.ts 的 monkey-patch 拦截 → logError → send() → 死循环，
+ * 把 main thread 锁死、UI 冻屏、frontend-log 文件无限膨胀到 GB 级
+ * （v2.5 实测：刷新仓库按钮 IPC 失败 → 164MB 日志，几秒内卡死 UI）。
  */
+type OriginalConsole = {
+  error: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  log: (...args: unknown[]) => void;
+  debug: (...args: unknown[]) => void;
+};
+
+function getOriginalConsole(): OriginalConsole {
+  const w = window as unknown as {
+    __originalConsoleError?: (...args: unknown[]) => void;
+    __originalConsoleWarn?: (...args: unknown[]) => void;
+    __originalConsoleLog?: (...args: unknown[]) => void;
+    __originalConsoleDebug?: (...args: unknown[]) => void;
+  };
+  return {
+    error: w.__originalConsoleError ?? console.error.bind(console),
+    warn: w.__originalConsoleWarn ?? console.warn.bind(console),
+    log: w.__originalConsoleLog ?? console.log.bind(console),
+    debug: w.__originalConsoleDebug ?? console.debug.bind(console),
+  };
+}
+
 function send(args: FrontendLogArgs): void {
   const desc = args.description && args.description.length > 1024
     ? args.description.slice(0, 1024) + '...(truncated)'
     : args.description;
 
-  // 始终在 DevTools 打一条记录（不影响生产：用户不打开 DevTools 就看不到）
-  // 级别映射跟 send() 一致,方便排查
-  // eslint-disable-next-line no-console
+  // 始终在 DevTools 打一条记录（用原始 console.* 避开 main.ts monkey-patch 死循环）
+  const oc = getOriginalConsole();
   const consoleFn = args.level === 'error'
-    ? console.error
+    ? oc.error
     : args.level === 'warn'
-      ? console.warn
+      ? oc.warn
       : args.level === 'debug'
-        ? console.debug
-        : console.log;
+        ? oc.debug
+        : oc.log;
   consoleFn(
     `[frontend-log] ${args.level.toUpperCase()} src=${args.source} msg=${args.message}`,
     desc ?? '',
@@ -81,8 +107,8 @@ function send(args: FrontendLogArgs): void {
       description: desc,
       source: args.source,
     }).catch((err: unknown) => {
-      // eslint-disable-next-line no-console
-      console.error('[frontend-log] LogFrontend IPC failed:', err);
+      // 用原始 console.error 避免 patch 死循环
+      oc.error('[frontend-log] LogFrontend IPC failed:', err);
     });
     return;
   }

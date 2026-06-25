@@ -127,10 +127,34 @@ window.addEventListener('unhandledrejection', (e) => {
  * 触发场景:库代码 / 第三方组件 / 业务代码自己 console.error
  * 不影响开发期 DevTools 看(走原 console.error),只是再写一份到文件
  *
- * 注意:不要覆盖 console.error 本身——会让上面的 console.error + Vue errorHandler
- * 都失效。这里改的是 console.error 的引用,让它调原 console.error + 再调 logError
+ * 注意:
+ * 1. 不要覆盖 console.error 本身——会让上面的 console.error + Vue errorHandler
+ *    都失效。这里改的是 console.error 的引用,让它调原 console.error + 再调 logError
+ * 2. logError → send() 内部会用 window.__originalConsoleError（避开此 patch），
+ *    防止"logError → console.error → logError"死循环导致 main thread 锁死、UI 冻屏
+ *    （v2.5 复现：刷新按钮 → IPC 401 → unhandledrejection → console.error → logError →
+ *     send → console.error → ... 164MB 日志无限增长、UI 卡死）
+ *
+ * 顺序：先保存原始引用到 window，再做 monkey-patch。如果顺序反了 patch 又会用上被替换的。
  */
 const originalConsoleError = console.error.bind(console);
+const originalConsoleWarn = console.warn.bind(console);
+const originalConsoleLog = console.log.bind(console);
+const originalConsoleDebug = console.debug.bind(console);
+// 挂到 window 给 frontend-log.ts 用（避开本 patch 的死循环）
+(window as unknown as {
+  __originalConsoleError: typeof originalConsoleError;
+  __originalConsoleWarn: typeof originalConsoleWarn;
+  __originalConsoleLog: typeof originalConsoleLog;
+  __originalConsoleDebug: typeof originalConsoleDebug;
+}).__originalConsoleError = originalConsoleError;
+(window as unknown as { __originalConsoleWarn: typeof originalConsoleWarn }).__originalConsoleWarn =
+  originalConsoleWarn;
+(window as unknown as { __originalConsoleLog: typeof originalConsoleLog }).__originalConsoleLog =
+  originalConsoleLog;
+(window as unknown as { __originalConsoleDebug: typeof originalConsoleDebug }).__originalConsoleDebug =
+  originalConsoleDebug;
+
 console.error = (...args: unknown[]) => {
   originalConsoleError(...args);
   // 避免递归:logError 失败时 fallback 到 console.error(已经被替换),
