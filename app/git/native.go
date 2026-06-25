@@ -88,3 +88,46 @@ func injectTokenToURL(url, token string) string {
 	// https:// + oauth2:TOKEN@ + github.com/owner/repo
 	return "https://oauth2:" + token + "@" + url[8:]
 }
+
+// FetchWithFilter 使用原生 git 命令执行 partial fetch（只拉取新的 commits）
+//
+// v2.9：对已存在的仓库执行 fetch，使用 --filter=blob:none 避免下载文件内容
+//
+// 参数：
+//   - localPath: 本地仓库路径
+//   - depth: 深度限制（可选）
+//
+// 限制：
+//   - 需要系统安装了 git 命令
+//   - 仓库必须已经存在
+func FetchWithFilter(localPath string, depth int) error {
+	// 检查 git 命令是否可用
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("系统未安装 git 命令: %w", err)
+	}
+
+	// 检查仓库是否存在
+	if _, err := os.Stat(filepath.Join(localPath, ".git")); err != nil {
+		return fmt.Errorf("仓库不存在: %w", err)
+	}
+
+	// 构造 git fetch 命令
+	args := []string{
+		"-C", localPath, // 在指定目录执行
+		"fetch",
+		"--filter=blob:none", // 不下载 blob
+	}
+
+	if depth > 0 {
+		args = append(args, fmt.Sprintf("--depth=%d", depth))
+	}
+
+	// 执行命令
+	cmd := exec.Command("git", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git fetch 失败: %w\n输出: %s", err, string(output))
+	}
+
+	return nil
+}

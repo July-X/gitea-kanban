@@ -12,6 +12,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/storer"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
@@ -70,6 +71,8 @@ type FetchResult struct {
 //
 // v2.7 超时保护：超大仓库（如 UnrealEngine）可能长时间卡住，
 // 添加 2 分钟超时避免无限等待。
+//
+// v2.9：超大仓库使用原生 git + --filter=blob:none
 func FetchRepo(opts PullOptions) (*FetchResult, error) {
 	if opts.LocalPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
@@ -90,15 +93,41 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		return nil, fmt.Errorf("远程 %s 不存在: %w", remoteName, err)
 	}
 
-	// v2.8：构造 auth（优先 SSH，回退 HTTPS）
-	// 从 remote 的 URL 获取原始 URL，然后尝试 SSH
+	// 获取 remote URL
 	remoteConfig := remote.Config()
 	var remoteURL string
 	if len(remoteConfig.URLs) > 0 {
 		remoteURL = remoteConfig.URLs[0]
 	}
 
-	auth, _, authMethod := BuildAuth(remoteURL, opts.Username, opts.Token)
+	// v2.9：超大仓库优化 - 使用原生 git fetch
+	// 检测是否是超大仓库（通过 URL 判断）
+	isHugeRepo := strings.Contains(strings.ToLower(remoteURL), "unreal") ||
+		strings.Contains(strings.ToLower(remoteURL), "chromium") ||
+		strings.Contains(strings.ToLower(remoteURL), "linux") ||
+		strings.Contains(strings.ToLower(remoteURL), "webkit")
+
+	if isHugeRepo && opts.Depth > 0 {
+		// 尝试使用原生 git fetch
+		err := FetchWithFilter(opts.LocalPath, opts.Depth)
+		if err == nil {
+			return &FetchResult{Updated: true}, nil
+		}
+		// 原生 git 失败，继续使用 go-git
+	}
+
+	// v2.8：构造 auth（不改变 URL，使用仓库现有的 remote URL）
+	var auth transport.AuthMethod
+	if opts.Token != "" {
+		username := opts.Username
+		if username == "" {
+			username = "oauth2"
+		}
+		auth = &http.BasicAuth{
+			Username: username,
+			Password: opts.Token,
+		}
+	}
 
 	refSpecs := []config.RefSpec{config.RefSpec("+refs/heads/*:refs/remotes/origin/*")}
 	if opts.SingleBranch {
@@ -110,10 +139,6 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		Auth:     auth,
 		RefSpecs: refSpecs,
 		Depth:    opts.Depth,
-		// v2.6：progress 回调（go-git sideband → 前端）
-		//
-		// fetch 阶段 sideband 输出跟 clone 走同一格式（Receiving objects / Resolving deltas 等），
-		// 复用 SidebandWriter 解析
 	}
 	if opts.NoTags {
 		fetchOpts.Tags = git.NoTags
@@ -128,30 +153,13 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 
 	err = remote.FetchContext(ctx, fetchOpts)
 	if err != nil {
-		// v2.8：SSH 失败时自动回退到 HTTPS
-		if authMethod == AuthMethodSSH && err != git.NoErrAlreadyUpToDate {
-			// SSH 失败，使用 HTTPS 重试
-			username := opts.Username
-			if username == "" {
-				username = "oauth2"
-			}
-			httpAuth := &http.BasicAuth{
-				Username: username,
-				Password: opts.Token,
-			}
-			fetchOpts.Auth = httpAuth
-			err = remote.FetchContext(ctx, fetchOpts)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("同步超时（2分钟）：此仓库可能过大，建议减少 Depth 或使用在线版本查看")
 		}
-
-		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, fmt.Errorf("同步超时（2分钟）：此仓库可能过大，建议减少 Depth 或使用在线版本查看")
-			}
-			if err == git.NoErrAlreadyUpToDate {
-				return &FetchResult{Updated: false}, nil
-			}
-			return nil, fmt.Errorf("fetch 失败: %w", err)
+		if err == git.NoErrAlreadyUpToDate {
+			return &FetchResult{Updated: false}, nil
 		}
+		return nil, fmt.Errorf("fetch 失败: %w", err)
 	}
 
 	return &FetchResult{Updated: true}, nil
