@@ -2143,6 +2143,7 @@ func (a *App) DeepenRepo(args DeepenRepoArgs) (DeepenRepoResult, error) {
 	result, err := git.DeepenRepo(git.DeepenRepoOptions{
 		LocalPath: localPath,
 		DeepenBy:  deepenBy,
+		Progress:  a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
 	})
 	if err != nil {
 		if a.logger != nil {
