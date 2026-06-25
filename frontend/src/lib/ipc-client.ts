@@ -172,6 +172,18 @@ export function normalizeError(err: unknown): UserFacingError {
   if (isIpcErrorPayload(err)) {
     return toUserFacingError(err);
   }
+  // Wails ErrorFormatter 兜底时返回 err.Error() 字符串，序列化后前端收到 string
+  // 这种情况必须把 string 本身当 message，否则用户看到"未知错误"占位文案
+  // (v2.x 修复：用户反馈"应用出错了:未知错误"，根因就是 Wails 把 network 层 err
+  // 序列化后丢光了字段，前端 normalizeError 没拿到具体原因)
+  if (typeof err === 'string' && err.trim()) {
+    return {
+      code: 'internal',
+      messageText: `应用出错了：${err}`,
+      hint: '请稍候重试',
+      recoverable: true,
+    };
+  }
   if (err instanceof Error) {
     // 2026-06-12 修复：Electron IPC 把 main process throw 的 plain object
     // (IpcError.toJSON()) 包装成 Error, message = "Error invoking remote method 'xxx': [object Object]"
@@ -186,6 +198,9 @@ export function normalizeError(err: unknown): UserFacingError {
         recoverable: true,
       };
     }
+    // Wails 2 + ErrorFormatter 走 err.Error() 兜底时，前端收到 Error.message 形如
+    // "Error invoking remote method 'repos.list': 请求失败: Get ...: TLS handshake timeout"
+    // 这种 message 包含 Go 端 err.Error() 全文，对用户排障很有用——直接展示
     return {
       code: 'internal',
       messageText: `应用出错了：${err.message}`,

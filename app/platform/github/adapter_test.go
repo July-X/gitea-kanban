@@ -392,6 +392,57 @@ func TestGitHubAdapter_RequestHeaders(t *testing.T) {
 	}
 }
 
+// TestGitHubAdapter_ListRepos_NetworkError 网络层失败 → IpcError(network_offline)
+//
+// 关键回归：v2.x 修复前 doRequest 网络层失败返 fmt.Errorf("请求失败: ...")。
+// 前端 normalizeError 落到 "未知错误" 占位文案（用户根本看不到原因）。
+// 修复后必须返 *ipc.IpcError 且 code=network_offline，前端才能识别为"网络问题"。
+func TestGitHubAdapter_ListRepos_NetworkError(t *testing.T) {
+	// 用永远连不上的地址（RFC 5737 TEST-NET-1 198.51.100.0/24）模拟网络层失败
+	// httptest server close 后立刻断，httpClient.Do 会拿到 connection refused
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	server.Close() // 立即关闭 → 后续请求必失败
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.ListRepos(context.Background(), server.URL, "", "tok", platform.ListReposOpts{})
+
+	if err == nil {
+		t.Fatalf("expected network error, got nil")
+	}
+
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("error is not *ipc.IpcError, type = %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeNetworkOffline {
+		t.Errorf("code = %q, want %q (network_offline)", ipcErr.Code, ipc.CodeNetworkOffline)
+	}
+	if !strings.Contains(ipcErr.Message, "离线") && !strings.Contains(ipcErr.Message, "网络") {
+		t.Errorf("message = %q, want 含「离线」或「网络」(提示用户网络问题)", ipcErr.Message)
+	}
+}
+
+// TestGitHubAdapter_VerifyToken_NetworkError 同上,VerifyToken 路径也得走 IpcError
+func TestGitHubAdapter_VerifyToken_NetworkError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.VerifyToken(context.Background(), server.URL, "tok")
+
+	if err == nil {
+		t.Fatalf("expected network error, got nil")
+	}
+
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("error is not *ipc.IpcError, type = %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeNetworkOffline {
+		t.Errorf("code = %q, want %q", ipcErr.Code, ipc.CodeNetworkOffline)
+	}
+}
+
 // TestGitHubAdapter_ListRepos_AuthError 400/401/403/404/415/422/429/5xx/default 全部走 mapHTTPError
 //
 // v2.x 修复重点：每个分支都必须带 HTTPStatus（前端 toast 显示具体码）；

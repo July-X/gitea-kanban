@@ -93,9 +93,9 @@ func DeepenRepo(opts DeepenRepoOptions) (*DeepenRepoResult, error) {
 	args := []string{
 		"-C", opts.LocalPath,
 		"fetch",
-		"--filter=blob:none",                       // 继续不下载文件内容
-		fmt.Sprintf("--deepen=%d", opts.DeepenBy),  // 增量拉取
-		"--progress",                               // 输出进度信息
+		"--filter=blob:none", // 继续不下载文件内容
+		fmt.Sprintf("--deepen=%d", opts.DeepenBy), // 增量拉取
+		"--progress", // 输出进度信息
 	}
 
 	// 执行命令并捕获输出
@@ -109,6 +109,7 @@ func DeepenRepo(opts DeepenRepoOptions) (*DeepenRepoResult, error) {
 
 	// 启动命令
 	if err := cmd.Start(); err != nil {
+		EmitProgress(opts.Progress, StageError, -1, "启动 git 命令失败")
 		return nil, fmt.Errorf("启动 git 命令失败: %w", err)
 	}
 
@@ -122,16 +123,13 @@ func DeepenRepo(opts DeepenRepoOptions) (*DeepenRepoResult, error) {
 
 	// 等待命令完成
 	if err := cmd.Wait(); err != nil {
+		EmitProgress(opts.Progress, StageError, -1, "git fetch --deepen 失败")
 		return nil, fmt.Errorf("git fetch --deepen 失败: %w", err)
 	}
 
 	// 报告完成
 	if opts.Progress != nil {
-		opts.Progress(SyncProgress{
-			Stage:   StageReceiving,
-			Percent: 100,
-			Message: "完成",
-		})
+		EmitProgress(opts.Progress, StageDone, 100, "加载更多历史完成")
 	}
 
 	// 检查是否已经拉取到根节点
@@ -151,8 +149,9 @@ func DeepenRepo(opts DeepenRepoOptions) (*DeepenRepoResult, error) {
 // parseGitProgress 解析 git 命令的进度输出
 //
 // git fetch 的进度格式：
-//   Receiving objects: 45% (234/520)
-//   Resolving deltas: 100% (123/123), done.
+//
+//	Receiving objects: 45% (234/520)
+//	Resolving deltas: 100% (123/123), done.
 func parseGitProgress(r io.Reader, callback ProgressCallback) {
 	scanner := bufio.NewScanner(r)
 
@@ -174,7 +173,7 @@ func parseGitProgress(r io.Reader, callback ProgressCallback) {
 			if strings.Contains(stage, "Receiving") {
 				syncStage = StageReceiving
 			} else {
-				syncStage = StageResolving
+				syncStage = StageResolvingDeltas
 			}
 
 			callback(SyncProgress{

@@ -345,7 +345,10 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
-		return fmt.Errorf("构造请求失败: %w", err)
+		// 构造失败：URL 解析 / ctx 异常 / headers 异常，几乎不会发生但兜底
+		slog.Default().Warn("GitHub HTTP request build failed",
+			"method", method, "url", fullURL, "err", err.Error())
+		return ipc.NewInternal("构造 GitHub 请求失败: " + err.Error())
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -356,10 +359,12 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		// 网络层错误（含 TLS、DNS、连接被拒）→ 写 slog + 返回 generic error
+		// 网络层错误（含 TLS、DNS、连接被拒、超时）
+		// 必须包成 IpcError，否则前端 normalizeError 落到 "未知错误" 占位文案
+		// 用户根本看不到真实原因（TLS handshake timeout / DNS 解析失败 / 502 等）
 		slog.Default().Warn("GitHub HTTP request failed",
 			"method", method, "url", fullURL, "err", err.Error())
-		return fmt.Errorf("请求失败: %w", err)
+		return ipc.NewNetworkOffline(fmt.Sprintf("GitHub %s %s: %s", method, fullURL, err.Error()))
 	}
 	defer resp.Body.Close()
 

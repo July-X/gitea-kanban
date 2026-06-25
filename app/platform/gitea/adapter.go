@@ -359,7 +359,8 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
-		return fmt.Errorf("构造请求失败: %w", err)
+		// 构造失败：URL 解析 / ctx 异常 / headers 异常，几乎不会发生但兜底
+		return ipc.NewInternal("构造 Gitea 请求失败: " + err.Error())
 	}
 
 	req.Header.Set("Authorization", "token "+token)
@@ -367,7 +368,9 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("请求失败: %w", err)
+		// 网络层错误（含 TLS、DNS、连接被拒、超时）
+		// 包成 IpcError，code=network_offline，前端能识别为"网络问题"而非"未知错误"
+		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea %s %s: %s", method, fullURL, err.Error()))
 	}
 	defer resp.Body.Close()
 
@@ -382,7 +385,7 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 
 	if out != nil {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return fmt.Errorf("解析响应失败: %w", err)
+			return ipc.NewInternal("解析 Gitea 响应失败: " + err.Error())
 		}
 	}
 
