@@ -15,7 +15,7 @@
  */
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { GitCommit, ArrowDownToLine, GitBranch, Tag } from 'lucide-vue-next';
+import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
@@ -603,7 +603,7 @@ function refBadgeClass(refType?: string): string {
           :disabled="loading || pulling || !activeProjectId"
           @click="syncRepo"
         >
-          <ArrowDownToLine :size="15" :class="{ spinning: pulling }" />
+          <RotateCw :size="15" :class="{ spinning: pulling }" />
           <span class="sync-btn__label">{{ syncButtonLabel }}</span>
         </button>
       </div>
