@@ -8,6 +8,7 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/storer"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
@@ -21,6 +22,14 @@ type PullOptions struct {
 	Username string
 	// RemoteName 远程名（默认 "origin"）
 	RemoteName string
+	// CountLimit commit 计数上限（0 = 精确统计全部）。
+	//
+	// 超大仓库（如 UnrealEngine）全量遍历历史成本过高；UI 更新提示只需要有限窗口。
+	CountLimit int
+	// Depth/SingleBranch/NoTags 用于超大仓库更新：只取默认分支最近窗口。
+	Depth        int
+	SingleBranch bool
+	NoTags       bool
 	// Progress 进度回调（v2.6：可选，给前端实时推送百分比）
 	//
 	// fetch 阶段 go-git 的 sideband 输出会被解析成 SyncProgress 事件
@@ -88,17 +97,23 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		}
 	}
 
-	// fetch（v2.5 修复：同步所有分支）
-	// 旧版只 fetch 默认分支，导致其他分支的 commit 看不到。
+	refSpecs := []config.RefSpec{config.RefSpec("+refs/heads/*:refs/remotes/origin/*")}
+	if opts.SingleBranch {
+		refSpecs = []config.RefSpec{config.RefSpec("+HEAD:refs/remotes/origin/HEAD")}
+	}
+
+	// fetch（默认同步所有分支；超大仓库可走 SingleBranch 只取默认分支）
 	fetchOpts := &git.FetchOptions{
-		Auth: auth,
-		RefSpecs: []config.RefSpec{
-			config.RefSpec("+refs/heads/*:refs/remotes/origin/*"),
-		},
+		Auth:     auth,
+		RefSpecs: refSpecs,
+		Depth:    opts.Depth,
 		// v2.6：progress 回调（go-git sideband → 前端）
 		//
 		// fetch 阶段 sideband 输出跟 clone 走同一格式（Receiving objects / Resolving deltas 等），
 		// 复用 SidebandWriter 解析
+	}
+	if opts.NoTags {
+		fetchOpts.Tags = git.NoTags
 	}
 	if opts.Progress != nil {
 		fetchOpts.Progress = NewSidebandWriter(SafeWrap(opts.Progress))
@@ -169,15 +184,17 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 		return nil, fmt.Errorf("打开仓库失败: %w", err)
 	}
 
-	// 1. 记录 pull 前 HEAD SHA + commit 数
-	ref, err := repo.Head()
-	if err != nil {
-		return nil, fmt.Errorf("获取 HEAD 失败: %w", err)
-	}
-	headBefore := ref.Hash().String()
-	beforeCount, err := countCommitsReal(repo, ref.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("统计 commit 数失败: %w", err)
+	// 1. 记录 pull 前 HEAD SHA + commit 数。
+	// 兼容历史 Mirror/中断 clone 产生的断 HEAD：先 fetch，再用远端 HEAD 修复本地 HEAD。
+	ref, headRefName, currentBranchShort, err := currentHeadInfo(repo)
+	headBefore := ""
+	beforeCount := 0
+	if err == nil {
+		headBefore = ref.Hash().String()
+		beforeCount, err = countCommitsWithLimit(repo, ref.Hash(), opts.CountLimit)
+		if err != nil {
+			return nil, fmt.Errorf("统计 commit 数失败: %w", err)
+		}
 	}
 
 	// 2. fetch
@@ -197,8 +214,8 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 		remoteName = "origin"
 	}
 
-	// 优先顺序：origin/HEAD → origin/{default branch from HEAD ref name}
-	remoteHead, err := resolveOriginHead(repo2, remoteName, ref.Name().Short())
+	// 优先顺序：origin/HEAD → origin/{default branch from HEAD ref name} → 任一远端/本地分支
+	remoteHead, err := resolveOriginHead(repo2, remoteName, currentBranchShort)
 	if err != nil {
 		return nil, fmt.Errorf("解析 origin HEAD 失败: %w", err)
 	}
@@ -207,14 +224,14 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 	// 4. 更新本地 HEAD ref 指向新 commit
 	//    （NoCheckout 模式没 worktree，"pull" 语义就是更新 HEAD 指向）
 	if headBefore != headAfter {
-		headRef := plumbing.NewHashReference(ref.Name(), remoteHead)
+		headRef := plumbing.NewHashReference(headRefName, remoteHead)
 		if err := repo2.Storer.SetReference(headRef); err != nil {
 			return nil, fmt.Errorf("更新 HEAD 失败: %w", err)
 		}
 	}
 
 	// 5. 统计新 commit 数
-	afterCount, err := countCommitsReal(repo2, remoteHead)
+	afterCount, err := countCommitsWithLimit(repo2, remoteHead, opts.CountLimit)
 	if err != nil {
 		return nil, fmt.Errorf("统计 commit 数失败: %w", err)
 	}
@@ -229,11 +246,47 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 	}, nil
 }
 
+func countCommitsWithLimit(repo *git.Repository, from plumbing.Hash, limit int) (int, error) {
+	if limit <= 0 {
+		return countCommitsReal(repo, from)
+	}
+	iter, err := repo.Log(&git.LogOptions{From: from})
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	err = iter.ForEach(func(c *object.Commit) error {
+		count++
+		if count >= limit {
+			return storer.ErrStop
+		}
+		return nil
+	})
+	if err != nil && err != storer.ErrStop {
+		return 0, err
+	}
+	return count, nil
+}
+
+func currentHeadInfo(repo *git.Repository) (*plumbing.Reference, plumbing.ReferenceName, string, error) {
+	head, err := repo.Head()
+	if err == nil {
+		return head, head.Name(), head.Name().Short(), nil
+	}
+	headRef, refErr := repo.Storer.Reference(plumbing.HEAD)
+	if refErr == nil && headRef.Type() == plumbing.SymbolicReference {
+		target := headRef.Target()
+		return nil, target, target.Short(), err
+	}
+	return nil, plumbing.NewBranchReferenceName("master"), "master", err
+}
+
 // resolveOriginHead 找 origin 的 default branch HEAD
 //
 // 步骤：
-//   1. 读 refs/remotes/{remote}/HEAD（remote tracking ref，gitea 在 clone 时一般会建）
-//   2. 失败则用原 HEAD 的 branch 名（refs/heads/main → origin/main）
+//  1. 读 refs/remotes/{remote}/HEAD（remote tracking ref，gitea 在 clone 时一般会建）
+//  2. 失败则用原 HEAD 的 branch 名（refs/heads/main → origin/main）
 func resolveOriginHead(repo *git.Repository, remoteName, currentBranchShort string) (plumbing.Hash, error) {
 	storer := repo.Storer
 
@@ -253,10 +306,34 @@ func resolveOriginHead(repo *git.Repository, remoteName, currentBranchShort stri
 	}
 
 	// 2. fallback：用 current branch 名直接拿 origin/{branch}
-	branchRefName := plumbing.NewRemoteReferenceName(remoteName, currentBranchShort)
-	branchRef, err := storer.Reference(branchRefName)
+	if currentBranchShort != "" {
+		branchRefName := plumbing.NewRemoteReferenceName(remoteName, currentBranchShort)
+		branchRef, err := storer.Reference(branchRefName)
+		if err == nil {
+			return branchRef.Hash(), nil
+		}
+		localRefName := plumbing.NewBranchReferenceName(currentBranchShort)
+		localRef, err := storer.Reference(localRefName)
+		if err == nil {
+			return localRef.Hash(), nil
+		}
+	}
+
+	var first plumbing.Hash
+	refs, err := repo.References()
 	if err == nil {
-		return branchRef.Hash(), nil
+		_ = refs.ForEach(func(ref *plumbing.Reference) error {
+			if first != plumbing.ZeroHash || ref.Type() != plumbing.HashReference {
+				return nil
+			}
+			if ref.Name().IsRemote() || ref.Name().IsBranch() {
+				first = ref.Hash()
+			}
+			return nil
+		})
+	}
+	if first != plumbing.ZeroHash {
+		return first, nil
 	}
 
 	return plumbing.ZeroHash, fmt.Errorf("找不到 origin 的 default branch（当前 branch=%s）", currentBranchShort)

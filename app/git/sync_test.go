@@ -196,3 +196,37 @@ func TestPullRepo(t *testing.T) {
 		t.Errorf("HeadBefore == HeadAfter (%q), should differ", result.HeadBefore)
 	}
 }
+
+func TestPullRepo_RepairsMissingHeadTarget(t *testing.T) {
+	barePath, _ := createBareAndClone(t)
+	localPath := filepath.Join(t.TempDir(), "partial.git")
+
+	runGit := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit(t.TempDir(), "init", "--bare", localPath)
+	runGit(localPath, "remote", "add", "origin", barePath)
+
+	result, err := PullRepo(PullOptions{LocalPath: localPath})
+	if err != nil {
+		t.Fatalf("PullRepo failed: %v", err)
+	}
+	if result.BeforeCount != 0 {
+		t.Errorf("BeforeCount = %d, want 0", result.BeforeCount)
+	}
+	if result.AfterCount != 1 {
+		t.Errorf("AfterCount = %d, want 1", result.AfterCount)
+	}
+
+	count, err := CountCommits(localPath)
+	if err != nil {
+		t.Fatalf("CountCommits after repair failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("CountCommits after repair = %d, want 1", count)
+	}
+}

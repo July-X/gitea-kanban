@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
@@ -64,6 +65,10 @@ type CloneOptions struct {
 	//   - Git Graph 需要完整 DAG 才能正确画 lane（浅 clone 会丢早期 commit → lane 错位）
 	//   - 仓库典型 commit 数 100~10k，全 clone 元信息也只占 ~MB 级（no checkout 后）
 	Depth int
+	// SingleBranch 只拉默认分支。超大 GitHub 仓库用它避免同步全分支历史。
+	SingleBranch bool
+	// NoTags 不拉 tag。超大仓库 tag 很多时能明显减少对象和 ref 处理成本。
+	NoTags bool
 	// URL 直接指定 clone URL（v2.4 测试用：跳过 CleanRepoURL(hostURL+owner+repo) 拼接）
 	//
 	// 设置后：URL 字段**直接**当 git.CloneOptions.URL 用，
@@ -168,22 +173,25 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// 未来如果用户需要"在本地看代码"，可加个开关走 PlainClone 默认（带工作区），
 	// 但当前业务用不到。
 	//
-	// v2.5 修复：同步所有分支（Mirror=true）
-	// 旧版只 clone 默认分支，导致其他分支的 commit 看不到。
-	// Mirror 模式会映射所有 refs（包括远程跟踪分支），并设置 refspec
-	// 使后续 remote update 能覆盖所有 refs。
+	// v2.5 修复：同步所有远程分支。
+	// 不用 Mirror：Mirror 会强制创建 bare 仓库，后续 HEAD/remote refs 语义和普通仓库不一致。
+	// go-git 默认 refspec 已是 refs/heads/* -> refs/remotes/origin/*，足够 Git Graph 使用。
 	cloneOpts := &git.CloneOptions{
 		URL:        cloneURL,
 		Auth:       auth,
 		NoCheckout: opts.NoCheckout,
 		Depth:      opts.Depth,
-		// Mirror 模式拉取所有 refs（分支、tags、notes 等）
-		Mirror: true,
+		// ReferenceName=HEAD + SingleBranch 表示只取远端默认分支。
+		ReferenceName: plumbing.HEAD,
+		SingleBranch:  opts.SingleBranch,
 		// v2.6：progress 回调（go-git sideband → 前端）
 		//
 		// opts.Progress 为 nil 时不设这一字段（go-git 会用默认空 writer，无 sideband 输出）
 		// opts.Progress 非 nil 时包成 sideband.Progress（实现 io.Writer），
 		// 每次 sideband 行触发一次 ParseProgress → cb(SyncProgress)
+	}
+	if opts.NoTags {
+		cloneOpts.Tags = git.NoTags
 	}
 	if opts.Progress != nil {
 		cloneOpts.Progress = NewSidebandWriter(SafeWrap(opts.Progress))

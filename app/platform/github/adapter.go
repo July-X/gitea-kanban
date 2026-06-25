@@ -85,6 +85,8 @@ func normalizeGitHubHostURL(hostURL string) string {
 // 改版本号时同步更新 README + CHANGELOG.md
 const GitHubAdapterVersion = "2.4.0"
 
+const largeRepoGraphDepth = 500
+
 // GitHubAdapter GitHub 平台适配器（首期仅 Git Graph）
 type GitHubAdapter struct {
 	httpClient *http.Client
@@ -269,6 +271,9 @@ func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token,
 		WorkspacePath:   workspacePath,
 		AccountUsername: accountUsername,
 		NoCheckout:      true, // v2.4：只拉元信息
+		Depth:           largeRepoGraphDepth,
+		SingleBranch:    true,
+		NoTags:          true,
 		Progress:        progress,
 	})
 	if err != nil {
@@ -325,11 +330,11 @@ func (a *GitHubAdapter) ListMembers(ctx context.Context, hostURL, username, toke
 //   - Authorization: Bearer <token>
 //   - Accept: application/vnd.github+json
 //   - User-Agent: gitea-kanban/<version>
-//     * Go http.Client 默认 UA 是 "Go-http-client/1.1" —— GitHub 偶尔会拒绝
-//     * 文档明确"Requests without a valid User-Agent header will be rejected"
-//     * 设成应用名 + 版本号让 GitHub 出问题时能联系到我们
+//   - Go http.Client 默认 UA 是 "Go-http-client/1.1" —— GitHub 偶尔会拒绝
+//   - 文档明确"Requests without a valid User-Agent header will be rejected"
+//   - 设成应用名 + 版本号让 GitHub 出问题时能联系到我们
 //   - X-GitHub-Api-Version: 2022-11-28
-//     * 文档推荐显式指定 API 版本,避免 GitHub 升级后端点行为变更导致 406
+//   - 文档推荐显式指定 API 版本,避免 GitHub 升级后端点行为变更导致 406
 //
 // 错误诊断：非 2xx 时把 status + URL + body 前 200 字符写到 slog
 // （路径 app/config/,文件 ${dataDir}/logs/main/main.log）

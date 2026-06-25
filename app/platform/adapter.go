@@ -42,7 +42,8 @@ type RepoDTO struct {
 	// 前端 Permissions 是 {pull, push, admin}，gitea API /repos/search
 	// 已经包含 permissions 字段（{pull: bool, push: bool, admin: bool}）
 	Permissions *RepoPermissions `json:"permissions,omitempty"`
-	// 前端 RepoDto 必备 isProject / lastSyncAt —— App.ListRepos 拼好
+	// 前端 RepoDto 必备 projectId / isProject / lastSyncAt —— App.ListRepos 拼好
+	ProjectID  string `json:"projectId,omitempty"`
 	IsProject  bool   `json:"isProject"`
 	LastSyncAt string `json:"lastSyncAt,omitempty"`
 }

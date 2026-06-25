@@ -590,6 +590,7 @@ export namespace main {
 		}
 	}
 	export class IsRepoClonedArgs {
+	    username?: string;
 	    owner: string;
 	    repo: string;
 	
@@ -599,6 +600,7 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.username = source["username"];
 	        this.owner = source["owner"];
 	        this.repo = source["repo"];
 	    }
@@ -989,6 +991,7 @@ export namespace platform {
 	    archived: boolean;
 	    updatedAt: string;
 	    permissions?: RepoPermissions;
+	    projectId?: string;
 	    isProject: boolean;
 	    lastSyncAt?: string;
 	
@@ -1008,6 +1011,7 @@ export namespace platform {
 	        this.archived = source["archived"];
 	        this.updatedAt = source["updatedAt"];
 	        this.permissions = this.convertValues(source["permissions"], RepoPermissions);
+	        this.projectId = source["projectId"];
 	        this.isProject = source["isProject"];
 	        this.lastSyncAt = source["lastSyncAt"];
 	    }

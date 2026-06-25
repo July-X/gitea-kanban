@@ -77,6 +77,11 @@ type LogResult struct {
 //   - 旧版跑 git log --graph 拿字形 + DATA 行，前端 parser 解析
 //   - 新版直接遍历 go-git Log() 拿结构化 CommitInfo，无需字形解析
 //   - Graph 布局在 layout.go 自研（步骤 4.3）
+//
+// v2.7 超大仓库优化：
+//   - 限制遍历分支数（默认最多 20 个分支）
+//   - 优先遍历 HEAD + 主要分支（main/master/develop 等）
+//   - 早停策略：收集到足够 commit 后提前结束
 func LogCommits(opts LogOptions) (*LogResult, error) {
 	if opts.LocalPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
@@ -108,11 +113,13 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 
 	// 遍历 commit
 	// v2.5 修复：遍历所有分支的 commit，而非仅 HEAD
+	// v2.7 优化：限制分支数（超大仓库如 UnrealEngine 可能有几十上百个分支）
 	// 步骤：
-	//   1. 收集所有分支（本地 + 远程跟踪）的 HEAD hash
+	//   1. 收集分支（本地 + 远程跟踪）的 HEAD hash，但限制数量
 	//   2. 对每个分支起点做 Log 遍历
 	//   3. 用 seen map 去重，合并所有 commit
-	allHeads, err := collectAllBranchHeads(repo)
+	//   4. 早停：收集到 MaxCount 后立即停止遍历其他分支
+	allHeads, err := collectLimitedBranchHeads(repo, opts.MaxCount)
 	if err != nil {
 		return nil, fmt.Errorf("收集分支列表失败: %w", err)
 	}
@@ -167,7 +174,29 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 			return nil
 		})
 		if err != nil && err != storer.ErrStop {
-			return nil, fmt.Errorf("迭代 commits 失败: %w", err)
+			// v2.7: 浅克隆（shallow clone）场景下，Log() 迭代器会在尝试访问不存在的 parent 时立即报错，
+			// 导致一个 commit 都没处理。Fallback：直接访问 HEAD commit 对象。
+			commit, commitErr := repo.CommitObject(headHash)
+			if commitErr == nil && !seen[commit.Hash.String()] {
+				seen[commit.Hash.String()] = true
+				parents := make([]string, len(commit.ParentHashes))
+				for i, h := range commit.ParentHashes {
+					parents[i] = h.String()
+				}
+				commits = append(commits, CommitInfo{
+					SHA:         commit.Hash.String(),
+					ShortSHA:    commit.Hash.String()[:7],
+					Subject:     extractSubject(commit.Message),
+					AuthorName:  commit.Author.Name,
+					AuthorEmail: commit.Author.Email,
+					AuthorWhen:  commit.Author.When,
+					Parents:     parents,
+					IsMerge:     len(parents) >= 2,
+					Refs:        refDataByHash[commit.Hash.String()].Names,
+					RefTypes:    refDataByHash[commit.Hash.String()].Types,
+				})
+			}
+			continue
 		}
 	}
 
@@ -255,6 +284,194 @@ func collectAllBranchHeads(repo *git.Repository) ([]plumbing.Hash, error) {
 	}
 
 	return heads, nil
+}
+
+// branchInfo 分支信息（用于优先级排序）
+type branchInfo struct {
+	hash     plumbing.Hash
+	name     string
+	isLocal  bool
+	priority int // 优先级（越小越优先）
+}
+
+// collectLimitedBranchHeads 收集仓库分支的 HEAD hash（限制数量，优先主要分支）
+//
+// v2.7 超大仓库优化：
+//   - 限制遍历分支数（最多 20 个）
+//   - 优先级顺序：HEAD > 主分支(main/master/develop等) > 本地分支 > 远程分支
+//   - 超大仓库（如 UnrealEngine）可能有几十上百个分支，全遍历会非常慢
+func collectLimitedBranchHeads(repo *git.Repository, maxCount int) ([]plumbing.Hash, error) {
+	const maxBranches = 20 // 最多遍历 20 个分支（覆盖绝大部分使用场景）
+
+	branches := make([]branchInfo, 0)
+	seen := make(map[plumbing.Hash]bool)
+
+	// 主分支名称列表（优先级最高）
+	mainBranchNames := map[string]bool{
+		"main":    true,
+		"master":  true,
+		"develop": true,
+		"dev":     true,
+		"trunk":   true,
+	}
+
+	// 1. 收集 HEAD（最高优先级）
+	head, err := repo.Head()
+	if err == nil {
+		// HEAD 可能是 HashReference（直接指向 commit）或 SymbolicReference（指向分支）
+		var headHash plumbing.Hash
+		if head.Type() == plumbing.HashReference {
+			headHash = head.Hash()
+		} else if head.Type() == plumbing.SymbolicReference {
+			// HEAD -> refs/heads/main 的情况，解析目标分支的 hash
+			target := head.Target()
+			targetRef, err := repo.Reference(target, true)
+			if err == nil && targetRef.Type() == plumbing.HashReference {
+				headHash = targetRef.Hash()
+			}
+		}
+		if headHash != plumbing.ZeroHash && !seen[headHash] {
+			seen[headHash] = true
+			branches = append(branches, branchInfo{
+				hash:     headHash,
+				name:     "HEAD",
+				isLocal:  true,
+				priority: 0, // 最高优先级
+			})
+		}
+	}
+
+	// 2. 收集本地分支
+	localRefs, err := repo.References()
+	if err != nil {
+		return nil, err
+	}
+	err = localRefs.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Type() == plumbing.HashReference && ref.Name().IsBranch() {
+			if !seen[ref.Hash()] {
+				seen[ref.Hash()] = true
+				shortName := ref.Name().Short()
+				priority := 2 // 本地分支默认优先级
+				if mainBranchNames[shortName] {
+					priority = 1 // 主分支优先级
+				}
+				branches = append(branches, branchInfo{
+					hash:     ref.Hash(),
+					name:     shortName,
+					isLocal:  true,
+					priority: priority,
+				})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. 收集远程跟踪分支
+	remoteRefs, err := repo.References()
+	if err != nil {
+		return nil, err
+	}
+	err = remoteRefs.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Type() == plumbing.HashReference && ref.Name().IsRemote() {
+			if !seen[ref.Hash()] {
+				seen[ref.Hash()] = true
+				shortName := ref.Name().Short()
+				priority := 4 // 远程分支优先级最低
+				// 检查是否是 origin/main 等主分支
+				for mainName := range mainBranchNames {
+					if strings.HasSuffix(shortName, "/"+mainName) {
+						priority = 3 // 远程主分支
+						break
+					}
+				}
+				branches = append(branches, branchInfo{
+					hash:     ref.Hash(),
+					name:     shortName,
+					isLocal:  false,
+					priority: priority,
+				})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 如果没有收集到任何分支（可能是浅克隆或特殊仓库状态），fallback 到所有 hash refs
+	if len(branches) == 0 {
+		refs, err := repo.References()
+		if err == nil {
+			_ = refs.ForEach(func(ref *plumbing.Reference) error {
+				if ref.Type() == plumbing.HashReference {
+					hash := ref.Hash()
+					if !seen[hash] {
+						seen[hash] = true
+						branches = append(branches, branchInfo{
+							hash:     hash,
+							name:     ref.Name().String(),
+							isLocal:  true,
+							priority: 5,
+						})
+					}
+				} else if ref.Type() == plumbing.SymbolicReference {
+					// 处理符号引用（如 HEAD -> refs/heads/main）
+					target := ref.Target()
+					targetRef, err := repo.Reference(target, true)
+					if err == nil && targetRef.Type() == plumbing.HashReference {
+						hash := targetRef.Hash()
+						if !seen[hash] {
+							seen[hash] = true
+							branches = append(branches, branchInfo{
+								hash:     hash,
+								name:     target.String(),
+								isLocal:  true,
+								priority: 5,
+							})
+						}
+					}
+				}
+				return nil
+			})
+		}
+	}
+
+	// 4. 按优先级排序（priority 升序，同优先级按名称字典序）
+	sort.Slice(branches, func(i, j int) bool {
+		if branches[i].priority != branches[j].priority {
+			return branches[i].priority < branches[j].priority
+		}
+		return branches[i].name < branches[j].name
+	})
+
+	// 5. 限制分支数量
+	limit := maxBranches
+	if maxCount > 0 && maxCount < 50 {
+		// 如果只要很少的 commit（如 20 个），可以进一步减少分支数
+		limit = min(10, maxBranches)
+	}
+	if len(branches) > limit {
+		branches = branches[:limit]
+	}
+
+	// 6. 提取 hash 列表
+	heads := make([]plumbing.Hash, len(branches))
+	for i, b := range branches {
+		heads[i] = b.hash
+	}
+
+	return heads, nil
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // refData 单个 SHA 对应的 ref 名称 + 类型（顺序一一对应）

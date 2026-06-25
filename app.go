@@ -1339,7 +1339,8 @@ func (a *App) SetWorkspace(args SetWorkspaceArgs) error {
 // 失败模式：路径不在 workspace 下 / project 没找到 / 账号被删 → 返 NotFound
 //
 // v2.5 兼容：仍接受旧版 ${workspacePath}/repos/<owner>__<repo> 两层路径
-//   （迁移期用户手动 mv 仓库、CI 测试等场景；通过 parts.length == 2 兼容）
+//
+//	（迁移期用户手动 mv 仓库、CI 测试等场景；通过 parts.length == 2 兼容）
 func (a *App) resolveTokenByLocalPath(localPath string) (token string, username string, err error) {
 	// 1. localPath → accountUsername?, owner, repo
 	rel, e := filepath.Rel(a.workspacePath, localPath)
@@ -1585,6 +1586,7 @@ func (a *App) ListRepos(args ListReposArgs) (ListReposResp, error) {
 				projects[j].Owner == remoteRepos[i].Owner &&
 				projects[j].Name == remoteRepos[i].Name {
 				remoteRepos[i].IsProject = true
+				remoteRepos[i].ProjectID = projects[j].ID
 				if projects[j].LastSyncAt > 0 {
 					remoteRepos[i].LastSyncAt = time.UnixMilli(projects[j].LastSyncAt).UTC().Format(time.RFC3339)
 				}
@@ -1817,18 +1819,18 @@ func filterStarredBranches(branches []store.StarredBranch, projectID, branch str
 // 修复"展开 commit 后手风琴无文件信息"bug —— 之前 DTO 只有 8 个元信息字段，
 // 完全没有文件变更数据，前端 CommitDetailPanel 永远拿不到 files。
 type CommitDetailDTO struct {
-	SHA          string           `json:"sha"`
-	ShortSHA     string           `json:"shortSha"`
-	Subject      string           `json:"subject"`
-	AuthorName   string           `json:"authorName"`
-	AuthorEmail  string           `json:"authorEmail"`
-	AuthorWhen   string           `json:"authorWhen"`
-	Message      string           `json:"message"`
-	Parents      []string         `json:"parents"`
-	Files        []FileChangeDTO  `json:"files,omitempty"`        // 变更文件列表（含 +/- 行数）
-	Additions    int              `json:"additions,omitempty"`     // 总新增行数
-	Deletions    int              `json:"deletions,omitempty"`     // 总删除行数
-	FilesChanged int              `json:"filesChanged,omitempty"`  // 变更文件数
+	SHA          string          `json:"sha"`
+	ShortSHA     string          `json:"shortSha"`
+	Subject      string          `json:"subject"`
+	AuthorName   string          `json:"authorName"`
+	AuthorEmail  string          `json:"authorEmail"`
+	AuthorWhen   string          `json:"authorWhen"`
+	Message      string          `json:"message"`
+	Parents      []string        `json:"parents"`
+	Files        []FileChangeDTO `json:"files,omitempty"`        // 变更文件列表（含 +/- 行数）
+	Additions    int             `json:"additions,omitempty"`    // 总新增行数
+	Deletions    int             `json:"deletions,omitempty"`    // 总删除行数
+	FilesChanged int             `json:"filesChanged,omitempty"` // 变更文件数
 }
 
 // FileChangeDTO 文件变更（前端 CommitDetailPanel 用）
@@ -1995,13 +1997,36 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 	}
 
 	// 5. 调 git.PullRepo（v2.6：装 progress 回调）
+	singleBranch := account.Platform == "github"
+	depth := 0
+	if singleBranch {
+		depth = 500
+	}
 	result, err := git.PullRepo(git.PullOptions{
 		LocalPath: localPath,
 		Token:     token,
 		Username:  account.Username,
-		Progress:  a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
+		// 大仓库不做全历史计数；Git Graph 页面只展示有限窗口，更新提示也只需要判断近期是否变化。
+		CountLimit: 500,
+		Depth:      depth,
+		// GitHub 超大仓库默认只更新默认分支最近窗口；Gitea 保持完整多分支同步。
+		SingleBranch: singleBranch,
+		NoTags:       singleBranch,
+		Progress:     a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
 	})
 	if err != nil {
+		// v2.6 错误溯源：wrap 时把 owner/repo/localPath 一并带上
+		//   之前只 wrap "fetch 失败" 这种话，前端 normalize 后只看到 '未知错误'
+		//   现在 include 路径 + 原始 err.Error() 让前端能展示'打开仓库失败: <real err>'
+		//   注：slog INFO 已经在入口打了 projectId；这里 ERROR 是冗余但更精准
+		if a.logger != nil {
+			a.logger.Error("PullRepoByProjectId: pull failed",
+				"owner", project.Owner,
+				"repo", project.Name,
+				"localPath", localPath,
+				"err", err.Error(),
+			)
+		}
 		return PullRepoResult{}, err
 	}
 

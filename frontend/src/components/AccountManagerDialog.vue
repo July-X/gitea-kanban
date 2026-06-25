@@ -79,22 +79,34 @@ async function onLogoutAndRemove(): Promise<void> {
 }
 
 // ===== 添加新账号 =====
+// v2.x:跟 AuthView 对齐,支持 Gitea / GitHub 两平台
+// GitHub 走固定 URL(https://github.com),不显示地址输入框
 const showAddForm = ref(false);
+/** 添加账号时选择的平台(Gitea / GitHub) */
+const addPlatform = ref<'gitea' | 'github'>('gitea');
 const newGiteaUrl = ref('http://127.0.0.1:3000');
 const newToken = ref('');
 const showNewToken = ref(false);
 const addLoading = ref(false);
 const addError = ref<string | null>(null);
 
+/** 添加账号时的平台选项 */
+const addPlatforms = [
+  { value: 'gitea' as const, label: 'Gitea（自托管）' },
+  { value: 'github' as const, label: 'GitHub' },
+];
+
 async function onAddAccount(): Promise<void> {
   addError.value = null;
-  const url = newGiteaUrl.value.trim();
+  // GitHub 走固定 URL,前端不显示地址输入框
+  const url = addPlatform.value === 'github' ? 'https://github.com' : newGiteaUrl.value.trim();
   const token = newToken.value.trim();
-  if (!url) { addError.value = '请输入 gitea 地址'; return; }
+  if (addPlatform.value === 'gitea' && !url) { addError.value = '请输入 gitea 地址'; return; }
   if (token.length < 8) { addError.value = '令牌至少 8 个字符'; return; }
   addLoading.value = true;
   try {
-    await auth.connect(url, token);
+    // v2.x:把平台透传给 auth.connect,Go 端走对应 adapter
+    await auth.connect(url, token, addPlatform.value);
     await repo.loadRepos('', true);
     showToast({ type: 'success', message: '新账号已添加' });
     showAddForm.value = false;
@@ -203,7 +215,26 @@ function isCurrent(account: GiteaAccountDto): boolean {
 
         <!-- 添加新账号表单 -->
         <div v-if="showAddForm" class="am-add-form">
+          <!-- 平台选择 tab -->
           <div class="am-add-field">
+            <label class="am-add-label">选择平台</label>
+            <div class="am-add-platform-tabs">
+              <button
+                v-for="p in addPlatforms"
+                :key="p.value"
+                type="button"
+                class="am-add-platform-tab"
+                :class="{ 'am-add-platform-tab--active': addPlatform === p.value }"
+                :disabled="addLoading"
+                @click="addPlatform = p.value"
+              >
+                {{ p.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Gitea 才显示地址输入框 -->
+          <div v-if="addPlatform === 'gitea'" class="am-add-field">
             <label class="am-add-label">gitea 地址</label>
             <input
               v-model="newGiteaUrl"
@@ -213,6 +244,7 @@ function isCurrent(account: GiteaAccountDto): boolean {
               :disabled="addLoading"
             />
           </div>
+
           <div class="am-add-field">
             <label class="am-add-label">个人访问令牌</label>
             <div class="am-add-input-wrap">
@@ -232,6 +264,25 @@ function isCurrent(account: GiteaAccountDto): boolean {
                 {{ showNewToken ? '隐藏' : '显示' }}
               </button>
             </div>
+            <p class="am-add-hint">
+              <template v-if="addPlatform === 'github'">
+                不知道怎么获取？
+                <a
+                  href="https://github.com/settings/tokens?type=beta"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >GitHub → Settings → Developer settings → Personal access tokens</a
+                >（classic PAT 勾选 <code>repo</code>）
+              </template>
+              <template v-else>
+                不知道怎么获取？去 gitea 的
+                <a
+                  href="https://docs.gitea.com/usage/api-usage#generating-an-access-token"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >设置 → 应用 → 生成令牌</a>
+              </template>
+            </p>
           </div>
           <div v-if="addError" class="am-add-error">{{ addError }}</div>
           <button
@@ -426,6 +477,51 @@ function isCurrent(account: GiteaAccountDto): boolean {
 }
 .am-add-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .am-add-label { font-size: var(--font-xs); color: var(--color-text-muted); }
+.am-add-hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.am-add-hint a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.am-add-hint code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  padding: 1px 4px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+  color: var(--color-text);
+}
+/* 平台选择 tab(跟 AuthView 视觉对齐) */
+.am-add-platform-tabs {
+  display: flex;
+  gap: 6px;
+}
+.am-add-platform-tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 150ms ease;
+}
+.am-add-platform-tab:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-text);
+}
+.am-add-platform-tab--active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.am-add-platform-tab:disabled { opacity: 0.5; cursor: not-allowed; }
 .am-add-input {
   height: 32px;
   padding: 0 var(--space-3);

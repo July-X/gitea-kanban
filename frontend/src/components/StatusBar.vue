@@ -167,6 +167,11 @@ function repoKey(r: RepoDto): string {
   return `${r.owner}/${r.name}`;
 }
 
+const activeProgressRepo = computed<RepoDto | null>(() => {
+  if (!busyRepoKey.value) return null;
+  return repo.repos.find((r) => repoKey(r) === busyRepoKey.value) ?? repo.currentRepo;
+});
+
 // ===== v2.6 进度条渲染辅助 =====
 
 /**
@@ -248,6 +253,7 @@ async function onSyncClick(r: RepoDto, e: Event): Promise<void> {
   busyRepoKey.value = key;
   try {
     await repo.cloneRepo(r.owner, r.name);
+    await repo.loadRepos('', true);
     showToast({ type: 'success', message: '同步成功', description: `${r.fullName} 已同步到本地` });
   } catch (err) {
     const e2 = err as { messageText?: string; message?: string };
@@ -270,13 +276,20 @@ async function onUpdateClick(r: RepoDto, e: Event): Promise<void> {
   const key = repoKey(r);
   busyRepoKey.value = key;
   try {
-    // 用 projectId 让 Go 端按 owner+repo 反算 localPath（避免前端拼错）
-    const currentProjectId = repo.currentProjectId;
-    if (!currentProjectId) {
-      showToast({ type: 'error', message: '更新失败', description: '请先在仓库行上点一下选中该仓库' });
+    // 用被点击行的 projectId，避免行内"更新"误拉当前选中的其它仓库。
+    let projectId = r.projectId ?? null;
+    if (!projectId && repo.currentRepo?.fullName === r.fullName) {
+      projectId = repo.currentProjectId;
+    }
+    if (!projectId) {
+      await repo.loadRepos('', true);
+      projectId = repo.repos.find((item) => item.owner === r.owner && item.name === r.name)?.projectId ?? null;
+    }
+    if (!projectId) {
+      showToast({ type: 'error', message: '更新失败', description: '请先同步该仓库，或刷新仓库列表后重试' });
       return;
     }
-    const result = await repo.pullRepoByProjectId({ projectId: currentProjectId });
+    const result = await repo.pullRepoByProjectId({ projectId });
     const added = (result as { addedCommits?: number }).addedCommits ?? 0;
     showToast({
       type: 'success',
@@ -389,6 +402,14 @@ function onLogoutClick(): void {
             <span class="statusbar__repo-name">
               {{ repo.currentRepo?.fullName ?? '请选择仓库' }}
             </span>
+            <div
+              v-if="activeProgressRepo && syncProgress(activeProgressRepo)"
+              class="statusbar__progress statusbar__progress--trigger"
+              :class="progressClass(activeProgressRepo)"
+              :title="progressTooltip(activeProgressRepo)"
+            >
+              <div class="statusbar__progress-bar" :style="progressStyle(activeProgressRepo)" />
+            </div>
             <ChevronDown :size="12" :stroke-width="2" aria-hidden="true" />
           </button>
 
@@ -447,23 +468,6 @@ function onLogoutClick(): void {
                     <Loader2 v-if="busyRepoKey === repoKey(r) && !syncProgress(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
                     <span>{{ updateButtonLabel(r) }}</span>
                   </button>
-                  <!--
-                    v2.6 进度条：同步/更新进行中时按钮下方显示一条细进度条
-                    - percent >= 0 时显示具体百分比
-                    - percent < 0（go-git 还没出百分比）时显示 indeterminate 动效
-                    - StageDone / StageError 短时间内保留一帧最终态，再被 setTimeout 清掉
-                  -->
-                  <div
-                    v-if="busyRepoKey === repoKey(r) && syncProgress(r)"
-                    class="statusbar__progress"
-                    :class="progressClass(r)"
-                    :title="progressTooltip(r)"
-                  >
-                    <div
-                      class="statusbar__progress-bar"
-                      :style="progressStyle(r)"
-                    />
-                  </div>
                 </div>
               </li>
             </ul>
@@ -919,6 +923,13 @@ function onLogoutClick(): void {
   overflow: hidden;
   align-self: stretch;
   margin-left: var(--space-2);
+}
+
+.statusbar__progress--trigger {
+  flex: 0 0 92px;
+  min-width: 92px;
+  align-self: center;
+  margin-left: 0;
 }
 
 .statusbar__progress-bar {

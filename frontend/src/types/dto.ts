@@ -104,6 +104,7 @@ export interface RepoDto {
   private: boolean;
   updatedAt: string;
   permissions: Permissions;
+  projectId?: string;
   isProject: boolean;
   lastSyncAt?: string;
 }

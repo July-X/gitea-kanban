@@ -280,6 +280,30 @@ export class IpcClient {
       markUpdated();
       return r;
     } catch (err) {
+      // v2.6 调试：在 normalizeError 之前先打一份原始 err 到 frontend-log
+      //
+      // 背景：之前遇到"更新失败 应用出错了：未知错误"，normalizeError 走到末尾的 fallback
+      // 返回 '未知错误'，前端啥也看不到。根因是 Wails 把 Go 抛的 error 包装成 Error instance，
+      // 但 message 形如 "Error invoking remote method 'App.PullRepoByProjectId': <go-err-msg>"，
+      // 其中 <go-err-msg> 部分是经过 toString 化的字符串，再被 normalizeError 当 err.message 用，
+      // 就吃掉了原始错误细节。
+      //
+      // 修复：rawErr 单独存进 UserFacingError.cause，前端能看到完整 stack；console.error 同
+      // 时给 DevTools 一份（v2.x 全局 console.error 拦截已修复死循环，不会爆日志）。
+      try {
+        const raw = err instanceof Error ? `${err.name}: ${err.message}\n${err.stack ?? ''}`
+          : (() => {
+              try {
+                return JSON.stringify(err);
+              } catch {
+                return String(err);
+              }
+            })();
+        // eslint-disable-next-line no-console
+        console.error('[ipc] invoke failed:', namespace + '.' + method, raw);
+      } catch {
+        /* 静默 */
+      }
       throw normalizeError(err);
     }
   }

@@ -5,6 +5,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 // createBareTestRepo 创建一个本地 bare git 仓库（用系统 git，仅测试用）
@@ -196,24 +199,24 @@ func TestCloneRepo_NoCheckout_NoWorktreeFiles(t *testing.T) {
 	runGit("remote", "add", "origin", repoPath)
 	runGit("push", "-u", "origin", "main")
 
-	// v2.5 clone（Mirror=true 同步所有分支；NoCheckout=true 跳过工作区文件）
+	// v2.5 clone（默认 refspec 同步远程分支；NoCheckout=true 跳过工作区文件）
 	workspace := t.TempDir()
 	result, err := CloneRepo(CloneOptions{
 		Platform:      "gitea",
 		URL:           "file://" + repoPath, // 直传 file:// + bare 仓库绝对路径
 		WorkspacePath: workspace,
 		NoCheckout:    true, // v2.4：只拉元信息
-		// Mirror=true 时 go-git 创建 bare 仓库，没有 .git 目录
-		// 但 RepoExists 会检查 HEAD + objects 目录
 	})
 	if err != nil {
 		t.Fatalf("CloneRepo failed: %v", err)
 	}
 
-	// 1. Mirror=true 时 go-git 创建 bare 仓库（无 .git 目录，HEAD + objects 在根目录）
-	// RepoExists 会检查 HEAD + objects 目录
+	// 1. 应创建普通仓库（有 .git），不能再生成 Mirror/bare 仓库
 	if !RepoExists(result.LocalPath) {
-		t.Errorf("仓库应该存在（Mirror 模式：HEAD + objects 在根目录）: %s", result.LocalPath)
+		t.Errorf("仓库应该存在: %s", result.LocalPath)
+	}
+	if _, err := os.Stat(filepath.Join(result.LocalPath, ".git")); err != nil {
+		t.Errorf("仓库应为普通 NoCheckout 仓库，必须有 .git 目录: %v", err)
 	}
 
 	// 2. worktree 目录**应该没有** README.md / main.go（NoCheckout 模式）
@@ -244,7 +247,7 @@ func TestCloneRepo_NoCheckout_NoWorktreeFiles(t *testing.T) {
 }
 
 // TestCloneRepo_AllBranchesSynced 验证 v2.5 关键性质：
-//   - Mirror=true 时应同步所有分支的 commit
+//   - 默认 refspec 应同步所有远程分支的 commit
 //   - LogCommits 不指定 branches 时应返回所有分支的 commit
 func TestCloneRepo_AllBranchesSynced(t *testing.T) {
 	// 创建带多个分支的源仓库
@@ -289,7 +292,7 @@ func TestCloneRepo_AllBranchesSynced(t *testing.T) {
 	runGit("commit", "-m", "feature commit")
 	runGit("push", "-u", "origin", "feature")
 
-	// v2.5 clone（Mirror=true 同步所有分支）
+	// v2.5 clone（默认 refspec 同步所有远程分支）
 	workspace := t.TempDir()
 	result, err := CloneRepo(CloneOptions{
 		Platform:      "gitea",
@@ -332,6 +335,83 @@ func TestCloneRepo_AllBranchesSynced(t *testing.T) {
 		t.Error("expected 'main commit' in LogCommits result")
 	}
 	if !hasFeature {
-		t.Error("expected 'feature commit' in LogCommits result (Mirror mode should sync all branches)")
+		t.Error("expected 'feature commit' in LogCommits result (remote branch refs should sync)")
+	}
+}
+
+func TestCloneRepo_LargeRepoMode_ShallowSingleBranchNoTags(t *testing.T) {
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "test-repo.git")
+	cmd := exec.Command("git", "init", "--bare", "-b", "main", repoPath)
+	if err := cmd.Run(); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+
+	srcPath := filepath.Join(dir, "src")
+	os.MkdirAll(srcPath, 0o755)
+	runGit := func(args ...string) {
+		c := exec.Command("git", args...)
+		c.Dir = srcPath
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	for i := 1; i <= 3; i++ {
+		os.WriteFile(filepath.Join(srcPath, "main.txt"), []byte{byte('0' + i)}, 0o644)
+		runGit("add", ".")
+		runGit("commit", "-m", "main commit")
+	}
+	runGit("tag", "v1.0.0")
+	runGit("remote", "add", "origin", repoPath)
+	runGit("push", "-u", "origin", "main", "--tags")
+	runGit("checkout", "-b", "feature")
+	os.WriteFile(filepath.Join(srcPath, "feature.txt"), []byte("feature"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "feature commit")
+	runGit("push", "-u", "origin", "feature")
+
+	result, err := CloneRepo(CloneOptions{
+		URL:           "file://" + repoPath,
+		WorkspacePath: t.TempDir(),
+		NoCheckout:    true,
+		Depth:         1,
+		SingleBranch:  true,
+		NoTags:        true,
+	})
+	if err != nil {
+		t.Fatalf("CloneRepo failed: %v", err)
+	}
+
+	logResult, err := LogCommits(LogOptions{LocalPath: result.LocalPath, MaxCount: 10})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+	if len(logResult.Commits) != 1 {
+		t.Fatalf("expected shallow clone to expose 1 commit, got %d", len(logResult.Commits))
+	}
+	if logResult.Commits[0].Subject != "main commit" {
+		t.Fatalf("expected default branch commit, got %q", logResult.Commits[0].Subject)
+	}
+
+	repo, err := gogit.PlainOpen(result.LocalPath)
+	if err != nil {
+		t.Fatalf("PlainOpen failed: %v", err)
+	}
+	tags, err := repo.Tags()
+	if err != nil {
+		t.Fatalf("Tags failed: %v", err)
+	}
+	tagCount := 0
+	if err := tags.ForEach(func(_ *plumbing.Reference) error {
+		tagCount++
+		return nil
+	}); err != nil {
+		t.Fatalf("iterating tags failed: %v", err)
+	}
+	if tagCount != 0 {
+		t.Fatalf("expected no tags to be fetched, got %d", tagCount)
 	}
 }
