@@ -18,8 +18,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
-import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
-import { DeepenRepo } from '@/wailsjs/go/main/App';
+import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull, deepenRepo } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import CommitDetailPanel from '@renderer/components/CommitDetailPanel.vue';
 import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
@@ -103,13 +102,20 @@ const pulling = ref(false);
 /** 当前展开的 commit SHA；null = 全部收起 */
 const expandedSha = ref<string | null>(null);
 
-/** Gitea 仓库 URL（用于 "在 Gitea 打开 commit" 按钮） */
+/** Gitea 仓库 URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
+ *  GitHub 仓库 web URL 模板（https://github.com/${owner}/${repo}）与 Gitea 一致，
+ *  这里复用一个计算属性即可，panel 内按 platform 切换 tooltip 文案。 */
 const giteaRepoUrl = computed(() => {
   if (!repo.currentProject) return undefined;
-  const giteaUrl = auth.currentGiteaUrl;
-  if (!giteaUrl) return undefined;
-  return `${giteaUrl.replace(/\/$/, '')}/${repo.currentProject.owner}/${repo.currentProject.name}`;
+  const hostUrl = auth.currentGiteaUrl;
+  if (!hostUrl) return undefined;
+  return `${hostUrl.replace(/\/$/, '')}/${repo.currentProject.owner}/${repo.currentProject.name}`;
 });
+
+/** 当前仓库所属平台（CommitDetailPanel 用以切换 "在 Gitea/GitHub 中打开" 的 tooltip） */
+const currentPlatform = computed<'gitea' | 'github'>(
+  () => (auth.accounts[0]?.platform ?? 'gitea') as 'gitea' | 'github',
+);
 
 /**
  * 点击 commit 行 → 切换展开
@@ -234,7 +240,7 @@ async function handleLoadMore() {
   loadingMore.value = true;
   try {
     // 1. 增量拉取历史
-    const result = await DeepenRepo({
+    const result = await deepenRepo({
       projectId: activeProjectId.value,
       deepenBy: 50,
     });
@@ -833,6 +839,7 @@ function refBadgeClass(refType?: string): string {
                    v-if="expandedCommitNode && expandedCommitNode.sha === r.commit.sha"
                    :commit="buildBasicCommit(r.commit)"
                    :project-id="activeProjectId"
+                   :platform="currentPlatform"
                    :gitea-repo-url="giteaRepoUrl"
                    variant="panel"
                  />

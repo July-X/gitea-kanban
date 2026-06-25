@@ -49,7 +49,10 @@ interface Props {
   commit: BasicCommit | null;
   /** 当前项目 ID（用于 commitsGet 请求）；不传则只显示基本信息不懒加载详情 */
   projectId?: string | null;
-  /** Gitea 仓库地址（用于 "在 Gitea 打开" 按钮） */
+  /** 平台类型（用于"在 XXX 中打开"按钮的 tooltip + URL 模板；默认 gitea） */
+  platform?: 'gitea' | 'github';
+  /** Gitea / GitHub 仓库地址（用于 "在平台打开" 按钮）。
+   *  字段名沿用 v2.0 时代的 giteaRepoUrl，实际承载的就是仓库 web URL（GitHub 也是同模板）。 */
   giteaRepoUrl?: string;
   /** 视觉变体：panel（inline 手风琴，紧凑）| dialog（弹窗内，宽松） */
   variant?: 'panel' | 'dialog';
@@ -57,6 +60,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   projectId: null,
+  platform: 'gitea',
   giteaRepoUrl: undefined,
   variant: 'panel',
 });
@@ -166,11 +170,18 @@ async function copySha(): Promise<void> {
   }
 }
 
-function openInGitea(): void {
+function openInPlatform(): void {
   if (!props.commit || !props.giteaRepoUrl) return;
+  // GitHub / Gitea 的仓库 web URL 模板一致（${hostUrl}/${owner}/${repo}），
+  // commit 子路径也都是 /commit/{sha}，所以无需按平台分支拼接。
   const url = `${props.giteaRepoUrl.replace(/\/$/, '')}/commit/${props.commit.sha}`;
   window.open(url, '_blank');
 }
+
+/** "在平台打开" 按钮的 tooltip 文案 —— 按 platform 切换 */
+const openInPlatformTooltip = computed(() =>
+  props.platform === 'github' ? '在 GitHub 中打开' : '在 Gitea 中打开',
+);
 
 /** 文件状态中文 */
 function fileStatusLabel(status?: string): string {
@@ -279,8 +290,8 @@ if (typeof document !== 'undefined') {
           v-if="props.giteaRepoUrl"
           type="button"
           class="cd-icon-btn"
-          title="在 Gitea 中打开"
-          @click="openInGitea"
+          :title="openInPlatformTooltip"
+          @click="openInPlatform"
         >
           <ExternalLink :size="13" />
         </button>

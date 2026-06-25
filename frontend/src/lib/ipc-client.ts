@@ -571,6 +571,25 @@ export function commitsGitgraphPull(args: {
 }
 
 /**
+ * v2.10：增量拉取更多历史记录（用于"加载更多"功能）
+ *
+ * 使用场景：用户在 Git Graph 底部点击「加载更多」
+ * 技术实现：git fetch --deepen=N --filter=blob:none
+ *
+ * @param args.projectId 项目 ID
+ * @param args.deepenBy 增加的深度（默认 50）
+ */
+export function deepenRepo(args: {
+  projectId: string;
+  deepenBy?: number;
+}): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  return getIpcClient().invoke('commits', 'deepenRepo', args);
+}
+
+/**
  * v1.5.3 应用工作区：读当前 workspace 路径
  *
  * main 端 lazy init 后返回 prefs.app.workspacePath（默认 ~/.gitea-kanban/workspace）

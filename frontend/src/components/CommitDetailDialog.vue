@@ -17,6 +17,8 @@ interface Props {
   commit: BasicCommit | null;
   /** 当前项目 ID（用于 commitsGet 请求） */
   projectId: string | null;
+  /** 平台类型（gitea / github），用于切换 "在 Gitea/GitHub 中打开" 的 tooltip */
+  platform?: 'gitea' | 'github';
   /** Gitea 仓库地址（用于 "在 Gitea 打开" 按钮） */
   giteaRepoUrl?: string;
 }
@@ -101,6 +103,7 @@ onUnmounted(() => {
         <CommitDetailPanel
           :commit="props.commit"
           :project-id="props.projectId"
+          :platform="props.platform"
           :gitea-repo-url="props.giteaRepoUrl"
           variant="dialog"
         />
