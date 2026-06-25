@@ -67,6 +67,17 @@ func (a *App) OnStartup(ctx context.Context) {
 	a.logger = config.NewLogger(a.dataDir)
 	a.logger.Info("gitea-kanban starting", "dataDir", a.dataDir, "version", "2.0.0")
 
+	// 把 slog.Default() 也指向同一个文件 logger
+	//
+	// 背景：github adapter (app/platform/github/adapter.go) 里的 doRequest
+	// 调了 slog.Default().Warn(...) 记诊断日志,但 slog.Default() 默认指向 stderr
+	// → wails dev 时只显示在终端,文件 main.log 里看不到。
+	// 把 default 重定向到 a.logger 后,slog.Default() 也会写到 main.log
+	// (wails dev 终端 + 文件 双写,production 仍然是只文件)
+	//
+	// 注意:slog.SetDefault 是进程全局副作用,只调一次。
+	slog.SetDefault(a.logger)
+
 	// 3. workspacePath = ${dataDir}/workspace（放 git repos 唯一目录）
 	a.workspacePath = filepath.Join(a.dataDir, "workspace")
 	if err := os.MkdirAll(a.workspacePath, 0o755); err != nil {
@@ -786,9 +797,18 @@ func (a *App) AuthConnect(args ConnectArgs) (ConnectResult, error) {
 	giteaURL := strings.TrimSpace(args.GiteaURL)
 	token := strings.TrimSpace(args.Token)
 
-	// GitHub 固定 URL；Gitea 必须填 URL
+	// GitHub 固定 URL 用 **API** 域名(不是 https://github.com 网站)
+	//
+	// 历史 bug(v2.x 修复前):这里写的是 https://github.com,
+	// 然后 VerifyToken 拼成 https://github.com/user → 命中 GitHub 网站 HTML 页面
+	// → 网站对 Accept: application/vnd.github+json 返 406 Not Acceptable
+	// → 用户看到「输入有误:GitHub 不接受请求格式(HTTP 406)」
+	//
+	// 正确路径:https://api.github.com/user(API endpoint)
+	//   - GitHubAPIBase 常量定义在 app/platform/github/adapter.go
+	//   - 这里直接引用,避免硬编码漂移
 	if platformName == string(platformAdapter.GitHub) {
-		giteaURL = "https://github.com"
+		giteaURL = github.GitHubAPIBase
 	} else {
 		if giteaURL == "" {
 			return ConnectResult{}, ipc.NewValidationFailed("gitea 地址不能为空", "url is empty")

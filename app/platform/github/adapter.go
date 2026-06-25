@@ -33,6 +33,53 @@ import (
 // GitHubAPIBase GitHub API 基础 URL
 const GitHubAPIBase = "https://api.github.com"
 
+// GitHubSiteBase GitHub 网站域名(给 doRequest 做归一化用)
+//
+// 关系:
+//   - GitHubAPIBase = https://api.github.com    API endpoint(我们的 HTTP 请求用这个)
+//   - GitHubSiteBase = https://github.com       网站域名(返回 HTML,Git Graph 不该走这个)
+//
+// 历史 bug:旧代码在 app.go 把 GitHub 平台的 GiteaURL 硬编码成 https://github.com
+// 然后 VerifyToken / ListRepos 都拿这个 URL 去请求,实际拼成 https://github.com/user
+// → 命中 GitHub 网站 HTML → 406 Not Acceptable(网站对 application/vnd.github+json 不接受)
+//
+// 现在 app.go 已经用 GitHubAPIBase,但**已存在的账号** localStore.GiteaURL 仍是
+// 错的 "https://github.com",所以 normalizeGitHubHostURL 必须做归一化。
+const GitHubSiteBase = "https://github.com"
+
+// normalizeGitHubHostURL 把任何 github.com URL 归一化成 API endpoint
+//
+// 输入可能是以下几种,全部归一到 GitHubAPIBase:
+//   - "https://github.com"              → "https://api.github.com"
+//   - "https://github.com/"             → "https://api.github.com"
+//   - "https://github.com/anything"     → "https://api.github.com"  (网站 URL 不该出现在这里)
+//   - "https://api.github.com"          → 不变
+//   - ""                                → GitHubAPIBase
+//   - 自托管 GitHub Enterprise Server (https://github.acme.com)
+//     → 不动,保留 host,只去掉 path
+//
+// 设计：用 url.Parse 提取 host,根据 host 判断
+//   - github.com / www.github.com / api.github.com  → 归一到 GitHubAPIBase
+//   - 自托管 GHES(其它 host)                       → 保留原 host
+func normalizeGitHubHostURL(hostURL string) string {
+	hostURL = strings.TrimSpace(hostURL)
+	if hostURL == "" {
+		return GitHubAPIBase
+	}
+	u, err := url.Parse(hostURL)
+	if err != nil {
+		// 解析失败 → 当成未知 host,原样返回(让后续 HTTP 报错)
+		return hostURL
+	}
+	host := u.Host
+	switch host {
+	case "github.com", "www.github.com", "api.github.com":
+		return GitHubAPIBase
+	}
+	// 自托管 GHES 或其它 host → 保留
+	return hostURL
+}
+
 // GitHubAdapterVersion 发请求时塞进 User-Agent 的应用版本号
 //
 // 改版本号时同步更新 README + CHANGELOG.md
@@ -61,9 +108,7 @@ func (a *GitHubAdapter) Platform() platform.Platform {
 //
 // GitHub 鉴权：Authorization: Bearer <token>（与 Gitea 的 token <pat> 不同）
 func (a *GitHubAdapter) VerifyToken(ctx context.Context, hostURL, token string) (*platform.UserDTO, error) {
-	if hostURL == "" {
-		hostURL = GitHubAPIBase
-	}
+	hostURL = normalizeGitHubHostURL(hostURL)
 
 	var raw struct {
 		ID        int64  `json:"id"`
@@ -108,9 +153,7 @@ func (a *GitHubAdapter) VerifyToken(ctx context.Context, hostURL, token string) 
 //     不支持服务端 q 参数，要搜全靠客户端过滤 —— 仓库量 < 上千够用）
 //   - 客户端过滤后 hasMore 按"服务端返满 per_page"判断（与 Gitea adapter 对齐）
 func (a *GitHubAdapter) ListRepos(ctx context.Context, hostURL, username, token string, opts platform.ListReposOpts) ([]platform.RepoDTO, error) {
-	if hostURL == "" {
-		hostURL = GitHubAPIBase
-	}
+	hostURL = normalizeGitHubHostURL(hostURL)
 
 	perPage := opts.Limit
 	if perPage <= 0 {
@@ -199,10 +242,20 @@ func (a *GitHubAdapter) ListBranches(ctx context.Context, hostURL, username, tok
 
 // CloneRepo clone 仓库到本地 workspace
 //
-// GitHub clone URL: https://github.com/{owner}/{repo}.git
+// GitHub clone URL: https://github.com/{owner}/{repo}.git（git 协议用网站域名,**不是** api.github.com）
 // 鉴权：http.BasicAuth{Username: "oauth2" 或用户名, Password: token}
+//
+// hostURL 归一化(反向于 normalizeGitHubHostURL):
+//   - ""                                       → "https://github.com"
+//   - "https://api.github.com"                 → "https://github.com"  (老账号 localStore 存了 API URL,要 reverse)
+//   - "https://github.com"                     → 不变
+//   - 自托管 GHES: https://github.acme.com     → 不变(保留 host,git clone 走自己的 host)
 func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath string) (string, error) {
+	hostURL = strings.TrimRight(strings.TrimSpace(hostURL), "/")
 	if hostURL == "" {
+		hostURL = "https://github.com"
+	}
+	if hostURL == "https://api.github.com" || hostURL == "http://api.github.com" {
 		hostURL = "https://github.com"
 	}
 

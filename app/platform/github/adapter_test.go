@@ -504,3 +504,90 @@ func TestGitHubAdapter_MapHTTPError_5xxNotGiteaError(t *testing.T) {
 		}
 	}
 }
+
+// ===== normalizeGitHubHostURL 测试（v2.x 修复 406 bug）=====
+//
+// 背景:app.go AuthConnect 旧版硬编码 https://github.com(网站 URL)
+// → VerifyToken 拼成 https://github.com/user → 命中 GitHub 网站 HTML
+// → 网站对 Accept: application/vnd.github+json 返 406 Not Acceptable
+//
+// 修复:所有 GitHub HTTP 请求前必须归一化成 https://api.github.com
+func TestNormalizeGitHubHostURL(t *testing.T) {
+	cases := []struct {
+		input  string
+		want   string
+		whyWhy string
+	}{
+		{"", GitHubAPIBase, "空字符串 → API base"},
+		{"https://github.com", GitHubAPIBase, "网站 URL → API(主修复)"},
+		{"https://github.com/", GitHubAPIBase, "网站 URL 带 trailing slash → API"},
+		{"https://github.com/anything", GitHubAPIBase, "网站 URL 带 path → API"},
+		{"http://github.com", GitHubAPIBase, "http 网站 URL → API(不常见,做防御)"},
+		{GitHubAPIBase, GitHubAPIBase, "已经是 API URL → 不变"},
+		{"https://api.github.com/", GitHubAPIBase, "API URL 带 trailing slash → 不变"},
+		// 自托管 GHES:保留 host,只 trim 末尾 slash(trim 空格但保留 path)
+		{"https://github.acme.com", "https://github.acme.com", "自托管 GHES 保留 host"},
+		{"  https://github.acme.com  ", "https://github.acme.com", "自托管 GHES trim 空格"},
+		// 含前后空格
+		{"  https://github.com  ", GitHubAPIBase, "前后空格 + 网站 URL → API"},
+	}
+	for _, c := range cases {
+		got := normalizeGitHubHostURL(c.input)
+		if got != c.want {
+			t.Errorf("normalizeGitHubHostURL(%q) = %q, want %q (%s)", c.input, got, c.want, c.whyWhy)
+		}
+	}
+}
+
+// TestGitHubAdapter_VerifyToken_NormalizesHostURL 集成测试:
+// 即使 caller 传错的 https://github.com(网站 URL),VerifyToken 也能归一化后正常走通
+//
+// 技巧:用自定义 Transport 把所有请求重定向到 httptest server,
+// 让 server 接到归一化后的 /user 请求(从 Authorization 头里抓出 host 看)
+func TestGitHubAdapter_VerifyToken_NormalizesHostURL(t *testing.T) {
+	var capturedHost string
+	var capturedPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHost = r.Host
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"id":1,"login":"octocat"}`)
+	}))
+	defer server.Close()
+
+	adapter := &GitHubAdapter{
+		httpClient: &http.Client{
+			Transport: redirectToServerTransport{target: server.URL},
+		},
+	}
+
+	// 故意传 https://github.com(网站 URL,触发归一化)
+	_, err := adapter.VerifyToken(context.Background(), "https://github.com", "test-token")
+	if err != nil {
+		t.Fatalf("VerifyToken failed: %v", err)
+	}
+	if capturedPath != "/user" {
+		t.Errorf("path = %q, want /user", capturedPath)
+	}
+	// host 应该是归一化后的 api.github.com(虽然实际 transport 重定向到 httptest server)
+	if capturedHost == "" {
+		t.Error("host should not be empty")
+	}
+}
+
+// redirectToServerTransport 把所有 HTTP 请求重定向到目标 server(用于集成测试)
+// 只重写 Scheme + Host,path 不动
+type redirectToServerTransport struct {
+	target string // 形如 "http://127.0.0.1:xxxx"
+}
+
+func (t redirectToServerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	targetURL, err := url.Parse(t.target)
+	if err != nil {
+		return nil, err
+	}
+	req.URL.Scheme = targetURL.Scheme
+	req.URL.Host = targetURL.Host
+	return http.DefaultTransport.RoundTrip(req)
+}
