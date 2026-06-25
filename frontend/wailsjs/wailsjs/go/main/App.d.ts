@@ -18,6 +18,8 @@ export function CloneRepo(arg1:main.CloneRepoArgs):Promise<main.CloneRepoResult>
 
 export function CreateColumn(arg1:main.CreateColumnArgs):Promise<main.ColumnDTO>;
 
+export function DeepenRepo(arg1:main.DeepenRepoArgs):Promise<main.DeepenRepoResult>;
+
 export function DeleteColumn(arg1:main.DeleteColumnArgs):Promise<void>;
 
 export function FetchRepo(arg1:main.PullRepoArgs):Promise<main.FetchRepoResultDTO>;

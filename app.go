@@ -2080,6 +2080,88 @@ func (a *App) FetchRepo(args PullRepoArgs) (FetchRepoResultDTO, error) {
 	return FetchRepoResultDTO{Updated: result.Updated}, nil
 }
 
+// DeepenRepoArgs 加深仓库历史参数
+type DeepenRepoArgs struct {
+	ProjectID string `json:"projectId"`
+	DeepenBy  int    `json:"deepenBy"` // 增加的深度（默认 50）
+}
+
+// DeepenRepoResult 加深结果
+type DeepenRepoResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+// DeepenRepo 增量拉取更多历史记录（用于"加载更多"功能）
+//
+// v2.10：按需加载机制
+//
+// 使用场景：用户在 Git Graph 底部点击"加载更多"
+func (a *App) DeepenRepo(args DeepenRepoArgs) (DeepenRepoResult, error) {
+	if a.logger != nil {
+		a.logger.Info("DeepenRepo", "projectId", args.ProjectID, "deepenBy", args.DeepenBy)
+	}
+
+	if args.ProjectID == "" {
+		return DeepenRepoResult{}, ipc.NewValidationFailed("projectId 不能为空", "")
+	}
+
+	// 默认增加 50 层
+	deepenBy := args.DeepenBy
+	if deepenBy <= 0 {
+		deepenBy = 50
+	}
+
+	// 1-2. 找 project + account
+	project, _, err := a.findProjectAndAccount(args.ProjectID)
+	if err != nil {
+		return DeepenRepoResult{}, err
+	}
+
+	// 3. 计算 localPath
+	workspacePath := a.workspacePath
+	if workspacePath == "" {
+		return DeepenRepoResult{}, ipc.NewInternal("workspacePath 未初始化")
+	}
+
+	// 找到关联的账号
+	state := a.localStore.Get()
+	var accountUsername string
+	for i := range state.Accounts {
+		if state.Accounts[i].ID == project.AccountID {
+			accountUsername = state.Accounts[i].Username
+			break
+		}
+	}
+	if accountUsername == "" {
+		return DeepenRepoResult{}, ipc.NewInternal("找不到关联的账号")
+	}
+
+	localPath := git.RepoLocalPathForAccount(workspacePath, accountUsername, project.Owner, project.Name)
+
+	// 4. 调用 git.DeepenRepo
+	result, err := git.DeepenRepo(git.DeepenRepoOptions{
+		LocalPath: localPath,
+		DeepenBy:  deepenBy,
+	})
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Error("DeepenRepo failed",
+				"owner", project.Owner,
+				"repo", project.Name,
+				"localPath", localPath,
+				"err", err.Error(),
+			)
+		}
+		return DeepenRepoResult{}, err
+	}
+
+	return DeepenRepoResult{
+		Success: result.Success,
+		Message: result.Message,
+	}, nil
+}
+
 // ===== 看板（issue + label 映射，仅 Gitea）（步骤 3.5）=====
 
 // IssueDTO 议题（暴露给前端）
