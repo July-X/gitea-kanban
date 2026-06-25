@@ -275,9 +275,10 @@ async function loadGraph(): Promise<void> {
   try {
     // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
     // 跳过 v1 字符流往返（adapter.ts 反编码 → parser.ts 解析），消除 bug1-bug4
+    // v2.10：增加 limit 以支持加载更多功能
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
-      limit: 200,
+      limit: 500, // 增加到 500 以支持多次加载更多
     });
 
     // 兼容 disabled 提示（main handler 可能返 disabled）
@@ -672,6 +673,18 @@ function refBadgeClass(refType?: string): string {
           <RotateCw :size="15" :class="{ spinning: pulling }" />
           <span class="sync-btn__label">{{ syncButtonLabel }}</span>
         </button>
+
+        <!-- v2.10：加载更多按钮（放在同步按钮旁边） -->
+        <button
+          v-if="canLoadMore"
+          class="load-more-header-btn"
+          :disabled="loadingMore"
+          :title="`当前显示 ${graphDto?.nodes?.length || 0} 个提交，点击加载更多`"
+          @click="handleLoadMore"
+        >
+          <span v-if="loadingMore">加载中...</span>
+          <span v-else>加载更多</span>
+        </button>
       </div>
     </header>
 
@@ -846,19 +859,6 @@ function refBadgeClass(refType?: string): string {
                </div>
 </template>
             </div>
-
-            <!-- v2.10：加载更多按钮 -->
-            <div v-if="canLoadMore" class="load-more-container">
-              <button
-                class="load-more-btn"
-                :disabled="loadingMore"
-                @click="handleLoadMore"
-              >
-                <span v-if="loadingMore">加载中...</span>
-                <span v-else>加载更多提交记录（当前 {{ graphDto?.nodes?.length || 0 }} 个）</span>
-              </button>
-            </div>
-
             <!-- v2.14：手风琴已内嵌到 .git-graph-list 内部（v-for 里展开 row 之后），
                  旧的 wrapper-level absolute 副本已删除 —— 不再跨整宽覆盖左侧 SVG -->
          </div>
@@ -1529,37 +1529,26 @@ function refBadgeClass(refType?: string): string {
 .commit-avatar-fallback.flow-color-16-14 { background-color: var(--color-series-16-14); }
 .commit-avatar-fallback.flow-color-16-15 { background-color: var(--color-series-16-15); }
 
-/* ===== v2.10: 加载更多按钮 ===== */
-.load-more-container {
-  padding: 24px;
-  text-align: center;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
-}
-
-.load-more-btn {
-  padding: 10px 20px;
-  background: var(--color-primary);
-  color: white;
-  border: none;
+/* ===== v2.10: 加载更多按钮（顶部操作区） ===== */
+.load-more-header-btn {
+  padding: 6px 12px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
-.load-more-btn:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+.load-more-header-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
 }
 
-.load-more-btn:disabled {
+.load-more-header-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.load-more-btn:active:not(:disabled) {
-  transform: translateY(0);
 }
 </style>
