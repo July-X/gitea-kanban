@@ -19,6 +19,7 @@ import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull } from '@renderer/lib/ipc-client';
+import { DeepenRepo } from '@/wailsjs/go/main/App';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import CommitDetailPanel from '@renderer/components/CommitDetailPanel.vue';
 import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
@@ -63,6 +64,25 @@ const svgRender = ref<SvgRenderResult | null>(null);
 const loading = ref(false);
 /** 本地错误信息 */
 const localError = ref<string | null>(null);
+
+/** v2.10：加载更多状态 */
+const loadingMore = ref(false);
+/** v2.10：是否已加载完整历史 */
+const hasCompleteHistory = ref(false);
+
+/** v2.10：是否显示「加载更多」按钮 */
+const canLoadMore = computed(() => {
+  // 必须有当前项目和 commits
+  if (!activeProjectId.value || !graphResult.value?.nodes?.length) return false;
+  // 已加载完整历史则不显示
+  if (hasCompleteHistory.value) return false;
+  // 超大仓库才显示（判断是否用了浅克隆）
+  const project = repo.currentProject;
+  if (!project) return false;
+  const name = project.name.toLowerCase();
+  return name.includes('unreal') || name.includes('chromium') ||
+         name.includes('linux') || name.includes('webkit');
+});
 /** v1.5 功能未启用提示（main handler 返 disabled=true 时设置） */
 const featureDisabled = ref(false);
 /** v1.5 启用流程：是否正在 git clone */
@@ -197,6 +217,46 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', onDragEnd);
   document.removeEventListener('app:refresh', onAppRefresh);
 });
+
+/**
+ * v2.10：加载更多提交记录（增量拉取历史）
+ *
+ * 使用场景：用户滚动到 Git Graph 底部，点击「加载更多」按钮
+ *
+ * 技术实现：
+ * 1. 调用 DeepenRepo API（增量拉取 50 层历史）
+ * 2. 重新调用 loadGraph 刷新图形
+ * 3. 显示成功/失败提示
+ */
+async function handleLoadMore() {
+  if (!activeProjectId.value || loadingMore.value) return;
+
+  loadingMore.value = true;
+  try {
+    // 1. 增量拉取历史
+    const result = await DeepenRepo({
+      projectId: activeProjectId.value,
+      deepenBy: 50,
+    });
+
+    // 2. 重新加载 Git Graph
+    await loadGraph();
+
+    // 3. 检查是否已到根节点
+    if (result.message && result.message.includes('完整历史')) {
+      hasCompleteHistory.value = true;
+      showToast('success', '已加载完整历史记录');
+    } else {
+      showToast('success', result.message || '成功加载更多提交记录');
+    }
+  } catch (error) {
+    console.error('[TimelineNewView] handleLoadMore failed:', error);
+    showToast('error', '加载失败，请重试');
+  } finally {
+    loadingMore.value = false;
+  }
+}
+
 
 async function loadGraph(): Promise<void> {
   if (!activeProjectId.value) {
@@ -779,6 +839,19 @@ function refBadgeClass(refType?: string): string {
                </div>
 </template>
             </div>
+
+            <!-- v2.10：加载更多按钮 -->
+            <div v-if="canLoadMore" class="load-more-container">
+              <button
+                class="load-more-btn"
+                :disabled="loadingMore"
+                @click="handleLoadMore"
+              >
+                <span v-if="loadingMore">加载中...</span>
+                <span v-else>加载更多提交记录（当前 {{ graphResult?.nodes?.length || 0 }} 个）</span>
+              </button>
+            </div>
+
             <!-- v2.14：手风琴已内嵌到 .git-graph-list 内部（v-for 里展开 row 之后），
                  旧的 wrapper-level absolute 副本已删除 —— 不再跨整宽覆盖左侧 SVG -->
          </div>
@@ -1448,4 +1521,38 @@ function refBadgeClass(refType?: string): string {
 .commit-avatar-fallback.flow-color-16-13 { background-color: var(--color-series-16-13); }
 .commit-avatar-fallback.flow-color-16-14 { background-color: var(--color-series-16-14); }
 .commit-avatar-fallback.flow-color-16-15 { background-color: var(--color-series-16-15); }
+
+/* ===== v2.10: 加载更多按钮 ===== */
+.load-more-container {
+  padding: 24px;
+  text-align: center;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.load-more-btn {
+  padding: 10px 20px;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.load-more-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
 </style>
