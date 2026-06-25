@@ -60,13 +60,13 @@ func CloneWithFilter(url, localPath string, depth int, token string) error {
 
 	// 执行命令
 	cmd := exec.Command("git", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	// 捕获输出和错误
+	output, err := cmd.CombinedOutput()
+	if err != nil {
 		// 清理失败的克隆
 		os.RemoveAll(localPath)
-		return fmt.Errorf("git clone 失败: %w", err)
+		return fmt.Errorf("git clone 失败: %w\n输出: %s", err, string(output))
 	}
 
 	return nil
