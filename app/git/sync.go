@@ -90,18 +90,15 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		return nil, fmt.Errorf("远程 %s 不存在: %w", remoteName, err)
 	}
 
-	// 构造 auth
-	var auth *http.BasicAuth
-	if opts.Token != "" {
-		username := opts.Username
-		if username == "" {
-			username = "oauth2"
-		}
-		auth = &http.BasicAuth{
-			Username: username,
-			Password: opts.Token,
-		}
+	// v2.8：构造 auth（优先 SSH，回退 HTTPS）
+	// 从 remote 的 URL 获取原始 URL，然后尝试 SSH
+	remoteConfig := remote.Config()
+	var remoteURL string
+	if len(remoteConfig.URLs) > 0 {
+		remoteURL = remoteConfig.URLs[0]
 	}
+
+	auth, _, authMethod := BuildAuth(remoteURL, opts.Username, opts.Token)
 
 	refSpecs := []config.RefSpec{config.RefSpec("+refs/heads/*:refs/remotes/origin/*")}
 	if opts.SingleBranch {
@@ -131,13 +128,30 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 
 	err = remote.FetchContext(ctx, fetchOpts)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("同步超时（2分钟）：此仓库可能过大，建议减少 Depth 或使用在线版本查看")
+		// v2.8：SSH 失败时自动回退到 HTTPS
+		if authMethod == AuthMethodSSH && err != git.NoErrAlreadyUpToDate {
+			// SSH 失败，使用 HTTPS 重试
+			username := opts.Username
+			if username == "" {
+				username = "oauth2"
+			}
+			httpAuth := &http.BasicAuth{
+				Username: username,
+				Password: opts.Token,
+			}
+			fetchOpts.Auth = httpAuth
+			err = remote.FetchContext(ctx, fetchOpts)
 		}
-		if err == git.NoErrAlreadyUpToDate {
-			return &FetchResult{Updated: false}, nil
+
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("同步超时（2分钟）：此仓库可能过大，建议减少 Depth 或使用在线版本查看")
+			}
+			if err == git.NoErrAlreadyUpToDate {
+				return &FetchResult{Updated: false}, nil
+			}
+			return nil, fmt.Errorf("fetch 失败: %w", err)
 		}
-		return nil, fmt.Errorf("fetch 失败: %w", err)
 	}
 
 	return &FetchResult{Updated: true}, nil

@@ -24,7 +24,6 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
@@ -146,21 +145,12 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		cloneURL = CleanRepoURL(opts.HostURL, opts.Owner, opts.Repo)
 	}
 
-	// 6. 构造 auth（内存态，不落盘）
-	var auth transport.AuthMethod
-	if opts.Token != "" {
-		// Gitea 和 GitHub 都支持 http.BasicAuth
-		// Gitea: username=用户名, password=token
-		// GitHub: username=任意(常用 oauth2 或用户名), password=token
-		username := opts.Username
-		if username == "" {
-			username = "oauth2"
-		}
-		auth = &http.BasicAuth{
-			Username: username,
-			Password: opts.Token,
-		}
-	}
+	// 6. 构造 auth（v2.8：优先 SSH，回退 HTTPS）
+	//
+	// 对于 GitHub 仓库，自动尝试使用 SSH 认证（更稳定，适合大仓库）
+	// 检测 ~/.ssh/id_ed25519 或 ~/.ssh/id_rsa（无 passphrase）
+	// SSH 失败时自动回退到 HTTPS + token
+	auth, finalURL, authMethod := BuildAuth(cloneURL, opts.Username, opts.Token)
 
 	// 7. 执行 clone（v2.4 轻量模式：NoCheckout=true 跳过工作区文件）
 	//
@@ -177,7 +167,7 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// 不用 Mirror：Mirror 会强制创建 bare 仓库，后续 HEAD/remote refs 语义和普通仓库不一致。
 	// go-git 默认 refspec 已是 refs/heads/* -> refs/remotes/origin/*，足够 Git Graph 使用。
 	cloneOpts := &git.CloneOptions{
-		URL:        cloneURL,
+		URL:        finalURL,
 		Auth:       auth,
 		NoCheckout: opts.NoCheckout,
 		Depth:      opts.Depth,
@@ -202,9 +192,27 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	//  Bare 完全无 worktree）
 	_, err = git.PlainClone(localPath, false, cloneOpts)
 	if err != nil {
-		// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
-		os.RemoveAll(localPath)
-		return nil, fmt.Errorf("go-git clone 失败: %w", err)
+		// v2.8：SSH 失败时自动回退到 HTTPS
+		if authMethod == AuthMethodSSH {
+			// SSH 失败，使用 HTTPS 重试
+			username := opts.Username
+			if username == "" {
+				username = "oauth2"
+			}
+			httpAuth := &http.BasicAuth{
+				Username: username,
+				Password: opts.Token,
+			}
+			cloneOpts.URL = cloneURL
+			cloneOpts.Auth = httpAuth
+			_, err = git.PlainClone(localPath, false, cloneOpts)
+		}
+
+		if err != nil {
+			// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
+			os.RemoveAll(localPath)
+			return nil, fmt.Errorf("go-git clone 失败: %w", err)
+		}
 	}
 
 	return &CloneResult{LocalPath: localPath}, nil
