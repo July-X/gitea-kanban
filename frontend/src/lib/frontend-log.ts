@@ -41,11 +41,30 @@ export interface FrontendLogArgs {
  * - 未注入(单测 / 极早启动期)→ 走 console
  * - 注入但调用失败(IPC 异常)→ 静默降级到 console（不抛 unhandledrejection 死循环）
  * - description 截断到 1024 字符（与 Go 端一致）
+ *
+ * v2.x 增强:每次 send() 都在 DevTools 打一条 console 记录（带 [frontend-log] 前缀）
+ * 这样开发期 / 反馈问题期用户能立刻确认 "send() 被调了",
+ * 排错"日志没出现"时区分是 send() 没被调,还是 IPC 链路断。
  */
 function send(args: FrontendLogArgs): void {
   const desc = args.description && args.description.length > 1024
     ? args.description.slice(0, 1024) + '...(truncated)'
     : args.description;
+
+  // 始终在 DevTools 打一条记录（不影响生产：用户不打开 DevTools 就看不到）
+  // 级别映射跟 send() 一致,方便排查
+  // eslint-disable-next-line no-console
+  const consoleFn = args.level === 'error'
+    ? console.error
+    : args.level === 'warn'
+      ? console.warn
+      : args.level === 'debug'
+        ? console.debug
+        : console.log;
+  consoleFn(
+    `[frontend-log] ${args.level.toUpperCase()} src=${args.source} msg=${args.message}`,
+    desc ?? '',
+  );
 
   // Wails binding 注入到 window.go.main.App.*；不依赖 shim,
   // 因为前端日志需求更紧迫——binding 还没就绪也能降级
@@ -55,7 +74,7 @@ function send(args: FrontendLogArgs): void {
 
   if (wailsApp?.LogFrontend) {
     // fire-and-forget:不 await,不 catch 抛错
-    // 失败时落到 console（开发期仍能看）
+    // 失败时落到 console（开发期仍能看,上面的 consoleFn 已经先打过一次）
     wailsApp.LogFrontend({
       level: args.level,
       message: args.message,
@@ -63,19 +82,13 @@ function send(args: FrontendLogArgs): void {
       source: args.source,
     }).catch((err: unknown) => {
       // eslint-disable-next-line no-console
-      console.error('[frontend-log] LogFrontend failed:', err);
+      console.error('[frontend-log] LogFrontend IPC failed:', err);
     });
     return;
   }
 
   // 降级:Wails binding 还没注入(单测 / SSR / 极早启动)
-  // eslint-disable-next-line no-console
-  const fallback = args.level === 'error'
-    ? console.error
-    : args.level === 'warn'
-      ? console.warn
-      : console.log;
-  fallback(`[${args.source}] ${args.message}`, desc ?? '');
+  // 这种情况 consoleFn 已经打过,前端能看到
 }
 
 export function logDebug(source: string, message: string, description?: string): void {
