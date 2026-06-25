@@ -1999,15 +1999,31 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 	// 5. 调 git.PullRepo（v2.6：装 progress 回调）
 	singleBranch := account.Platform == "github"
 	depth := 0
+	countLimit := 500
+
+	// v2.7：超大仓库优化（UnrealEngine / Chromium 等）
+	// 识别超大仓库的启发式规则：repo 名称包含已知大仓库关键词
+	isHugeRepo := strings.Contains(strings.ToLower(project.Name), "unreal") ||
+		strings.Contains(strings.ToLower(project.Name), "chromium") ||
+		strings.Contains(strings.ToLower(project.Name), "linux") ||
+		strings.Contains(strings.ToLower(project.Name), "webkit")
+
 	if singleBranch {
-		depth = 500
+		if isHugeRepo {
+			// 超大仓库：只取最近 50 个 commit
+			depth = 50
+			countLimit = 50
+		} else {
+			depth = 500
+		}
 	}
+
 	result, err := git.PullRepo(git.PullOptions{
 		LocalPath: localPath,
 		Token:     token,
 		Username:  account.Username,
 		// 大仓库不做全历史计数；Git Graph 页面只展示有限窗口，更新提示也只需要判断近期是否变化。
-		CountLimit: 500,
+		CountLimit: countLimit,
 		Depth:      depth,
 		// GitHub 超大仓库默认只更新默认分支最近窗口；Gitea 保持完整多分支同步。
 		SingleBranch: singleBranch,
