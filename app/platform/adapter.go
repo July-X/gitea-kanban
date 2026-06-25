@@ -86,7 +86,11 @@ type PlatformAdapter interface {
 
 	// CloneRepo clone 仓库到本地 workspace
 	// 实际调用 app/git.CloneRepo，但通过 adapter 暴露让上层统一调用
-	CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath string) (localPath string, err error)
+	//
+	// v2.5：accountUsername 用于按账号隔离的子目录布局
+	//   旧布局：${workspacePath}/repos/<owner>__<repo>/
+	//   新布局：${workspacePath}/repos/<accountUsername>/<owner>__<repo>/
+	CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath, accountUsername string) (localPath string, err error)
 
 	// LogGraph 获取 commit 历史并构建 Graph 布局
 	LogGraph(ctx context.Context, localPath string, opts LogGraphOpts) (*GraphResult, error)

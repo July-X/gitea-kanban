@@ -41,8 +41,15 @@ type CloneOptions struct {
 	Token string
 	// Username 用户名（Gitea 用 login；GitHub token 鉴权时可用 "oauth2" 或用户名）
 	Username string
-	// WorkspacePath workspace 根目录（repos 会 clone 到 ${workspacePath}/repos/${owner}__${repo}）
+	// WorkspacePath workspace 根目录（repos 会 clone 到 ${workspacePath}/repos/${accountUsername}/${owner}__${repo}）
 	WorkspacePath string
+	// AccountUsername 账号 username（v2.5：用于按账号分层目录）
+	//
+	// 旧布局：${workspacePath}/repos/${owner}__${repo}
+	// 新布局：${workspacePath}/repos/${accountUsername}/${owner}__${repo}
+	//
+	// 若为空字符串 → fallback 到 ${workspacePath}/repos/${owner}__${repo}（仅供测试）
+	AccountUsername string
 	// NoCheckout 跳过 worktree 检出（v2.4：只拉元信息不拉文件）
 	//
 	// 设为 true 后 go-git 走 "info-only" 模式：
@@ -78,7 +85,10 @@ type CloneResult struct {
 //   - go-git 不像 git 二进制那样在 .git/config 留 URL（无 set-url 需求）
 //   - clone 完成后 token 不落盘
 //
-// 路径规则：${workspacePath}/repos/${owner}__${repo}（对齐旧版 suggestLocalRepoPath）
+// 路径规则（v2.5）：
+//   - 首选：${workspacePath}/repos/${accountUsername}/${owner}__${repo}
+//   - 兜底（AccountUsername 为空）：${workspacePath}/repos/${owner}__${repo}
+//     仅在测试场景使用——生产代码必须传 accountUsername
 //
 // 并发安全：使用 per-repo 锁避免两个 CloneRepo 同时 clone 同一仓库时竞态
 // （os.Stat + PlainClone 不是原子的，可能产生损坏仓库）
@@ -90,8 +100,14 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		return nil, fmt.Errorf("workspacePath 不能为空")
 	}
 
-	// 1. 计算本地路径
-	localPath := RepoLocalPath(opts.WorkspacePath, opts.Owner, opts.Repo)
+	// 1. 计算本地路径（v2.5：按账号分层）
+	var localPath string
+	if opts.AccountUsername != "" {
+		localPath = RepoLocalPathForAccount(opts.WorkspacePath, opts.AccountUsername, opts.Owner, opts.Repo)
+	} else {
+		// 兜底（旧布局）：测试场景 + 防御
+		localPath = RepoLocalPath(opts.WorkspacePath, opts.Owner, opts.Repo)
+	}
 
 	// 2. 拿 per-repo 锁（避免并发 clone 同一仓库竞态）
 	unlock, err := lockPath(localPath)
@@ -173,14 +189,52 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	return &CloneResult{LocalPath: localPath}, nil
 }
 
-// RepoLocalPath 计算仓库在 workspace 中的本地路径
+// AccountDirName 账号目录名 = sanitize(username)
 //
-// 规则：${workspacePath}/repos/${owner}__${repo}
-// owner/repo 中的非安全字符替换为 _
+// 命名规则（v2.5 · user 拍板 2026-06-22）：
+//   - 用 account.Username（login），不用 account.ID（UUID）
+//   - 理由：前端 UI 展示的就是 username，用户从路径能直接看懂"这个仓库属于哪个账号"
+//   - 重命名账号时同步搬家（一次性 rename）也是合理代价
+func AccountDirName(accountUsername string) string {
+	if accountUsername == "" {
+		return "_unknown"
+	}
+	return sanitizeName(accountUsername)
+}
+
+// RepoLocalPath 计算仓库在 workspace 中的本地路径（旧版布局）
+//
+// 规则（v2.4 之前）：${workspacePath}/repos/${owner}__${repo}
+//
+// v2.5 起仅在迁移逻辑 / 旧数据回退场景使用，新代码一律走 RepoLocalPathForAccount。
+// 保留这个函数的原因是迁移期 + 测试可能需要直接拼路径，避免重复计算逻辑。
 func RepoLocalPath(workspacePath, owner, repo string) string {
 	safeOwner := sanitizeName(owner)
 	safeRepo := sanitizeName(repo)
 	return filepath.Join(workspacePath, "repos", fmt.Sprintf("%s__%s", safeOwner, safeRepo))
+}
+
+// RepoLocalPathForAccount 按账号隔离的仓库本地路径（v2.5 · user 拍板 2026-06-22）
+//
+// 规则：
+//   - ${workspacePath}/repos/${username}/${owner}__${repo}
+//   - username 来自 GiteaAccount.Username（对齐前端展示 + 零术语"账号"概念）
+//
+// 为什么按账号再做一层：
+//   - 多账号场景：用户在不同平台（Gitea 实例 / GitHub）有同名用户名会撞目录名
+//     （如 July-X 在 gitea.example.com 和 github.com 都同名 → 物理隔离避免冲突）
+//   - 删账号 / 切换平台：清账号目录即丢所有本地仓库，不用按 project 一个个删
+//
+// 沙箱校验：所有 caller 必须保证 accountDir 在 ${workspacePath}/repos/ 下，否则
+// RepoExists 等下游函数无法识别 git 仓库。
+func RepoLocalPathForAccount(workspacePath, accountUsername, owner, repo string) string {
+	safeAccount := sanitizeName(accountUsername)
+	safeOwner := sanitizeName(owner)
+	safeRepo := sanitizeName(repo)
+	return filepath.Join(
+		workspacePath, "repos", safeAccount,
+		fmt.Sprintf("%s__%s", safeOwner, safeRepo),
+	)
 }
 
 // CleanRepoURL 构造干净的仓库 URL（不含 token）

@@ -420,12 +420,18 @@ export const useRepoStore = defineStore('repo', () => {
       clonedMap.value = {};
       return;
     }
+    const acc = auth.accounts[0]; // v2.5：clone status 按当前账号 username 查
+    const username = acc?.username;
     const next: Record<string, boolean> = {};
     await Promise.all(
       repos.value.map(async (r) => {
         const key = cloneKey(r.owner, r.name);
         try {
-          next[key] = await commitsGitgraphIsRepoCloned({ owner: r.owner, repo: r.name });
+          next[key] = await commitsGitgraphIsRepoCloned({
+            username,
+            owner: r.owner,
+            repo: r.name,
+          });
         } catch {
           next[key] = false;
         }

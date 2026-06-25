@@ -168,16 +168,18 @@ func (a *GiteaAdapter) ListBranches(ctx context.Context, hostURL, username, toke
 // CloneRepo clone 仓库到本地 workspace（委托 app/git.CloneRepo）
 //
 // v2.4 轻量模式：NoCheckout=true 跳过工作区文件（Git Graph 元信息足够）
-func (a *GiteaAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath string) (string, error) {
+// v2.5 按账号分层：accountUsername 用于子目录布局
+func (a *GiteaAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath, accountUsername string) (string, error) {
 	result, err := git.CloneRepo(git.CloneOptions{
-		Platform:      "gitea",
-		HostURL:       hostURL,
-		Owner:         owner,
-		Repo:          repo,
-		Token:         token,
-		Username:      username,
-		WorkspacePath: workspacePath,
-		NoCheckout:    true, // v2.4：只拉元信息
+		Platform:        "gitea",
+		HostURL:         hostURL,
+		Owner:           owner,
+		Repo:            repo,
+		Token:           token,
+		Username:        username,
+		WorkspacePath:   workspacePath,
+		AccountUsername: accountUsername,
+		NoCheckout:      true, // v2.4：只拉元信息
 	})
 	if err != nil {
 		return "", err

@@ -506,8 +506,14 @@ export function commitsGitgraphCloneRepo(args: {
  * v2.3 检查 owner/repo 是否已 clone 本地 workspace
  *
  * StatusBar 仓库管理面板用：判断行末按钮是"同步"还是"更新"
+ *
+ * v2.5：按账号分层（新增 username 参数）
+ *   - 旧版：只查 ${workspace}/repos/<owner>__<repo>/
+ *   - 新版：查 ${workspace}/repos/<username>/<owner>__<repo>/
+ *   - username 为空时 fallback 到旧版路径（兼容旧 caller）
  */
 export function commitsGitgraphIsRepoCloned(args: {
+  username?: string;
   owner: string;
   repo: string;
 }): Promise<boolean> {

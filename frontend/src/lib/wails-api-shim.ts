@@ -57,8 +57,9 @@ type WailsApp = {
     owner: string;
     repo: string;
   }) => Promise<{ localPath: string; reused: boolean }>;
-  /** v2.3：检查 owner/repo 是否已 clone 本地 */
-  IsRepoCloned?: (args: { owner: string; repo: string }) => Promise<boolean>;
+  /** v2.3：检查 owner/repo 是否已 clone 本地
+   *  v2.5：按账号分层（新增 username 参数） */
+  IsRepoCloned?: (args: { username?: string; owner: string; repo: string }) => Promise<boolean>;
   /** v2.3：pull 仓库最新改动（不传 token，从 localPath 反查） */
   PullRepo?: (args: { localPath: string }) => Promise<{
     beforeCount: number;
@@ -398,9 +399,11 @@ const apiShim = {
     /**
      * gitgraphIsRepoCloned —— v2.3 检查 owner/repo 是否已 clone 本地
      * 前端 StatusBar 仓库管理面板用
+     *
+     * v2.5：按账号分层（args.username 可选；空时 fallback 到旧版路径）
      */
     gitgraphIsRepoCloned: (args: unknown): Promise<unknown> => {
-      const a = (args ?? {}) as { owner: string; repo: string };
+      const a = (args ?? {}) as { username?: string; owner: string; repo: string };
       return forwardToWails(
         () => Promise.resolve(false), // Wails 未启动时降级返 false（按钮显示"同步"）
         (app) => app.IsRepoCloned?.(a) ?? Promise.resolve(false),

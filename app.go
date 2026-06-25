@@ -109,6 +109,78 @@ func (a *App) OnStartup(ctx context.Context) {
 	} else {
 		a.logger.Info("secret store: system keychain (go-keyring)")
 	}
+
+	// 7. v2.5 · 旧布局 → 新布局迁移（一次性，启动期同步执行）
+	//
+	// 必须放在 localStore / secretStore 初始化**之后**（resolver 需要读 Projects / Accounts），
+	// 放在业务方法前（任何 CloneRepo / GetGitGraph 都依赖新布局）。
+	//
+	// 用户拍板 2026-06-22：
+	//   - ${dataDir}/workspace/repos/<owner>__<repo>/ → ${dataDir}/workspace/repos/<username>/<owner>__<repo>/
+	//   - 启动同步，失败时把整个旧 repos 目录 mv 到 _pre_v25_workspace 保留
+	//   - 旧布局一旦迁完就标记完成，新代码不再回退到旧路径
+	a.runLegacyWorkspaceMigration()
+}
+
+// runLegacyWorkspaceMigration 执行一次性的 v2.4 → v2.5 旧布局迁移
+//
+// 设计：
+//   - localStore 未初始化时跳过（启动期错误已经在前面日志记过）
+//   - 只跑一次：迁移成功后即便用户手动把 _pre_v25_workspace mv 回 repos，
+//     也**不会**再触发迁移（识别规则"repos 下有 __owner__repo 仓库"成立时**仍**会触发，
+//     但用户主动 mv 回去的场景罕见，行为可接受）
+//   - 失败时整个旧 repos 目录被 mv 到 _pre_v25_workspace，新数据 clone 会失败
+//     —— 前端在 UI 上提示"工作区迁移失败"（待 v2.5.x 单独任务做）
+func (a *App) runLegacyWorkspaceMigration() {
+	if a.localStore == nil || a.logger == nil {
+		return
+	}
+
+	wm := git.NewWorkspaceManager()
+	resolver := func(platform, owner, repo string) (string, bool) {
+		state := a.localStore.Get()
+		// 用 (Owner, Name) 在 Projects 里找 → AccountID → Accounts 里找 Username
+		var matchedAccountID string
+		for _, p := range state.Projects {
+			if p.Owner == owner && p.Name == repo {
+				matchedAccountID = p.AccountID
+				break
+			}
+		}
+		if matchedAccountID == "" {
+			return "", false
+		}
+		for _, acc := range state.Accounts {
+			if acc.ID == matchedAccountID && acc.Username != "" {
+				return acc.Username, true
+			}
+		}
+		return "", false
+	}
+
+	result, err := wm.MigrateLegacyWorkspaceLayout(a.workspacePath, resolver)
+	if err != nil {
+		a.logger.Error("legacy workspace migration failed",
+			"err", err, "result", result)
+		return
+	}
+	if result.MigratedCount == 0 && result.FailedCount == 0 {
+		// 没有旧布局 → 不记 INFO（每次启动都记会刷屏）
+		return
+	}
+	if result.BackupKept {
+		a.logger.Warn("legacy workspace migration: failures detected, backup kept",
+			"migrated", result.MigratedCount,
+			"failed", result.FailedCount,
+			"backup", result.RenamedTo,
+		)
+	} else {
+		a.logger.Info("legacy workspace migration: completed",
+			"migrated", result.MigratedCount,
+			"skipped", result.SkippedCount,
+			"backup", result.RenamedTo,
+		)
+	}
 }
 
 // OnShutdown 在应用退出前调用
@@ -490,7 +562,10 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 		return CloneRepoResult{}, ipc.NewInternal("平台适配器未初始化：" + platformName)
 	}
 
-	localPath, err := adapter.CloneRepo(a.ctx, hostURL, username, token, args.Owner, args.Repo, a.workspacePath)
+	// v2.5：clone 到账号隔离的子目录
+	//   旧布局：${workspacePath}/repos/<owner>__<repo>/
+	//   新布局：${workspacePath}/repos/<username>/<owner>__<repo>/
+	localPath, err := adapter.CloneRepo(a.ctx, hostURL, username, token, args.Owner, args.Repo, a.workspacePath, matchedAccount.Username)
 	if err != nil {
 		return CloneRepoResult{}, err
 	}
@@ -605,8 +680,8 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 		return GraphResultDTO{}, err
 	}
 
-	// 3. 算 localPath
-	localPath := git.RepoLocalPath(a.workspacePath, project.Owner, project.Name)
+	// 3. 算 localPath（v2.5：按账号分层）
+	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
 
 	// 4. 拿 token
 	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
@@ -669,7 +744,8 @@ func (a *App) GetRepoById(args GetRepoByIdArgs) (GetRepoByIdResult, error) {
 		return GetRepoByIdResult{}, err
 	}
 
-	localPath := git.RepoLocalPath(a.workspacePath, project.Owner, project.Name)
+	// v2.5：按账号分层
+	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
 	cloned := git.RepoExists(localPath)
 
 	return GetRepoByIdResult{
@@ -1192,15 +1268,19 @@ func (a *App) SetWorkspace(args SetWorkspaceArgs) error {
 
 // resolveTokenByLocalPath 从本地仓库路径反查 keychain 里的 token
 //
-// 步骤：
-//  1. localPath 形如 ${workspacePath}/repos/<owner>__<repo>，从路径解析 owner/repo
-//  2. 在 localStore.Projects 里找匹配的 project（owner+name 匹配 + 平台一致）
+// 步骤（v2.5 升级：按账号分层）：
+//  1. localPath 形如 ${workspacePath}/repos/<username>/<owner>__<repo>
+//     从路径解析 username / owner / repo（兜底旧版两层路径）
+//  2. 在 localStore.Projects 里找匹配的 project（owner+name 匹配）
 //  3. 用 project.AccountID 找到 GiteaAccount → 拿 hostURL/username
 //  4. 从 secretStore 拿 token
 //
 // 失败模式：路径不在 workspace 下 / project 没找到 / 账号被删 → 返 NotFound
+//
+// v2.5 兼容：仍接受旧版 ${workspacePath}/repos/<owner>__<repo> 两层路径
+//   （迁移期用户手动 mv 仓库、CI 测试等场景；通过 parts.length == 2 兼容）
 func (a *App) resolveTokenByLocalPath(localPath string) (token string, username string, err error) {
-	// 1. localPath → owner, repo
+	// 1. localPath → accountUsername?, owner, repo
 	rel, e := filepath.Rel(a.workspacePath, localPath)
 	if e != nil || strings.HasPrefix(rel, "..") {
 		return "", "", ipc.NewValidationFailed(
@@ -1208,15 +1288,30 @@ func (a *App) resolveTokenByLocalPath(localPath string) (token string, username 
 			"localPath="+localPath+" workspace="+a.workspacePath,
 		)
 	}
-	// rel = "repos/owner__repo"
+	// rel = "repos/<username>/<owner>__<repo>" (v2.5) 或 "repos/<owner>__<repo>" (v2.4 旧)
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-	if len(parts) != 2 || parts[0] != "repos" {
+	if len(parts) < 2 || parts[0] != "repos" {
 		return "", "", ipc.NewValidationFailed(
-			"localPath 不是 repos/<owner>__<repo> 形态",
+			"localPath 不是 repos/<...>/<owner>__<repo> 形态",
 			"localPath="+localPath+" rel="+rel,
 		)
 	}
-	repoDirName := parts[1]
+	var accountUsername string
+	var repoDirName string
+	if len(parts) == 2 {
+		// 旧版两层：repos/<owner>__<repo>
+		repoDirName = parts[1]
+		accountUsername = "" // 不限定账号，按 owner+repo 匹配 project
+	} else if len(parts) == 3 {
+		// v2.5 三层：repos/<username>/<owner>__<repo>
+		accountUsername = parts[1]
+		repoDirName = parts[2]
+	} else {
+		return "", "", ipc.NewValidationFailed(
+			"localPath 层级过深（v2.5 期望 repos/<username>/<owner>__<repo>）",
+			"localPath="+localPath+" rel="+rel,
+		)
+	}
 	idx := strings.Index(repoDirName, "__")
 	if idx < 0 {
 		return "", "", ipc.NewValidationFailed(
@@ -1235,6 +1330,19 @@ func (a *App) resolveTokenByLocalPath(localPath string) (token string, username 
 	var matchedPlatform string
 	for _, p := range state.Projects {
 		if p.Owner == owner && p.Name == repo {
+			// 如果 path 里给了 accountUsername，优先匹配同账号的 project
+			if accountUsername != "" {
+				var accUsername string
+				for _, acc := range state.Accounts {
+					if acc.ID == p.AccountID {
+						accUsername = acc.Username
+						break
+					}
+				}
+				if accUsername != accountUsername {
+					continue // 跳过不同账号的同名 project
+				}
+			}
 			matchedAccountID = p.AccountID
 			matchedPlatform = p.Platform
 			break
@@ -1275,6 +1383,7 @@ func (a *App) resolveTokenByLocalPath(localPath string) (token string, username 
 // ListWorkspaceRepos 列出 workspace 中已 clone 的仓库
 //
 // workspace = ${dataDir}/workspace（v2.2 固定）
+// v2.5：每个仓库带 accountUsername（所属账号 username）
 func (a *App) ListWorkspaceRepos() ([]map[string]string, error) {
 	wm := git.NewWorkspaceManager()
 	repos, err := wm.ListRepos(a.workspacePath)
@@ -1285,29 +1394,43 @@ func (a *App) ListWorkspaceRepos() ([]map[string]string, error) {
 	result := make([]map[string]string, 0, len(repos))
 	for _, r := range repos {
 		result = append(result, map[string]string{
-			"name":  r.Name,
-			"path":  r.Path,
-			"owner": r.Owner,
-			"repo":  r.Repo,
+			"name":            r.Name,
+			"path":            r.Path,
+			"owner":           r.Owner,
+			"repo":            r.Repo,
+			"accountUsername": r.AccountUsername,
 		})
 	}
 	return result, nil
 }
 
 // IsRepoClonedArgs 检查仓库是否已 clone 本地参数
+//
+// v2.5：新增 Username 字段（按账号分层的布局需要）
+//   - 旧版只查 ${workspacePath}/repos/<owner>__<repo>/
+//   - 新版查 ${workspacePath}/repos/<username>/<owner>__<repo>/
+//   - Username 为空时 fallback 到旧版路径（迁移期兼容 + 测试）
 type IsRepoClonedArgs struct {
-	Owner string `json:"owner"`
-	Repo  string `json:"repo"`
+	Username string `json:"username,omitempty"`
+	Owner    string `json:"owner"`
+	Repo     string `json:"repo"`
 }
 
 // IsRepoCloned 检查指定 owner/repo 是否已 clone 到本地 workspace
 //
 // v2.3 StatusBar 仓库管理面板用：判断行末按钮是"同步"还是"更新"
+// v2.5 升级：按账号分层（args.Username 决定子目录）
 func (a *App) IsRepoCloned(args IsRepoClonedArgs) bool {
 	if args.Owner == "" || args.Repo == "" {
 		return false
 	}
-	localPath := git.RepoLocalPath(a.workspacePath, args.Owner, args.Repo)
+	var localPath string
+	if args.Username != "" {
+		localPath = git.RepoLocalPathForAccount(a.workspacePath, args.Username, args.Owner, args.Repo)
+	} else {
+		// 兼容旧调用方（不传 username）
+		localPath = git.RepoLocalPath(a.workspacePath, args.Owner, args.Repo)
+	}
 	return git.RepoExists(localPath)
 }
 
@@ -1798,8 +1921,8 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 		return PullRepoResult{}, err
 	}
 
-	// 3. 算 localPath
-	localPath := git.RepoLocalPath(a.workspacePath, project.Owner, project.Name)
+	// 3. 算 localPath（v2.5：按账号分层）
+	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
 
 	// 4. 拿 token
 	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)

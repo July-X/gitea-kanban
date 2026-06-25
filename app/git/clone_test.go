@@ -73,11 +73,30 @@ func TestCloneRepo_LocalFileProtocol(t *testing.T) {
 func TestCloneRepo_FilePath(t *testing.T) {
 	workspace := t.TempDir()
 
-	// 直接测路径计算
+	// 直接测路径计算（旧版）
 	path := RepoLocalPath(workspace, "my-org", "my-repo")
 	expected := filepath.Join(workspace, "repos", "my-org__my-repo")
 	if path != expected {
 		t.Errorf("RepoLocalPath = %q, want %q", path, expected)
+	}
+
+	// v2.5 新版：按账号分层
+	newPath := RepoLocalPathForAccount(workspace, "alice", "my-org", "my-repo")
+	newExpected := filepath.Join(workspace, "repos", "alice", "my-org__my-repo")
+	if newPath != newExpected {
+		t.Errorf("RepoLocalPathForAccount = %q, want %q", newPath, newExpected)
+	}
+
+	// AccountDirName 测试
+	if got := AccountDirName("alice"); got != "alice" {
+		t.Errorf("AccountDirName(\"alice\") = %q, want alice", got)
+	}
+	if got := AccountDirName(""); got != "_unknown" {
+		t.Errorf("AccountDirName(\"\") = %q, want _unknown", got)
+	}
+	// 含特殊字符的 username 应被 sanitize
+	if got := AccountDirName("July@X"); got != "July_X" {
+		t.Errorf("AccountDirName(\"July@X\") = %q, want July_X", got)
 	}
 }
 

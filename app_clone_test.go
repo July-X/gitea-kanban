@@ -208,14 +208,23 @@ func TestApp_IsRepoCloned(t *testing.T) {
 		t.Error("IsRepoCloned should be false before clone")
 	}
 
-	// 手动建一个 fake 仓库（含 .git）→ true
+	// 手动建一个 fake 仓库（含 .git）→ true（v2.5 新布局：repos/<username>/<owner>__<repo>）
 	workspace := filepath.Join(tmp, "workspace")
-	repoDir := filepath.Join(workspace, "repos", "org__demo")
+	repoDir := filepath.Join(workspace, "repos", "alice", "org__demo")
 	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir fake repo: %v", err)
 	}
-	if !app.IsRepoCloned(IsRepoClonedArgs{Owner: "org", Repo: "demo"}) {
+	if !app.IsRepoCloned(IsRepoClonedArgs{Username: "alice", Owner: "org", Repo: "demo"}) {
 		t.Error("IsRepoCloned should be true after mkdir .git")
+	}
+
+	// 不传 username 时走旧版兜底路径（兼容旧 caller / 迁移期残留旧布局）
+	repoDirLegacy := filepath.Join(workspace, "repos", "bob__legacy")
+	if err := os.MkdirAll(filepath.Join(repoDirLegacy, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir legacy repo: %v", err)
+	}
+	if !app.IsRepoCloned(IsRepoClonedArgs{Owner: "bob", Repo: "legacy"}) {
+		t.Error("IsRepoCloned (legacy fallback) should be true after mkdir .git")
 	}
 
 	// 空 owner/repo → false（防御）
@@ -299,6 +308,110 @@ func TestApp_ResolveTokenByLocalPath(t *testing.T) {
 	_, _, err = app2.resolveTokenByLocalPath(repoDir2)
 	if err == nil {
 		t.Error("expected NotFound for project-less repo dir")
+	}
+}
+
+// TestApp_ResolveTokenByLocalPath_V25Layout 验证 v2.5 三层路径
+// (repos/<username>/<owner>__<repo>) 的反查逻辑
+func TestApp_ResolveTokenByLocalPath_V25Layout(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("GITEA_KANBAN_DATA_DIR", tmp)
+	t.Setenv("GITEA_KANBAN_DEV_KEYCHAIN", "1")
+
+	app := NewApp()
+	app.OnStartup(context.Background())
+	defer app.OnShutdown(context.Background())
+
+	workspace := filepath.Join(tmp, "workspace")
+	// v2.5 三层：repos/alice/org__demo
+	repoDir := filepath.Join(workspace, "repos", "alice", "org__demo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	hostURL := "https://gitea.example.com"
+	_ = app.localStore.Mutate(func(s *store.LocalState) {
+		s.Accounts = append(s.Accounts, store.GiteaAccount{
+			ID:       "acc-1",
+			Platform: "gitea",
+			GiteaURL: hostURL,
+			Username: "alice",
+		})
+		s.Projects = append(s.Projects, store.RepoProject{
+			ID:        "proj-1",
+			Platform:  "gitea",
+			AccountID: "acc-1",
+			Owner:     "org",
+			Name:      "demo",
+			CreatedAt: 1234567890000,
+		})
+	})
+	if err := app.secretStore.Set(secret.Credential{
+		Platform: "gitea",
+		HostURL:  hostURL,
+		Username: "alice",
+		Token:    "secret-token-xyz",
+	}); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+
+	tok, u, err := app.resolveTokenByLocalPath(repoDir)
+	if err != nil {
+		t.Fatalf("resolveTokenByLocalPath (v2.5 layout) failed: %v", err)
+	}
+	if tok != "secret-token-xyz" {
+		t.Errorf("token = %q, want %q", tok, "secret-token-xyz")
+	}
+	if u != "alice" {
+		t.Errorf("username = %q, want alice", u)
+	}
+}
+
+// TestApp_ResolveTokenByLocalPath_V25AccountMismatch 验证 v2.5 三层路径下，
+// path 中的 username 与 project 关联账号不匹配时不会乱拿 token
+//
+// 场景：两个账号 alice / bob 都连同一 Gitea 实例，并各 clone 了同名仓库 org/demo
+// （不同账号同 owner/repo 在新布局下物理隔离）；
+// 如果 path 是 repos/alice/org__demo，必须用 alice 的 token，不能用 bob 的。
+func TestApp_ResolveTokenByLocalPath_V25AccountMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("GITEA_KANBAN_DATA_DIR", tmp)
+	t.Setenv("GITEA_KANBAN_DEV_KEYCHAIN", "1")
+
+	app := NewApp()
+	app.OnStartup(context.Background())
+	defer app.OnShutdown(context.Background())
+
+	hostURL := "https://gitea.example.com"
+	_ = app.localStore.Mutate(func(s *store.LocalState) {
+		s.Accounts = append(s.Accounts,
+			store.GiteaAccount{ID: "acc-alice", Platform: "gitea", GiteaURL: hostURL, Username: "alice"},
+			store.GiteaAccount{ID: "acc-bob", Platform: "gitea", GiteaURL: hostURL, Username: "bob"},
+		)
+		s.Projects = append(s.Projects,
+			store.RepoProject{ID: "p1", Platform: "gitea", AccountID: "acc-alice", Owner: "org", Name: "demo", CreatedAt: 1},
+			store.RepoProject{ID: "p2", Platform: "gitea", AccountID: "acc-bob", Owner: "org", Name: "demo", CreatedAt: 2},
+		)
+	})
+	if err := app.secretStore.Set(secret.Credential{Platform: "gitea", HostURL: hostURL, Username: "alice", Token: "alice-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.secretStore.Set(secret.Credential{Platform: "gitea", HostURL: hostURL, Username: "bob", Token: "bob-token"}); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := filepath.Join(tmp, "workspace")
+	aliceRepo := filepath.Join(workspace, "repos", "alice", "org__demo")
+	if err := os.MkdirAll(aliceRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tok, u, err := app.resolveTokenByLocalPath(aliceRepo)
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if tok != "alice-token" || u != "alice" {
+		t.Errorf("got (token=%q username=%q), want (alice-token, alice)", tok, u)
 	}
 }
 

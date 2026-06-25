@@ -216,7 +216,8 @@ func TestApp_GetRepoById(t *testing.T) {
 	if r.Cloned {
 		t.Error("expected Cloned=false before clone")
 	}
-	wantPath := filepath.Join(tmp, "workspace", "repos", "org__demo")
+	// v2.5：按账号分层（alice 是 account username）
+	wantPath := filepath.Join(tmp, "workspace", "repos", "alice", "org__demo")
 	if r.LocalPath != wantPath {
 		t.Errorf("LocalPath = %q, want %q", r.LocalPath, wantPath)
 	}
