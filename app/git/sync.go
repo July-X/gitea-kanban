@@ -1,8 +1,11 @@
 package git
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -64,6 +67,9 @@ type FetchResult struct {
 // 对齐旧版 pullRepo 中的 fetch 步骤：
 //   - fetch origin（拉远端最新 refs）
 //   - 不修改工作区
+//
+// v2.7 超时保护：超大仓库（如 UnrealEngine）可能长时间卡住，
+// 添加 2 分钟超时避免无限等待。
 func FetchRepo(opts PullOptions) (*FetchResult, error) {
 	if opts.LocalPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
@@ -118,8 +124,16 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 	if opts.Progress != nil {
 		fetchOpts.Progress = NewSidebandWriter(SafeWrap(opts.Progress))
 	}
-	err = remote.Fetch(fetchOpts)
+
+	// v2.7：添加 2 分钟超时保护（超大仓库如 UnrealEngine 可能卡很久）
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	err = remote.FetchContext(ctx, fetchOpts)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("同步超时（2分钟）：此仓库可能过大，建议减少 Depth 或使用在线版本查看")
+		}
 		if err == git.NoErrAlreadyUpToDate {
 			return &FetchResult{Updated: false}, nil
 		}
