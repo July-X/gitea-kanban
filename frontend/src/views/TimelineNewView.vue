@@ -261,35 +261,81 @@ async function loadGraph(): Promise<void> {
 }
 
 /**
- * v1.5.2 pull (merge)：git fetch + pull --rebase
+ * v2.x 同步按钮（v1 旧名 pullRepo）
  *
- * Header 的 pull 按钮调：拉取远端最新 commit → 成功后重新 loadGraph
+ * 与 StatusBar 仓库选择界面的「同步/更新」按钮逻辑一致(v2.3 StatusBar 多行重写):
+ *   - 未同步本地(clonedMap[owner/repo] = false)→ 调 commitsGitgraphCloneRepo
+ *     (首次 clone,go-git NoCheckout 轻量模式,只拉元信息不拉工作区文件)
+ *   - 已同步本地(clonedMap = true)→ 调 commitsGitgraphPull
+ *     (git fetch + 更新本地 HEAD + 统计 commit 变化)
+ *
+ * 按钮可用性:`!loading && !pulling && activeProjectId` —— 跟 v1 旧版比,**不再依赖 localPath**:
+ *   - 旧版要求 localPath 非空(导致"已 clone 但 view 不知情"时按钮永久 disabled)
+ *   - 新版 Go 端 GetGitGraph / PullRepo 都按 projectId 反算 localPath(v2.4 已支持),
+ *     所以前端只看 activeProjectId 就够
+ *
+ * 成功后:刷新本地 clonedMap 缓存 + 重新 loadGraph(显示最新 commit)
  */
-async function pullRepo(): Promise<void> {
+async function syncRepo(): Promise<void> {
   if (!activeProjectId.value) return;
   pulling.value = true;
   useGlobalLoadingStore().show('timeline');
   try {
-    const resp = await commitsGitgraphPull({
-      projectId: activeProjectId.value,
-    });
-    if (resp.addedCommits > 0) {
-      showToast({ type: 'info', message: `拉取了 ${resp.addedCommits} 个新提交` });
+    const repo2 = activeRepo.value;
+    const cloned = repo2 ? repo.clonedMap[`${repo2.owner}/${repo2.name}`] === true : false;
+    let addedCommits = 0;
+    if (!cloned) {
+      // 未同步 → 首次 clone
+      const resp = await commitsGitgraphCloneRepo({
+        projectId: activeProjectId.value,
+      });
+      // 更新 clonedMap 缓存(避免下次又走 clone 分支)
+      if (repo2) {
+        repo.clonedMap[`${repo2.owner}/${repo2.name}`] = true;
+      }
+      // clone 完后端会返 localPath,但这里前端不再依赖它;
+      // 显式让 loadGraph 重渲染用新的 local commit DAG
+      showToast({
+        type: 'success',
+        message: '同步成功',
+        description: `${repo2?.fullName ?? ''} 已同步到本地`,
+      });
+      _ = resp; // localPath 已后端记下,前端不再需要
     } else {
-      showToast({ type: 'info', message: '已是最新' });
+      // 已同步 → pull 更新
+      const resp = await commitsGitgraphPull({
+        projectId: activeProjectId.value,
+      });
+      addedCommits = resp.addedCommits ?? 0;
+      if (addedCommits > 0) {
+        showToast({ type: 'info', message: `同步了 ${addedCommits} 个新提交` });
+      } else {
+        showToast({ type: 'info', message: '已是最新' });
+      }
     }
     // 重新加载 graph（显示最新 commit）
     await loadGraph();
+    // 刷新 clonedMap 缓存(让 StatusBar 仓库行按钮切到"更新")
+    await repo.refreshClonedStatus();
   } catch (e: unknown) {
     const err = e as { messageText?: string; message?: string; hint?: string };
-    const msg = err.messageText ?? err.message ?? String(e) ?? '拉取失败';
-    console.error('[TimelineNewView] pullRepo failed:', e);
+    const msg = err.messageText ?? err.message ?? String(e) ?? '同步失败';
+    console.error('[TimelineNewView] syncRepo failed:', e);
     showToast({ type: 'error', message: msg });
   } finally {
     pulling.value = false;
     useGlobalLoadingStore().hide('timeline');
   }
 }
+
+/** v2.x 按钮文字:根据 cloned 状态显示"同步"/"同步中…"
+ *  - 跟 StatusBar 行末按钮文案风格对齐(StatusBar 未同步显示"同步",已同步显示"更新")
+ *  - 这里统一叫"同步"(因为按钮在 Header 位置,顶部操作更直白;"更新"暗示已同步)
+ */
+const syncButtonLabel = computed<string>(() => {
+  if (pulling.value) return '同步中…';
+  return '同步';
+});
 
 /**
  * 启用流程：用户点「启用 Git Graph」按钮 → Go 端用 go-git 轻量同步仓库
@@ -537,14 +583,28 @@ function refBadgeClass(refType?: string): string {
       </div>
 
       <div class="timeline-new__actions">
+        <!--
+          v2.x：右上角"拉取"按钮 → 改名为"同步",逻辑跟 StatusBar 仓库选择界面一致
+            - 未同步本地 → commitsGitgraphCloneRepo(首次 clone)
+            - 已同步本地 → commitsGitgraphPull(git fetch + 更新本地 HEAD)
+            - 不再依赖 localPath(Go 端按 projectId 反算,v2.4 已支持)
+          命名:Header 顶部按钮统一叫"同步",跟 StatusBar 行末按钮文案风格对齐;
+          StatusBar 的"更新"暗示已 clone,Header 这里更直白。
+        -->
         <button
-          class="pull-btn"
-          title="拉取远端最新提交（git fetch + pull --rebase）"
-          :disabled="loading || pulling || !localPath"
-          @click="pullRepo"
+          class="sync-btn"
+          :title="
+            repo.clonedMap[
+              `${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}`
+            ] === true
+              ? '从远端拉取最新 commit（git fetch + pull --rebase）'
+              : '克隆仓库元信息到本地（go-git 轻量模式，只拉 commit / tree / branch / tag）'
+          "
+          :disabled="loading || pulling || !activeProjectId"
+          @click="syncRepo"
         >
           <ArrowDownToLine :size="15" :class="{ spinning: pulling }" />
-          <span class="pull-btn__label">拉取</span>
+          <span class="sync-btn__label">{{ syncButtonLabel }}</span>
         </button>
       </div>
     </header>
@@ -816,8 +876,8 @@ function refBadgeClass(refType?: string): string {
   max-width: 600px;
 }
 
-/* ===== Pull 按钮 ===== */
-.pull-btn {
+/* ===== Sync 按钮（v2.x：拉取按钮改为同步，跟 StatusBar 一致）===== */
+.sync-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1, 4px);
@@ -830,15 +890,15 @@ function refBadgeClass(refType?: string): string {
   cursor: pointer;
   transition: all 0.15s;
 }
-.pull-btn:hover:not(:disabled) {
+.sync-btn:hover:not(:disabled) {
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
-.pull-btn:disabled {
+.sync-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.pull-btn__label {
+.sync-btn__label {
   font-size: var(--font-xs, 11px);
 }
 
