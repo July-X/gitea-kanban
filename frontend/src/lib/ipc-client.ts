@@ -589,8 +589,8 @@ export async function deepenRepo(args: {
   success: boolean;
   message: string;
 }> {
-  // 动态导入 Wails 绑定以避免循环依赖
-  const { DeepenRepo } = await import('../../wailsjs/go/main/App');
+  // 动态导入 Wails 绑定（路径相对于 frontend 目录）
+  const { DeepenRepo } = await import('../../wailsjs/wailsjs/go/main/App');
   return DeepenRepo(args);
 }
 
