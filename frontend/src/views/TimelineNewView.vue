@@ -261,8 +261,10 @@ watch(expandedSha, async (sha) => {
   scrollContainer.scrollTo({ top: targetScroll, behavior: 'smooth' });
 });
 
-/** 组件卸载时清理事件监听器（v2.15：拖拽缩放已移除） */
+/** 组件卸载时清理事件监听器（v2.16：拖拽已恢复） */
 onUnmounted(() => {
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
   document.removeEventListener('app:refresh', onAppRefresh);
 });
 
@@ -693,7 +695,8 @@ const expandedCommitNode = computed<
  */
 
 /**
- * lane 视觉间距（px）：COL_WIDTH * DISPLAY_SCALE = 10px（不缩放，跟 Gitea lane 间距一致）
+ * lane 视觉间距（px）：COL_WIDTH * DISPLAY_SCALE = 5px（v2.16 跟 Gitea 一致）
+ * 用户要求"flow 线条间隔调整到 5px"，DISPLAY_SCALE 改 1 后 COL_WIDTH=5 → 5px
  */
 const laneSpacing = computed(() => ASCII_COL_WIDTH * ASCII_DISPLAY_SCALE);
 
@@ -747,9 +750,62 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
 });
 
 // ============================================================
-// v2.15：移除拖拽缩放（SourceTree 风格 SVG 完整渲染不缩放）
-// 拖拽手柄 DOM 也已删除（详见 template 内注释）
+// v2.16：拖拽栅格栏（SourceTree 风格）
+// - 拖拽手柄调整 userOffsetDelta，控制 commit list padding-left
+// - 默认 userOffsetDelta = 0 → commitListOffset = svgWidth
+//   （commit 内容从 SVG lane 右边缘开始）
+// - 用户向左拖动减小 userOffsetDelta → offset 减小
+//   → commit 内容向左延伸到 SVG lane 上方（盖板效果）
+// - SVG 不缩放（完整渲染固定宽度），拖拽只改 commit list 起点
 // ============================================================
+
+/** commit list 起点偏移增量（px），相对 svgWidth 默认值 */
+const userOffsetDelta = ref<number>(0);
+/** 是否正在拖拽 */
+const dragging = ref(false);
+let dragStartX = 0;
+let dragStartDelta = 0;
+
+/** commit list 内容起点偏移（px） = svgWidth + userOffsetDelta
+ *  用于 commit list 容器的 padding-left，让 subject 等内容从 offset 位置开始显示 */
+const commitListOffset = computed(() => {
+  const svgW = parseSvgPx(svgWidth.value);
+  return Math.max(0, svgW + userOffsetDelta.value);
+});
+
+function onDragStart(e: MouseEvent): void {
+  e.preventDefault();
+  dragging.value = true;
+  dragStartX = e.clientX;
+  dragStartDelta = userOffsetDelta.value;
+  document.addEventListener('mousemove', onDragMove);
+  document.addEventListener('mouseup', onDragEnd);
+}
+
+function onDragMove(e: MouseEvent): void {
+  if (!dragging.value) return;
+  // 向左拖 delta 为负 → offset 减小 → commit 内容向左延伸到 SVG 上方
+  const delta = e.clientX - dragStartX;
+  const svgW = parseSvgPx(svgWidth.value);
+  // 下界：offset >= svgWidth * 0.2（commit 内容不能比 SVG lane 右 20% 更左）
+  // 上界：offset <= svgWidth * 1.5（拖得不能太远，避免失去 SVG 上下文）
+  const minOffset = svgW * 0.2;
+  const maxOffset = svgW * 1.5;
+  const newOffset = Math.max(minOffset, Math.min(maxOffset, svgW + dragStartDelta + delta));
+  userOffsetDelta.value = newOffset - svgW;
+}
+
+function onDragEnd(): void {
+  dragging.value = false;
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+}
+
+/** 将 px 字符串解析为数字（用于 svgWidth 的 '250px' 解析） */
+function parseSvgPx(value: string): number {
+  const n = Number.parseFloat(value.replace(/px$/, ''));
+  return Number.isFinite(n) ? n : 0;
+}
 
 /** 生成 fallback avatar：取名字首字符 */
 function avatarInitial(name: string): string {
@@ -857,7 +913,7 @@ function refBadgeClass(refType?: string): string {
     </header>
 
     <!-- ===== 主内容 ===== -->
-    <div class="timeline-new__main">
+    <div class="timeline-new__main" :class="{ 'timeline-new__main--dragging': dragging }">
       <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
       </div>
@@ -950,17 +1006,34 @@ function refBadgeClass(refType?: string): string {
                 />
               </div>
             </div>
+
+            <!-- 列宽拖拽手柄（v2.16 恢复：SourceTree 风格栅格栏）
+                 拖拽调整 commitListOffset = commit list padding-left，
+                 减小 offset 让 commit 内容向左延伸到 SVG lane 上方（盖板效果）。
+                 不再缩放 SVG，只改 commit list 起点位置。
+                 放在 .git-graph-svg-area 内部，sticky 跟随垂直滚动，固定在 SVG 区域右边缘 -->
+            <div
+              class="graph-resize-handle"
+              :class="{ 'graph-resize-handle--active': dragging }"
+              title="拖拽调整图形列宽度（向左拖让 commit 内容浮在 git-graph 上方）"
+              @mousedown="onDragStart"
+            />
           </div>
 
           <!--
             右侧：Commit 列表（SourceTree 风格：浮在 SVG 上方盖板效果）
             - 容器横跨整个 git-graph-wrapper（position: absolute, left:0, right:0）
-            - padding-left: svgWidth 让 subject 等内容从 SVG lane 右边缘开始显示
-              （subject 文字向左延伸到 SVG lane 上方 = 盖板效果）
+            - padding-left: commitListOffset 让 subject 等内容从 offset 位置开始显示
+              （offset 越小，subject 越向左延伸到 SVG lane 上方 = 盖板效果）
+            - 默认 offset = svgWidth（subject 从 SVG lane 右边缘开始）
+            - 拖拽手柄调整 offset，向左拖动减小 offset 让 commit 内容浮到 SVG 上方
             - 背景透明（不覆盖 SVG lane 和圆点）
             - 但点击事件正常（z-index: 2）
           -->
-          <div class="git-graph-list" :style="{ minHeight: svgHeight, paddingLeft: svgWidth }">
+          <div
+            class="git-graph-list"
+            :style="{ minHeight: svgHeight, paddingLeft: `${commitListOffset}px` }"
+          >
             <template v-for="r in allRows" :key="`row-${r.row}`">
               <div
                 class="commit-row"
@@ -968,6 +1041,7 @@ function refBadgeClass(refType?: string): string {
                   'commit-row--relation': !r.commit,
                   'commit-row--clickable': r.commit,
                   'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
+                  'commit-row--ascii': useAsciiGraph,
                 }"
                 :style="{ height: ROW_H + 'px' }"
                 :role="r.commit ? 'button' : undefined"
@@ -1338,14 +1412,12 @@ function refBadgeClass(refType?: string): string {
   fill: var(--color-series-16-15);
 }
 
-/* Commit 列表（v2.15 SourceTree 风格：浮在 SVG 上方盖板）
- * - position: absolute 横跨整个 git-graph-wrapper（left:0; right:0）
- * - padding-left 由 inline 绑定 svgWidth（让 subject 等内容从 lane 区域右边缘开始）
+/* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
+ * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
+ * - padding-left 由 inline 绑定 commitListOffset（让 subject 等内容从 offset 位置开始）
  * - z-index: 3 > svg z-index:1 = 文字浮在 SVG lane 上方（盖板） */
 .git-graph-list {
-  position: absolute;
-  left: 0;
-  right: 0;
+  position: sticky;
   top: 0;
   z-index: 3;
   background: transparent; /* 不挡 SVG lane + 圆点 */
@@ -1360,14 +1432,19 @@ function refBadgeClass(refType?: string): string {
   display: flex;
   align-items: center;
   gap: var(--space-2, 8px);
-  /* 高度由内联 style 绑定 ROW_H（= ROW_HEIGHT = 28px），与 SVG 行高 1:1 对齐 */
-  height: 28px;
+  /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 28px），与 SVG 行高 1:1 对齐 */
+  height: 28px; /* fallback（被 inline style 覆盖） */
   padding: 0 var(--space-3, 12px);
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
   overflow: hidden;
   border-bottom: 1px solid var(--color-border);
   box-sizing: border-box;
+}
+/* v2.16：ASCII 路径 ROW_H=12px，字体缩小到 11px 适配紧凑行高 */
+.commit-row--ascii {
+  font-size: 11px;
+  line-height: 1;
 }
 .commit-row:hover {
   background: var(--color-bg-hover);
@@ -1619,10 +1696,67 @@ function refBadgeClass(refType?: string): string {
   cursor: not-allowed;
 }
 
-/* ===== v1.6 列宽拖拽手柄已移除（v2.15 SourceTree 风格 SVG 完整渲染不缩放） ===== */
+/* ===== v2.16 列宽拖拽手柄（SourceTree 风格栅格栏，恢复） =====
+ * 拖拽调整 commitListOffset = commit list padding-left，
+ * 不缩放 SVG（完整渲染固定宽度），只让 commit 内容向左延伸到 SVG lane 上方
+ * 手柄放在 .git-graph-svg-area 内部，sticky 跟随垂直滚动，固定在 SVG 区域右边缘 */
+.graph-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: var(--color-border);
+  transition: background 0.15s;
+  user-select: none;
+  z-index: 5; /* 在 commit list 之上 */
+}
+.graph-resize-handle:hover,
+.graph-resize-handle--active {
+  background: var(--color-primary, #74b830);
+}
+/* 竖向三点 grip 指示器 */
+.graph-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--color-text-muted, #666);
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--color-text-muted, #666) 0px,
+    var(--color-text-muted, #666) 2px,
+    transparent 2px,
+    transparent 5px
+  );
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.graph-resize-handle:hover::before,
+.graph-resize-handle--active::before {
+  opacity: 1;
+  background: repeating-linear-gradient(
+    to bottom,
+    #fff 0px,
+    #fff 2px,
+    transparent 2px,
+    transparent 5px
+  );
+}
 
 /* 拖拽中防止文本选中 + 全局 cursor */
-/* v2.15：拖拽缩放已移除（SourceTree 风格），不再需要 --dragging cursor 样式 */
+.timeline-new__main--dragging {
+  user-select: none;
+  cursor: col-resize;
+}
+.timeline-new__main--dragging * {
+  cursor: col-resize !important;
+}
 
 /* ===== v1.6 Avatar fallback（无头像时显示首字母） ===== */
 .commit-avatar-fallback {

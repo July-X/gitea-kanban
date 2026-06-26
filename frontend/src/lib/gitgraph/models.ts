@@ -31,8 +31,14 @@ export const COL_WIDTH = 5;
 /** SVG 单位行高（unit） */
 export const ROW_HEIGHT = 12;
 
-/** 显示缩放系数（1 SVG unit = SCALE px） */
-export const DISPLAY_SCALE = 2;
+/** 显示缩放系数（1 SVG unit = SCALE px）
+ *  v2.16：改为 1（1:1 渲染），跟 Gitea svgcontainer.tmpl 一致。
+ *  - COL_WIDTH = 5 → lane 视觉间距 5px（用户要求"flow 线条间隔调整到 5px"）
+ *  - ROW_HEIGHT = 12 → row 视觉高度 12px
+ *  - svgWidth = graphWidth * 5 + 5（跟 Gitea `Width * 5 + 5` 一致）
+ *  之前是 2（lane 10px），改 1 后 git-graph 整体更紧凑，更接近 SourceTree 风格
+ */
+export const DISPLAY_SCALE = 1;
 
 /** 字形：git --graph 输出中的一个字符位置 */
 export interface Glyph {
