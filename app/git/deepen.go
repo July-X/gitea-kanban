@@ -18,6 +18,10 @@ type DeepenRepoOptions struct {
 	LocalPath string
 	// DeepenBy 增加的深度（拉取更多历史）
 	DeepenBy int
+	// Token GitHub 私有仓库认证 token（仅 UseGitHubCLI 时使用）
+	Token string
+	// UseGitHubCLI 使用 gh credential helper 执行加深拉取
+	UseGitHubCLI bool
 	// Progress 进度回调（可选）
 	Progress ProgressCallback
 }
@@ -37,7 +41,7 @@ type DeepenRepoResult struct {
 // 使用场景：
 //   - 用户查看 Git Graph 时滚动到底部
 //   - 点击"加载更多"按钮
-//   - 首次只拉取 10 个 commit，后续按需加载
+//   - 首次拉取近期窗口，后续按需加载
 //
 // 技术实现：
 //   - 使用 git fetch --deepen=N 增量拉取
@@ -46,7 +50,7 @@ type DeepenRepoResult struct {
 //
 // 参数：
 //   - localPath: 本地仓库路径
-//   - deepenBy: 增加的深度（如 50 表示再拉取 50 个 commit）
+//   - deepenBy: 增加的深度（如 200 表示再拉取 200 个 commit）
 //   - Progress: 进度回调（可选）
 //
 // 限制：
@@ -56,6 +60,11 @@ func DeepenRepo(opts DeepenRepoOptions) (*DeepenRepoResult, error) {
 	if opts.LocalPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
 	}
+	unlock, err := lockPath(opts.LocalPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	if opts.DeepenBy <= 0 {
 		return nil, fmt.Errorf("deepenBy 必须大于 0")
@@ -65,10 +74,18 @@ func DeepenRepo(opts DeepenRepoOptions) (*DeepenRepoResult, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil, fmt.Errorf("系统未安装 git 命令: %w", err)
 	}
+	if opts.UseGitHubCLI {
+		if _, err := exec.LookPath("gh"); err != nil {
+			return nil, fmt.Errorf("系统未安装 gh 命令，无法加载更多 GitHub 提交记录: %w", err)
+		}
+	}
 
 	// 检查仓库是否存在
 	if _, err := os.Stat(filepath.Join(opts.LocalPath, ".git")); err != nil {
 		return nil, fmt.Errorf("仓库不存在: %w", err)
+	}
+	if err := cleanupStaleGitLock(opts.LocalPath, "shallow.lock"); err != nil {
+		return nil, err
 	}
 
 	// 检查是否是浅克隆
@@ -92,14 +109,20 @@ func DeepenRepo(opts DeepenRepoOptions) (*DeepenRepoResult, error) {
 	// 构造 git fetch --deepen 命令
 	args := []string{
 		"-C", opts.LocalPath,
+	}
+	if opts.UseGitHubCLI {
+		args = append(args, "-c", "credential.helper=!gh auth git-credential")
+	}
+	args = append(args,
 		"fetch",
 		"--filter=blob:none", // 继续不下载文件内容
 		fmt.Sprintf("--deepen=%d", opts.DeepenBy), // 增量拉取
 		"--progress", // 输出进度信息
-	}
+	)
 
 	// 执行命令并捕获输出
 	cmd := exec.Command("git", args...)
+	configureGitHubCLIEnv(cmd, opts.Token)
 
 	// 创建管道捕获 stderr（git 的进度输出在 stderr）
 	stderr, err := cmd.StderrPipe()

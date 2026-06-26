@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestLockPath_ConcurrentAccess 验证 lockPath 在并发调用下提供互斥
@@ -96,5 +97,47 @@ func TestLockFileCreated(t *testing.T) {
 	lockFile := localPath + ".lock"
 	if _, err := os.Stat(lockFile); err != nil {
 		t.Errorf("lock file not created: %v", err)
+	}
+}
+
+func TestCleanupStaleGitLock_RemovesOldLock(t *testing.T) {
+	localPath := filepath.Join(t.TempDir(), "repo")
+	gitDir := filepath.Join(localPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(gitDir, "shallow.lock")
+	if err := os.WriteFile(lockFile, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-staleGitLockAge - time.Minute)
+	if err := os.Chtimes(lockFile, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanupStaleGitLock(localPath, "shallow.lock"); err != nil {
+		t.Fatalf("cleanupStaleGitLock failed: %v", err)
+	}
+	if _, err := os.Stat(lockFile); !os.IsNotExist(err) {
+		t.Fatalf("lock file still exists, err=%v", err)
+	}
+}
+
+func TestCleanupStaleGitLock_KeepsFreshLock(t *testing.T) {
+	localPath := filepath.Join(t.TempDir(), "repo")
+	gitDir := filepath.Join(localPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(gitDir, "shallow.lock")
+	if err := os.WriteFile(lockFile, []byte("fresh"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanupStaleGitLock(localPath, "shallow.lock"); err != nil {
+		t.Fatalf("cleanupStaleGitLock failed: %v", err)
+	}
+	if _, err := os.Stat(lockFile); err != nil {
+		t.Fatalf("fresh lock should remain: %v", err)
 	}
 }

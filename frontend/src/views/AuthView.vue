@@ -20,6 +20,12 @@ import { useRoute, useRouter } from 'vue-router';
 import { Eye, EyeOff, KeyRound, LogIn, ShieldCheck } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { showToast } from '@renderer/lib/toast';
+import {
+  GITHUB_CLI_INSTALL_LABEL,
+  GITHUB_CLI_INSTALL_URL,
+  GITHUB_CLI_REQUIRED_HINT,
+  GITHUB_CLI_REQUIRED_MESSAGE,
+} from '@renderer/lib/github-cli-guide';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -193,6 +199,16 @@ function goNext(): void {
         </div>
 
         <!-- Gitea: 显示地址输入框；GitHub: 固定地址 -->
+        <div v-if="selectedPlatform === 'github'" class="auth__notice">
+          <p class="auth__notice-title">{{ GITHUB_CLI_REQUIRED_MESSAGE }}</p>
+          <p class="auth__notice-body">
+            {{ GITHUB_CLI_REQUIRED_HINT }}
+            <a :href="GITHUB_CLI_INSTALL_URL" target="_blank" rel="noopener noreferrer">
+              {{ GITHUB_CLI_INSTALL_LABEL }}
+            </a>
+          </p>
+        </div>
+
         <div v-if="selectedPlatform === 'gitea'" class="auth__field">
           <label class="auth__label" for="gitea-url">gitea 地址</label>
           <input
@@ -415,6 +431,33 @@ function goNext(): void {
 .auth__hint a {
   color: var(--color-primary);
   text-decoration: underline;
+}
+
+.auth__notice {
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-divider));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.auth__notice-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.auth__notice-body {
+  margin: 0;
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.auth__notice-body a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  white-space: nowrap;
 }
 
 .auth__error {

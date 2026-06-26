@@ -79,6 +79,10 @@ type CloneOptions struct {
 	// 设为非 nil 后，clone 过程中 go-git 的 sideband 输出会被解析成 SyncProgress 事件
 	// 通过本 callback 推给 caller。nil = 不推送（保持原行为，向后兼容）。
 	Progress ProgressCallback
+	// UseGitHubCLI 使用 gh repo clone + git partial clone 参数。
+	//
+	// GitHub 超大仓库的核心诉求是快速拿提交记录，不下载 blob；go-git 不支持 blobless clone。
+	UseGitHubCLI bool
 }
 
 // CloneResult clone 结果
@@ -152,12 +156,12 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// SSH 失败时自动回退到 HTTPS + token
 	auth, finalURL, authMethod := BuildAuth(cloneURL, opts.Username, opts.Token)
 
-	// v2.9：超大仓库优化 - 使用原生 git + --filter=blob:none
+	// v2.9：超大仓库优化 - 使用 git partial clone（--filter=blob:none）
 	//
 	// 问题：go-git 不支持 partial clone（--filter=blob:none）
 	// 对于超大仓库（如 UnrealEngine），即使 depth=10，仍需下载大量 blob
 	//
-	// 解决方案：检测超大仓库，使用原生 git 命令（支持 --filter=blob:none）
+	// 解决方案：GitHub 仓库强制使用 gh repo clone，把 partial clone 参数透传给 git。
 	// 只下载 commits 和 trees，不下载文件内容（blob），大幅减少下载量
 	//
 	// 启发式规则：仓库名包含已知超大仓库关键词
@@ -166,8 +170,12 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		strings.Contains(strings.ToLower(opts.Repo), "linux") ||
 		strings.Contains(strings.ToLower(opts.Repo), "webkit")
 
-	if isHugeRepo && opts.Depth > 0 {
-		// 尝试使用原生 git（如果系统有 git 命令）
+	if opts.UseGitHubCLI || (isHugeRepo && opts.Depth > 0) {
+		if opts.Depth <= 0 {
+			return nil, fmt.Errorf("GitHub CLI blobless clone 需要 depth > 0")
+		}
+		// GitHub 仓库必须走 gh + partial clone；go-git 不支持 blobless，
+		// 回退会重新下载大量对象，违背“快速获得提交记录”的核心诉求。
 		nativeURL := finalURL
 		nativeToken := opts.Token
 
@@ -178,10 +186,10 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 
 		err = CloneWithFilter(nativeURL, localPath, opts.Depth, nativeToken)
 		if err == nil {
-			// 原生 git 成功，直接返回
+			// gh + partial clone 成功，直接返回
 			return &CloneResult{LocalPath: localPath}, nil
 		}
-		// 原生 git 失败（可能系统没装 git），继续使用 go-git
+		return nil, fmt.Errorf("GitHub 仓库需要使用 gh 的 blobless clone，但执行失败: %w", err)
 	}
 
 	// 7. 执行 clone（v2.4 轻量模式：NoCheckout=true 跳过工作区文件）

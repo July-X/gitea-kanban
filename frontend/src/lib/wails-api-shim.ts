@@ -115,6 +115,8 @@ type WailsApp = {
     maxLane: number;
     truncated: boolean;
   }>;
+  /** v2.x：GitHub/gh 超大仓库使用 git log --graph ASCII fallback */
+  GetGitGraphAscii?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取（避免前端拼错 localPath） */
   PullRepoByProjectId?: (args: { projectId: string }) => Promise<{
     beforeCount: number;
@@ -348,6 +350,26 @@ const apiShim = {
             return stubEmpty({ nodes: [], edges: [], maxLane: 0, truncated: false });
           }
           return app.GetGitGraph({
+            projectId: a.projectId ?? '',
+            branches: a.branches,
+            maxCount: a.limit,
+          });
+        },
+      );
+    },
+    gitgraphAsciiLines: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as {
+        projectId: string;
+        branches?: string[];
+        limit?: number;
+      };
+      return forwardToWails(
+        () => stubEmpty({ lines: [], totalCommits: 0, truncated: false, range: { from: '', to: '' } }),
+        (app) => {
+          if (!app.GetGitGraphAscii) {
+            return stubEmpty({ lines: [], totalCommits: 0, truncated: false, range: { from: '', to: '' } });
+          }
+          return app.GetGitGraphAscii({
             projectId: a.projectId ?? '',
             branches: a.branches,
             maxCount: a.limit,

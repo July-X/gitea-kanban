@@ -18,7 +18,13 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
-import { commitsGitgraphLines, commitsGitgraphCloneRepo, commitsGitgraphPull, deepenRepo } from '@renderer/lib/ipc-client';
+import {
+  commitsGitgraphAsciiLines,
+  commitsGitgraphLines,
+  commitsGitgraphCloneRepo,
+  commitsGitgraphPull,
+  deepenRepo,
+} from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import CommitDetailPanel from '@renderer/components/CommitDetailPanel.vue';
 import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
@@ -31,6 +37,21 @@ import {
   type GraphResultDto,
   type SvgRenderResult,
 } from '@renderer/lib/gitgraph/structured';
+import {
+  COL_WIDTH as ASCII_COL_WIDTH,
+  DISPLAY_SCALE as ASCII_DISPLAY_SCALE,
+  ROW_HEIGHT as ASCII_ROW_HEIGHT,
+  flowColorClass,
+  flowToPathD,
+  parseLines,
+  svgHeightPx as asciiSvgHeightPx,
+  svgViewBox as asciiSvgViewBox,
+  svgWidthPx as asciiSvgWidthPx,
+  type Flow,
+  type GitGraphCommit,
+  type Graph,
+  type GraphLine,
+} from '@renderer/lib/gitgraph';
 
 // ============================================================
 // 常量
@@ -42,6 +63,12 @@ import {
 // ============================================================
 const auth = useAuthStore();
 const repo = useRepoStore();
+
+const INITIAL_GRAPH_LIMIT = 5000;
+const LOAD_MORE_DEEPEN_BY = 200;
+const SVG_AREA_MIN_WIDTH = 120;
+const SVG_AREA_AUTO_MAX_WIDTH = 260;
+const SVG_AREA_USER_MAX_WIDTH = 520;
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const activeRepo = computed(() => {
@@ -59,6 +86,10 @@ const activeRepo = computed(() => {
 const graphDto = ref<GraphResultDto | null>(null);
 /** v2.6：前端从 GraphResultDto 渲染出的 SVG 数据（paths 按 color 分组） */
 const svgRender = ref<SvgRenderResult | null>(null);
+/** GitHub/gh 超大仓库：git log --graph 字符流解析后的 Graph */
+const asciiGraph = ref<Graph | null>(null);
+/** GitHub/gh 超大仓库：后端返回的原始字符流行 */
+const asciiLines = ref<GraphLine[]>([]);
 /** 加载态 */
 const loading = ref(false);
 /** 本地错误信息 */
@@ -68,11 +99,13 @@ const localError = ref<string | null>(null);
 const loadingMore = ref(false);
 /** v2.10：是否已加载完整历史 */
 const hasCompleteHistory = ref(false);
+/** 当前 Git Graph 显示上限；初始同步窗口更大，加载更多后继续放宽 */
+const graphLimit = ref(INITIAL_GRAPH_LIMIT);
 
 /** v2.10：是否显示「加载更多」按钮 */
 const canLoadMore = computed(() => {
   // 必须有当前项目和 commits
-  if (!activeProjectId.value || !graphDto.value?.nodes?.length) return false;
+  if (!activeProjectId.value || activeCommitCount.value <= 0) return false;
   // 已加载完整历史则不显示
   if (hasCompleteHistory.value) return false;
   // 超大仓库才显示（判断是否用了浅克隆）
@@ -114,8 +147,20 @@ const giteaRepoUrl = computed(() => {
 
 /** 当前仓库所属平台（CommitDetailPanel 用以切换 "在 Gitea/GitHub 中打开" 的 tooltip） */
 const currentPlatform = computed<'gitea' | 'github'>(
-  () => (auth.accounts[0]?.platform ?? 'gitea') as 'gitea' | 'github',
+  () => (repo.currentProject?.platform ?? auth.accounts[0]?.platform ?? 'gitea') as 'gitea' | 'github',
 );
+const useAsciiGraph = computed(() => currentPlatform.value === 'github');
+
+interface DisplayCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  date: string;
+  authorName: string;
+  authorEmail: string;
+  refs?: string[];
+  refTypes?: string[];
+}
 
 /**
  * 点击 commit 行 → 切换展开
@@ -123,27 +168,25 @@ const currentPlatform = computed<'gitea' | 'github'>(
  * - 若点的是已展开的 → 收起
  * - 若点的是另一个 → 切到新 SHA（前一个自动收起）
  */
-function toggleCommitDetail(node: NonNullable<GraphResultDto['nodes']>[number]): void {
-  if (expandedSha.value === node.sha) {
+function toggleCommitDetail(commit: DisplayCommit): void {
+  if (expandedSha.value === commit.sha) {
     expandedSha.value = null;
     return;
   }
-  expandedSha.value = node.sha;
+  expandedSha.value = commit.sha;
 }
 
 /** 构造展开面板的 commit prop（与 GraphNodeDto 字段对齐） */
-function buildBasicCommit(
-  node: NonNullable<GraphResultDto['nodes']>[number],
-): BasicCommit {
+function buildBasicCommit(commit: DisplayCommit): BasicCommit {
   return {
-    sha: node.sha,
-    shortSha: node.shortSha,
-    subject: node.subject,
-    date: node.date,
-    authorName: node.authorName,
-    authorEmail: node.authorEmail,
-    refs: node.refs,
-    refTypes: node.refTypes,
+    sha: commit.sha,
+    shortSha: commit.shortSha,
+    subject: commit.subject,
+    date: commit.date,
+    authorName: commit.authorName,
+    authorEmail: commit.authorEmail,
+    refs: commit.refs,
+    refTypes: commit.refTypes,
   };
 }
 
@@ -230,7 +273,7 @@ onUnmounted(() => {
  * 使用场景：用户滚动到 Git Graph 底部，点击「加载更多」按钮
  *
  * 技术实现：
- * 1. 调用 DeepenRepo API（增量拉取 50 层历史）
+ * 1. 调用 DeepenRepo API（增量拉取 200 层历史）
  * 2. 重新调用 loadGraph 刷新图形
  * 3. 显示成功/失败提示
  */
@@ -242,8 +285,9 @@ async function handleLoadMore() {
     // 1. 增量拉取历史
     const result = await deepenRepo({
       projectId: activeProjectId.value,
-      deepenBy: 50,
+      deepenBy: LOAD_MORE_DEEPEN_BY,
     });
+    graphLimit.value += LOAD_MORE_DEEPEN_BY;
 
     // 2. 重新加载 Git Graph
     await loadGraph();
@@ -273,12 +317,25 @@ async function loadGraph(): Promise<void> {
   featureDisabled.value = false;
   useGlobalLoadingStore().show('timeline');
   try {
+    if (useAsciiGraph.value) {
+      const dto = await commitsGitgraphAsciiLines({
+        projectId: activeProjectId.value,
+        limit: graphLimit.value,
+      });
+      asciiLines.value = dto.lines;
+      asciiGraph.value = parseLines(dto.lines).graph;
+      graphDto.value = null;
+      svgRender.value = null;
+      expandedSha.value = null;
+      return;
+    }
+
     // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
     // 跳过 v1 字符流往返（adapter.ts 反编码 → parser.ts 解析），消除 bug1-bug4
     // v2.10：增加 limit 以支持加载更多功能
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
-      limit: 500, // 增加到 500 以支持多次加载更多
+      limit: graphLimit.value,
     });
 
     // 兼容 disabled 提示（main handler 可能返 disabled）
@@ -287,12 +344,16 @@ async function loadGraph(): Promise<void> {
       featureDisabled.value = true;
       graphDto.value = null;
       svgRender.value = null;
+      asciiGraph.value = null;
+      asciiLines.value = [];
       localPath.value = null;
       // 不要在这里 return，让 finally 块清理状态
     } else {
       graphDto.value = dto;
       // 直接渲染为 SVG（path 按 color 分组、节点含坐标）
       svgRender.value = renderGraph(dto);
+      asciiGraph.value = null;
+      asciiLines.value = [];
     }
     // v2.9：新数据加载完收起展开（防 SHA 失效）
     expandedSha.value = null;
@@ -313,12 +374,16 @@ async function loadGraph(): Promise<void> {
       featureDisabled.value = true;
       graphDto.value = null;
       svgRender.value = null;
+      asciiGraph.value = null;
+      asciiLines.value = [];
       localPath.value = null;
       // 不要在这里 return，让 finally 块清理状态
     } else {
       localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
       graphDto.value = null;
       svgRender.value = null;
+      asciiGraph.value = null;
+      asciiLines.value = [];
       localPath.value = null;
     }
   } finally {
@@ -445,17 +510,28 @@ async function enableGitGraph(): Promise<void> {
 // - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 28 px / row
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
 
-const ROW_H = STRUCTURED_ROW_HEIGHT; // commit 行高（px），与 SVG 一致
+const ROW_H = computed(() =>
+  useAsciiGraph.value ? ASCII_ROW_HEIGHT * ASCII_DISPLAY_SCALE : STRUCTURED_ROW_HEIGHT,
+); // commit 行高（px），与当前 SVG 路径一致
 
 const viewBox = computed(() => {
+  if (useAsciiGraph.value && asciiGraph.value) {
+    return asciiSvgViewBox(asciiGraph.value);
+  }
   const r = svgRender.value;
   return r ? `0 0 ${r.width} ${r.height}` : '0 0 0 0';
 });
 const svgWidth = computed(() => {
+  if (useAsciiGraph.value && asciiGraph.value) {
+    return asciiSvgWidthPx(asciiGraph.value);
+  }
   const r = svgRender.value;
   return r ? `${r.width}px` : '0px';
 });
 const svgHeight = computed(() => {
+  if (useAsciiGraph.value && asciiGraph.value) {
+    return asciiSvgHeightPx(asciiGraph.value);
+  }
   const r = svgRender.value;
   return r ? `${r.height}px` : '0px';
 });
@@ -467,11 +543,21 @@ interface PathGroup {
   order: number;
   colorIndex: number; // 0..15，对齐 Gitea Color16()
   colorClass: string; // 'flow-color-16-N'
-  colorHex: string; // v2.6 fix：内联 hex（用于 path stroke 属性）
+  colorHex?: string; // v2.6 fix：结构化路径用内联 hex；ASCII fallback 走 CSS class
   d: string; // 单条 path 的 d
 }
 
 const pathGroups = computed<PathGroup[]>(() => {
+  if (useAsciiGraph.value && asciiGraph.value) {
+    return [...asciiGraph.value.flows.values()]
+      .sort((a, b) => a.id - b.id)
+      .map((flow: Flow) => ({
+        order: flow.id,
+        colorIndex: flow.colorNumber % 16,
+        colorClass: flowColorClass(flow.colorNumber),
+        d: flowToPathD(flow),
+      }));
+  }
   const r = svgRender.value;
   if (!r) return [];
   // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
@@ -496,9 +582,36 @@ const pathGroups = computed<PathGroup[]>(() => {
  */
 interface DisplayRow {
   row: number;
-  commit: NonNullable<GraphResultDto['nodes']>[number] | null;
+  commit: DisplayCommit | null;
 }
 const allRows = computed<DisplayRow[]>(() => {
+  if (useAsciiGraph.value && asciiGraph.value) {
+    const graph = asciiGraph.value;
+    const byRow = new Map<number, GitGraphCommit>();
+    for (const commit of graph.commits) byRow.set(commit.row, commit);
+    const maxRow = Math.max(graph.maxRow, asciiLines.value.length - 1, 0);
+    const out: DisplayRow[] = [];
+    for (let row = 0; row <= maxRow; row++) {
+      const commit = byRow.get(row);
+      const refs = Array.isArray(commit?.refs) ? commit.refs : [];
+      out.push({
+        row,
+        commit: commit
+          ? {
+              sha: commit.sha,
+              shortSha: commit.shortSha,
+              subject: commit.subject,
+              date: commit.date,
+              authorName: commit.authorName,
+              authorEmail: commit.authorEmail,
+              refs: refs.map((r) => r.shortName),
+              refTypes: refs.map((r) => refTypeFromGroup(r.refGroup)),
+            }
+          : null,
+      });
+    }
+    return out;
+  }
   const dto = graphDto.value;
   if (!dto) return [];
   const sorted = [...dto.nodes].sort((a, b) => a.row - b.row);
@@ -507,9 +620,29 @@ const allRows = computed<DisplayRow[]>(() => {
   for (const n of sorted) byRow.set(n.row, n);
   const out: DisplayRow[] = [];
   for (let row = 0; row <= maxRow; row++) {
-    out.push({ row, commit: byRow.get(row) ?? null });
+    const commit = byRow.get(row);
+    out.push({
+      row,
+      commit: commit
+        ? {
+            sha: commit.sha,
+            shortSha: commit.shortSha,
+            subject: commit.subject,
+            date: commit.date,
+            authorName: commit.authorName,
+            authorEmail: commit.authorEmail,
+            refs: commit.refs,
+            refTypes: commit.refTypes,
+          }
+        : null,
+    });
   }
   return out;
+});
+
+const activeCommitCount = computed(() => {
+  if (useAsciiGraph.value) return asciiGraph.value?.commits.length ?? 0;
+  return graphDto.value?.nodes.length ?? 0;
 });
 
 // ============================================================
@@ -537,7 +670,7 @@ function formatRelative(iso: string): string {
  * v2.10：当前展开的 commit node（直接从 allRows 拿，懒加载 detail 用）
  */
 const expandedCommitNode = computed<
-  NonNullable<GraphResultDto['nodes']>[number] | null
+  DisplayCommit | null
 >(() => {
   if (!expandedSha.value) return null;
   const rows = allRows.value;
@@ -555,12 +688,50 @@ const expandedCommitNode = computed<
 
 /** SVG 区域实际宽度（用户拖拽 > 自动计算 > 最小值） */
 const svgAreaWidth = computed(() => {
-  const r = svgRender.value;
-  const autoNum = r ? r.width : 120;
+  const autoNum = parseSvgPx(svgWidth.value) || SVG_AREA_MIN_WIDTH;
   const user = userSvgAreaWidth.value;
-  if (user !== null) return `${Math.max(80, user)}px`;
-  return `${Math.max(120, autoNum)}px`;
+  if (user !== null) {
+    return `${Math.min(Math.max(SVG_AREA_MIN_WIDTH, user), SVG_AREA_USER_MAX_WIDTH)}px`;
+  }
+  // 大仓库可能产生大量 lane，SVG 本身很宽；左列只给一个可用窗口，
+  // 横向查看留给 .git-graph-svg-area 内部滚动，避免把右侧提交记录挤出屏幕。
+  return `${Math.min(Math.max(SVG_AREA_MIN_WIDTH, autoNum), SVG_AREA_AUTO_MAX_WIDTH)}px`;
 });
+
+interface DotOverlayNode {
+  sha: string;
+  subject: string;
+  cx: number;
+  cy: number;
+  colorHex?: string;
+  colorClass?: string;
+}
+
+const dotNodes = computed<DotOverlayNode[]>(() => {
+  if (useAsciiGraph.value && asciiGraph.value) {
+    return asciiGraph.value.commits.map((commit) => ({
+      sha: commit.sha,
+      subject: commit.subject,
+      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH) * ASCII_DISPLAY_SCALE,
+      cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
+      colorClass: flowColorClass(
+        asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
+      ),
+    }));
+  }
+  return (svgRender.value?.nodes ?? []).map((node) => ({
+    sha: node.sha,
+    subject: node.subject,
+    cx: node.cx,
+    cy: node.cy,
+    colorHex: node.colorHex,
+  }));
+});
+
+function parseSvgPx(value: string): number {
+  const n = Number.parseFloat(value.replace(/px$/, ''));
+  return Number.isFinite(n) ? n : 0;
+}
 
 // ============================================================
 // v1.6 拖拽调整 SVG 区域宽度（v2.6 保留：结构化渲染后仍可用）
@@ -610,6 +781,18 @@ function avatarColorIndex(name: string): number {
     hash = (hash * 31 + name.charCodeAt(i)) | 0;
   }
   return Math.abs(hash) % 16;
+}
+
+function refTypeFromGroup(refGroup: string): string {
+  switch (refGroup) {
+    case 'tags':
+      return 'tag';
+    case 'remotes':
+      return 'remoteBranch';
+    case 'heads':
+    default:
+      return 'branch';
+  }
 }
 
 /**
@@ -679,7 +862,7 @@ function refBadgeClass(refType?: string): string {
           v-if="canLoadMore"
           class="load-more-header-btn"
           :disabled="loadingMore"
-          :title="`当前显示 ${graphDto?.nodes?.length || 0} 个提交，点击加载更多`"
+          :title="`当前显示 ${activeCommitCount} 个提交，点击加载更多`"
           @click="handleLoadMore"
         >
           <span v-if="loadingMore">加载中...</span>
@@ -716,7 +899,7 @@ function refBadgeClass(refType?: string): string {
         </div>
       </div>
       <div
-        v-else-if="!graphDto || (graphDto?.nodes?.length ?? 0) === 0"
+        v-else-if="activeCommitCount === 0"
         class="timeline-new__placeholder"
       >
         <EmptyState title="没有提交记录" />
@@ -750,7 +933,7 @@ function refBadgeClass(refType?: string): string {
                   <path
                     v-if="pg.d"
                     :d="pg.d"
-                    :stroke="pg.colorHex"
+                    v-bind="pg.colorHex ? { stroke: pg.colorHex } : {}"
                     stroke-width="1"
                     fill="none"
                     stroke-linecap="round"
@@ -761,9 +944,10 @@ function refBadgeClass(refType?: string): string {
               <!-- 圆点 overlay：固定大小，不受 SVG 缩放影响 -->
               <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
                 <div
-                  v-for="c in svgRender?.nodes ?? []"
+                  v-for="c in dotNodes"
                   :key="`dot-${c.sha}`"
                   class="commit-dot"
+                  :class="c.colorClass"
                   :style="{
                     left: `${c.cx - 4}px`,
                     top: `${c.cy - 4}px`,
@@ -837,9 +1021,9 @@ function refBadgeClass(refType?: string): string {
                     <span class="commit-author">{{ r.commit.authorName }}</span>
                     <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
                   </span>
-<span class="commit-sha">{{ r.commit.shortSha }}</span>
-                 </template>
-               </div>
+                  <span class="commit-sha">{{ r.commit.shortSha }}</span>
+                </template>
+              </div>
                <!-- v2.14：行下手风琴 —— 流式插入 list 内部，只占右列宽，
                     **不**遮挡左侧 git-graph SVG。紧跟展开 commit-row 之后，
                     自然撑高 list 高度，把下方 commit-row 推开 -->
@@ -857,7 +1041,7 @@ function refBadgeClass(refType?: string): string {
                    variant="panel"
                  />
                </div>
-</template>
+            </template>
             </div>
             <!-- v2.14：手风琴已内嵌到 .git-graph-list 内部（v-for 里展开 row 之后），
                  旧的 wrapper-level absolute 副本已删除 —— 不再跨整宽覆盖左侧 SVG -->

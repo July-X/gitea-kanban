@@ -39,6 +39,8 @@ type PullOptions struct {
 	// fetch 阶段 go-git 的 sideband 输出会被解析成 SyncProgress 事件
 	// 通过本 callback 推给 caller。nil = 不推送（向后兼容）。
 	Progress ProgressCallback
+	// UseGitHubCLI 使用 gh credential helper + git partial fetch。
+	UseGitHubCLI bool
 }
 
 // PullResult pull 结果
@@ -72,7 +74,7 @@ type FetchResult struct {
 // v2.7 超时保护：超大仓库（如 UnrealEngine）可能长时间卡住，
 // 添加 2 分钟超时避免无限等待。
 //
-// v2.9：超大仓库使用原生 git + --filter=blob:none
+// v2.9：超大仓库使用 gh credential helper + git partial fetch
 func FetchRepo(opts PullOptions) (*FetchResult, error) {
 	if opts.LocalPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
@@ -100,20 +102,24 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		remoteURL = remoteConfig.URLs[0]
 	}
 
-	// v2.9：超大仓库优化 - 使用原生 git fetch
+	// v2.9：超大仓库优化 - 使用 gh credential helper + git partial fetch
 	// 检测是否是超大仓库（通过 URL 判断）
 	isHugeRepo := strings.Contains(strings.ToLower(remoteURL), "unreal") ||
 		strings.Contains(strings.ToLower(remoteURL), "chromium") ||
 		strings.Contains(strings.ToLower(remoteURL), "linux") ||
 		strings.Contains(strings.ToLower(remoteURL), "webkit")
 
-	if isHugeRepo && opts.Depth > 0 {
-		// 尝试使用原生 git fetch
-		err := FetchWithFilter(opts.LocalPath, opts.Depth)
+	if opts.UseGitHubCLI || (isHugeRepo && opts.Depth > 0) {
+		if opts.Depth <= 0 {
+			return nil, fmt.Errorf("GitHub CLI blobless fetch 需要 depth > 0")
+		}
+		// GitHub 仓库必须走 gh credential helper + partial fetch；go-git 不支持 blobless，
+		// 回退会重新下载大量对象，违背“快速获得提交记录”的核心诉求。
+		err := FetchWithFilter(opts.LocalPath, opts.Depth, opts.Token)
 		if err == nil {
 			return &FetchResult{Updated: true}, nil
 		}
-		// 原生 git 失败，继续使用 go-git
+		return nil, fmt.Errorf("GitHub 仓库需要使用 gh 的 blobless fetch，但执行失败: %w", err)
 	}
 
 	// v2.8：构造 auth（不改变 URL，使用仓库现有的 remote URL）
@@ -192,6 +198,9 @@ func countCommitsReal(repo *git.Repository, from plumbing.Hash) (int, error) {
 		count++
 		return nil
 	})
+	if errors.Is(err, plumbing.ErrObjectNotFound) {
+		return count, nil
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -299,6 +308,9 @@ func countCommitsWithLimit(repo *git.Repository, from plumbing.Hash, limit int) 
 		}
 		return nil
 	})
+	if errors.Is(err, plumbing.ErrObjectNotFound) {
+		return count, nil
+	}
 	if err != nil && err != storer.ErrStop {
 		return 0, err
 	}

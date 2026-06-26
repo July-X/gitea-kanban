@@ -190,7 +190,7 @@ const activeProgressRepo = computed<RepoDto | null>(() => {
  *   - 无进度（未点过）→ "同步"
  */
 function syncButtonLabel(r: RepoDto): string {
-  const p = syncProgress(r);
+  const p = rowActionProgress(r);
   if (!p) return '同步';
   if (p.stage === 'done') return '同步完成';
   if (p.stage === 'error') return '同步失败';
@@ -200,7 +200,7 @@ function syncButtonLabel(r: RepoDto): string {
 
 /** 更新按钮文案：同上但词换成"更新" */
 function updateButtonLabel(r: RepoDto): string {
-  const p = syncProgress(r);
+  const p = rowActionProgress(r);
   if (!p) return '更新';
   if (p.stage === 'done') return '更新完成';
   if (p.stage === 'error') return '更新失败';
@@ -211,6 +211,12 @@ function updateButtonLabel(r: RepoDto): string {
 /** 取出当前 repo 的 SyncProgress（无则 undefined） */
 function syncProgress(r: RepoDto): SyncProgress | undefined {
   return repo.progressByRepo[repoKey(r)];
+}
+
+/** 仓库列表行按钮只展示由该按钮触发的同步/更新进度，避免“加载更多”污染列表文案 */
+function rowActionProgress(r: RepoDto): SyncProgress | undefined {
+  if (busyRepoKey.value !== repoKey(r)) return undefined;
+  return syncProgress(r);
 }
 
 /** 进度条 class：根据 stage 切换颜色（done=绿，error=红，普通=主色） */
@@ -461,7 +467,7 @@ function onLogoutClick(): void {
                     :title="`同步 ${r.fullName} 到本地 workspace`"
                     @click="onSyncClick(r, $event)"
                   >
-                    <Loader2 v-if="busyRepoKey === repoKey(r) && !syncProgress(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
+                    <Loader2 v-if="busyRepoKey === repoKey(r) && !rowActionProgress(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
                     <span>{{ syncButtonLabel(r) }}</span>
                   </button>
                   <button
@@ -472,7 +478,7 @@ function onLogoutClick(): void {
                     :title="`从远端拉取 ${r.fullName} 最新 commit`"
                     @click="onUpdateClick(r, $event)"
                   >
-                    <Loader2 v-if="busyRepoKey === repoKey(r) && !syncProgress(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
+                    <Loader2 v-if="busyRepoKey === repoKey(r) && !rowActionProgress(r)" :size="12" :stroke-width="2" class="statusbar__spin" />
                     <span>{{ updateButtonLabel(r) }}</span>
                   </button>
                 </div>

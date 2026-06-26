@@ -3,7 +3,7 @@
 // 支持范围（v2.x）：
 //   - VerifyToken：GET /user，Authorization: Bearer <token>
 //   - ListRepos：GET /user/repos，列当前登录用户可访问的仓库（含 collaborator）
-//   - CloneRepo：go-git clone（与 Gitea 共用 app/git.CloneRepo）
+//   - CloneRepo：gh repo clone + partial clone（避免超大仓库下载 blob）
 //   - LogGraph：go-git DAG Log + 自研 lane 布局（与 Gitea 共用）
 //   - 其余方法返回 ErrNotSupported
 //
@@ -85,7 +85,7 @@ func normalizeGitHubHostURL(hostURL string) string {
 // 改版本号时同步更新 README + CHANGELOG.md
 const GitHubAdapterVersion = "2.4.0"
 
-const largeRepoGraphDepth = 500
+const largeRepoGraphDepth = 5000
 
 // GitHubAdapter GitHub 平台适配器（首期仅 Git Graph）
 type GitHubAdapter struct {
@@ -275,6 +275,7 @@ func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token,
 		SingleBranch:    true,
 		NoTags:          true,
 		Progress:        progress,
+		UseGitHubCLI:    true,
 	})
 	if err != nil {
 		return "", err

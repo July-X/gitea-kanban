@@ -15,6 +15,12 @@ import { X, User, LogOut, UserPlus, Check } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { showToast } from '@renderer/lib/toast';
+import {
+  GITHUB_CLI_INSTALL_LABEL,
+  GITHUB_CLI_INSTALL_URL,
+  GITHUB_CLI_REQUIRED_HINT,
+  GITHUB_CLI_REQUIRED_MESSAGE,
+} from '@renderer/lib/github-cli-guide';
 import type { GiteaAccountDto } from '@renderer/types/dto';
 
 const props = defineProps<{ open: boolean }>();
@@ -25,15 +31,21 @@ const repo = useRepoStore();
 const router = useRouter();
 
 // ===== 切换账号 =====
-async function onSwitch(accountId: string): Promise<void> {
+async function onSwitch(account: GiteaAccountDto): Promise<void> {
   try {
-    await auth.switchAccount(accountId);
+    await auth.switchAccount(account.id);
     // 切换后重载数据
     repo.repos.length = 0;
     repo.selectProject(null);
     void repo.persistLastSelected(null, null, '');
     await repo.loadRepos('', true);
-    showToast({ type: 'success', message: '已切换账号' });
+    showToast({
+      type: 'success',
+      message: '已切换账号',
+      description: account.platform === 'github'
+        ? 'GitHub 仓库会使用 gh 快速加载提交记录'
+        : undefined,
+    });
     close();
   } catch (e) {
     const err = e as { messageText?: string };
@@ -173,7 +185,7 @@ function isCurrent(account: GiteaAccountDto): boolean {
                 v-if="!isCurrent(account)"
                 type="button"
                 class="am-btn am-btn--ghost"
-                @click="onSwitch(account.id)"
+                @click="onSwitch(account)"
               >
                 切换
               </button>
@@ -243,6 +255,16 @@ function isCurrent(account: GiteaAccountDto): boolean {
               placeholder="http://127.0.0.1:3000"
               :disabled="addLoading"
             />
+          </div>
+
+          <div v-if="addPlatform === 'github'" class="am-gh-guide">
+            <p class="am-gh-guide__title">{{ GITHUB_CLI_REQUIRED_MESSAGE }}</p>
+            <p class="am-gh-guide__body">
+              {{ GITHUB_CLI_REQUIRED_HINT }}
+              <a :href="GITHUB_CLI_INSTALL_URL" target="_blank" rel="noopener noreferrer">
+                {{ GITHUB_CLI_INSTALL_LABEL }}
+              </a>
+            </p>
           </div>
 
           <div class="am-add-field">
@@ -494,6 +516,29 @@ function isCurrent(account: GiteaAccountDto): boolean {
   background: var(--color-bg-hover);
   border-radius: 3px;
   color: var(--color-text);
+}
+.am-gh-guide {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-divider));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.am-gh-guide__title {
+  margin: 0 0 2px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+.am-gh-guide__body {
+  margin: 0;
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+.am-gh-guide__body a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  white-space: nowrap;
 }
 /* 平台选择 tab(跟 AuthView 视觉对齐) */
 .am-add-platform-tabs {

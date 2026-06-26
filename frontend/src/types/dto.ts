@@ -112,6 +112,8 @@ export interface RepoDto {
 export interface RepoProjectDto {
   id: string;
   giteaAccountId: string;
+  /** v2 多平台：gitea | github */
+  platform?: 'gitea' | 'github';
   owner: string;
   name: string;
   defaultBranch: string | null;
@@ -569,6 +571,40 @@ export interface GraphResultDto {
   edges: GraphEdgeDto[];
   maxLane: number;
   truncated: boolean;
+}
+
+export type GraphRefGroupDto = 'heads' | 'tags' | 'remotes' | 'pull';
+
+export interface GraphLineRefDto {
+  name: string;
+  refGroup: GraphRefGroupDto;
+  shortName: string;
+}
+
+export interface GraphLineCommitDto {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  date: string;
+  authorName: string;
+  authorEmail: string;
+  isMerge: boolean;
+  parents: string[];
+  refs: GraphLineRefDto[];
+}
+
+export interface GraphLineDto {
+  row: number;
+  glyph: string;
+  commit: GraphLineCommitDto | null;
+}
+
+/** ASCII Git Graph 完整结果（GitHub/gh 超大仓库 fallback 使用） */
+export interface GraphLinesDto {
+  lines: GraphLineDto[];
+  totalCommits: number;
+  truncated: boolean;
+  range: { from: string; to: string };
 }
 
 /** commits.gitgraph.pull 返回 */

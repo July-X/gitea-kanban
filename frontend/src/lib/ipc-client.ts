@@ -40,6 +40,7 @@ import type {
   PullDto,
   RepoProjectDto,
   GraphResultDto,
+  GraphLinesDto,
 } from '@renderer/types/dto';
 
 /** window.api 的精确类型（preload/index.ts导出） */
@@ -511,6 +512,16 @@ export function commitsGitgraphLines(args: {
   return getIpcClient().invoke('commits', 'gitgraphLines', args);
 }
 
+/** 拿 ASCII Git Graph（GitHub/gh 超大仓库 fallback，前端复用旧 parser） */
+export function commitsGitgraphAsciiLines(args: {
+  projectId: string;
+  branches?: string[];
+  limit?: number;
+  hidePRRefs?: boolean;
+}): Promise<GraphLinesDto> {
+  return getIpcClient().invoke('commits', 'gitgraphAsciiLines', args);
+}
+
 /**
  * 启用 Git Graph：自动用 go-git 轻量 clone 仓库元信息到本地
  *
@@ -595,7 +606,7 @@ export function commitsGitgraphPull(args: {
  * 因为 DeepenRepo 是新增的 API，使用新的调用方式
  *
  * @param args.projectId 项目 ID
- * @param args.deepenBy 增加的深度（默认 50）
+ * @param args.deepenBy 增加的深度（默认 200）
  */
 export async function deepenRepo(args: {
   projectId: string;

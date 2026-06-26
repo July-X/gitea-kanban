@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	gogit "github.com/go-git/go-git/v5"
 )
 
 // createBareAndClone 创建一个 bare 仓库 + clone 到本地，返回本地路径和 bare 路径
@@ -228,5 +230,54 @@ func TestPullRepo_RepairsMissingHeadTarget(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("CountCommits after repair = %d, want 1", count)
+	}
+}
+
+func TestCountCommitsWithLimit_TreatsShallowBoundaryAsStop(t *testing.T) {
+	tmpDir := t.TempDir()
+	remotePath := filepath.Join(tmpDir, "remote.git")
+	srcPath := filepath.Join(tmpDir, "src")
+	localPath := filepath.Join(tmpDir, "local")
+
+	runGit := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit(tmpDir, "init", "--bare", "remote.git")
+	os.MkdirAll(srcPath, 0o755)
+	runGit(srcPath, "init")
+	runGit(srcPath, "config", "user.email", "test@test.com")
+	runGit(srcPath, "config", "user.name", "Test")
+	runGit(srcPath, "remote", "add", "origin", remotePath)
+	for i := 1; i <= 3; i++ {
+		if err := os.WriteFile(filepath.Join(srcPath, "a.txt"), []byte{byte('0' + i)}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(srcPath, "add", ".")
+		runGit(srcPath, "commit", "-m", "C"+string(rune('0'+i)))
+	}
+	runGit(srcPath, "push", "origin", "master")
+
+	runGit(tmpDir, "clone", "--depth=1", "file://"+remotePath, localPath)
+
+	repo, err := gogit.PlainOpen(localPath)
+	if err != nil {
+		t.Fatalf("PlainOpen failed: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head failed: %v", err)
+	}
+
+	count, err := countCommitsWithLimit(repo, head.Hash(), 5000)
+	if err != nil {
+		t.Fatalf("countCommitsWithLimit failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("countCommitsWithLimit = %d, want 1", count)
 	}
 }

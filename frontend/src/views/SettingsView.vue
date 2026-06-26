@@ -36,6 +36,12 @@ import {
   commitsGitgraphGetWorkspace,
   systemOpenPath,
 } from '@renderer/lib/ipc-client';
+import {
+  GITHUB_CLI_INSTALL_LABEL,
+  GITHUB_CLI_INSTALL_URL,
+  GITHUB_CLI_REQUIRED_HINT,
+  GITHUB_CLI_REQUIRED_MESSAGE,
+} from '@renderer/lib/github-cli-guide';
 // v2.2：WorkspaceMigrateDialog 已移除（workspace 路径不可改）
 
 const settings = useSettingsStore();
@@ -264,6 +270,8 @@ const accountErrorMessage = computed(() => {
 });
 
 const accountErrorHint = computed(() => auth.error?.hint ?? null);
+const currentAccountPlatform = computed(() => auth.accounts[0]?.platform ?? 'gitea');
+const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === 'github');
 </script>
 
 <template>
@@ -335,6 +343,13 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
             {{ auth.currentUser?.login ?? '—' }}
           </span>
         </div>
+        <p v-if="currentAccountIsGitHub" class="settings__gh-guide">
+          <strong>{{ GITHUB_CLI_REQUIRED_MESSAGE }}</strong>
+          <span>{{ GITHUB_CLI_REQUIRED_HINT }}</span>
+          <a :href="GITHUB_CLI_INSTALL_URL" target="_blank" rel="noopener noreferrer">
+            {{ GITHUB_CLI_INSTALL_LABEL }}
+          </a>
+        </p>
         <button
           type="button"
           class="settings__save"
@@ -788,6 +803,31 @@ const accountErrorHint = computed(() => auth.error?.hint ?? null);
   margin: 0 0 var(--space-3);
   line-height: 1.5;
 }
+
+.settings__gh-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 32%, var(--color-divider));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
+.settings__gh-guide strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.settings__gh-guide a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
 .account-modal__form {
   display: flex;
   flex-direction: column;

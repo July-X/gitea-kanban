@@ -58,6 +58,10 @@ export function GetGitGraph(arg1) {
   return window['go']['main']['App']['GetGitGraph'](arg1);
 }
 
+export function GetGitGraphAscii(arg1) {
+  return window['go']['main']['App']['GetGitGraphAscii'](arg1);
+}
+
 export function GetRepoById(arg1) {
   return window['go']['main']['App']['GetRepoById'](arg1);
 }

@@ -5,9 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+const staleGitLockAge = 10 * time.Minute
 
 // pathLocks 内存级 per-path 锁（保护同进程内并发）
 //
@@ -48,4 +51,22 @@ func lockPath(localPath string) (func(), error) {
 		f.Close()
 		mu.Unlock()
 	}, nil
+}
+
+func cleanupStaleGitLock(localPath, name string) error {
+	lockFile := filepath.Join(localPath, ".git", name)
+	info, err := os.Stat(lockFile)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("检查 git 锁文件失败: %w", err)
+	}
+	if time.Since(info.ModTime()) < staleGitLockAge {
+		return nil
+	}
+	if err := os.Remove(lockFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("清理过期 git 锁文件失败: %w", err)
+	}
+	return nil
 }

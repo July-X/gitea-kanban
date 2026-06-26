@@ -774,6 +774,34 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 	return graphResultToAppDTO(result), nil
 }
 
+// GetGitGraphAscii 获取 git log --graph 字符流版本的 Git Graph。
+//
+// 主要用于 GitHub/gh partial clone 的超大仓库：让系统 git 直接输出 ASCII graph，
+// 前端复用旧 parser 渲染，避免结构化 lane 算法在超大浅历史下生成过宽 SVG。
+func (a *App) GetGitGraphAscii(args GetGitGraphArgs) (git.GraphLinesResult, error) {
+	if a.logger != nil {
+		a.logger.Info("GetGitGraphAscii", "projectId", args.ProjectID, "branches", args.Branches)
+	}
+
+	if args.ProjectID == "" {
+		return git.GraphLinesResult{}, ipc.NewValidationFailed("projectId 不能为空", "")
+	}
+
+	project, account, err := a.findProjectAndAccount(args.ProjectID)
+	if err != nil {
+		return git.GraphLinesResult{}, err
+	}
+	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
+	result, err := git.RunGraphLog(localPath, git.RunGraphLogOptions{
+		Branches: args.Branches,
+		MaxCount: args.MaxCount,
+	})
+	if err != nil {
+		return git.GraphLinesResult{}, ipc.NewInternal(err.Error())
+	}
+	return *result, nil
+}
+
 // GetRepoByIdArgs 查项目参数
 type GetRepoByIdArgs struct {
 	ProjectID string `json:"projectId"`
@@ -945,6 +973,14 @@ func (a *App) AuthConnect(args ConnectArgs) (ConnectResult, error) {
 	//   - GitHubAPIBase 常量定义在 app/platform/github/adapter.go
 	//   - 这里直接引用,避免硬编码漂移
 	if platformName == string(platformAdapter.GitHub) {
+		if _, err := exec.LookPath("gh"); err != nil {
+			return ConnectResult{}, &ipc.IpcError{
+				Code:    ipc.CodeValidationFailed,
+				Message: "使用 GitHub 仓库需要先安装 GitHub CLI（gh）",
+				Hint:    "请安装 gh 后重新连接 GitHub 账号；本应用会用它快速加载超大仓库提交记录",
+				Cause:   err.Error(),
+			}
+		}
 		giteaURL = github.GitHubAPIBase
 	} else {
 		if giteaURL == "" {
@@ -2009,13 +2045,13 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 		strings.Contains(strings.ToLower(project.Name), "webkit")
 
 	if singleBranch {
+		depth = 5000
+		countLimit = 5000
 		if isHugeRepo {
-			// 超大仓库：只取最近 10 个 commit（极致优化）
-			// 用户可以在需要时手动"加载更多"来增量拉取
-			depth = 10
-			countLimit = 10
-		} else {
-			depth = 500
+			// gh blobless fetch 已经足够快：初始同步允许最多 5 分钟，
+			// 先给 Git Graph 一个更可用的近期窗口；更早历史交给用户手动"加载更多"。
+			depth = 5000
+			countLimit = 5000
 		}
 	}
 
@@ -2030,6 +2066,7 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 		SingleBranch: singleBranch,
 		NoTags:       singleBranch,
 		Progress:     a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
+		UseGitHubCLI: account.Platform == "github",
 	})
 	if err != nil {
 		// v2.6 错误溯源：wrap 时把 owner/repo/localPath 一并带上
@@ -2083,7 +2120,7 @@ func (a *App) FetchRepo(args PullRepoArgs) (FetchRepoResultDTO, error) {
 // DeepenRepoArgs 加深仓库历史参数
 type DeepenRepoArgs struct {
 	ProjectID string `json:"projectId"`
-	DeepenBy  int    `json:"deepenBy"` // 增加的深度（默认 50）
+	DeepenBy  int    `json:"deepenBy"` // 增加的深度（默认 200）
 }
 
 // DeepenRepoResult 加深结果
@@ -2106,14 +2143,14 @@ func (a *App) DeepenRepo(args DeepenRepoArgs) (DeepenRepoResult, error) {
 		return DeepenRepoResult{}, ipc.NewValidationFailed("projectId 不能为空", "")
 	}
 
-	// 默认增加 50 层
+	// 默认增加 200 层
 	deepenBy := args.DeepenBy
 	if deepenBy <= 0 {
-		deepenBy = 50
+		deepenBy = 200
 	}
 
 	// 1-2. 找 project + account
-	project, _, err := a.findProjectAndAccount(args.ProjectID)
+	project, account, err := a.findProjectAndAccount(args.ProjectID)
 	if err != nil {
 		return DeepenRepoResult{}, err
 	}
@@ -2139,11 +2176,24 @@ func (a *App) DeepenRepo(args DeepenRepoArgs) (DeepenRepoResult, error) {
 
 	localPath := git.RepoLocalPathForAccount(workspacePath, accountUsername, project.Owner, project.Name)
 
+	var token string
+	if account.Platform == "github" {
+		token, err = a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
+		if err != nil {
+			return DeepenRepoResult{}, classifyKeychainError(err)
+		}
+		if token == "" {
+			return DeepenRepoResult{}, ipc.NewInternal("token 为空")
+		}
+	}
+
 	// 4. 调用 git.DeepenRepo
 	result, err := git.DeepenRepo(git.DeepenRepoOptions{
-		LocalPath: localPath,
-		DeepenBy:  deepenBy,
-		Progress:  a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
+		LocalPath:    localPath,
+		DeepenBy:     deepenBy,
+		Token:        token,
+		UseGitHubCLI: account.Platform == "github",
+		Progress:     a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
 	})
 	if err != nil {
 		if a.logger != nil {
