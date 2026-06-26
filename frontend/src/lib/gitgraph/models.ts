@@ -197,73 +197,18 @@ export function svgHeightPx(g: Graph): string {
 // ============================================================
 
 /**
- * 压缩列号分配 —— 贪心左边缘算法。
+ * 压缩列号分配 —— 已废弃（v2.x 修复多 MR 仓库断线）。
  *
- * 扫描所有 flow 的时间区间（minRow..maxRow），为时间上不重叠的
- * flow 复用同一列号，把 active flows 尽可能向左压缩。
+ * 历史：v2.6 之前 `column = flowID`，为了让 SVG path 按 lane 紧凑布局，按 flow
+ *       时间区间复用 column（不同 flow 时间不重叠时共用 column）。
+ * 现状：v2.x 改 `column = ASCII 字符流下标`（lane 编号）以保证 / \ 几何正确连接，
+ *       此时 ASCII lane 已是紧凑表示（git log --graph 输出 left-aligned），
+ *       不能再压缩：压缩会破坏 / \ 跨 lane 的几何连接（多 MR 仓库断线）。
+ *
+ * 保留函数签名（no-op）以避免破坏调用方和未来重新设计。
  */
 export function compactColumns(graph: Graph): void {
-  if (graph.flows.size <= 1) return;
-
-  const sorted = [...graph.flows.values()].sort(
-    (a, b) => a.minRow - b.minRow || a.id - b.id,
-  );
-
-  const assign = new Map<number, number>(); // flowId → 新列号
-
-  for (const flow of sorted) {
-    let col = 1;
-    while (true) {
-      let conflict = false;
-      for (const [otherId, otherCol] of assign) {
-        if (otherCol !== col) continue;
-        const other = graph.flows.get(otherId)!;
-        if (flow.minRow <= other.maxRow && other.minRow <= flow.maxRow) {
-          conflict = true;
-          break;
-        }
-      }
-      if (!conflict) break;
-      col++;
-    }
-    assign.set(flow.id, col);
-  }
-
-  const offsets = new Map<number, number>();
-  for (const flow of graph.flows.values()) {
-    const newCol = assign.get(flow.id);
-    if (newCol === undefined) continue;
-    offsets.set(flow.id, newCol - flow.minColumn);
-  }
-
-  for (const flow of graph.flows.values()) {
-    const offset = offsets.get(flow.id);
-    if (!offset) continue;
-
-    flow.minColumn += offset;
-    flow.maxColumn += offset;
-    for (const g of flow.glyphs) {
-      g.column += offset;
-    }
-    for (const g of flow.glyphs) {
-      if (g.parentColumn !== undefined) {
-        const po = offsets.get(g.parentColumn);
-        if (po !== undefined) g.parentColumn += po;
-      }
-    }
-  }
-
-  for (const c of graph.commits) {
-    const offset = offsets.get(c.flowId);
-    if (offset) c.column += offset;
-  }
-
-  let minCol = Infinity;
-  let maxCol = -Infinity;
-  for (const flow of graph.flows.values()) {
-    if (flow.minColumn < minCol) minCol = flow.minColumn;
-    if (flow.maxColumn > maxCol) maxCol = flow.maxColumn;
-  }
-  graph.minColumn = minCol < Infinity ? minCol : 0;
-  graph.maxColumn = maxCol > -Infinity ? maxCol : 0;
+  // no-op: column 已是 ASCII lane，压缩会破坏斜线几何。
+  // 若未来要恢复"lane 复用"，需要同时改 svg.ts 用 (column, lane) 两套坐标。
+  void graph;
 }
