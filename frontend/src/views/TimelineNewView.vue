@@ -836,6 +836,122 @@ function refTypeFromGroup(refGroup: string): string {
   }
 }
 
+// ============================================================
+// v2.22：SourceTree 风格表头 —— 列宽状态管理
+// 列：Description (refs+subject) / Author / Date / SHA
+// 拖动表头列分隔手柄调整列宽（commit-row 同步调整 grid-template-columns）
+// 列宽持久化到 localStorage（用户偏好保存）
+// ============================================================
+
+/** 列宽状态：每个列的初始宽度（px） */
+const DEFAULT_COL_WIDTHS = {
+  desc: 480, // Description 列（refs + subject）
+  author: 160, // Author 列
+  date: 120, // Date 列
+  sha: 80, // SHA 列
+} as const;
+
+/** 列宽存储 key */
+const COL_WIDTHS_STORAGE_KEY = 'gitea-kanban:gitgraph:column-widths';
+
+/** 加载持久化的列宽（如果有） */
+function loadColWidths(): typeof DEFAULT_COL_WIDTHS {
+  try {
+    const stored = localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return {
+        desc: typeof parsed.desc === 'number' ? parsed.desc : DEFAULT_COL_WIDTHS.desc,
+        author: typeof parsed.author === 'number' ? parsed.author : DEFAULT_COL_WIDTHS.author,
+        date: typeof parsed.date === 'number' ? parsed.date : DEFAULT_COL_WIDTHS.date,
+        sha: typeof parsed.sha === 'number' ? parsed.sha : DEFAULT_COL_WIDTHS.sha,
+      };
+    }
+  } catch {
+    /* localStorage 可能不可用（SSR/隐私模式） */
+  }
+  return { ...DEFAULT_COL_WIDTHS };
+}
+
+/** 列宽状态（响应式，初始从 localStorage 加载） */
+const colWidths = ref({ ...loadColWidths() });
+
+/** 当前正在拖拽的列分隔手柄（-1 表示无） */
+const draggingCol = ref<number>(-1); // 0 = desc-author 间，1 = author-date 间，2 = date-sha 间
+let colDragStartX = 0;
+let colDragStartWidths: typeof DEFAULT_COL_WIDTHS | null = null;
+
+/** grid-template-columns 字符串（用于 commit-row 和表头） */
+const gridTemplateColumns = computed(() => {
+  const w = colWidths.value;
+  return `${w.desc}px ${w.author}px ${w.date}px ${w.sha}px`;
+});
+
+/** 列分隔手柄 mousedown */
+function onColHandleMouseDown(e: MouseEvent, colIndex: number): void {
+  e.preventDefault();
+  e.stopPropagation(); // 防止触发 git-graph 的 handle 拖拽
+  draggingCol.value = colIndex;
+  colDragStartX = e.clientX;
+  colDragStartWidths = { ...colWidths.value };
+  document.addEventListener('mousemove', onColHandleMouseMove);
+  document.addEventListener('mouseup', onColHandleMouseUp);
+}
+
+function onColHandleMouseMove(e: MouseEvent): void {
+  if (draggingCol.value < 0 || !colDragStartWidths) return;
+  const delta = e.clientX - colDragStartX;
+  const w = { ...colDragStartWidths };
+  // 拖动列 i 改变列 i 和列 i+1 的宽度（保持总宽度不变）
+  if (draggingCol.value === 0) {
+    // desc-author 分隔线：desc 加宽 = author 减窄
+    const minW = 60;
+    const newDesc = Math.max(minW, colDragStartWidths.desc + delta);
+    const newAuthor = Math.max(minW, colDragStartWidths.author - (newDesc - colDragStartWidths.desc));
+    w.desc = newDesc;
+    w.author = newAuthor;
+  } else if (draggingCol.value === 1) {
+    // author-date 分隔线
+    const minW = 60;
+    const newAuthor = Math.max(minW, colDragStartWidths.author + delta);
+    const newDate = Math.max(minW, colDragStartWidths.date - (newAuthor - colDragStartWidths.author));
+    w.author = newAuthor;
+    w.date = newDate;
+  } else if (draggingCol.value === 2) {
+    // date-sha 分隔线
+    const minW = 60;
+    const newDate = Math.max(minW, colDragStartWidths.date + delta);
+    const newSha = Math.max(minW, colDragStartWidths.sha - (newDate - colDragStartWidths.date));
+    w.date = newDate;
+    w.sha = newSha;
+  }
+  colWidths.value = w;
+}
+
+function onColHandleMouseUp(): void {
+  if (draggingCol.value >= 0) {
+    // 持久化列宽到 localStorage
+    try {
+      localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(colWidths.value));
+    } catch {
+      /* 忽略持久化错误 */
+    }
+  }
+  draggingCol.value = -1;
+  colDragStartWidths = null;
+  document.removeEventListener('mousemove', onColHandleMouseMove);
+  document.removeEventListener('mouseup', onColHandleMouseUp);
+}
+
+/** 列分隔手柄位置（用于 inline style） */
+function colHandleLeft(colIndex: number): number {
+  // colIndex=0: desc 列右边；=1: desc+author 列右边；=2: desc+author+date 列右边
+  const w = colWidths.value;
+  if (colIndex === 0) return w.desc;
+  if (colIndex === 1) return w.desc + w.author;
+  return w.desc + w.author + w.date;
+}
+
 /**
  * ref badge 类型判断（v2.8：用后端 refTypes 严格区分，不再启发式猜）
  *
@@ -1017,11 +1133,45 @@ function refBadgeClass(refType?: string): string {
 
           <!-- 右侧：Commit 列表（v2.21：transform translateX 由 handleLeft 控制位置）
        handle 默认 = svgWidth（list 位置不变），handle 移动后 list 跟着移动
-       背景 transparent 让 SVG dot 透过 commit list 可见 -->
+       背景 transparent 让 SVG dot 透过 commit list 可见
+       v2.22：grid-template-columns 让 commit-row 按列对齐（表头控制列宽） -->
           <div
             class="git-graph-list"
-            :style="{ minHeight: svgHeight, transform: `translateX(${handleLeft - parseSvgPx(svgWidth)}px)` }"
+            :style="{
+              minHeight: svgHeight,
+              transform: `translateX(${handleLeft - parseSvgPx(svgWidth)}px)`,
+              '--grid-template-columns': gridTemplateColumns,
+            }"
           >
+            <!-- v2.22：SourceTree 风格表头（sticky 在顶部，列宽可拖拽调整） -->
+            <div class="git-graph-header" @mousedown.stop>
+              <div class="git-graph-header__col git-graph-header__col--desc">Description</div>
+              <div
+                class="git-graph-header__resize"
+                @mousedown="(e) => onColHandleMouseDown(e, 0)"
+                :class="{ 'git-graph-header__resize--active': draggingCol === 0 }"
+                :style="{ left: `${colHandleLeft(0)}px` }"
+                title="拖动调整 Description 列宽度"
+              />
+              <div class="git-graph-header__col git-graph-header__col--author">Author</div>
+              <div
+                class="git-graph-header__resize"
+                @mousedown="(e) => onColHandleMouseDown(e, 1)"
+                :class="{ 'git-graph-header__resize--active': draggingCol === 1 }"
+                :style="{ left: `${colHandleLeft(1)}px` }"
+                title="拖动调整 Author 列宽度"
+              />
+              <div class="git-graph-header__col git-graph-header__col--date">Date</div>
+              <div
+                class="git-graph-header__resize"
+                @mousedown="(e) => onColHandleMouseDown(e, 2)"
+                :class="{ 'git-graph-header__resize--active': draggingCol === 2 }"
+                :style="{ left: `${colHandleLeft(2)}px` }"
+                title="拖动调整 Date 列宽度"
+              />
+              <div class="git-graph-header__col git-graph-header__col--sha">SHA</div>
+            </div>
+
             <template v-for="r in allRows" :key="`row-${r.row}`">
               <div
                 class="commit-row"
