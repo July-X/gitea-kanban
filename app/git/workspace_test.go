@@ -130,7 +130,7 @@ func TestWorkspaceManager_ListRepos_WithRepos(t *testing.T) {
 
 func TestParseRepoDirName(t *testing.T) {
 	cases := []struct {
-		name     string
+		name      string
 		wantOwner string
 		wantRepo  string
 	}{
@@ -535,4 +535,3 @@ func TestMigrateLegacy_NoReposDir(t *testing.T) {
 		t.Errorf("expected no-op, got %+v", result)
 	}
 }
-

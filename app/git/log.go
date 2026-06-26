@@ -14,9 +14,9 @@ import (
 
 // CommitInfo commit 元数据（对齐前端 GraphLineCommitDto）
 type CommitInfo struct {
-	SHA         string    // 完整 hash
-	ShortSHA    string    // 短 hash（前 7 位）
-	Subject     string    // commit message 第一行
+	SHA         string // 完整 hash
+	ShortSHA    string // 短 hash（前 7 位）
+	Subject     string // commit message 第一行
 	AuthorName  string
 	AuthorEmail string
 	AuthorWhen  time.Time // 作者时间
@@ -36,9 +36,9 @@ type CommitInfo struct {
 type RefType string
 
 const (
-	RefTypeBranch      RefType = "branch"      // 本地分支（refs/heads/...）
+	RefTypeBranch       RefType = "branch"       // 本地分支（refs/heads/...）
 	RefTypeRemoteBranch RefType = "remoteBranch" // 远程跟踪分支（refs/remotes/<remote>/...）
-	RefTypeTag         RefType = "tag"         // tag（refs/tags/...）
+	RefTypeTag          RefType = "tag"          // tag（refs/tags/...）
 )
 
 // CommitRef commit 关联的 ref（带类型）

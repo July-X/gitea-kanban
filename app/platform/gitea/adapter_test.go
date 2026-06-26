@@ -176,4 +176,3 @@ func TestMapHTTPError(t *testing.T) {
 		}
 	}
 }
-

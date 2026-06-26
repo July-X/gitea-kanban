@@ -208,8 +208,8 @@ func TestEmitProgress_NilSafe(t *testing.T) {
 // TestSidebandWriter_Integration 验证 SidebandWriter 的 io.Writer 接口
 func TestSidebandWriter_Integration(t *testing.T) {
 	var (
-		mu      sync.Mutex
-		events  []SyncProgress
+		mu     sync.Mutex
+		events []SyncProgress
 	)
 	cb := func(p SyncProgress) {
 		mu.Lock()

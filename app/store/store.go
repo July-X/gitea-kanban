@@ -22,13 +22,13 @@ const StateSchemaVersion = 1
 
 // GiteaAccount 账号（对齐 TS GiteaAccount，新增 Platform 字段支持多平台）
 type GiteaAccount struct {
-	ID              string      `json:"id"`
-	Platform        string      `json:"platform"` // "gitea" | "github"（v2 新增，旧数据默认 "gitea"）
-	GiteaURL        string      `json:"giteaUrl"` // Gitea 实例 URL 或 GitHub API URL
-	Username        string      `json:"username"`
-	KeychainService string      `json:"keychainService"`
-	CreatedAt       int64       `json:"createdAt"` // epoch ms
-	UserInfo        *UserInfo   `json:"userInfo"`
+	ID              string    `json:"id"`
+	Platform        string    `json:"platform"` // "gitea" | "github"（v2 新增，旧数据默认 "gitea"）
+	GiteaURL        string    `json:"giteaUrl"` // Gitea 实例 URL 或 GitHub API URL
+	Username        string    `json:"username"`
+	KeychainService string    `json:"keychainService"`
+	CreatedAt       int64     `json:"createdAt"` // epoch ms
+	UserInfo        *UserInfo `json:"userInfo"`
 }
 
 // UserInfo denormalized 用户信息（来自平台 /user 接口）
@@ -45,7 +45,7 @@ type UserInfo struct {
 type LocalUser struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
-	CreatedAt   int64 `json:"createdAt"`
+	CreatedAt   int64  `json:"createdAt"`
 }
 
 // RepoProject 仓库项目
@@ -77,7 +77,7 @@ type ColumnLabelMap struct {
 	ProjectID      string `json:"projectId"`
 	GiteaLabelID   string `json:"giteaLabelId"`
 	GiteaLabelName string `json:"giteaLabelName"`
-	CreatedAt      int64 `json:"createdAt"`
+	CreatedAt      int64  `json:"createdAt"`
 }
 
 // StarredBranch 收藏的分支
@@ -90,14 +90,14 @@ type StarredBranch struct {
 
 // LocalState 顶层状态（1 个 JSON 文件）
 type LocalState struct {
-	SchemaVersion  int                `json:"schemaVersion"`
-	Accounts       []GiteaAccount     `json:"accounts"`
-	Users          []LocalUser        `json:"users"`
-	Prefs          map[string]any     `json:"prefs"`
-	Projects       []RepoProject      `json:"projects"`
-	Columns        []BoardColumn      `json:"columns"`
-	LabelMaps      []ColumnLabelMap   `json:"labelMaps"`
-	StarredBranches []StarredBranch   `json:"starredBranches"`
+	SchemaVersion   int              `json:"schemaVersion"`
+	Accounts        []GiteaAccount   `json:"accounts"`
+	Users           []LocalUser      `json:"users"`
+	Prefs           map[string]any   `json:"prefs"`
+	Projects        []RepoProject    `json:"projects"`
+	Columns         []BoardColumn    `json:"columns"`
+	LabelMaps       []ColumnLabelMap `json:"labelMaps"`
+	StarredBranches []StarredBranch  `json:"starredBranches"`
 }
 
 // WorkspacePathPrefKey prefs 中 workspace 路径的 key

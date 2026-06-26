@@ -16,12 +16,12 @@ import (
 //
 // 历史 DAG：
 //
-//	*   merge commit (C4)
-//	|\
-//	| * feature commit (C3)
-//	* | main commit (C2)
-//	|/
-//	* initial commit (C1)
+//   - merge commit (C4)
+//     |\
+//     | * feature commit (C3)
+//   - | main commit (C2)
+//     |/
+//   - initial commit (C1)
 func createRepoWithMerge(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

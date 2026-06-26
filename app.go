@@ -570,13 +570,13 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 	//   修复"GitHub 小仓库点同步报 hostUrl 不能为空"：旧协议要求前端传 platform/hostUrl/username，
 	//   但前端只有 projectId，shim 把 hostUrl 透传成空字符串 → 校验失败。
 	var (
-		platformName    string
-		hostURL         string
-		username        string
-		owner           string
-		repo            string
-		matchedAccount  *store.GiteaAccount
-		matchedProject  *store.RepoProject
+		platformName   string
+		hostURL        string
+		username       string
+		owner          string
+		repo           string
+		matchedAccount *store.GiteaAccount
+		matchedProject *store.RepoProject
 	)
 
 	if strings.TrimSpace(args.ProjectID) != "" {

@@ -80,7 +80,7 @@ type ProgressCallback func(p SyncProgress)
 // go-git 调用模式：每个 sideband 行会调一次 Write([]byte)，所以 ParseProgress
 // 也是一次一行调（每次 sideband writer flush 完整行）。
 type progressParser struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	lastStage SyncStage
 }
 

@@ -22,20 +22,20 @@ import (
 type OpType string
 
 const (
-	OpIssueCreate    OpType = "issue.create"
-	OpIssueUpdate    OpType = "issue.update"
+	OpIssueCreate     OpType = "issue.create"
+	OpIssueUpdate     OpType = "issue.update"
 	OpIssueMoveColumn OpType = "issue.moveColumn"
-	OpPullMerge      OpType = "pull.merge"
-	OpPullClose      OpType = "pull.close"
+	OpPullMerge       OpType = "pull.merge"
+	OpPullClose       OpType = "pull.close"
 )
 
 // OpState 操作状态
 type OpState string
 
 const (
-	StatePending  OpState = "pending"
-	StateDone     OpState = "done"
-	StateFailed   OpState = "failed"
+	StatePending OpState = "pending"
+	StateDone    OpState = "done"
+	StateFailed  OpState = "failed"
 )
 
 // Op 队列中的操作

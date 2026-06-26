@@ -40,8 +40,8 @@ type AuthConfig struct {
 //  3. 如果 SSH 不可用，回退到 HTTPS + token
 //
 // 注意：
-//  - SSH key 必须无 passphrase（或已添加到 ssh-agent）
-//  - 只支持 GitHub 的 SSH（git@github.com:owner/repo.git）
+//   - SSH key 必须无 passphrase（或已添加到 ssh-agent）
+//   - 只支持 GitHub 的 SSH（git@github.com:owner/repo.git）
 func BuildAuth(httpsURL, username, token string) (transport.AuthMethod, string, AuthMethod) {
 	// 1. 尝试 SSH（仅 GitHub）
 	if strings.Contains(httpsURL, "github.com") {
@@ -108,8 +108,9 @@ func loadSSHKey(keyPath string) (transport.AuthMethod, error) {
 // convertToSSHURL 将 HTTPS URL 转换为 SSH URL
 //
 // 示例：
-//   https://github.com/owner/repo -> git@github.com:owner/repo.git
-//   https://github.com/owner/repo.git -> git@github.com:owner/repo.git
+//
+//	https://github.com/owner/repo -> git@github.com:owner/repo.git
+//	https://github.com/owner/repo.git -> git@github.com:owner/repo.git
 func convertToSSHURL(httpsURL string) string {
 	u, err := url.Parse(httpsURL)
 	if err != nil {

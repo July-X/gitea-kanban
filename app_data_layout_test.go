@@ -18,12 +18,13 @@ import (
 //   - 禁止出现 ${dataDir}/workspace/workspace 这种嵌套
 //
 // 预期布局：
-//   ${dataDir}/
-//   ├── state.json
-//   ├── logs/main/main.log
-//   ├── dev-tokens/
-//   └── workspace/                ← git repos 唯一目录（不可改）
-//       └── repos/owner__repo/.git
+//
+//	${dataDir}/
+//	├── state.json
+//	├── logs/main/main.log
+//	├── dev-tokens/
+//	└── workspace/                ← git repos 唯一目录（不可改）
+//	    └── repos/owner__repo/.git
 func TestApp_OnStartup_DataLayout(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("GITEA_KANBAN_DATA_DIR", tmp)

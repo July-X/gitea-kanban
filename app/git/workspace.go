@@ -366,11 +366,11 @@ func (wm *WorkspaceManager) MigrateLegacyWorkspaceLayout(
 			}
 		}
 		legacyRepos = append(legacyRepos, legacyRepo{
-			dirName:   name,
-			dirPath:   dirPath,
-			owner:     owner,
-			repo:      repo,
-			platform:  platform,
+			dirName:  name,
+			dirPath:  dirPath,
+			owner:    owner,
+			repo:     repo,
+			platform: platform,
 			stagingAccountDir: filepath.Join(workspacePath, "_v25_migration_staging",
 				AccountDirName(username)),
 			stagingRepoPath: filepath.Join(workspacePath, "_v25_migration_staging",

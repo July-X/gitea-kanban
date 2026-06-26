@@ -357,6 +357,7 @@ func TestGitHubAdapter_ListRepos_Empty(t *testing.T) {
 //   - User-Agent: 应用名(Go 默认 Go-http-client/1.1 偶尔被拒)
 //   - X-GitHub-Api-Version: 2022-11-28(钉死避免 API 升级导致兼容问题)
 //   - Accept: application/vnd.github+json
+//
 // 这两个 header 缺失是 GitHub 返 406/415 的常见根因
 func TestGitHubAdapter_RequestHeaders(t *testing.T) {
 	var capturedHeaders http.Header

@@ -78,10 +78,10 @@ func TestApp_CloneRepo_RejectsUnmatchedAccount(t *testing.T) {
 }
 
 // TestApp_CloneRepo_HappyPath 验证 CloneRepo 走通完整链路
-//   1. 准备一个 httptest mock gitea server 接收 /user /repos/.../info/refs?service=git-upload-pack
-//   2. 把 mock server URL 写进 localStore 作为账号
-//   3. 把假 token 写进 dev-tokens（keychain fallback）
-//   4. 调 CloneRepo → 期望 workspace 下出现 .git 目录
+//  1. 准备一个 httptest mock gitea server 接收 /user /repos/.../info/refs?service=git-upload-pack
+//  2. 把 mock server URL 写进 localStore 作为账号
+//  3. 把假 token 写进 dev-tokens（keychain fallback）
+//  4. 调 CloneRepo → 期望 workspace 下出现 .git 目录
 //
 // 注：完整 git clone 协议要跑 go-git transport，复杂；
 // 这里只验证"走到 adapter.CloneRepo"那一步前都正确，再验证目录创建在 workspace 下
