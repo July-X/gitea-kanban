@@ -750,53 +750,46 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
 });
 
 // ============================================================
-// v2.16：拖拽栅格栏（SourceTree 风格）
-// - 拖拽手柄调整 userOffsetDelta，控制 commit list padding-left
-// - 默认 userOffsetDelta = 0 → commitListOffset = svgWidth
-//   （commit 内容从 SVG lane 右边缘开始）
-// - 用户向左拖动减小 userOffsetDelta → offset 减小
-//   → commit 内容向左延伸到 SVG lane 上方（盖板效果）
-// - SVG 不缩放（完整渲染固定宽度），拖拽只改 commit list 起点
+// v2.18：拖拽栅格栏（SourceTree 风格）
+// - 拖拽手柄调整 gitGraphAreaWidth（SVG 区域宽度 = userSvgAreaWidth 默认 svgWidth）
+// - 两栏布局：SVG 左（width=userSvgAreaWidth）+ commit 右（flex:1）
+// - 拖拽手柄减小 userSvgAreaWidth → SVG 区域变窄 → commit list 起点向左
+//   → commit 内容（rows）向左溢出 SVG 区域覆盖 lane（盖板效果）
 // ============================================================
 
-/** commit list 起点偏移增量（px），相对 wrapper 起点（= 0）
- * v2.17：默认 0（commit 内容覆盖 SVG lane 起点）
- * 用户拖拽调整 offset：
- *   - 增大 offset 让 commit 内容向右离开 SVG 区域
- *   - 减小 offset 让 commit 内容向左（< 0）—— commit 完全覆盖 SVG 区域 */
-const userOffsetDelta = ref<number>(0);
+/** 用户拖拽后的 SVG 区域宽度（px），默认 svgWidth（完整渲染固定宽度） */
+const userSvgAreaWidth = ref<number | null>(null);
 /** 是否正在拖拽 */
 const dragging = ref(false);
 let dragStartX = 0;
-let dragStartDelta = 0;
+let dragStartWidth = 0;
 
-/** commit list 内容起点偏移（px） = userOffsetDelta
- *  用于 commit list 容器的 padding-left，让 subject 等内容从 offset 位置开始显示
- *  v2.17：默认 0（commit 起点 = wrapper 起点 = SVG lane 起点），subject 等覆盖 SVG lane 区域
- *  拖拽改变 offset 实现"commit 内容浮在 git-graph 上方"的盖板效果调节 */
-const commitListOffset = computed(() => {
-  return userOffsetDelta.value;
+/** SVG 区域实际宽度（用户拖拽 > 自动计算 svgWidth 默认） */
+const gitGraphAreaWidth = computed(() => {
+  if (userSvgAreaWidth.value !== null) return userSvgAreaWidth.value;
+  return parseSvgPx(svgWidth.value);
 });
 
 function onDragStart(e: MouseEvent): void {
   e.preventDefault();
   dragging.value = true;
   dragStartX = e.clientX;
-  dragStartDelta = userOffsetDelta.value;
+  const svgArea = document.querySelector('.git-graph-svg-area') as HTMLElement | null;
+  dragStartWidth = svgArea?.offsetWidth ?? parseSvgPx(svgWidth.value);
   document.addEventListener('mousemove', onDragMove);
   document.addEventListener('mouseup', onDragEnd);
 }
 
 function onDragMove(e: MouseEvent): void {
   if (!dragging.value) return;
-  // 向左拖 delta 为负 → offset 减小 → commit 内容向左覆盖更多 SVG 区域
+  // 向左拖 delta 为负 → SVG 区域变窄 → commit list 起点向左 → 内容覆盖 SVG lane 上方
   const delta = e.clientX - dragStartX;
   const svgW = parseSvgPx(svgWidth.value);
-  // 下界：offset >= -svgWidth * 0.5（commit 内容不能太深入 SVG 区域）
-  // 上界：offset <= svgWidth（commit 内容可以完全离开 SVG 区域到右边）
-  const minOffset = -svgW * 0.5;
-  const maxOffset = svgW;
-  userOffsetDelta.value = Math.max(minOffset, Math.min(maxOffset, dragStartDelta + delta));
+  // 下界：宽度 >= 0（不能为负）
+  // 上界：宽度 <= svgWidth * 1.5（拖宽不超过 50%，避免失去 SVG 上下文）
+  const minWidth = 0;
+  const maxWidth = svgW * 1.5;
+  userSvgAreaWidth.value = Math.max(minWidth, Math.min(maxWidth, dragStartWidth + delta));
 }
 
 function onDragEnd(): void {
@@ -953,24 +946,22 @@ function refBadgeClass(refType?: string): string {
       <!-- Git Graph -->
       <template v-else>
         <!--
-          v2.15 SourceTree 风格布局：
-          - SVG 完整渲染（width = svgWidth），不缩放
-          - 左侧 SVG lane 区域（z-index 0，最底层）
-          - 右侧 commit list 浮在 SVG 上方（z-index 2，盖板效果）
-            commit list 用 padding-left 留出 lane 起点位置，subject 等内容向右延伸到 SVG 上方
+          v2.18：恢复标准两栏布局（修复 v2.17 的 layout 错乱）
+          - 左侧 git-graph 区域（position: sticky，flex-shrink:0，固定宽度）
+          - 拖拽手柄（绝对定位在 svg-area 右边缘）
+          - 右侧 commit list（flex:1，自适应宽度，vertical sticky top:0）
+          不再用 absolute/sticky 浮层（避免 layout 错乱）
         -->
         <div class="git-graph-wrapper">
-          <!-- SVG 图：固定完整渲染宽度（SourceTree 风格不缩放），sticky 在左 -->
-          <div class="git-graph-svg-area" :style="{ width: svgWidth }">
+          <!-- 左侧：SVG 图（sticky，宽度由 gitGraphAreaWidth 控制，默认 = svgWidth） -->
+          <div class="git-graph-svg-area" :style="{ width: `${gitGraphAreaWidth}px` }">
             <div class="git-graph-svg-inner">
-              <!-- SVG：只画线条（path），圆点用 HTML overlay -->
               <svg
                 class="git-graph-svg"
                 :viewBox="viewBox"
                 :width="svgWidth"
                 :height="svgHeight"
               >
-                <!-- v2.6：按 color 分组 path（对齐 Gitea svgcontainer.tmpl：每 flow 一个 <g>） -->
                 <g
                   v-for="pg in pathGroups"
                   :key="`flow-${pg.colorIndex}`"
@@ -978,8 +969,6 @@ function refBadgeClass(refType?: string): string {
                   :class="pg.colorClass"
                   :data-color="pg.colorIndex"
                 >
-                  <!-- v2.6 fix：用 inline stroke 属性（不依赖 scoped CSS / CSS 变量），
-                       修复 WebKit (Wails macOS WebView) 不显示连线的问题 -->
                   <path
                     v-if="pg.d"
                     :d="pg.d"
@@ -992,7 +981,7 @@ function refBadgeClass(refType?: string): string {
                 </g>
               </svg>
 
-              <!-- 圆点 overlay：固定大小 = lane 间距（10px），跟随 SVG 不缩放 -->
+              <!-- 圆点 overlay：固定大小 = lane 间距（5px） -->
               <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
                 <div
                   v-for="c in dotNodes"
@@ -1010,38 +999,18 @@ function refBadgeClass(refType?: string): string {
                 />
               </div>
             </div>
+
+            <!-- 列宽拖拽手柄（绝对定位在 svg-area 右边缘） -->
+            <div
+              class="graph-resize-handle"
+              :class="{ 'graph-resize-handle--active': dragging }"
+              title="拖拽调整图形列宽度"
+              @mousedown="onDragStart"
+            />
           </div>
 
-          <!-- 列宽拖拽手柄（v2.17：移到 wrapper 级别，避免 svg-area sticky stacking context 拦截）
-               拖拽调整 commitListOffset = commit list padding-left，
-               减小 offset 让 commit 内容向左延伸到 SVG lane 上方（盖板效果）。
-               不再缩放 SVG，只改 commit list 起点位置。
-               放在 wrapper 层级，position:sticky 让手柄跟随 SVG 区域垂直滚动，
-               z-index:5 高于 commit list (z-index:3) 确保 mousedown 能触发 -->
-          <div
-            class="graph-resize-handle"
-            :class="{ 'graph-resize-handle--active': dragging }"
-            :style="{ left: `calc(${svgWidth} - 6px)` }"
-            title="拖拽调整图形列宽度（向左拖让 commit 内容浮在 git-graph 上方）"
-            @mousedown="onDragStart"
-          />
-
-          <!--
-            右侧：Commit 列表（SourceTree 风格：浮在 SVG 上方盖板效果）
-            - 容器横跨整个 git-graph-wrapper（z-index: 3）
-            - padding-left: 0（v2.17：让 commit 内容覆盖在 SVG lane 区域上方 = 盖板效果）
-              refs 部分从 SVG lane 起点 (0) 开始向右显示，
-              subject/meta/sha 紧邻 refs 向右延伸。
-              commit 整体跟 SVG lane 起点对齐，dot 浮在 refs 之间。
-            - 拖拽手柄调整 commitListOffset，让 commit 内容向左/右偏移
-              （默认 = 0；正向偏移让 commit 离开 SVG 区域，负向让 commit 更深入 SVG 区域）
-            - 背景透明（不覆盖 SVG lane 和圆点）
-            - 但点击事件正常（z-index: 3）
-          -->
-          <div
-            class="git-graph-list"
-            :style="{ minHeight: svgHeight, paddingLeft: `${commitListOffset}px` }"
-          >
+          <!-- 右侧：Commit 列表（flex:1，跟 svg 高度一致） -->
+          <div class="git-graph-list" :style="{ minHeight: svgHeight }">
             <template v-for="r in allRows" :key="`row-${r.row}`">
               <div
                 class="commit-row"
@@ -1241,35 +1210,31 @@ function refBadgeClass(refType?: string): string {
 }
 
 /* ===== Git Graph Wrapper ===== */
-/* v2.15 SourceTree 风格：SVG 在底层完整渲染，commit list 浮在上方（盖板）
- * - SVG 区域：sticky 在左，固定宽度（= svgWidth），背景透明
- * - commit list：position absolute 横跨整个 wrapper，padding-left = svgWidth 让
- *   内容（refs/subject/meta/sha）从 lane 区域右边缘开始，subject 浮在 SVG 上方 */
+/* v2.18：标准两栏布局（恢复 flex，避免 v2.17 的 absolute/sticky 浮层错乱）
+ * - SVG 区域在左（flex-shrink:0 固定宽度），sticky 跟随垂直滚动
+ * - commit list 在右（flex:1 自适应宽度）
+ * - 拖拽手柄绝对定位在 svg-area 右边缘，z-index 高于 list */
 .git-graph-wrapper {
-  position: relative; /* 给 commit list absolute 定位锚点 */
+  display: flex;
+  align-items: flex-start;
+  position: relative;
   min-height: 1px;
-  /* v2.15：SVG 完整渲染固定宽度，wrapper 宽度可能比 viewport 窄，
-     SVG 元素溢出但 wrapper 用 overflow-x: hidden 裁切（避免水平滚动）。 */
-  overflow-x: hidden;
-  /* SVG 区域固定 width=svgWidth，超宽时 wrapper 横向滚动展示 lane */
-  overflow-y: visible;
 }
 
-/* SVG 区域：sticky 在左，固定宽度（= svgWidth），不缩放
- * 背景透明让 commit list 文字可透过（盖板效果） */
+/* SVG 区域：sticky 在左，固定宽度（= svgWidth），不缩放 */
 .git-graph-svg-area {
   position: sticky;
   left: 0;
   top: 0;
-  z-index: 1; /* SVG 在下层，commit list 在上层 */
-  background: transparent;
+  z-index: 1; /* SVG 在下层，拖拽手柄在上层 */
+  background: var(--color-shell-main-bg);
+  border-right: 1px solid var(--color-border);
   flex-shrink: 0;
   align-self: flex-start;
 }
 
 .git-graph-svg-inner {
   position: relative;
-  /* SVG 宽度 = svgWidthPx（×2 缩放），按真实宽度渲染不被压缩 */
   display: inline-block;
 }
 
@@ -1422,15 +1387,16 @@ function refBadgeClass(refType?: string): string {
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
  * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
- * - padding-left 由 inline 绑定 commitListOffset（让 subject 等内容从 offset 位置开始）
- * - z-index: 3 > svg z-index:1 = 文字浮在 SVG lane 上方（盖板） */
+ /* v2.18：commit list 在右侧（flex:1 自适应宽度）
+ *  简单 block 布局跟 SVG 形成左右两栏
+ *  sticky top:0 让 list 顶部跟随 SVG 区域一起 sticky 屏幕顶部（保持 dot 和 commit 文字垂直对齐）
+ *  注意：sticky 创建 stacking context，但 flex item 不需要 z-index */
 .git-graph-list {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-shell-main-bg);
   position: sticky;
   top: 0;
-  z-index: 3;
-  background: transparent; /* 不挡 SVG lane + 圆点 */
-  pointer-events: auto; /* 保留点击事件 */
-  overflow-x: hidden;
 }
 
 /* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐）
@@ -1442,7 +1408,9 @@ function refBadgeClass(refType?: string): string {
   gap: var(--space-2, 8px);
   /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 28px），与 SVG 行高 1:1 对齐 */
   height: 28px; /* fallback（被 inline style 覆盖） */
-  padding: 0 var(--space-3, 12px);
+  /* v2.18：取消 padding-left 让 commit 内容紧贴 SVG 区域右边缘（视觉上连续），
+     保留 padding-right 让长 commit 内容不顶到 viewport 边缘 */
+  padding: 0 var(--space-3, 12px) 0 0;
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
   overflow: hidden;
@@ -1705,20 +1673,21 @@ function refBadgeClass(refType?: string): string {
 }
 
 /* ===== v2.17 列宽拖拽手柄（SourceTree 风格栅格栏，wrapper 级别） =====
- * v2.17：从 .git-graph-svg-area 内部移到 wrapper 层级，避免 sticky stacking context 拦截。
- * 拖拽调整 commitListOffset = commit list padding-left，不缩放 SVG（完整渲染固定宽度）。
- * position:sticky top:0 让手柄跟随 SVG 区域垂直滚动，固定在 SVG lane 右边缘
- * z-index:5 高于 commit list (z-index:3) 确保 mousedown 能触发 */
+ /* ===== v2.18 列宽拖拽手柄（绝对定位在 svg-area 右边缘） =====
+ * 不再 sticky top:0 height:100vh（v2.17 的高度让 handle 占满整屏，挤压布局）
+ * 改为 position: absolute 限制在 svg-area 内（高度 100% = svg-area 高度）
+ * 拖拽调整 svgWidth 让 SVG 区域宽度变化（commit list flex:1 自动调整宽度） */
 .graph-resize-handle {
-  position: sticky;
+  position: absolute;
   top: 0;
+  right: 0;
   width: 6px;
-  height: 100vh;
+  height: 100%;
   cursor: col-resize;
   background: var(--color-border);
   transition: background 0.15s;
   user-select: none;
-  z-index: 5; /* 在 commit list 之上 */
+  z-index: 5;
 }
 .graph-resize-handle:hover,
 .graph-resize-handle--active {
