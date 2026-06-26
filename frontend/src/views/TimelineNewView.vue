@@ -704,36 +704,53 @@ const svgAreaWidth = computed(() => {
 });
 
 /**
- * SVG 横向缩放比：当容器（svgAreaWidth）比 SVG 固有宽度更宽时，把 SVG 线条
- * scaleX 拉伸填满容器，让复杂 merge 的 lane 间距变大、斜线更清晰（缓解断线视觉），
- * 也让"拉宽 graph 区域"真正生效（之前拉宽只改变滚动条，flow 图形不变）。
+ * SVG 横向缩放比：让 lane 间距跟随容器宽度等比缩放，圆点和线一起变密/变疏。
  *
- * 圆点 overlay 不参与 transform（保持正圆），但其 cx 按 scaleX 缩放以对齐线条。
- * 仅横向拉伸（scaleY=1，行高不变），避免 commit 列表与圆点垂直错位。
- * 容器比 SVG 窄时不缩放（保持 1，靠 .git-graph-svg-area 内部 overflow-x 滚动）。
+ * 逻辑：scaleX = container / intrinsic（任意值）
+ *   - 拉宽（container > intrinsic）：lane 间距变大、线变疏（缓解断线）
+ *   - 缩窄（container < intrinsic）：lane 间距变小、线变密、点变小（点和线同步缩放）
+ *   - 相等（container = intrinsic）：scaleX = 1
+ *
+ * 圆点大小、cx 全部按 scaleX 缩放，保证圆点始终落在 lane 上。
+ * SVG line 用 vector-effect: non-scaling-stroke，缩放时线宽保持 1px 不变粗不变细。
  */
 const svgScaleX = computed(() => {
   if (!useAsciiGraph.value || !asciiGraph.value) return 1;
   const intrinsic = parseSvgPx(svgWidth.value);
   const container = parseSvgPx(svgAreaWidth.value);
   if (intrinsic <= 0 || container <= 0) return 1;
-  // 容器更宽才拉伸；容器更窄保持 1（滚动）
-  return container > intrinsic ? container / intrinsic : 1;
+  // 容器宽度 / SVG 固有宽度 = 缩放比
+  return container / intrinsic;
 });
 
-/** SVG 线条元素的 transform（横向拉伸），圆点 overlay 不受影响 */
+/** SVG 线条元素的 transform（横向缩放，圆点 overlay 不受影响） */
 const svgTransform = computed(() => {
   const s = svgScaleX.value;
   return s === 1 ? undefined : `scaleX(${s})`;
 });
 
-/** .git-graph-svg-inner 宽度：拉伸时撑到容器宽度，避免 SVG transform 后右侧留白 */
+/**
+ * lane 视觉间距（px）：COL_WIDTH * DISPLAY_SCALE * scaleX
+ * 等于 lane 上相邻两个 `|` 之间的视觉距离。
+ */
+const laneSpacing = computed(() => ASCII_COL_WIDTH * ASCII_DISPLAY_SCALE * svgScaleX.value);
+
+/**
+ * 圆点视觉直径（px）：lane 间距（圆点填满一个 lane，跟 Gitea 圆点直径=lane 间距一致）
+ * scaleX < 1 时圆点变小（线变密时点也变密）。
+ */
+const dotSize = computed(() => laneSpacing.value);
+
+/**
+ * .git-graph-svg-inner 宽度：缩放后 = container 宽度（避免 SVG transform 后留白/溢出）
+ * 不缩放时让 inline-block 自动撑到 SVG 宽度即可。
+ */
 const svgInnerWidthStyle = computed(() => {
   if (svgScaleX.value === 1) return undefined;
   return { width: dotsOverlayWidth.value };
 });
 
-/** 圆点 overlay 容器宽度：拉伸后要等于容器宽度，否则圆点定位错位 */
+/** 圆点 overlay 容器宽度：缩放后 = container 宽度，跟 SVG 视觉宽度一致 */
 const dotsOverlayWidth = computed(() => {
   if (!useAsciiGraph.value || !asciiGraph.value) return svgWidth.value;
   const s = svgScaleX.value;
@@ -746,6 +763,8 @@ interface DotOverlayNode {
   subject: string;
   cx: number;
   cy: number;
+  /** 圆点直径（px），随 lane 缩放（保证圆点跟 lane 一起变密/变疏） */
+  size: number;
   colorHex?: string;
   colorClass?: string;
 }
@@ -758,14 +777,16 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     // 不减 minX，会恒定偏右 minX*SCALE（minColumn 几乎总是 1 → 偏右 10px），
     // 表现为"圆点偏右、线条偏左"。这里减去 minX 对齐。
     const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
-    // svgScaleX：容器比 SVG 宽时线条横向拉伸，圆点 cx 也要同步缩放才能对齐线条。
-    // 圆点本身不 transform（保持正圆），只把 cx 乘 scaleX。
+    // svgScaleX：容器宽窄变化时 lane 等比缩放，圆点 cx 乘 scaleX 与线条对齐，
+    // 圆点 size = lane 间距（点也跟随缩放：缩小变密时点变小）。
     const sx = svgScaleX.value;
+    const dot = dotSize.value;
     return asciiGraph.value.commits.map((commit) => ({
       sha: commit.sha,
       subject: commit.subject,
       cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX) * ASCII_DISPLAY_SCALE * sx,
       cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
+      size: dot,
       colorClass: flowColorClass(
         asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
       ),
@@ -776,6 +797,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     subject: node.subject,
     cx: node.cx,
     cy: node.cy,
+    size: dotSize.value,
     colorHex: node.colorHex,
   }));
 });
@@ -1003,8 +1025,10 @@ function refBadgeClass(refType?: string): string {
                   class="commit-dot"
                   :class="c.colorClass"
                   :style="{
-                    left: `${c.cx - 4}px`,
-                    top: `${c.cy - 4}px`,
+                    left: `${c.cx - c.size / 2}px`,
+                    top: `${c.cy - c.size / 2}px`,
+                    width: `${c.size}px`,
+                    height: `${c.size}px`,
                     backgroundColor: c.colorHex,
                   }"
                   :title="c.subject"
@@ -1269,6 +1293,7 @@ function refBadgeClass(refType?: string): string {
 }
 .commit-dot {
   position: absolute;
+  /* 默认尺寸（被 inline style 覆盖，inline size = lane 间距 跟随缩放） */
   width: 8px;
   height: 8px;
   border-radius: 50%;
