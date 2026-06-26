@@ -226,10 +226,11 @@ case "$EVENT" in
     ;;
   Stop)
     log "Stop 事件触发 → 完整后处理流程"
-    stage_format
-    stage_build
-    stage_test
-    stage_commit
+    # 任何 stage_* 失败时 exit 1，且不再继续后续阶段
+    stage_format || { err "格式化阶段失败"; exit 1; }
+    stage_build  || { err "编译阶段失败"; exit 1; }
+    stage_test   || { err "测试阶段失败，不提交（请修复测试后重试）"; exit 1; }
+    stage_commit || { err "提交阶段失败"; exit 1; }
     ok "全部阶段通过"
     exit 0
     ;;
