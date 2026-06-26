@@ -1391,17 +1391,19 @@ function refBadgeClass(refType?: string): string {
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
  * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
- /* v2.19：commit list 在右侧（flex:1 自适应宽度）
+ /* v2.20：commit list 在右侧（flex:1 自适应宽度）
  *  简单 block 布局跟 SVG 形成左右两栏
  *  sticky top:0 让 list 顶部跟随 SVG 区域一起 sticky 屏幕顶部（保持 dot 和 commit 文字垂直对齐）
- *  background: transparent（盖被子效果：拖拽让 list 内容覆盖 SVG lane 但 SVG dot 仍可见） */
+ *  z-index: 2 (v2.20)：盖被子效果——list 在 SVG area 上方
+ *    （v2.19 没设 z-index，list 默认在 SVG area 下面，margin-left 负值时被 SVG area 遮挡）
+ *  background: transparent（让 SVG dot 透过 commit list 可见） */
 .git-graph-list {
   flex: 1;
   min-width: 0;
   background: transparent;
   position: sticky;
   top: 0;
-  /* v2.19：rows 内容从最左边开始（不 padding-left），让 refs 紧贴 SVG area 右边缘 */
+  z-index: 2;
 }
 
 /* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐）
@@ -1678,10 +1680,11 @@ function refBadgeClass(refType?: string): string {
 }
 
 /* ===== v2.17 列宽拖拽手柄（SourceTree 风格栅格栏，wrapper 级别） =====
- /* ===== v2.18 列宽拖拽手柄（绝对定位在 svg-area 右边缘） =====
+ /* ===== v2.20 列宽拖拽手柄（绝对定位在 svg-area 右边缘） =====
+ * z-index: 50（最高）确保 handle 在最上层，不会被 list (z:2) 或其他元素遮挡
  * 不再 sticky top:0 height:100vh（v2.17 的高度让 handle 占满整屏，挤压布局）
  * 改为 position: absolute 限制在 svg-area 内（高度 100% = svg-area 高度）
- * 拖拽调整 svgWidth 让 SVG 区域宽度变化（commit list flex:1 自动调整宽度） */
+ * 拖拽调整 commitListOffset 让 commit list 向左覆盖 SVG lane（盖被子效果） */
 .graph-resize-handle {
   position: absolute;
   top: 0;
@@ -1692,7 +1695,7 @@ function refBadgeClass(refType?: string): string {
   background: var(--color-border);
   transition: background 0.15s;
   user-select: none;
-  z-index: 5;
+  z-index: 50;
 }
 .graph-resize-handle:hover,
 .graph-resize-handle--active {
