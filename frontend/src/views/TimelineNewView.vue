@@ -71,10 +71,6 @@ const repo = useRepoStore();
 // 降到 1000：最近的提交 graph 很窄（列宽 ≤3），DOM 秒渲染；更早历史交给「加载更多」按需拉。
 const INITIAL_GRAPH_LIMIT = 1000;
 const LOAD_MORE_DEEPEN_BY = 200;
-const SVG_AREA_MIN_WIDTH = 120;
-const SVG_AREA_AUTO_MAX_WIDTH = 260;
-const SVG_AREA_USER_MAX_WIDTH = 520;
-
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const activeRepo = computed(() => {
   const fn = repo.currentProject
@@ -265,10 +261,8 @@ watch(expandedSha, async (sha) => {
   scrollContainer.scrollTo({ top: targetScroll, behavior: 'smooth' });
 });
 
-/** 组件卸载时清理拖拽监听器和事件监听器 */
+/** 组件卸载时清理事件监听器（v2.15：拖拽缩放已移除） */
 onUnmounted(() => {
-  document.removeEventListener('mousemove', onDragMove);
-  document.removeEventListener('mouseup', onDragEnd);
   document.removeEventListener('app:refresh', onAppRefresh);
 });
 
@@ -691,72 +685,23 @@ const expandedCommitNode = computed<
 // 保留 ACCORDION_MAX_HEIGHT 常量供 CSS 注释和 ref 使用。
 // const ACCORDION_MAX_HEIGHT = 260;
 
-/** SVG 区域实际宽度（用户拖拽 > 自动计算 > 最小值） */
-const svgAreaWidth = computed(() => {
-  const autoNum = parseSvgPx(svgWidth.value) || SVG_AREA_MIN_WIDTH;
-  const user = userSvgAreaWidth.value;
-  if (user !== null) {
-    return `${Math.min(Math.max(SVG_AREA_MIN_WIDTH, user), SVG_AREA_USER_MAX_WIDTH)}px`;
-  }
-  // 大仓库可能产生大量 lane，SVG 本身很宽；左列只给一个可用窗口，
-  // 横向查看留给 .git-graph-svg-area 内部滚动，避免把右侧提交记录挤出屏幕。
-  return `${Math.min(Math.max(SVG_AREA_MIN_WIDTH, autoNum), SVG_AREA_AUTO_MAX_WIDTH)}px`;
-});
-
 /**
- * SVG 横向缩放比：让 lane 间距跟随容器宽度等比缩放，圆点和线一起变密/变疏。
- *
- * 逻辑：scaleX = container / intrinsic（任意值）
- *   - 拉宽（container > intrinsic）：lane 间距变大、线变疏（缓解断线）
- *   - 缩窄（container < intrinsic）：lane 间距变小、线变密、点变小（点和线同步缩放）
- *   - 相等（container = intrinsic）：scaleX = 1
- *
- * 圆点大小、cx 全部按 scaleX 缩放，保证圆点始终落在 lane 上。
- * SVG line 用 vector-effect: non-scaling-stroke，缩放时线宽保持 1px 不变粗不变细。
+ * SourceTree 风格布局（v2.15）：
+ *   - SVG 完整渲染固定宽度（= svgWidth），不缩放
+ *   - commit log 内容浮在 git-graph 上方（盖板），用 padding-left 留出 lane 起点位置
+ *   - 不再有\"拉宽/缩窄拖拽缩放\"，避免圆点和线不同步缩放造成视觉错位
  */
-const svgScaleX = computed(() => {
-  if (!useAsciiGraph.value || !asciiGraph.value) return 1;
-  const intrinsic = parseSvgPx(svgWidth.value);
-  const container = parseSvgPx(svgAreaWidth.value);
-  if (intrinsic <= 0 || container <= 0) return 1;
-  // 容器宽度 / SVG 固有宽度 = 缩放比
-  return container / intrinsic;
-});
-
-/** SVG 线条元素的 transform（横向缩放，圆点 overlay 不受影响） */
-const svgTransform = computed(() => {
-  const s = svgScaleX.value;
-  return s === 1 ? undefined : `scaleX(${s})`;
-});
 
 /**
- * lane 视觉间距（px）：COL_WIDTH * DISPLAY_SCALE * scaleX
- * 等于 lane 上相邻两个 `|` 之间的视觉距离。
+ * lane 视觉间距（px）：COL_WIDTH * DISPLAY_SCALE = 10px（不缩放，跟 Gitea lane 间距一致）
  */
-const laneSpacing = computed(() => ASCII_COL_WIDTH * ASCII_DISPLAY_SCALE * svgScaleX.value);
+const laneSpacing = computed(() => ASCII_COL_WIDTH * ASCII_DISPLAY_SCALE);
 
 /**
- * 圆点视觉直径（px）：lane 间距（圆点填满一个 lane，跟 Gitea 圆点直径=lane 间距一致）
- * scaleX < 1 时圆点变小（线变密时点也变密）。
+ * 圆点视觉直径（px）= lane 间距（圆点填满一个 lane，跟 Gitea 圆点直径=lane 间距一致）
+ * 不缩放所以 size 是常量 10px。
  */
 const dotSize = computed(() => laneSpacing.value);
-
-/**
- * .git-graph-svg-inner 宽度：缩放后 = container 宽度（避免 SVG transform 后留白/溢出）
- * 不缩放时让 inline-block 自动撑到 SVG 宽度即可。
- */
-const svgInnerWidthStyle = computed(() => {
-  if (svgScaleX.value === 1) return undefined;
-  return { width: dotsOverlayWidth.value };
-});
-
-/** 圆点 overlay 容器宽度：缩放后 = container 宽度，跟 SVG 视觉宽度一致 */
-const dotsOverlayWidth = computed(() => {
-  if (!useAsciiGraph.value || !asciiGraph.value) return svgWidth.value;
-  const s = svgScaleX.value;
-  if (s === 1) return svgWidth.value;
-  return `${parseSvgPx(svgWidth.value) * s}px`;
-});
 
 interface DotOverlayNode {
   sha: string;
@@ -777,14 +722,13 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     // 不减 minX，会恒定偏右 minX*SCALE（minColumn 几乎总是 1 → 偏右 10px），
     // 表现为"圆点偏右、线条偏左"。这里减去 minX 对齐。
     const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
-    // svgScaleX：容器宽窄变化时 lane 等比缩放，圆点 cx 乘 scaleX 与线条对齐，
-    // 圆点 size = lane 间距（点也跟随缩放：缩小变密时点变小）。
-    const sx = svgScaleX.value;
+    // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW-minX)*SCALE，
+    // 圆点 size = lane 间距（10px），圆点视觉上落在 lane 右缘，跨 lane 边界（跟 Gitea 一致）。
     const dot = dotSize.value;
     return asciiGraph.value.commits.map((commit) => ({
       sha: commit.sha,
       subject: commit.subject,
-      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX) * ASCII_DISPLAY_SCALE * sx,
+      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX) * ASCII_DISPLAY_SCALE,
       cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
       size: dot,
       colorClass: flowColorClass(
@@ -802,43 +746,10 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
   }));
 });
 
-function parseSvgPx(value: string): number {
-  const n = Number.parseFloat(value.replace(/px$/, ''));
-  return Number.isFinite(n) ? n : 0;
-}
-
 // ============================================================
-// v1.6 拖拽调整 SVG 区域宽度（v2.6 保留：结构化渲染后仍可用）
+// v2.15：移除拖拽缩放（SourceTree 风格 SVG 完整渲染不缩放）
+// 拖拽手柄 DOM 也已删除（详见 template 内注释）
 // ============================================================
-/** 用户手动设定的 SVG 区域宽度（px）；null = 用自动计算值 */
-const userSvgAreaWidth = ref<number | null>(null);
-/** 是否正在拖拽 */
-const dragging = ref(false);
-/** 拖拽起始 x 和起始宽度 */
-let dragStartX = 0;
-let dragStartWidth = 0;
-
-function onDragStart(e: MouseEvent): void {
-  e.preventDefault();
-  dragging.value = true;
-  dragStartX = e.clientX;
-  const svgArea = document.querySelector('.git-graph-svg-area') as HTMLElement | null;
-  dragStartWidth = svgArea?.offsetWidth ?? 120;
-  document.addEventListener('mousemove', onDragMove);
-  document.addEventListener('mouseup', onDragEnd);
-}
-
-function onDragMove(e: MouseEvent): void {
-  if (!dragging.value) return;
-  const delta = e.clientX - dragStartX;
-  userSvgAreaWidth.value = Math.max(80, dragStartWidth + delta);
-}
-
-function onDragEnd(): void {
-  dragging.value = false;
-  document.removeEventListener('mousemove', onDragMove);
-  document.removeEventListener('mouseup', onDragEnd);
-}
 
 /** 生成 fallback avatar：取名字首字符 */
 function avatarInitial(name: string): string {
@@ -946,7 +857,7 @@ function refBadgeClass(refType?: string): string {
     </header>
 
     <!-- ===== 主内容 ===== -->
-    <div class="timeline-new__main" :class="{ 'timeline-new__main--dragging': dragging }">
+    <div class="timeline-new__main">
       <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
       </div>
@@ -981,19 +892,23 @@ function refBadgeClass(refType?: string): string {
 
       <!-- Git Graph -->
       <template v-else>
+        <!--
+          v2.15 SourceTree 风格布局：
+          - SVG 完整渲染（width = svgWidth），不缩放
+          - 左侧 SVG lane 区域（z-index 0，最底层）
+          - 右侧 commit list 浮在 SVG 上方（z-index 2，盖板效果）
+            commit list 用 padding-left 留出 lane 起点位置，subject 等内容向右延伸到 SVG 上方
+        -->
         <div class="git-graph-wrapper">
-          <!-- 左侧：SVG 图（grid-column:1，跨所有 row，sticky 跟随滚动） -->
-          <!-- 左侧：SVG 图（固定宽度，左侧 sticky） -->
-          <div class="git-graph-svg-area" :style="{ width: svgAreaWidth }">
-            <div class="git-graph-svg-inner" :style="svgInnerWidthStyle">
-              <!-- SVG：只画线条（path），圆点用 HTML overlay 固定大小） -->
-              <!-- v2.x：容器更宽时 SVG 线条 scaleX 拉伸填满（缓解断线 + 拉宽生效） -->
+          <!-- SVG 图：固定完整渲染宽度（SourceTree 风格不缩放），sticky 在左 -->
+          <div class="git-graph-svg-area" :style="{ width: svgWidth }">
+            <div class="git-graph-svg-inner">
+              <!-- SVG：只画线条（path），圆点用 HTML overlay -->
               <svg
                 class="git-graph-svg"
                 :viewBox="viewBox"
                 :width="svgWidth"
                 :height="svgHeight"
-                :style="{ transform: svgTransform, transformOrigin: 'top left' }"
               >
                 <!-- v2.6：按 color 分组 path（对齐 Gitea svgcontainer.tmpl：每 flow 一个 <g>） -->
                 <g
@@ -1017,8 +932,8 @@ function refBadgeClass(refType?: string): string {
                 </g>
               </svg>
 
-              <!-- 圆点 overlay：固定大小，不受 SVG 缩放影响（cx 已按 scaleX 缩放对齐线条） -->
-              <div class="commit-dots-overlay" :style="{ width: dotsOverlayWidth, height: svgHeight }">
+              <!-- 圆点 overlay：固定大小 = lane 间距（10px），跟随 SVG 不缩放 -->
+              <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
                 <div
                   v-for="c in dotNodes"
                   :key="`dot-${c.sha}`"
@@ -1037,16 +952,15 @@ function refBadgeClass(refType?: string): string {
             </div>
           </div>
 
-          <!-- 列宽拖拽手柄（SVG 区域右侧竖向分割线，拖拽调宽） -->
-          <div
-            class="graph-resize-handle"
-            :class="{ 'graph-resize-handle--active': dragging }"
-            title="拖拽调整图形列宽度"
-            @mousedown="onDragStart"
-          />
-
-          <!-- 右侧：Commit 列表（与 SVG 等高，按 row 0..maxRow 全渲染） -->
-          <div class="git-graph-list" :style="{ minHeight: svgHeight }">
+          <!--
+            右侧：Commit 列表（SourceTree 风格：浮在 SVG 上方盖板效果）
+            - 容器横跨整个 git-graph-wrapper（position: absolute, left:0, right:0）
+            - padding-left: svgWidth 让 subject 等内容从 SVG lane 右边缘开始显示
+              （subject 文字向左延伸到 SVG lane 上方 = 盖板效果）
+            - 背景透明（不覆盖 SVG lane 和圆点）
+            - 但点击事件正常（z-index: 2）
+          -->
+          <div class="git-graph-list" :style="{ minHeight: svgHeight, paddingLeft: svgWidth }">
             <template v-for="r in allRows" :key="`row-${r.row}`">
               <div
                 class="commit-row"
@@ -1245,32 +1159,29 @@ function refBadgeClass(refType?: string): string {
 }
 
 /* ===== Git Graph Wrapper ===== */
-/* v2.10：flex 布局 —— 3 子元素横排（SVG / 6px 拖拽手柄 / commit 列表）
- * 手风琴是 wrapper 的绝对定位子元素，跨整宽覆盖左侧 SVG
- * 左侧 SVG 区域 sticky + 可拖拽调宽；右侧 commit 列表 flex:1 自适应 */
+/* v2.15 SourceTree 风格：SVG 在底层完整渲染，commit list 浮在上方（盖板）
+ * - SVG 区域：sticky 在左，固定宽度（= svgWidth），背景透明
+ * - commit list：position absolute 横跨整个 wrapper，padding-left = svgWidth 让
+ *   内容（refs/subject/meta/sha）从 lane 区域右边缘开始，subject 浮在 SVG 上方 */
 .git-graph-wrapper {
-  display: flex;
-  align-items: flex-start;
-  position: relative; /* 给手风琴绝对定位用锚点 */
+  position: relative; /* 给 commit list absolute 定位锚点 */
+  min-height: 1px;
+  /* v2.15：SVG 完整渲染固定宽度，wrapper 宽度可能比 viewport 窄，
+     SVG 元素溢出但 wrapper 用 overflow-x: hidden 裁切（避免水平滚动）。 */
+  overflow-x: hidden;
+  /* SVG 区域固定 width=svgWidth，超宽时 wrapper 横向滚动展示 lane */
+  overflow-y: visible;
 }
 
-/* SVG 区域：sticky 在左侧，跟随 commit 列表垂直滚动；
- * 宽度由拖拽手柄控制（默认自动计算），flex-shrink:0 不被压缩 */
-/* ===== git-graph 背景（v1.6.1 合并到主区中性色）=====
- * 旧值 --color-bg (#E8F1F5 浅苍蓝) 跟新主区 (#F8FAFC 极浅灰白) 对比过强,
- * "工具面板区域" 跟 "主内容区" 跳出来, 不协调
- * v1.6.1 改用 --color-shell-main-bg (跟主区同色), 靠 1px 右边线分区 */
+/* SVG 区域：sticky 在左，固定宽度（= svgWidth），不缩放
+ * 背景透明让 commit list 文字可透过（盖板效果） */
 .git-graph-svg-area {
   position: sticky;
   left: 0;
-  z-index: 2;
-  min-width: 80px;
-  background: var(--color-shell-main-bg);
-  border-right: 1px solid var(--color-border);
-  overflow-x: auto;     /* 多列时水平滚动而非被压缩 */
-  overflow-y: hidden;
+  top: 0;
+  z-index: 1; /* SVG 在下层，commit list 在上层 */
+  background: transparent;
   flex-shrink: 0;
-  /* v2.10：宽度由 inline style 控制（grid 模式已撤） */
   align-self: flex-start;
 }
 
@@ -1284,12 +1195,13 @@ function refBadgeClass(refType?: string): string {
   display: block;
 }
 
-/* 圆点 overlay：绝对定位在 SVG 之上，固定大小 */
+/* 圆点 overlay：绝对定位在 SVG 之上，固定大小 = lane 间距（10px） */
 .commit-dots-overlay {
   position: absolute;
   top: 0;
   left: 0;
   pointer-events: none;
+  z-index: 2; /* 圆点在 commit list 下层（让 commit 文字浮在圆点上方） */
 }
 .commit-dot {
   position: absolute;
@@ -1426,11 +1338,19 @@ function refBadgeClass(refType?: string): string {
   fill: var(--color-series-16-15);
 }
 
-/* Commit 列表 */
+/* Commit 列表（v2.15 SourceTree 风格：浮在 SVG 上方盖板）
+ * - position: absolute 横跨整个 git-graph-wrapper（left:0; right:0）
+ * - padding-left 由 inline 绑定 svgWidth（让 subject 等内容从 lane 区域右边缘开始）
+ * - z-index: 3 > svg z-index:1 = 文字浮在 SVG lane 上方（盖板） */
 .git-graph-list {
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto; /* 内容超宽时允许横向滚动（保证不挤压） */
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 3;
+  background: transparent; /* 不挡 SVG lane + 圆点 */
+  pointer-events: auto; /* 保留点击事件 */
+  overflow-x: hidden;
 }
 
 /* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐）
@@ -1699,63 +1619,10 @@ function refBadgeClass(refType?: string): string {
   cursor: not-allowed;
 }
 
-/* ===== v1.6 列宽拖拽手柄（SVG 区域右侧竖向分割线） ===== */
-.graph-resize-handle {
-  width: 6px;
-  flex-shrink: 0;
-  cursor: col-resize;
-  background: var(--color-border);
-  position: relative;
-  transition: background 0.15s;
-  user-select: none;
-  align-self: stretch;
-}
-.graph-resize-handle:hover,
-.graph-resize-handle--active {
-  background: var(--color-primary, #74b830);
-}
-/* 竖向三点 grip 指示器 */
-.graph-resize-handle::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 20px;
-  border-radius: 2px;
-  background: var(--color-text-muted, #666);
-  /* 三点效果：用渐变模拟 */
-  background: repeating-linear-gradient(
-    to bottom,
-    var(--color-text-muted, #666) 0px,
-    var(--color-text-muted, #666) 2px,
-    transparent 2px,
-    transparent 5px
-  );
-  opacity: 0.5;
-  transition: opacity 0.15s;
-}
-.graph-resize-handle:hover::before,
-.graph-resize-handle--active::before {
-  opacity: 1;
-  background: repeating-linear-gradient(
-    to bottom,
-    #fff 0px,
-    #fff 2px,
-    transparent 2px,
-    transparent 5px
-  );
-}
+/* ===== v1.6 列宽拖拽手柄已移除（v2.15 SourceTree 风格 SVG 完整渲染不缩放） ===== */
 
 /* 拖拽中防止文本选中 + 全局 cursor */
-.timeline-new__main--dragging {
-  user-select: none;
-  cursor: col-resize;
-}
-.timeline-new__main--dragging * {
-  cursor: col-resize !important;
-}
+/* v2.15：拖拽缩放已移除（SourceTree 风格），不再需要 --dragging cursor 样式 */
 
 /* ===== v1.6 Avatar fallback（无头像时显示首字母） ===== */
 .commit-avatar-fallback {
