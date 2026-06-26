@@ -1470,16 +1470,26 @@ function refBadgeClass(refType?: string): string {
 .git-graph-header__col--sha {
   padding: 0 var(--space-2, 8px);
 }
-/* 列分隔手柄 —— 绝对定位在 header 内部 */
+/* v2.30：列分隔拖拽手柄 = 平时 1px 透明（与表头 .git-graph-header__col 的 border-right 重叠）
+ *  - 命中区是 4px 宽（padding 扩展），但 background-clip: content-box 让背景只渲染中间 1px
+ *  - 平时看到的"1px 纵向线"是 content-box 的 background = 透明，所以实际可见的是表头 col 的 border-right
+ *  - hover/active 时 content-box background 变绿（仍是 1px 居中） + ::before 显示 16px 中心白线指示
+ *  - 用户体验：鼠标 hover 到纵向分隔线 → 立刻变绿 → 按下即可拖拽
+ *  - 不再有独立的 6px 胖手柄（用户要求："鼠标滑动到这个分割线后就能左右拖动"） */
 .git-graph-header__resize {
   position: absolute;
   top: 0;
-  width: 6px;
+  width: 4px;            /* 命中区 4px（centered around the 1px line） */
   height: 100%;
   cursor: col-resize;
   z-index: 4;
   background: transparent;
-  transition: background 0.15s;
+  transition: background 0.12s;
+  /* background-clip: content-box 让 background 只在 content 区域渲染（1px），
+     padding 区域（左右各 1.5px）保持透明，命中区是整个 4px */
+  background-clip: content-box;
+  padding-left: 1.5px;
+  padding-right: 1.5px;
 }
 .git-graph-header__resize:hover,
 .git-graph-header__resize--active {
