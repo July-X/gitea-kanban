@@ -844,12 +844,12 @@ function refTypeFromGroup(refGroup: string): string {
 // ============================================================
 
 /** 列宽状态：每个列的初始宽度（px） */
-const DEFAULT_COL_WIDTHS = {
+const DEFAULT_COL_WIDTHS: { desc: number; author: number; date: number; sha: number } = {
   desc: 480, // Description 列（refs + subject）
   author: 160, // Author 列
   date: 120, // Date 列
   sha: 80, // SHA 列
-} as const;
+};
 
 /** 列宽存储 key */
 const COL_WIDTHS_STORAGE_KEY = 'gitea-kanban:gitgraph:column-widths';
@@ -1190,42 +1190,59 @@ function refBadgeClass(refType?: string): string {
                 @keydown.space.prevent="r.commit && toggleCommitDetail(r.commit)"
               >
                 <template v-if="r.commit">
-                  <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
-                       这里按类型渲染 badge 颜色，不再用启发式猜。 -->
-                  <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
-                    <span
-                      v-for="(ref, idx) in r.commit.refs"
-                      :key="`ref-${r.commit.sha}-${ref}`"
-                      class="ref-badge"
-                      :class="refBadgeClass(r.commit.refTypes?.[idx])"
-                      :title="ref"
-                    >
-                      <Tag
-                        v-if="r.commit.refTypes?.[idx] === 'tag'"
-                        :size="11"
-                        class="ref-badge__icon"
-                        aria-hidden="true"
-                      />
-                      <GitBranch
-                        v-else
-                        :size="11"
-                        class="ref-badge__icon"
-                        aria-hidden="true"
-                      />
-                      <span>{{ ref }}</span>
+                  <!-- v2.22：Description 列（refs + subject） -->
+                  <div class="commit-row__col commit-row__col--desc">
+                    <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
+                         这里按类型渲染 badge 颜色，不再用启发式猜。 -->
+                    <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
+                      <span
+                        v-for="(ref, idx) in r.commit.refs"
+                        :key="`ref-${r.commit.sha}-${ref}`"
+                        class="ref-badge"
+                        :class="refBadgeClass(r.commit.refTypes?.[idx])"
+                        :title="ref"
+                      >
+                        <Tag
+                          v-if="r.commit.refTypes?.[idx] === 'tag'"
+                          :size="11"
+                          class="ref-badge__icon"
+                          aria-hidden="true"
+                        />
+                        <GitBranch
+                          v-else
+                          :size="11"
+                          class="ref-badge__icon"
+                          aria-hidden="true"
+                        />
+                        <span>{{ ref }}</span>
+                      </span>
                     </span>
-                  </span>
-                  <span class="commit-subject">{{ r.commit.subject }}</span>
-                  <span class="commit-meta">
+                    <span class="commit-subject">{{ r.commit.subject }}</span>
+                  </div>
+                  <!-- v2.22：Author 列 -->
+                  <div class="commit-row__col commit-row__col--author">
                     <span
                       class="commit-avatar-fallback"
                       :class="`flow-color-16-${avatarColorIndex(r.commit.authorName)}`"
                       aria-hidden="true"
                     >{{ avatarInitial(r.commit.authorName) }}</span>
                     <span class="commit-author">{{ r.commit.authorName }}</span>
+                  </div>
+                  <!-- v2.22：Date 列 -->
+                  <div class="commit-row__col commit-row__col--date">
                     <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
-                  </span>
-                  <span class="commit-sha">{{ r.commit.shortSha }}</span>
+                  </div>
+                  <!-- v2.22：SHA 列 -->
+                  <div class="commit-row__col commit-row__col--sha">
+                    <span class="commit-sha">{{ r.commit.shortSha }}</span>
+                  </div>
+                </template>
+                <template v-else>
+                  <!-- 关系占位行（merge edge 中间段）—— 用 4 个空 col 占位 -->
+                  <div class="commit-row__col commit-row__col--desc" />
+                  <div class="commit-row__col commit-row__col--author" />
+                  <div class="commit-row__col commit-row__col--date" />
+                  <div class="commit-row__col commit-row__col--sha" />
                 </template>
               </div>
                <!-- v2.14：行下手风琴 —— 流式插入 list 内部，只占右列宽，
@@ -1565,13 +1582,89 @@ function refBadgeClass(refType?: string): string {
   will-change: transform;
 }
 
+/* v2.22：SourceTree 风格表头
+ *  - 跟 commit-row 同样的 grid-template-columns（--grid-template-columns）
+ *  - 顶部 sticky（top: 0 + z-index: 3 高于 commit-row）
+ *  - 列分隔手柄（git-graph-header__resize）绝对定位在列右边
+ *  - 表头高度 = commit-row 高度一致
+ *  - 背景 var(--color-bg-header) 与 commit-row 区分
+ *  - 列宽变化触发 commit-row 重新布局（通过 --grid-template-columns 共享 CSS 变量） */
+.git-graph-header {
+  display: grid;
+  grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
+  align-items: center;
+  height: 32px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--color-bg-soft, rgba(0, 0, 0, 0.03));
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  padding-right: var(--space-3, 12px);
+}
+.git-graph-header__col {
+  padding: 0 var(--space-2, 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-graph-header__col--desc {
+  padding-left: 0;
+}
+.git-graph-header__col--author {
+  padding-left: var(--space-2, 8px);
+}
+.git-graph-header__col--date {
+  padding: 0 var(--space-2, 8px);
+}
+.git-graph-header__col--sha {
+  padding: 0 var(--space-2, 8px);
+}
+/* 列分隔手柄 —— 绝对定位在 list 内部（top: 0 跨越表头和所有 row） */
+.git-graph-header__resize {
+  position: absolute;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+  /* 默认透明，hover/active 显示绿色指示器 */
+  background: transparent;
+  transition: background 0.15s;
+}
+.git-graph-header__resize:hover,
+.git-graph-header__resize--active {
+  background: var(--color-primary, #74b830);
+}
+.git-graph-header__resize:hover::before,
+.git-graph-header__resize--active::before {
+  /* 竖向指示线（hover/active 时显示） */
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 16px;
+  background: #fff;
+  border-radius: 1px;
+}
+
 /* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐）
  * v1.6 策略：保持单行固定高度 → 分支名完整显示 + 提交信息省略号兜底
- * 这样 SVG 点位永远与 commit 行对齐，不会因换行错位 */
+ * 这样 SVG 点位永远与 commit 行对齐，不会因换行错位
+ * v2.22：display: grid + grid-template-columns（来自 .git-graph-list 的 --grid-template-columns 变量）
+ * 让 commit-row 按列对齐（Description / Author / Date / SHA），列宽由表头拖拽手柄控制 */
 .commit-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
-  gap: var(--space-2, 8px);
+  gap: 0;
   /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 28px），与 SVG 行高 1:1 对齐 */
   height: 28px; /* fallback（被 inline style 覆盖） */
   /* v2.18：取消 padding-left 让 commit 内容紧贴 SVG 区域右边缘（视觉上连续），
@@ -1677,13 +1770,38 @@ function refBadgeClass(refType?: string): string {
 }
 
 .commit-subject {
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
   font-size: var(--font-sm, 13px);
+}
+
+/* v2.22：列容器（grid item） */
+.commit-row__col {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+  overflow: hidden;
+}
+.commit-row__col--desc {
+  gap: var(--space-2, 8px);
+  padding-right: var(--space-2, 8px);
+}
+.commit-row__col--author {
+  font-size: var(--font-xs, 11px);
+  color: var(--color-text-secondary);
+}
+.commit-row__col--date {
+  font-size: var(--font-xs, 11px);
+  color: var(--color-text-secondary);
+  padding: 0 var(--space-2, 8px);
+}
+.commit-row__col--sha {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--color-text-secondary);
 }
 
 .commit-meta {
@@ -1701,7 +1819,6 @@ function refBadgeClass(refType?: string): string {
   flex-shrink: 0;
 }
 .commit-author {
-  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
