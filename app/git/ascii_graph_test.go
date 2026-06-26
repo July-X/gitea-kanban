@@ -1,9 +1,11 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,5 +108,68 @@ func TestParseGraphDecorationsRemote(t *testing.T) {
 	}
 	if refs[1].Name != "refs/remotes/origin/dev" || refs[1].ShortName != "origin/dev" {
 		t.Fatalf("refs[1] = %#v", refs[1])
+	}
+}
+
+// TestMaxLineLaneWidth 验证超宽 graph 检测：单行非空格 glyph 数 = 并发 lane 宽度。
+// UnrealEngine release 中段单行可达 1407 lane，超过 maxGraphLaneWidth(64) 应触发回退。
+func TestMaxLineLaneWidth(t *testing.T) {
+	lines := []GraphLine{
+		{Row: 0, Glyph: "* "},            // 1 lane
+		{Row: 1, Glyph: "|\\  "},         // 2 lane（| + \）
+		{Row: 2, Glyph: "* | * | * | *"}, // 7 lane
+	}
+	if got := maxLineLaneWidth(lines); got != 7 {
+		t.Fatalf("maxLineLaneWidth = %d, want 7", got)
+	}
+
+	// 模拟 UnrealEngine 超宽行：1407 个非空格字符
+	wide := strings.Repeat("*", 1407)
+	lines = append(lines, GraphLine{Row: 3, Glyph: wide})
+	if got := maxLineLaneWidth(lines); got != 1407 {
+		t.Fatalf("maxLineLaneWidth = %d, want 1407", got)
+	}
+	if maxLineLaneWidth(lines) <= maxGraphLaneWidth {
+		t.Fatalf("超宽行应超过阈值 %d，实际 %d", maxGraphLaneWidth, maxLineLaneWidth(lines))
+	}
+}
+
+// TestRunGraphLogWideFallback 验证超宽 graph 自动回退 --first-parent。
+// 构造一条主线 + 大量未合并的分叉分支，让 --graph 单行出现超 64 lane，触发回退。
+func TestRunGraphLogWideFallback(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not found: %v", err)
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+
+	commit := func(msg string) {
+		// 每个分支用独立文件避免 merge 冲突
+		if err := os.WriteFile(filepath.Join(dir, msg+".txt"), []byte(msg+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, dir, "add", "-A")
+		runGit(t, dir, "commit", "-m", msg)
+	}
+
+	commit("m1")
+	// 开 70 个分叉分支（不合并）：--graph 会把它们画成 70 条并排 lane，单行 lane 数 > 64 触发回退。
+	// 不 merge 避免每次 merge 的子进程开销，测试快很多。
+	for i := 0; i < 70; i++ { // 70 > maxGraphLaneWidth(64)
+		runGit(t, dir, "checkout", "-b", fmt.Sprintf("b%d", i))
+		commit(fmt.Sprintf("b%d", i))
+		runGit(t, dir, "checkout", "main")
+	}
+	runGit(t, dir, "checkout", "main")
+
+	result, err := RunGraphLog(dir, RunGraphLogOptions{MaxCount: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 回退后应是 first-parent 单列：每行最多 1-2 个非空格 glyph
+	if w := maxLineLaneWidth(result.Lines); w > 3 {
+		t.Fatalf("回退后最大 lane 宽度 = %d，应 ≤3（first-parent 单列）", w)
 	}
 }

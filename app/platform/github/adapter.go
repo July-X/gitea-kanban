@@ -85,7 +85,12 @@ func normalizeGitHubHostURL(hostURL string) string {
 // 改版本号时同步更新 README + CHANGELOG.md
 const GitHubAdapterVersion = "2.4.0"
 
-const largeRepoGraphDepth = 5000
+// largeRepoGraphDepth GitHub 超大仓库初始浅克隆深度。
+//
+// v2.x 修复 July-X/UnrealEngine 渲染卡死：5000 会拉到 release 分支中段超宽 merge 历史
+// （单行 1407 lane），前端渲染卡死。降到 2000：最近的提交 graph 很窄（列宽 ≤3），
+// 更早历史交给用户手动「加载更多」（配合 RunGraphLog 的超宽 --first-parent 回退保护）。
+const largeRepoGraphDepth = 2000
 
 // GitHubAdapter GitHub 平台适配器（首期仅 Git Graph）
 type GitHubAdapter struct {

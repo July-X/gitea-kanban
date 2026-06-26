@@ -473,6 +473,11 @@ type GraphEdgeDTO struct {
 //   - 现在 Go 端根据 platform+hostURL+username 自己去 keychain 拿
 //   - 前端只传 (platform, hostURL, username, owner, repo)
 type CloneRepoArgs struct {
+	// ProjectID 优先（v2.x 推荐）：Go 端按 projectId 反查 project + account，
+	// 自动拿 platform/hostUrl/username/owner/repo，前端无需再传。
+	// 与 PullRepoByProjectId 范式对齐，符合 AGENTS §8.2 鉴权铁律（前端不传鉴权字段）。
+	ProjectID string `json:"projectId,omitempty"`
+	// 以下字段为旧协议（projectId 为空时回退用），新代码请只传 projectId
 	Platform string `json:"platform"` // "gitea" | "github"
 	HostURL  string `json:"hostUrl"`
 	Username string `json:"username"`
@@ -552,6 +557,7 @@ func (a *App) buildSyncProgressCallback(repoKey string) git.ProgressCallback {
 func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 	if a.logger != nil {
 		a.logger.Info("CloneRepo",
+			"projectId", args.ProjectID,
 			"platform", args.Platform,
 			"owner", args.Owner,
 			"repo", args.Repo,
@@ -559,9 +565,40 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 		)
 	}
 
-	platformName := strings.TrimSpace(args.Platform)
-	hostURL := strings.TrimSpace(args.HostURL)
-	username := strings.TrimSpace(args.Username)
+	// 优先按 projectId 反查（v2.x，与 PullRepoByProjectId 范式对齐）：
+	//   前端 syncRepo 只传 projectId，Go 端反查 project→account 拿 platform/hostUrl/username/owner/repo。
+	//   修复"GitHub 小仓库点同步报 hostUrl 不能为空"：旧协议要求前端传 platform/hostUrl/username，
+	//   但前端只有 projectId，shim 把 hostUrl 透传成空字符串 → 校验失败。
+	var (
+		platformName    string
+		hostURL         string
+		username        string
+		owner           string
+		repo            string
+		matchedAccount  *store.GiteaAccount
+		matchedProject  *store.RepoProject
+	)
+
+	if strings.TrimSpace(args.ProjectID) != "" {
+		project, account, err := a.findProjectAndAccount(args.ProjectID)
+		if err != nil {
+			return CloneRepoResult{}, err
+		}
+		matchedProject = project
+		matchedAccount = account
+		platformName = account.Platform
+		hostURL = account.GiteaURL
+		username = account.Username
+		owner = project.Owner
+		repo = project.Name
+	} else {
+		// 旧协议回退（projectId 为空时）：前端传 platform/hostUrl/username/owner/repo
+		platformName = strings.TrimSpace(args.Platform)
+		hostURL = strings.TrimSpace(args.HostURL)
+		username = strings.TrimSpace(args.Username)
+		owner = strings.TrimSpace(args.Owner)
+		repo = strings.TrimSpace(args.Repo)
+	}
 
 	if platformName == "" {
 		return CloneRepoResult{}, ipc.NewValidationFailed("platform 不能为空", "")
@@ -570,26 +607,28 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 		return CloneRepoResult{}, ipc.NewValidationFailed("不支持的平台", "platform="+platformName)
 	}
 	if hostURL == "" {
-		return CloneRepoResult{}, ipc.NewValidationFailed("hostUrl 不能为空", "")
+		return CloneRepoResult{}, ipc.NewValidationFailed("hostUrl 不能为空", "projectId 为空时需传 hostUrl，或检查 project 是否关联了 account")
 	}
 	if username == "" {
 		return CloneRepoResult{}, ipc.NewValidationFailed("username 不能为空", "")
 	}
-	if args.Owner == "" || args.Repo == "" {
+	if owner == "" || repo == "" {
 		return CloneRepoResult{}, ipc.NewValidationFailed("owner/repo 不能为空",
-			fmt.Sprintf("owner=%q repo=%q", args.Owner, args.Repo))
+			fmt.Sprintf("owner=%q repo=%q", owner, repo))
 	}
 
 	// 1. 从 localStore 找账号 → secret.Store 拿 token
-	//    防御：hostURL + username 必须匹配（防越权 clone 别账号的仓库）
-	state := a.localStore.Get()
-	var matchedAccount *store.GiteaAccount
-	for i := range state.Accounts {
-		if state.Accounts[i].Platform == platformName &&
-			state.Accounts[i].GiteaURL == hostURL &&
-			state.Accounts[i].Username == username {
-			matchedAccount = &state.Accounts[i]
-			break
+	//    projectId 路径已通过 findProjectAndAccount 拿到 matchedAccount；
+	//    旧协议路径需按 platform+hostURL+username 匹配（防越权 clone 别账号仓库）
+	if matchedAccount == nil {
+		state := a.localStore.Get()
+		for i := range state.Accounts {
+			if state.Accounts[i].Platform == platformName &&
+				state.Accounts[i].GiteaURL == hostURL &&
+				state.Accounts[i].Username == username {
+				matchedAccount = &state.Accounts[i]
+				break
+			}
 		}
 	}
 	if matchedAccount == nil {
@@ -626,32 +665,42 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 	//   新布局：${workspacePath}/repos/<username>/<owner>__<repo>/
 	//
 	// v2.6：progress 回调（把 sideband 解析结果通过 EventsEmit 推到前端）
-	localPath, err := adapter.CloneRepo(a.ctx, hostURL, username, token, args.Owner, args.Repo, a.workspacePath, matchedAccount.Username, a.buildSyncProgressCallback(args.Owner+"/"+args.Repo))
+	localPath, err := adapter.CloneRepo(a.ctx, hostURL, username, token, owner, repo, a.workspacePath, matchedAccount.Username, a.buildSyncProgressCallback(owner+"/"+repo))
 	if err != nil {
 		return CloneRepoResult{}, err
 	}
 
-	// 4. 标记 project：已存在 → 刷 LastSyncAt；不存在 → 新建
+	// 4. 标记 project：projectId 路径已存在 project（只刷 LastSyncAt）；
+	//    旧协议路径可能 project 不存在 → 新建。
 	//
 	// v2.3 重要：必须新建 project（之前是只更新，导致 pullRepo 找不到 project → 找不到 token）
 	_ = a.localStore.Mutate(func(s *store.LocalState) {
 		now := time.Now().UnixMilli()
+		// projectId 路径：直接刷已知 project
+		if matchedProject != nil {
+			for i := range s.Projects {
+				if s.Projects[i].ID == matchedProject.ID {
+					s.Projects[i].LastSyncAt = now
+					return
+				}
+			}
+		}
 		for i := range s.Projects {
 			if s.Projects[i].Platform == platformName &&
 				s.Projects[i].AccountID == matchedAccount.ID &&
-				s.Projects[i].Owner == args.Owner &&
-				s.Projects[i].Name == args.Repo {
+				s.Projects[i].Owner == owner &&
+				s.Projects[i].Name == repo {
 				s.Projects[i].LastSyncAt = now
 				return
 			}
 		}
-		// 新建 project
+		// 新建 project（仅旧协议路径会走到这里）
 		s.Projects = append(s.Projects, store.RepoProject{
 			ID:            uuid.NewString(),
 			Platform:      platformName,
 			AccountID:     matchedAccount.ID,
-			Owner:         args.Owner,
-			Name:          args.Repo,
+			Owner:         owner,
+			Name:          repo,
 			DefaultBranch: "", // CloneRepo 不知道 default branch，由 GetAppInfo / ListRepos 后续补充
 			LastSyncAt:    now,
 			CreatedAt:     now,
@@ -660,7 +709,7 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 
 	if a.logger != nil {
 		a.logger.Info("CloneRepo: success",
-			"owner", args.Owner, "repo", args.Repo,
+			"owner", owner, "repo", repo,
 			"localPath", localPath, "accountId", matchedAccount.ID,
 		)
 	}
@@ -2045,13 +2094,16 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 		strings.Contains(strings.ToLower(project.Name), "webkit")
 
 	if singleBranch {
-		depth = 5000
-		countLimit = 5000
+		// v2.x 修复 July-X/UnrealEngine 渲染卡死：深度与 largeRepoGraphDepth 对齐到 2000。
+		// 5000 会拉到 release 中段超宽 merge 历史（单行 1407 lane），前端渲染卡死。
+		// 2000 以内 graph 很窄（列宽 ≤3），更早历史交给「加载更多」+ RunGraphLog 超宽回退保护。
+		depth = 2000
+		countLimit = 2000
 		if isHugeRepo {
 			// gh blobless fetch 已经足够快：初始同步允许最多 5 分钟，
 			// 先给 Git Graph 一个更可用的近期窗口；更早历史交给用户手动"加载更多"。
-			depth = 5000
-			countLimit = 5000
+			depth = 2000
+			countLimit = 2000
 		}
 	}
 

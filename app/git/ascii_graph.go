@@ -5,9 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -65,6 +63,14 @@ const graphLogPrettyFormat = "DATA:%D|%H|%ad|%h|%P|%an|%ae|%s"
 // 这个路径主要给 GitHub/gh partial clone 的超大仓库使用：仓库只需要 commit 元信息，
 // 由 git 自己完成 date-order + graph ASCII 布局，前端复用旧 parser 渲染，避免结构化
 // lane 算法在超大浅历史上生成过宽 SVG。
+//
+// 超宽 graph 保护（v2.x 修复 July-X/UnrealEngine 渲染卡死）：
+// UnrealEngine release 分支中段有一段把大量 promotional 分支同步 merge 进来的历史，
+// `git log --graph` 在该段单行 glyph 宽达上千 lane，前端会生成几百条 flow + 超宽 SVG，
+// 渲染 6000+ div 时卡死主线程（用户看到"只有圆点、列表空白"）。
+// 这里先跑一次完整 graph，若检测到单行非空格 glyph 数超过 maxGraphLaneWidth（默认 64），
+// 自动回退到 --first-parent 重跑：只画默认分支第一父链主线，graph 退化为单列，秒渲染。
+// 语义上对齐 --single-branch 浅克隆：用户看的是主干历史，被合入的子分支细节本就不是重点。
 func RunGraphLog(localPath string, opts RunGraphLogOptions) (*GraphLinesResult, error) {
 	if localPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
@@ -72,10 +78,57 @@ func RunGraphLog(localPath string, opts RunGraphLogOptions) (*GraphLinesResult, 
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil, fmt.Errorf("系统未安装 git 命令: %w", err)
 	}
-	if _, err := os.Stat(filepath.Join(localPath, ".git")); err != nil {
-		return nil, fmt.Errorf("仓库不存在: %w", err)
+	// 兼容两种仓库布局（与 clone.go RepoExists 对齐）：
+	//   1. 标准布局：localPath/.git/（gh clone、git clone 默认）
+	//   2. bare 布局：localPath/ 下直接是 HEAD + objects + config
+	//      （go-git NoCheckout clone 在某些场景产出 bare 仓库，见 clone.go 注释；
+	//       早期 mirror clone 也留有 bare 布局）
+	// 旧代码只查 .git，go-git 仓库会误报"仓库不存在"，导致 Git Graph 显示不了。
+	if !RepoExists(localPath) {
+		return nil, fmt.Errorf("仓库不存在（%s 下既无 .git 目录，也无 HEAD/objects，可能 clone 未完成）", localPath)
 	}
 
+	result, err := runGraphLogOnce(localPath, opts, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// 超宽 graph 回退：单行 lane 数超阈值 → 用 --first-parent 重跑
+	if maxLineLaneWidth(result.Lines) > maxGraphLaneWidth {
+		fpResult, fpErr := runGraphLogOnce(localPath, opts, true)
+		if fpErr == nil && len(fpResult.Lines) > 0 {
+			fpResult.Truncated = result.Truncated
+			return &fpResult, nil
+		}
+		// first-parent 失败则保留原结果（至少有数据）
+	}
+	return &result, nil
+}
+
+// maxGraphLaneWidth 触发 --first-parent 回退的单行 lane 阈值。
+// 64 lane 对应 SVG ~320px 宽（COL_WIDTH=5 × DISPLAY_SCALE=2），前端可流畅渲染。
+const maxGraphLaneWidth = 64
+
+// maxLineLaneWidth 统计所有行中最大的非空格 glyph 数（≈ 该行的并发 lane 数）。
+// git log --graph 每个非空格字符代表一条 lane 在该行的存在，行内非空格字符数即 lane 宽度。
+func maxLineLaneWidth(lines []GraphLine) int {
+	maxW := 0
+	for _, line := range lines {
+		w := 0
+		for _, c := range line.Glyph {
+			if c != ' ' {
+				w++
+			}
+		}
+		if w > maxW {
+			maxW = w
+		}
+	}
+	return maxW
+}
+
+// runGraphLogOnce 执行一次 git log --graph，firstParent 控制 是否加 --first-parent。
+func runGraphLogOnce(localPath string, opts RunGraphLogOptions, firstParent bool) (GraphLinesResult, error) {
 	args := []string{
 		"-C", localPath,
 		"log",
@@ -88,6 +141,9 @@ func RunGraphLog(localPath string, opts RunGraphLogOptions) (*GraphLinesResult, 
 		"--pretty=format:" + graphLogPrettyFormat,
 		"--branches",
 		"--remotes",
+	}
+	if firstParent {
+		args = append(args, "--first-parent")
 	}
 	for _, branch := range opts.Branches {
 		if strings.TrimSpace(branch) == "" {
@@ -109,12 +165,12 @@ func RunGraphLog(localPath string, opts RunGraphLogOptions) (*GraphLinesResult, 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("git log --graph 超时（%s）：%w", nativeGitTimeout, ctx.Err())
+			return GraphLinesResult{}, fmt.Errorf("git log --graph 超时（%s）：%w", nativeGitTimeout, ctx.Err())
 		}
-		return nil, fmt.Errorf("git log --graph 失败: %w\n输出: %s", err, string(output))
+		return GraphLinesResult{}, fmt.Errorf("git log --graph 失败: %w\n输出: %s", err, string(output))
 	}
 	result := parseGraphLogOutput(output, opts.MaxCount)
-	return &result, nil
+	return result, nil
 }
 
 func parseGraphLogOutput(output []byte, maxCount int) GraphLinesResult {
