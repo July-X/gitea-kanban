@@ -1706,8 +1706,11 @@ function refBadgeClass(refType?: string): string {
   gap: 0;
   /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 28px），与 SVG 行高 1:1 对齐 */
   height: 28px; /* fallback（被 inline style 覆盖） */
-  /* v2.27：行透明背景（让背景层 SVG 透出），行内容仅 commit-row__col--desc 等有自身背景 */
-  background: transparent;
+  /* v2.31：行使用 shell 背景色（用户要求移除"内容区背景透明"的设定）
+     - graph 占位列仍 transparent，让背景层 SVG/dot overlay 透出
+     - 其余 4 个内容列由 commit-row 整行背景遮住下方 SVG 路径
+     - 移除原 .commit-row__col 的独立 background，避免双层背景 */
+  background: var(--color-shell-main-bg);
   padding: 0 var(--space-3, 12px) 0 0;
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
@@ -1836,8 +1839,8 @@ function refBadgeClass(refType?: string): string {
   gap: var(--space-2, 8px);
   min-width: 0;
   overflow: hidden;
-  /* v2.27：内容列有自身背景，遮住下方背景层 SVG/圆点（commit-row 整行透明） */
-  background: var(--color-shell-main-bg);
+  /* v2.31：移除 .commit-row__col 的独立 background（由 .commit-row 整行 background 提供） */
+  background: transparent;
 }
 /* v2.27：graph 占位列（透明背景，让背景层 SVG + dot overlay 透出） */
 .commit-row__col--graph {
