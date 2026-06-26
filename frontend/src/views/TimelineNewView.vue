@@ -1430,6 +1430,8 @@ function refBadgeClass(refType?: string): string {
   white-space: nowrap;
   /* v2.26：表头中文居中显示（与 SourceTree / VSCode Git Graph 风格一致） */
   text-align: center;
+  /* v2.28：min-width: 0 防止内容撑大列宽（否则 SHA 会被挤到下一行） */
+  min-width: 0;
 }
 .git-graph-header__col--graph {
   /* 第一列 graph 标题（宽度由 inline 绑定 handleLeft） */
@@ -1664,78 +1666,11 @@ function refBadgeClass(refType?: string): string {
 /* v2.27：.git-graph-list 已删除（合并到 .git-graph-body）
  * 旧规则保留注释供 git blame 参考 */
 
-/* v2.23：SourceTree 风格表头
- *  - 跟 commit-row 同样的 grid-template-columns（--grid-template-columns）
- *  - 不 sticky（v2.23：避免 z-index: 3 + sticky 创建新 stacking context 覆盖 svg-area 顶部）
- *    header 跟 list 一起滚，垂直滚动时跟 commit-row 一起移动
- *  - 列分隔手柄（git-graph-header__resize）绝对定位在列右边
- *  - 高度 32px，背景色区分 commit-row
- *  - 列宽变化触发 commit-row 重新布局（通过 --grid-template-columns 共享 CSS 变量） */
-.git-graph-header {
-  display: grid;
-  grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
-  align-items: center;
-  height: 32px;
-  background: var(--color-bg-soft, rgba(0, 0, 0, 0.03));
-  border-bottom: 1px solid var(--color-border);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  user-select: none;
-  padding-right: var(--space-3, 12px);
-  position: relative; /* 让子元素 resize handle 绝对定位锚点 */
-}
-.git-graph-header__col {
-  padding: 0 var(--space-2, 8px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* v2.26：表头中文居中显示（与 SourceTree / VSCode Git Graph 风格一致） */
-  text-align: center;
-}
-.git-graph-header__col--desc {
-  padding-left: 0;
-}
-.git-graph-header__col--author {
-  padding-left: var(--space-2, 8px);
-}
-.git-graph-header__col--date {
-  padding: 0 var(--space-2, 8px);
-}
-.git-graph-header__col--sha {
-  padding: 0 var(--space-2, 8px);
-}
-/* 列分隔手柄 —— 绝对定位在 list 内部（top: 0 跨越表头和所有 row） */
-.git-graph-header__resize {
-  position: absolute;
-  top: 0;
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-  z-index: 4;
-  /* 默认透明，hover/active 显示绿色指示器 */
-  background: transparent;
-  transition: background 0.15s;
-}
-.git-graph-header__resize:hover,
-.git-graph-header__resize--active {
-  background: var(--color-primary, #74b830);
-}
-.git-graph-header__resize:hover::before,
-.git-graph-header__resize--active::before {
-  /* 竖向指示线（hover/active 时显示） */
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 16px;
-  background: #fff;
-  border-radius: 1px;
-}
+/* v2.28：移除 v2.23 旧 .git-graph-header / __col / __resize 规则残留
+ * 旧规则定义在 line 1674-1738，grid-template-columns 是 4 列 (480/160/120/80)
+ * 没 'auto' 前缀 → 表头没有 graph 占位列 → SHA 被挤到第二行（用户反馈）
+ * 当前 v2.27 规则在 line 1407-1465 已是 5 列 (auto + 4 个内容列)
+ * 旧 .git-graph-header__resize 规则也保留（v2.27 复用，行为一致） */
 
 /* Commit 列表行 v2.27：5 列 grid（graph + 描述/作者/日期/SHA）
  *  - 第一列是 graph 占位（与表头第一列同宽，背景透出让 SVG 显示）
@@ -1758,7 +1693,8 @@ function refBadgeClass(refType?: string): string {
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
   overflow: hidden;
-  border-bottom: 1px solid var(--color-border);
+  /* v2.28：移除 commit-row 的 border-bottom（用户：下方的内容区，暂时不用 1px 的表格线） */
+  border-bottom: none;
   box-sizing: border-box;
   position: relative; /* 自身建立 stacking context，让 col 内容在 SVG 之上 */
   z-index: 1;
