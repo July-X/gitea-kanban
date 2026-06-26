@@ -750,45 +750,49 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
 });
 
 // ============================================================
-// v2.19：拖拽栅格栏（SourceTree 风格）
-// - SVG 区域**保持固定宽度 = svgWidth**（不缩放不重绘）
-// - 拖拽手柄调整 commitListOffset = commit list 的 margin-left
-//   - 默认 0（commit list 在 SVG 区域右边，跟 SVG 并列两栏）
-//   - 减小（负值）让 commit list 起点向左延伸到 SVG lane 区域上方（盖被子效果）
-//   - 增大（正值）让 commit list 起点向右，离开 SVG 区域
-// - SVG 完整渲染固定不动；只有 commit list 横向移动
+// v2.21：拖拽栅格栏（SourceTree 风格）
+// - handle 物理位置：position: absolute，left 由 userHandleLeft 控制
+//   - 默认 = svgWidth（handle 在 SVG area 右边缘）
+//   - 用户拖拽后停在新位置（不回弹）
+//   - 边界：handleLeft ∈ [60, 800]
+// - handle 左侧显示背景色遮罩（用 :before 伪元素全宽背景）盖住部分 git-graph
+// - commit list 起点 = handleLeft（紧邻 handle 右边）
+// - SVG 完整渲染固定不动；handle 物理位置变化
 // ============================================================
 
-/** commit list 横向偏移（px），用 margin-left 实现盖被子效果
- * 默认 0（紧邻 SVG 区域右边）；负值让 list 向左延伸覆盖 SVG lane */
-const commitListOffset = ref<number>(0);
+/** handle 物理位置（px），默认 = svgWidth
+ * 用户拖拽后停在 [60, 800] 范围内 */
+const userHandleLeft = ref<number | null>(null);
 /** 是否正在拖拽 */
 const dragging = ref(false);
 let dragStartX = 0;
-let dragStartOffset = 0;
+let dragStartHandleLeft = 0;
+
+/** handle 实际位置（用户拖拽 > 自动计算 svgWidth 默认） */
+const handleLeft = computed(() => {
+  if (userHandleLeft.value !== null) return userHandleLeft.value;
+  return parseSvgPx(svgWidth.value);
+});
 
 function onDragStart(e: MouseEvent): void {
   e.preventDefault();
   dragging.value = true;
   dragStartX = e.clientX;
-  dragStartOffset = commitListOffset.value;
+  dragStartHandleLeft = handleLeft.value;
   document.addEventListener('mousemove', onDragMove);
   document.addEventListener('mouseup', onDragEnd);
 }
 
 function onDragMove(e: MouseEvent): void {
   if (!dragging.value) return;
-  // 向左拖 delta 为负 → offset 减小（变负）→ commit list 起点向左延伸到 SVG lane 上方
+  // 向左拖 delta 为负 → handleLeft 减小
   const delta = e.clientX - dragStartX;
-  const svgW = parseSvgPx(svgWidth.value);
-  // 下界：offset >= -svgWidth（commit list 可以向左延伸到完全覆盖 SVG 区域）
-  // 上界：offset >= 0（不允许 commit list 向右移出 SVG 区域外，默认 0 = 紧邻 SVG 右边）
-  // 用户希望："向左拉动让 commit log 覆盖到 git-graph 上方（盖被子效果）；
-  //           反过来向右拉动又正常显示 git-graph"
-  // 默认 0，负值让 commit list 向左移动覆盖 SVG lane
-  const minOffset = -svgW; // 完全覆盖 SVG 区域
-  const maxOffset = 0;      // 默认位置（紧邻 SVG 右边）
-  commitListOffset.value = Math.max(minOffset, Math.min(maxOffset, dragStartOffset + delta));
+  // 拖拽边界（用户要求）：
+  // - 向左最多距离 wrapper 左边 60px（handle 不能再左）
+  // - 向右最多让 git-graph 显示 800px（handle 不能超过 800px）
+  const minLeft = 60;
+  const maxLeft = 800;
+  userHandleLeft.value = Math.max(minLeft, Math.min(maxLeft, dragStartHandleLeft + delta));
 }
 
 function onDragEnd(): void {
@@ -952,8 +956,8 @@ function refBadgeClass(refType?: string): string {
           不再用 absolute/sticky 浮层（避免 layout 错乱）
         -->
         <div class="git-graph-wrapper">
-          <!-- 左侧：SVG 图（sticky，固定宽度 = svgWidth，不缩放） -->
-          <div class="git-graph-svg-area" :style="{ width: svgWidth }">
+          <!-- 左侧：SVG 图（sticky，宽度 = handleLeft，由拖拽手柄控制，默认 svgWidth） -->
+          <div class="git-graph-svg-area" :style="{ width: `${handleLeft}px` }">
             <div class="git-graph-svg-inner">
               <svg
                 class="git-graph-svg"
@@ -972,7 +976,7 @@ function refBadgeClass(refType?: string): string {
                     v-if="pg.d"
                     :d="pg.d"
                     v-bind="pg.colorHex ? { stroke: pg.colorHex } : {}"
-                    stroke-width="1"
+                    stroke-width="2"
                     fill="none"
                     stroke-linecap="round"
                     vector-effect="non-scaling-stroke"
@@ -999,21 +1003,24 @@ function refBadgeClass(refType?: string): string {
               </div>
             </div>
 
-            <!-- 列宽拖拽手柄（绝对定位在 svg-area 右边缘） -->
+            <!-- 列宽拖拽手柄（v2.21：物理位置由 handleLeft 控制，拖拽后停在新位置）
+     拖拽边界：handleLeft ∈ [60, 800]
+     handle 左侧（左侧移动方向）显示背景色遮罩盖住部分 git-graph -->
             <div
               class="graph-resize-handle"
               :class="{ 'graph-resize-handle--active': dragging }"
-              title="拖拽调整图形列宽度"
+              :style="{ left: `${handleLeft}px`, '--handle-cover-width': `${handleLeft}px` }"
+              title="拖拽调整 git-graph 显示宽度（左边至少 60px，右边最多让 git-graph 显示 800px）"
               @mousedown="onDragStart"
             />
           </div>
 
-          <!-- 右侧：Commit 列表（flex:1，跟 svg 高度一致）
-       v2.19：margin-left 由拖拽手柄调整（commitListOffset）
-       默认 0（紧邻 SVG 区域右边）；负值让 list 向左延伸到 SVG lane 上方（盖被子效果） -->
+          <!-- 右侧：Commit 列表（v2.21：transform translateX 由 handleLeft 控制位置）
+       handle 默认 = svgWidth（list 位置不变），handle 移动后 list 跟着移动
+       背景 transparent 让 SVG dot 透过 commit list 可见 -->
           <div
             class="git-graph-list"
-            :style="{ minHeight: svgHeight, marginLeft: `${commitListOffset}px` }"
+            :style="{ minHeight: svgHeight, transform: `translateX(${handleLeft - parseSvgPx(svgWidth)}px)` }"
           >
             <template v-for="r in allRows" :key="`row-${r.row}`">
               <div
@@ -1391,11 +1398,10 @@ function refBadgeClass(refType?: string): string {
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
  * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
- /* v2.20：commit list 在右侧（flex:1 自适应宽度）
- *  简单 block 布局跟 SVG 形成左右两栏
+ /* v2.21：commit list 在右侧
+ *  v2.20 改 z-index: 2（盖被子效果）
+ *  v2.21 改用 transform: translateX 由 handleLeft 控制位置（不脱离文档流）
  *  sticky top:0 让 list 顶部跟随 SVG 区域一起 sticky 屏幕顶部（保持 dot 和 commit 文字垂直对齐）
- *  z-index: 2 (v2.20)：盖被子效果——list 在 SVG area 上方
- *    （v2.19 没设 z-index，list 默认在 SVG area 下面，margin-left 负值时被 SVG area 遮挡）
  *  background: transparent（让 SVG dot 透过 commit list 可见） */
 .git-graph-list {
   flex: 1;
@@ -1404,6 +1410,9 @@ function refBadgeClass(refType?: string): string {
   position: sticky;
   top: 0;
   z-index: 2;
+  /* v2.21：transform translateX 由 inline 绑定 handleLeft 偏移 */
+  /* transform: translateX(<handleLeft - svgWidth>px) —— handleLeft > svgWidth 时 list 向右移，handleLeft < svgWidth 时 list 向左移到 SVG 上方 */
+  will-change: transform;
 }
 
 /* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐）
@@ -1679,59 +1688,43 @@ function refBadgeClass(refType?: string): string {
   cursor: not-allowed;
 }
 
-/* ===== v2.17 列宽拖拽手柄（SourceTree 风格栅格栏，wrapper 级别） =====
- /* ===== v2.20 列宽拖拽手柄（绝对定位在 svg-area 右边缘） =====
- * z-index: 50（最高）确保 handle 在最上层，不会被 list (z:2) 或其他元素遮挡
- * 不再 sticky top:0 height:100vh（v2.17 的高度让 handle 占满整屏，挤压布局）
- * 改为 position: absolute 限制在 svg-area 内（高度 100% = svg-area 高度）
- * 拖拽调整 commitListOffset 让 commit list 向左覆盖 SVG lane（盖被子效果） */
+/* ===== v2.21 列宽拖拽手柄（物理位置，拖拽后停在新位置） =====
+ * - position: absolute，left 由 inline 绑定 handleLeft（默认 = svgWidth）
+ * - 用户拖拽后 handle 停在 [60, 800] 范围内（不回弹）
+ * - 拖拽后 handle 停在新位置，可再次点击拖动
+ * - z-index: 50 确保 handle 在最上层（不被 list 遮挡） */
 .graph-resize-handle {
   position: absolute;
   top: 0;
-  right: 0;
+  /* left 由 inline 绑定 handleLeft（默认 svgWidth） */
   width: 6px;
   height: 100%;
   cursor: col-resize;
-  background: var(--color-border);
+  background: var(--color-primary, #74b830); /* 绿色（绿色分割线，按用户要求） */
   transition: background 0.15s;
   user-select: none;
   z-index: 50;
 }
 .graph-resize-handle:hover,
 .graph-resize-handle--active {
-  background: var(--color-primary, #74b830);
+  background: var(--color-primary, #5fa026); /* 拖拽时颜色加深 */
 }
-/* 竖向三点 grip 指示器 */
+/* v2.21：handle 左侧全屏背景色遮罩（盖被子效果）
+ * 用 :before 伪元素，从 handle 左边延伸到 wrapper 最左边（handleLeft 像素宽度）
+ * 颜色 = 主题背景色（var(--color-shell-main-bg)），遮挡部分 git-graph
+ * （v2.21 新增：用户要求"移动过去的背景应该是背景色，用背景遮挡部分git-graph"）
+ * :before 宽度由 CSS 变量 --handle-cover-width 控制（inline 绑定 handleLeft） */
 .graph-resize-handle::before {
   content: '';
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 20px;
-  border-radius: 2px;
-  background: var(--color-text-muted, #666);
-  background: repeating-linear-gradient(
-    to bottom,
-    var(--color-text-muted, #666) 0px,
-    var(--color-text-muted, #666) 2px,
-    transparent 2px,
-    transparent 5px
-  );
-  opacity: 0.5;
-  transition: opacity 0.15s;
-}
-.graph-resize-handle:hover::before,
-.graph-resize-handle--active::before {
-  opacity: 1;
-  background: repeating-linear-gradient(
-    to bottom,
-    #fff 0px,
-    #fff 2px,
-    transparent 2px,
-    transparent 5px
-  );
+  top: 0;
+  /* :before 左边界 = handle 左边界 - handleLeft = -handleLeft（向左延伸到 wrapper 起点） */
+  left: calc(-1 * var(--handle-cover-width, 0px));
+  width: var(--handle-cover-width, 0px);
+  height: 100%;
+  /* 背景色 = 主题背景色（亮/暗主题自动适配） */
+  background: var(--color-shell-main-bg);
+  pointer-events: none;
 }
 
 /* 拖拽中防止文本选中 + 全局 cursor */
