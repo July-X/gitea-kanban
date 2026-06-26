@@ -1145,7 +1145,7 @@ function refBadgeClass(refType?: string): string {
           >
             <!-- v2.22：SourceTree 风格表头（sticky 在顶部，列宽可拖拽调整） -->
             <div class="git-graph-header" @mousedown.stop>
-              <div class="git-graph-header__col git-graph-header__col--desc">Description</div>
+              <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
               <div
                 class="git-graph-header__resize"
                 @mousedown="(e) => onColHandleMouseDown(e, 0)"
@@ -1153,7 +1153,7 @@ function refBadgeClass(refType?: string): string {
                 :style="{ left: `${colHandleLeft(0)}px` }"
                 title="拖动调整 Description 列宽度"
               />
-              <div class="git-graph-header__col git-graph-header__col--author">Author</div>
+              <div class="git-graph-header__col git-graph-header__col--author">作者</div>
               <div
                 class="git-graph-header__resize"
                 @mousedown="(e) => onColHandleMouseDown(e, 1)"
@@ -1161,7 +1161,7 @@ function refBadgeClass(refType?: string): string {
                 :style="{ left: `${colHandleLeft(1)}px` }"
                 title="拖动调整 Author 列宽度"
               />
-              <div class="git-graph-header__col git-graph-header__col--date">Date</div>
+              <div class="git-graph-header__col git-graph-header__col--date">日期</div>
               <div
                 class="git-graph-header__resize"
                 @mousedown="(e) => onColHandleMouseDown(e, 2)"
@@ -1565,11 +1565,18 @@ function refBadgeClass(refType?: string): string {
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
  * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
- /* v2.21：commit list 在右侧
- *  v2.20 改 z-index: 2（盖被子效果）
- *  v2.21 改用 transform: translateX 由 handleLeft 控制位置（不脱离文档流）
- *  sticky top:0 让 list 顶部跟随 SVG 区域一起 sticky 屏幕顶部（保持 dot 和 commit 文字垂直对齐）
- *  background: transparent（让 SVG dot 透过 commit list 可见） */
+ /* v2.23：commit list 在右侧（修复 git-graph 看不到问题）
+ *  v2.22 之前 z-index: 2 + sticky + transform: translateX 创建独立 stacking context
+ *  当 list 是 flex: 1 子元素时，flex container 会让 list 占满剩余空间，
+ *  加上 z-index 2 让 list 整体在 svg-area 上面。
+ *  但 list 视觉位置 (125-840px) 应该不影响 SVG 0-125 范围。
+ *  实际上 v2.22 时 git-graph-header 是 list 内子元素，
+ *  header grid-template-columns 总和 840px > list 容器 715px
+ *  → list 内的 header 实际渲染范围溢出 list 容器 → header 视觉位置 125-965px
+ *  → header sticky 触发后顶部 = 屏幕 0px，宽度 840px，位置 125-965
+ *  → header 覆盖 SVG area 顶部 0-32px, x 125-965（不覆盖 SVG 0-125）
+ *  v2.23：保持 z-index: 2（盖被子），保持 transform: translateX（拖拽偏移）
+ *  让 .git-graph-header 改为非 sticky（不创建新 stacking context，header 跟 list 一起滚） */
 .git-graph-list {
   flex: 1;
   min-width: 0;
@@ -1577,26 +1584,22 @@ function refBadgeClass(refType?: string): string {
   position: sticky;
   top: 0;
   z-index: 2;
-  /* v2.21：transform translateX 由 inline 绑定 handleLeft 偏移 */
-  /* transform: translateX(<handleLeft - svgWidth>px) —— handleLeft > svgWidth 时 list 向右移，handleLeft < svgWidth 时 list 向左移到 SVG 上方 */
   will-change: transform;
+  /* transform 由 inline 绑定 handleLeft 偏移（盖被子效果） */
 }
 
-/* v2.22：SourceTree 风格表头
+/* v2.23：SourceTree 风格表头
  *  - 跟 commit-row 同样的 grid-template-columns（--grid-template-columns）
- *  - 顶部 sticky（top: 0 + z-index: 3 高于 commit-row）
+ *  - 不 sticky（v2.23：避免 z-index: 3 + sticky 创建新 stacking context 覆盖 svg-area 顶部）
+ *    header 跟 list 一起滚，垂直滚动时跟 commit-row 一起移动
  *  - 列分隔手柄（git-graph-header__resize）绝对定位在列右边
- *  - 表头高度 = commit-row 高度一致
- *  - 背景 var(--color-bg-header) 与 commit-row 区分
+ *  - 高度 32px，背景色区分 commit-row
  *  - 列宽变化触发 commit-row 重新布局（通过 --grid-template-columns 共享 CSS 变量） */
 .git-graph-header {
   display: grid;
   grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
   height: 32px;
-  position: sticky;
-  top: 0;
-  z-index: 3;
   background: var(--color-bg-soft, rgba(0, 0, 0, 0.03));
   border-bottom: 1px solid var(--color-border);
   font-size: 11px;
@@ -1606,6 +1609,7 @@ function refBadgeClass(refType?: string): string {
   letter-spacing: 0.05em;
   user-select: none;
   padding-right: var(--space-3, 12px);
+  position: relative; /* 让子元素 resize handle 绝对定位锚点 */
 }
 .git-graph-header__col {
   padding: 0 var(--space-2, 8px);
