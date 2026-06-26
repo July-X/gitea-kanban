@@ -1612,6 +1612,8 @@ function refBadgeClass(refType?: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* v2.26：表头中文居中显示（与 SourceTree / VSCode Git Graph 风格一致） */
+  text-align: center;
 }
 .git-graph-header__col--desc {
   padding-left: 0;
@@ -1959,7 +1961,10 @@ function refBadgeClass(refType?: string): string {
  * - position: absolute，left 由 inline 绑定 handleLeft（默认 = svgWidth）
  * - 用户拖拽后 handle 停在 [60, 800] 范围内（不回弹）
  * - 拖拽后 handle 停在新位置，可再次点击拖动
- * - z-index: 50 确保 handle 在最上层（不被 list 遮挡） */
+ * - z-index: 50 确保 handle 在最上层（不被 list 遮挡）
+ *
+ * v2.26：默认背景改为透明（移除一直显示的绿色粗条 —— 用户反馈），
+ *  只在 hover/active 时显示绿色高亮 + 中心白线指示。 */
 .graph-resize-handle {
   position: absolute;
   top: 0;
@@ -1967,32 +1972,33 @@ function refBadgeClass(refType?: string): string {
   width: 6px;
   height: 100%;
   cursor: col-resize;
-  background: var(--color-primary, #74b830); /* 绿色（绿色分割线，按用户要求） */
+  background: transparent; /* v2.26：默认透明（不再一直显示绿色） */
   transition: background 0.15s;
   user-select: none;
   z-index: 50;
 }
 .graph-resize-handle:hover,
 .graph-resize-handle--active {
-  background: var(--color-primary, #5fa026); /* 拖拽时颜色加深 */
+  background: var(--color-primary, #74b830); /* hover/active 时才显示绿色 */
 }
-/* v2.21：handle 左侧全屏背景色遮罩（盖被子效果）
- * 用 :before 伪元素，从 handle 左边延伸到 wrapper 最左边（handleLeft 像素宽度）
- * 颜色 = 主题背景色（var(--color-shell-main-bg)），遮挡部分 git-graph
- * （v2.21 新增：用户要求"移动过去的背景应该是背景色，用背景遮挡部分git-graph"）
- * :before 宽度由 CSS 变量 --handle-cover-width 控制（inline 绑定 handleLeft） */
-.graph-resize-handle::before {
+/* v2.26：hover/active 时中心竖向指示线（沿用 git-graph-header__resize 的视觉） */
+.graph-resize-handle:hover::before,
+.graph-resize-handle--active::before {
   content: '';
   position: absolute;
-  top: 0;
-  /* :before 左边界 = handle 左边界 - handleLeft = -handleLeft（向左延伸到 wrapper 起点） */
-  left: calc(-1 * var(--handle-cover-width, 0px));
-  width: var(--handle-cover-width, 0px);
-  height: 100%;
-  /* 背景色 = 主题背景色（亮/暗主题自动适配） */
-  background: var(--color-shell-main-bg);
-  pointer-events: none;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 16px;
+  background: #fff;
+  border-radius: 1px;
 }
+/* v2.21：handle 左侧全屏背景色遮罩（盖被子效果）
+ * v2.26：移除此遮罩！它用 `pointer-events:none` 背景色块盖住整个 svg-area，
+ * 导致 git-graph 看不到（用户反馈"git-graph 被黑色东西遮挡"）。
+ * 改用 svg-area 自身的 background（CSS line 1408）提供遮罩，
+ * 而 handle 只做分隔+拖拽指示，不做遮罩。 */
 
 /* 拖拽中防止文本选中 + 全局 cursor */
 .timeline-new__main--dragging {
