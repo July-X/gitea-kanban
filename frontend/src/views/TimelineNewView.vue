@@ -1131,15 +1131,15 @@ function refBadgeClass(refType?: string): string {
             />
           </div>
 
-          <!-- 右侧：Commit 列表（v2.21：transform translateX 由 handleLeft 控制位置）
-       handle 默认 = svgWidth（list 位置不变），handle 移动后 list 跟着移动
-       背景 transparent 让 SVG dot 透过 commit list 可见
-       v2.22：grid-template-columns 让 commit-row 按列对齐（表头控制列宽） -->
+          <!-- 右侧：Commit 列表（v2.25：margin-left 由 handleLeft 控制位置，不再用 transform）
+       v2.24 之前用 transform: translateX()，但 transform !== none 创建 stacking context
+       导致 list 整体在 svg-area 上面（虽然视觉位置不影响 SVG，但 z-index 体系混乱）
+       v2.25 改用 margin-left 实现拖拽（margin-left 不创建 stacking context） -->
           <div
             class="git-graph-list"
             :style="{
               minHeight: svgHeight,
-              transform: `translateX(${handleLeft - parseSvgPx(svgWidth)}px)`,
+              marginLeft: `${handleLeft - parseSvgPx(svgWidth)}px`,
               '--grid-template-columns': gridTemplateColumns,
             }"
           >
@@ -1565,26 +1565,22 @@ function refBadgeClass(refType?: string): string {
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
  * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
- /* v2.23：commit list 在右侧（修复 git-graph 看不到问题）
- *  v2.22 之前 z-index: 2 + sticky + transform: translateX 创建独立 stacking context
- *  当 list 是 flex: 1 子元素时，flex container 会让 list 占满剩余空间，
- *  加上 z-index 2 让 list 整体在 svg-area 上面。
- *  但 list 视觉位置 (125-840px) 应该不影响 SVG 0-125 范围。
- *  实际上 v2.22 时 git-graph-header 是 list 内子元素，
- *  header grid-template-columns 总和 840px > list 容器 715px
- *  → list 内的 header 实际渲染范围溢出 list 容器 → header 视觉位置 125-965px
- *  → header sticky 触发后顶部 = 屏幕 0px，宽度 840px，位置 125-965
- *  → header 覆盖 SVG area 顶部 0-32px, x 125-965（不覆盖 SVG 0-125）
- *  v2.23：保持 z-index: 2（盖被子），保持 transform: translateX（拖拽偏移）
- *  让 .git-graph-header 改为非 sticky（不创建新 stacking context，header 跟 list 一起滚） */
+ /* v2.24：commit list 在右侧（彻底排查 git-graph 看不到问题）
+ *  v2.23 之前问题：position: sticky + z-index: 2 + will-change: transform + transform
+ *  全部创建独立 stacking context，list 整体在 svg-area 上面
+ *  list 视觉位置 125-1000px（flex: 1 子元素），**应该**不影响 SVG 0-125
+ *  实际看不到 SVG 可能是：
+ *  - list sticky top:0 触发后顶部 = 屏幕 0px + list 整体 z:2 stacking 覆盖 svg-area
+ *  - list 内部 header 840px 溢出 list 容器 875px，header 视觉位置 125-965
+ *  - 多个 z-index 互相干扰
+ *  v2.24 修复：完全移除 list 的 position: sticky 和 z-index
+ *  list 不用 sticky 垂直滚动（让 commit-row 跟 SVG 一起滚）
+ *  list 不用 z-index: 2（盖被子效果改用 transform 视觉位置实现） */
 .git-graph-list {
   flex: 1;
   min-width: 0;
   background: transparent;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  will-change: transform;
+  /* v2.24：不创建新 stacking context（移除 sticky + z-index + will-change） */
   /* transform 由 inline 绑定 handleLeft 偏移（盖被子效果） */
 }
 
