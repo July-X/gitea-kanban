@@ -64,7 +64,12 @@ import {
 const auth = useAuthStore();
 const repo = useRepoStore();
 
-const INITIAL_GRAPH_LIMIT = 5000;
+// 初始 graph 上限。
+// v2.x 修复 July-X/UnrealEngine 渲染卡死：UnrealEngine release 分支中段有一段超宽 merge
+// 历史（单行 1407 lane / 963 flow），-n 5000 会把这段拉进来，前端 6836 div + 963 超长 path
+// 直接卡死主线程（用户看到"只有圆点、列表空白"的卡顿中间态）。
+// 降到 1000：最近的提交 graph 很窄（列宽 ≤3），DOM 秒渲染；更早历史交给「加载更多」按需拉。
+const INITIAL_GRAPH_LIMIT = 1000;
 const LOAD_MORE_DEEPEN_BY = 200;
 const SVG_AREA_MIN_WIDTH = 120;
 const SVG_AREA_AUTO_MAX_WIDTH = 260;
@@ -698,6 +703,44 @@ const svgAreaWidth = computed(() => {
   return `${Math.min(Math.max(SVG_AREA_MIN_WIDTH, autoNum), SVG_AREA_AUTO_MAX_WIDTH)}px`;
 });
 
+/**
+ * SVG 横向缩放比：当容器（svgAreaWidth）比 SVG 固有宽度更宽时，把 SVG 线条
+ * scaleX 拉伸填满容器，让复杂 merge 的 lane 间距变大、斜线更清晰（缓解断线视觉），
+ * 也让"拉宽 graph 区域"真正生效（之前拉宽只改变滚动条，flow 图形不变）。
+ *
+ * 圆点 overlay 不参与 transform（保持正圆），但其 cx 按 scaleX 缩放以对齐线条。
+ * 仅横向拉伸（scaleY=1，行高不变），避免 commit 列表与圆点垂直错位。
+ * 容器比 SVG 窄时不缩放（保持 1，靠 .git-graph-svg-area 内部 overflow-x 滚动）。
+ */
+const svgScaleX = computed(() => {
+  if (!useAsciiGraph.value || !asciiGraph.value) return 1;
+  const intrinsic = parseSvgPx(svgWidth.value);
+  const container = parseSvgPx(svgAreaWidth.value);
+  if (intrinsic <= 0 || container <= 0) return 1;
+  // 容器更宽才拉伸；容器更窄保持 1（滚动）
+  return container > intrinsic ? container / intrinsic : 1;
+});
+
+/** SVG 线条元素的 transform（横向拉伸），圆点 overlay 不受影响 */
+const svgTransform = computed(() => {
+  const s = svgScaleX.value;
+  return s === 1 ? undefined : `scaleX(${s})`;
+});
+
+/** .git-graph-svg-inner 宽度：拉伸时撑到容器宽度，避免 SVG transform 后右侧留白 */
+const svgInnerWidthStyle = computed(() => {
+  if (svgScaleX.value === 1) return undefined;
+  return { width: dotsOverlayWidth.value };
+});
+
+/** 圆点 overlay 容器宽度：拉伸后要等于容器宽度，否则圆点定位错位 */
+const dotsOverlayWidth = computed(() => {
+  if (!useAsciiGraph.value || !asciiGraph.value) return svgWidth.value;
+  const s = svgScaleX.value;
+  if (s === 1) return svgWidth.value;
+  return `${parseSvgPx(svgWidth.value) * s}px`;
+});
+
 interface DotOverlayNode {
   sha: string;
   subject: string;
@@ -709,10 +752,19 @@ interface DotOverlayNode {
 
 const dotNodes = computed<DotOverlayNode[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
+    // 圆点 overlay 是 HTML 绝对定位 px，必须与 SVG viewBox 映射后的像素坐标对齐。
+    // SVG viewBox 的 minX = graph.minColumn * COL_WIDTH（见 models.ts svgViewBox），
+    // 线条经 viewBox 映射后整体左移 minX*SCALE。圆点若用绝对 px (col*CW+CW)*SCALE
+    // 不减 minX，会恒定偏右 minX*SCALE（minColumn 几乎总是 1 → 偏右 10px），
+    // 表现为"圆点偏右、线条偏左"。这里减去 minX 对齐。
+    const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
+    // svgScaleX：容器比 SVG 宽时线条横向拉伸，圆点 cx 也要同步缩放才能对齐线条。
+    // 圆点本身不 transform（保持正圆），只把 cx 乘 scaleX。
+    const sx = svgScaleX.value;
     return asciiGraph.value.commits.map((commit) => ({
       sha: commit.sha,
       subject: commit.subject,
-      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH) * ASCII_DISPLAY_SCALE,
+      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX) * ASCII_DISPLAY_SCALE * sx,
       cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
       colorClass: flowColorClass(
         asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
@@ -911,14 +963,15 @@ function refBadgeClass(refType?: string): string {
           <!-- 左侧：SVG 图（grid-column:1，跨所有 row，sticky 跟随滚动） -->
           <!-- 左侧：SVG 图（固定宽度，左侧 sticky） -->
           <div class="git-graph-svg-area" :style="{ width: svgAreaWidth }">
-            <div class="git-graph-svg-inner">
+            <div class="git-graph-svg-inner" :style="svgInnerWidthStyle">
               <!-- SVG：只画线条（path），圆点用 HTML overlay 固定大小） -->
+              <!-- v2.x：容器更宽时 SVG 线条 scaleX 拉伸填满（缓解断线 + 拉宽生效） -->
               <svg
                 class="git-graph-svg"
                 :viewBox="viewBox"
                 :width="svgWidth"
                 :height="svgHeight"
-                style="display: block"
+                :style="{ transform: svgTransform, transformOrigin: 'top left' }"
               >
                 <!-- v2.6：按 color 分组 path（对齐 Gitea svgcontainer.tmpl：每 flow 一个 <g>） -->
                 <g
@@ -937,12 +990,13 @@ function refBadgeClass(refType?: string): string {
                     stroke-width="1"
                     fill="none"
                     stroke-linecap="round"
+                    vector-effect="non-scaling-stroke"
                   />
                 </g>
               </svg>
 
-              <!-- 圆点 overlay：固定大小，不受 SVG 缩放影响 -->
-              <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
+              <!-- 圆点 overlay：固定大小，不受 SVG 缩放影响（cx 已按 scaleX 缩放对齐线条） -->
+              <div class="commit-dots-overlay" :style="{ width: dotsOverlayWidth, height: svgHeight }">
                 <div
                   v-for="c in dotNodes"
                   :key="`dot-${c.sha}`"

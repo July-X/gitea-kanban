@@ -37,16 +37,17 @@ export function glyphToPathD(g: Glyph): string {
       // 垂直线 v ROW_HEIGHT（本列右缘）
       return `M ${x + COL_WIDTH} ${y} v ${ROW_HEIGHT}`;
     case '/': {
-      // 本列右缘 → parent 列右缘
-      const pc = g.parentColumn ?? g.column - 1;
-      const span = g.column - pc;
-      return `M ${x + COL_WIDTH} ${y} l ${-span * COL_WIDTH} ${ROW_HEIGHT}`;
+      // / 从本列右缘斜向左下到左邻列右缘（git graph 的 / 每条只跨 1 lane）
+      //
+      // 修复"多 MR 仓库 graph 大量断线"：
+      // 旧代码用 g.parentColumn（parser 传入的 flowID）当列坐标，但密集 merge 区
+      // parentColumn 可能指向已死 flow（compactColumns 无法修正）→ 斜线起点 x 错位 → 断线。
+      // git log --graph 的 / \ 几何上恒跨相邻 1 lane，parent 列恒为 column-1，无需依赖 parentColumn。
+      return `M ${x + COL_WIDTH} ${y} l ${-COL_WIDTH} ${ROW_HEIGHT}`;
     }
     case '\\': {
-      // parent 列右缘 → 本列右缘
-      const pc = g.parentColumn ?? g.column - 1;
-      const span = g.column - pc;
-      return `M ${pc * COL_WIDTH + COL_WIDTH} ${y} l ${span * COL_WIDTH} ${ROW_HEIGHT}`;
+      // \ 从左邻列右缘斜向右下到本列右缘（跨相邻 1 lane）
+      return `M ${x} ${y} l ${COL_WIDTH} ${ROW_HEIGHT}`;
     }
     case '-':
     case '.':

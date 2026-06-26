@@ -49,8 +49,10 @@ type WailsApp = {
   SetWorkspace?: (a: { cwd: string }) => Promise<void>;
   /** v2.2：用系统文件管理器打开应用数据目录 */
   OpenDataDir?: () => Promise<void>;
-  /** v2.3：clone 仓库到本地 workspace（不传 token，从 keychain 拿） */
+  /** v2.3：clone 仓库到本地 workspace（不传 token，从 keychain 拿）
+   *  v2.x：优先 projectId（Go 端反查 account），旧协议 platform/hostUrl/username 回退 */
   CloneRepo?: (args: {
+    projectId?: string;
     platform: string;
     hostUrl: string;
     username: string;
@@ -386,9 +388,10 @@ const apiShim = {
      *   - 前端用 repo.owner + repo.name 直接传 owner/repo（不再需要 projectId）
      */
     gitgraphCloneRepo: (args: unknown): Promise<unknown> => {
-      // 旧协议：{ projectId, cwd? } —— projectId 在新协议里不再用
-      // 新协议：{ platform?, hostUrl?, username?, owner, repo }
+      // 优先 projectId（v2.x，与 PullRepoByProjectId 范式对齐）：Go 端反查 account
+      // 旧协议回退：{ platform?, hostUrl?, username?, owner, repo }
       const a = (args ?? {}) as {
+        projectId?: string;
         platform?: string;
         hostUrl?: string;
         username?: string;
@@ -409,6 +412,7 @@ const apiShim = {
             });
           }
           return app.CloneRepo({
+            projectId: a.projectId ?? '',
             platform: a.platform ?? 'gitea',
             hostUrl: a.hostUrl ?? '',
             username: a.username ?? '',

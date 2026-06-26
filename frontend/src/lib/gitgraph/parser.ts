@@ -522,6 +522,8 @@ export function addLineToGraph(
     const column = flowID; // flowId 是流在所有行中的稳定列号（位置索引会因 git graph 空格而漂移）
 
     // 对角线的另一端列号（\ 从 parent 分叉，/ 合并到 parent）
+    // 注：svg.ts 渲染斜线时已改用 column-1（相邻 lane）几何关系，不再依赖 parentColumn，
+    //     这里仍按原逻辑记录 parentColumn 供 compactColumns 等参考（不影响渲染）。
     let parentColumn: number | undefined;
     if (glyph === '\\' && columnIdx > 0) {
       parentColumn = p.flows[columnIdx - 1]; // \ 从左侧的 | 分叉
