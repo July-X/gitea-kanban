@@ -1441,7 +1441,9 @@ function refBadgeClass(refType?: string): string {
   justify-content: flex-start;
   padding-left: var(--space-2, 8px);
   padding-right: var(--space-2, 8px);
-  border-right: 1px solid var(--color-border);
+  /* v2.29：用 --color-divider 替换 --color-border（border 在两个主题下都是 transparent，
+     用户看不到 graph 列与 desc 列之间的纵向分隔线） */
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   background: var(--color-bg-soft, rgba(0, 0, 0, 0.02));
 }
 .git-graph-header__col--graph .git-graph-header__col-label {
@@ -1452,12 +1454,18 @@ function refBadgeClass(refType?: string): string {
 }
 .git-graph-header__col--desc {
   padding-left: 0;
+  /* v2.29：desc 列右侧纵向分隔线（用 --color-divider 可见） */
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .git-graph-header__col--author {
   padding-left: var(--space-2, 8px);
+  /* v2.29：author 列右侧纵向分隔线 */
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .git-graph-header__col--date {
   padding: 0 var(--space-2, 8px);
+  /* v2.29：date 列右侧纵向分隔线（sha 是最后一列不加） */
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .git-graph-header__col--sha {
   padding: 0 var(--space-2, 8px);
