@@ -1076,7 +1076,7 @@ function refBadgeClass(refType?: string): string {
           - 每个 commit-row 第一列是占位（高度 = ROW_H），让背景的 SVG 在每行精确对齐
           - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
         -->
-        <div class="git-graph-wrapper" :style="{ '--grid-template-columns': gridTemplateColumns }">
+        <div class="git-graph-wrapper" :style="{ '--grid-template-columns': gridTemplateColumns, '--git-graph-col-width': `${handleLeft}px` }">
           <!-- v2.22：SourceTree 风格表头（5 列：graph + 描述/作者/日期/SHA） -->
           <div class="git-graph-header" @mousedown.stop>
             <!-- v2.27：第一列 graph 标题格（与 commit-row 第一列同宽） -->
@@ -1422,7 +1422,9 @@ function refBadgeClass(refType?: string): string {
   padding-right: var(--space-3, 12px);
   position: sticky; /* v2.27：表头 sticky 顶部，body 滚动时表头保持可见 */
   top: 0;
-  z-index: 2;
+  /* v2.32：z-index 提高到 5（高于 commit-dots-overlay z-index: 2 和 commit-row z-index: 1），
+     让 sticky 表头在向下滚动时浮在 commit-row 之上，避免背景看起来"透明" */
+  z-index: 5;
 }
 .git-graph-header__col {
   padding: 0 var(--space-2, 8px);
@@ -1470,26 +1472,22 @@ function refBadgeClass(refType?: string): string {
 .git-graph-header__col--sha {
   padding: 0 var(--space-2, 8px);
 }
-/* v2.30：列分隔拖拽手柄 = 平时 1px 透明（与表头 .git-graph-header__col 的 border-right 重叠）
- *  - 命中区是 4px 宽（padding 扩展），但 background-clip: content-box 让背景只渲染中间 1px
- *  - 平时看到的"1px 纵向线"是 content-box 的 background = 透明，所以实际可见的是表头 col 的 border-right
- *  - hover/active 时 content-box background 变绿（仍是 1px 居中） + ::before 显示 16px 中心白线指示
- *  - 用户体验：鼠标 hover 到纵向分隔线 → 立刻变绿 → 按下即可拖拽
- *  - 不再有独立的 6px 胖手柄（用户要求："鼠标滑动到这个分割线后就能左右拖动"） */
+/* v2.32：列分隔拖拽手柄 = 6px 命中区，居中于 1px 分割线（用 transform: translateX(-50%)）
+ *  - 6px 命中区在 hover 时整条变绿（用户清楚知道可以拖）
+ *  - 中心 1px 视觉线（与表头 col 的 border-right 重叠）
+ *  - 不再依赖 padding + background-clip 的复杂机制（v2.30 引入但定位不准确导致 hover 不灵敏）
+ *  - 用户要求："鼠标滑动到这个分割线后就能左右拖动" */
 .git-graph-header__resize {
   position: absolute;
   top: 0;
-  width: 4px;            /* 命中区 4px（centered around the 1px line） */
+  width: 6px;            /* 命中区 6px */
   height: 100%;
   cursor: col-resize;
   z-index: 4;
   background: transparent;
   transition: background 0.12s;
-  /* background-clip: content-box 让 background 只在 content 区域渲染（1px），
-     padding 区域（左右各 1.5px）保持透明，命中区是整个 4px */
-  background-clip: content-box;
-  padding-left: 1.5px;
-  padding-right: 1.5px;
+  /* 居中于 1px 分割线：left = colHandleLeft(colIndex) = 分割线中心 */
+  transform: translateX(-50%);
 }
 .git-graph-header__resize:hover,
 .git-graph-header__resize--active {
@@ -1940,6 +1938,9 @@ function refBadgeClass(refType?: string): string {
       flex-direction: column;
       /* v2.14：list 内嵌流式布局 —— 上下 margin 让手风琴跟展开 row + 下方 row 视觉呼吸 */
       margin: 4px 12px;
+      /* v2.32：左侧加 margin-left = graph 列宽（用 --git-graph-col-width），
+         让手风琴只占后面 4 列宽度，不侵入第一列 git-graph 图形列 */
+      margin-left: calc(var(--git-graph-col-width, 130px) + 4px);
       flex-shrink: 0;
     }
 .commit-accordion::-webkit-scrollbar {
