@@ -701,10 +701,11 @@ const expandedCommitNode = computed<
 const laneSpacing = computed(() => ASCII_COL_WIDTH * ASCII_DISPLAY_SCALE);
 
 /**
- * 圆点视觉直径（px）= lane 间距（圆点填满一个 lane，跟 Gitea 圆点直径=lane 间距一致）
- * 不缩放所以 size 是常量 10px。
+ * 圆点视觉直径（px）= 4px（v2.27 用户要求：flow 线上的点应该是 4px 宽的圆点）
+ * 不再等于 lane 间距（5px）—— 圆点比 lane 略小 1px，圆点视觉上"嵌"在 lane 线上，
+ * 比 5px（跟 lane 等宽）更紧凑、跟 Gitea gitgraph 风格略有差异但用户明确要求 4px。
  */
-const dotSize = computed(() => laneSpacing.value);
+const dotSize = computed(() => 4);
 
 interface DotOverlayNode {
   sha: string;
@@ -943,13 +944,17 @@ function onColHandleMouseUp(): void {
   document.removeEventListener('mouseup', onColHandleMouseUp);
 }
 
-/** 列分隔手柄位置（用于 inline style） */
+/** 列分隔手柄位置（用于 inline style，v2.27：相对整个 wrapper 起点）
+ *  graph 列宽度 = handleLeft 在前，colHandleLeft 算的是 desc 列左边起点
+ *  colIndex=0: desc 列右边 = handleLeft + desc
+ *  colIndex=1: desc+author 列右边 = handleLeft + desc + author
+ *  colIndex=2: desc+author+date 列右边 = handleLeft + desc + author + date */
 function colHandleLeft(colIndex: number): number {
-  // colIndex=0: desc 列右边；=1: desc+author 列右边；=2: desc+author+date 列右边
   const w = colWidths.value;
-  if (colIndex === 0) return w.desc;
-  if (colIndex === 1) return w.desc + w.author;
-  return w.desc + w.author + w.date;
+  const base = handleLeft.value;
+  if (colIndex === 0) return base + w.desc;
+  if (colIndex === 1) return base + w.desc + w.author;
+  return base + w.desc + w.author + w.date;
 }
 
 /**
@@ -1065,16 +1070,61 @@ function refBadgeClass(refType?: string): string {
       <!-- Git Graph -->
       <template v-else>
         <!--
-          v2.18：恢复标准两栏布局（修复 v2.17 的 layout 错乱）
-          - 左侧 git-graph 区域（position: sticky，flex-shrink:0，固定宽度）
-          - 拖拽手柄（绝对定位在 svg-area 右边缘）
-          - 右侧 commit list（flex:1，自适应宽度，vertical sticky top:0）
-          不再用 absolute/sticky 浮层（避免 layout 错乱）
+          v2.27：git-graph 整合为表格第一列（用户反馈"应该是整体是表格的一个列，
+                 而不是和表头分离的布局模式"）
+          - 整张 SVG + dot overlay 作为背景层铺在 body 底层（position: absolute, z-index: 0）
+          - header / commit-row 改为 5 列 grid：graph | 描述 | 作者 | 日期 | SHA
+          - 每个 commit-row 第一列是占位（高度 = ROW_H），让背景的 SVG 在每行精确对齐
+          - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
         -->
-        <div class="git-graph-wrapper">
-          <!-- 左侧：SVG 图（sticky，宽度 = handleLeft，由拖拽手柄控制，默认 svgWidth） -->
-          <div class="git-graph-svg-area" :style="{ width: `${handleLeft}px` }">
-            <div class="git-graph-svg-inner">
+        <div class="git-graph-wrapper" :style="{ '--grid-template-columns': gridTemplateColumns }">
+          <!-- v2.22：SourceTree 风格表头（5 列：graph + 描述/作者/日期/SHA） -->
+          <div class="git-graph-header" @mousedown.stop>
+            <!-- v2.27：第一列 graph 标题格（与 commit-row 第一列同宽） -->
+            <div
+              class="git-graph-header__col git-graph-header__col--graph"
+              :style="{ width: `${handleLeft}px` }"
+            >
+              <span class="git-graph-header__col-label">Graph</span>
+            </div>
+            <!-- v2.28：移除 graph 列宽拖拽手柄（用户：表头列的拖拽就够用了） -->
+            <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
+            <div
+              class="git-graph-header__resize"
+              @mousedown="(e) => onColHandleMouseDown(e, 0)"
+              :class="{ 'git-graph-header__resize--active': draggingCol === 0 }"
+              :style="{ left: `${colHandleLeft(0)}px` }"
+              title="拖动调整 Description 列宽度"
+            />
+            <div class="git-graph-header__col git-graph-header__col--author">作者</div>
+            <div
+              class="git-graph-header__resize"
+              @mousedown="(e) => onColHandleMouseDown(e, 1)"
+              :class="{ 'git-graph-header__resize--active': draggingCol === 1 }"
+              :style="{ left: `${colHandleLeft(1)}px` }"
+              title="拖动调整 Author 列宽度"
+            />
+            <div class="git-graph-header__col git-graph-header__col--date">日期</div>
+            <div
+              class="git-graph-header__resize"
+              @mousedown="(e) => onColHandleMouseDown(e, 2)"
+              :class="{ 'git-graph-header__resize--active': draggingCol === 2 }"
+              :style="{ left: `${colHandleLeft(2)}px` }"
+              title="拖动调整 Date 列宽度"
+            />
+            <div class="git-graph-header__col git-graph-header__col--sha">SHA</div>
+          </div>
+
+          <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row） -->
+          <div class="git-graph-body" :style="{ minHeight: svgHeight }">
+            <!-- 背景层：整张 SVG + 圆点 overlay 铺在 body 底层，commit-row 透明显示 -->
+            <div
+              class="git-graph-bg"
+              :style="{
+                width: svgWidth,
+                height: svgHeight,
+              }"
+            >
               <svg
                 class="git-graph-svg"
                 :viewBox="viewBox"
@@ -1100,7 +1150,7 @@ function refBadgeClass(refType?: string): string {
                 </g>
               </svg>
 
-              <!-- 圆点 overlay：固定大小 = lane 间距（5px） -->
+              <!-- 圆点 overlay：固定大小 = lane 间距 -->
               <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
                 <div
                   v-for="c in dotNodes"
@@ -1119,59 +1169,7 @@ function refBadgeClass(refType?: string): string {
               </div>
             </div>
 
-            <!-- 列宽拖拽手柄（v2.21：物理位置由 handleLeft 控制，拖拽后停在新位置）
-     拖拽边界：handleLeft ∈ [60, 800]
-     handle 左侧（左侧移动方向）显示背景色遮罩盖住部分 git-graph -->
-            <div
-              class="graph-resize-handle"
-              :class="{ 'graph-resize-handle--active': dragging }"
-              :style="{ left: `${handleLeft}px`, '--handle-cover-width': `${handleLeft}px` }"
-              title="拖拽调整 git-graph 显示宽度（左边至少 60px，右边最多让 git-graph 显示 800px）"
-              @mousedown="onDragStart"
-            />
-          </div>
-
-          <!-- 右侧：Commit 列表（v2.25：margin-left 由 handleLeft 控制位置，不再用 transform）
-       v2.24 之前用 transform: translateX()，但 transform !== none 创建 stacking context
-       导致 list 整体在 svg-area 上面（虽然视觉位置不影响 SVG，但 z-index 体系混乱）
-       v2.25 改用 margin-left 实现拖拽（margin-left 不创建 stacking context） -->
-          <div
-            class="git-graph-list"
-            :style="{
-              minHeight: svgHeight,
-              marginLeft: `${handleLeft - parseSvgPx(svgWidth)}px`,
-              '--grid-template-columns': gridTemplateColumns,
-            }"
-          >
-            <!-- v2.22：SourceTree 风格表头（sticky 在顶部，列宽可拖拽调整） -->
-            <div class="git-graph-header" @mousedown.stop>
-              <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
-              <div
-                class="git-graph-header__resize"
-                @mousedown="(e) => onColHandleMouseDown(e, 0)"
-                :class="{ 'git-graph-header__resize--active': draggingCol === 0 }"
-                :style="{ left: `${colHandleLeft(0)}px` }"
-                title="拖动调整 Description 列宽度"
-              />
-              <div class="git-graph-header__col git-graph-header__col--author">作者</div>
-              <div
-                class="git-graph-header__resize"
-                @mousedown="(e) => onColHandleMouseDown(e, 1)"
-                :class="{ 'git-graph-header__resize--active': draggingCol === 1 }"
-                :style="{ left: `${colHandleLeft(1)}px` }"
-                title="拖动调整 Author 列宽度"
-              />
-              <div class="git-graph-header__col git-graph-header__col--date">日期</div>
-              <div
-                class="git-graph-header__resize"
-                @mousedown="(e) => onColHandleMouseDown(e, 2)"
-                :class="{ 'git-graph-header__resize--active': draggingCol === 2 }"
-                :style="{ left: `${colHandleLeft(2)}px` }"
-                title="拖动调整 Date 列宽度"
-              />
-              <div class="git-graph-header__col git-graph-header__col--sha">SHA</div>
-            </div>
-
+            <!-- 行层：每行 grid 5 列，第一列是 graph 占位让背景 SVG 透出 -->
             <template v-for="r in allRows" :key="`row-${r.row}`">
               <div
                 class="commit-row"
@@ -1189,6 +1187,11 @@ function refBadgeClass(refType?: string): string {
                 @keydown.enter.prevent="r.commit && toggleCommitDetail(r.commit)"
                 @keydown.space.prevent="r.commit && toggleCommitDetail(r.commit)"
               >
+                <!-- v2.27：graph 占位列（与表头第一列同宽，让背景 SVG 透出） -->
+                <div
+                  class="commit-row__col commit-row__col--graph"
+                  :style="{ width: `${handleLeft}px` }"
+                />
                 <template v-if="r.commit">
                   <!-- v2.22：Description 列（refs + subject） -->
                   <div class="commit-row__col commit-row__col--desc">
@@ -1238,16 +1241,15 @@ function refBadgeClass(refType?: string): string {
                   </div>
                 </template>
                 <template v-else>
-                  <!-- 关系占位行（merge edge 中间段）—— 用 4 个空 col 占位 -->
+                  <!-- 关系占位行（merge edge 中间段）—— 4 个空 col 占位 -->
                   <div class="commit-row__col commit-row__col--desc" />
                   <div class="commit-row__col commit-row__col--author" />
                   <div class="commit-row__col commit-row__col--date" />
                   <div class="commit-row__col commit-row__col--sha" />
                 </template>
               </div>
-               <!-- v2.14：行下手风琴 —— 流式插入 list 内部，只占右列宽，
-                    **不**遮挡左侧 git-graph SVG。紧跟展开 commit-row 之后，
-                    自然撑高 list 高度，把下方 commit-row 推开 -->
+               <!-- v2.14：行下手风琴 —— 流式插入 body 内部，跨整宽（不再只是右列），
+                    v2.27：跨整宽包含 graph 列背景，accordion 自身有 elevated 底色 -->
                <div
                  v-if="r.commit && expandedSha === r.commit.sha"
                  class="commit-accordion"
@@ -1263,10 +1265,8 @@ function refBadgeClass(refType?: string): string {
                  />
                </div>
             </template>
-            </div>
-            <!-- v2.14：手风琴已内嵌到 .git-graph-list 内部（v-for 里展开 row 之后），
-                 旧的 wrapper-level absolute 副本已删除 —— 不再跨整宽覆盖左侧 SVG -->
-         </div>
+          </div>
+        </div>
        </template>
      </div>
    </div>
@@ -1388,34 +1388,122 @@ function refBadgeClass(refType?: string): string {
 }
 
 /* ===== Git Graph Wrapper ===== */
-/* v2.18：标准两栏布局（恢复 flex，避免 v2.17 的 absolute/sticky 浮层错乱）
- * - SVG 区域在左（flex-shrink:0 固定宽度），sticky 跟随垂直滚动
- * - commit list 在右（flex:1 自适应宽度）
- * - 拖拽手柄绝对定位在 svg-area 右边缘，z-index 高于 list */
+/* ===== v2.27 Git Graph Wrapper（git-graph 整合为表格第一列）=====
+ * 单栏布局：
+ *   - header: 5 列 grid（graph + 描述/作者/日期/SHA）
+ *   - body: position: relative 包含背景层 (git-graph-bg) 和 行层 (commit-row)
+ *   - 背景层 SVG + dot overlay 绝对定位在 body 左上角，z-index: 0
+ *   - 行层 commit-row 透明背景，让 SVG 透出；第一列是 graph 占位
+ * 不再用 flex 两栏 + sticky，避免 v2.18~v2.26 的 z-index 互相干扰 */
 .git-graph-wrapper {
-  display: flex;
-  align-items: flex-start;
   position: relative;
   min-height: 1px;
+  display: block;
+  /* v2.27：把 grid-template-columns 透传给 header / body 行（5 列：graph + 4 个内容列） */
+  --grid-template-columns-5: var(--grid-template-columns-5, 130px 1fr 1fr 1fr 1fr);
 }
 
-/* SVG 区域：sticky 在左，固定宽度（= svgWidth），不缩放 */
-.git-graph-svg-area {
-  position: sticky;
-  left: 0;
+/* 表头（5 列 grid） */
+.git-graph-header {
+  display: grid;
+  grid-template-columns: auto var(--grid-template-columns, 480px 160px 120px 80px);
+  align-items: center;
+  height: 32px;
+  background: var(--color-bg-soft, rgba(0, 0, 0, 0.03));
+  border-bottom: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  padding-right: var(--space-3, 12px);
+  position: sticky; /* v2.27：表头 sticky 顶部，body 滚动时表头保持可见 */
   top: 0;
-  z-index: 1; /* SVG 在下层，拖拽手柄在上层 */
-  background: var(--color-shell-main-bg);
+  z-index: 2;
+}
+.git-graph-header__col {
+  padding: 0 var(--space-2, 8px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* v2.26：表头中文居中显示（与 SourceTree / VSCode Git Graph 风格一致） */
+  text-align: center;
+}
+.git-graph-header__col--graph {
+  /* 第一列 graph 标题（宽度由 inline 绑定 handleLeft） */
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: var(--space-2, 8px);
+  padding-right: var(--space-2, 8px);
   border-right: 1px solid var(--color-border);
-  flex-shrink: 0;
-  align-self: flex-start;
+  background: var(--color-bg-soft, rgba(0, 0, 0, 0.02));
+}
+.git-graph-header__col--graph .git-graph-header__col-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-disabled);
+  letter-spacing: 0.05em;
+}
+.git-graph-header__col--desc {
+  padding-left: 0;
+}
+.git-graph-header__col--author {
+  padding-left: var(--space-2, 8px);
+}
+.git-graph-header__col--date {
+  padding: 0 var(--space-2, 8px);
+}
+.git-graph-header__col--sha {
+  padding: 0 var(--space-2, 8px);
+}
+/* 列分隔手柄 —— 绝对定位在 header 内部 */
+.git-graph-header__resize {
+  position: absolute;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+  background: transparent;
+  transition: background 0.15s;
+}
+.git-graph-header__resize:hover,
+.git-graph-header__resize--active {
+  background: var(--color-primary, #74b830);
+}
+.git-graph-header__resize:hover::before,
+.git-graph-header__resize--active::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 16px;
+  background: #fff;
+  border-radius: 1px;
 }
 
-.git-graph-svg-inner {
+/* v2.27：body 容器（包含背景层 SVG + 行层 commit-row） */
+.git-graph-body {
   position: relative;
-  display: inline-block;
+  display: block;
+  overflow: visible;
 }
 
+/* 背景层：SVG + dot overlay，整张铺在 body 左上角（z-index 0） */
+.git-graph-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  pointer-events: none; /* 不响应鼠标事件，让 commit-row 接收点击 */
+}
+
+/* SVG 自身 */
 .git-graph-svg {
   display: block;
 }
@@ -1573,16 +1661,8 @@ function refBadgeClass(refType?: string): string {
  *  - list sticky top:0 触发后顶部 = 屏幕 0px + list 整体 z:2 stacking 覆盖 svg-area
  *  - list 内部 header 840px 溢出 list 容器 875px，header 视觉位置 125-965
  *  - 多个 z-index 互相干扰
- *  v2.24 修复：完全移除 list 的 position: sticky 和 z-index
- *  list 不用 sticky 垂直滚动（让 commit-row 跟 SVG 一起滚）
- *  list 不用 z-index: 2（盖被子效果改用 transform 视觉位置实现） */
-.git-graph-list {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  /* v2.24：不创建新 stacking context（移除 sticky + z-index + will-change） */
-  /* transform 由 inline 绑定 handleLeft 偏移（盖被子效果） */
-}
+/* v2.27：.git-graph-list 已删除（合并到 .git-graph-body）
+ * 旧规则保留注释供 git blame 参考 */
 
 /* v2.23：SourceTree 风格表头
  *  - 跟 commit-row 同样的 grid-template-columns（--grid-template-columns）
@@ -1657,40 +1737,52 @@ function refBadgeClass(refType?: string): string {
   border-radius: 1px;
 }
 
-/* 每行 commit（与 SVG 行高 24px 1:1 对齐，dot 圆心才能与 commit 文字对齐）
+/* Commit 列表行 v2.27：5 列 grid（graph + 描述/作者/日期/SHA）
+ *  - 第一列是 graph 占位（与表头第一列同宽，背景透出让 SVG 显示）
+ *  - 后 4 列用 --grid-template-columns（4 个内容列） */
+/* 每行 commit（与 SVG 行高 1:1 对齐，dot 圆心才能与 commit 文字对齐）
  * v1.6 策略：保持单行固定高度 → 分支名完整显示 + 提交信息省略号兜底
  * 这样 SVG 点位永远与 commit 行对齐，不会因换行错位
- * v2.22：display: grid + grid-template-columns（来自 .git-graph-list 的 --grid-template-columns 变量）
- * 让 commit-row 按列对齐（Description / Author / Date / SHA），列宽由表头拖拽手柄控制 */
+ * v2.22：display: grid + grid-template-columns（来自 .git-graph-wrapper 的 --grid-template-columns 变量）
+ * v2.27：加第一列 graph 占位（auto 宽度，与表头 graph 列同宽） */
 .commit-row {
   display: grid;
-  grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
+  grid-template-columns: auto var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
   gap: 0;
   /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 28px），与 SVG 行高 1:1 对齐 */
   height: 28px; /* fallback（被 inline style 覆盖） */
-  /* v2.18：取消 padding-left 让 commit 内容紧贴 SVG 区域右边缘（视觉上连续），
-     保留 padding-right 让长 commit 内容不顶到 viewport 边缘 */
+  /* v2.27：行透明背景（让背景层 SVG 透出），行内容仅 commit-row__col--desc 等有自身背景 */
+  background: transparent;
   padding: 0 var(--space-3, 12px) 0 0;
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
   overflow: hidden;
   border-bottom: 1px solid var(--color-border);
   box-sizing: border-box;
+  position: relative; /* 自身建立 stacking context，让 col 内容在 SVG 之上 */
+  z-index: 1;
 }
 /* v2.16：ASCII 路径 ROW_H=12px，字体缩小到 11px 适配紧凑行高 */
 .commit-row--ascii {
   font-size: 11px;
   line-height: 1;
 }
-.commit-row:hover {
+/* v2.27：commit-row hover 时给 4 个内容列加背景（不动 graph 占位列，让 SVG 始终透出） */
+.commit-row:hover .commit-row__col--desc,
+.commit-row:hover .commit-row__col--author,
+.commit-row:hover .commit-row__col--date,
+.commit-row:hover .commit-row__col--sha {
   background: var(--color-bg-hover);
 }
 /* v1.6 可点击的 commit 行 */
 .commit-row--clickable {
   cursor: pointer;
 }
-.commit-row--clickable:hover {
+.commit-row--clickable:hover .commit-row__col--desc,
+.commit-row--clickable:hover .commit-row__col--author,
+.commit-row--clickable:hover .commit-row__col--date,
+.commit-row--clickable:hover .commit-row__col--sha {
   background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
 }
 .commit-row--clickable:focus-visible {
@@ -1699,15 +1791,18 @@ function refBadgeClass(refType?: string): string {
 }
 /* v2.11：行下手风琴 —— 展开 commit 行背景改为 --color-bg-hover（中性 hover 灰），
  * 让手风琴卡片（elevated 灰白）成为视觉主体，展开行只保留轻量状态指示。
- * 旧值 --color-primary-soft（绿色高亮）跟 elevated 卡片"双高亮"视觉割裂，
- * 跟 vscode 的"展开行不突出、面板是重点"风格不一致。
- * 选择器用 .commit-row--clickable.commit-row--expanded 提高 specificity，
- * 覆盖默认 .commit-row--clickable:hover 的绿色高亮 */
-.commit-row--clickable.commit-row--expanded {
+ * v2.27：只覆盖 4 个内容列（不动 graph 占位列） */
+.commit-row--clickable.commit-row--expanded .commit-row__col--desc,
+.commit-row--clickable.commit-row--expanded .commit-row__col--author,
+.commit-row--clickable.commit-row--expanded .commit-row__col--date,
+.commit-row--clickable.commit-row--expanded .commit-row__col--sha {
   background: var(--color-bg-hover);
   border-bottom-color: transparent;
 }
-.commit-row--clickable.commit-row--expanded:hover {
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--desc,
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--author,
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--date,
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha {
   background: var(--color-bg-hover);
   filter: brightness(1.08);
 }
@@ -1786,6 +1881,16 @@ function refBadgeClass(refType?: string): string {
   gap: var(--space-2, 8px);
   min-width: 0;
   overflow: hidden;
+  /* v2.27：内容列有自身背景，遮住下方背景层 SVG/圆点（commit-row 整行透明） */
+  background: var(--color-shell-main-bg);
+}
+/* v2.27：graph 占位列（透明背景，让背景层 SVG + dot overlay 透出） */
+.commit-row__col--graph {
+  width: 130px; /* fallback（被 inline 覆盖 = handleLeft） */
+  padding: 0;
+  border-right: 1px solid var(--color-border);
+  background: transparent;
+  flex-shrink: 0;
 }
 .commit-row__col--desc {
   gap: var(--space-2, 8px);
@@ -1957,43 +2062,13 @@ function refBadgeClass(refType?: string): string {
   cursor: not-allowed;
 }
 
-/* ===== v2.21 列宽拖拽手柄（物理位置，拖拽后停在新位置） =====
- * - position: absolute，left 由 inline 绑定 handleLeft（默认 = svgWidth）
- * - 用户拖拽后 handle 停在 [60, 800] 范围内（不回弹）
- * - 拖拽后 handle 停在新位置，可再次点击拖动
- * - z-index: 50 确保 handle 在最上层（不被 list 遮挡）
- *
- * v2.26：默认背景改为透明（移除一直显示的绿色粗条 —— 用户反馈），
- *  只在 hover/active 时显示绿色高亮 + 中心白线指示。 */
-.graph-resize-handle {
-  position: absolute;
-  top: 0;
-  /* left 由 inline 绑定 handleLeft（默认 svgWidth） */
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-  background: transparent; /* v2.26：默认透明（不再一直显示绿色） */
-  transition: background 0.15s;
-  user-select: none;
-  z-index: 50;
-}
-.graph-resize-handle:hover,
-.graph-resize-handle--active {
-  background: var(--color-primary, #74b830); /* hover/active 时才显示绿色 */
-}
-/* v2.26：hover/active 时中心竖向指示线（沿用 git-graph-header__resize 的视觉） */
-.graph-resize-handle:hover::before,
-.graph-resize-handle--active::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 16px;
-  background: #fff;
-  border-radius: 1px;
-}
+/* v2.28：移除 .graph-resize-handle 样式（用户：表头列的拖拽就够用了，不再单独提供 graph 列宽拖拽手柄）
+ *  旧规则保留注释供 git blame 参考：
+ *  - .graph-resize-handle { position: absolute; ... background: transparent; }
+ *  - :hover/--active { background: var(--color-primary); } + ::before 中心白线
+ *  - 整段 CSS 与模板中的 <div class="graph-resize-handle" @mousedown="onDragStart" /> 一起删除
+ *  - onDragStart 仍保留（用于响应 .git-graph-header 的 mousedown.stop 兜底/未来扩展）
+ */
 /* v2.21：handle 左侧全屏背景色遮罩（盖被子效果）
  * v2.26：移除此遮罩！它用 `pointer-events:none` 背景色块盖住整个 svg-area，
  * 导致 git-graph 看不到（用户反馈"git-graph 被黑色东西遮挡"）。
