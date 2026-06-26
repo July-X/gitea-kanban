@@ -701,11 +701,10 @@ const expandedCommitNode = computed<
 const laneSpacing = computed(() => ASCII_COL_WIDTH * ASCII_DISPLAY_SCALE);
 
 /**
- * 圆点视觉直径（px）= 4px（v2.27 用户要求：flow 线上的点应该是 4px 宽的圆点）
- * 不再等于 lane 间距（5px）—— 圆点比 lane 略小 1px，圆点视觉上"嵌"在 lane 线上，
- * 比 5px（跟 lane 等宽）更紧凑、跟 Gitea gitgraph 风格略有差异但用户明确要求 4px。
+ * 圆点视觉直径（px）= 8px（v2.29 用户要求：flow 线条上的圆点调整为 8px 宽）
+ * 比 lane 间距（5px）大，圆点视觉上"凸"在 lane 线上、跟 flow 路径有明显视觉对比。
  */
-const dotSize = computed(() => 4);
+const dotSize = computed(() => 8);
 
 interface DotOverlayNode {
   sha: string;
@@ -1410,8 +1409,10 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   height: 32px;
   background: var(--color-bg-soft, rgba(0, 0, 0, 0.03));
-  border-bottom: 1px solid var(--color-border);
-  border-top: 1px solid var(--color-border);
+  /* v2.29：用 --color-divider 替换 --color-border（border 在两个主题下都是 transparent，
+     所以用户看不到表头底下的 1px 线，无法方便拖拽列分隔手柄） */
+  border-bottom: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
+  border-top: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   font-size: 11px;
   font-weight: 600;
   color: var(--color-text-secondary);
