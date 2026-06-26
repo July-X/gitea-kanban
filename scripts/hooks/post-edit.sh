@@ -166,9 +166,15 @@ stage_commit() {
 
 make_commit_message() {
   # 优先策略：
-  #   1. 从 Stop payload 的 lastAssistantText 提取首行/首段
-  #   2. 否则从 git status 看变更文件清单生成简要说明
+  #   1. 从 Stop payload 的 lastAssistantText 提取首段（最多 300 字，保留 commit 标题/正文结构）
+  #   2. 否则从 git diff --stat + 文件名提取精确摘要（变更行数 + 关键文件）
   #   3. 兜底模板
+  #
+  # v2.33 改写（用户反馈："commit 应该是具体的功能改动说明，不要机械模板"）：
+  #   - 不再强制 `chore: 模型自动提交` 前缀
+  #   - 第一行直接用模型回复的首句（用户已写好 conventional commit 标题如 `fix: ...`）
+  #   - body 用模型回复的完整首段（最多 300 字），保留问题/方案/测试说明
+  #   - 兜底用 diff stat 生成"fix/feat: <文件> <行数> 行"等具体摘要
 
   local ASSISTANT_TEXT=""
   ASSISTANT_TEXT="$(printf '%s' "$PAYLOAD" | python3 -c "
@@ -176,22 +182,22 @@ import json,sys
 try:
     d=json.loads(sys.stdin.read() or '{}')
     t=(d.get('lastAssistantText') or '').strip().replace('\r\n', '\n')
-    if not t:
-        pass
-    else:
-        # 优先在中文/全角句号或换行前截断（分隔符自身一起丢掉）
-        seps = ['\n', '。', '！', '？', ';', '. ', '? ', '! ']
+    if t:
+        # 保留前 300 字的完整内容（让 commit message body 包含问题/方案/测试说明）
+        # 优先在段落结束（双换行）处截断，其次在单换行/句号
+        seps = ['\n\n', '\n', '。', '！', '？']
         cut = None
         for sep in seps:
             i = t.find(sep)
-            if 6 <= i <= 100:
-                cut = i  # 不包含分隔符本身
+            # 至少保留 200 字，避免截得太短；最多 300 字
+            if 200 <= i <= 300:
+                cut = i
                 break
         if cut is not None:
             t = t[:cut].rstrip()
         else:
-            # 找不到合适分隔符：截前 60 字（避免半截字）
-            head = t[:60]
+            # 找不到合适分隔符：截前 300 字
+            head = t[:300]
             if len(t) > len(head):
                 t = head.rstrip() + '…'
         print(t)
@@ -200,21 +206,34 @@ except Exception:
 " 2>/dev/null || true)"
 
   if [ -n "$ASSISTANT_TEXT" ]; then
-    # 确保是中文/含中文的标题
-    printf 'chore: 模型自动提交\n\n%s' "$ASSISTANT_TEXT"
+    # 不再强制 'chore: 模型自动提交' 前缀 —— 直接用模型回复的完整首段
+    # 模型自己写的 commit 标题（fix:/feat:/refactor:/style: 等）就是第一行
+    printf '%s' "$ASSISTANT_TEXT"
     return 0
   fi
 
-  # 兜底：从 git diff --stat 提取
-  local SUMMARY
-  SUMMARY="$(git diff --cached --stat 2>/dev/null | tail -1 || git diff --stat 2>/dev/null | tail -1 || true)"
-  if [ -z "$SUMMARY" ]; then
-    SUMMARY="$(git status --short 2>/dev/null | head -1 || true)"
-  fi
-  if [ -n "$SUMMARY" ]; then
-    printf 'chore: 模型自动提交\n\n变更摘要：%s' "$SUMMARY"
+  # 兜底 1：从 git diff stat 提取精确摘要（文件 + 行数）
+  local DIFF_SUMMARY
+  DIFF_SUMMARY="$(git diff --cached --stat 2>/dev/null | tail -1 || git diff --stat 2>/dev/null | tail -1 || true)"
+  if [ -n "$DIFF_SUMMARY" ]; then
+    # 从 stat 提取文件名前缀（取第一个文件名）
+    local FIRST_FILE
+    FIRST_FILE="$(git diff --cached --name-only 2>/dev/null | head -1 || git diff --name-only 2>/dev/null | head -1 || true)"
+    if [ -n "$FIRST_FILE" ]; then
+      local BASENAME="${FIRST_FILE##*/}"
+      printf 'chore: %s 改动\n\n变更摘要：%s' "$BASENAME" "$DIFF_SUMMARY"
+    else
+      printf 'chore: 代码改动\n\n变更摘要：%s' "$DIFF_SUMMARY"
+    fi
   else
-    printf 'chore: 模型自动提交'
+    # 兜底 2：没有 diff 时用 git status
+    local STATUS_LINE
+    STATUS_LINE="$(git status --short 2>/dev/null | head -1 || true)"
+    if [ -n "$STATUS_LINE" ]; then
+      printf 'chore: %s' "$STATUS_LINE"
+    else
+      printf 'chore: 代码改动'
+    fi
   fi
 }
 
