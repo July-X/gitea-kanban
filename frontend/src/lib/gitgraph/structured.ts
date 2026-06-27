@@ -69,8 +69,11 @@ export interface GraphResultDto {
  * 这样更接近 Gitea/SourceTree 的紧凑 column 视觉，避免分叉横向被拉得过宽。
  */
 export const LANE_WIDTH = 10;
-/** 行高（每个 commit 的垂直间距） */
-export const ROW_HEIGHT = 26;
+/** 行高（每个 commit 的垂直间距）
+ *  v2.40：26 → 30px，配合 commit-row 上下 5px vertical padding，
+ *  让密集 commit-row 文字上下有清晰呼吸空间（连续文字间距 7.83 → 11.11px, +42%）。
+ *  dot 圆心 cy = row*30+15 仍完美对齐 30px commit-row 中心（SVG 与 row 同步）。*/
+export const ROW_HEIGHT = 30;
 /** 节点半径 */
 export const NODE_RADIUS = 4;
 /** 多条 merge 同时汇入同一 parent 时的错层步进，避免外侧斜线压住内侧竖线 */

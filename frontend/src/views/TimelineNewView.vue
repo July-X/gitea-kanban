@@ -519,7 +519,7 @@ async function enableGitGraph(): Promise<void> {
 //
 // v2.6 改用结构化渲染（不再走字符流）：
 // - viewBox = `0 0 width height`（width/height 由 renderGraph 计算）
-// - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 26 px / row
+// - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 30 px / row（v2.40 26 → 30,密集 commit-row 文字间距 +42%）
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
 
 const ROW_H = computed(() =>
@@ -1898,7 +1898,8 @@ function refBadgeClass(refType?: string): string {
  * 背景盖住，鼠标事件仍由 commit-row 接收。
  *
  * v1.7 性能优化：`content-visibility: auto` 让屏幕外 SVG 区域不渲染——
- * SVG 含 1000+ path 时浏览器 paint 成本极高。viewport 不可见区域的 path 完全跳过。*/
+ * SVG 含 1000+ path 时浏览器 paint 成本极高。viewport 不可见区域的 path 完全跳过。
+ * v2.40：contain-intrinsic-size 28 → 30，与 commit-row / SVG ROW_HEIGHT 同步。*/
 .git-graph-bg {
   position: absolute;
   top: 0;
@@ -1906,7 +1907,7 @@ function refBadgeClass(refType?: string): string {
   z-index: 2;
   pointer-events: none; /* 不响应鼠标事件，让 commit-row 接收点击 */
   content-visibility: auto;
-  contain-intrinsic-size: auto 28px;
+  contain-intrinsic-size: auto 30px;
 }
 
 /* SVG 自身 */
@@ -1919,7 +1920,8 @@ function refBadgeClass(refType?: string): string {
  * v1.7 性能优化：`content-visibility: auto` 让屏幕外圆点不参与渲染——
  * 1000 个 absolute 定位的 div，每个浏览器都要 hit-test + paint，
  * 全部跳过渲染后滚动 fps 显著提升。
- * 圆点行高 = 28px（与 SVG 行高一致），整容器高度 = maxRow * 28px。*/
+ * v2.40：圆点行高 = 30px（与 commit-row / SVG ROW_HEIGHT 同步），整容器高度 = maxRow * 30px。
+ * contain-intrinsic-size 26 → 30 与 commit-row 同步。*/
 .commit-dots-overlay {
   position: absolute;
   top: 0;
@@ -1927,7 +1929,7 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
   z-index: 2;
   content-visibility: auto;
-  contain-intrinsic-size: auto 26px;
+  contain-intrinsic-size: auto 30px;
 }
 .commit-dot {
   position: absolute;
@@ -2113,22 +2115,24 @@ function refBadgeClass(refType?: string): string {
   min-width: var(--git-graph-table-width, 950px);
   align-items: center;
   gap: 0;
-  /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 26px），与 SVG 行高 1:1 对齐 */
-  height: 26px; /* fallback（被 inline style 覆盖） */
+  /* v2.40 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 30px），与 SVG 行高 1:1 对齐 */
+  height: 30px; /* fallback（被 inline style 覆盖） */
+  /* v2.40：上下 5px vertical padding（box-sizing: border-box 已设），让 commit 文字真正垂直居中且密集 commit-row 文字间距从 7.83 → 11.11px ( +42%) */
   /* v2.31 revert：恢复 v2.27 的"行透明 + 内容列自身背景"机制
      用户原意："只需要表头是非透明的背景即可"——表头 .git-graph-header 使用实色主内容背景，
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
   background: transparent;
-  padding: 0 var(--space-3, 12px) 0 0;
+  padding: 5px var(--space-3, 12px) 5px 0;
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
   /* v2.35：用户诉求——commit row 主体字号加大到 15px,提升可读性
    * v2.39：整体调优——字号回归 14px（26px 行高下更舒适），显式声明系统字体栈 +
    *   letter-spacing 微调，各列 padding 统一 12px，避免文字贴边。 */
+  /* v2.40：14px 主体字号 line-height 1.3 → 1.35，配合 5px vertical padding 让密集 row 文字呼吸 +42% */
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.3;
+  line-height: 1.35;
   letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
@@ -2141,12 +2145,16 @@ function refBadgeClass(refType?: string): string {
    * 注意：contain: layout 与 :hover 状态不影响——hover 时只重渲染当前 row，
    * 但浏览器对每个 row 单独走 hit-test 后才知道哪行 hover，所以 c-v: auto 仍有效。*/
   content-visibility: auto;
-  contain-intrinsic-size: auto 26px;
+  /* v2.40：26 → 30px，与 commit-row 高度 + SVG ROW_HEIGHT 同步（content-visibility 离屏预估高度） */
+  contain-intrinsic-size: auto 30px;
 }
-/* v2.16：ASCII 路径 ROW_H=12px，字体缩小到 11px 适配紧凑行高 */
+/* v2.16：ASCII 路径 ROW_H=12px，字体缩小到 11px 适配紧凑行高
+ * v2.40：ASCII row 12px 高度太紧，不应用 structured 的 5px vertical padding（会挤掉文字），
+ * 通过 padding: 0 保持紧凑显示；只 inherit font-size/line-height 的紧凑参数。*/
 .commit-row--ascii {
   font-size: 11px;
   line-height: 1;
+  padding: 0 var(--space-3, 12px) 0 0;
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
@@ -2215,11 +2223,11 @@ function refBadgeClass(refType?: string): string {
   filter: none;
 }
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
- * 必须保持 min-height: 24px（不要合并 / 不要 display:none） */
+ * v2.40：26 → 30px，与 commit-row / SVG ROW_HEIGHT 同步（dot 行节奏对齐） */
 .commit-row--relation {
   pointer-events: none;
   background: transparent;
-  height: 26px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
+  height: 30px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
 }
 .commit-row--relation:hover {
   background: transparent;
