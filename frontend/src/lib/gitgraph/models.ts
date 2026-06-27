@@ -189,14 +189,15 @@ export function graphHeight(g: Graph): number {
 
 /**
  * SVG viewBox 字符串
- * - x = minColumn * COL_WIDTH + FLOW_LEFT_PAD；y = minRow * ROW_HEIGHT
+ * - x = minColumn * COL_WIDTH；y = minRow * ROW_HEIGHT
  * - w = (maxColumn - minColumn + 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD
  * - h = (maxRow - minRow + 1) * ROW_HEIGHT
- * v2.42：加 FLOW_LEFT_PAD 让 flow 1 距左边 5px（圆缘距离，圆心 = 9px）。
- *   SVG 起点 +FLOW_LEFT_PAD 让 SVG lane path 在 viewBox 内视觉位置右移，
- *   dot cx 在 TimelineNewView 中也加 FLOW_LEFT_PAD 保持同步。*/
+ * v2.42：viewBox.x 保持 0-based (minColumn*COL_WIDTH)，**不偏移**。
+ *   SVG 内部坐标系起点与 body 左边一致（minColumn=0 时起点=0）。
+ *   FLOW_LEFT_PAD 偏移由 path 内部坐标 + dot cx 同步加 4 来实现（保持 path 和 dot 在同一绝对 px 坐标系）。
+ *   这样不需要 viewBox 偏移，path 和 dot 计算公式完全一致：column*COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD。*/
 export function svgViewBox(g: Graph): string {
-  const x = g.minColumn * COL_WIDTH + FLOW_LEFT_PAD;
+  const x = g.minColumn * COL_WIDTH;
   const y = g.minRow * ROW_HEIGHT;
   const w = graphWidth(g) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
   const h = graphHeight(g) * ROW_HEIGHT;
@@ -204,7 +205,7 @@ export function svgViewBox(g: Graph): string {
 }
 
 /** SVG 显示宽度（px）
- * v2.42：+FLOW_LEFT_PAD 让 SVG 容器宽度多 4px，与 viewBox 同步扩展。*/
+ * v2.42：+FLOW_LEFT_PAD 让 SVG 容器宽度多 4px，给 flow 1 圆缘预留 5px 左边距。*/
 export function svgWidthPx(g: Graph): string {
   return `${graphWidth(g) * COL_WIDTH * DISPLAY_SCALE + COL_WIDTH * DISPLAY_SCALE + FLOW_LEFT_PAD * DISPLAY_SCALE}px`;
 }

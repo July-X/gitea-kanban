@@ -28,15 +28,23 @@
  */
 
 import type { Flow, Glyph } from './models.js';
-import { COL_WIDTH, ROW_HEIGHT } from './models.js';
+import { COL_WIDTH, FLOW_LEFT_PAD, ROW_HEIGHT } from './models.js';
 
 // ============================================================
 // 单字形 → path d 段
 // ============================================================
 
-/** 单字形 → path d 段字符串 */
+/** 单字形 → path d 段字符串
+ * v2.42：所有 path 内部 x 坐标 +FLOW_LEFT_PAD（与 dot cx 公式一致）。
+ *   之前 path x = column*COL_WIDTH + COL_WIDTH（column 0 → 5px），
+ *   viewBox.x = minColumn*COL_WIDTH + FLOW_LEFT_PAD（0+4=4），path 渲染位置 = 4 + (5-4) = 1px。
+ *   dot cx = column*COL_WIDTH + COL_WIDTH - minX + FLOW_LEFT_PAD = 9px。
+ *   → path (1px) 和 dot (9px) 错位 3px（用户反馈"dot 调了 flow 线没同步"）。
+ *   现在 viewBox.x 改回 minColumn*COL_WIDTH（不偏移），path 内部 +FLOW_LEFT_PAD，
+ *   path 渲染位置 = 0 + (column*5+5+4 - 0) = column*5+9，
+ *   与 dot cx 完全一致 ✓。*/
 export function glyphToPathD(g: Glyph): string {
-  const x = g.column * COL_WIDTH;
+  const x = g.column * COL_WIDTH + FLOW_LEFT_PAD;
   const y = g.row * ROW_HEIGHT;
   switch (g.glyph) {
     case '*':
@@ -54,14 +62,14 @@ export function glyphToPathD(g: Glyph): string {
       // v3 对齐 Gitea svgcontainer.tmpl 几何：跨 2 lane (column-1 ↔ column+1)，
       //   起点 ((col+1)*CW + CW) 与上一行 | 终点 (col*CW + CW) 相差 1 lane，
       //   但 * 在 col+1 的右缘 = (col+1)*CW + CW，所以 / 起点正好接 * 在 col+1 行的底部。
-      const sx = (g.column + 1) * COL_WIDTH + COL_WIDTH;
-      const ex = (g.column - 1) * COL_WIDTH + COL_WIDTH;
+      const sx = (g.column + 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
+      const ex = (g.column - 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
       return `M ${sx} ${y} l ${ex - sx} ${ROW_HEIGHT}`;
     }
     case '\\': {
       // \ 从左邻 lane (col-1) 右缘斜向右下到右邻 lane (col+1) 右缘（跨 2 lane）
-      const sx = (g.column - 1) * COL_WIDTH + COL_WIDTH;
-      const ex = (g.column + 1) * COL_WIDTH + COL_WIDTH;
+      const sx = (g.column - 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
+      const ex = (g.column + 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
       return `M ${sx} ${y} l ${ex - sx} ${ROW_HEIGHT}`;
     }
     case '-':
