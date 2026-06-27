@@ -792,6 +792,7 @@ const userHandleLeft = ref<number | null>(loadGraphWidth());
 const dragging = ref(false);
 let dragStartX = 0;
 let dragStartHandleLeft = 0;
+let dragLatestX = 0;
 
 /** handle 实际位置（用户拖拽 > 自动计算 svgWidth 默认） */
 const handleLeft = computed(() => {
@@ -809,6 +810,7 @@ function onDragStart(e: MouseEvent): void {
   e.preventDefault();
   dragging.value = true;
   dragStartX = e.clientX;
+  dragLatestX = e.clientX;
   dragStartHandleLeft = handleLeft.value;
   // 缓存所有需要的 DOM ref 和响应式快照
   graphDragWrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
@@ -816,10 +818,6 @@ function onDragStart(e: MouseEvent): void {
     graphDragHandles = {
       headerGraphCol: graphDragWrapper.querySelector('.git-graph-header__col--graph') as HTMLElement | null,
       headerGraphHandle: graphDragWrapper.querySelector('.git-graph-header__resize--graph') as HTMLElement | null,
-      // commit-row 的 graph 占位列可能有 1000 个 —— 用 querySelectorAll 一次性拿全部 ref
-      commitGraphCols: Array.from(
-        graphDragWrapper.querySelectorAll('.commit-row__col--graph'),
-      ) as HTMLElement[],
       // 列分隔手柄 0/1/2 也跟着 handleLeft 走（手柄 0 = handleLeft + desc 实际宽）
       // —— 拖 graph 列时 desc 实际宽不变，所以手柄 0/1/2 的 left 都加 delta
       colHandles: Array.from(
@@ -847,9 +845,9 @@ function onDragStart(e: MouseEvent): void {
  *   gridTemplateColumns 3 个 computed 重算 → wrapper inline style 重写 → 1000 行
  *   commit-row 重新解析 3 个 CSS 变量 + 重新计算 grid-template-columns → template
  *   重渲染调 colHandleLeft(n) 里 querySelector + getBoundingClientRect（强制 layout）。
- * - 新版 mousemove **完全不写 ref**：直接修改所有依赖 handleLeft 的 DOM 节点的
- *   inline style（wrapper CSS 变量、表头 graph 列宽度、表头 graph 手柄 left、
- *   所有 commit-row graph 占位列宽度、所有列分隔手柄 left）。
+ * - 新版 mousemove **完全不写 ref**：只更新 wrapper CSS 变量和表头手柄 DOM，
+ *   不逐行写入 commit-row inline style。
+ * - rAF pending 期间继续记录最新 clientX，下一帧直接使用最新位置，避免快速拖动滞后。
  * - mouseup 才把最终 handleLeft 写回 userHandleLeft.value，让响应式系统同步一次状态
  *   用于持久化。
  */
@@ -859,13 +857,11 @@ let graphDragWrapper: HTMLElement | null = null;
 let graphDragHandles: {
   headerGraphCol: HTMLElement | null;
   headerGraphHandle: HTMLElement | null;
-  commitGraphCols: HTMLElement[];
   colHandles: HTMLElement[];
   colHandlesStartLeft: number[];
 } = {
   headerGraphCol: null,
   headerGraphHandle: null,
-  commitGraphCols: [],
   colHandles: [],
   colHandlesStartLeft: [],
 };
@@ -874,12 +870,13 @@ let graphDragSnapshot: { desc: number; author: number; date: number; sha: number
 
 function onDragMove(e: MouseEvent): void {
   if (!dragging.value) return;
+  dragLatestX = e.clientX;
   if (graphDragRafId !== 0) return; // 已有 pending frame，跳过
-  const delta = e.clientX - dragStartX;
   const startHandleLeft = dragStartHandleLeft;
   graphDragRafId = requestAnimationFrame(() => {
     graphDragRafId = 0;
     if (!dragging.value) return;
+    const delta = dragLatestX - dragStartX;
     // 计算新 handleLeft（夹紧到 [MIN, MAX]）
     const newLeft = Math.max(
       MIN_GRAPH_COL_WIDTH,
@@ -904,11 +901,7 @@ function onDragMove(e: MouseEvent): void {
       if (graphDragHandles.headerGraphHandle) {
         graphDragHandles.headerGraphHandle.style.left = `${newLeft}px`;
       }
-      // 5. 所有 commit-row 的 graph 占位列宽度（1000 个直接改 inline style）
-      for (let i = 0; i < graphDragHandles.commitGraphCols.length; i++) {
-        graphDragHandles.commitGraphCols[i].style.width = `${newLeft}px`;
-      }
-      // 6. 列分隔手柄 0/1/2 left 也要跟随（手柄在 handleLeft 之后，所有手柄 left += delta）
+      // 5. 列分隔手柄 0/1/2 left 也要跟随（手柄在 handleLeft 之后，所有手柄 left += delta）
       for (let i = 0; i < graphDragHandles.colHandles.length; i++) {
         const startL = graphDragHandles.colHandlesStartLeft[i];
         if (!Number.isNaN(startL)) {
@@ -946,7 +939,6 @@ function onDragEnd(): void {
   graphDragHandles = {
     headerGraphCol: null,
     headerGraphHandle: null,
-    commitGraphCols: [],
     colHandles: [],
     colHandlesStartLeft: [],
   };
@@ -1034,6 +1026,7 @@ const colWidths = ref({ ...loadColWidths() });
 /** 当前正在拖拽的列分隔手柄（-1 表示无） */
 const draggingCol = ref<number>(-1); // 0 = desc-author 间，1 = author-date 间，2 = date-sha 间
 let colDragStartX = 0;
+let colDragLatestX = 0;
 let colDragStartWidths: typeof DEFAULT_COL_WIDTHS | null = null;
 
 /**
@@ -1070,6 +1063,7 @@ function onColHandleMouseDown(e: MouseEvent, colIndex: number): void {
   e.stopPropagation(); // 防止触发 git-graph 的 handle 拖拽
   draggingCol.value = colIndex;
   colDragStartX = e.clientX;
+  colDragLatestX = e.clientX;
   colDragStartWidths = { ...colWidths.value };
   // v2.34：缓存所有需要的 DOM ref 和响应式快照，mousemove 完全不读响应式
   colDragWrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
@@ -1111,6 +1105,7 @@ function onColHandleMouseDown(e: MouseEvent, colIndex: number): void {
  *   重新解析 CSS 变量（即便数值未变，CSS 变量继承链路变化也会触发 layout invalidation）。
  * - 新版拖拽期间**绕过 Vue 响应式**：直接 `wrapper.style.setProperty('--grid-template-columns', str)`
  *   修改 DOM CSS 变量。这只触发浏览器 native reflow，不触发任何 Vue 响应式链路。
+ * - rAF pending 期间继续记录最新 clientX，下一帧直接使用最新位置，避免快速拖动滞后。
  * - 只有 mouseup 时才把最终宽度回写 `colWidths.value`，让响应式系统同步一次状态用于持久化、
  *   表头列分隔手柄位置更新等场景（mouseup 后用户停止拖拽，无视觉影响）。
  * - 测试发现：1000 行 commit 时拖拽手感从 ~30fps 提升到稳定 60fps。
@@ -1144,12 +1139,13 @@ function colWidthsToGridTemplate(w: { author: number; date: number; sha: number 
 
 function onColHandleMouseMove(e: MouseEvent): void {
   if (draggingCol.value < 0 || !colDragStartWidths) return;
+  colDragLatestX = e.clientX;
   if (colDragRafId !== 0) return; // 已有 pending frame，跳过
-  const delta = e.clientX - colDragStartX;
   const startWidths = colDragStartWidths;
   colDragRafId = requestAnimationFrame(() => {
     colDragRafId = 0;
     if (draggingCol.value < 0) return;
+    const delta = colDragLatestX - colDragStartX;
     const w = { ...startWidths };
     // colHandle 0 (desc-author 间) → 调整 author 列宽（desc 用 1fr 自然伸缩）
     if (draggingCol.value === 0) {

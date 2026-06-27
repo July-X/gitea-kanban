@@ -52,10 +52,15 @@ export const useAuthStore = defineStore('auth', () => {
     platform: 'gitea' | 'github',
   ): string | undefined {
     if (platform === 'github') {
-      // GitHub 账号固定 URL https://github.com —— 找第一个 platform==='github' 的账号
-      // 后端 connect 时 GitHub 走固定 URL,见 AccountManagerDialog.vue:114
+      // v2.38：GitHub 账号后端存的 giteaUrl 是 API 域名 https://api.github.com
+      // (见 app.go:1033 giteaURL = github.GitHubAPIBase + adapter.go:34)
+      // —— 因为后端所有 HTTP 调用需要走 API。但前端"在 GitHub 中打开 commit"
+      //   需要的是**网站 URL** https://github.com/owner/repo/commit/{sha},
+      //   跳到 api.github.com 是 API endpoint,浏览器看到 JSON 不是 web 页面。
+      // 归一化:任何 github.com 域名(无论 api. 还是裸 github.com)都替换成网站 URL。
       const gh = accounts.value.find((a) => a.platform === 'github');
-      return gh?.giteaUrl ?? 'https://github.com';
+      const apiUrl = gh?.giteaUrl ?? 'https://github.com';
+      return apiUrl.replace('api.github.com', 'github.com');
     }
     // Gitea：取第一个 Gitea 账号（兼容历史 currentGiteaUrl 语义）
     const gitea = accounts.value.find((a) => (a.platform ?? 'gitea') === 'gitea');
