@@ -23,8 +23,8 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:     "Gitea Kanban",
-		Width:     1280,
-		Height:    800,
+		Width:     1366,
+		Height:    768,
 		MinWidth:  800,
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
