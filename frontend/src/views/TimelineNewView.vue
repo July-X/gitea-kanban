@@ -521,6 +521,7 @@ async function enableGitGraph(): Promise<void> {
 // - viewBox = `0 0 width height`（width/height 由 renderGraph 计算）
 // - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 30 px / row（v2.40 26 → 30,密集 commit-row 文字间距 +42%）
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
+// v2.41：ASCII 路径 ROW_HEIGHT models.ts 12 → 16px（GitHub 平台 commit-row 上下气口）
 
 const ROW_H = computed(() =>
   useAsciiGraph.value ? ASCII_ROW_HEIGHT * ASCII_DISPLAY_SCALE : STRUCTURED_ROW_HEIGHT,
@@ -2115,7 +2116,7 @@ function refBadgeClass(refType?: string): string {
   min-width: var(--git-graph-table-width, 950px);
   align-items: center;
   gap: 0;
-  /* v2.40 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 30px），与 SVG 行高 1:1 对齐 */
+  /* v2.41 高度由内联 style 绑定 ROW_H（ASCII = 16px, structured = 30px），与 SVG 行高 1:1 对齐 */
   height: 30px; /* fallback（被 inline style 覆盖） */
   /* v2.40：上下 5px vertical padding（box-sizing: border-box 已设），让 commit 文字真正垂直居中且密集 commit-row 文字间距从 7.83 → 11.11px ( +42%) */
   /* v2.31 revert：恢复 v2.27 的"行透明 + 内容列自身背景"机制
@@ -2150,11 +2151,16 @@ function refBadgeClass(refType?: string): string {
 }
 /* v2.16：ASCII 路径 ROW_H=12px，字体缩小到 11px 适配紧凑行高
  * v2.40：ASCII row 12px 高度太紧，不应用 structured 的 5px vertical padding（会挤掉文字），
- * 通过 padding: 0 保持紧凑显示；只 inherit font-size/line-height 的紧凑参数。*/
+ * 通过 padding: 0 保持紧凑显示；只 inherit font-size/line-height 的紧凑参数。
+ * v2.41：models.ts ROW_HEIGHT 12 → 16px，ASCII commit-row 高度也变为 16px。
+ *   现在垂直方向有空间：上下 1px vertical padding，让 11px 文字在 row 内有 1px 上下气口，
+ *   行间连续 commit 文字间距从 0px → 2px（v2.41 之前 = 0），
+ *   文字距 row 顶/底各 1.5/1.5px（之前贴边）。
+ *   font-size 保持 11px（git-graph 紧凑风格），line-height 1.1 给 box 留 ~1px 行间空气。*/
 .commit-row--ascii {
   font-size: 11px;
-  line-height: 1;
-  padding: 0 var(--space-3, 12px) 0 0;
+  line-height: 1.1;
+  padding: 1px var(--space-3, 12px) 1px 0;
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)

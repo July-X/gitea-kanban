@@ -28,16 +28,21 @@ export { type GitRef };
 /** SVG 单位列宽（unit），控制 flow lane 之间的间距 */
 export const COL_WIDTH = 5;
 
-/** SVG 单位行高（unit） */
-export const ROW_HEIGHT = 12;
-
-/** 显示缩放系数（1 SVG unit = SCALE px）
- *  v2.16：改为 1（1:1 渲染），跟 Gitea svgcontainer.tmpl 一致。
+/** SVG 单位行高（unit）
+ *  v2.41：12 → 16px，让 ASCII 路径（GitHub 平台）的 commit-row 上下各有 ~2px 气口。
+ *  之前 12px 太紧，11px 字体 + line-height 1 文字几乎贴满 row 上下边界，
+ *  密集 row 时连续文字行间间距几乎为 0（看 v3-005 用户截图"sig-go coms"项目）。
+ *
+ *  ⚠️ 只影响 ASCII 路径（git --graph 字符流渲染）。
+ *  structured 路径用 structured.ts 自己的 ROW_HEIGHT=30，与本常量无关。
  *  - COL_WIDTH = 5 → lane 视觉间距 5px（用户要求"flow 线条间隔调整到 5px"）
- *  - ROW_HEIGHT = 12 → row 视觉高度 12px
+ *  - ROW_HEIGHT = 16 → row 视觉高度 16px（v2.41 从 12 提升）
  *  - svgWidth = graphWidth * 5 + 5（跟 Gitea `Width * 5 + 5` 一致）
  *  之前是 2（lane 10px），改 1 后 git-graph 整体更紧凑，更接近 SourceTree 风格
  */
+export const ROW_HEIGHT = 16;
+
+/** 显示缩放系数（1 SVG unit = SCALE px） */
 export const DISPLAY_SCALE = 1;
 
 /** 字形：git --graph 输出中的一个字符位置 */
