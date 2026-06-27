@@ -530,14 +530,21 @@ if (typeof document !== 'undefined') {
 }
 
 /* panel 变体（inline 手风琴）：
- *   - 高 100% 撑满父容器（手风琴卡片 max-height: 260px）
  *   - flex column：header 顶 + body 撑开
  *   - 让内部子元素可以各自滚动 */
 .cd-panel--panel {
   background: transparent;
   border-top: none;
   padding: 0;
-  height: 100%;
+  /* v1.8 bugfix：原 `height: 100%` 在 flex column 父容器 (.commit-accordion) 里
+   * 不会起作用 —— flex 子元素的高度由 flex 属性决定，height:100% 被忽略。
+   * 结果：cd-panel 高度 = 内容自然高度，accordion 容器 260px max-height 形同虚设，
+   * 整个面板撑开到屏幕底部。
+   * 改用 `flex: 1 1 auto` + `min-height: 0`：
+   *   - flex:1 让它撑满 accordion 容器剩余空间（260px - 自身 margin 等）
+   *   - min-height:0 允许内部 body/左右栏被压缩、出现滚动条
+   * 配合 .commit-accordion 的 max-height:260px + overflow:hidden 形成完整裁剪。*/
+  flex: 1 1 auto;
   min-height: 0;
 }
 
@@ -557,6 +564,9 @@ if (typeof document !== 'undefined') {
   position: sticky;
   top: 0;
   z-index: 1;
+  /* v1.8 bugfix：panel flex column 里 header 必须 flex-shrink:0，
+   * 否则会被压缩到 0 高度，body 拿不到准确可用高度，
+   * 260px max-height 容器 + body 内容 > 容器时滚动行为失准。*/
   flex-shrink: 0;
 }
 .cd-panel--panel .cd-panel__header {
