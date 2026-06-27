@@ -41,6 +41,89 @@ err()  { printf '%s[hook]%s %s %s%s\n' "$C_BLUE" "$C_RESET" "$C_RED" "$*" "$C_RE
 # ---------- 工具探测 ----------
 has() { command -v "$1" >/dev/null 2>&1; }
 
+trim_text() {
+  awk '{$1=$1; print}'
+}
+
+is_conventional_subject() {
+  printf '%s' "$1" | grep -Eq '^(feat|fix|refactor|perf|chore|test|docs|style)(\([^)]+\))?: .+'
+}
+
+is_bad_summary_subject() {
+  printf '%s' "$1" | grep -Eqi '^(#+[[:space:]]*)?(修复总结|修复完成|完成|编译错误修复完成|完整动态宽度修复|真正的根因|性能优化总结|所有[[:space:]]*[0-9]*[[:space:]]*(个|项)?[[:space:]]*todo|所有 todos|全部阶段通过|交付总结)'
+}
+
+normalize_commit_subject() {
+  local RAW SUBJECT
+  RAW="$(printf '%s' "$1" | tr -d '\r')"
+  SUBJECT="$(printf '%s\n' "$RAW" | sed -n '/./{p;q;}')"
+  SUBJECT="$(printf '%s' "$SUBJECT" | sed -E 's/^#+[[:space:]]*//; s/^`([^`]+)`$/\1/' | trim_text)"
+  if [ "${POST_EDIT_COMMIT_STYLE:-}" = "concise-conventional" ] && ! is_conventional_subject "$SUBJECT"; then
+    return 1
+  fi
+  if is_bad_summary_subject "$SUBJECT"; then
+    return 1
+  fi
+  if is_conventional_subject "$SUBJECT"; then
+    printf '%s' "$SUBJECT" | cut -c 1-72
+    return 0
+  fi
+  return 1
+}
+
+guess_commit_type() {
+  local NAMES
+  NAMES="$(git diff --cached --name-only 2>/dev/null; git diff --name-only 2>/dev/null)"
+  if printf '%s\n' "$NAMES" | grep -Eq '(^|/)(README|AGENTS|CLAUDE|docs/|.*\.md$)'; then
+    printf 'docs'
+  elif printf '%s\n' "$NAMES" | grep -Eq '(^|/)(.*(_test|\.test|\.spec)\.|tests?/)' ; then
+    printf 'test'
+  elif printf '%s\n' "$NAMES" | grep -Eq '(^|/)(package.json|pnpm-lock.yaml|go.mod|go.sum|wails.json|scripts/|\.reasonix/)'; then
+    printf 'chore'
+  elif git diff --cached --name-only 2>/dev/null | grep -Eq '\.(css|scss|vue)$' || git diff --name-only 2>/dev/null | grep -Eq '\.(css|scss|vue)$'; then
+    printf 'fix'
+  else
+    printf 'fix'
+  fi
+}
+
+describe_changed_area() {
+  local FILES FIRST BASE AREA
+  FILES="$(git diff --cached --name-only 2>/dev/null; git diff --name-only 2>/dev/null)"
+  FIRST="$(printf '%s\n' "$FILES" | sed -n '/./{p;q;}')"
+  BASE="${FIRST##*/}"
+  case "$FIRST" in
+    frontend/src/views/TimelineNewView.vue) AREA="git-graph 时间线" ;;
+    frontend/src/components/*) AREA="${BASE%.*} 组件" ;;
+    frontend/src/views/*) AREA="${BASE%.*} 页面" ;;
+    frontend/src/stores/*) AREA="${BASE%.*} 状态" ;;
+    frontend/src/lib/*) AREA="${BASE%.*} 工具逻辑" ;;
+    app/git/graph/*) AREA="git-graph 布局算法" ;;
+    app/git/*) AREA="git 客户端" ;;
+    app/platform/*) AREA="平台接口" ;;
+    app/store/*) AREA="本地状态存储" ;;
+    scripts/hooks/*|.reasonix/*) AREA="Reasonix hooks 提交说明" ;;
+    docs/*|*.md) AREA="项目文档" ;;
+    *) AREA="${BASE%.*}" ;;
+  esac
+  if [ -z "$AREA" ]; then
+    AREA="代码改动"
+  fi
+  printf '%s' "$AREA"
+}
+
+fallback_commit_subject() {
+  local TYPE AREA
+  TYPE="$(guess_commit_type)"
+  AREA="$(describe_changed_area)"
+  case "$AREA" in
+    *提交说明*) printf '%s: 优化 %s' "$TYPE" "$AREA" ;;
+    项目文档) printf '%s: 更新项目文档' "$TYPE" ;;
+    代码改动) printf '%s: 优化代码改动' "$TYPE" ;;
+    *) printf '%s: 优化 %s' "$TYPE" "$AREA" ;;
+  esac
+}
+
 # ---------- 阶段函数：失败立即停止 ----------
 stage_format() {
   log "阶段 1/4：格式化 (gofmt)"
@@ -166,15 +249,14 @@ stage_commit() {
 
 make_commit_message() {
   # 优先策略：
-  #   1. 从 Stop payload 的 lastAssistantText 提取首段（最多 300 字，保留 commit 标题/正文结构）
+  #   1. 从 Stop payload 的 lastAssistantText 提取明确的 conventional commit 标题
   #   2. 否则从 git diff --stat + 文件名提取精确摘要（变更行数 + 关键文件）
   #   3. 兜底模板
   #
-  # v2.33 改写（用户反馈："commit 应该是具体的功能改动说明，不要机械模板"）：
-  #   - 不再强制 `chore: 模型自动提交` 前缀
-  #   - 第一行直接用模型回复的首句（用户已写好 conventional commit 标题如 `fix: ...`）
-  #   - body 用模型回复的完整首段（最多 300 字），保留问题/方案/测试说明
-  #   - 兜底用 diff stat 生成"fix/feat: <文件> <行数> 行"等具体摘要
+  # v2.34 改写：
+  #   - 截图风格固定为短中文 Conventional Commit 标题
+  #   - 拒绝"修复总结 / 所有 todos 完成 / 完成"等模型最终回复标题
+  #   - 兜底基于实际变更区域生成，例如 `fix: 优化 git-graph 时间线`
 
   local ASSISTANT_TEXT=""
   ASSISTANT_TEXT="$(printf '%s' "$PAYLOAD" | python3 -c "
@@ -206,13 +288,23 @@ except Exception:
 " 2>/dev/null || true)"
 
   if [ -n "$ASSISTANT_TEXT" ]; then
-    # 不再强制 'chore: 模型自动提交' 前缀 —— 直接用模型回复的完整首段
-    # 模型自己写的 commit 标题（fix:/feat:/refactor:/style: 等）就是第一行
-    printf '%s' "$ASSISTANT_TEXT"
+    local SUBJECT
+    SUBJECT="$(normalize_commit_subject "$ASSISTANT_TEXT" || true)"
+    if [ -n "$SUBJECT" ]; then
+      printf '%s' "$SUBJECT"
+      return 0
+    fi
+  fi
+
+  # 兜底 1：按实际变更文件生成短中文 conventional 标题
+  local FALLBACK_SUBJECT
+  FALLBACK_SUBJECT="$(fallback_commit_subject)"
+  if [ -n "$FALLBACK_SUBJECT" ]; then
+    printf '%s' "$FALLBACK_SUBJECT" | cut -c 1-72
     return 0
   fi
 
-  # 兜底 1：从 git diff stat 提取精确摘要（文件 + 行数）
+  # 兜底 2：从 git diff stat 提取精确摘要（文件 + 行数）
   local DIFF_SUMMARY
   DIFF_SUMMARY="$(git diff --cached --stat 2>/dev/null | tail -1 || git diff --stat 2>/dev/null | tail -1 || true)"
   if [ -n "$DIFF_SUMMARY" ]; then
@@ -221,16 +313,16 @@ except Exception:
     FIRST_FILE="$(git diff --cached --name-only 2>/dev/null | head -1 || git diff --name-only 2>/dev/null | head -1 || true)"
     if [ -n "$FIRST_FILE" ]; then
       local BASENAME="${FIRST_FILE##*/}"
-      printf 'chore: %s 改动\n\n变更摘要：%s' "$BASENAME" "$DIFF_SUMMARY"
+      printf 'chore: 优化 %s' "${BASENAME%.*}"
     else
-      printf 'chore: 代码改动\n\n变更摘要：%s' "$DIFF_SUMMARY"
+      printf 'chore: 优化代码改动'
     fi
   else
-    # 兜底 2：没有 diff 时用 git status
+    # 兜底 3：没有 diff 时用 git status
     local STATUS_LINE
     STATUS_LINE="$(git status --short 2>/dev/null | head -1 || true)"
     if [ -n "$STATUS_LINE" ]; then
-      printf 'chore: %s' "$STATUS_LINE"
+      printf 'chore: 优化工作区改动'
     else
       printf 'chore: 代码改动'
     fi

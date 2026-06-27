@@ -34,6 +34,34 @@ export const useAuthStore = defineStore('auth', () => {
   /** 当前账号的 giteaUrl（多账号时取第一个；UI 上不直接暴露给用户看） */
   const currentGiteaUrl = computed(() => accounts.value[0]?.giteaUrl ?? '');
 
+  /**
+   * v2.37：按平台查找对应账号的 giteaUrl
+   *
+   * 历史 Bug：currentGiteaUrl 永远取 accounts[0]，导致用户连了多个平台时
+   * "在 GitHub 中打开" 按钮仍跳到 Gitea（第一个账号的 URL）。
+   *
+   * 用法：
+   *   - 当 currentProject.platform === 'github' 时调用 getAccountUrlByPlatform('github')
+   *     拿到 GitHub 账号的 URL（https://github.com），拼接 commit 路径正确跳转
+   *   - Gitea 平台走旧逻辑（取第一个 Gitea 账号）
+   *
+   * 找不到对应平台账号时返回 undefined —— 调用方（如 CommitDetailPanel
+   * 的 "在 X 中打开" 按钮）会据此隐藏按钮，避免跳到错的平台。
+   */
+  function getAccountUrlByPlatform(
+    platform: 'gitea' | 'github',
+  ): string | undefined {
+    if (platform === 'github') {
+      // GitHub 账号固定 URL https://github.com —— 找第一个 platform==='github' 的账号
+      // 后端 connect 时 GitHub 走固定 URL,见 AccountManagerDialog.vue:114
+      const gh = accounts.value.find((a) => a.platform === 'github');
+      return gh?.giteaUrl ?? 'https://github.com';
+    }
+    // Gitea：取第一个 Gitea 账号（兼容历史 currentGiteaUrl 语义）
+    const gitea = accounts.value.find((a) => (a.platform ?? 'gitea') === 'gitea');
+    return gitea?.giteaUrl ?? '';
+  }
+
   // ===== actions =====
 
   /**
@@ -149,6 +177,7 @@ export const useAuthStore = defineStore('auth', () => {
     // getters
     isConnected,
     currentGiteaUrl,
+    getAccountUrlByPlatform, // v2.37：多平台 URL 查找
     // actions
     refreshStatus,
     connect,

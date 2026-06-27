@@ -136,12 +136,19 @@ const pulling = ref(false);
 /** 当前展开的 commit SHA；null = 全部收起 */
 const expandedSha = ref<string | null>(null);
 
-/** Gitea 仓库 URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
+/** 仓库 web URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
  *  GitHub 仓库 web URL 模板（https://github.com/${owner}/${repo}）与 Gitea 一致，
- *  这里复用一个计算属性即可，panel 内按 platform 切换 tooltip 文案。 */
+ *  区别只在 hostUrl：Gitea 是 auth.currentGiteaUrl,GitHub 是 https://github.com。
+ *
+ *  v2.37 修复："在 GitHub 中打开" 按钮跳转错误的 Bug。
+ *  —— 旧实现用 currentGiteaUrl 永远返回 accounts[0]，当用户先连 Gitea 后连 GitHub 时
+ *     GitHub 项目仍跳到 Gitea URL。
+ *  —— 新实现按 currentProject.platform 查找对应平台的账号 URL；
+ *     找不到对应平台账号时返回 undefined（按钮隐藏）。 */
 const giteaRepoUrl = computed(() => {
   if (!repo.currentProject) return undefined;
-  const hostUrl = auth.currentGiteaUrl;
+  const platform = (repo.currentProject.platform ?? 'gitea') as 'gitea' | 'github';
+  const hostUrl = auth.getAccountUrlByPlatform(platform);
   if (!hostUrl) return undefined;
   return `${hostUrl.replace(/\/$/, '')}/${repo.currentProject.owner}/${repo.currentProject.name}`;
 });

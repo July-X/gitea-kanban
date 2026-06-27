@@ -33,26 +33,27 @@
 
 ## commit 信息生成
 
-`Stop` 事件会携带模型最后一次回复文本（`lastAssistantText`），脚本从中截取首句（句号/换行前，最多 120 字）作为 commit body 的中文描述：
+`Stop` 事件会携带模型最后一次回复文本（`lastAssistantText`），脚本只接受短中文 Conventional Commit 标题：
 
 ```
-chore: 模型自动提交
-
-<截取的模型回复中文首句>
+fix: 修复 git-graph 拖拽错位
+feat: SourceTree 风格表头
+refactor: 收敛 Git Graph 视图状态
 ```
 
-兜底场景（payload 没拿到 / 中文首句太长）会退化为：
+如果模型最后回复是"修复总结"、"所有 todos 完成"、"完成"这类交付总结标题，脚本会拒绝直接作为提交说明，并根据实际变更文件生成兜底标题：
 
 ```
-chore: 模型自动提交
-
-变更摘要： <git diff --stat 末行 / git status 头行>
+chore: 优化 Reasonix hooks 提交说明
+fix: 优化 git-graph 时间线
+docs: 更新项目文档
 ```
 
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
+| `POST_EDIT_COMMIT_STYLE` | 空 | `concise-conventional` = 强制提交标题为短中文 Conventional Commit 风格。 |
 | `POST_EDIT_SKIP_TEST` | `0` | `1` = 跳过 `go test` 阶段。已知测试用例失败时可临时绕过，但**不要**作为默认设置。 |
 | `POST_EDIT_SKIP_COMMIT` | `0` | `1` = 跳过 commit 阶段，仅做 format/build/test 验证。 |
 

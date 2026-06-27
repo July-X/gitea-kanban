@@ -447,11 +447,16 @@ const activeRepo = computed<RepoDto | null>(() => {
  * v1.4 调整（2026-06-18）：当前仓库的 Gitea 页面 URL，传给 BoardTopbar 的"Gitea 数据源"按钮。
  * 拼 ${giteaUrl}/${owner}/${name}（Gitea 仓库路径 = owner/name）。
  * 无 currentProject 或 giteaUrl 时返空串（按钮隐藏）。
+ *
+ * v2.37 修复：按 currentProject.platform 选对应平台账号 URL，
+ * 避免多平台账号混连时仍取 accounts[0] 跳错平台。
  */
 const giteaSourceUrl = computed<string>(() => {
   const proj = repo.currentProject;
-  const url = auth.currentGiteaUrl;
-  if (!proj || !url) return '';
+  if (!proj) return '';
+  const platform = (proj.platform ?? 'gitea') as 'gitea' | 'github';
+  const url = auth.getAccountUrlByPlatform(platform);
+  if (!url) return '';
   return `${url.replace(/\/+$/, '')}/${proj.owner}/${proj.name}`;
 });
 
