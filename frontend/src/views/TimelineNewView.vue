@@ -2082,41 +2082,54 @@ function refBadgeClass(refType?: string): string {
   font-size: 11px;
   line-height: 1;
 }
-/* v2.27：commit-row hover 时给 4 个内容列加背景（不动 graph 占位列，让 SVG 始终透出） */
+/* v2.36：commit-row hover 时给 4 个内容列加背景
+ * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
+ * —— 因为 .commit-dots-overlay z-index 2 > commit-row z-index 1,
+ *   SVG dot 自动浮在 hover 背景之上,圆点依然清晰可见。
+ *   视觉上 hover 整行变浅色,圆点"踩"在 hover 背景上 = 明确告诉用户当前 hover 的 commit 对应哪个 dot。
+ *   同时 border-right 改 transparent 让 hover 视觉不被 graph/desc 分隔线"截断"。*/
 .commit-row:hover .commit-row__col--desc,
 .commit-row:hover .commit-row__col--author,
 .commit-row:hover .commit-row__col--date,
-.commit-row:hover .commit-row__col--sha {
+.commit-row:hover .commit-row__col--sha,
+.commit-row:hover .commit-row__col--graph {
   background: var(--color-bg-hover);
+  border-right-color: transparent;
 }
 /* v1.6 可点击的 commit 行 */
 .commit-row--clickable {
   cursor: pointer;
 }
+/* v2.36：可点击 commit 行 hover 主色 soft 背景 —— graph 列也跟随(理由同 :hover 规则) */
 .commit-row--clickable:hover .commit-row__col--desc,
 .commit-row--clickable:hover .commit-row__col--author,
 .commit-row--clickable:hover .commit-row__col--date,
-.commit-row--clickable:hover .commit-row__col--sha {
+.commit-row--clickable:hover .commit-row__col--sha,
+.commit-row--clickable:hover .commit-row__col--graph {
   background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
+  border-right-color: transparent;
 }
 .commit-row--clickable:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
-/* v2.11：行下手风琴 —— 展开 commit 行背景改为 --color-bg-hover（中性 hover 灰），
+/* v2.36：行下手风琴 —— 展开 commit 行背景改为 --color-bg-hover（中性 hover 灰），
  * 让手风琴卡片（elevated 灰白）成为视觉主体，展开行只保留轻量状态指示。
- * v2.27：只覆盖 4 个内容列（不动 graph 占位列） */
+ * v2.36：graph 列也跟随(其他 hover 规则的理由一致)*/
 .commit-row--clickable.commit-row--expanded .commit-row__col--desc,
 .commit-row--clickable.commit-row--expanded .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded .commit-row__col--date,
-.commit-row--clickable.commit-row--expanded .commit-row__col--sha {
+.commit-row--clickable.commit-row--expanded .commit-row__col--sha,
+.commit-row--clickable.commit-row--expanded .commit-row__col--graph {
   background: var(--color-bg-hover);
   border-bottom-color: transparent;
+  border-right-color: transparent;
 }
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--desc,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--date,
-.commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha {
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha,
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--graph {
   background: var(--color-bg-hover);
   filter: brightness(1.08);
 }

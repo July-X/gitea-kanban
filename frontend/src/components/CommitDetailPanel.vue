@@ -183,36 +183,53 @@ const openInPlatformTooltip = computed(() =>
   props.platform === 'github' ? '在 GitHub 中打开' : '在 Gitea 中打开',
 );
 
-/** 文件状态中文 */
+/** 文件状态缩写 —— 用 Gitea 通用单字母风格(A/M/D/R/B)
+ * 替代原中文标签"新增/修改/删除/重命名/二进制"，更紧凑、更符合开发者习惯。
+ * 配合 fileStatusStyle() 返回 Gitea badge 配色:绿/黄/红/蓝/灰 */
 function fileStatusLabel(status?: string): string {
   switch (status) {
     case 'added':
-      return '新增';
+      return 'A';
     case 'modified':
-      return '修改';
+      return 'M';
     case 'deleted':
-      return '删除';
+      return 'D';
     case 'renamed':
-      return '重命名';
+      return 'R';
     case 'binary':
-      return '二进制';
+      return 'B';
     default:
       return status ?? '';
   }
 }
 
-/** 文件状态颜色 */
-function fileStatusColor(status?: string): string {
+/** 文件状态颜色 —— Gitea 配色:
+ *   A (added)    绿  --color-success
+ *   M (modified) 黄  --color-warning (Gitea 默认 modified 用黄/橙,提示注意)
+ *   D (deleted)  红  --color-danger
+ *   R (renamed)  蓝  --color-info
+ *   B (binary)   灰  --color-text-secondary
+ * 返回 [主色, 浅底色] 数组 —— 浅底色 = 主色 14% alpha,Gitea diff badge 风格 */
+function fileStatusPalette(status?: string): [string, string] {
   switch (status) {
     case 'added':
-      return 'var(--color-success, #7db233)';
+      return ['var(--color-success, #7db233)', 'rgba(125, 178, 51, 0.14)'];
+    case 'modified':
+      return ['var(--color-warning, #d29922)', 'rgba(210, 153, 34, 0.14)'];
     case 'deleted':
-      return 'var(--color-danger, #dc2626)';
+      return ['var(--color-danger, #dc2626)', 'rgba(220, 38, 38, 0.14)'];
     case 'renamed':
-      return 'var(--color-info, #3b82f6)';
+      return ['var(--color-info, #3b82f6)', 'rgba(59, 130, 246, 0.14)'];
     default:
-      return 'var(--color-text-secondary)';
+      return ['var(--color-text-secondary)', 'rgba(127, 127, 127, 0.14)'];
   }
+}
+
+/** 文件状态 inline style(Gitea badge: 主色文字 + 浅底色)
+ * v2.36 替代旧的 `color: fileStatusColor(f.status)` 单属性绑定 */
+function fileStatusStyle(status?: string): { color: string; backgroundColor: string } {
+  const [color, bg] = fileStatusPalette(status);
+  return { color, backgroundColor: bg };
 }
 
 /** 多行 message 拆分：第一行是标题，其余是正文 */
@@ -379,7 +396,11 @@ if (typeof document !== 'undefined') {
           <div class="cd-files__scroll">
             <div class="cd-files__list">
             <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
-              <span class="cd-file-status" :style="{ color: fileStatusColor(f.status) }">
+              <!-- v2.36：单字母 A/M/D/R/B + Gitea badge 风格(浅底色 + 主色文字) -->
+              <span
+                class="cd-file-status"
+                :style="fileStatusStyle(f.status)"
+              >
                 {{ fileStatusLabel(f.status) }}
               </span>
               <span class="cd-file-name mono" :title="f.filename">
@@ -484,7 +505,11 @@ if (typeof document !== 'undefined') {
         </div>
         <div class="cd-files__list">
           <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
-            <span class="cd-file-status" :style="{ color: fileStatusColor(f.status) }">
+            <!-- v2.36：单字母 A/M/D/R/B + Gitea badge 风格 -->
+            <span
+              class="cd-file-status"
+              :style="fileStatusStyle(f.status)"
+            >
               {{ fileStatusLabel(f.status) }}
             </span>
             <span class="cd-file-name mono" :title="f.filename">
@@ -991,11 +1016,24 @@ if (typeof document !== 'undefined') {
   border-bottom: none;
 }
 .cd-file-status {
-  flex: 0 0 36px;
-  font-weight: 500;
-  font-size: 10px;
-  text-align: right;
+  /* v2.36：单字母 A/M/D/R/B 用更紧凑布局 + Gitea 风格色块背景
+   * - flex-basis 从 36px 降到 22px(单字符宽度)
+   * - 加圆角 + 浅背景,让状态标识有"badge"质感(Gitea diff 风格)
+   * - 加 letter-spacing 让大写字母更挺 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 18px;
+  border-radius: 3px;
+  font-family: var(--font-mono-stack, ui-monospace, monospace);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-align: center;
   flex-shrink: 0;
+  /* background 由内联 :style 注入半透明色 —— 比 css variable 更易调 */
 }
 .cd-file-name {
   flex: 1;
