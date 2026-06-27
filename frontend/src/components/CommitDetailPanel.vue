@@ -677,20 +677,19 @@ if (typeof document !== 'undefined') {
   background: var(--scrollbar-thumb-hover);
 }
 /* panel 变体下的 message / meta / files 都不再需要 border-bottom（左右两栏 + header 已分割）
- * flex-shrink 不强制 0 —— 允许右栏内容在 260px max-height 容器内被压缩，
- * 由 .cd-panel__left/right 的 overflow-y: auto 接管滚动（v2.12 设计意图）。
- * v1.8：原 flex-shrink: 0 会让右栏内 .cd-files + .cd-cards 撑爆父容器，导致
- *   .commit-accordion 高度被撑开，进而把整个 .commit-row 流式高度变大，
- *   Git Graph 表格高度跟着膨胀。改为 flex-shrink: 1 + min-height: 0 后，
- *   右栏在 260px 容器内自然出滚动条，左右栏各自独立滚动。
- *
- * 注：.cd-cards 仍保持 flex-shrink: 0（在下面单独规则）—— cards 是关联卡片 chip，
- * 数量有限（通常 <10），让它始终贴底完整可见；files 列表可能 50+ 文件才需要滚动。*/
+ * v2.40 修复：meta 区改回 flex-shrink:0——作者/统计/引用是元信息，必须完整可见，
+ *   不能被压缩重叠。左栏内容超高时由 message body 的 max-height:120px + overflow-y:auto
+ *   兜底滚动，meta 区始终贴底完整展示。
+ * message 仍 flex-shrink:1 + min-height:0——可被压缩，body 有滚动兜底。*/
 .cd-panel--panel .cd-panel__message,
-.cd-panel--panel .cd-panel__meta,
 .cd-panel--panel .cd-files {
   border-bottom: none;
   flex-shrink: 1;
+  min-height: 0;
+}
+.cd-panel--panel .cd-panel__meta {
+  border-bottom: none;
+  flex-shrink: 0;
   min-height: 0;
 }
 .cd-panel--panel .cd-cards {
@@ -702,7 +701,9 @@ if (typeof document !== 'undefined') {
 }
 /* panel 变体下的 message body 不再叠 120px max-height 滚动（外层已是滚动容器） */
 .cd-panel--panel .cd-message__body {
-  max-height: none;
+  /* v2.40：panel 变体下也限制 body 高度——超长 commit message 不会把 meta 区
+   * 推到左栏滚动区底部。body 自身 overflow-y:auto 滚动，meta 区始终可见。*/
+  max-height: 80px;
 }
 .cd-panel__header-left {
   display: flex;
@@ -804,6 +805,8 @@ if (typeof document !== 'undefined') {
   display: flex;
   align-items: baseline;
   gap: var(--space-2, 8px);
+  /* v2.40：每行不压缩——防止 meta 区被压缩时 row 内文字重叠 */
+  flex-shrink: 0;
 }
 .cd-meta__label {
   flex: 0 0 36px;
@@ -824,7 +827,10 @@ if (typeof document !== 'undefined') {
   color: var(--color-text);
   min-width: 0;
   flex: 1;
-  overflow: hidden;
+  /* v2.40：允许换行——长 author name / 长 email 不再被截断重叠，
+   *   超出时自然折到下一行；row 的 flex-shrink:0 保证高度不被压缩 */
+  flex-wrap: wrap;
+  overflow: visible;
 }
 .cd-panel--dialog .cd-meta__value {
   font-size: 13px;

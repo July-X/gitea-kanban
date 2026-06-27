@@ -101,6 +101,8 @@ export interface SvgNode {
   isMerge: boolean;
   row: number;
   lane: number;
+  refs?: string[];
+  refTypes?: string[];
   /** 内联 hex 颜色（v2.6 fix：与 path 同策略，不依赖 CSS 变量） */
   colorHex: string;
 }
@@ -261,6 +263,8 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
       isMerge: node.isMerge,
       row: node.row,
       lane: node.lane,
+      refs: node.refs,
+      refTypes: node.refTypes,
       colorHex,
     });
   }

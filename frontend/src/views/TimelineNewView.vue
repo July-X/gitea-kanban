@@ -719,6 +719,7 @@ const dotSize = computed(() => 8);
 interface DotOverlayNode {
   sha: string;
   subject: string;
+  title: string;
   row: number;
   cx: number;
   cy: number;
@@ -726,6 +727,11 @@ interface DotOverlayNode {
   size: number;
   colorHex?: string;
   colorClass?: string;
+}
+
+function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string {
+  const branch = refs?.find((_, i) => refTypes?.[i] !== 'tag');
+  return branch ?? refs?.[0] ?? subject;
 }
 
 const dotNodes = computed<DotOverlayNode[]>(() => {
@@ -742,6 +748,11 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     return asciiGraph.value.commits.map((commit) => ({
       sha: commit.sha,
       subject: commit.subject,
+      title: dotTitle(
+        commit.subject,
+        commit.refs.map((r) => r.shortName),
+        commit.refs.map((r) => refTypeFromGroup(r.refGroup)),
+      ),
       row: commit.row,
       cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX) * ASCII_DISPLAY_SCALE,
       cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
@@ -754,6 +765,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
   return (svgRender.value?.nodes ?? []).map((node) => ({
     sha: node.sha,
     subject: node.subject,
+    title: dotTitle(node.subject, node.refs, node.refTypes),
     row: node.row,
     cx: node.cx,
     cy: node.cy,
@@ -1517,7 +1529,7 @@ function refBadgeClass(refType?: string): string {
                     height: `${c.size}px`,
                     backgroundColor: c.colorHex,
                   }"
-                  :title="c.subject"
+                  :title="c.title"
                 />
               </div>
             </div>
