@@ -1795,6 +1795,7 @@ function refBadgeClass(refType?: string): string {
      所以用户看不到表头底下的 1px 线，无法方便拖拽列分隔手柄） */
   border-bottom: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   border-top: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 600;
   color: var(--color-text-secondary);
@@ -1812,7 +1813,7 @@ function refBadgeClass(refType?: string): string {
   z-index: 5;
 }
 .git-graph-header__col {
-  padding: 0 var(--space-2, 8px);
+  padding: 0 var(--space-3, 12px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2130,8 +2131,13 @@ function refBadgeClass(refType?: string): string {
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
-  /* v2.35：用户诉求——commit row 主体字号加大到 15px,提升可读性 */
-  font-size: 15px;
+  /* v2.35：用户诉求——commit row 主体字号加大到 15px,提升可读性
+   * v2.39：整体调优——字号回归 14px（26px 行高下更舒适），显式声明系统字体栈 +
+   *   letter-spacing 微调，各列 padding 统一 12px，避免文字贴边。 */
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
   /* v2.28：移除 commit-row 的 border-bottom（用户：下方的内容区，暂时不用 1px 的表格线） */
@@ -2281,8 +2287,9 @@ function refBadgeClass(refType?: string): string {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
-  /* v2.35：主体信息(subject)同步加大到 15px,让 commit message 突出 */
-  font-size: 15px;
+  /* v2.39：15px → 14px，与 26px 行高比例更舒适；letter-spacing 微收紧 */
+  font-size: 14px;
+  letter-spacing: -0.005em;
 }
 
 /* v2.22：列容器（grid item） */
@@ -2311,27 +2318,31 @@ function refBadgeClass(refType?: string): string {
 }
 .commit-row__col--desc {
   gap: var(--space-2, 8px);
-  padding-right: var(--space-2, 8px);
+  padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--author {
-  /* v2.35：从 11px 提升到 13px,与主体(15px)拉开一档层次,体现"设计意识" */
-  font-size: 13px;
+  /* v2.39：13px → 12px，与主体(14px)拉开层次但不显拥挤 */
+  font-size: 12px;
   color: var(--color-text-secondary);
+  padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--date {
-  /* v2.35：从 11px 提升到 13px */
-  font-size: 13px;
+  /* v2.39：13px → 12px */
+  font-size: 12px;
   color: var(--color-text-secondary);
-  padding: 0 var(--space-2, 8px);
+  padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--sha {
-  font-family: monospace;
-  /* v2.35：从 11px 提升到 12px,mono 字体视觉较重,微调即可 */
-  font-size: 12px;
+  /* v2.39：monospace → var(--font-mono-stack)（JetBrains Mono 优先） */
+  font-family: var(--font-mono-stack);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
+  /* 右侧间距由 commit-row 的 padding-right 提供，避免叠加 */
+  padding: 0 0 0 12px;
 }
 
 .commit-meta {
