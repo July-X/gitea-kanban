@@ -522,7 +522,7 @@ async function enableGitGraph(): Promise<void> {
 // - viewBox = `0 0 width height`（width/height 由 renderGraph 计算）
 // - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 30 px / row（v2.40 26 → 30,密集 commit-row 文字间距 +42%）
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
-// v2.41：ASCII 路径 ROW_HEIGHT models.ts 12 → 16px（GitHub 平台 commit-row 上下气口）
+// v2.45：ASCII 路径 ROW_HEIGHT models.ts 19 → 30px（与 Gitea 路径完全统一，commit-row 行间距统一 8px）
 
 const ROW_H = computed(() =>
   useAsciiGraph.value ? ASCII_ROW_HEIGHT * ASCII_DISPLAY_SCALE : STRUCTURED_ROW_HEIGHT,
@@ -2159,13 +2159,14 @@ function refBadgeClass(refType?: string): string {
 /* v2.44：真正统一 Gitea + GitHub 两个平台 commit-row 视觉表现（用户无感）
  * 之前 v2.43 把 ASCII 路径做"小一号"（font 11px, row 19px, line-height 1.0）让行间距统一 8px，
  * 但行间距统一 ≠ 视觉统一——用户切换平台仍能感受到 row 高度/字号差异。
- * v2.44 方案：.commit-row--ascii 完全继承 .commit-row 基础样式（font 14px, line-height 1.35, row 30px, padding 5+5），
- * SVG path/dot 用 transform: scaleY(19/30) 把 30px 几何压缩到 19px 显示，
- * 同时 ROW_HEIGHT = 19 保持 SVG 几何（dot cy、path y、svgHeight）正确。
- * 结果：Gitea 和 GitHub 视觉完全一致（font 14px, row 30px, padding 5px），用户无感。*/
+ * v2.45 方案：彻底删掉 19px 这个中间值，models.ts 的 ROW_HEIGHT 直接 = 30（与 structured.ts 一致），
+ * SVG path/dot/容器高度全部走 30px，font 14px、line-height 1.571、line-box 22px、上下气口 8px。
+ * 结果：Gitea 和 GitHub 视觉完全一致（font 14px, row 30px, line-height 1.571, 间距 8px），用户无感。
+ * 之前 v2.44 注释里"transform: scaleY(19/30)"和"ROW_HEIGHT=19 保持 SVG 几何"是中间方案，
+ * 实际并未真正落地（commit-row 容器还是 19px），现在 v2.45 一次性补上。*/
 .commit-row--ascii {
-  /* 完全继承 .commit-row 样式（font-size, line-height, padding, height）—— 视觉统一 */
-  /* SVG 几何用 ROW_HEIGHT=19，但视觉上 30px 容器缩放显示 */
+  /* 完全继承 .commit-row 样式（font-size, line-height, padding, height = 30px）—— 视觉统一 */
+  /* SVG 几何与容器都走 ROW_HEIGHT=30（models.ts v2.45），无需 transform 压缩 */
   /* contain-intrinsic-size 跟随 row 30px 离屏预估 */
   contain-intrinsic-size: auto 30px;
 }

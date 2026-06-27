@@ -29,19 +29,17 @@ export { type GitRef };
 export const COL_WIDTH = 5;
 
 /** SVG 单位行高（unit）
- *  v2.41：12 → 16px，让 ASCII 路径（GitHub 平台）的 commit-row 上下各有 ~2px 气口。
- *  v2.43：16 → 19px，让 ASCII 路径行间距 = 8px（与 Gitea 路径统一）。
- *    row 19px = line-box 11px (font 11 × line-height 1.0) + 间距 8px。
- *    之前 16px + line-height 1.045 = line-box 11.5px + 间距 4.5px（不统一）。
+ *  v2.45：19 → 30px，让 ASCII 路径 commit-row 容器与 Gitea 路径完全统一
+ *    （font 14px × line-height 1.571 ≈ 22px line-box, row 30px - 22px = 8px 上下气口，
+ *     与 Gitea 路径的 8px 间距完全一致 —— 解决 ASCII 路径密集 commit 时行间距 < 8px 的问题）。
+ *  v2.43：16 → 19px（中间值，已废弃）。
+ *  v2.41：12 → 16px（GitHub 平台 commit-row 上下气口）。
  *
- *  ⚠️ 只影响 ASCII 路径（git --graph 字符流渲染）。
- *  structured 路径用 structured.ts 自己的 ROW_HEIGHT=30，与本常量无关。
- *  - COL_WIDTH = 5 → lane 视觉间距 5px（用户要求"flow 线条间隔调整到 5px"）
- *  - ROW_HEIGHT = 16 → row 视觉高度 16px（v2.41 从 12 提升）
- *  - svgWidth = graphWidth * 5 + 5（跟 Gitea `Width * 5 + 5` 一致）
- *  之前是 2（lane 10px），改 1 后 git-graph 整体更紧凑，更接近 SourceTree 风格
+ *  ⚠️ 同步影响：svg.ts（ASCII 路径 path d 生成）+ TimelineNewView.vue 的 ROW_H / dot cy
+ *  / svgHeight 全部从 19 变 30，commit-row 容器高度跟着抬到 30px。
+ *  structured 路径独立维护自己的 ROW_HEIGHT=30（structured.ts:76），本来就一致。
  */
-export const ROW_HEIGHT = 19;
+export const ROW_HEIGHT = 30;
 
 /** 显示缩放系数（1 SVG unit = SCALE px） */
 export const DISPLAY_SCALE = 1;

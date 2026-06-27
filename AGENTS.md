@@ -170,6 +170,8 @@ pnpm build                     # vite build（typecheck 暂时跳过，迁移期
 pnpm typecheck                 # vue-tsc --noEmit（迁移期可能失败，旧代码 strict 模式报错）
 ```
 
+**前端类型检查铁律**：仓库已有 `frontend/package.json` 的 `typecheck` 脚本。需要跑 `vue-tsc` 时必须执行 `cd frontend && pnpm typecheck`，禁止临时手写后台 `npx vue-tsc --noEmit &` + `sleep/kill/ps` 超时脚本；这类脚本容易拿错 `$!`、误判卡住并遗留进程。
+
 ### 4.1 跨平台编译说明
 
 - **macOS**：默认产出 `.app`（17MB，含 x86_64+arm64 universal binary）
