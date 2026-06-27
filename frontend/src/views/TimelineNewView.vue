@@ -1516,13 +1516,24 @@ function refBadgeClass(refType?: string): string {
  *   - body: position: relative 包含背景层 (git-graph-bg) 和 行层 (commit-row)
  *   - 背景层 SVG + dot overlay 绝对定位在 body 左上角，z-index: 0
  *   - 行层 commit-row 透明背景，让 SVG 透出；第一列是 graph 占位
- * 不再用 flex 两栏 + sticky，避免 v2.18~v2.26 的 z-index 互相干扰 */
+ * 不再用 flex 两栏 + sticky，避免 v2.18~v2.26 的 z-index 互相干扰
+ *
+ * v2.0 宽度语义：
+ *   - wrapper width = 100% 父容器（不被内部内容撑开）
+ *   - 不再用 width: max-content —— 旧逻辑下 commit-row 长内容会撑大 wrapper
+ *   - 表格最小宽度走 header / commit-row 的 min-width（窗口极窄时 header 出横向滚动）
+ *   - 展开 commit-accordion 时手风琴宽度 = wrapper 宽度 - graph 列宽 - 4px，
+ *     不会再撑大 wrapper（手风琴自身 max-width 锁住）
+ *   - panel body 内部 panel 4:6 grid 各自 overflow-x: auto，长 message/file 横向滚动
+ */
 .git-graph-wrapper {
   position: relative;
   min-height: 1px;
   display: block;
-  width: max-content;
-  min-width: max(100%, calc(var(--git-graph-table-width, 920px) + var(--space-3, 12px)));
+  width: 100%;
+  /* v2.0：兜底——万一未来某元素意外撑开，wrapper 自己出横向滚动条而不是把祖先撑大 */
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 /* v1.7 性能优化：拖拽时布局隔离
@@ -1557,7 +1568,8 @@ function refBadgeClass(refType?: string): string {
   letter-spacing: 0.05em;
   user-select: none;
   padding-right: var(--space-3, 12px);
-  min-width: var(--git-graph-table-width, 920px);
+  /* v2.0：去掉 min-width —— 让 header 宽度跟 wrapper 走（wrapper 已 100% 父容器），
+   * 不再硬性 920px，避免极窄窗口被强制撑开。表格整体可被 wrapper overflow-x 滚动。*/
   box-sizing: border-box;
   position: sticky; /* v2.27：表头 sticky 顶部，body 滚动时表头保持可见 */
   top: 0;
@@ -1866,7 +1878,9 @@ function refBadgeClass(refType?: string): string {
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
   background: transparent;
   padding: 0 var(--space-3, 12px) 0 0;
-  min-width: var(--git-graph-table-width, 920px);
+  /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
+   * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
+   * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
   overflow: hidden;
@@ -2102,19 +2116,21 @@ function refBadgeClass(refType?: string): string {
       /* 让内部 panel 能用 height: 100% 撑满手风琴（v2.12 双栏 4:6 必需） */
       display: flex;
       flex-direction: column;
-      /* v1.9 手风琴宽度语义 —— 锁定为 4 列内容总宽：
-         - 左边用 margin-left 推到 graph 列右边（不侵入 graph SVG）
-         - width = calc(100% - graph-col-width - 4px) 让总宽 = 4 列总宽
-         - margin-right 必须为 0，否则 width 会让手风琴再缩 12px（实测少 4px）
-         - 上下 margin 4px 让手风琴跟展开 row + 下方 row 视觉呼吸（v2.14 设计）*/
+      /* v1.9 + v2.0 手风琴宽度语义 —— 锁定为 4 列内容总宽：
+   - 左边用 margin-left 推到 graph 列右边（不侵入 graph SVG）
+   - width = calc(100% - graph-col-width - 4px) 让总宽 = 4 列总宽
+   - margin-right 必须为 0，否则 width 会让手风琴再缩 12px（实测少 4px）
+   - 上下 margin 4px 让手风琴跟展开 row + 下方 row 视觉呼吸（v2.14 设计）
+   - v2.0 加 min-width: 0 —— 默认 min-width: auto 会让 accordion 拒绝收缩到
+     比内容自然宽度小，导致 panel 内超长内容（如长 file path / 长 commit message
+     的 <pre>）反向把 commit-row 和 wrapper 撑大。min-width:0 强制收缩 + overflow:hidden
+     让长内容被裁剪或走 panel 内部横向滚动。*/
       margin: 4px 0;
       margin-left: calc(var(--git-graph-col-width, 130px) + 4px);
       width: calc(100% - var(--git-graph-col-width, 130px) - 4px);
-      flex-shrink: 0;
-      /* 防止 panel body 内容过长撑开手风琴（panel 4:6 grid 的子项可能比手风琴宽，
-         比如长 message body / 长 file name）—— 手风琴自身不溢出，超出由 panel 内部滚动 */
       max-width: calc(100% - var(--git-graph-col-width, 130px) - 4px);
-    }
+      min-width: 0;
+      flex-shrink: 0;
 .commit-accordion::-webkit-scrollbar {
   width: 8px;
 }

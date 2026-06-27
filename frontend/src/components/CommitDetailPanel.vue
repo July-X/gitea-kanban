@@ -577,12 +577,23 @@ if (typeof document !== 'undefined') {
  * 复刻 vscode git graph：左 4 (commit meta + message) | 右 6 (files + cards)
  * 左右各自独立纵向滚动（各自 overflow-y: auto），互不干扰。
  * 父容器（手风琴卡片）max-height: 260px 减去 header 高度 ~32px ≈ 228px 是 body 高度上限。
- * min-height: 0 是关键 —— 否则 grid 子元素无法收缩，会撑爆 228px */
+ * min-height: 0 是关键 —— 否则 grid 子元素无法收缩，会撑爆 228px。
+ *
+ * v2.0 横向滚动策略：
+ * - body 用 display: grid (4fr 6fr)，子项各自 overflow-x: auto（继承自 .cd-panel__left/right）
+ * - 长 message body 用 <pre> 渲染，自身 white-space: pre-wrap 不应横向溢出；
+ *   万一溢出由 .cd-panel__left 的 overflow-x: auto 出横向滚动条
+ * - 长 file name 用 text-overflow: ellipsis 截断；超出 .cd-files__scroll 的 overflow-x: auto 出横向滚动
+ * - body 自身 overflow: hidden（高度方向）+ 不限制横向（让 4fr 6fr grid 子项自然撑满 body 宽度）
+ *
+ * 不要把 body 设成 overflow-x: auto —— body 是 grid 容器，它的 overflow-x: auto 会让
+ * 左右栏的滚动条互相干扰（一个滚动另一个跟动）。横向滚动交给左右栏各自处理。*/
 .cd-panel__body {
   display: grid;
   grid-template-columns: 4fr 6fr;
   flex: 1;
   min-height: 0;
+  min-width: 0; /* v2.0：grid 容器允许子项收缩 */
   overflow: hidden;
   /* 4:6 之间的纵向分隔线 */
   border-top: 1px solid var(--color-divider);
@@ -591,7 +602,10 @@ if (typeof document !== 'undefined') {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
+  min-width: 0; /* v2.0：允许 grid 子项收缩到内容自然宽度以下 */
+  /* v2.0：横纵双向滚动 —— 长 commit message / 长 author email / 长 ref badge list
+   * 在左栏内部独立滚动，不撑开 grid 容器、不撑开手风琴、不撑开 commit-row */
+  overflow: auto;
   border-right: 1px solid var(--color-divider);
   /* 滚动条样式 */
   scrollbar-width: thin;
@@ -601,9 +615,12 @@ if (typeof document !== 'undefined') {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* v1.8：右栏本身不再 overflow-y:auto —— files 列表的滚动由 .cd-files__scroll 接管，
-   * cards 始终在右栏底部紧贴可见。如果右栏自己也滚动，会出现双滚动条体验。*/
-  /* 滚动条样式保留在 .cd-files__scroll 上（v1.8 新增） */
+  min-width: 0; /* v2.0：同上 */
+  /* v2.0：横纵双向滚动 —— 长 file path / 长 card chip 列表在右栏内部独立滚动 */
+  overflow: auto;
+  /* 滚动条样式 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .cd-panel__left::-webkit-scrollbar,
 .cd-panel__right::-webkit-scrollbar {
@@ -929,28 +946,22 @@ if (typeof document !== 'undefined') {
  *                           > .cd-files__scroll（flex:1, min-height:0, overflow-y:auto）
  *                           > .cd-files__list
  *
- * .cd-files__scroll 接管 files 列表滚动；右栏本身不再滚动（内容总高度由卡片列表兜底）。
- * 配合下面 .cd-files / .cd-cards 的 flex-shrink:1，260px 容器内出现预期滚动条。
+ /* v2.0 重构：files 列表滚动接管
+ *
+ * 历史：
+ * - v1.8：右栏本身 overflow-y:hidden，files 滚动由 .cd-files__scroll (flex:1 + overflow-y:auto) 接管
+ *   → 右栏不滚动，files 区域内部独立滚动
+ * - v2.0：右栏本身 overflow: auto (横纵双向)，接管所有内容滚动
+ *   → 简化结构：.cd-files__scroll 退化成 flex item（不再 overflow），files/cards 都在右栏 flex column 内自然堆叠
+ *   → 右栏总高度超 228px（手风琴 body 可用高度）时右栏统一出滚动条
+ *   → 这样 cards 永远在 files 之后按 DOM 顺序展示，与 4:6 panel 的 1 个滚动条体验一致
  */
 .cd-files__scroll {
-  flex: 1;
+  /* 容器占位：flex column 内自然占满余下空间，不再单独滚动（v2.0 上交右栏） */
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
-.cd-files__scroll::-webkit-scrollbar {
-  width: 8px;
-}
-.cd-files__scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.cd-files__scroll::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 4px;
-}
-.cd-files__scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
+/* v2.0：删除 .cd-files__scroll::-webkit-scrollbar 滚动条样式（已无滚动） */
 }
 /* dialog 变体单列流：files__list 自身需 max-height + 滚动（避免文件多撑爆弹窗） */
 .cd-panel--dialog .cd-files__list {
