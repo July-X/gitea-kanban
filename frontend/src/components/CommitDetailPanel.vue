@@ -362,14 +362,22 @@ if (typeof document !== 'undefined') {
         </div>
       </div>
 
-      <!-- 右 6/10：files + cards -->
+      <!-- 右 6/10：files + cards
+           v1.8：右栏内部结构 ——
+             cd-files（标题 + 独立滚动区 + 卡片列表）
+             cd-files__scroll（flex:1 + overflow-y:auto，独立接管 files 列表滚动）
+             cd-cards（始终可见）
+           这样右栏总高度 = min(内容自然高度, 父容器 260px - header)，
+           files 列表很长时只在 .cd-files__scroll 内部出滚动条，
+           cards 始终贴底可见，不会被 files 列表挤出右栏。-->
       <div class="cd-panel__right">
         <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
           <div class="cd-section-title">
             <FileText :size="13" />
             文件变更（{{ detail.files.length }}）
           </div>
-          <div class="cd-files__list">
+          <div class="cd-files__scroll">
+            <div class="cd-files__list">
             <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
               <span class="cd-file-status" :style="{ color: fileStatusColor(f.status) }">
                 {{ fileStatusLabel(f.status) }}
@@ -385,6 +393,7 @@ if (typeof document !== 'undefined') {
                 <span v-if="f.deletions" class="cd-stats__del">-{{ f.deletions }}</span>
                 <span v-if="f.binary" class="cd-file-binary">二进制</span>
               </span>
+            </div>
             </div>
           </div>
         </div>
@@ -582,10 +591,9 @@ if (typeof document !== 'undefined') {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
-  /* 滚动条样式 */
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  /* v1.8：右栏本身不再 overflow-y:auto —— files 列表的滚动由 .cd-files__scroll 接管，
+   * cards 始终在右栏底部紧贴可见。如果右栏自己也滚动，会出现双滚动条体验。*/
+  /* 滚动条样式保留在 .cd-files__scroll 上（v1.8 新增） */
 }
 .cd-panel__left::-webkit-scrollbar,
 .cd-panel__right::-webkit-scrollbar {
@@ -604,12 +612,28 @@ if (typeof document !== 'undefined') {
 .cd-panel__right::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
 }
-/* panel 变体下的 message / meta / files 都不再需要 border-bottom（左右两栏 + header 已分割） */
+/* panel 变体下的 message / meta / files 都不再需要 border-bottom（左右两栏 + header 已分割）
+ * flex-shrink 不强制 0 —— 允许右栏内容在 260px max-height 容器内被压缩，
+ * 由 .cd-panel__left/right 的 overflow-y: auto 接管滚动（v2.12 设计意图）。
+ * v1.8：原 flex-shrink: 0 会让右栏内 .cd-files + .cd-cards 撑爆父容器，导致
+ *   .commit-accordion 高度被撑开，进而把整个 .commit-row 流式高度变大，
+ *   Git Graph 表格高度跟着膨胀。改为 flex-shrink: 1 + min-height: 0 后，
+ *   右栏在 260px 容器内自然出滚动条，左右栏各自独立滚动。
+ *
+ * 注：.cd-cards 仍保持 flex-shrink: 0（在下面单独规则）—— cards 是关联卡片 chip，
+ * 数量有限（通常 <10），让它始终贴底完整可见；files 列表可能 50+ 文件才需要滚动。*/
 .cd-panel--panel .cd-panel__message,
 .cd-panel--panel .cd-panel__meta,
-.cd-panel--panel .cd-files,
+.cd-panel--panel .cd-files {
+  border-bottom: none;
+  flex-shrink: 1;
+  min-height: 0;
+}
 .cd-panel--panel .cd-cards {
   border-bottom: none;
+  /* v1.8：cards 在右栏 flex 中保持完整可见（flex-shrink:0），
+   * 让 files 列表在 cd-files__scroll 内独立滚动，
+   * cards 始终贴底显示，不被 files 列表挤出右栏。*/
   flex-shrink: 0;
 }
 /* panel 变体下的 message body 不再叠 120px max-height 滚动（外层已是滚动容器） */
@@ -884,6 +908,39 @@ if (typeof document !== 'undefined') {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm, 6px);
   background: var(--color-bg);
+}
+/* v1.8：右栏内 files 列表独立滚动接管
+ *
+ * 原结构：.cd-panel__right (flex column, overflow-y:auto) > .cd-files > .cd-files__list
+ *   问题：.cd-files 设了 flex-shrink:0，files__list 很长时整体高度撑爆右栏，
+ *   撑开 .commit-accordion max-height:260px，撑开整个 commit row 高度。
+ *
+ * 新结构：.cd-panel__right > .cd-files > .cd-section-title（始终可见）
+ *                           > .cd-files__scroll（flex:1, min-height:0, overflow-y:auto）
+ *                           > .cd-files__list
+ *
+ * .cd-files__scroll 接管 files 列表滚动；右栏本身不再滚动（内容总高度由卡片列表兜底）。
+ * 配合下面 .cd-files / .cd-cards 的 flex-shrink:1，260px 容器内出现预期滚动条。
+ */
+.cd-files__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.cd-files__scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.cd-files__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cd-files__scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+.cd-files__scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 /* dialog 变体单列流：files__list 自身需 max-height + 滚动（避免文件多撑爆弹窗） */
 .cd-panel--dialog .cd-files__list {
