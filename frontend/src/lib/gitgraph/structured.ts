@@ -70,7 +70,7 @@ export interface GraphResultDto {
  */
 export const LANE_WIDTH = 10;
 /** 行高（每个 commit 的垂直间距） */
-export const ROW_HEIGHT = 20;
+export const ROW_HEIGHT = 26;
 /** 节点半径 */
 export const NODE_RADIUS = 4;
 /** 多条 merge 同时汇入同一 parent 时的错层步进，避免外侧斜线压住内侧竖线 */

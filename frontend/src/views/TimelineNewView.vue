@@ -515,7 +515,7 @@ async function enableGitGraph(): Promise<void> {
 //
 // v2.6 改用结构化渲染（不再走字符流）：
 // - viewBox = `0 0 width height`（width/height 由 renderGraph 计算）
-// - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 20 px / row
+// - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 26 px / row
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
 
 const ROW_H = computed(() =>
@@ -1877,7 +1877,7 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
   z-index: 2; /* 圆点在 commit list 下层（让 commit 文字浮在圆点上方） */
   content-visibility: auto;
-  contain-intrinsic-size: auto 20px;
+  contain-intrinsic-size: auto 26px;
 }
 .commit-dot {
   position: absolute;
@@ -2044,7 +2044,7 @@ function refBadgeClass(refType?: string): string {
  * v1.7：加 `content-visibility: auto` 让屏幕外 commit-row 不参与渲染——
  *   1000 行 commit 时，viewport 通常只显示 25 行，剩余 975 行彻底不渲染，
  *   滚动时浏览器按需渲染，滚动 fps 从 30 提到 60。
- *   contain-intrinsic-size 告诉浏览器每行预估高度（= ROW_HEIGHT = 20px），
+ *   contain-intrinsic-size 告诉浏览器每行预估高度（= ROW_HEIGHT = 26px），
  *   保证滚动条比例正确（不会因内容不可见突然"弹跳"）。
  *   `contain: layout` 同时把布局重算隔离在此 row 内——拖拽时 1000 行重排也只影响此 row。*/
 .commit-row {
@@ -2052,8 +2052,8 @@ function refBadgeClass(refType?: string): string {
   grid-template-columns: var(--git-graph-col-width, 130px) var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
   gap: 0;
-  /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 20px），与 SVG 行高 1:1 对齐 */
-  height: 20px; /* fallback（被 inline style 覆盖） */
+  /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 26px），与 SVG 行高 1:1 对齐 */
+  height: 26px; /* fallback（被 inline style 覆盖） */
   /* v2.31 revert：恢复 v2.27 的"行透明 + 内容列自身背景"机制
      用户原意："只需要表头是非透明的背景即可"——表头 .git-graph-header 使用实色主内容背景，
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
@@ -2062,7 +2062,8 @@ function refBadgeClass(refType?: string): string {
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
-  font-size: var(--font-sm, 13px);
+  /* v2.35：用户诉求——commit row 主体字号加大到 15px,提升可读性 */
+  font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   /* v2.28：移除 commit-row 的 border-bottom（用户：下方的内容区，暂时不用 1px 的表格线） */
@@ -2074,7 +2075,7 @@ function refBadgeClass(refType?: string): string {
    * 注意：contain: layout 与 :hover 状态不影响——hover 时只重渲染当前 row，
    * 但浏览器对每个 row 单独走 hit-test 后才知道哪行 hover，所以 c-v: auto 仍有效。*/
   content-visibility: auto;
-  contain-intrinsic-size: auto 20px;
+  contain-intrinsic-size: auto 26px;
 }
 /* v2.16：ASCII 路径 ROW_H=12px，字体缩小到 11px 适配紧凑行高 */
 .commit-row--ascii {
@@ -2124,7 +2125,7 @@ function refBadgeClass(refType?: string): string {
 .commit-row--relation {
   pointer-events: none;
   background: transparent;
-  height: 20px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
+  height: 26px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
 }
 .commit-row--relation:hover {
   background: transparent;
@@ -2184,7 +2185,8 @@ function refBadgeClass(refType?: string): string {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
-  font-size: var(--font-sm, 13px);
+  /* v2.35：主体信息(subject)同步加大到 15px,让 commit message 突出 */
+  font-size: 15px;
 }
 
 /* v2.22：列容器（grid item） */
@@ -2217,19 +2219,22 @@ function refBadgeClass(refType?: string): string {
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--author {
-  font-size: var(--font-xs, 11px);
+  /* v2.35：从 11px 提升到 13px,与主体(15px)拉开一档层次,体现"设计意识" */
+  font-size: 13px;
   color: var(--color-text-secondary);
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--date {
-  font-size: var(--font-xs, 11px);
+  /* v2.35：从 11px 提升到 13px */
+  font-size: 13px;
   color: var(--color-text-secondary);
   padding: 0 var(--space-2, 8px);
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--sha {
   font-family: monospace;
-  font-size: 11px;
+  /* v2.35：从 11px 提升到 12px,mono 字体视觉较重,微调即可 */
+  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
@@ -2251,16 +2256,19 @@ function refBadgeClass(refType?: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-xs, 11px);
+  /* v2.35：从 11px 提升到 13px */
+  font-size: 13px;
 }
 .commit-time {
   white-space: nowrap;
-  font-size: var(--font-xs, 11px);
+  /* v2.35：从 11px 提升到 13px */
+  font-size: 13px;
 }
 
 .commit-sha {
   font-family: monospace;
-  font-size: 11px;
+  /* v2.35：从 11px 提升到 12px */
+  font-size: 12px;
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
