@@ -2131,6 +2131,7 @@ function refBadgeClass(refType?: string): string {
       max-width: calc(100% - var(--git-graph-col-width, 130px) - 4px);
       min-width: 0;
       flex-shrink: 0;
+    }
 .commit-accordion::-webkit-scrollbar {
   width: 8px;
 }

@@ -962,7 +962,6 @@ if (typeof document !== 'undefined') {
   min-height: 0;
 }
 /* v2.0：删除 .cd-files__scroll::-webkit-scrollbar 滚动条样式（已无滚动） */
-}
 /* dialog 变体单列流：files__list 自身需 max-height + 滚动（避免文件多撑爆弹窗） */
 .cd-panel--dialog .cd-files__list {
   max-height: 240px;
