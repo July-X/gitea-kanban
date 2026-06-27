@@ -103,9 +103,14 @@ func FetchWithFilter(localPath string, depth int, token string) error {
 		return fmt.Errorf("系统未安装 gh 命令，无法快速加载 GitHub 超大仓库提交记录: %w", err)
 	}
 
-	// 检查仓库是否存在
-	if _, err := os.Stat(filepath.Join(localPath, ".git")); err != nil {
-		return fmt.Errorf("仓库不存在: %w", err)
+	// 检查仓库是否存在（兼容 bare 布局）
+	// 旧代码只 os.Stat(.git)，但 gh blobless clone / 旧版 mirror clone 产出的是
+	// bare 仓库（bare=true，无 .git 子目录，HEAD+objects 直接在根目录），
+	// 导致 PullRepo 的 FetchWithFilter 误报"仓库不存在"→ 同步按钮报错。
+	// RepoExists 已兼容两种布局（.git 子目录 → HEAD+objects 回退），与
+	// ascii_graph.go 的检测逻辑对齐。
+	if !RepoExists(localPath) {
+		return fmt.Errorf("仓库不存在: %s（既无 .git 目录，也无 HEAD/objects，可能 clone 未完成）", localPath)
 	}
 	if err := cleanupStaleGitLock(localPath, "shallow.lock"); err != nil {
 		return err
