@@ -2156,16 +2156,18 @@ function refBadgeClass(refType?: string): string {
   /* v2.40：26 → 30px，与 commit-row 高度 + SVG ROW_HEIGHT 同步（content-visibility 离屏预估高度） */
   contain-intrinsic-size: auto 30px;
 }
-/* v2.43：行间距统一 8px（Gitea + GitHub 一致）
- *   models.ts ROW_HEIGHT 16 → 19px，ASCII commit-row 高度也变为 19px。
- *   line-height 1.045 → 1.0（line-box 11 → 11px），padding 1 → 0，
- *   间距 = 19 - 11 = 8px（与 Gitea 路径统一 ✓）。*/
+/* v2.44：真正统一 Gitea + GitHub 两个平台 commit-row 视觉表现（用户无感）
+ * 之前 v2.43 把 ASCII 路径做"小一号"（font 11px, row 19px, line-height 1.0）让行间距统一 8px，
+ * 但行间距统一 ≠ 视觉统一——用户切换平台仍能感受到 row 高度/字号差异。
+ * v2.44 方案：.commit-row--ascii 完全继承 .commit-row 基础样式（font 14px, line-height 1.35, row 30px, padding 5+5），
+ * SVG path/dot 用 transform: scaleY(19/30) 把 30px 几何压缩到 19px 显示，
+ * 同时 ROW_HEIGHT = 19 保持 SVG 几何（dot cy、path y、svgHeight）正确。
+ * 结果：Gitea 和 GitHub 视觉完全一致（font 14px, row 30px, padding 5px），用户无感。*/
 .commit-row--ascii {
-  font-size: 11px;
-  line-height: 1.0;
-  padding: 0 var(--space-3, 12px) 0 0;
-  /* v2.43：覆盖 .commit-row 基础 contain-intrinsic-size 30px，ASCII 19px row 离屏预估 */
-  contain-intrinsic-size: auto 19px;
+  /* 完全继承 .commit-row 样式（font-size, line-height, padding, height）—— 视觉统一 */
+  /* SVG 几何用 ROW_HEIGHT=19，但视觉上 30px 容器缩放显示 */
+  /* contain-intrinsic-size 跟随 row 30px 离屏预估 */
+  contain-intrinsic-size: auto 30px;
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
