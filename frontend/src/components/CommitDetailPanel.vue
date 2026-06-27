@@ -606,6 +606,10 @@ if (typeof document !== 'undefined') {
   /* v2.0：横纵双向滚动 —— 长 commit message / 长 author email / 长 ref badge list
    * 在左栏内部独立滚动，不撑开 grid 容器、不撑开手风琴、不撑开 commit-row */
   overflow: auto;
+  /* v2.34：滚动到底后阻止滚轮事件穿透到外层 .commit-accordion / .timeline-new__main。
+   * overscroll-behavior: contain 把滚动链限定在本容器内 —— 用户滚到底时
+   * 不再"意外"滚动外层 commit log 或主区，体验与 VSCode Git Graph 一致 */
+  overscroll-behavior: contain;
   border-right: 1px solid var(--color-divider);
   /* 滚动条样式 */
   scrollbar-width: thin;
@@ -618,6 +622,9 @@ if (typeof document !== 'undefined') {
   min-width: 0; /* v2.0：同上 */
   /* v2.0：横纵双向滚动 —— 长 file path / 长 card chip 列表在右栏内部独立滚动 */
   overflow: auto;
+  /* v2.34：同上，左/右栏滚到底后阻止滚动事件穿透外层（修复 files 列表滚到底后
+   * 带动整个 commit log / 主区滚动的错误体验） */
+  overscroll-behavior: contain;
   /* 滚动条样式 */
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
