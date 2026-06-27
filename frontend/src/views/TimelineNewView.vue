@@ -1899,7 +1899,10 @@ function refBadgeClass(refType?: string): string {
   overflow: visible;
 }
 
-/* 背景层：SVG + dot overlay，整张铺在 body 左上角（z-index 0）
+/* 背景层：SVG + dot overlay，整张铺在 body 左上角
+ *
+ * z-index 高于 commit-row，但 pointer-events:none；这样 graph 线和圆点不会被 row hover
+ * 背景盖住，鼠标事件仍由 commit-row 接收。
  *
  * v1.7 性能优化：`content-visibility: auto` 让屏幕外 SVG 区域不渲染——
  * SVG 含 1000+ path 时浏览器 paint 成本极高。viewport 不可见区域的 path 完全跳过。*/
@@ -1907,7 +1910,7 @@ function refBadgeClass(refType?: string): string {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 0;
+  z-index: 2;
   pointer-events: none; /* 不响应鼠标事件，让 commit-row 接收点击 */
   content-visibility: auto;
   contain-intrinsic-size: auto 28px;
@@ -1929,7 +1932,7 @@ function refBadgeClass(refType?: string): string {
   top: 0;
   left: 0;
   pointer-events: none;
-  z-index: 2; /* 圆点在 commit list 下层（让 commit 文字浮在圆点上方） */
+  z-index: 2;
   content-visibility: auto;
   contain-intrinsic-size: auto 26px;
 }
@@ -1940,6 +1943,16 @@ function refBadgeClass(refType?: string): string {
   height: 8px;
   border-radius: 50%;
   box-sizing: border-box;
+  transition:
+    box-shadow 0.12s ease,
+    transform 0.12s ease;
+}
+.commit-dot--active {
+  box-shadow:
+    0 0 0 3px var(--color-shell-main-bg),
+    0 0 0 5px var(--color-primary, #74b830),
+    0 0 14px rgba(116, 184, 48, 0.55);
+  transform: scale(1.25);
 }
 
 /* 圆点背景色（HTML div 用 background-color，不是 SVG fill） */
@@ -2139,17 +2152,19 @@ function refBadgeClass(refType?: string): string {
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
- * —— 因为 .commit-dots-overlay z-index 2 > commit-row z-index 1,
- *   SVG dot 自动浮在 hover 背景之上,圆点依然清晰可见。
- *   视觉上 hover 整行变浅色,圆点"踩"在 hover 背景上 = 明确告诉用户当前 hover 的 commit 对应哪个 dot。
- *   同时 border-right 改 transparent 让 hover 视觉不被 graph/desc 分隔线"截断"。*/
+ * 右侧内容列用实底色；左侧 graph 列用半透明轨道，让 SVG flow 和圆点仍在轨道上方可见。*/
 .commit-row:hover .commit-row__col--desc,
 .commit-row:hover .commit-row__col--author,
 .commit-row:hover .commit-row__col--date,
-.commit-row:hover .commit-row__col--sha,
-.commit-row:hover .commit-row__col--graph {
+.commit-row:hover .commit-row__col--sha {
   background: var(--color-bg-hover);
   border-right-color: transparent;
+}
+.commit-row:hover .commit-row__col--graph {
+  background:
+    linear-gradient(90deg, rgba(116, 184, 48, 0.18), rgba(116, 184, 48, 0.08) 68%, transparent),
+    linear-gradient(0deg, transparent calc(50% - 1px), rgba(116, 184, 48, 0.42) 50%, transparent calc(50% + 1px));
+  border-right-color: rgba(116, 184, 48, 0.42);
 }
 /* v1.6 可点击的 commit 行 */
 .commit-row--clickable {
@@ -2159,10 +2174,15 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable:hover .commit-row__col--desc,
 .commit-row--clickable:hover .commit-row__col--author,
 .commit-row--clickable:hover .commit-row__col--date,
-.commit-row--clickable:hover .commit-row__col--sha,
-.commit-row--clickable:hover .commit-row__col--graph {
+.commit-row--clickable:hover .commit-row__col--sha {
   background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
   border-right-color: transparent;
+}
+.commit-row--clickable:hover .commit-row__col--graph {
+  background:
+    linear-gradient(90deg, rgba(116, 184, 48, 0.22), rgba(116, 184, 48, 0.1) 68%, transparent),
+    linear-gradient(0deg, transparent calc(50% - 1px), rgba(116, 184, 48, 0.5) 50%, transparent calc(50% + 1px));
+  border-right-color: rgba(116, 184, 48, 0.5);
 }
 .commit-row--clickable:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -2174,19 +2194,27 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable.commit-row--expanded .commit-row__col--desc,
 .commit-row--clickable.commit-row--expanded .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded .commit-row__col--date,
-.commit-row--clickable.commit-row--expanded .commit-row__col--sha,
-.commit-row--clickable.commit-row--expanded .commit-row__col--graph {
+.commit-row--clickable.commit-row--expanded .commit-row__col--sha {
   background: var(--color-bg-hover);
   border-bottom-color: transparent;
   border-right-color: transparent;
 }
+.commit-row--clickable.commit-row--expanded .commit-row__col--graph {
+  background:
+    linear-gradient(90deg, rgba(116, 184, 48, 0.18), rgba(116, 184, 48, 0.08) 68%, transparent),
+    linear-gradient(0deg, transparent calc(50% - 1px), rgba(116, 184, 48, 0.42) 50%, transparent calc(50% + 1px));
+  border-bottom-color: transparent;
+  border-right-color: rgba(116, 184, 48, 0.42);
+}
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--desc,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--date,
-.commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha,
-.commit-row--clickable.commit-row--expanded:hover .commit-row__col--graph {
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha {
   background: var(--color-bg-hover);
   filter: brightness(1.08);
+}
+.commit-row--clickable.commit-row--expanded:hover .commit-row__col--graph {
+  filter: none;
 }
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * 必须保持 min-height: 24px（不要合并 / 不要 display:none） */
