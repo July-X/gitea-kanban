@@ -34,7 +34,7 @@ test('向右分叉时先斜出再沿目标 lane 下行', () => {
   };
 
   const result = renderGraph(graph);
-  assert.equal(result.paths[0]?.d, 'M 5 14 L 15 28 L 15 42');
+  assert.equal(result.paths[0]?.d, 'M 5 10 L 15 20 L 15 30');
 });
 
 test('向左回收时先沿当前 lane 下行再斜回主干', () => {
@@ -46,7 +46,7 @@ test('向左回收时先沿当前 lane 下行再斜回主干', () => {
   };
 
   const result = renderGraph(graph);
-  assert.equal(result.paths[0]?.d, 'M 15 42 L 15 84 L 5 98');
+  assert.equal(result.paths[0]?.d, 'M 15 30 L 15 60 L 5 70');
 });
 
 test('同 lane 被外来 flow 复用时在外来节点前截断', () => {
@@ -58,7 +58,7 @@ test('同 lane 被外来 flow 复用时在外来节点前截断', () => {
   };
 
   const result = renderGraph(graph);
-  assert.equal(result.paths[0]?.d, 'M 5 14 L 5 28');
+  assert.equal(result.paths[0]?.d, 'M 5 10 L 5 20');
 });
 
 test('尺寸基于 lane/row 常量稳定输出', () => {
@@ -93,10 +93,10 @@ test('多条分支回收到同一 parent 时按层级错开拐点，避免线条
   const inner = result.paths.find((path) => path.colorIndex === 1);
   const outer = result.paths.find((path) => path.colorIndex === 2);
 
-  assert.equal(inner?.d, 'M 15 42 L 15 74 L 5 98');
-  assert.equal(outer?.d, `M 25 42 L 25 ${84} L 5 98`);
+  assert.equal(inner?.d, 'M 15 30 L 15 50 L 5 70');
+  assert.equal(outer?.d, `M 25 30 L 25 ${60} L 5 70`);
   assert.notEqual(inner?.d, outer?.d);
-  assert.equal(84 - 74, MERGE_STAGGER);
+  assert.equal(60 - 50, MERGE_STAGGER);
 });
 
 test('path 输出顺序保持 edge 原始顺序，避免按颜色 regroup 后覆盖主干', () => {
@@ -121,10 +121,10 @@ test('path 输出顺序保持 edge 原始顺序，避免按颜色 regroup 后覆
   assert.deepEqual(
     result.paths.map((path) => [path.order, path.colorIndex, path.d]),
     [
-      [0, 0, 'M 5 14 L 5 42'],
-      [1, 1, 'M 5 14 L 15 28 L 15 42'],
-      [2, 0, 'M 5 42 L 5 70'],
-      [3, 1, 'M 15 42 L 15 56 L 5 70'],
+      [0, 0, 'M 5 10 L 5 30'],
+      [1, 1, 'M 5 10 L 15 20 L 15 30'],
+      [2, 0, 'M 5 30 L 5 50'],
+      [3, 1, 'M 15 30 L 15 40 L 5 50'],
     ],
   );
 });
@@ -164,11 +164,11 @@ test('merge 回其他分支后，目标分支 flow 前后半段保持同色 path
   assert.deepEqual(
     branchFlowPaths.map((path) => path.d),
     [
-      'M 15 42 L 15 70',
-      'M 15 70 L 15 126',
-      'M 15 70 L 25 84 L 25 98',
-      'M 15 126 L 15 182',
-      'M 15 182 L 15 224 L 5 238',
+      'M 15 30 L 15 50',
+      'M 15 50 L 15 90',
+      'M 15 50 L 25 60 L 25 70',
+      'M 15 90 L 15 130',
+      'M 15 130 L 15 160 L 5 170',
     ],
   );
 });
@@ -196,5 +196,5 @@ test('merge commit 指向被合入分支的长斜线使用 parent flow 颜色', 
   const result = renderGraph(graph);
   const longBranch = result.paths.find((path) => path.order === 1);
   assert.equal(longBranch?.colorIndex, 1);
-  assert.equal(longBranch?.d, 'M 5 14 L 15 28 L 15 266');
+  assert.equal(longBranch?.d, 'M 5 10 L 15 20 L 15 190');
 });
