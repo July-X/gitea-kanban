@@ -72,25 +72,41 @@ normalize_commit_subject() {
 }
 
 guess_commit_type() {
-  local NAMES
-  NAMES="$(git diff --cached --name-only 2>/dev/null; git diff --name-only 2>/dev/null)"
-  if printf '%s\n' "$NAMES" | grep -Eq '(^|/)(README|AGENTS|CLAUDE|docs/|.*\.md$)'; then
+  local FIRST
+  FIRST="$(primary_changed_file)"
+  if printf '%s\n' "$FIRST" | grep -Eq '(^|/)(README|AGENTS|CLAUDE|docs/|.*\.md$)'; then
     printf 'docs'
-  elif printf '%s\n' "$NAMES" | grep -Eq '(^|/)(.*(_test|\.test|\.spec)\.|tests?/)' ; then
+  elif printf '%s\n' "$FIRST" | grep -Eq '(^|/)(.*(_test|\.test|\.spec)\.|tests?/)' ; then
     printf 'test'
-  elif printf '%s\n' "$NAMES" | grep -Eq '(^|/)(package.json|pnpm-lock.yaml|go.mod|go.sum|wails.json|scripts/|\.reasonix/)'; then
+  elif printf '%s\n' "$FIRST" | grep -Eq '(^|/)(package.json|pnpm-lock.yaml|go.mod|go.sum|wails.json|scripts/|\.reasonix/)'; then
     printf 'chore'
-  elif git diff --cached --name-only 2>/dev/null | grep -Eq '\.(css|scss|vue)$' || git diff --name-only 2>/dev/null | grep -Eq '\.(css|scss|vue)$'; then
+  elif printf '%s\n' "$FIRST" | grep -Eq '\.(css|scss|vue)$'; then
     printf 'fix'
   else
     printf 'fix'
   fi
 }
 
-describe_changed_area() {
-  local FILES FIRST BASE AREA
+primary_changed_file() {
+  local FILES FIRST PRIORITY
   FILES="$(git diff --cached --name-only 2>/dev/null; git diff --name-only 2>/dev/null)"
+  PRIORITY="$(printf '%s\n' "$FILES" | grep -E '^(scripts/hooks/|\.reasonix/)' | sed -n '/./{p;q;}')"
+  if [ -n "$PRIORITY" ]; then
+    printf '%s' "$PRIORITY"
+    return 0
+  fi
+  PRIORITY="$(printf '%s\n' "$FILES" | grep -E '^frontend/src/views/TimelineNewView\.vue$|^app/git/graph/' | sed -n '/./{p;q;}')"
+  if [ -n "$PRIORITY" ]; then
+    printf '%s' "$PRIORITY"
+    return 0
+  fi
   FIRST="$(printf '%s\n' "$FILES" | sed -n '/./{p;q;}')"
+  printf '%s' "$FIRST"
+}
+
+describe_changed_area() {
+  local FIRST BASE AREA
+  FIRST="$(primary_changed_file)"
   BASE="${FIRST##*/}"
   case "$FIRST" in
     frontend/src/views/TimelineNewView.vue) AREA="git-graph 时间线" ;;
