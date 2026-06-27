@@ -28,6 +28,9 @@ import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
 import { showToast } from '@renderer/lib/toast';
 import { renderMarkdown } from '@renderer/lib/markdown';
+// Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL
+// （v2 是 Wails WebView，<a target="_blank"> / window.open 在这里不可靠）。
+import { BrowserOpenURL } from '../../wailsjs/wailsjs/runtime/runtime';
 import {
   issuesCommentCreate,
   issuesCommentList,
@@ -192,6 +195,13 @@ function giteaPullUrl(p: PullDto): string {
   const giteaUrl = (auth.currentGiteaUrl || '').replace(/\/+$/, '');
   if (!giteaUrl) return '#';
   return `${giteaUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/pulls/${p.index}`;
+}
+
+/** 在系统浏览器打开合并请求页面（Wails BrowserOpenURL，window.open / <a target=_blank>
+ * 在 Wails WebView 下不可靠）。 */
+function openPullExternal(p: PullDto): void {
+  const url = giteaPullUrl(p);
+  if (url && url !== '#') BrowserOpenURL(url);
 }
 
 /** 判断目标分支是否是主线分支（需要额外警告） */
@@ -962,10 +972,9 @@ function formatRelative(iso: string | undefined): string {
           <div class="merge-item__body">
             <a
               :href="giteaPullUrl(p)"
-              target="_blank"
-              rel="noopener"
               class="merge-item__index mono"
-              @click.stop
+              :title="'在 gitea 中打开 #' + p.index"
+              @click.stop.prevent="openPullExternal(p)"
             >#{{ p.index }}</a>
             <span class="merge-item__meta-line">
               <span class="merge-item__meta-text">打开于 {{ formatRelative(p.createdAt) }}</span>
@@ -1045,11 +1054,9 @@ function formatRelative(iso: string | undefined): string {
           >有冲突</span>
           <a
             :href="giteaPullUrl(p)"
-            target="_blank"
-            rel="noopener"
             class="merge-item__ext-link"
             :title="'在 gitea 中打开 #' + p.index"
-            @click.stop
+            @click.stop.prevent="openPullExternal(p)"
           >
             <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
           </a>

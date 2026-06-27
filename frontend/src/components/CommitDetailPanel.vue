@@ -29,6 +29,9 @@ import {
 } from 'lucide-vue-next';
 import { commitsGet } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
+// Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL（window.open 在 Wails
+// WebView 下不可靠——v1 Electron 时代的 setWindowOpenHandler 拦截已不存在）。
+import { BrowserOpenURL } from '../../wailsjs/wailsjs/runtime/runtime';
 
 /** 基础 commit 信息（从 graph 数据直接传入，不需要额外请求） */
 export interface BasicCommit {
@@ -175,7 +178,9 @@ function openInPlatform(): void {
   // GitHub / Gitea 的仓库 web URL 模板一致（${hostUrl}/${owner}/${repo}），
   // commit 子路径也都是 /commit/{sha}，所以无需按平台分支拼接。
   const url = `${props.giteaRepoUrl.replace(/\/$/, '')}/commit/${props.commit.sha}`;
-  window.open(url, '_blank');
+  // v2: 必须用 Wails BrowserOpenURL 打开系统浏览器；window.open 在 Wails WebView
+  // 下不会打开系统浏览器（之前两次修了 URL 拼接但没动打开方式，所以点了没反应）。
+  BrowserOpenURL(url);
 }
 
 /** "在平台打开" 按钮的 tooltip 文案 —— 按 platform 切换 */

@@ -11,8 +11,7 @@
  * v1.4 调整（2026-06-18）：
  * - 移除左侧"看板"标题（StatusBar 已有当前 view 语义，顶栏不再重复）
  * - 移除右侧"共 X 个仓库"计数（仓库上下文由 StatusBar picker 承担）
- * - 撤销后方加"Gitea 数据源"按钮：window.open 走系统浏览器（main 端 setWindowOpenHandler
- *   拦截 → shell.openExternal）
+ * - 撤销后方加"Gitea 数据源"按钮：走 Wails BrowserOpenURL → 系统默认浏览器
  *
  * 通信：props + emit
  *   - props.canUndo / canRedo : 撤销 / 重做按钮可点态
@@ -22,6 +21,9 @@
  *   - emit('undo') / emit('redo')
  */
 import { ExternalLink, Plus, RefreshCw, RotateCcw, RotateCw } from 'lucide-vue-next';
+// Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL
+// （v2 是 Wails WebView，不是 Electron Chromium——window.open 在这里不可靠）。
+import { BrowserOpenURL } from '../../../wailsjs/wailsjs/runtime/runtime';
 
 interface Props {
   canUndo: boolean;
@@ -44,10 +46,10 @@ const emit = defineEmits<{
   (e: 'create-issue'): void;
 }>();
 
-/** 打开 Gitea 仓库页面（window.open 被 main 端 setWindowOpenHandler 拦截 → shell.openExternal 走系统浏览器） */
+/** 打开 Gitea 仓库页面（走 Wails BrowserOpenURL → 系统默认浏览器） */
 function openGiteaSource(): void {
   if (!props.giteaSourceUrl) return;
-  window.open(props.giteaSourceUrl, '_blank', 'noopener,noreferrer');
+  BrowserOpenURL(props.giteaSourceUrl);
 }
 </script>
 
