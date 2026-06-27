@@ -45,6 +45,14 @@ export const ROW_HEIGHT = 16;
 /** 显示缩放系数（1 SVG unit = SCALE px） */
 export const DISPLAY_SCALE = 1;
 
+/** v2.42：flow 1 (column 0) 距离 commit list 左边缘的 padding
+ * 之前 viewBox/dot 起点 = 0，导致第一个 lane 圆心距离边框仅 4.5px（DOT_SIZE=8 → 圆心 4.5，
+ * 圆缘贴边 0.5px），看起来"flow 1 贴着边太近"。
+ * 现在统一 +4px padding，让 flow 1 圆心距离边框 9px，圆缘距离边框 5px（用户要求）。
+ * ⚠️ 只影响 ASCII 路径（git --graph 字符流渲染）。
+ * structured 路径有自己的 SVG 几何（renderGraph() in structured.ts），那里单独处理。*/
+export const FLOW_LEFT_PAD = 4;
+
 /** 字形：git --graph 输出中的一个字符位置 */
 export interface Glyph {
   /** 行号（Y 坐标） */
@@ -181,21 +189,24 @@ export function graphHeight(g: Graph): number {
 
 /**
  * SVG viewBox 字符串
- * - x = minColumn * COL_WIDTH；y = minRow * ROW_HEIGHT
- * - w = (maxColumn - minColumn + 1) * COL_WIDTH + COL_WIDTH
+ * - x = minColumn * COL_WIDTH + FLOW_LEFT_PAD；y = minRow * ROW_HEIGHT
+ * - w = (maxColumn - minColumn + 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD
  * - h = (maxRow - minRow + 1) * ROW_HEIGHT
- */
+ * v2.42：加 FLOW_LEFT_PAD 让 flow 1 距左边 5px（圆缘距离，圆心 = 9px）。
+ *   SVG 起点 +FLOW_LEFT_PAD 让 SVG lane path 在 viewBox 内视觉位置右移，
+ *   dot cx 在 TimelineNewView 中也加 FLOW_LEFT_PAD 保持同步。*/
 export function svgViewBox(g: Graph): string {
-  const x = g.minColumn * COL_WIDTH;
+  const x = g.minColumn * COL_WIDTH + FLOW_LEFT_PAD;
   const y = g.minRow * ROW_HEIGHT;
-  const w = graphWidth(g) * COL_WIDTH + COL_WIDTH;
+  const w = graphWidth(g) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
   const h = graphHeight(g) * ROW_HEIGHT;
   return `${x} ${y} ${w} ${h}`;
 }
 
-/** SVG 显示宽度（px） */
+/** SVG 显示宽度（px）
+ * v2.42：+FLOW_LEFT_PAD 让 SVG 容器宽度多 4px，与 viewBox 同步扩展。*/
 export function svgWidthPx(g: Graph): string {
-  return `${graphWidth(g) * COL_WIDTH * DISPLAY_SCALE + COL_WIDTH * DISPLAY_SCALE}px`;
+  return `${graphWidth(g) * COL_WIDTH * DISPLAY_SCALE + COL_WIDTH * DISPLAY_SCALE + FLOW_LEFT_PAD * DISPLAY_SCALE}px`;
 }
 
 /** SVG 显示高度（px） */

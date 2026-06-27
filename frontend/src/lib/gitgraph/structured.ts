@@ -74,6 +74,13 @@ export const LANE_WIDTH = 10;
  *  让密集 commit-row 文字上下有清晰呼吸空间（连续文字间距 7.83 → 11.11px, +42%）。
  *  dot 圆心 cy = row*30+15 仍完美对齐 30px commit-row 中心（SVG 与 row 同步）。*/
 export const ROW_HEIGHT = 30;
+
+/** v2.42：flow 1 (lane 0) 距离 commit list 左边缘 padding
+ *  之前 lane 0 圆心 cx = LANE_WIDTH/2 = 5px (DOT_SIZE=8 → 圆缘贴边 1px)，看起来"flow 1 贴着边"。
+ *  现在 +4px padding，lane 0 圆心 cx = LANE_WIDTH/2 + FLOW_LEFT_PAD = 9px（圆缘距边框 5px）。
+ *  ⚠️ 只影响 structured 路径（renderGraph() 输出）。
+ *  ASCII 路径在 models.ts 自己处理（FLOW_LEFT_PAD 也独立 export 在那里）。*/
+export const FLOW_LEFT_PAD = 4;
 /** 节点半径 */
 export const NODE_RADIUS = 4;
 /** 多条 merge 同时汇入同一 parent 时的错层步进，避免外侧斜线压住内侧竖线 */
@@ -174,7 +181,8 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   const rowCenter = (row: number): number => row * ROW_HEIGHT + ROW_HEIGHT / 2;
   const rowTop = (row: number): number => row * ROW_HEIGHT;
   const rowBottom = (row: number): number => (row + 1) * ROW_HEIGHT;
-  const laneX = (lane: number): number => lane * LANE_WIDTH + LANE_WIDTH / 2;
+  // v2.42：+FLOW_LEFT_PAD 让 lane 0 圆心距边框 9px（圆缘 5px），跟 ASCII 路径对齐。
+  const laneX = (lane: number): number => lane * LANE_WIDTH + LANE_WIDTH / 2 + FLOW_LEFT_PAD;
 
   const firstForeignNodeBetween = (
     lane: number,
@@ -272,7 +280,8 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   }
 
   // ===== 3. 计算尺寸（基于实际用到的最大 lane）=====
-  const width = (maxRenderLane + 1) * LANE_WIDTH + LANE_WIDTH;
+  // v2.42：+FLOW_LEFT_PAD 让 SVG 容器宽度增 4px，与 laneX 偏移同步。
+  const width = (maxRenderLane + 1) * LANE_WIDTH + LANE_WIDTH + FLOW_LEFT_PAD;
   const height = graph.nodes.length * ROW_HEIGHT + ROW_HEIGHT;
 
   return { paths, nodes, width, height };

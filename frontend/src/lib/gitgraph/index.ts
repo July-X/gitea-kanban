@@ -42,6 +42,7 @@ export {
   COL_WIDTH,
   ROW_HEIGHT,
   DISPLAY_SCALE,
+  FLOW_LEFT_PAD,
   newGraph,
   newFlow,
   flowColorClass,

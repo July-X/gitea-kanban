@@ -41,6 +41,7 @@ import {
   COL_WIDTH as ASCII_COL_WIDTH,
   DISPLAY_SCALE as ASCII_DISPLAY_SCALE,
   ROW_HEIGHT as ASCII_ROW_HEIGHT,
+  FLOW_LEFT_PAD,
   flowColorClass,
   flowToPathD,
   parseLines,
@@ -731,12 +732,14 @@ function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string
 const dotNodes = computed<DotOverlayNode[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
     // 圆点 overlay 是 HTML 绝对定位 px，必须与 SVG viewBox 映射后的像素坐标对齐。
-    // SVG viewBox 的 minX = graph.minColumn * COL_WIDTH（见 models.ts svgViewBox），
+    // SVG viewBox 的 minX = graph.minColumn * COL_WIDTH + FLOW_LEFT_PAD（见 models.ts svgViewBox v2.42），
     // 线条经 viewBox 映射后整体左移 minX*SCALE。圆点若用绝对 px (col*CW+CW)*SCALE
     // 不减 minX，会恒定偏右 minX*SCALE（minColumn 几乎总是 1 → 偏右 10px），
     // 表现为"圆点偏右、线条偏左"。这里减去 minX 对齐。
+    // v2.42：+FLOW_LEFT_PAD 让 ASCII flow 1 (column 0) 圆心距 commit list 左 9px（圆缘 5px），
+    //   之前圆心 4.5px，圆缘 0.5px 贴边。viewBox x 和 dot cx 同步偏移保持对齐。
     const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
-    // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW-minX)*SCALE，
+    // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW-minX+FLOW_LEFT_PAD)*SCALE，
     // 圆点 size = lane 间距（10px），圆点视觉上落在 lane 右缘，跨 lane 边界（跟 Gitea 一致）。
     return asciiGraph.value.commits.map((commit) => ({
       sha: commit.sha,
@@ -747,7 +750,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
         commit.refs.map((r) => refTypeFromGroup(r.refGroup)),
       ),
       row: commit.row,
-      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX) * ASCII_DISPLAY_SCALE,
+      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
       cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
       size: DOT_SIZE,
       colorClass: flowColorClass(
@@ -2154,12 +2157,14 @@ function refBadgeClass(refType?: string): string {
  * 通过 padding: 0 保持紧凑显示；只 inherit font-size/line-height 的紧凑参数。
  * v2.41：models.ts ROW_HEIGHT 12 → 16px，ASCII commit-row 高度也变为 16px。
  *   现在垂直方向有空间：上下 1px vertical padding，让 11px 文字在 row 内有 1px 上下气口，
- *   行间连续 commit 文字间距从 0px → 2px（v2.41 之前 = 0），
- *   文字距 row 顶/底各 1.5/1.5px（之前贴边）。
- *   font-size 保持 11px（git-graph 紧凑风格），line-height 1.1 给 box 留 ~1px 行间空气。*/
+ *   行间连续 commit 文字间距从 0px → 3.91px（v2.41 之前 = 0）。
+ * v2.42：行间文字间距 3.91 → 4.5px（用户要求"行间距调整到 4.5px 左右"）。
+ *   调整 line-height: 1.1 → 1.045（line-box 11 → 11.5px），row 高度保持 16px，
+ *   行间距 = ROW_H - line-box = 16 - 11.5 = 4.5px ✓。
+ *   文字距 row 顶/底各 2.25/2.25px（居中）。*/
 .commit-row--ascii {
   font-size: 11px;
-  line-height: 1.1;
+  line-height: 1.045;
   padding: 1px var(--space-3, 12px) 1px 0;
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
