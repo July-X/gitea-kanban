@@ -249,12 +249,13 @@ stage_commit() {
     return 0
   fi
 
+  git add -A
+
   # 生成中文 commit 信息
   COMMIT_MSG="$(make_commit_message)"
   log "提交信息："
   printf '  %s\n' "$COMMIT_MSG" | head -10
 
-  git add -A
   local MSG_FILE
   MSG_FILE="$(mktemp "${TMPDIR:-/tmp}/gitea-kanban-commit-msg.XXXXXX")"
   printf '%s\n' "$COMMIT_MSG" > "$MSG_FILE"
@@ -284,7 +285,24 @@ except Exception:
 commit_body() {
   local TEXT="$1"
   local FILES STAT BODY
-  BODY="$(printf '%s\n' "$TEXT" | sed -E 's/^#+[[:space:]]*//; s/^已完成[：:]?[[:space:]]*//g' | sed '/^$/N;/^\n$/D' | head -80)"
+  BODY="$(printf '%s\n' "$TEXT" |
+    sed -E 's/^#+[[:space:]]*//; s/^已完成[：:]?[[:space:]]*//g' |
+    awk '
+      NR == 1 && /^(feat|fix|refactor|perf|chore|test|docs|style)(\([^)]+\))?: / { next }
+      /^改动说明[：:]?[[:space:]]*$/ { next }
+      /^本轮无新指令/ { next }
+      /^---[[:space:]]*$/ { exit }
+      /^\[goal:/ { exit }
+      /^判定：active goal/ { next }
+      /^未跑的验证/ { exit }
+      /^你的下一步/ { exit }
+      /^Commit[[:space:]]*$/ { exit }
+      /^```/ { exit }
+      /noise_filter|受限|不可 practical|下一步|兜底/ { next }
+      { print }
+    ' |
+    sed '/^$/N;/^\n$/D' |
+    head -60)"
   FILES="$(git diff --cached --name-status 2>/dev/null | sed -n '1,12p' || true)"
   STAT="$(git diff --cached --stat 2>/dev/null | tail -1 || true)"
 
@@ -292,7 +310,9 @@ commit_body() {
     printf '改动说明：\n%s\n\n' "$BODY"
   fi
   if [ -n "$FILES" ]; then
-    printf '变更文件：\n%s\n\n' "$FILES" | sed 's/^/- /'
+    printf '变更文件：\n'
+    printf '%s\n' "$FILES" | sed 's/^/- /'
+    printf '\n'
   fi
   if [ -n "$STAT" ]; then
     printf '统计：\n- %s\n' "$STAT"
