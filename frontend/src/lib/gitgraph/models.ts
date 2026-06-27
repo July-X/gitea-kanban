@@ -30,8 +30,9 @@ export const COL_WIDTH = 5;
 
 /** SVG 单位行高（unit）
  *  v2.41：12 → 16px，让 ASCII 路径（GitHub 平台）的 commit-row 上下各有 ~2px 气口。
- *  之前 12px 太紧，11px 字体 + line-height 1 文字几乎贴满 row 上下边界，
- *  密集 row 时连续文字行间间距几乎为 0（看 v3-005 用户截图"sig-go coms"项目）。
+ *  v2.43：16 → 19px，让 ASCII 路径行间距 = 8px（与 Gitea 路径统一）。
+ *    row 19px = line-box 11px (font 11 × line-height 1.0) + 间距 8px。
+ *    之前 16px + line-height 1.045 = line-box 11.5px + 间距 4.5px（不统一）。
  *
  *  ⚠️ 只影响 ASCII 路径（git --graph 字符流渲染）。
  *  structured 路径用 structured.ts 自己的 ROW_HEIGHT=30，与本常量无关。
@@ -40,7 +41,7 @@ export const COL_WIDTH = 5;
  *  - svgWidth = graphWidth * 5 + 5（跟 Gitea `Width * 5 + 5` 一致）
  *  之前是 2（lane 10px），改 1 后 git-graph 整体更紧凑，更接近 SourceTree 风格
  */
-export const ROW_HEIGHT = 16;
+export const ROW_HEIGHT = 19;
 
 /** 显示缩放系数（1 SVG unit = SCALE px） */
 export const DISPLAY_SCALE = 1;

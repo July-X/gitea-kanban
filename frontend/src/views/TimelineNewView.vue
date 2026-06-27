@@ -2120,24 +2120,27 @@ function refBadgeClass(refType?: string): string {
   min-width: var(--git-graph-table-width, 950px);
   align-items: center;
   gap: 0;
-  /* v2.41 高度由内联 style 绑定 ROW_H（ASCII = 16px, structured = 30px），与 SVG 行高 1:1 对齐 */
+  /* v2.43 高度由内联 style 绑定 ROW_H（ASCII = 19px, structured = 30px），与 SVG 行高 1:1 对齐 */
   height: 30px; /* fallback（被 inline style 覆盖） */
-  /* v2.40：上下 5px vertical padding（box-sizing: border-box 已设），让 commit 文字真正垂直居中且密集 commit-row 文字间距从 7.83 → 11.11px ( +42%) */
+  /* v2.43：行间距统一到 8px（Gitea + GitHub 一致体验）
+   *   row 30px = line-box 22px (font 14 × line-height 1.571) + 间距 8px
+   *   之前 v2.40 padding 5 + line-height 1.35 = 间距 11.11px（过大）*/
   /* v2.31 revert：恢复 v2.27 的"行透明 + 内容列自身背景"机制
      用户原意："只需要表头是非透明的背景即可"——表头 .git-graph-header 使用实色主内容背景，
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
   background: transparent;
-  padding: 5px var(--space-3, 12px) 5px 0;
+  padding: 0 var(--space-3, 12px) 0 0;
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
   /* v2.35：用户诉求——commit row 主体字号加大到 15px,提升可读性
    * v2.39：整体调优——字号回归 14px（26px 行高下更舒适），显式声明系统字体栈 +
    *   letter-spacing 微调，各列 padding 统一 12px，避免文字贴边。 */
-  /* v2.40：14px 主体字号 line-height 1.3 → 1.35，配合 5px vertical padding 让密集 row 文字呼吸 +42% */
+  /* v2.43：行间距统一 8px（用户要求 Gitea + GitHub 一致）
+   *   line-height 1.35 → 1.571（line-box 14×1.571≈22px），row 30px - 22px = 8px 间距。*/
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.35;
+  line-height: 1.571;
   letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
@@ -2153,20 +2156,16 @@ function refBadgeClass(refType?: string): string {
   /* v2.40：26 → 30px，与 commit-row 高度 + SVG ROW_HEIGHT 同步（content-visibility 离屏预估高度） */
   contain-intrinsic-size: auto 30px;
 }
-/* v2.16：ASCII 路径 ROW_H=12px，字体缩小到 11px 适配紧凑行高
- * v2.40：ASCII row 12px 高度太紧，不应用 structured 的 5px vertical padding（会挤掉文字），
- * 通过 padding: 0 保持紧凑显示；只 inherit font-size/line-height 的紧凑参数。
- * v2.41：models.ts ROW_HEIGHT 12 → 16px，ASCII commit-row 高度也变为 16px。
- *   现在垂直方向有空间：上下 1px vertical padding，让 11px 文字在 row 内有 1px 上下气口，
- *   行间连续 commit 文字间距从 0px → 3.91px（v2.41 之前 = 0）。
- * v2.42：行间文字间距 3.91 → 4.5px（用户要求"行间距调整到 4.5px 左右"）。
- *   调整 line-height: 1.1 → 1.045（line-box 11 → 11.5px），row 高度保持 16px，
- *   行间距 = ROW_H - line-box = 16 - 11.5 = 4.5px ✓。
- *   文字距 row 顶/底各 2.25/2.25px（居中）。*/
+/* v2.43：行间距统一 8px（Gitea + GitHub 一致）
+ *   models.ts ROW_HEIGHT 16 → 19px，ASCII commit-row 高度也变为 19px。
+ *   line-height 1.045 → 1.0（line-box 11 → 11px），padding 1 → 0，
+ *   间距 = 19 - 11 = 8px（与 Gitea 路径统一 ✓）。*/
 .commit-row--ascii {
   font-size: 11px;
-  line-height: 1.045;
-  padding: 1px var(--space-3, 12px) 1px 0;
+  line-height: 1.0;
+  padding: 0 var(--space-3, 12px) 0 0;
+  /* v2.43：覆盖 .commit-row 基础 contain-intrinsic-size 30px，ASCII 19px row 离屏预估 */
+  contain-intrinsic-size: auto 19px;
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
