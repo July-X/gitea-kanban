@@ -227,7 +227,7 @@ func parseGraphLogOutput(output []byte, maxCount int) GraphLinesResult {
 }
 
 func parseGraphLineCommit(dataPart string) *GraphLineCommit {
-	parts := strings.Split(dataPart, "|")
+	parts := strings.SplitN(dataPart, "|", 8)
 	if len(parts) < 8 {
 		return nil
 	}
@@ -235,7 +235,7 @@ func parseGraphLineCommit(dataPart string) *GraphLineCommit {
 	return &GraphLineCommit{
 		SHA:         parts[1],
 		ShortSHA:    parts[3],
-		Subject:     strings.Join(parts[7:], "|"),
+		Subject:     parts[7],
 		Date:        parts[2],
 		AuthorName:  parts[5],
 		AuthorEmail: parts[6],

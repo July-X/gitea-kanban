@@ -178,24 +178,6 @@ func TestBuildGraph_Empty(t *testing.T) {
 	}
 }
 
-func TestSortCommitsByDate(t *testing.T) {
-	now := time.Now()
-	commits := []git.CommitInfo{
-		{SHA: "old", AuthorWhen: now.Add(-2 * time.Hour)},
-		{SHA: "new", AuthorWhen: now},
-		{SHA: "mid", AuthorWhen: now.Add(-time.Hour)},
-	}
-
-	SortCommitsByDate(commits)
-
-	if commits[0].SHA != "new" {
-		t.Errorf("expected new first, got %s", commits[0].SHA)
-	}
-	if commits[2].SHA != "old" {
-		t.Errorf("expected old last, got %s", commits[2].SHA)
-	}
-}
-
 // =============================================================================
 // v2.6 回归用例（覆盖 bug1-bug4 修复）
 // =============================================================================

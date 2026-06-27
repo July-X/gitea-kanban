@@ -122,8 +122,6 @@ const featureDisabled = ref(false);
 const cloning = ref(false);
 /** v1.5 启用流程：克隆进度 / 错误信息 */
 const cloneProgress = ref<string | null>(null);
-/** v1.5 本地仓库绝对路径（Header 小字标注用） */
-const localPath = ref<string | null>(null);
 /** 是否正在 pull */
 const pulling = ref(false);
 
@@ -364,7 +362,6 @@ async function loadGraph(): Promise<void> {
       svgRender.value = null;
       asciiGraph.value = null;
       asciiLines.value = [];
-      localPath.value = null;
       // 不要在这里 return，让 finally 块清理状态
     } else {
       graphDto.value = dto;
@@ -394,7 +391,6 @@ async function loadGraph(): Promise<void> {
       svgRender.value = null;
       asciiGraph.value = null;
       asciiLines.value = [];
-      localPath.value = null;
       // 不要在这里 return，让 finally 块清理状态
     } else {
       localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
@@ -402,7 +398,6 @@ async function loadGraph(): Promise<void> {
       svgRender.value = null;
       asciiGraph.value = null;
       asciiLines.value = [];
-      localPath.value = null;
     }
   } finally {
     loading.value = false;
@@ -578,15 +573,13 @@ const pathGroups = computed<PathGroup[]>(() => {
   const r = svgRender.value;
   if (!r) return [];
   // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
-  return [...r.paths]
-    .sort((a, b) => a.order - b.order)
-    .map((p) => ({
-      order: p.order,
-      colorIndex: p.colorIndex,
-      colorClass: `flow-color-16-${p.colorIndex}`,
-      colorHex: p.colorHex,
-      d: p.d,
-    }));
+  return r.paths.map((p) => ({
+    order: p.order,
+    colorIndex: p.colorIndex,
+    colorClass: `flow-color-16-${p.colorIndex}`,
+    colorHex: p.colorHex,
+    d: p.d,
+  }));
 });
 
 /**
@@ -714,7 +707,7 @@ const expandedCommitNode = computed<
  * 圆点视觉直径（px）= 8px（v2.29 用户要求：flow 线条上的圆点调整为 8px 宽）
  * 比 lane 间距（5px）大，圆点视觉上"凸"在 lane 线上、跟 flow 路径有明显视觉对比。
  */
-const dotSize = computed(() => 8);
+const DOT_SIZE = 8;
 
 interface DotOverlayNode {
   sha: string;
@@ -744,7 +737,6 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
     // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW-minX)*SCALE，
     // 圆点 size = lane 间距（10px），圆点视觉上落在 lane 右缘，跨 lane 边界（跟 Gitea 一致）。
-    const dot = dotSize.value;
     return asciiGraph.value.commits.map((commit) => ({
       sha: commit.sha,
       subject: commit.subject,
@@ -756,7 +748,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
       row: commit.row,
       cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX) * ASCII_DISPLAY_SCALE,
       cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
-      size: dot,
+      size: DOT_SIZE,
       colorClass: flowColorClass(
         asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
       ),
@@ -769,7 +761,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     row: node.row,
     cx: node.cx,
     cy: node.cy,
-    size: dotSize.value,
+    size: DOT_SIZE,
     colorHex: node.colorHex,
   }));
 });
@@ -967,7 +959,7 @@ function onDragEnd(): void {
 
 /** 将 px 字符串解析为数字 */
 function parseSvgPx(value: string): number {
-  const n = Number.parseFloat(value.replace(/px$/, ''));
+  const n = Number.parseFloat(value);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -1339,8 +1331,6 @@ function refBadgeClass(refType?: string): string {
         <span>Git Graph</span>
         <span v-if="activeRepo" class="timeline-new__repo-name">{{ activeRepo.fullName }}</span>
         <span v-else class="timeline-new__repo-name muted">请选择仓库</span>
-        <!-- 本地仓库路径小字标注（v1.5 clone 后返） -->
-        <span v-if="localPath" class="timeline-new__local-path">{{ localPath }}</span>
       </div>
 
       <div class="timeline-new__actions">
@@ -1671,16 +1661,6 @@ function refBadgeClass(refType?: string): string {
 }
 .timeline-new__repo-name.muted {
   color: var(--color-text-disabled);
-}
-/* v1.5.2 本地仓库路径小字标注（紧接 repo-name 之后） */
-.timeline-new__local-path {
-  font-size: var(--font-xs, 11px);
-  color: var(--color-text-disabled);
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: default;
 }
 .timeline-new__actions {
   display: flex;

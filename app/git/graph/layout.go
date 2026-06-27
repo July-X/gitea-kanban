@@ -113,11 +113,6 @@ func BuildGraph(commits []git.CommitInfo) *GraphResult {
 	return buildGraphWithMaxColors(commits, defaultMaxColors)
 }
 
-// BuildGraphWithMaxColors 自定义颜色上限（测试用）
-func BuildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResult {
-	return buildGraphWithMaxColors(commits, maxColors)
-}
-
 func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResult {
 	if len(commits) == 0 {
 		return &GraphResult{}
@@ -703,54 +698,4 @@ func branchSpanEndRow(
 		}
 		curSHA = firstParent
 	}
-}
-
-// FormatGraph 格式化图布局为可读字符串（调试用）
-func FormatGraph(result *GraphResult) string {
-	if result == nil || len(result.Nodes) == 0 {
-		return "(empty graph)"
-	}
-	// 找最大 Row 防止越界（nodes 不保证按 Row 排序）
-	maxRow := 0
-	for _, node := range result.Nodes {
-		if node.Row > maxRow {
-			maxRow = node.Row
-		}
-	}
-	rows := make([]string, maxRow+1)
-	for i := range rows {
-		rows[i] = "" // 初始化空行（某些 row 可能无 node）
-	}
-	for _, node := range result.Nodes {
-		prefix := ""
-		for i := 0; i < node.Lane; i++ {
-			prefix += "  "
-		}
-		rows[node.Row] = prefix + "* " + node.ShortSHA + " " + node.Subject
-	}
-	out := ""
-	for _, row := range rows {
-		out += row + "\n"
-	}
-	return out
-}
-
-// SortCommitsByDate 按 AuthorWhen 降序排序（对齐 --date-order）
-func SortCommitsByDate(commits []git.CommitInfo) {
-	sort.SliceStable(commits, func(i, j int) bool {
-		if !commits[i].AuthorWhen.Equal(commits[j].AuthorWhen) {
-			return commits[i].AuthorWhen.After(commits[j].AuthorWhen)
-		}
-		return commits[i].SHA < commits[j].SHA
-	})
-}
-
-// SortCommitsByDateASC 按 AuthorWhen 升序排序（root 在前，保留供测试使用）
-func SortCommitsByDateASC(commits []git.CommitInfo) {
-	sort.SliceStable(commits, func(i, j int) bool {
-		if !commits[i].AuthorWhen.Equal(commits[j].AuthorWhen) {
-			return commits[i].AuthorWhen.Before(commits[j].AuthorWhen)
-		}
-		return commits[i].SHA < commits[j].SHA
-	})
 }

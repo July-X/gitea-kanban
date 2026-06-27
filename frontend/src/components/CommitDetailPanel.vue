@@ -288,6 +288,32 @@ if (typeof document !== 'undefined') {
     document.removeEventListener('keydown', onGlobalKeydown);
   });
 }
+
+/**
+ * v2.41：拦截左/右栏 wheel 事件的滚动穿透。
+ *
+ * 问题：commit-row 展开后，左栏（commit message + meta）/ 右栏（files）滚到底时，
+ *   滚轮事件会穿透到外层 .timeline-new__main，带动整个 commit log 滚动。
+ *   overscroll-behavior: contain 在部分 WebView 引擎下支持不完整，且当容器内容
+ *   未溢出时无法阻止穿透。
+ *
+ * 方案：在 panel 变体的左/右栏上拦截 wheel 事件——滚到顶/底时 preventDefault()，
+ *   阻止事件冒泡到外层。dialog 变体不需要（弹窗 overlay 本身隔离滚动）。
+ */
+function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
+  const { scrollTop, scrollHeight, clientHeight } = el;
+  const maxScroll = scrollHeight - clientHeight;
+  if (maxScroll <= 0) {
+    // 容器无可滚动空间，直接拦截，防止穿透外层
+    e.preventDefault();
+    return;
+  }
+  const delta = e.deltaY;
+  // 向下滚且已到底 → 拦截；向上滚且已到顶 → 拦截
+  if ((delta > 0 && scrollTop >= maxScroll) || (delta < 0 && scrollTop <= 0)) {
+    e.preventDefault();
+  }
+}
 </script>
 
 <template>
@@ -325,7 +351,7 @@ if (typeof document !== 'undefined') {
          dialog 变体保留单列垂直流（弹窗宽屏更适合纵向堆叠）-->
     <div v-if="props.variant === 'panel'" class="cd-panel__body">
       <!-- 左 4/10：commit message + meta -->
-      <div class="cd-panel__left">
+      <div class="cd-panel__left" @wheel="onPanelWheel($event, $event.currentTarget as HTMLElement)">
         <div class="cd-panel__message">
           <div class="cd-message__title">{{ messageTitle }}</div>
           <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
@@ -392,7 +418,7 @@ if (typeof document !== 'undefined') {
            这样右栏总高度 = min(内容自然高度, 父容器 260px - header)，
            files 列表很长时只在 .cd-files__scroll 内部出滚动条，
            cards 始终贴底可见，不会被 files 列表挤出右栏。-->
-      <div class="cd-panel__right">
+      <div class="cd-panel__right" @wheel="onPanelWheel($event, $event.currentTarget as HTMLElement)">
         <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
           <div class="cd-section-title">
             <FileText :size="13" />

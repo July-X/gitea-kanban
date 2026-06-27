@@ -147,8 +147,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   //   Gitea parser.go ParseGlyphs 从右到左扫描，新 flow +1，但根 commit
   //   总是占 column 0（= 最左位置）
   //   结论：lane 0 = main 在最左，lane N = 最新分叉在右（v2.6+ 标准）
-  const maxLaneRaw = graph.nodes.reduce((m, n) => Math.max(m, n.lane), 0);
-  let maxRenderLane = maxLaneRaw;
+  const maxRenderLane = graph.maxLane;
 
   const nodesByLane = new Map<number, GraphNodeDto[]>();
   for (const node of graph.nodes) {
