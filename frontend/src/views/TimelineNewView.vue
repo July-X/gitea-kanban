@@ -419,7 +419,7 @@ async function syncRepo(): Promise<void> {
     let addedCommits = 0;
     if (!cloned) {
       // 未同步 → 首次 clone
-      const resp = await commitsGitgraphCloneRepo({
+      await commitsGitgraphCloneRepo({
         projectId: activeProjectId.value,
       });
       // 更新 clonedMap 缓存(避免下次又走 clone 分支)
@@ -433,7 +433,6 @@ async function syncRepo(): Promise<void> {
         message: '同步成功',
         description: `${repo2?.fullName ?? ''} 已同步到本地`,
       });
-      _ = resp; // localPath 已后端记下,前端不再需要
     } else {
       // 已同步 → pull 更新
       const resp = await commitsGitgraphPull({
@@ -695,12 +694,6 @@ const expandedCommitNode = computed<
  */
 
 /**
- * lane 视觉间距（px）：COL_WIDTH * DISPLAY_SCALE = 5px（v2.16 跟 Gitea 一致）
- * 用户要求"flow 线条间隔调整到 5px"，DISPLAY_SCALE 改 1 后 COL_WIDTH=5 → 5px
- */
-const laneSpacing = computed(() => ASCII_COL_WIDTH * ASCII_DISPLAY_SCALE);
-
-/**
  * 圆点视觉直径（px）= 8px（v2.29 用户要求：flow 线条上的圆点调整为 8px 宽）
  * 比 lane 间距（5px）大，圆点视觉上"凸"在 lane 线上、跟 flow 路径有明显视觉对比。
  */
@@ -760,9 +753,26 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
 // - SVG 完整渲染固定不动；handle 物理位置变化
 // ============================================================
 
+const MIN_GRAPH_COL_WIDTH = 60;
+const MAX_GRAPH_COL_WIDTH = 800;
+const MIN_CONTENT_COL_WIDTH = 60;
+const GRAPH_WIDTH_STORAGE_KEY = 'gitea-kanban:gitgraph:graph-width';
+
+function loadGraphWidth(): number | null {
+  try {
+    const stored = localStorage.getItem(GRAPH_WIDTH_STORAGE_KEY);
+    if (!stored) return null;
+    const parsed = Number.parseFloat(stored);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(MIN_GRAPH_COL_WIDTH, Math.min(MAX_GRAPH_COL_WIDTH, parsed));
+  } catch {
+    return null;
+  }
+}
+
 /** handle 物理位置（px），默认 = svgWidth
  * 用户拖拽后停在 [60, 800] 范围内 */
-const userHandleLeft = ref<number | null>(null);
+const userHandleLeft = ref<number | null>(loadGraphWidth());
 /** 是否正在拖拽 */
 const dragging = ref(false);
 let dragStartX = 0;
@@ -787,15 +797,20 @@ function onDragMove(e: MouseEvent): void {
   if (!dragging.value) return;
   // 向左拖 delta 为负 → handleLeft 减小
   const delta = e.clientX - dragStartX;
-  // 拖拽边界（用户要求）：
-  // - 向左最多距离 wrapper 左边 60px（handle 不能再左）
-  // - 向右最多让 git-graph 显示 800px（handle 不能超过 800px）
-  const minLeft = 60;
-  const maxLeft = 800;
-  userHandleLeft.value = Math.max(minLeft, Math.min(maxLeft, dragStartHandleLeft + delta));
+  userHandleLeft.value = Math.max(
+    MIN_GRAPH_COL_WIDTH,
+    Math.min(MAX_GRAPH_COL_WIDTH, dragStartHandleLeft + delta),
+  );
 }
 
 function onDragEnd(): void {
+  if (userHandleLeft.value !== null) {
+    try {
+      localStorage.setItem(GRAPH_WIDTH_STORAGE_KEY, String(userHandleLeft.value));
+    } catch {
+      /* 忽略持久化错误 */
+    }
+  }
   dragging.value = false;
   document.removeEventListener('mousemove', onDragMove);
   document.removeEventListener('mouseup', onDragEnd);
@@ -881,10 +896,16 @@ const draggingCol = ref<number>(-1); // 0 = desc-author 间，1 = author-date �
 let colDragStartX = 0;
 let colDragStartWidths: typeof DEFAULT_COL_WIDTHS | null = null;
 
-/** grid-template-columns 字符串（用于 commit-row 和表头） */
+/** grid-template-columns 字符串（5 列表格中的后 4 列内容区） */
 const gridTemplateColumns = computed(() => {
   const w = colWidths.value;
   return `${w.desc}px ${w.author}px ${w.date}px ${w.sha}px`;
+});
+
+/** 整张 5 列表格的最小宽度，用于让主内容区自然出现横向滚动 */
+const tableMinWidth = computed(() => {
+  const w = colWidths.value;
+  return handleLeft.value + w.desc + w.author + w.date + w.sha;
 });
 
 /** 列分隔手柄 mousedown */
@@ -902,28 +923,13 @@ function onColHandleMouseMove(e: MouseEvent): void {
   if (draggingCol.value < 0 || !colDragStartWidths) return;
   const delta = e.clientX - colDragStartX;
   const w = { ...colDragStartWidths };
-  // 拖动列 i 改变列 i 和列 i+1 的宽度（保持总宽度不变）
+  // 表头分隔线代表左侧列的右边界：拖动时只改变左侧列宽，右侧列整体顺移。
   if (draggingCol.value === 0) {
-    // desc-author 分隔线：desc 加宽 = author 减窄
-    const minW = 60;
-    const newDesc = Math.max(minW, colDragStartWidths.desc + delta);
-    const newAuthor = Math.max(minW, colDragStartWidths.author - (newDesc - colDragStartWidths.desc));
-    w.desc = newDesc;
-    w.author = newAuthor;
+    w.desc = Math.max(MIN_CONTENT_COL_WIDTH, colDragStartWidths.desc + delta);
   } else if (draggingCol.value === 1) {
-    // author-date 分隔线
-    const minW = 60;
-    const newAuthor = Math.max(minW, colDragStartWidths.author + delta);
-    const newDate = Math.max(minW, colDragStartWidths.date - (newAuthor - colDragStartWidths.author));
-    w.author = newAuthor;
-    w.date = newDate;
+    w.author = Math.max(MIN_CONTENT_COL_WIDTH, colDragStartWidths.author + delta);
   } else if (draggingCol.value === 2) {
-    // date-sha 分隔线
-    const minW = 60;
-    const newDate = Math.max(minW, colDragStartWidths.date + delta);
-    const newSha = Math.max(minW, colDragStartWidths.sha - (newDate - colDragStartWidths.date));
-    w.date = newDate;
-    w.sha = newSha;
+    w.date = Math.max(MIN_CONTENT_COL_WIDTH, colDragStartWidths.date + delta);
   }
   colWidths.value = w;
 }
@@ -1033,7 +1039,10 @@ function refBadgeClass(refType?: string): string {
     </header>
 
     <!-- ===== 主内容 ===== -->
-    <div class="timeline-new__main" :class="{ 'timeline-new__main--dragging': dragging }">
+    <div
+      class="timeline-new__main"
+      :class="{ 'timeline-new__main--dragging': dragging || draggingCol >= 0 }"
+    >
       <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
       </div>
@@ -1076,7 +1085,14 @@ function refBadgeClass(refType?: string): string {
           - 每个 commit-row 第一列是占位（高度 = ROW_H），让背景的 SVG 在每行精确对齐
           - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
         -->
-        <div class="git-graph-wrapper" :style="{ '--grid-template-columns': gridTemplateColumns, '--git-graph-col-width': `${handleLeft}px` }">
+        <div
+          class="git-graph-wrapper"
+          :style="{
+            '--grid-template-columns': gridTemplateColumns,
+            '--git-graph-col-width': `${handleLeft}px`,
+            '--git-graph-table-width': `${tableMinWidth}px`,
+          }"
+        >
           <!-- v2.22：SourceTree 风格表头（5 列：graph + 描述/作者/日期/SHA） -->
           <div class="git-graph-header" @mousedown.stop>
             <!-- v2.27：第一列 graph 标题格（与 commit-row 第一列同宽） -->
@@ -1086,7 +1102,13 @@ function refBadgeClass(refType?: string): string {
             >
               <span class="git-graph-header__col-label">Graph</span>
             </div>
-            <!-- v2.28：移除 graph 列宽拖拽手柄（用户：表头列的拖拽就够用了） -->
+            <div
+              class="git-graph-header__resize git-graph-header__resize--graph"
+              @mousedown="onDragStart"
+              :class="{ 'git-graph-header__resize--active': dragging }"
+              :style="{ left: `${handleLeft}px` }"
+              title="拖动调整 Graph 列宽度"
+            />
             <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
             <div
               class="git-graph-header__resize"
@@ -1398,17 +1420,17 @@ function refBadgeClass(refType?: string): string {
   position: relative;
   min-height: 1px;
   display: block;
-  /* v2.27：把 grid-template-columns 透传给 header / body 行（5 列：graph + 4 个内容列） */
-  --grid-template-columns-5: var(--grid-template-columns-5, 130px 1fr 1fr 1fr 1fr);
+  width: max-content;
+  min-width: max(100%, calc(var(--git-graph-table-width, 920px) + var(--space-3, 12px)));
 }
 
 /* 表头（5 列 grid） */
 .git-graph-header {
   display: grid;
-  grid-template-columns: auto var(--grid-template-columns, 480px 160px 120px 80px);
+  grid-template-columns: var(--git-graph-col-width, 130px) var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
   height: 32px;
-  background: var(--color-bg-soft, rgba(0, 0, 0, 0.03));
+  background: var(--color-shell-main-bg);
   /* v2.29：用 --color-divider 替换 --color-border（border 在两个主题下都是 transparent，
      所以用户看不到表头底下的 1px 线，无法方便拖拽列分隔手柄） */
   border-bottom: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
@@ -1420,6 +1442,8 @@ function refBadgeClass(refType?: string): string {
   letter-spacing: 0.05em;
   user-select: none;
   padding-right: var(--space-3, 12px);
+  min-width: var(--git-graph-table-width, 920px);
+  box-sizing: border-box;
   position: sticky; /* v2.27：表头 sticky 顶部，body 滚动时表头保持可见 */
   top: 0;
   /* v2.32：z-index 提高到 5（高于 commit-dots-overlay z-index: 2 和 commit-row z-index: 1），
@@ -1446,7 +1470,7 @@ function refBadgeClass(refType?: string): string {
   /* v2.29：用 --color-divider 替换 --color-border（border 在两个主题下都是 transparent，
      用户看不到 graph 列与 desc 列之间的纵向分隔线） */
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
-  background: var(--color-bg-soft, rgba(0, 0, 0, 0.02));
+  background: var(--color-shell-main-bg);
 }
 .git-graph-header__col--graph .git-graph-header__col-label {
   font-size: 10px;
@@ -1483,7 +1507,7 @@ function refBadgeClass(refType?: string): string {
   width: 6px;            /* 命中区 6px */
   height: 100%;
   cursor: col-resize;
-  z-index: 4;
+  z-index: 6;
   background: transparent;
   transition: background 0.12s;
   /* 居中于 1px 分割线：left = colHandleLeft(colIndex) = 分割线中心 */
@@ -1699,16 +1723,17 @@ function refBadgeClass(refType?: string): string {
  * v2.27：加第一列 graph 占位（auto 宽度，与表头 graph 列同宽） */
 .commit-row {
   display: grid;
-  grid-template-columns: auto var(--grid-template-columns, 480px 160px 120px 80px);
+  grid-template-columns: var(--git-graph-col-width, 130px) var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
   gap: 0;
   /* 高度由内联 style 绑定 ROW_H（ASCII = 12px, structured = 28px），与 SVG 行高 1:1 对齐 */
   height: 28px; /* fallback（被 inline style 覆盖） */
   /* v2.31 revert：恢复 v2.27 的"行透明 + 内容列自身背景"机制
-     用户原意："只需要表头是非透明的背景即可"——表头 .git-graph-header 已有 var(--color-bg-soft) 背景，
+     用户原意："只需要表头是非透明的背景即可"——表头 .git-graph-header 使用实色主内容背景，
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
   background: transparent;
   padding: 0 var(--space-3, 12px) 0 0;
+  min-width: var(--git-graph-table-width, 920px);
   font-size: var(--font-sm, 13px);
   white-space: nowrap;
   overflow: hidden;
@@ -1843,22 +1868,25 @@ function refBadgeClass(refType?: string): string {
 .commit-row__col--graph {
   width: 130px; /* fallback（被 inline 覆盖 = handleLeft） */
   padding: 0;
-  border-right: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   background: transparent;
   flex-shrink: 0;
 }
 .commit-row__col--desc {
   gap: var(--space-2, 8px);
   padding-right: var(--space-2, 8px);
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--author {
   font-size: var(--font-xs, 11px);
   color: var(--color-text-secondary);
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--date {
   font-size: var(--font-xs, 11px);
   color: var(--color-text-secondary);
   padding: 0 var(--space-2, 8px);
+  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--sha {
   font-family: monospace;
@@ -2020,13 +2048,7 @@ function refBadgeClass(refType?: string): string {
   cursor: not-allowed;
 }
 
-/* v2.28：移除 .graph-resize-handle 样式（用户：表头列的拖拽就够用了，不再单独提供 graph 列宽拖拽手柄）
- *  旧规则保留注释供 git blame 参考：
- *  - .graph-resize-handle { position: absolute; ... background: transparent; }
- *  - :hover/--active { background: var(--color-primary); } + ::before 中心白线
- *  - 整段 CSS 与模板中的 <div class="graph-resize-handle" @mousedown="onDragStart" /> 一起删除
- *  - onDragStart 仍保留（用于响应 .git-graph-header 的 mousedown.stop 兜底/未来扩展）
- */
+/* Graph/描述之间的表头分隔线也是拖拽开关；它移动第一列宽度，从而移动后 4 列内容区。 */
 /* v2.21：handle 左侧全屏背景色遮罩（盖被子效果）
  * v2.26：移除此遮罩！它用 `pointer-events:none` 背景色块盖住整个 svg-area，
  * 导致 git-graph 看不到（用户反馈"git-graph 被黑色东西遮挡"）。

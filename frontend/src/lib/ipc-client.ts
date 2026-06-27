@@ -617,7 +617,10 @@ export async function deepenRepo(args: {
 }> {
   // 动态导入 Wails 绑定（路径相对于 frontend 目录）
   const { DeepenRepo } = await import('../../wailsjs/wailsjs/go/main/App');
-  return DeepenRepo(args);
+  return DeepenRepo({
+    projectId: args.projectId,
+    deepenBy: args.deepenBy ?? 200,
+  });
 }
 
 /**
