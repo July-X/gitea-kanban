@@ -255,93 +255,78 @@ stage_commit() {
   printf '  %s\n' "$COMMIT_MSG" | head -10
 
   git add -A
-  if git commit -m "$COMMIT_MSG"; then
+  local MSG_FILE
+  MSG_FILE="$(mktemp "${TMPDIR:-/tmp}/gitea-kanban-commit-msg.XXXXXX")"
+  printf '%s\n' "$COMMIT_MSG" > "$MSG_FILE"
+  if git commit -F "$MSG_FILE"; then
+    rm -f "$MSG_FILE"
     ok "git commit 成功：$(git rev-parse --short HEAD)"
   else
+    rm -f "$MSG_FILE"
     err "git commit 失败"
     return 1
+  fi
+}
+
+assistant_text() {
+  printf '%s' "$PAYLOAD" | python3 -c "
+import json, re, sys
+try:
+    d=json.loads(sys.stdin.read() or '{}')
+    t=(d.get('lastAssistantText') or '').strip().replace('\r\n', '\n')
+    t=re.sub(r'\n?<oai-mem-citation>.*?</oai-mem-citation>\s*$', '', t, flags=re.S).strip()
+    print(t[:4000])
+except Exception:
+    pass
+" 2>/dev/null || true
+}
+
+commit_body() {
+  local TEXT="$1"
+  local FILES STAT BODY
+  BODY="$(printf '%s\n' "$TEXT" | sed -E 's/^#+[[:space:]]*//; s/^已完成[：:]?[[:space:]]*//g' | sed '/^$/N;/^\n$/D' | head -80)"
+  FILES="$(git diff --cached --name-status 2>/dev/null | sed -n '1,12p' || true)"
+  STAT="$(git diff --cached --stat 2>/dev/null | tail -1 || true)"
+
+  if [ -n "$BODY" ]; then
+    printf '改动说明：\n%s\n\n' "$BODY"
+  fi
+  if [ -n "$FILES" ]; then
+    printf '变更文件：\n%s\n\n' "$FILES" | sed 's/^/- /'
+  fi
+  if [ -n "$STAT" ]; then
+    printf '统计：\n- %s\n' "$STAT"
   fi
 }
 
 make_commit_message() {
   # 优先策略：
   #   1. 从 Stop payload 的 lastAssistantText 提取明确的 conventional commit 标题
-  #   2. 否则从 git diff --stat + 文件名提取精确摘要（变更行数 + 关键文件）
-  #   3. 兜底模板
+  #   2. 标题不可信时按实际变更文件兜底
+  #   3. 正文保留 Stop 事件的详细改动描述 + 变更文件摘要
   #
-  # v2.34 改写：
+  # v2.35 改写：
   #   - 截图风格固定为短中文 Conventional Commit 标题
+  #   - commit body 保留详细改动描述，避免 Stop 自动提交只剩一句标题
   #   - 拒绝"修复总结 / 所有 todos 完成 / 完成"等模型最终回复标题
   #   - 兜底基于实际变更区域生成，例如 `fix: 优化 git-graph 时间线`
 
-  local ASSISTANT_TEXT=""
-  ASSISTANT_TEXT="$(printf '%s' "$PAYLOAD" | python3 -c "
-import json,sys
-try:
-    d=json.loads(sys.stdin.read() or '{}')
-    t=(d.get('lastAssistantText') or '').strip().replace('\r\n', '\n')
-    if t:
-        # 保留前 300 字的完整内容（让 commit message body 包含问题/方案/测试说明）
-        # 优先在段落结束（双换行）处截断，其次在单换行/句号
-        seps = ['\n\n', '\n', '。', '！', '？']
-        cut = None
-        for sep in seps:
-            i = t.find(sep)
-            # 至少保留 200 字，避免截得太短；最多 300 字
-            if 200 <= i <= 300:
-                cut = i
-                break
-        if cut is not None:
-            t = t[:cut].rstrip()
-        else:
-            # 找不到合适分隔符：截前 300 字
-            head = t[:300]
-            if len(t) > len(head):
-                t = head.rstrip() + '…'
-        print(t)
-except Exception:
-    pass
-" 2>/dev/null || true)"
+  local ASSISTANT_TEXT SUBJECT BODY
+  ASSISTANT_TEXT="$(assistant_text)"
 
   if [ -n "$ASSISTANT_TEXT" ]; then
-    local SUBJECT
     SUBJECT="$(normalize_commit_subject "$ASSISTANT_TEXT" || true)"
-    if [ -n "$SUBJECT" ]; then
-      printf '%s' "$SUBJECT"
-      return 0
-    fi
   fi
 
-  # 兜底 1：按实际变更文件生成短中文 conventional 标题
-  local FALLBACK_SUBJECT
-  FALLBACK_SUBJECT="$(fallback_commit_subject)"
-  if [ -n "$FALLBACK_SUBJECT" ]; then
-    printf '%s' "$FALLBACK_SUBJECT" | cut -c 1-72
-    return 0
+  if [ -z "$SUBJECT" ]; then
+    SUBJECT="$(fallback_commit_subject | cut -c 1-72)"
   fi
 
-  # 兜底 2：从 git diff stat 提取精确摘要（文件 + 行数）
-  local DIFF_SUMMARY
-  DIFF_SUMMARY="$(git diff --cached --stat 2>/dev/null | tail -1 || git diff --stat 2>/dev/null | tail -1 || true)"
-  if [ -n "$DIFF_SUMMARY" ]; then
-    # 从 stat 提取文件名前缀（取第一个文件名）
-    local FIRST_FILE
-    FIRST_FILE="$(git diff --cached --name-only 2>/dev/null | head -1 || git diff --name-only 2>/dev/null | head -1 || true)"
-    if [ -n "$FIRST_FILE" ]; then
-      local BASENAME="${FIRST_FILE##*/}"
-      printf 'chore: 优化 %s' "${BASENAME%.*}"
-    else
-      printf 'chore: 优化代码改动'
-    fi
+  BODY="$(commit_body "$ASSISTANT_TEXT")"
+  if [ -n "$BODY" ]; then
+    printf '%s\n\n%s' "$SUBJECT" "$BODY"
   else
-    # 兜底 3：没有 diff 时用 git status
-    local STATUS_LINE
-    STATUS_LINE="$(git status --short 2>/dev/null | head -1 || true)"
-    if [ -n "$STATUS_LINE" ]; then
-      printf 'chore: 优化工作区改动'
-    else
-      printf 'chore: 代码改动'
-    fi
+    printf '%s' "$SUBJECT"
   fi
 }
 
