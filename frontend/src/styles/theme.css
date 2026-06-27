@@ -450,6 +450,42 @@ html[data-theme='light'] {
     color var(--t-theme) var(--ease-theme);
 }
 
+/* v1.7 优化：主题切换热路径豁免（Git Graph 等长列表）
+ *
+ * 背景：全局 `*` 选择器让每个 DOM 元素都参与 150ms 主题过渡动画。Git Graph 视图在
+ * 单仓库 1000+ commits 时，每个 commit-row（含 4 个内容列 + 圆点 overlay 共 6000+ 元素）
+ * 都在背景/边框颜色变化时跑 150ms transition，造成切主题肉眼可见的卡顿。
+ *
+ * 策略：保留全局过渡（顶栏 / 卡片 / 按钮等"低节点但视觉关键"元素仍享受平滑切换），
+ * 但在热路径显式 `transition: none` 跳过动画——这些元素视觉变化通过容器继承瞬时完成，
+ * 切主题时主区画布 → 卡片背景还是平滑过渡，只是 1000 行 commit 内容瞬时更新。
+ *
+ * 选型依据：
+ * - `transition: none` 只取消 background-color/color 的过渡动画，不影响 box-sizing 等
+ *   其他属性，所以全局 box-sizing: border-box 不受影响
+ * - .commit-avatar-fallback / .ref-badge 等带色块的小元素保留过渡——它们数量有限（最多
+ *   每行 5-6 个），且 hover/active 交互依赖过渡平滑，保留更符合用户预期
+ * - .git-graph-svg * 单独列出来——SVG 子元素继承 fill/stroke 颜色，过渡时颜色淡变让
+ *   视觉上更顺（且 SVG 元素总数有限，不构成卡顿来源）*/
+.git-graph-wrapper,
+.git-graph-header,
+.git-graph-header *,
+.git-graph-body,
+.git-graph-bg,
+.git-graph-svg,
+.commit-dots-overlay,
+.commit-dot,
+.commit-row,
+.commit-row__col,
+.commit-row__col--graph,
+.commit-row__col--desc,
+.commit-row__col--author,
+.commit-row__col--date,
+.commit-row__col--sha,
+.commit-accordion {
+  transition: none;
+}
+
 html,
 body,
 #app {
