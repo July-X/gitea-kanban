@@ -1946,11 +1946,12 @@ function refBadgeClass(refType?: string): string {
     box-shadow 0.12s ease,
     transform 0.12s ease;
 }
+/* v2.42：hover 时只让 dot 变大（scale 1.25，8px → 10px），不再叠加绿色 box-shadow 外圈。
+ * 之前 .commit-dot--active 有 3 重 box-shadow（3px shell-bg + 5px 绿色 + 14px glow），
+ * 在 dot 周围画一个绿色圆环（用户反馈"外部画一个绿色的圆圈"，不够干净）。
+ * 现在只保留 scale(1.25)，dot 视觉放大，hover 高亮通过尺寸变化表达，
+ * 配合 .git-graph-bg:hover / SVG path highlight（如果有）共同传达 focus 状态。*/
 .commit-dot--active {
-  box-shadow:
-    0 0 0 3px var(--color-shell-main-bg),
-    0 0 0 5px var(--color-primary, #74b830),
-    0 0 14px rgba(116, 184, 48, 0.55);
   transform: scale(1.25);
 }
 
