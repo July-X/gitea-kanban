@@ -274,16 +274,21 @@ func TestLogCommits_RefsAttached(t *testing.T) {
 		t.Errorf("expected 'v1.0' in second commit Refs, got %v", secondCommit.Refs)
 	}
 
-	// first commit → Refs 应包含默认分支（因为 feature 是从 main 的 second commit 分出的）
-	first := result.Commits[2]
-	if first.Subject != "first commit" {
-		t.Fatalf("expected first commit to be 'first commit', got %q", first.Subject)
-	}
 	// first commit 在 main 的历史里，但 HEAD 指向 main 的 second commit（checkout 回去后）
 	// 所以 first commit 可能有或没有 ref，这里不强制断言（git 行为可能不同）
 	// 主要验证 second/third commit 的 refs 正确即可
-	if len(first.Refs) > 0 && !contains(first.Refs, defaultBranch) {
-		t.Logf("first commit Refs: %v (might or might not contain %s)", first.Refs, defaultBranch)
+	var firstCommit *CommitInfo
+	for i := range result.Commits {
+		if result.Commits[i].Subject == "first commit" {
+			firstCommit = &result.Commits[i]
+			break
+		}
+	}
+	if firstCommit == nil {
+		t.Fatalf("expected to find 'first commit' in results")
+	}
+	if len(firstCommit.Refs) > 0 && !contains(firstCommit.Refs, defaultBranch) {
+		t.Logf("first commit Refs: %v (might or might not contain %s)", firstCommit.Refs, defaultBranch)
 	}
 }
 

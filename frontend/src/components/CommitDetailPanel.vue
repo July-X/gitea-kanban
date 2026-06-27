@@ -294,22 +294,21 @@ if (typeof document !== 'undefined') {
  *
  * 问题：commit-row 展开后，左栏（commit message + meta）/ 右栏（files）滚到底时，
  *   滚轮事件会穿透到外层 .timeline-new__main，带动整个 commit log 滚动。
- *   overscroll-behavior: contain 在部分 WebView 引擎下支持不完整，且当容器内容
- *   未溢出时无法阻止穿透。
+ *   overscroll-behavior: contain 在部分 WebView 引擎下支持不完整。
  *
- * 方案：在 panel 变体的左/右栏上拦截 wheel 事件——滚到顶/底时 preventDefault()，
- *   阻止事件冒泡到外层。dialog 变体不需要（弹窗 overlay 本身隔离滚动）。
+ * 方案：在 panel 变体的左/右栏上拦截 wheel 事件——仅在滚到顶/底边界时
+ *   preventDefault() 阻止穿透；中间正常滚动不拦截；容器无溢出时不拦截
+ *   （让外层 commit log 正常滚动，与右栏文件列表行为一致）。
+ *
+ * dialog 变体不需要（弹窗 overlay 本身隔离滚动）。
  */
 function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   const { scrollTop, scrollHeight, clientHeight } = el;
   const maxScroll = scrollHeight - clientHeight;
-  if (maxScroll <= 0) {
-    // 容器无可滚动空间，直接拦截，防止穿透外层
-    e.preventDefault();
-    return;
-  }
+  // 容器无可滚动空间 → 不拦截，让外层正常滚动
+  if (maxScroll <= 0) return;
   const delta = e.deltaY;
-  // 向下滚且已到底 → 拦截；向上滚且已到顶 → 拦截
+  // 滚到底（向下）→ 拦截；滚到顶（向上）→ 拦截
   if ((delta > 0 && scrollTop >= maxScroll) || (delta < 0 && scrollTop <= 0)) {
     e.preventDefault();
   }
