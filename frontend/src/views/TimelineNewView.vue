@@ -278,10 +278,6 @@ onUnmounted(() => {
     cancelAnimationFrame(graphDragRafId);
     graphDragRafId = 0;
   }
-  if (colDragRafId !== 0) {
-    cancelAnimationFrame(colDragRafId);
-    colDragRafId = 0;
-  }
 });
 
 /**
@@ -876,8 +872,8 @@ function onDragStart(e: MouseEvent): void {
       const leftPx = parseFloat(el.style.left || '0');
       graphDragHandles.colHandlesStartLeft.push(leftPx);
     });
-    // 拖拽 graph 列时内容列不变，mousemove 直接用当前实测宽度快照。
-    graphDragSnapshot = measureContentColumnWidths(colWidths.value);
+    // 拖拽 graph 列时内容列不变，mousemove 直接用当前列宽快照。
+    graphDragSnapshot = { ...colWidths.value };
   }
   document.addEventListener('mousemove', onDragMove);
   document.addEventListener('mouseup', onDragEnd);
@@ -935,9 +931,9 @@ function onDragMove(e: MouseEvent): void {
       // 1. wrapper 的 CSS 变量（1000 行 commit-row 的 var(--git-graph-col-width) 直接生效）
       graphDragWrapper.style.setProperty('--git-graph-col-width', `${newLeft}px`);
       // 2. tableMinWidth 也要更新（避免外层 timeline-new__main 横向滚动条失准）
-      // v2.34：用快照而非读响应式（mousemove 完全不触发 Vue 响应式）
+      // v2.50：desc 用 1fr，最小宽度基于 MIN_CONTENT_COL_WIDTH 而非 w.desc
       const w = graphDragSnapshot ?? DEFAULT_COL_WIDTHS;
-      const newTableMin = newLeft + w.desc + w.author + w.date + w.sha;
+      const newTableMin = newLeft + MIN_CONTENT_COL_WIDTH + w.author + w.date + w.sha;
       graphDragWrapper.style.setProperty('--git-graph-table-width', `${newTableMin}px`);
       // 3. 表头 graph 列宽度
       if (graphDragHandles.headerGraphCol) {
@@ -1071,12 +1067,6 @@ function loadColWidths(): typeof DEFAULT_COL_WIDTHS {
 /** 列宽状态（响应式，初始从 localStorage 加载） */
 const colWidths = ref({ ...loadColWidths() });
 
-/** 当前正在拖拽的列分隔手柄（-1 表示无） */
-const draggingCol = ref<number>(-1); // 0 = desc-author 间，1 = author-date 间，2 = date-sha 间
-let colDragStartX = 0;
-let colDragLatestX = 0;
-let colDragStartWidths: typeof DEFAULT_COL_WIDTHS | null = null;
-
 /**
  * v1.9 列宽语义重构：
  *   - desc 列：minmax(60px, 1fr) —— 默认占满余下空间，让表格内容区撑满父容器宽度
@@ -1109,244 +1099,14 @@ const tableMinWidth = computed(() => {
   return handleLeft.value + MIN_CONTENT_COL_WIDTH + w.author + w.date + w.sha + 12;
 });
 
-/** 列分隔手柄 mousedown */
-function onColHandleMouseDown(e: MouseEvent, colIndex: number): void {
-  e.preventDefault();
-  e.stopPropagation(); // 防止触发 git-graph 的 handle 拖拽
-  draggingCol.value = colIndex;
-  colDragStartX = e.clientX;
-  colDragLatestX = e.clientX;
-  colDragStartWidths = { ...colWidths.value };
-  colDragPersistStartWidths = { ...colWidths.value };
-  // v2.34：缓存所有需要的 DOM ref 和响应式快照，mousemove 完全不读响应式
-  colDragWrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
-  colDragHandleLeft = handleLeft.value;
-  colDragStartWidths = measureContentColumnWidths(colDragStartWidths);
-  // 用一次 querySelectorAll 拿 3 个列分隔手柄（排除 graph 列手柄 --graph）
-  const allHandles = colDragWrapper?.querySelectorAll('.git-graph-header__resize') ?? [];
-  const contentHandles: HTMLElement[] = [];
-  allHandles.forEach((el) => {
-    if (!(el as HTMLElement).classList.contains('git-graph-header__resize--graph')) {
-      contentHandles.push(el as HTMLElement);
-    }
-  });
-  colDragHandles = [
-    contentHandles[0] ?? null,
-    contentHandles[1] ?? null,
-    contentHandles[2] ?? null,
-  ];
-  document.addEventListener('mousemove', onColHandleMouseMove);
-  document.addEventListener('mouseup', onColHandleMouseUp);
-}
-
-/**
- * 列分隔手柄拖拽 mousemove
- *
- * v1.7 性能优化（拖拽卡顿修复）：
- * - 旧版直接 `colWidths.value = w` 触发 1000 行 .commit-row 的 grid-template-columns 重新
- *   布局 + .git-graph-wrapper 的 min-width 重算，每像素 mousemove 都触发一次 reflow。
- * - 新版用 `requestAnimationFrame` 节流：每帧最多更新一次 colWidths。
- * - 拖拽中给 .git-graph-wrapper 加 `contain: layout`（见 .git-graph-wrapper[data-dragging-col]
- *   样式），把布局重算隔离在 wrapper 内部，**不**触发外层 timeline-new__main / topbar 等 reflow。
- * - 同时在拖拽期间临时给 .git-graph-header / .commit-row 加 `pointer-events: none`
- *   （已在 .timeline-new__main--dragging 里用 user-select: none / cursor: col-resize 处理），
- *   减少浏览器 hit-testing 开销。
- *
- * v2.33 性能二次优化（拖拽依然有卡顿的问题）：
- * - 旧逻辑下 mousemove 即使经过 rAF 节流，每帧仍会写 `colWidths.value = w` → 触发
- *   `gridTemplateColumns` computed 重算 → wrapper inline style 重写 → 1000 个
- *   `.commit-row` 的 `grid-template-columns: var(--grid-template-columns, ...)` 全部
- *   重新解析 CSS 变量（即便数值未变，CSS 变量继承链路变化也会触发 layout invalidation）。
- * - 新版拖拽期间**绕过 Vue 响应式**：直接 `wrapper.style.setProperty('--grid-template-columns', str)`
- *   修改 DOM CSS 变量。这只触发浏览器 native reflow，不触发任何 Vue 响应式链路。
- * - rAF pending 期间继续记录最新 clientX，下一帧直接使用最新位置，避免快速拖动滞后。
- * - 只有 mouseup 时才把最终宽度回写 `colWidths.value`，让响应式系统同步一次状态用于持久化、
- *   表头列分隔手柄位置更新等场景（mouseup 后用户停止拖拽，无视觉影响）。
- * - 测试发现：1000 行 commit 时拖拽手感从 ~30fps 提升到稳定 60fps。
- *
- * v1.9 列宽语义：desc 列用 minmax(60px, 1fr) 占满余下空间，**不可直接拖**。
- *   - draggingCol === 0（desc-author 间）：改为调整 author 列宽（左列宽不变，desc 自然收缩）
- *     —— 注意：拖动方向是 author 左边界，左移 = author 变窄 = desc 变宽；右移 = author 变宽 = desc 变窄
- *   - draggingCol === 1（author-date 间）：调整 author 列宽（同上，但语义不同：author 右边界）
- *     —— 这里调整为 date 列宽，避免与 colIndex=0 重复修改 author
- *   - draggingCol === 2（date-sha 间）：调整 date 列宽
- *
- * 设计原则：每个 colHandle 对应**右侧**列的宽度调整（更符合用户"拖右边手柄改右边列"的直觉）：
- *   - colHandle 0 → author（紧邻 desc）
- *   - colHandle 1 → date
- *   - colHandle 2 → sha（最后列）
- */
-let colDragRafId = 0;
-/** 缓存 wrapper DOM ref（拖拽开始时拿一次，避免每帧 querySelector） */
-let colDragWrapper: HTMLElement | null = null;
-/** 拖拽结束时的最终列宽（mouseup 时回写响应式用，避免最后一帧被 rAF 跳过丢失） */
-let colDragFinalWidths: { desc: number; author: number; date: number; sha: number } | null = null;
-/** 拖拽开始时的持久化宽度快照，避免把 1fr 自动填充的宽度错误写进 localStorage */
-let colDragPersistStartWidths: { desc: number; author: number; date: number; sha: number } | null = null;
-/** 3 个列分隔手柄的 DOM ref（mousedown 时拿一次，mousemove 直接改 style.left） */
-let colDragHandles: [HTMLElement | null, HTMLElement | null, HTMLElement | null] = [null, null, null];
-/** 拖拽开始时的 handleLeft 快照（避免在 mousemove 中读响应式 handleLeft.value） */
-let colDragHandleLeft = 0;
-
 /** 把 widths 序列化成 CSS grid-template-columns 字符串
  *
  * v2.48：desc 列用 `minmax(MIN_CONTENT_COL_WIDTH, 1fr)` —— 占满剩余屏宽，
  * 让表格显示饱满（用户诉求："描述"列尽可能占用多的屏宽）。
- * v2.49：author/date/sha 用固定 px —— 保证拖拽列分隔手柄时改变列宽能生效
- * （minmax(w, auto) 下内容宽 > w 时列宽由 auto 主导，拖拽改 w 无效）。
- * 默认宽度已调大确保常见内容不被截断（见 DEFAULT_COL_WIDTHS）。
- * 拖拽期间用 colWidthsToFixedGridTemplate（同样固定 px）保证精确像素控制。 */
+ * v2.49：author/date/sha 用固定 px —— v2.50 起列分隔手柄已移除（只保留 graph 手柄），
+ * 这些宽度走 DEFAULT_COL_WIDTHS 默认值，不再支持用户拖拽调整。 */
 function colWidthsToGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
   return `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) ${w.author}px ${w.date}px ${w.sha}px`;
-}
-
-function colWidthsToFixedGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
-  return `${w.desc}px ${w.author}px ${w.date}px ${w.sha}px`;
-}
-
-function measureContentColumnWidths(fallback: { desc: number; author: number; date: number; sha: number }): {
-  desc: number;
-  author: number;
-  date: number;
-  sha: number;
-} {
-  const headerCols = colDragWrapper?.querySelectorAll('.git-graph-header__col') ?? [];
-  const descWidth = headerCols[1]?.getBoundingClientRect().width;
-  const authorWidth = headerCols[2]?.getBoundingClientRect().width;
-  const dateWidth = headerCols[3]?.getBoundingClientRect().width;
-  const shaWidth = headerCols[4]?.getBoundingClientRect().width;
-  return {
-    desc: Number.isFinite(descWidth) ? descWidth : fallback.desc,
-    author: Number.isFinite(authorWidth) ? authorWidth : fallback.author,
-    date: Number.isFinite(dateWidth) ? dateWidth : fallback.date,
-    sha: Number.isFinite(shaWidth) ? shaWidth : fallback.sha,
-  };
-}
-
-function clampResizeDelta(leftWidth: number, rightWidth: number, delta: number): number {
-  const minDelta = MIN_CONTENT_COL_WIDTH - leftWidth;
-  const maxDelta = rightWidth - MIN_CONTENT_COL_WIDTH;
-  return Math.max(minDelta, Math.min(maxDelta, delta));
-}
-
-function onColHandleMouseMove(e: MouseEvent): void {
-  if (draggingCol.value < 0 || !colDragStartWidths) return;
-  colDragLatestX = e.clientX;
-  if (colDragRafId !== 0) return; // 已有 pending frame，跳过
-  const startWidths = colDragStartWidths;
-  colDragRafId = requestAnimationFrame(() => {
-    colDragRafId = 0;
-    if (draggingCol.value < 0) return;
-    const delta = colDragLatestX - colDragStartX;
-    const w = { ...startWidths };
-    const persisted = { ...(colDragPersistStartWidths ?? startWidths) };
-    // 分割线贴着鼠标走：左侧列 += delta，右侧列 -= delta，并受两侧最小宽度约束。
-    if (draggingCol.value === 0) {
-      const d = clampResizeDelta(startWidths.desc, startWidths.author, delta);
-      w.desc = startWidths.desc + d;
-      w.author = startWidths.author - d;
-      persisted.desc = Math.max(MIN_CONTENT_COL_WIDTH, persisted.desc + d);
-      persisted.author = w.author;
-    } else if (draggingCol.value === 1) {
-      const d = clampResizeDelta(startWidths.author, startWidths.date, delta);
-      w.author = startWidths.author + d;
-      w.date = startWidths.date - d;
-      persisted.author = w.author;
-      persisted.date = w.date;
-    } else if (draggingCol.value === 2) {
-      const d = clampResizeDelta(startWidths.date, startWidths.sha, delta);
-      w.date = startWidths.date + d;
-      w.sha = startWidths.sha - d;
-      persisted.date = w.date;
-      persisted.sha = w.sha;
-    }
-    // 缓存最终宽度（mouseup 时回写响应式）
-    colDragFinalWidths = persisted;
-    // v2.34：拖拽中**完全绕过 Vue 响应式**，直接写 DOM
-    // 浏览器 native reflow 比响应式链路快：省掉 computed 重算 + 1000 行 var() 重新解析
-    // + template 重渲染调 colHandleLeft 里的 querySelector + getBoundingClientRect
-    if (colDragWrapper) {
-      // 1. 主 CSS 变量：列宽 grid-template-columns（1000 行 commit-row 直接吃这个 var）
-      colDragWrapper.style.setProperty('--grid-template-columns', colWidthsToFixedGridTemplate(w));
-      // 2. tableMinWidth：handleLeft 没变，仍准确（baseLeft 用快照避免响应式读取）
-      const newTableMin = colDragHandleLeft + w.desc + w.author + w.date + w.sha;
-      colDragWrapper.style.setProperty('--git-graph-table-width', `${newTableMin}px`);
-      // 3. 3 个列分隔手柄的 left 位置（直接改 DOM ref，绕过响应式）
-      const h0 = colDragHandleLeft + w.desc;
-      const h1 = h0 + w.author;
-      const h2 = h1 + w.date;
-      if (colDragHandles[0]) colDragHandles[0].style.left = `${h0}px`;
-      if (colDragHandles[1]) colDragHandles[1].style.left = `${h1}px`;
-      if (colDragHandles[2]) colDragHandles[2].style.left = `${h2}px`;
-    }
-  });
-}
-
-function onColHandleMouseUp(): void {
-  if (colDragRafId !== 0) {
-    cancelAnimationFrame(colDragRafId);
-    colDragRafId = 0;
-  }
-  if (draggingCol.value >= 0) {
-    // v2.34：mouseup 才把最终宽度同步到响应式状态（让响应式系统精确重算手柄位置、持久化等）
-    if (colDragFinalWidths) {
-      colWidths.value = colDragFinalWidths;
-    } else {
-      colWidths.value = { ...colWidths.value };
-    }
-    // 持久化列宽到 localStorage
-    try {
-      localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(colWidths.value));
-    } catch {
-      /* 忽略持久化错误 */
-    }
-  }
-  draggingCol.value = -1;
-  colDragStartWidths = null;
-  colDragWrapper = null;
-  colDragFinalWidths = null;
-  colDragPersistStartWidths = null;
-  colDragHandles = [null, null, null];
-  colDragHandleLeft = 0;
-  document.removeEventListener('mousemove', onColHandleMouseMove);
-  document.removeEventListener('mouseup', onColHandleMouseUp);
-}
-
-/** 列分隔手柄位置（用于 inline style，v2.27：相对整个 wrapper 起点）
- * v1.9：desc 列用 minmax(60px, 1fr) 占满余下空间，手柄位置必须用 DOM 实测值，
- * 否则 desc 宽度未知 → 手柄位置错误。
- *
- * 计算策略：
- * - colIndex=0（desc-author 间）位置 = handleLeft + desc 实际宽度
- *   desc 实际宽度 = .git-graph-header 第 2 列的 offsetWidth
- * - colIndex=1（author-date 间）位置 = colIndex=0 位置 + author 实际宽度
- *   author 实际宽度 = .git-graph-header 第 3 列的 offsetWidth
- * - colIndex=2（date-sha 间）位置 = colIndex=1 位置 + date 实际宽度
- *   date 实际宽度 = .git-graph-header 第 4 列的 offsetWidth
- *
- * 实现：mount 后用 querySelector 拿列 DOM 实测宽度（响应式：拖拽时立即更新）。
- * 没拿到（DOM 还没渲染）时退回 px 估算：desc = MIN_CONTENT_COL_WIDTH */
-function colHandleLeft(colIndex: number): number {
-  const w = colWidths.value;
-  const base = handleLeft.value;
-  // 实测模式：从 DOM 读各列 offsetWidth（与 grid-template-columns 实际渲染一致）
-  const header = document.querySelector(
-    '.git-graph-header',
-  ) as HTMLElement | null;
-  if (header) {
-    const cols = header.querySelectorAll('.git-graph-header__col');
-    // cols[0]=graph 标题, cols[1]=desc, cols[2]=author, cols[3]=date, cols[4]=sha
-    const descW = cols[1]?.getBoundingClientRect().width ?? MIN_CONTENT_COL_WIDTH;
-    const authorW = cols[2]?.getBoundingClientRect().width ?? w.author;
-    const dateW = cols[3]?.getBoundingClientRect().width ?? w.date;
-    if (colIndex === 0) return base + descW;
-    if (colIndex === 1) return base + descW + authorW;
-    return base + descW + authorW + dateW;
-  }
-  // DOM 未就绪：回退估算（desc 取最小宽度）
-  if (colIndex === 0) return base + MIN_CONTENT_COL_WIDTH;
-  if (colIndex === 1) return base + MIN_CONTENT_COL_WIDTH + w.author;
-  return base + MIN_CONTENT_COL_WIDTH + w.author + w.date;
 }
 
 /**
@@ -1426,7 +1186,7 @@ function refBadgeClass(refType?: string): string {
     <!-- ===== 主内容 ===== -->
     <div
       class="timeline-new__main"
-      :class="{ 'timeline-new__main--dragging': dragging || draggingCol >= 0 }"
+      :class="{ 'timeline-new__main--dragging': dragging }"
     >
       <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
@@ -1472,7 +1232,7 @@ function refBadgeClass(refType?: string): string {
         -->
         <div
           class="git-graph-wrapper"
-          :data-dragging-col="draggingCol >= 0 ? draggingCol : null"
+          :data-dragging="dragging ? '' : null"
           :style="{
             '--grid-template-columns': gridTemplateColumns,
             '--git-graph-col-width': `${handleLeft}px`,
@@ -1495,29 +1255,8 @@ function refBadgeClass(refType?: string): string {
               title="拖动调整 Graph 列宽度"
             />
             <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
-            <div
-              class="git-graph-header__resize"
-              @mousedown="(e) => onColHandleMouseDown(e, 0)"
-              :class="{ 'git-graph-header__resize--active': draggingCol === 0 }"
-              :style="{ left: `${colHandleLeft(0)}px` }"
-              title="拖动调整 Description 列宽度"
-            />
             <div class="git-graph-header__col git-graph-header__col--author">作者</div>
-            <div
-              class="git-graph-header__resize"
-              @mousedown="(e) => onColHandleMouseDown(e, 1)"
-              :class="{ 'git-graph-header__resize--active': draggingCol === 1 }"
-              :style="{ left: `${colHandleLeft(1)}px` }"
-              title="拖动调整 Author 列宽度"
-            />
             <div class="git-graph-header__col git-graph-header__col--date">日期</div>
-            <div
-              class="git-graph-header__resize"
-              @mousedown="(e) => onColHandleMouseDown(e, 2)"
-              :class="{ 'git-graph-header__resize--active': draggingCol === 2 }"
-              :style="{ left: `${colHandleLeft(2)}px` }"
-              title="拖动调整 Date 列宽度"
-            />
             <div class="git-graph-header__col git-graph-header__col--sha">SHA</div>
           </div>
 
@@ -1833,7 +1572,7 @@ function refBadgeClass(refType?: string): string {
  *
  * 选型：`contain: layout` 而非 `contain: strict` —— strict 会把 paint 也隔离，
  * 但我们拖拽时表头位置、handle 位置都需要 paint 同步更新。*/
-.git-graph-wrapper[data-dragging-col] {
+.git-graph-wrapper[data-dragging] {
   contain: layout;
   /* `contain: layout` 默认不创建层叠上下文，但拖拽时仍然需要避免与外层复合 —— 加一个
      isolation: isolate 让 wrapper 形成独立合成层，浏览器可以 GPU 加速 wrapper 内部绘制。*/
