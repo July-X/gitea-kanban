@@ -53,6 +53,10 @@ is_bad_summary_subject() {
   printf '%s' "$1" | grep -Eqi '^(#+[[:space:]]*)?(修复总结|修复完成|完成|编译错误修复完成|完整动态宽度修复|真正的根因|性能优化总结|所有[[:space:]]*[0-9]*[[:space:]]*(个|项)?[[:space:]]*todo|所有 todos|全部阶段通过|交付总结)'
 }
 
+is_generic_fallback_subject() {
+  printf '%s' "$1" | grep -Eqi '^(feat|fix|refactor|perf|chore|test|docs|style)(\([^)]+\))?: 优化 (git-graph 时间线|代码改动|Reasonix hooks 提交说明|项目文档|.*工具逻辑)$'
+}
+
 normalize_commit_subject() {
   local RAW SUBJECT
   RAW="$(printf '%s' "$1" | tr -d '\r')"
@@ -384,8 +388,12 @@ make_commit_message() {
     SUBJECT="$(normalize_commit_subject "$ASSISTANT_TEXT" || true)"
   fi
 
-  if [ -z "$SUBJECT" ] && [ -n "$ASSISTANT_TEXT" ]; then
-    SUBJECT="$(subject_from_details "$ASSISTANT_TEXT" || true)"
+  if [ -n "$ASSISTANT_TEXT" ] && { [ -z "$SUBJECT" ] || is_generic_fallback_subject "$SUBJECT"; }; then
+    local DETAIL_SUBJECT
+    DETAIL_SUBJECT="$(subject_from_details "$ASSISTANT_TEXT" || true)"
+    if [ -n "$DETAIL_SUBJECT" ]; then
+      SUBJECT="$DETAIL_SUBJECT"
+    fi
   fi
 
   if [ -z "$SUBJECT" ]; then
