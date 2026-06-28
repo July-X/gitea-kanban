@@ -1188,13 +1188,15 @@ let colDragHandleLeft = 0;
 /** 把 widths 序列化成 CSS grid-template-columns 字符串
  *
  * v2.48：desc 列用 `minmax(MIN_CONTENT_COL_WIDTH, 1fr)` —— 占满剩余屏宽，
- * 让表格显示饱满（用户诉求：“描述”列尽可能占用多的屏宽）。
- * 旧版 `minmax(60, 480px)` 把 desc 锁在最大 480px，右侧出现大量空白。
- * author/date/sha 仍用固定 px（用户拖拽这些列分隔手柄时改变它们的宽度）。
- * desc 字段（colWidths.desc）只在拖拽期间的固定 grid 里用（colWidthsToFixedGridTemplate），
- * 非拖拽态用 1fr 占满，所以持久化的 desc 值不影响正常显示宽度。 */
+ * 让表格显示饱满（用户诉求："描述"列尽可能占用多的屏宽）。
+ * v2.49：author/date/sha 用 `minmax(w.xxx, auto)` —— 最小宽度 = 持久化值，
+ * 内容更宽时自动撑开（用户诉求："后面3列显示全的前提下"）。
+ * 旧版纯固定 px（160/120/80）+ padding 24px 会让长作者名/长 SHA 被截断。
+ * minmax 的下限保证表头与行有稳定的对齐基准（不会因 auto 缩到比表头窄），
+ * 上限 auto 让内容自适应撑开，永不截断。
+ * 拖拽期间仍用 colWidthsToFixedGridTemplate（固定 px）保证精确像素控制。 */
 function colWidthsToGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
-  return `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) ${w.author}px ${w.date}px ${w.sha}px`;
+  return `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) minmax(${w.author}px, auto) minmax(${w.date}px, auto) minmax(${w.sha}px, auto)`;
 }
 
 function colWidthsToFixedGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
