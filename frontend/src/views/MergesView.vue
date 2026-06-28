@@ -1631,7 +1631,10 @@ function formatRelative(iso: string | undefined): string {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  /* v2.59：紧凑布局——超多 MR 时减小 item 之间的间隙（8px → 4px），
+     让用户在 viewport 内能同时看到更多 MR 记录（commit row 紧凑诉求）。
+     配合 .merge-item padding 上下 12px → 8px 一起生效。 */
+  gap: var(--space-1);
   padding: var(--space-4);
   overflow-y: auto;
 }
@@ -1656,7 +1659,9 @@ function formatRelative(iso: string | undefined): string {
   grid-template-columns: auto 1fr auto;
   align-items: start;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  /* v2.59：紧凑布局——padding 上下 12px → 8px，让超多 MR 时 commit row 紧凑显示
+     （避免 viewport 内出现大量空行，用户能同屏看到更多记录）。 */
+  padding: var(--space-2) var(--space-4);
 }
 
 .merge-item:hover {
@@ -1712,7 +1717,9 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  /* v2.59：紧凑布局——main 内部元素之间 gap 4px → 2px，让 header/body/branches/attrs
+     紧凑堆叠（超多 MR 时减少视觉空行）。 */
+  gap: 2px;
 }
 
 .merge-item__header {
