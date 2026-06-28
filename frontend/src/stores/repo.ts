@@ -494,16 +494,26 @@ export const useRepoStore = defineStore('repo', () => {
   /**
    * clone 仓库到本地 workspace（v2.3：不传 token，Go 端从 keychain 拿）
    *
+   * v2.x：优先按 projectId 协议走，让 Go 端按 project→account 反查 platform/hostUrl/username。
+   *   - 原因：用户可能连了多个账号（一个 Gitea、一个 GitHub），同 owner/repo 可能在不同账号下。
+   *     旧实现 `accounts[0]` 在多账号场景下永远把 GitHub 仓库当 Gitea 走（错的 adapter）。
+   *   - GitHub 仓库必须走 `gh repo clone` + blobless partial fetch（见 App.PullRepoByProjectId）
+   *     而 Gitea 仓库走 go-git PlainClone；分错平台会导致 clone 失败或拉不到 commit。
+   *   - 走 projectId 协议后，Go 端按 RepoProject.Platform 选 adapter（giteaAdapter vs githubAdapter），
+   *     二者的服务实现天然区分（go-git vs gh）。
+   *
+   * Fallback：列表里还没 project 记录（旧版 ListRepos 之前被选过的 repo）→ 走旧协议按当前已连账号。
+   * 这种情况只在极少数迁移场景发生，绝大多数调用都走 projectId 分支。
+   *
    * @returns localPath（成功）/ 抛 UserFacingError（失败）
    */
   async function cloneRepo(owner: string, repo: string): Promise<string> {
     const auth = useAuthStore();
-    const acc = auth.accounts[0];
-    if (!acc) {
+    if (!auth.accounts.length) {
       throw {
         code: 'unauthenticated',
-        messageText: '需要登录：尚未连接任何 gitea 实例',
-        hint: '请先连接 gitea',
+        messageText: '需要登录：尚未连接任何账号',
+        hint: '请先连接 gitea 或 GitHub',
         recoverable: true,
       } satisfies UserFacingError;
     }
@@ -511,6 +521,23 @@ export const useRepoStore = defineStore('repo', () => {
     useGlobalLoadingStore().show('repo'); // v2.3：复用 'repo' namespace
     error.value = null;
     try {
+      // 先在当前仓库列表里找匹配项，取它的 projectId（v2.x 反查 account 的钥匙）。
+      // 注意：loadRepos() 当前按 `accounts[0]` 列出的，所以同一时刻列表里只会有"第一个账号"
+      //       的仓库 + 该账号已存在的 project；要拿到其它账号的仓库需要先切账号或合并列表。
+      //       多账号完整支持属于另一张卡，本次先把"已 clone 同步走对平台"修对。
+      const matched = repos.value.find(
+        (it) => it.owner === owner && it.name === repo,
+      );
+      const projectId = matched?.projectId;
+      if (projectId) {
+        // 走新协议：Go 端 App.CloneRepo 按 projectId 反查 account → 正确 adapter
+        const r = await commitsGitgraphCloneRepo({ projectId });
+        clonedMap.value[cloneKey(owner, repo)] = true;
+        return r.localPath;
+      }
+      // Fallback：旧协议，按当前已连账号传 platform/hostUrl/username
+      //   （仅用于本地 store 里没 project 记录的迁移场景）
+      const acc = auth.accounts[0];
       const r = await commitsGitgraphCloneRepo({
         platform: acc.platform as 'gitea' | 'github',
         hostUrl: acc.giteaUrl,

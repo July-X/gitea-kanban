@@ -791,6 +791,12 @@ const MAX_GRAPH_COL_WIDTH = 800;
 const MIN_CONTENT_COL_WIDTH = 60;
 const GRAPH_WIDTH_STORAGE_KEY = 'gitea-kanban:gitgraph:graph-width';
 
+/** 默认 graph 列宽度（v2.47：脱钩 svgWidth，避免多 lane 仓库把表格撑爆视口）
+ * 之前 userHandleLeft 为 null 时 handleLeft = parseSvgPx(svgWidth)，200 lane → 2014px
+ * → tableMinWidth 暴涨 → 整个表格出现大横向滚动条 → 用户必须左右扫才能看完整信息
+ * 现在默认固定 130px（v2.27 旧默认值），用户拖过才用持久化值。
+ * 真实 lane 数显示靠 SVG 内部横向滚动（见 .git-graph-bg 改造）。 */
+const DEFAULT_GRAPH_COL_WIDTH = 130;
 function loadGraphWidth(): number | null {
   try {
     const stored = localStorage.getItem(GRAPH_WIDTH_STORAGE_KEY);
@@ -803,7 +809,7 @@ function loadGraphWidth(): number | null {
   }
 }
 
-/** handle 物理位置（px），默认 = svgWidth
+/** handle 物理位置（px），默认 = DEFAULT_GRAPH_COL_WIDTH（v2.47：脱钩 svgWidth）
  * 用户拖拽后停在 [60, 800] 范围内 */
 const userHandleLeft = ref<number | null>(loadGraphWidth());
 /** 是否正在拖拽 */
@@ -812,10 +818,11 @@ let dragStartX = 0;
 let dragStartHandleLeft = 0;
 let dragLatestX = 0;
 
-/** handle 实际位置（用户拖拽 > 自动计算 svgWidth 默认） */
+/** handle 实际位置（用户拖拽 > 默认 DEFAULT_GRAPH_COL_WIDTH）
+ * v2.47：默认不跟随 svgWidth，避免多 lane 把表格撑爆 */
 const handleLeft = computed(() => {
   if (userHandleLeft.value !== null) return userHandleLeft.value;
-  return parseSvgPx(svgWidth.value);
+  return DEFAULT_GRAPH_COL_WIDTH;
 });
 
 /**
@@ -966,12 +973,6 @@ function onDragEnd(): void {
   document.removeEventListener('mouseup', onDragEnd);
 }
 
-/** 将 px 字符串解析为数字 */
-function parseSvgPx(value: string): number {
-  const n = Number.parseFloat(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
 /** 生成 fallback avatar：取名字首字符 */
 function avatarInitial(name: string): string {
   if (!name) return '?';
@@ -1069,9 +1070,14 @@ const gridTemplateColumns = computed(() => {
 
 /** 整张 5 列表格的最小宽度，用于让主内容区自然出现横向滚动
  *  v1.9：desc 不再是固定 px，最小宽度 = handleLeft + author + date + sha + MIN_DESC */
+/** 表格最小宽度（v2.47：脱钩 svgWidth）
+ * 之前 = handleLeft + 内容列宽 + svgWidth → 200 lane 时 2014 + 840 = 2854px，撑爆视口
+ * 现在只跟 handleLeft + 内容列固定宽（4 个内容列 + 12px 边距），跟 lane 数完全脱钩。
+ * 多 lane 的水平滚动交给 SVG 内部（.git-graph-bg 的横向 overflow），不影响 commit 文字布局。 */
 const tableMinWidth = computed(() => {
   const w = colWidths.value;
-  return handleLeft.value + w.desc + w.author + w.date + w.sha;
+  // v2.47：+ 12px padding-right + 1px border-right 兼容
+  return handleLeft.value + w.desc + w.author + w.date + w.sha + 12;
 });
 
 /** 列分隔手柄 mousedown */
@@ -1533,7 +1539,9 @@ function refBadgeClass(refType?: string): string {
               </div>
             </div>
 
-            <!-- 行层：每行 grid 5 列，第一列是 graph 占位让背景 SVG 透出 -->
+            <!-- 行层：每行 grid 5 列，第一列是 graph 占位让背景 SVG 透出
+                 v2.47：用 .git-graph-rows 容器包住，flex: 1 + width: handleLeft + 内容列 -->
+            <div class="git-graph-rows">
             <template v-for="r in allRows" :key="`row-${r.row}`">
               <div
                 class="commit-row"
@@ -1631,6 +1639,7 @@ function refBadgeClass(refType?: string): string {
                  />
                </div>
             </template>
+            </div><!-- /.git-graph-rows -->
           </div>
         </div>
        </template>
@@ -1765,8 +1774,10 @@ function refBadgeClass(refType?: string): string {
   min-height: 1px;
   display: block;
   width: 100%;
-  /* v2.0：兜底——万一未来某元素意外撑开，wrapper 自己出横向滚动条而不是把祖先撑大 */
-  overflow-x: auto;
+  /* v2.47：去掉 overflow-x: auto —— commit-row 不再跟 svgWidth 撑大 wrapper，
+   * wrapper 自身不会出现横向滚动条（避免 ancestor 全局横向溢出）。
+   * 多 lane 仓库的横向滚动完全在 .git-graph-bg 内部 SVG container 内部。*/
+  overflow: hidden;
   overflow-y: visible;
 }
 
@@ -1784,11 +1795,15 @@ function refBadgeClass(refType?: string): string {
   isolation: isolate;
 }
 
-/* 表头（5 列 grid） */
+/* 表头（5 列 grid）
+ *
+ * v2.47：min-width 改成 handleLeft + 4 内容列固定宽（不再依赖 var(--git-graph-table-width)）。
+ * 之前 .git-graph-table-width = handleLeft + 4 内容列 + svgWidth（line 1088 旧版），
+ * 多 lane 仓库（200 lane）下 .git-graph-table-width = 2854px → 表头撑出 wrapper 横向滚动条。
+ * 现在 .git-graph-table-width 只跟 handleLeft + 4 内容列走，多 lane 由 SVG 内部横向滚动兜底。*/
 .git-graph-header {
   display: grid;
   grid-template-columns: var(--git-graph-col-width, 130px) var(--grid-template-columns, 480px 160px 120px 80px);
-  min-width: var(--git-graph-table-width, 950px);
   align-items: center;
   height: 32px;
   background: var(--color-shell-main-bg);
@@ -1893,12 +1908,24 @@ function refBadgeClass(refType?: string): string {
   border-radius: 1px;
 }
 
-/* v2.27：body 容器（包含背景层 SVG + 行层 commit-row） */
+/* v2.47：body 容器（包含背景层 SVG + 行层 commit-row）
+ *
+ * 之前 layout：body 是 block + relative，bg 是 absolute + left:0，commit-row 是普通 flow。
+ *   问题：多 lane 仓库（svgWidth > handleLeft）下，bg 撑出 commit-row 第一列范围，
+ *         圆点散落到 desc/author 列上方（视觉错乱）。
+ *
+ * 新 layout：body 是 flex + relative，bg 和 commit-rows 容器并列。
+ *   - bg (flex-shrink:0 + position:sticky left:0 + overflow-x:auto)：保持 SVG 完整宽度，
+ *     多 lane 时内部横向滚动，不影响 commit-row 布局
+ *   - commit-rows (flex:1 + width: handleLeft + 内容列)：固定宽度，跟 SVG 横向滚动解耦
+ *   - wrapper 不再因为 commit-row min-width 撑出横向滚动条
+ */
 .git-graph-body {
   position: relative;
-  display: block;
-  min-width: var(--git-graph-table-width, 950px);
-  overflow: visible;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: var(--git-graph-row-height, 30px);
 }
 
 /* 背景层：SVG + dot overlay，整张铺在 body 左上角
@@ -1908,15 +1935,28 @@ function refBadgeClass(refType?: string): string {
  *
  * v1.7 性能优化：`content-visibility: auto` 让屏幕外 SVG 区域不渲染——
  * SVG 含 1000+ path 时浏览器 paint 成本极高。viewport 不可见区域的 path 完全跳过。
- * v2.40：contain-intrinsic-size 28 → 30，与 commit-row / SVG ROW_HEIGHT 同步。*/
+ * v2.40：contain-intrinsic-size 28 → 30，与 commit-row / SVG ROW_HEIGHT 同步。
+ *
+ * v2.47 改造 (GitHub 风格)：
+ *   - 改 `position: absolute` → `position: sticky; top: 0; left: 0`
+ *   - 加 `overflow-x: auto` 让多 lane (svgWidth > handleLeft) 时 SVG 自身横向滚动
+ *   - 加 `overflow-y: hidden` 防止 commit-row 高度溢出
+ *   - 加 `min-width: handleLeft` 保证背景层至少跟 commit-row 第一列同宽
+ *   - 加 `flex-shrink: 0` 防止 flex 容器挤压 SVG
+ *   - 配合 .git-graph-body 的 `display: flex` 让 commit-rows 容器和 bg 容器并列
+ *     → 多 lane 时 bg 容器内部横向滚动，commit-rows 容器固定宽度（不再撑大 wrapper）*/
 .git-graph-bg {
-  position: absolute;
+  position: sticky;
   top: 0;
   left: 0;
   z-index: 2;
-  pointer-events: none; /* 不响应鼠标事件，让 commit-row 接收点击 */
+  pointer-events: none;
   content-visibility: auto;
   contain-intrinsic-size: auto 30px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: var(--git-graph-col-width, 130px);
+  flex-shrink: 0;
 }
 
 /* SVG 自身 */
@@ -2086,6 +2126,16 @@ function refBadgeClass(refType?: string): string {
   fill: var(--color-series-16-15);
 }
 
+/* v2.47：rows 容器（包住所有 commit-row + accordion，flex 右子项）
+ *   - flex: 1 占据剩余空间（跟 bg 容器并排）
+ *   - min-width: 0 允许内容收缩（默认 flex item 不会收缩到 min-content 以下）
+ *   - overflow: visible 让手风琴展开时自然延伸（手风琴自身 max-width 兜底）*/
+.git-graph-rows {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: visible;
+}
+
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
  * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
  /* v2.24：commit list 在右侧（彻底排查 git-graph 看不到问题）
@@ -2118,11 +2168,13 @@ function refBadgeClass(refType?: string): string {
  *   滚动时浏览器按需渲染，滚动 fps 从 30 提到 60。
  *   contain-intrinsic-size 告诉浏览器每行预估高度（= ROW_HEIGHT = 26px），
  *   保证滚动条比例正确（不会因内容不可见突然"弹跳"）。
- *   `contain: layout` 同时把布局重算隔离在此 row 内——拖拽时 1000 行重排也只影响此 row。*/
+ *   `contain: layout` 同时把布局重算隔离在此 row 内——拖拽时 1000 行重排也只影响此 row。
+ *
+ * v2.47：min-width 改成 handleLeft + 4 内容列固定宽，不再依赖 var(--git-graph-table-width)
+ *   （之前 .git-graph-table-width = svgWidth + 840 → 撑爆视口）*/
 .commit-row {
   display: grid;
   grid-template-columns: var(--git-graph-col-width, 130px) var(--grid-template-columns, 480px 160px 120px 80px);
-  min-width: var(--git-graph-table-width, 950px);
   align-items: center;
   gap: 0;
   /* v2.43 高度由内联 style 绑定 ROW_H（ASCII = 19px, structured = 30px），与 SVG 行高 1:1 对齐 */
