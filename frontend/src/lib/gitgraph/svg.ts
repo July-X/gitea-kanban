@@ -176,13 +176,13 @@ export function flowToPathDCompact(
     } else if (!useCurve) {
       parts.push(`L ${cur.x} ${cur.y}`);
     } else {
-      // 跨 lane：S 曲线
-      // 控制点 1：(prev.x, midY - curveDy) — 从 prev 垂直下降到上方拐点
-      // 控制点 2：(cur.x, midY + curveDy)  — 从下方拐点垂直上升到 cur
-      const midY = (prev.y + cur.y) / 2;
-      const curveDy = 8;
+      // 跨 lane：S 曲线（VSCode 风格 —— 端点垂直小段 + 中段大幅弯过去）
+      // 控制点贴近两端 y，让 S 曲线在两个 lane 之间"先垂直走一点，再大幅度弯过去，再垂直下来"。
+      // curveDy 比例 ≈ lane 间距 25%，跨 2 row 时 ≈ 15px，跨 4+ row 时接近 ROW_HEIGHT/2。
+      const dy = cur.y - prev.y;
+      const curveDy = Math.min(Math.abs(dy) / 2 - 2, ROW_HEIGHT / 2);
       parts.push(
-        `C ${prev.x} ${midY - curveDy}, ${cur.x} ${midY + curveDy}, ${cur.x} ${cur.y}`,
+        `C ${prev.x} ${prev.y + curveDy}, ${cur.x} ${cur.y - curveDy}, ${cur.x} ${cur.y}`,
       );
     }
   }
