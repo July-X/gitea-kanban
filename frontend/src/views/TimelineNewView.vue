@@ -2367,28 +2367,25 @@ function refBadgeClass(refType?: string): string {
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
-/* commit-refs 容器：多个 badge 横向排列 */
+/* commit-refs 容器：多个 badge 横向排列
+ * v2.x：inline 文字流 —— 紧跟 subject 后面（行内盒），不在 flex 中被推到列最右。
+ * 与 commit-subject 一起在 desc 列的 white-space:nowrap + ellipsis 下被整体截断。*/
 .commit-refs {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  /* v2.x：去掉 margin-left: auto —— 之前把 ref badge 推到描述列最右，
-     与 subject 之间空出大段空白（用户报告"标注部分不对"）。
-     现在让 ref badge 紧跟 subject 后面，subject 用 ellipsis 在前方截断。
-     subject 通过 display: block + min-width: 0 触发 ellipsis（span 默认 inline 不响应）。 */
+  /* 与 subject 之间留 8px 视觉间隔（行内盒 margin-left 仍生效） */
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 .commit-subject {
-  display: block;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* v2.x：行内文字流 —— subject 文本 + 后面紧跟的 refs 一起组成 desc 列内容。
+     desc 列的 white-space:nowrap + overflow:hidden + text-overflow:ellipsis
+     负责整体截断（subject 太长时 subject + refs 一起被 … 截断在右边界）。*/
+  display: inline;
   color: var(--color-text);
-  /* v2.x：去掉 subject 在前 refs 在后的 inline 排版：让 subject 占据 desc 列剩余空间并 ellipsis 截断，
-     ref badge (flex-shrink: 0) 始终紧跟 subject 后面完整显示。 */
   /* v2.39：15px → 14px，与 26px 行高比例更舒适；letter-spacing 微收紧 */
   font-size: 14px;
   letter-spacing: -0.005em;
@@ -2419,9 +2416,20 @@ function refBadgeClass(refType?: string): string {
   flex-shrink: 0;
 }
 .commit-row__col--desc {
-  gap: var(--space-2, 8px);
+  /* v2.x：放弃 flex 布局，改 block 文字流 —— subject 和 refs 都 inline，
+     整体被 desc 列的 overflow:hidden + text-overflow:ellipsis 截断。
+     这样：
+       - subject 永远贴描述列最左（12px padding 起点）
+       - refs 紧跟 subject 后面（行内流，无 margin-left:auto 把 refs 推到列最右）
+       - subject 太长时整段（subject + refs 一起）被 ellipsis 截断，**不留空白**
+     旧 flex 布局有"subject 撑满 + refs 紧跟"导致 refs 之后仍有空白的问题。*/
+  display: block;
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 30px;
 }
 .commit-row__col--author {
   /* v2.39：13px → 12px，与主体(14px)拉开层次但不显拥挤 */
