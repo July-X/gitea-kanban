@@ -1025,6 +1025,32 @@ export namespace main {
 	        this.projectId = source["projectId"];
 	    }
 	}
+	export class RemoveWorkspaceReposArgs {
+	    username: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoveWorkspaceReposArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.username = source["username"];
+	    }
+	}
+	export class RemoveWorkspaceReposResult {
+	    removedCount: number;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoveWorkspaceReposResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.removedCount = source["removedCount"];
+	        this.message = source["message"];
+	    }
+	}
 	export class SetUserPrefsArgs {
 	    entries: Record<string, any>;
 	

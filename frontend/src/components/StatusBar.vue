@@ -1078,9 +1078,13 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
     border-color var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease);
 }
-/* v2.54：svg 显式 vertical-align: middle 防止与文本 baseline 对齐导致 icon 顶部空隙 */
+/* v2.62：svg 显式 vertical-align: middle + display: block + height:1em，
+   彻底防止 svg 被 button 默认行高推到顶部（v2.54 只加了 vertical-align 仍不够）。 */
 .statusbar__picker-trigger :deep(svg) {
+  display: block;
   vertical-align: middle;
+  height: 1em;
+  width: auto;
   flex-shrink: 0;
 }
 

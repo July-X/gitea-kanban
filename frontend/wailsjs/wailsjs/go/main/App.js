@@ -126,6 +126,10 @@ export function RemoveProject(arg1) {
   return window['go']['main']['App']['RemoveProject'](arg1);
 }
 
+export function RemoveWorkspaceRepos(arg1) {
+  return window['go']['main']['App']['RemoveWorkspaceRepos'](arg1);
+}
+
 export function SetUserPrefs(arg1) {
   return window['go']['main']['App']['SetUserPrefs'](arg1);
 }

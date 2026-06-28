@@ -16,6 +16,7 @@ import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { showToast } from '@renderer/lib/toast';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
+import { RemoveWorkspaceRepos } from '../../wailsjs/wailsjs/go/main/App';
 import {
   GITHUB_CLI_INSTALL_LABEL,
   GITHUB_CLI_INSTALL_URL,
@@ -45,6 +46,26 @@ async function confirmRemove(): Promise<void> {
   confirmTarget.value = null;
   try {
     await auth.disconnectOne(account.giteaUrl, account.username);
+
+    // v2.63：同步删除该账号的 workspace 仓库数据（${workspace}/repos/${username}/）
+    // Go 端 RemoveWorkspaceRepos 安全策略：
+    //   - 只删 ${username} 目录，不碰其他账号
+    //   - 目录不存在时幂等返回（removedCount = -1，message = 无需清理）
+    //   - 删除失败不阻断账号移除（best-effort 语义）
+    try {
+      const result = await RemoveWorkspaceRepos({ username: account.username });
+      if (result.removedCount > 0) {
+        showToast({ type: 'info', message: result.message });
+      }
+    } catch (_wsErr) {
+      // workspace 清理失败不阻断账号移除 —— 用户可后续手动删 ~/.gitea-kanban/workspace/repos/<username>/
+      showToast({
+        type: 'warn',
+        message: '本地仓库数据清理失败',
+        description: `请手动删除 ~/.gitea-kanban/workspace/repos/${account.username}/ 目录`,
+      });
+    }
+
     showToast({ type: 'success', message: `已移除 ${account.username}` });
     // v2.58：移除任意账号都同步清理该账号对应的仓库信息（不仅是当前账号）
     // - 当前账号被移除：清空所有仓库 + 清空 last-selected 持久化 + 跳 /auth
@@ -289,8 +310,8 @@ function isCurrent(account: GiteaAccountDto): boolean {
       :title="confirmTarget ? `移除账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}` : '移除账号'"
       :description="confirmTarget
         ? (isCurrent(confirmTarget)
-          ? `将退出当前账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}，并从 keychain 删除令牌、清空仓库列表。\n\n（同步清除本账号对应的仓库信息：仓库列表、当前选中仓库、最近使用记录）`
-          : `将从历史中移除账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}@${confirmTarget.giteaUrl}。\n\n（当前账号不变，仍可正常加载该账号的仓库）`)
+          ? `将退出当前账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}，并从 keychain 删除令牌、清空仓库列表。\n\n同步清理本地仓库数据（~/.gitea-kanban/workspace/repos/${confirmTarget.username}/），操作不可恢复。`
+          : `将从历史中移除账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}@${confirmTarget.giteaUrl}。\n\n同步清理该账号对应的本地仓库数据（~/.gitea-kanban/workspace/repos/${confirmTarget.username}/），操作不可恢复。`)
         : ''"
       confirm-label="移除"
       cancel-label="再想想"

@@ -482,3 +482,58 @@ func uniqueBackupPath(target string) (string, error) {
 	}
 	return "", fmt.Errorf("无法找到唯一的备份路径：%s", target)
 }
+
+// RemoveReposForAccount 删除某个账号下的所有 workspace 仓库
+//
+// 对应 AccountManagerDialog 移除账号时同步清理该账号 clone 的仓库数据。
+// 删除路径：${workspacePath}/repos/${username}/*（整个账号目录）
+//
+// 安全策略：
+//   - 只删除 ${workspacePath}/repos/${username}/ 目录，不碰其他账号的仓库
+//   - 检查 workspacePath 是合法路径（非空，非根目录 "/"）
+//   - os.RemoveAll 不可逆，**调用方必须在 UI 二次确认后才能调用**
+//
+// 返回被删除的仓库数量（供前端 toast 提示），-1 表示账号目录不存在（幂等成功）。
+func (wm *WorkspaceManager) RemoveReposForAccount(workspacePath, username string) (removedCount int, err error) {
+	if workspacePath == "" {
+		return 0, fmt.Errorf("workspacePath 不能为空")
+	}
+	if filepath.Clean(workspacePath) == "/" || filepath.Clean(workspacePath) == "." {
+		return 0, fmt.Errorf("workspacePath 不能是根目录")
+	}
+	if username == "" {
+		return 0, fmt.Errorf("username 不能为空")
+	}
+
+	accountDir := filepath.Join(workspacePath, "repos", username)
+
+	// 账号目录不存在 → 幂等成功（已清理过 / 从未 clone 过仓库）
+	info, err := os.Stat(accountDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return -1, nil
+		}
+		return 0, fmt.Errorf("读取账号仓库目录失败: %w", err)
+	}
+	if !info.IsDir() {
+		return 0, fmt.Errorf("路径存在但不是目录: %s", accountDir)
+	}
+
+	// 统计仓库数量（供前端提示）
+	entries, err := os.ReadDir(accountDir)
+	if err != nil {
+		return 0, fmt.Errorf("读取账号仓库列表失败: %w", err)
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			count++
+		}
+	}
+
+	if err := os.RemoveAll(accountDir); err != nil {
+		return 0, fmt.Errorf("删除账号仓库目录失败: %w", err)
+	}
+
+	return count, nil
+}

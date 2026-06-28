@@ -1183,6 +1183,50 @@ func (a *App) AuthDisconnectOne(args DisconnectOneArgs) error {
 	return a.disconnectImpl(args.GiteaURL, args.Username)
 }
 
+// RemoveWorkspaceReposArgs 移除账号 workspace 仓库的入参
+type RemoveWorkspaceReposArgs struct {
+	Username string `json:"username"`
+}
+
+// RemoveWorkspaceReposResult 移除结果
+type RemoveWorkspaceReposResult struct {
+	RemovedCount int    `json:"removedCount"` // 被删除的仓库数量（-1 = 账号目录不存在，幂等成功）
+	Message      string `json:"message"`      // 供前端 toast 展示
+}
+
+// RemoveWorkspaceRepos 删除指定账号下的所有 workspace 仓库
+//
+// 调用方：AccountManagerDialog 移除账号时同步清理该账号 clone 的仓库数据。
+//
+// 安全策略：
+//   - 只删 ${workspacePath}/repos/${username}/ 目录
+//   - 二次确认由前端 UI 保证（本函数不弹窗）
+func (a *App) RemoveWorkspaceRepos(args RemoveWorkspaceReposArgs) (RemoveWorkspaceReposResult, error) {
+	username := strings.TrimSpace(args.Username)
+	if username == "" {
+		return RemoveWorkspaceReposResult{RemovedCount: 0, Message: "用户名不能为空"},
+			ipc.NewValidationFailed("用户名不能为空", "")
+	}
+
+	wm := git.NewWorkspaceManager()
+	count, err := wm.RemoveReposForAccount(a.workspacePath, username)
+	if err != nil {
+		a.logger.Error("RemoveWorkspaceRepos failed", "username", username, "err", err)
+		return RemoveWorkspaceReposResult{RemovedCount: 0, Message: "删除失败: " + err.Error()}, err
+	}
+
+	if count < 0 {
+		return RemoveWorkspaceReposResult{RemovedCount: 0, Message: "账号无本地仓库数据，无需清理"}, nil
+	}
+
+	msg := fmt.Sprintf("已清理 %d 个仓库的本地数据", count)
+	if count == 0 {
+		msg = "账号无本地仓库数据，无需清理"
+	}
+	a.logger.Info("RemoveWorkspaceRepos done", "username", username, "removed_count", count)
+	return RemoveWorkspaceReposResult{RemovedCount: count, Message: msg}, nil
+}
+
 // disconnectImpl 共用断开逻辑
 //
 // username 为空 → 删整站（GiteaURL 所有 username）；否则只删单个

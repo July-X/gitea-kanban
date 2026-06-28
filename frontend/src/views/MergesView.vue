@@ -994,7 +994,8 @@ function formatRelative(iso: string | undefined): string {
               ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.head.ref }}</span>
             </div>
             <!-- 标签 + 里程碑 + 指派人 + 评审人（gitea 合并请求属性块） -->
-            <div class="merge-item__attrs">
+            <!-- v2.62：attrs 用 v-if 包裹，空 MR 时不渲染空 div -->
+            <div v-if="(p.labels ?? []).length > 0 || p.milestone || p.assignee || (p.reviewers ?? []).length > 0 || (p.commentsCount ?? 0) > 0" class="merge-item__attrs">
               <span
                 v-for="label in (p.labels ?? [])"
                 :key="label.id"
@@ -1631,12 +1632,13 @@ function formatRelative(iso: string | undefined): string {
   flex: 1;
   display: flex;
   flex-direction: column;
-  /* v2.59：紧凑布局——超多 MR 时减小 item 之间的间隙（8px → 4px），
-     让用户在 viewport 内能同时看到更多 MR 记录（commit row 紧凑诉求）。
-     配合 .merge-item padding 上下 12px → 8px 一起生效。 */
-  gap: var(--space-1);
+  /* v2.62：用 margin-top 替代 gap（某些 WebKit flex gap 有 bug，多 item 时产生多余空白） */
+  margin: 0;
   padding: var(--space-4);
   overflow-y: auto;
+  & > li + li {
+    margin-top: 2px;
+  }
 }
 
 .merge-item {
@@ -1647,21 +1649,14 @@ function formatRelative(iso: string | undefined): string {
   overflow: hidden;
   cursor: pointer;
   user-select: none;
-  /* 关键：父 .merges__list 是 flex column，
-  /* 关键：父 .merges__list 是 flex column，
-   * 子 item 默认 flex-shrink: 1 会让每个 item 被等比压缩。
-   * 43 个 item 共 1870px head 高，容器 622px 会被压缩到每个 15px——
-   * 完全看不见。设 flex-shrink: 0 让 item 保持完整高度，
-   * 容器才触发 overflow-y: auto 滚动。 */
   flex-shrink: 0;
-  /* 模仿 gitea /pulls 列表的 .flex-item 三块布局：leading | main | trailing */
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: start;
   gap: var(--space-3);
-  /* v2.59：紧凑布局——padding 上下 12px → 8px，让超多 MR 时 commit row 紧凑显示
-     （避免 viewport 内出现大量空行，用户能同屏看到更多记录）。 */
-  padding: var(--space-2) var(--space-4);
+  /* v2.59：紧凑布局——padding 12px → 8px（v2.62 再降至 4px，消灭超多 MR 时的空行）。
+     padding(4px)+gap(2px)=8px/item 间距，极致紧凑。 */
+  padding: 4px var(--space-3);
 }
 
 .merge-item:hover {
@@ -1691,10 +1686,7 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* v1.3：去 padding-top 2px，让 icon 与 main 垂直居中对齐（不再贴首行） */
   padding: 0;
-  /* 让 icon 与 main 第一行基线对齐 —— main 第一行是 header (font-md 600),
-   * icon 16px 在 main 高度 ~40px 容器里垂直居中即可 */
   align-self: center;
 }
 
@@ -1717,22 +1709,13 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  /* v2.59：紧凑布局——main 内部元素之间 gap 4px → 2px，让 header/body/branches/attrs
-     紧凑堆叠（超多 MR 时减少视觉空行）。 */
   gap: 2px;
 }
 
 .merge-item__header {
   display: flex;
   align-items: center;
-  /* 4px 紧贴：title / 时钟按钮 / badge 三者都贴在一起,
-     让 header 看起来是"标题 + 一组附标(时钟 + 状态)"的紧凑单元。
-     badge 靠自身的 status 色(open=success/merged=accent/draft=warning/
-     closed=secondary)与 title 区分,不需要靠距离分组。 */
   gap: var(--space-1);
-  /* 强制一行 —— timeline-btn 必须紧贴 title 末尾(不换行跑到第二行,
-     否则视觉上跟 trailing 区的"在 gitea 中打开"/"合并"/"关闭"按钮撞在一起);
-     title 必要时 ellipsis 截断,badge + timeline-btn 始终可见 */
   flex-wrap: nowrap;
 }
 
@@ -1741,13 +1724,6 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
   font-weight: 600;
   text-decoration: none;
-  /* flex: 0 1 auto —— 不要 grow 占满 header 宽度,
-   * 否则会把 .merge-item__timeline-btn 和 badge 推到 header 最右,
-   * 视觉上跟 title 拉开一大段空隙(用户反馈)。
-   * 0 1 auto + min-width: 0 + ellipsis 经典组合:
-   * - 自然宽度时按内容走
-   * - 撑不下时 title 收缩并 ellipsis(clock/badge 都有 flex-shrink: 0 不动)
-   * - 右侧多出的空隙在 trailing 列(grid 留出的)那边,不影响 header 内部 */
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -1845,8 +1821,6 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  /* v1.3 · task #25 调整：gap 缩小,让顶部"创建 / 冲突"等行更紧凑,
-   * 把右半空间让给展开后的评论区 */
   gap: 2px var(--space-2);
   font-size: var(--font-xs);
   color: var(--color-text-muted);

@@ -65,6 +65,8 @@ export function PullRepoByProjectId(arg1:main.PullRepoByProjectIdArgs):Promise<m
 
 export function RemoveProject(arg1:main.RemoveProjectArgs):Promise<void>;
 
+export function RemoveWorkspaceRepos(arg1:main.RemoveWorkspaceReposArgs):Promise<main.RemoveWorkspaceReposResult>;
+
 export function SetUserPrefs(arg1:main.SetUserPrefsArgs):Promise<Record<string, any>>;
 
 export function SetWorkspace(arg1:main.SetWorkspaceArgs):Promise<void>;
