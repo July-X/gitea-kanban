@@ -1577,6 +1577,10 @@ function refBadgeClass(refType?: string): string {
                 <template v-if="r.commit">
                   <!-- v2.22：Description 列（refs + subject） -->
                   <div class="commit-row__col commit-row__col--desc">
+                    <!-- v2.x：subject 永远是第一个 flex 子元素，贴描述列最左（padding 12px 起点），
+                         不再被前面的 ref badge 挤到右侧。ref badges 用 margin-left: auto 推到列右端。
+                         视觉风格对齐 SourceTree / VSCode Git Graph：subject 在前，ref 在右。 -->
+                    <span class="commit-subject">{{ r.commit.subject }}</span>
                     <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
                          这里按类型渲染 badge 颜色，不再用启发式猜。 -->
                     <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
@@ -1602,7 +1606,6 @@ function refBadgeClass(refType?: string): string {
                         <span>{{ ref }}</span>
                       </span>
                     </span>
-                    <span class="commit-subject">{{ r.commit.subject }}</span>
                   </div>
                   <!-- v2.22：Author 列 -->
                   <div class="commit-row__col commit-row__col--author">
@@ -2370,6 +2373,9 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  /* v2.x：subject 永远贴描述列最左，ref badge 用 margin-left: auto 推到列右端。
+     之前是 refs 在前 subject 在后，ref badge 把 subject 挤到右侧（用户报告"文字未对齐列最左"）。 */
+  margin-left: auto;
   /* 与 commit-subject 之间的间距由 commit-row gap 提供 */
 }
 
