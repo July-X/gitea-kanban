@@ -1185,9 +1185,14 @@ let colDragHandles: [HTMLElement | null, HTMLElement | null, HTMLElement | null]
 /** 拖拽开始时的 handleLeft 快照（避免在 mousemove 中读响应式 handleLeft.value） */
 let colDragHandleLeft = 0;
 
-/** 把 widths 序列化成 CSS grid-template-columns 字符串（与 gridTemplateColumns computed 一致） */
+/** 把 widths 序列化成 CSS grid-template-columns 字符串（与 gridTemplateColumns computed 一致）
+ *
+ * v2.x：desc 列用 `minmax(MIN_CONTENT_COL_WIDTH, auto)` —— col 缩到内容宽度，
+ * 后面不留空白（旧 `minmax(480, 1fr)` 强制最小 480 时 col 2 右侧会有大块空白）。
+ * 拖拽 desc 列宽仍能撑大 col 2（用户拖到 600 → minmax(60, 600) = 600 撑大）。
+ * MIN_CONTENT_COL_WIDTH (60) 保证 col 2 不会缩到 0（subject 看不见）。 */
 function colWidthsToGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
-  return `minmax(${w.desc}px, 1fr) ${w.author}px ${w.date}px ${w.sha}px`;
+  return `minmax(${MIN_CONTENT_COL_WIDTH}px, ${w.desc}px) ${w.author}px ${w.date}px ${w.sha}px`;
 }
 
 function colWidthsToFixedGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
