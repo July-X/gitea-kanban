@@ -138,6 +138,38 @@ const expandedSha = ref<string | null>(null);
 /** 当前 hover 的 commit 行，用于同步高亮左侧 graph 圆点 */
 const hoveredGraphRow = ref<number | null>(null);
 
+/** v2.65：手风琴展开高度（实际渲染像素，ResizeObserver 实时更新）
+ * 用于 SVG path d + dot cy 的 rowOffsets：手风琴展开时，
+ * expanded row 之后的 commit 视觉 y 坐标 = displayRow*ROW_H + expansionHeight
+ * （VSCode 行为：lane 直线自动拉伸延伸覆盖展开行） */
+const expandedHeight = ref(0);
+/** 监听手风琴 DOM 元素的实际高度（max-height 600px，content-driven） */
+let accordionResizeObserver: ResizeObserver | null = null;
+function bindAccordionObserver(el: HTMLElement | null) {
+  if (accordionResizeObserver) {
+    accordionResizeObserver.disconnect();
+    accordionResizeObserver = null;
+  }
+  if (!el) {
+    expandedHeight.value = 0;
+    return;
+  }
+  accordionResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const h = entry.contentRect.height;
+      // 加上 4px margin-top + 4px margin-bottom（CSS 上有 margin: 4px 0）
+      expandedHeight.value = h + 8;
+    }
+  });
+  accordionResizeObserver.observe(el);
+}
+onUnmounted(() => {
+  if (accordionResizeObserver) {
+    accordionResizeObserver.disconnect();
+    accordionResizeObserver = null;
+  }
+});
+
 /** 仓库 web URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
  *  GitHub 仓库 web URL 模板（https://github.com/${owner}/${repo}）与 Gitea 一致，
  *  区别只在 hostUrl：Gitea 是 auth.currentGiteaUrl,GitHub 是 https://github.com。
@@ -168,6 +200,8 @@ interface DisplayCommit {
   date: string;
   authorName: string;
   authorEmail: string;
+  /** v2.65：merge commit 标识（来自 GraphLineCommit.isMerge）——用于 .commit-row--merge 视觉降级 */
+  isMerge?: boolean;
   refs?: string[];
   refTypes?: string[];
 }
@@ -560,20 +594,50 @@ const displayRowMap = computed<Map<number, number>>(() => {
   return map;
 });
 
+/**
+ * v2.65：手风琴展开时，expanded row 之后的所有 displayRow 视觉 y 都需要
+ * 加上 expandedHeight（手风琴实际渲染高度）。
+ * VSCode 行为：lane 直线自动延伸覆盖展开行高度。
+ *
+ * 关键：offset 应用到 rowOffsets[displayRow > expandedRow]，不加到 expandedRow 自身
+ * （expandedRow 自身的视觉位置不变，只是它下面多出一段扩展区域）。
+ */
+const expandedDisplayRow = computed<number | null>(() => {
+  if (!expandedSha.value) return null;
+  for (const c of asciiGraph.value?.commits ?? []) {
+    if (c.sha === expandedSha.value) {
+      return displayRowMap.value.get(c.row) ?? null;
+    }
+  }
+  return null;
+});
+
+const asciiRowOffsets = computed<Map<number, number>>(() => {
+  const map = new Map<number, number>();
+  const expandedAt = expandedDisplayRow.value;
+  const offset = expandedHeight.value;
+  if (expandedAt === null || offset <= 0) return map;
+  // expandedAt 之后的所有 displayRow 都需要 offset
+  const total = asciiGraph.value?.commits.length ?? 0;
+  for (let r = expandedAt + 1; r < total; r++) {
+    map.set(r, offset);
+  }
+  return map;
+});
+
 const viewBox = computed(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    // v2.63 GitHub parser 修复：viewBox 的高度也需要跟 displayRow 对齐（commit 数）。
-    // 否则 SVG 内部 path 在 displayRow 坐标系绘，但 SVG 视口仍是 ASCII row+1 → 视觉错位。
-    // 水平方向仍用 asciiSvgViewBox 计算 x/w（跟 lane 数对齐）。
+    // v2.65：viewBox 高度 = commit 数 * ROW_HEIGHT + 累计 rowOffset
+    // 手风琴展开时 viewBox 自动扩张，给 path d 留出延伸空间。
     const g = asciiGraph.value;
     const commitCount = g.commits.length;
     const baseViewBox = asciiSvgViewBox(g);
-    // asciiSvgViewBox 格式："x y w h"，把 h 替换成 commitCount*ROW_HEIGHT
     const parts = baseViewBox.split(' ');
     const x = parts[0]!;
     const y = parts[1]!;
     const w = parts[2]!;
-    return `${x} ${y} ${w} ${commitCount * ROW_HEIGHT}`;
+    const totalHeight = commitCount * ROW_HEIGHT + expandedHeight.value;
+    return `${x} ${y} ${w} ${totalHeight}`;
   }
   const r = svgRender.value;
   return r ? `0 0 ${r.width} ${r.height}` : '0 0 0 0';
@@ -587,11 +651,11 @@ const svgWidth = computed(() => {
 });
 const svgHeight = computed(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    // v2.63 GitHub parser 修复：SVG 高度用 commit 数（displayRow 0..N-1），
-    // 而不是 asciiRow+1（包含 edge row）。SVG 容器 + bg-scroll + dot overlay
-    // 全部跟着 commit-row 容器走，commit 之间不留空 30px。
+    // v2.65：SVG 高度 = commit 数 * ROW_HEIGHT + 累计 rowOffset
+    // 手风琴展开时 SVG 自动扩张，跟 commit-row 容器（grid + accordion 流式）视觉一致
     const commitCount = asciiGraph.value.commits.length;
-    return `${commitCount * ROW_HEIGHT * DISPLAY_SCALE}px`;
+    const totalHeight = (commitCount * ROW_HEIGHT + expandedHeight.value) * DISPLAY_SCALE;
+    return `${totalHeight}px`;
   }
   const r = svgRender.value;
   return r ? `${r.height}px` : '0px';
@@ -610,16 +674,20 @@ interface PathGroup {
 
 const pathGroups = computed<PathGroup[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    // v2.63 GitHub parser 修复：ASCII 路径必须用 displayRow 压缩版
-    // ——edge row 已被 commit-row 容器跳过，path d 也要在 displayRow 坐标系绘制
-    // 才能跟 commit 文字和 dot 几何对齐（dotNodes 同步改成 displayRow）。
+    // v2.65：ASCII 路径用 S 曲线 + 手风琴展开 rowOffsets
+    // - 跨 lane 时用 C 命令画 S 曲线（VSCode 风格）
+    // - 手风琴展开时，expanded row 之后的 commit y 自动 +expandedHeight
+    //   → lane 直线自动"拉伸延伸"覆盖展开行高度（VSCode 行为）
     return [...asciiGraph.value.flows.values()]
       .sort((a, b) => a.id - b.id)
       .map((flow: Flow) => ({
         order: flow.id,
         colorIndex: flow.colorNumber % 16,
         colorClass: flowColorClass(flow.colorNumber),
-        d: flowToPathDCompact(flow, displayRowMap.value),
+        d: flowToPathDCompact(flow, displayRowMap.value, {
+          curve: true,
+          rowOffsets: asciiRowOffsets.value,
+        }),
       }));
   }
   const r = svgRender.value;
@@ -669,6 +737,8 @@ const allRows = computed<DisplayRow[]>(() => {
         date: commit.date,
         authorName: commit.authorName,
         authorEmail: commit.authorEmail,
+        // v2.65：merge commit 视觉降级
+        isMerge: commit.isMerge,
         refs: Array.isArray(commit.refs) ? commit.refs.map((r) => r.shortName) : [],
         refTypes: Array.isArray(commit.refs)
           ? commit.refs.map((r) => refTypeFromGroup(r.refGroup))
@@ -695,6 +765,7 @@ const allRows = computed<DisplayRow[]>(() => {
             date: commit.date,
             authorName: commit.authorName,
             authorEmail: commit.authorEmail,
+            isMerge: commit.isMerge,
             refs: commit.refs,
             refTypes: commit.refTypes,
           }
@@ -798,10 +869,11 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
     // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW/2-minX+FLOW_LEFT_PAD)*SCALE，
     // 圆点 size = 8px（DOT_SIZE），圆点视觉上落在 lane 中线（与 Gitea path + structured 路径一致）。
-    // v2.63 GitHub parser 修复：cy 用 displayRow 而非 asciiRow（commit-row 容器现在按
-    // displayRow 0..N-1 连续堆叠，dot 也必须在 displayRow 坐标系里才能跟 commit 文字对齐）。
+    // v2.65 GitHub parser 修复 + VSCode 风格：cy 用 displayRow + rowOffset
+    // （手风琴展开时 expanded row 之后的 dot 自动下移，与 SVG path 同步）
     return asciiGraph.value.commits.map((commit) => {
       const displayRow = displayRowMap.value.get(commit.row) ?? 0;
+      const rowOffset = asciiRowOffsets.value.get(displayRow) ?? 0;
       return {
         sha: commit.sha,
         subject: commit.subject,
@@ -812,7 +884,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
         ),
         row: displayRow,
         cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH / 2 - minX + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
-        cy: (displayRow * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
+        cy: (displayRow * ASCII_ROW_HEIGHT + rowOffset + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
         size: DOT_SIZE,
         colorClass: flowColorClass(
           asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
@@ -1380,10 +1452,10 @@ function refBadgeClass(refType?: string): string {
                   'commit-row--clickable': r.commit,
                   'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
                   'commit-row--ascii': useAsciiGraph,
+                  'commit-row--merge': r.commit.isMerge,
                 }"
                 :style="{
                   height: ROW_H + 'px',
-                  gridRow: r.row + 1,
                 }"
                 :role="r.commit ? 'button' : undefined"
                 :tabindex="r.commit ? 0 : undefined"
@@ -1457,9 +1529,11 @@ function refBadgeClass(refType?: string): string {
                 </template>
               </div>
                <!-- v2.14：行下手风琴 —— 流式插入 body 内部，跨整宽（不再只是右列），
-                    v2.27：跨整宽包含 graph 列背景，accordion 自身有 elevated 底色 -->
+                    v2.27：跨整宽包含 graph 列背景，accordion 自身有 elevated 底色。
+                    v2.65：用 ref 绑定 DOM 给 ResizeObserver，让 SVG path 自动拉伸延伸 -->
                <div
                  v-if="r.commit && expandedSha === r.commit.sha"
+                 :ref="(el) => { if (el) bindAccordionObserver(el as HTMLElement) }"
                  class="commit-accordion"
                  :data-sha="r.commit.sha"
                >
@@ -1986,16 +2060,21 @@ function refBadgeClass(refType?: string): string {
 /* v2.47：rows 容器（包住所有 commit-row + accordion，flex 右子项）
  *   - flex: 1 占据剩余空间（跟 bg 容器并排）
  *   - min-width: 0 允许内容收缩（默认 flex item 不会收缩到 min-content 以下）
- *   - overflow: visible 让手风琴展开时自然延伸（手风琴自身 max-width 兜底）*/
+ *   - overflow: visible 让手风琴展开时自然延伸（手风琴自身 max-width 兜底）
+ *
+ * v2.65：去掉 display: grid（v2.62 引入）和 grid-template-rows（commit-row grid-row 定位）。
+ * 原因：v2.62 的 grid 是为了"edge 行 30px 占位"——但 v2.63 已经把 edge 行完全压扁，
+ * 每个 commit-row 都对应一个 commit，不再有空 cell 留给 accordion。
+ * 改成普通 block 流式：每个 commit-row 是 30px 块，accordion（手风琴展开时）紧跟其后
+ * 自然撑高 rows 容器高度 → SVG 用 rowOffsets 自动同步延伸。
+ *
+ * 不再用 grid 后：commit-row 不再需要 :style="gridRow: r.row+1"，
+ * 改为固定 height: ROW_H，row 顺序由 v-for 自然保证。*/
 .git-graph-rows {
   flex: 1 1 auto;
   min-width: 0;
   overflow: visible;
-  /* v2.62：配合 commit-row grid-row 定位 —— 容器用 grid 布局，
-     grid-template-rows 按 maxRow 数量声明 ROW_H 高，commit row 容器 grid-row 精确指定，
-     edge 行（无 commit）由 grid 自动保留 ROW_H 高度的视觉占位（不渲染透明容器）。 */
-  display: grid;
-  grid-template-rows: repeat(var(--git-graph-row-count, 0), var(--git-graph-row-height, 30px));
+  display: block;
 }
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
@@ -2144,6 +2223,16 @@ function refBadgeClass(refType?: string): string {
 }
 .commit-row--relation:hover {
   background: transparent;
+}
+
+/* v2.65：merge commit 视觉降级（VSCode 风格）
+ * - isMerge=true 的 commit（merge / pull request 合并提交）subject 文字用更淡的灰色
+ * - 与普通 commit 形成视觉层级，用户一眼能区分"我的 commit" vs "merge commit"
+ * - 颜色取自 --color-text-tertiary（设计系统三级文字），比 --color-text-primary 略淡
+ *   在 dark mode 下差异更明显，light mode 下也是合理的弱化 */
+.commit-row--merge .commit-row__subject,
+.commit-row--merge .commit-row__col--desc {
+  color: var(--color-text-tertiary, rgba(255, 255, 255, 0.55));
 }
 
 .ref-badge {

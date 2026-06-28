@@ -120,44 +120,73 @@ export function flowToPathD(flow: Flow): string {
  *   - 修复方案：把 commit 排成连续 displayRow 0..N-1，grid 容器跟 commit 数对齐
  *     → 这里就需要 path d 也在 displayRow 坐标系里绘制
  *
- * 算法（与 VSCode Git Graph 一致）：
+ * 算法（v2.65 复刻 VSCode Git Graph）：
  *   1. 把 flow.commits 按 row 升序
  *   2. 用 rowRemap 查每个 commit 的 displayRow
- *   3. 顺序连点：相邻 commit 同 lane → 垂直线 / 不同 lane → 直线
+ *   3. 顺序连点：
+ *      - 同 lane → 垂直 V 命令
+ *      - 跨 lane → S 曲线 C 命令，控制点 y = midpoint ± curveDy
+ *        (curveDy = 8px，给曲线一个优雅的弧度——不夸张，跨短距离不抖动)
  *   4. 末尾追加 ROW_HEIGHT 竖线让线条穿过最后一个 commit 的 row
  *
  * 与原 flowToPathD 的差别：
  *   - 原版逐字形绘制，edge row（|, /, \, _ 等）每个都产生独立 d 段
  *   - 压缩版只看 commit，edge 几何被两个相邻 commit 的 (column, displayRow) 隐式表达
- *   - 视觉上仍然是 SourceTree 风格：分叉 / 合并用 commit 之间的直线表达
+ *   - 视觉上 VSCode 风格：分叉 / 合并用 commit 之间的 S 曲线优雅表达
+ *
+ * v2.65（VSCode 风格）：
+ *   - 同 lane 用 V 命令（垂直）
+ *   - 跨 lane 用 S 曲线（C 命令）—— 比直线更优雅，跨行时的视觉过渡更自然
+ *   - 支持 rowOffset 累加：手风琴展开时，displayRow >= expandedIndex 的所有 commit
+ *     y 坐标加 offsetPx，让 SVG 路径自动"拉伸延伸"覆盖展开行（VSCode 行为）
  */
 export function flowToPathDCompact(
   flow: Flow,
   rowRemap: Map<number, number>,
+  options?: { curve?: boolean; rowOffsets?: Map<number, number> },
 ): string {
+  const useCurve = options?.curve ?? true;
+  const rowOffsets = options?.rowOffsets;
   const commits = flow.commits
     .filter((c) => rowRemap.has(c.row))
     .sort((a, b) => a.row - b.row);
   if (commits.length < 1) return '';
 
   // 收集每个 commit 的绝对位置
+  // y = displayRow * ROW_HEIGHT + rowOffsets.get(displayRow) ?? 0
+  // （手风琴展开时，expandedRow 及之后的所有 commit 视觉位置都往下推 rowOffsets[displayRow]）
   const pts = commits.map((c) => {
     const displayRow = rowRemap.get(c.row)!;
     return {
       x: c.column * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD,
-      y: displayRow * ROW_HEIGHT,
+      y: displayRow * ROW_HEIGHT + (rowOffsets?.get(displayRow) ?? 0),
     };
   });
 
   const parts: string[] = [];
   // 起点：第一个 commit 的左上角
   parts.push(`M ${pts[0]!.x} ${pts[0]!.y}`);
-  // 依次连到每个后续 commit（用 L 即可，同 lane 时 L 等价 v 都能渲染）
+  // 依次连到每个后续 commit
   for (let i = 1; i < pts.length; i++) {
-    parts.push(`L ${pts[i]!.x} ${pts[i]!.y}`);
+    const prev = pts[i - 1]!;
+    const cur = pts[i]!;
+    if (cur.x === prev.x) {
+      // 同 lane：垂直 V 命令
+      parts.push(`V ${cur.y}`);
+    } else if (!useCurve) {
+      parts.push(`L ${cur.x} ${cur.y}`);
+    } else {
+      // 跨 lane：S 曲线
+      // 控制点 1：(prev.x, midY - curveDy) — 从 prev 垂直下降到上方拐点
+      // 控制点 2：(cur.x, midY + curveDy)  — 从下方拐点垂直上升到 cur
+      const midY = (prev.y + cur.y) / 2;
+      const curveDy = 8;
+      parts.push(
+        `C ${prev.x} ${midY - curveDy}, ${cur.x} ${midY + curveDy}, ${cur.x} ${cur.y}`,
+      );
+    }
   }
   // 末尾追加 ROW_HEIGHT 竖线，让线条穿过最后一个 commit 的 row
-  // （与原版 glyphToPathD 的 * / | 行为一致：每个 commit 都有 30px 高度的线段覆盖）
   parts.push(`v ${ROW_HEIGHT}`);
 
   return parts.join(' ');
