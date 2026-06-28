@@ -2373,17 +2373,22 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  /* v2.x：subject 永远贴描述列最左，ref badge 用 margin-left: auto 推到列右端。
-     之前是 refs 在前 subject 在后，ref badge 把 subject 挤到右侧（用户报告"文字未对齐列最左"）。 */
-  margin-left: auto;
-  /* 与 commit-subject 之间的间距由 commit-row gap 提供 */
+  /* v2.x：去掉 margin-left: auto —— 之前把 ref badge 推到描述列最右，
+     与 subject 之间空出大段空白（用户报告"标注部分不对"）。
+     现在让 ref badge 紧跟 subject 后面，subject 用 ellipsis 在前方截断。
+     subject 通过 display: block + min-width: 0 触发 ellipsis（span 默认 inline 不响应）。 */
 }
 
 .commit-subject {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
+  /* v2.x：去掉 subject 在前 refs 在后的 inline 排版：让 subject 占据 desc 列剩余空间并 ellipsis 截断，
+     ref badge (flex-shrink: 0) 始终紧跟 subject 后面完整显示。 */
   /* v2.39：15px → 14px，与 26px 行高比例更舒适；letter-spacing 微收紧 */
   font-size: 14px;
   letter-spacing: -0.005em;
