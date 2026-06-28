@@ -1003,6 +1003,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   align-items: center;
   gap: 4px;
   padding: 2px 6px;
+  /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
+  line-height: 1;
   border: none;
   background: transparent;
   color: var(--color-text-muted);
@@ -1012,6 +1014,11 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   transition:
     background var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease);
+}
+/* v2.54：svg 显式 vertical-align: middle 防止与文本 baseline 对齐导致 icon 顶部空隙 */
+.statusbar__action :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 .statusbar__action:hover:not(:disabled) {
   background: var(--color-bg-hover);
@@ -1043,6 +1050,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   align-items: center;
   gap: 6px;
   padding: 3px 8px 3px 6px;
+  /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
+  line-height: 1;
   border: 1px solid transparent;
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
@@ -1056,6 +1065,11 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
     background var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease);
+}
+/* v2.54：svg 显式 vertical-align: middle 防止与文本 baseline 对齐导致 icon 顶部空隙 */
+.statusbar__picker-trigger :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .statusbar__picker-trigger:hover {
@@ -1250,6 +1264,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
+  /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
+  line-height: 1;
   border: 1px solid var(--color-divider);
   background: var(--color-bg-elevated);
   color: var(--color-text);
@@ -1263,6 +1279,11 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
     color var(--t-fast) var(--ease);
   min-width: 64px;
   justify-content: center;
+}
+/* v2.54：svg 显式 vertical-align: middle 防止与文本 baseline 对齐导致 icon 顶部空隙 */
+.statusbar__row-btn :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 .statusbar__row-btn:hover:not(:disabled) {
   background: var(--color-bg-hover);

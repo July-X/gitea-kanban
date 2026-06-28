@@ -237,6 +237,37 @@ function fileStatusStyle(status?: string): { color: string; backgroundColor: str
   return { color, backgroundColor: bg };
 }
 
+/**
+ * v2.55：路径前缀缩写 —— 超长 file path 中间省略，首段 + ... + 末段文件名
+ *
+ * 目的：长路径如 `src/foo/bar/very/very/long/path/Component.tsx`
+ *       → `src/.../Component.tsx`（保留首段让用户看出位置，保留文件名最关键信息）
+ *       末尾省略（CSS text-overflow: ellipsis）会让文件名被切，不友好。
+ *
+ * 策略：
+ *   - 段数 ≤ 2：原样返回（dir/file 短，不需要缩）
+ *   - 段数 ≥ 3：保留第一段 + `/.../` + 最后一段（文件名）
+ *   - 总长度阈值 60：超过才缩写，避免短路径被强行加 ...
+ *
+ * @param path 完整文件路径（用 / 分隔；Windows 路径也按 / 处理，组件 UI 不展示 Win 路径）
+ * @param maxLen 触发缩写的最小长度（默认 60 字符）
+ * @returns 缩写后的路径（或原样）
+ */
+function shortenPathMiddle(path: string, maxLen = 60): string {
+  if (!path || path.length <= maxLen) return path;
+  const segments = path.split('/').filter((s) => s.length > 0);
+  // 只有 1-2 段（根目录文件或单层目录）：保留首段 + /.../ + 文件名（如果有）
+  if (segments.length <= 1) return path;
+  if (segments.length === 2) {
+    // dir/file：首段可能也很长，但用户能看到完整结构，保留原样让 CSS 末尾 ellipsis
+    return path;
+  }
+  // 段数 ≥ 3：首段 + `/.../` + 最后一段（文件名）
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  return `${first}/.../${last}`;
+}
+
 /** 多行 message 拆分：第一行是标题，其余是正文 */
 const messageTitle = computed(() => {
   const msg = detail.value?.message ?? props.commit?.subject ?? '';
@@ -434,9 +465,9 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
                 {{ fileStatusLabel(f.status) }}
               </span>
               <span class="cd-file-name mono" :title="f.filename">
-                {{ f.filename }}
+                {{ shortenPathMiddle(f.filename) }}
                 <span v-if="f.previousFilename" class="cd-file-rename">
-                  ← {{ f.previousFilename }}
+                  ← {{ shortenPathMiddle(f.previousFilename) }}
                 </span>
               </span>
               <span class="cd-file-stats">
@@ -543,9 +574,9 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
               {{ fileStatusLabel(f.status) }}
             </span>
             <span class="cd-file-name mono" :title="f.filename">
-              {{ f.filename }}
+              {{ shortenPathMiddle(f.filename) }}
               <span v-if="f.previousFilename" class="cd-file-rename">
-                ← {{ f.previousFilename }}
+                ← {{ shortenPathMiddle(f.previousFilename) }}
               </span>
             </span>
             <span class="cd-file-stats">
