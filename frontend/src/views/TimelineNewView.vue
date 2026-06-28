@@ -854,24 +854,12 @@ function onDragStart(e: MouseEvent): void {
   dragStartX = e.clientX;
   dragLatestX = e.clientX;
   dragStartHandleLeft = handleLeft.value;
-  // 缓存所有需要的 DOM ref 和响应式快照
+  // v2.51：缓存所有需要的 DOM ref 和响应式快照
   graphDragWrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
   if (graphDragWrapper) {
     graphDragHandles = {
       headerGraphCol: graphDragWrapper.querySelector('.git-graph-header__col--graph') as HTMLElement | null,
-      headerGraphHandle: graphDragWrapper.querySelector('.git-graph-header__resize--graph') as HTMLElement | null,
-      // 列分隔手柄 0/1/2 也跟着 handleLeft 走（手柄 0 = handleLeft + desc 实际宽）
-      // —— 拖 graph 列时 desc 实际宽不变，所以手柄 0/1/2 的 left 都加 delta
-      colHandles: Array.from(
-        graphDragWrapper.querySelectorAll('.git-graph-header__resize:not(.git-graph-header__resize--graph)'),
-      ) as HTMLElement[],
-      // 缓存拖拽开始时各手柄的 left px（避免 mousemove 中读响应式）
-      colHandlesStartLeft: [] as number[],
     };
-    graphDragHandles.colHandles.forEach((el) => {
-      const leftPx = parseFloat(el.style.left || '0');
-      graphDragHandles.colHandlesStartLeft.push(leftPx);
-    });
     // 拖拽 graph 列时内容列不变，mousemove 直接用当前列宽快照。
     graphDragSnapshot = { ...colWidths.value };
   }
@@ -898,14 +886,8 @@ let graphDragRafId = 0;
 let graphDragWrapper: HTMLElement | null = null;
 let graphDragHandles: {
   headerGraphCol: HTMLElement | null;
-  headerGraphHandle: HTMLElement | null;
-  colHandles: HTMLElement[];
-  colHandlesStartLeft: number[];
 } = {
   headerGraphCol: null,
-  headerGraphHandle: null,
-  colHandles: [],
-  colHandlesStartLeft: [],
 };
 /** 列宽快照（mousedown 时缓存，mousemove 用快照避免读响应式） */
 let graphDragSnapshot: { desc: number; author: number; date: number; sha: number } | null = null;
@@ -935,21 +917,14 @@ function onDragMove(e: MouseEvent): void {
       const w = graphDragSnapshot ?? DEFAULT_COL_WIDTHS;
       const newTableMin = newLeft + MIN_CONTENT_COL_WIDTH + w.author + w.date + w.sha;
       graphDragWrapper.style.setProperty('--git-graph-table-width', `${newTableMin}px`);
-      // 3. 表头 graph 列宽度
+      // 3. 表头 graph 列宽度（v2.51：列是 grid item，宽度由 grid-template-columns 第一列决定，
+      //    这里直接写 inline style 覆盖 grid 值，拖拽期间实时跟随 newLeft）
       if (graphDragHandles.headerGraphCol) {
         graphDragHandles.headerGraphCol.style.width = `${newLeft}px`;
       }
-      // 4. 表头 graph 列手柄 left
-      if (graphDragHandles.headerGraphHandle) {
-        graphDragHandles.headerGraphHandle.style.left = `${newLeft}px`;
-      }
-      // 5. 列分隔手柄 0/1/2 left 也要跟随（手柄在 handleLeft 之后，所有手柄 left += delta）
-      for (let i = 0; i < graphDragHandles.colHandles.length; i++) {
-        const startL = graphDragHandles.colHandlesStartLeft[i];
-        if (!Number.isNaN(startL)) {
-          graphDragHandles.colHandles[i].style.left = `${startL + (newLeft - startHandleLeft)}px`;
-        }
-      }
+      // v2.51：删除旧版表头手柄 left 和列分隔手柄 0/1/2 left 更新逻辑——
+      // 旧版独立 .git-graph-header__resize div 已删除，手柄现在是 GRAPH 列的 ::after 伪元素，
+      // 永远紧贴列右边线，无需 left 同步。
     }
   });
 }
@@ -983,12 +958,7 @@ function onDragEnd(): void {
   dragging.value = false;
   // 清空缓存
   graphDragWrapper = null;
-  graphDragHandles = {
-    headerGraphCol: null,
-    headerGraphHandle: null,
-    colHandles: [],
-    colHandlesStartLeft: [],
-  };
+  graphDragHandles = { headerGraphCol: null };
   graphDragFinalLeft = null;
   graphDragSnapshot = null;
   document.removeEventListener('mousemove', onDragMove);
@@ -1244,14 +1214,19 @@ function refBadgeClass(refType?: string): string {
             <!-- v2.27：第一列 graph 标题格（与 commit-row 第一列同宽）
                  v2.34：宽度由 grid-template-columns 的 var(--git-graph-col-width) 决定，
                  不再挂 inline style（避免每个 header 跟随 handleLeft 重渲染） -->
+            <!-- v2.51：graph 列（与 commit-row graph 列同宽）
+                 resize handle 是列的真实右边缘——独立 div 用 right: -3px 定位，
+                 永远紧贴列右边线（不再用 :style="{left: handleLeft}" 浮动定位），
+                 与列宽变化 1:1 同步，不会出现"手柄位置跟列宽脱节"的视觉错位。
+                 这是正常 table column resize 的标准模式：列右边线 = 命中区。 -->
             <div class="git-graph-header__col git-graph-header__col--graph">
               <span class="git-graph-header__col-label">Graph</span>
             </div>
+            <!-- resize handle：紧贴 GRAPH 列右边，命中区 6px（中心对齐 1px border-right） -->
             <div
-              class="git-graph-header__resize git-graph-header__resize--graph"
+              class="git-graph-header__resize-handle"
+              :class="{ 'git-graph-header__resize-handle--active': dragging }"
               @mousedown="onDragStart"
-              :class="{ 'git-graph-header__resize--active': dragging }"
-              :style="{ left: `${handleLeft}px` }"
               title="拖动调整 Graph 列宽度"
             />
             <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
@@ -1658,29 +1633,31 @@ function refBadgeClass(refType?: string): string {
 .git-graph-header__col--sha {
   padding: 0 var(--space-2, 8px);
 }
-/* v2.32：列分隔拖拽手柄 = 6px 命中区，居中于 1px 分割线（用 transform: translateX(-50%)）
- *  - 6px 命中区在 hover 时整条变绿（用户清楚知道可以拖）
- *  - 中心 1px 视觉线（与表头 col 的 border-right 重叠）
- *  - 不再依赖 padding + background-clip 的复杂机制（v2.30 引入但定位不准确导致 hover 不灵敏）
- *  - 用户要求："鼠标滑动到这个分割线后就能左右拖动" */
-.git-graph-header__resize {
+/* v2.51：GRAPH 列右边缘 resize handle —— 正常 table column resize 模式
+ *  - 独立 div 用 right: -3px 定位（不是 :style="{left: handleLeft}" 浮动定位）
+ *  - 永远紧贴 GRAPH 列右边线（right: -3px + width: 6px → 中心对齐 1px border-right）
+ *  - 与列宽变化 1:1 同步，不会出现"手柄位置跟列宽脱节"
+ *  - 这是 mouse 命中区（cursor + mousedown），也是视觉反馈区（hover/active 时高亮）
+ *  - 与 v2.50 之前的 .git-graph-header__resize 区别：旧版用 left 浮动定位，
+ *    手柄看起来"飘"在某个位置；新版紧贴列真实右边缘，正常 column 缩放体验 */
+.git-graph-header__resize-handle {
   position: absolute;
   top: 0;
-  width: 6px;            /* 命中区 6px */
-  height: 100%;
+  bottom: 0;
+  /* 紧贴 GRAPH 列右边缘：right: -3px + width: 6px → 中心在列右边线 */
+  right: -3px;
+  width: 6px;
   cursor: col-resize;
   z-index: 6;
   background: transparent;
   transition: background 0.12s;
-  /* 居中于 1px 分割线：left = colHandleLeft(colIndex) = 分割线中心 */
-  transform: translateX(-50%);
 }
-.git-graph-header__resize:hover,
-.git-graph-header__resize--active {
-  background: var(--color-primary, #74b830);
+.git-graph-header__resize-handle:hover,
+.git-graph-header__resize-handle--active {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
 }
-.git-graph-header__resize:hover::before,
-.git-graph-header__resize--active::before {
+.git-graph-header__resize-handle:hover::before,
+.git-graph-header__resize-handle--active::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -1688,9 +1665,12 @@ function refBadgeClass(refType?: string): string {
   transform: translate(-50%, -50%);
   width: 2px;
   height: 16px;
-  background: #fff;
+  background: var(--color-primary, #74b830);
   border-radius: 1px;
 }
+
+/* v2.51：旧 .git-graph-header__resize 规则已删除——v2.50 起不再用浮动定位的独立手柄。
+   旧规则保留注释供 git blame 参考。*/
 
 /* v2.47：body 容器（包含背景层 SVG + 行层 commit-row）
  *
