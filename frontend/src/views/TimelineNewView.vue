@@ -2232,7 +2232,10 @@ function refBadgeClass(refType?: string): string {
  *   在 dark mode 下差异更明显，light mode 下也是合理的弱化 */
 .commit-row--merge .commit-subject,
 .commit-row--merge .commit-row__col--desc {
-  color: var(--color-text-tertiary, rgba(255, 255, 255, 0.55));
+  /* 用 --color-text-muted 而不是 --color-text-tertiary：
+   * muted 在 dark 下 5.29:1 / light 下 6.39:1 ✓ 都过 WCAG AA，
+   * 比 tertiary 的 rgba(255,255,255,0.55) 在 light 下几乎不可见友好。*/
+  color: var(--color-text-muted, rgba(154, 170, 182, 0.85));
 }
 
 .ref-badge {
