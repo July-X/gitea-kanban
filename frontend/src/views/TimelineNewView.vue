@@ -1600,11 +1600,9 @@ function refBadgeClass(refType?: string): string {
                 @keydown.enter.prevent="r.commit && toggleCommitDetail(r.commit)"
                 @keydown.space.prevent="r.commit && toggleCommitDetail(r.commit)"
               >
-                <!-- v2.27：graph 占位列（与表头第一列同宽，让背景 SVG 透出）
-                     v2.34：宽度走 CSS 变量 var(--git-graph-col-width)，不再挂 inline style -->
-                <div
-                  class="commit-row__col commit-row__col--graph"
-                />
+                <!-- v2.48：移除 graph 占位列——v2.47 改 flex 两栏后 SVG 已在独立 .git-graph-bg
+                     容器，commit-row 内的 graph 占位列变成纯空白（描述列左侧 130px 空白根因）。
+                     commit-row 改为 4 列 grid（desc/author/date/sha），直接对齐表头 desc 列。 -->
                 <template v-if="r.commit">
                   <!-- v2.22：Description 列（refs + subject） -->
                   <div class="commit-row__col commit-row__col--desc">
@@ -2228,7 +2226,9 @@ function refBadgeClass(refType?: string): string {
  *   （之前 .git-graph-table-width = svgWidth + 840 → 撑爆视口）*/
 .commit-row {
   display: grid;
-  grid-template-columns: var(--git-graph-col-width, 130px) var(--grid-template-columns, 480px 160px 120px 80px);
+  /* v2.48：移除 graph 占位列（第一列 var(--git-graph-col-width)），改为 4 列 grid。
+     v2.47 改 flex 两栏后 SVG 在独立 .git-graph-bg 容器，commit-row 不再需要 graph 占位列。 */
+  grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
   gap: 0;
   /* v2.43 高度由内联 style 绑定 ROW_H（ASCII = 19px, structured = 30px），与 SVG 行高 1:1 对齐 */
@@ -2291,12 +2291,6 @@ function refBadgeClass(refType?: string): string {
   background: var(--color-bg-hover);
   border-right-color: transparent;
 }
-.commit-row:hover .commit-row__col--graph {
-  background:
-    linear-gradient(90deg, rgba(116, 184, 48, 0.18), rgba(116, 184, 48, 0.08) 68%, transparent),
-    linear-gradient(0deg, transparent calc(50% - 1px), rgba(116, 184, 48, 0.42) 50%, transparent calc(50% + 1px));
-  border-right-color: rgba(116, 184, 48, 0.42);
-}
 /* v1.6 可点击的 commit 行 */
 .commit-row--clickable {
   cursor: pointer;
@@ -2308,12 +2302,6 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable:hover .commit-row__col--sha {
   background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
   border-right-color: transparent;
-}
-.commit-row--clickable:hover .commit-row__col--graph {
-  background:
-    linear-gradient(90deg, rgba(116, 184, 48, 0.22), rgba(116, 184, 48, 0.1) 68%, transparent),
-    linear-gradient(0deg, transparent calc(50% - 1px), rgba(116, 184, 48, 0.5) 50%, transparent calc(50% + 1px));
-  border-right-color: rgba(116, 184, 48, 0.5);
 }
 .commit-row--clickable:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -2330,22 +2318,12 @@ function refBadgeClass(refType?: string): string {
   border-bottom-color: transparent;
   border-right-color: transparent;
 }
-.commit-row--clickable.commit-row--expanded .commit-row__col--graph {
-  background:
-    linear-gradient(90deg, rgba(116, 184, 48, 0.18), rgba(116, 184, 48, 0.08) 68%, transparent),
-    linear-gradient(0deg, transparent calc(50% - 1px), rgba(116, 184, 48, 0.42) 50%, transparent calc(50% + 1px));
-  border-bottom-color: transparent;
-  border-right-color: rgba(116, 184, 48, 0.42);
-}
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--desc,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--date,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha {
   background: var(--color-bg-hover);
   filter: brightness(1.08);
-}
-.commit-row--clickable.commit-row--expanded:hover .commit-row__col--graph {
-  filter: none;
 }
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * v2.40：26 → 30px，与 commit-row / SVG ROW_HEIGHT 同步（dot 行节奏对齐） */
@@ -2432,20 +2410,8 @@ function refBadgeClass(refType?: string): string {
   /* v2.31 revert：恢复 v2.27 行为——内容列有自身背景，遮住下方背景层 SVG/圆点（commit-row 整行透明） */
   background: var(--color-shell-main-bg);
 }
-/* v2.27：graph 占位列（透明背景，让背景层 SVG + dot overlay 透出）
- * v2.34：width 直接走 CSS 变量 var(--git-graph-col-width)，
- * 不再在每个 commit-row 上挂 inline style。1000 行 commit 时：
- * - 旧版拖 graph 列每帧要写 1000 次 inline style（拖拽卡顿元凶之一）
- * - 新版改一个 wrapper CSS 变量，1000 行 .commit-row__col--graph 通过 var() 级联生效
- *   （浏览器只重排，不重新执行任何 JS 模板绑定）
- */
-.commit-row__col--graph {
-  width: var(--git-graph-col-width, 130px);
-  padding: 0;
-  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
-  background: transparent;
-  flex-shrink: 0;
-}
+/* v2.48：.commit-row__col--graph 已移除——v2.47 flex 两栏后 SVG 在独立 .git-graph-bg
+ * 容器，commit-row 不再需要 graph 占位列（旧规则保留注释供 git blame 参考） */
 .commit-row__col--desc {
   /* v2.x：放弃 flex 布局，改 block 文字流 —— subject 和 refs 都 inline，
      整体被 desc 列的 overflow:hidden + text-overflow:ellipsis 截断。
