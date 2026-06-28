@@ -39,13 +39,14 @@ import {
 } from '@renderer/lib/gitgraph/structured';
 import {
   COL_WIDTH as ASCII_COL_WIDTH,
+  DISPLAY_SCALE,
   DISPLAY_SCALE as ASCII_DISPLAY_SCALE,
+  ROW_HEIGHT,
   ROW_HEIGHT as ASCII_ROW_HEIGHT,
   FLOW_LEFT_PAD,
   flowColorClass,
-  flowToPathD,
+  flowToPathDCompact,
   parseLines,
-  svgHeightPx as asciiSvgHeightPx,
   svgViewBox as asciiSvgViewBox,
   svgWidthPx as asciiSvgWidthPx,
   type Flow,
@@ -524,9 +525,55 @@ const ROW_H = computed(() =>
   useAsciiGraph.value ? ASCII_ROW_HEIGHT * ASCII_DISPLAY_SCALE : STRUCTURED_ROW_HEIGHT,
 ); // commit 行高（px），与当前 SVG 路径一致
 
+// v2.62 → v2.63 GitHub parser 修复：grid-template-rows 不再用 maxRow+1（包含 edge 行）
+// 而是直接用 commit 数（displayRow 0..N-1 连续），彻底消除"看不见的空行"。
+const maxRowPlusOne = computed(() => {
+  if (useAsciiGraph.value && asciiGraph.value) {
+    // ASCII 路径：grid 行数 = commit 数（displayRow 0..N-1 连续，无 edge row 占位）
+    return asciiGraph.value.commits.length;
+  }
+  const dto = graphDto.value;
+  if (!dto || dto.nodes.length === 0) return 0;
+  return Math.max(...dto.nodes.map((n) => n.row)) + 1;
+});
+
+/**
+ * v2.63 GitHub parser 修复：ASCII 字符流行号 → displayRow 映射
+ *
+ * 背景：parseLines 返回的 commit.row 是 git --graph 字符流行号（多 PR 场景
+ * 下不连续，row 0/2/3/5/7/8/10 这种，中间有 edge 行）。
+ * 修复：commit 排成连续 displayRow 0..N-1，grid 容器跟 commit 数对齐。
+ * SVG（path d + dot cy）也要在 displayRow 坐标系里绘制，否则线条跟 commit
+ * 错位。
+ *
+ * - displayRowMap：asciiRow → displayRow
+ * - sortedAsciiCommits：按 displayRow 升序的 commit 列表（rendering 用）
+ */
+const sortedAsciiCommits = computed<GitGraphCommit[]>(() => {
+  if (!asciiGraph.value) return [];
+  return [...asciiGraph.value.commits].sort((a, b) => a.row - b.row);
+});
+
+const displayRowMap = computed<Map<number, number>>(() => {
+  const map = new Map<number, number>();
+  sortedAsciiCommits.value.forEach((c, i) => map.set(c.row, i));
+  return map;
+});
+
 const viewBox = computed(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    return asciiSvgViewBox(asciiGraph.value);
+    // v2.63 GitHub parser 修复：viewBox 的高度也需要跟 displayRow 对齐（commit 数）。
+    // 否则 SVG 内部 path 在 displayRow 坐标系绘，但 SVG 视口仍是 ASCII row+1 → 视觉错位。
+    // 水平方向仍用 asciiSvgViewBox 计算 x/w（跟 lane 数对齐）。
+    const g = asciiGraph.value;
+    const commitCount = g.commits.length;
+    const baseViewBox = asciiSvgViewBox(g);
+    // asciiSvgViewBox 格式："x y w h"，把 h 替换成 commitCount*ROW_HEIGHT
+    const parts = baseViewBox.split(' ');
+    const x = parts[0]!;
+    const y = parts[1]!;
+    const w = parts[2]!;
+    return `${x} ${y} ${w} ${commitCount * ROW_HEIGHT}`;
   }
   const r = svgRender.value;
   return r ? `0 0 ${r.width} ${r.height}` : '0 0 0 0';
@@ -540,7 +587,11 @@ const svgWidth = computed(() => {
 });
 const svgHeight = computed(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    return asciiSvgHeightPx(asciiGraph.value);
+    // v2.63 GitHub parser 修复：SVG 高度用 commit 数（displayRow 0..N-1），
+    // 而不是 asciiRow+1（包含 edge row）。SVG 容器 + bg-scroll + dot overlay
+    // 全部跟着 commit-row 容器走，commit 之间不留空 30px。
+    const commitCount = asciiGraph.value.commits.length;
+    return `${commitCount * ROW_HEIGHT * DISPLAY_SCALE}px`;
   }
   const r = svgRender.value;
   return r ? `${r.height}px` : '0px';
@@ -559,13 +610,16 @@ interface PathGroup {
 
 const pathGroups = computed<PathGroup[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
+    // v2.63 GitHub parser 修复：ASCII 路径必须用 displayRow 压缩版
+    // ——edge row 已被 commit-row 容器跳过，path d 也要在 displayRow 坐标系绘制
+    // 才能跟 commit 文字和 dot 几何对齐（dotNodes 同步改成 displayRow）。
     return [...asciiGraph.value.flows.values()]
       .sort((a, b) => a.id - b.id)
       .map((flow: Flow) => ({
         order: flow.id,
         colorIndex: flow.colorNumber % 16,
         colorClass: flowColorClass(flow.colorNumber),
-        d: flowToPathD(flow),
+        d: flowToPathDCompact(flow, displayRowMap.value),
       }));
   }
   const r = svgRender.value;
@@ -592,33 +646,35 @@ interface DisplayRow {
   row: number;
   commit: DisplayCommit | null;
 }
+/**
+ * 完整行数组（row 0..maxRow）—— v2.6 简化 + v2.63 修复
+ *
+ * v2.6 旧逻辑（ASCII 路径）：for row in 0..maxRow → 包含 edge row（commit=null），
+ * 渲染时 v-if 跳过 commit=null 容器，但 grid-template-rows: repeat(maxRow+1)
+ * 仍然分配 30px 高度的 grid cell → 中间出现"看不见的 30px 空行"。
+ *
+ * v2.63 新逻辑（ASCII 路径）：allRows 直接由 sortedAsciiCommits 构造，
+ * row 字段 = displayRow（0..N-1 连续），grid 行数 = commit 数（无空行）。
+ * SVG（path + dot）用 displayRowMap 把 asciiRow 映射到 displayRow，
+ * 视觉上 commit 与 flow 线条完全对齐。
+ */
 const allRows = computed<DisplayRow[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    const graph = asciiGraph.value;
-    const byRow = new Map<number, GitGraphCommit>();
-    for (const commit of graph.commits) byRow.set(commit.row, commit);
-    const maxRow = Math.max(graph.maxRow, asciiLines.value.length - 1, 0);
-    const out: DisplayRow[] = [];
-    for (let row = 0; row <= maxRow; row++) {
-      const commit = byRow.get(row);
-      const refs = Array.isArray(commit?.refs) ? commit.refs : [];
-      out.push({
-        row,
-        commit: commit
-          ? {
-              sha: commit.sha,
-              shortSha: commit.shortSha,
-              subject: commit.subject,
-              date: commit.date,
-              authorName: commit.authorName,
-              authorEmail: commit.authorEmail,
-              refs: refs.map((r) => r.shortName),
-              refTypes: refs.map((r) => refTypeFromGroup(r.refGroup)),
-            }
-          : null,
-      });
-    }
-    return out;
+    return sortedAsciiCommits.value.map((commit, displayRow) => ({
+      row: displayRow,
+      commit: {
+        sha: commit.sha,
+        shortSha: commit.shortSha,
+        subject: commit.subject,
+        date: commit.date,
+        authorName: commit.authorName,
+        authorEmail: commit.authorEmail,
+        refs: Array.isArray(commit.refs) ? commit.refs.map((r) => r.shortName) : [],
+        refTypes: Array.isArray(commit.refs)
+          ? commit.refs.map((r) => refTypeFromGroup(r.refGroup))
+          : [],
+      },
+    }));
   }
   const dto = graphDto.value;
   if (!dto) return [];
@@ -742,22 +798,27 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
     // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW/2-minX+FLOW_LEFT_PAD)*SCALE，
     // 圆点 size = 8px（DOT_SIZE），圆点视觉上落在 lane 中线（与 Gitea path + structured 路径一致）。
-    return asciiGraph.value.commits.map((commit) => ({
-      sha: commit.sha,
-      subject: commit.subject,
-      title: dotTitle(
-        commit.subject,
-        commit.refs.map((r) => r.shortName),
-        commit.refs.map((r) => refTypeFromGroup(r.refGroup)),
-      ),
-      row: commit.row,
-      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH / 2 - minX + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
-      cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
-      size: DOT_SIZE,
-      colorClass: flowColorClass(
-        asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
-      ),
-    }));
+    // v2.63 GitHub parser 修复：cy 用 displayRow 而非 asciiRow（commit-row 容器现在按
+    // displayRow 0..N-1 连续堆叠，dot 也必须在 displayRow 坐标系里才能跟 commit 文字对齐）。
+    return asciiGraph.value.commits.map((commit) => {
+      const displayRow = displayRowMap.value.get(commit.row) ?? 0;
+      return {
+        sha: commit.sha,
+        subject: commit.subject,
+        title: dotTitle(
+          commit.subject,
+          commit.refs.map((r) => r.shortName),
+          commit.refs.map((r) => refTypeFromGroup(r.refGroup)),
+        ),
+        row: displayRow,
+        cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH / 2 - minX + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
+        cy: (displayRow * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
+        size: DOT_SIZE,
+        colorClass: flowColorClass(
+          asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
+        ),
+      };
+    });
   }
   return (svgRender.value?.nodes ?? []).map((node) => ({
     sha: node.sha,
@@ -1299,17 +1360,31 @@ function refBadgeClass(refType?: string): string {
 
             <!-- 行层：每行 grid 5 列，第一列是 graph 占位让背景 SVG 透出
                  v2.47：用 .git-graph-rows 容器包住，flex: 1 + width: handleLeft + 内容列 -->
-            <div class="git-graph-rows">
+            <div
+              class="git-graph-rows"
+              :style="{
+                '--git-graph-row-count': maxRowPlusOne,
+                '--git-graph-row-height': ROW_H + 'px',
+              }"
+            >
             <template v-for="r in allRows" :key="`row-${r.row}`">
+              <!-- v2.63 GitHub parser 修复：ASCII 路径的 allRows 已经按 displayRow 0..N-1
+                   排好（edge 行已被压扁跳过），grid-template-rows = commit 数（不再有
+                   "看不见的 30px 空行"被插入到 commit 行间）。
+                   v-if="r.commit" 现在只是结构性兜底（理论 allRows 里 commit 永远非空），
+                   保留以应对未来 parser 变化。-->
               <div
+                v-if="r.commit"
                 class="commit-row"
                 :class="{
-                  'commit-row--relation': !r.commit,
                   'commit-row--clickable': r.commit,
                   'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
                   'commit-row--ascii': useAsciiGraph,
                 }"
-                :style="{ height: ROW_H + 'px' }"
+                :style="{
+                  height: ROW_H + 'px',
+                  gridRow: r.row + 1,
+                }"
                 :role="r.commit ? 'button' : undefined"
                 :tabindex="r.commit ? 0 : undefined"
                 :aria-expanded="r.commit ? expandedSha === r.commit.sha : undefined"
@@ -1916,6 +1991,11 @@ function refBadgeClass(refType?: string): string {
   flex: 1 1 auto;
   min-width: 0;
   overflow: visible;
+  /* v2.62：配合 commit-row grid-row 定位 —— 容器用 grid 布局，
+     grid-template-rows 按 maxRow 数量声明 ROW_H 高，commit row 容器 grid-row 精确指定，
+     edge 行（无 commit）由 grid 自动保留 ROW_H 高度的视觉占位（不渲染透明容器）。 */
+  display: grid;
+  grid-template-rows: repeat(var(--git-graph-row-count, 0), var(--git-graph-row-height, 30px));
 }
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
@@ -2244,7 +2324,11 @@ function refBadgeClass(refType?: string): string {
       border: 1px solid var(--color-divider);
       border-radius: var(--radius-card, 8px);
       box-shadow: var(--shadow-sm);
-      max-height: 260px;
+      /* v2.64：max-height 260 → 600，让 4:6 双栏 panel 完整显示。
+         旧 260px 只够装 header + commit message title，4:6 双栏（message body + files）
+         被 overflow: hidden 截断（用户报告"手风琴展开失败"——实际是内容截断）。
+         4:6 panel 内部 .cd-panel__left/right 各自有 overflow-y: auto，超出仍可滚。 */
+      max-height: 600px;
       /* v2.12：panel 内部 grid 4:6 各自滚，accordion 本身隐藏外层滚动避免双滚动条 */
       overflow: hidden;
       /* 滚动条样式：兜底滚动时使用（理论上不会触发） */

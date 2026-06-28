@@ -103,3 +103,62 @@ export function flowToPathD(flow: Flow): string {
   }
   return parts.join(' ');
 }
+
+// ============================================================
+// flowToPathDCompact —— display row 压缩版
+// ============================================================
+
+/**
+ * 把一个 flow 的所有 commit 用紧凑 path 表示（用于 ASCII 字符流的 edge row
+ * 已被压缩到 displayRow 的场景）。
+ *
+ * 背景：
+ *   - parseLines 输出的 commit.row 是 ASCII 字符流行号（多 PR 场景下不连续：
+ *     row 0/2/3/5/7/8/10 这种，中间有 edge row）
+ *   - 如果直接拿 ASCII row 渲染 commit-row 容器 + 跟 svgHeight 同步，会在两个
+ *     commit 之间出现"看不见的 30px 空行"（edge row 占据 grid 单元格）
+ *   - 修复方案：把 commit 排成连续 displayRow 0..N-1，grid 容器跟 commit 数对齐
+ *     → 这里就需要 path d 也在 displayRow 坐标系里绘制
+ *
+ * 算法（与 VSCode Git Graph 一致）：
+ *   1. 把 flow.commits 按 row 升序
+ *   2. 用 rowRemap 查每个 commit 的 displayRow
+ *   3. 顺序连点：相邻 commit 同 lane → 垂直线 / 不同 lane → 直线
+ *   4. 末尾追加 ROW_HEIGHT 竖线让线条穿过最后一个 commit 的 row
+ *
+ * 与原 flowToPathD 的差别：
+ *   - 原版逐字形绘制，edge row（|, /, \, _ 等）每个都产生独立 d 段
+ *   - 压缩版只看 commit，edge 几何被两个相邻 commit 的 (column, displayRow) 隐式表达
+ *   - 视觉上仍然是 SourceTree 风格：分叉 / 合并用 commit 之间的直线表达
+ */
+export function flowToPathDCompact(
+  flow: Flow,
+  rowRemap: Map<number, number>,
+): string {
+  const commits = flow.commits
+    .filter((c) => rowRemap.has(c.row))
+    .sort((a, b) => a.row - b.row);
+  if (commits.length < 1) return '';
+
+  // 收集每个 commit 的绝对位置
+  const pts = commits.map((c) => {
+    const displayRow = rowRemap.get(c.row)!;
+    return {
+      x: c.column * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD,
+      y: displayRow * ROW_HEIGHT,
+    };
+  });
+
+  const parts: string[] = [];
+  // 起点：第一个 commit 的左上角
+  parts.push(`M ${pts[0]!.x} ${pts[0]!.y}`);
+  // 依次连到每个后续 commit（用 L 即可，同 lane 时 L 等价 v 都能渲染）
+  for (let i = 1; i < pts.length; i++) {
+    parts.push(`L ${pts[i]!.x} ${pts[i]!.y}`);
+  }
+  // 末尾追加 ROW_HEIGHT 竖线，让线条穿过最后一个 commit 的 row
+  // （与原版 glyphToPathD 的 * / | 行为一致：每个 commit 都有 30px 高度的线段覆盖）
+  parts.push(`v ${ROW_HEIGHT}`);
+
+  return parts.join(' ');
+}
