@@ -773,6 +773,10 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   align-items: center;
   gap: 4px;
   padding: 2px 6px;
+  /* v2.54：显式重置 line-height —— button 默认 line-height 加上 svg 文本基线对齐
+     会让 User 图标被挤到容器顶部（icon 上方出现空隙）。统一 line-height: 1
+     + svg vertical-align: middle 解决垂直对齐问题。 */
+  line-height: 1;
   border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
@@ -786,6 +790,11 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
     background var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease);
+}
+.statusbar__account-trigger :deep(svg) {
+  /* v2.54：svg 显式 vertical-align: middle，避免与文本基线对齐导致 icon 顶部空隙 */
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 .statusbar__account-trigger span {
   overflow: hidden;
@@ -846,6 +855,12 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   justify-content: center;
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
+  /* v2.54：line-height: 1 + svg vertical-align: middle 避免 icon 被推到顶部 */
+  line-height: 1;
+}
+.statusbar__account-info-avatar--placeholder :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 .statusbar__account-info-main {
   flex: 1;
@@ -933,6 +948,12 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   justify-content: center;
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
+  /* v2.54：line-height: 1 + svg vertical-align: middle 避免 icon 被推到顶部 */
+  line-height: 1;
+}
+.statusbar__account-row-avatar--placeholder :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 .statusbar__account-row-main {
   flex: 1;
