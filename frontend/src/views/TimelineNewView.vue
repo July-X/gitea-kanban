@@ -732,15 +732,20 @@ function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string
 const dotNodes = computed<DotOverlayNode[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
     // 圆点 overlay 是 HTML 绝对定位 px，必须与 SVG viewBox 映射后的像素坐标对齐。
-    // SVG viewBox 的 minX = graph.minColumn * COL_WIDTH + FLOW_LEFT_PAD（见 models.ts svgViewBox v2.42），
-    // 线条经 viewBox 映射后整体左移 minX*SCALE。圆点若用绝对 px (col*CW+CW)*SCALE
+    // SVG viewBox 的 minX = graph.minColumn * COL_WIDTH（见 models.ts svgViewBox v2.42），
+    // 线条经 viewBox 映射后整体左移 minX*SCALE。圆点若用绝对 px (col*CW+CW/2)*SCALE
     // 不减 minX，会恒定偏右 minX*SCALE（minColumn 几乎总是 1 → 偏右 10px），
     // 表现为"圆点偏右、线条偏左"。这里减去 minX 对齐。
     // v2.42：+FLOW_LEFT_PAD 让 ASCII flow 1 (column 0) 圆心距 commit list 左 9px（圆缘 5px），
     //   之前圆心 4.5px，圆缘 0.5px 贴边。viewBox x 和 dot cx 同步偏移保持对齐。
+    // v2.46：dot cx 从 lane 右缘 (col*CW + CW) 改成 lane 中线 (col*CW + CW/2)，
+    //   与 structured 路径 laneX() + node.cx() 公式完全对齐：
+    //   - path d x = col*CW + CW/2 + FLOW_LEFT_PAD（lane 0 = 9px）
+    //   - dot cx = col*CW + CW/2 + FLOW_LEFT_PAD - minX（lane 0 minX=0 时 = 9px）
+    //   → dot 与 line 完美重合 ✓，与 structured 路径也一致 ✓。
     const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
-    // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW-minX+FLOW_LEFT_PAD)*SCALE，
-    // 圆点 size = lane 间距（10px），圆点视觉上落在 lane 右缘，跨 lane 边界（跟 Gitea 一致）。
+    // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW/2-minX+FLOW_LEFT_PAD)*SCALE，
+    // 圆点 size = 8px（DOT_SIZE），圆点视觉上落在 lane 中线（与 Gitea path + structured 路径一致）。
     return asciiGraph.value.commits.map((commit) => ({
       sha: commit.sha,
       subject: commit.subject,
@@ -750,7 +755,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
         commit.refs.map((r) => refTypeFromGroup(r.refGroup)),
       ),
       row: commit.row,
-      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH - minX + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
+      cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH / 2 - minX + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
       cy: (commit.row * ASCII_ROW_HEIGHT + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
       size: DOT_SIZE,
       colorClass: flowColorClass(

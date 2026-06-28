@@ -25,8 +25,24 @@ export { type GitRef };
 // 尺寸常量（可调整）
 // ============================================================
 
-/** SVG 单位列宽（unit），控制 flow lane 之间的间距 */
-export const COL_WIDTH = 5;
+/** SVG 单位列宽（unit），控制 flow lane 之间的间距
+ *
+ * v2.46：5 → 10，与 structured 路径 LANE_WIDTH=10 对齐
+ *   —— 之前 GitHub 仓库用 ASCII 路径 5px/lane、Gitea 仓库用 structured 路径 10px/lane，
+ *      切换平台时 lane 视觉密度明显不一致（5px 看起来"挤"，10px 看起来"宽松"）。
+ *   现在两边统一 10px/lane，跨平台视觉一致。
+ *
+ *   ⚠️ 同步影响 svg.ts（所有 path d x 坐标 ×2）+ TimelineNewView.vue 的 dot cx + svgWidth
+ *   全部从 5 翻 10。viewBox 同步翻倍（容器自动 stretch）。
+ *   ROW_HEIGHT=30 不变，所以 / \ 斜线斜率从 30/10=3.0 变 30/20=1.5（更平），这是为了
+ *   配合 SourceTree 风格 (structured 路径) 的视觉，ASCII 路径的字符流语义不再保留。
+ *
+ *   ⚠️ 此改动只影响 ASCII 路径（git --graph 字符流渲染）。
+ *   structured 路径用 structured.ts 自己的 LANE_WIDTH=10，与本常量无关。
+ *   - svgWidth = graphWidth * 10 + 10（与 Gitea SVG 容器一致）
+ *   - 之前是 5（lane 5px），改 10 后 ASCII git-graph 整体更接近 structured 视觉
+ */
+export const COL_WIDTH = 10;
 
 /** SVG 单位行高（unit）
  *  v2.45：19 → 30px，让 ASCII 路径 commit-row 容器与 Gitea 路径完全统一
@@ -194,7 +210,7 @@ export function graphHeight(g: Graph): number {
  * v2.42：viewBox.x 保持 0-based (minColumn*COL_WIDTH)，**不偏移**。
  *   SVG 内部坐标系起点与 body 左边一致（minColumn=0 时起点=0）。
  *   FLOW_LEFT_PAD 偏移由 path 内部坐标 + dot cx 同步加 4 来实现（保持 path 和 dot 在同一绝对 px 坐标系）。
- *   这样不需要 viewBox 偏移，path 和 dot 计算公式完全一致：column*COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD。*/
+ *   path 和 dot 计算公式完全一致：column*COL_WIDTH + COL_WIDTH/2 + FLOW_LEFT_PAD（中线）。*/
 export function svgViewBox(g: Graph): string {
   const x = g.minColumn * COL_WIDTH;
   const y = g.minRow * ROW_HEIGHT;

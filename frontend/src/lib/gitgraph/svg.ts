@@ -1,24 +1,28 @@
 /**
- * Git Graph SVG path 生成 —— 1:1 对齐 Gitea templates/repo/graph/svgcontainer.tmpl
+ * Git Graph SVG path 生成 —— 对齐 Gitea 路径（structured.ts）的 SourceTree 风格几何
  *
- * 坐标公式（列宽 COL_WIDTH unit / 行高 ROW_HEIGHT unit）：
- *   - '*' | '|'      → M (col*CW + CW) (row*RH + 0) v RH
- *                        垂直线，本 lane 右缘
- *   - '/'            → M ((col+1)*CW + CW) (row*RH + 0) l (-2*CW) RH
- *                        起点：右邻 lane (col+1) 右缘
- *                        终点：左邻 lane (col-1) 右缘
+ * v2.46：把 ASCII 路径从"复刻 Gitea git log --graph 字符流"(右缘对齐 5px/lane)
+ *        改成"对齐 structured 路径 LANE_WIDTH=10 中线对齐"——两侧视觉规则一致。
+ *
+ * 坐标公式（列宽 COL_WIDTH unit / 行高 ROW_HEIGHT unit，**lane 中线对齐**）：
+ *   - '*' | '|'      → M (col*CW + CW/2) (row*RH + 0) v RH
+ *                        垂直线，本 lane 中线
+ *   - '/'            → M ((col+1)*CW + CW/2) (row*RH + 0) l (-2*CW) RH
+ *                        起点：右邻 lane (col+1) 中线
+ *                        终点：左邻 lane (col-1) 中线
  *                        跨 2 lane（git log --graph 的 / 是合并线，从右上斜向左下）
- *   - '\\'           → M ((col-1)*CW + CW) (row*RH + 0) l (2*CW) RH
- *                        起点：左邻 lane (col-1) 右缘
- *                        终点：右邻 lane (col+1) 右缘
+ *   - '\\'           → M ((col-1)*CW + CW/2) (row*RH + 0) l (2*CW) RH
+ *                        起点：左邻 lane (col-1) 中线
+ *                        终点：右邻 lane (col+1) 中线
  *                        跨 2 lane（\ 是分叉线，从左上斜向右下）
- *   - '-' | '.'      → M (col*CW) (row*RH + RH) h CW
- *                        底部水平短线（左 → 右）
- *   - '_'            → M (col*CW) (row*RH + RH) h 2*CW
- *                        底部水平长线（左 → 右二格）
+ *   - '-' | '.'      → M (col*CW - CW/2) (row*RH + RH) h CW
+ *                        底部水平短线（lane 左缘 → 中线 → 右缘，1 个 lane 宽）
+ *   - '_'            → M (col*CW - CW/2) (row*RH + RH) h 2*CW
+ *                        底部水平长线（lane 左缘 → 中线 → 右缘 → 右邻中线，2 个 lane 宽）
  *
- * 这些公式直接复刻 Gitea svgcontainer.tmpl:5-16 的 {{template "shared/gitgraph/glyph"}}
- * 输出。
+ * 这些公式跟 structured.ts laneX(lane) = lane*LANE_WIDTH + LANE_WIDTH/2 + FLOW_LEFT_PAD
+ * 完全镜像（structured 路径 LANE_WIDTH 与本模块 COL_WIDTH 都是 10）。dot cx 也用中线公式，
+ * path d 与 dot 都在 lane 中线对齐（SourceTree 风格）。
  *
  * 关键前提：g.column 是 ASCII 字符流下标（lane 编号），不是 flowID。
  * 见 parser.ts addLineToGraph 的注释。
@@ -35,50 +39,44 @@ import { COL_WIDTH, FLOW_LEFT_PAD, ROW_HEIGHT } from './models.js';
 // ============================================================
 
 /** 单字形 → path d 段字符串
+ *
  * v2.42：所有 path 内部 x 坐标 +FLOW_LEFT_PAD（与 dot cx 公式一致）。
- *   之前 path x = column*COL_WIDTH + COL_WIDTH（column 0 → 5px），
- *   viewBox.x = minColumn*COL_WIDTH + FLOW_LEFT_PAD（0+4=4），path 渲染位置 = 4 + (5-4) = 1px。
- *   dot cx = column*COL_WIDTH + COL_WIDTH - minX + FLOW_LEFT_PAD = 9px。
- *   → path (1px) 和 dot (9px) 错位 3px（用户反馈"dot 调了 flow 线没同步"）。
- *   现在 viewBox.x 改回 minColumn*COL_WIDTH（不偏移），path 内部 +FLOW_LEFT_PAD，
- *   path 渲染位置 = 0 + (column*5+5+4 - 0) = column*5+9，
- *   与 dot cx 完全一致 ✓。*/
+ * v2.46：把 path x 从"lane 右缘 (col*CW + CW)"改成"lane 中线 (col*CW + CW/2)"，
+ *        与 structured 路径 laneX() 公式对齐（structured LANE_WIDTH=10 → 中线 lane*10+5）。
+ *   viewBox.x = minColumn * COL_WIDTH（不偏移），path 内部 +FLOW_LEFT_PAD + COL_WIDTH/2，
+ *   path 渲染位置 = (column*10 + 5 + 4 - minColumn*10) = (column-minColumn)*10 + 9，
+ *   与 dot cx (column*10 + 5 - minX + 4) = (column-minColumn)*10 + 9 完全一致 ✓。*/
 export function glyphToPathD(g: Glyph): string {
-  const x = g.column * COL_WIDTH + FLOW_LEFT_PAD;
+  const xCenter = g.column * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD;
   const y = g.row * ROW_HEIGHT;
   switch (g.glyph) {
     case '*':
     case '|':
-      // 垂直线 v ROW_HEIGHT（本列右缘）
-      return `M ${x + COL_WIDTH} ${y} v ${ROW_HEIGHT}`;
+      // 垂直线 v ROW_HEIGHT（本列中线）
+      return `M ${xCenter} ${y} v ${ROW_HEIGHT}`;
     case '/': {
-      // / 从右邻 lane (col+1) 右缘斜向左下到左邻 lane (col-1) 右缘（跨 2 lane）
+      // / 从右邻 lane (col+1) 中线斜向左下到左邻 lane (col-1) 中线（跨 2 lane）
       //
-      // 修复"多 MR 仓库 graph 大量断线"：
-      // v1 用 g.parentColumn（parser 传入的 flowID）算跨距，但密集 merge 区
-      //   parentColumn 可能指向已死 flow（compactColumns 无法修正）→ 斜线端点错位 → 断线。
-      // v2 简化为"跨 1 lane (column±1)"，但 git log --graph 的 / 实际跨 2 lane，
-      //   起点 / 终点与垂直线 | 错位 1 lane，仍有大量断线。
-      // v3 对齐 Gitea svgcontainer.tmpl 几何：跨 2 lane (column-1 ↔ column+1)，
-      //   起点 ((col+1)*CW + CW) 与上一行 | 终点 (col*CW + CW) 相差 1 lane，
-      //   但 * 在 col+1 的右缘 = (col+1)*CW + CW，所以 / 起点正好接 * 在 col+1 行的底部。
-      const sx = (g.column + 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
-      const ex = (g.column - 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
+      // 跨 2 lane 几何：起点 ((col+1)*CW + CW/2)，终点 ((col-1)*CW + CW/2)，
+      // 横向距离 = (col+1 - (col-1)) * CW = 2*CW，纵向 ROW_HEIGHT，斜率 = RH/(2*CW) = 30/20 = 1.5
+      // (v2.46 前 CW=5 时斜率 30/10=3.0，更陡)。
+      const sx = (g.column + 1) * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD;
+      const ex = (g.column - 1) * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD;
       return `M ${sx} ${y} l ${ex - sx} ${ROW_HEIGHT}`;
     }
     case '\\': {
-      // \ 从左邻 lane (col-1) 右缘斜向右下到右邻 lane (col+1) 右缘（跨 2 lane）
-      const sx = (g.column - 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
-      const ex = (g.column + 1) * COL_WIDTH + COL_WIDTH + FLOW_LEFT_PAD;
+      // \ 从左邻 lane (col-1) 中线斜向右下到右邻 lane (col+1) 中线（跨 2 lane）
+      const sx = (g.column - 1) * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD;
+      const ex = (g.column + 1) * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD;
       return `M ${sx} ${y} l ${ex - sx} ${ROW_HEIGHT}`;
     }
     case '-':
     case '.':
-      // 底部水平短线
-      return `M ${x} ${y + ROW_HEIGHT} h ${COL_WIDTH}`;
+      // 底部水平短线（从本 lane 左缘 → 右缘，长 1 个 lane = CW）
+      return `M ${xCenter - COL_WIDTH / 2} ${y + ROW_HEIGHT} h ${COL_WIDTH}`;
     case '_':
-      // 底部水平长线
-      return `M ${x} ${y + ROW_HEIGHT} h ${2 * COL_WIDTH}`;
+      // 底部水平长线（从本 lane 左缘 → 右邻 lane 中线，长 2 个 lane = 2*CW）
+      return `M ${xCenter - COL_WIDTH / 2} ${y + ROW_HEIGHT} h ${2 * COL_WIDTH}`;
     default:
       return '';
   }

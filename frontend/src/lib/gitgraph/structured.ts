@@ -258,10 +258,15 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
   }
 
   // ===== 2. 生成 nodes → SVG circles =====
+  // v2.46：dot cx 加 +FLOW_LEFT_PAD 与 path d x (laneX) 对齐——
+  //   之前 cx = lane*CW + CW/2 (lane 0 = 5px)，path d x = lane*CW + CW/2 + FLOW_LEFT_PAD (lane 0 = 9px)，
+  //   dot 与 line 错位 4px（用户可能没注意到，因为 dot 直径 8px 覆盖 line 半边）。
+  //   现在 cx 加 +FLOW_LEFT_PAD = 4，dot 中心与 line 完美重合（lane 0 = 9px），
+  //   与 ASCII 路径 dot cx 公式完全一致，跨平台视觉统一。
   for (const node of graph.nodes) {
     const colorHex = LANE_COLORS[node.color] ?? LANE_COLORS[0];
     nodes.push({
-      cx: node.lane * LANE_WIDTH + LANE_WIDTH / 2,
+      cx: node.lane * LANE_WIDTH + LANE_WIDTH / 2 + FLOW_LEFT_PAD,
       cy: node.row * ROW_HEIGHT + ROW_HEIGHT / 2,
       r: NODE_RADIUS,
       sha: node.sha,

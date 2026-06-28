@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  FLOW_LEFT_PAD,
   LANE_WIDTH,
   MERGE_STAGGER,
   ROW_HEIGHT,
@@ -34,7 +35,8 @@ test('向右分叉时先斜出再沿目标 lane 下行', () => {
   };
 
   const result = renderGraph(graph);
-  assert.equal(result.paths[0]?.d, 'M 5 13 L 15 26 L 15 39');
+  // v2.46：path d x = lane*LANE_WIDTH + LANE_WIDTH/2 + FLOW_LEFT_PAD（lane 0 = 9, lane 1 = 19）
+  assert.equal(result.paths[0]?.d, 'M 9 15 L 19 30 L 19 45');
 });
 
 test('向左回收时先沿当前 lane 下行再斜回主干', () => {
@@ -46,7 +48,7 @@ test('向左回收时先沿当前 lane 下行再斜回主干', () => {
   };
 
   const result = renderGraph(graph);
-  assert.equal(result.paths[0]?.d, 'M 15 39 L 15 78 L 5 91');
+  assert.equal(result.paths[0]?.d, 'M 19 45 L 19 90 L 9 105');
 });
 
 test('同 lane 被外来 flow 复用时在外来节点前截断', () => {
@@ -58,7 +60,7 @@ test('同 lane 被外来 flow 复用时在外来节点前截断', () => {
   };
 
   const result = renderGraph(graph);
-  assert.equal(result.paths[0]?.d, 'M 5 13 L 5 26');
+  assert.equal(result.paths[0]?.d, 'M 9 15 L 9 30');
 });
 
 test('尺寸基于 lane/row 常量稳定输出', () => {
@@ -70,7 +72,8 @@ test('尺寸基于 lane/row 常量稳定输出', () => {
   };
 
   const result = renderGraph(graph);
-  assert.equal(result.width, 3 * LANE_WIDTH);
+  // v2.46：width = (maxRenderLane + 1) * LANE_WIDTH + LANE_WIDTH + FLOW_LEFT_PAD
+  assert.equal(result.width, 3 * LANE_WIDTH + FLOW_LEFT_PAD);
   assert.equal(result.height, 3 * ROW_HEIGHT);
 });
 
@@ -93,10 +96,15 @@ test('多条分支回收到同一 parent 时按层级错开拐点，避免线条
   const inner = result.paths.find((path) => path.colorIndex === 1);
   const outer = result.paths.find((path) => path.colorIndex === 2);
 
-  assert.equal(inner?.d, 'M 15 39 L 15 68 L 5 91');
-  assert.equal(outer?.d, `M 25 39 L 25 ${78} L 5 91`);
+  // v2.46：path d x = lane*LANE_WIDTH + LANE_WIDTH/2 + FLOW_LEFT_PAD（lane 0 = 9, lane 1 = 19, lane 2 = 29）
+  // v2.40：ROW_HEIGHT 26 → 30（rowCenter(row)=row*30+15, rowTop(row)=row*30）
+  // mergeRank logic：edge1 (colorIndex=1, fromLane=1) rank=0, edge2 (colorIndex=2, fromLane=2) rank=1
+  //   inner: desiredOffset = (2-0-1)*10 = 10, branchY = 90 - min(10, max(0,90-60)) = 80
+  //   outer: desiredOffset = (2-1-1)*10 = 0, branchY = 90 - 0 = 90
+  assert.equal(inner?.d, 'M 19 45 L 19 80 L 9 105');
+  assert.equal(outer?.d, `M 29 45 L 29 ${90} L 9 105`);
   assert.notEqual(inner?.d, outer?.d);
-  assert.equal(78 - 68, MERGE_STAGGER);
+  assert.equal(90 - 80, MERGE_STAGGER);
 });
 
 test('path 输出顺序保持 edge 原始顺序，避免按颜色 regroup 后覆盖主干', () => {
@@ -121,10 +129,10 @@ test('path 输出顺序保持 edge 原始顺序，避免按颜色 regroup 后覆
   assert.deepEqual(
     result.paths.map((path) => [path.order, path.colorIndex, path.d]),
     [
-      [0, 0, 'M 5 13 L 5 39'],
-      [1, 1, 'M 5 13 L 15 26 L 15 39'],
-      [2, 0, 'M 5 39 L 5 65'],
-      [3, 1, 'M 15 39 L 15 52 L 5 65'],
+      [0, 0, 'M 9 15 L 9 45'],
+      [1, 1, 'M 9 15 L 19 30 L 19 45'],
+      [2, 0, 'M 9 45 L 9 75'],
+      [3, 1, 'M 19 45 L 19 60 L 9 75'],
     ],
   );
 });
@@ -164,11 +172,11 @@ test('merge 回其他分支后，目标分支 flow 前后半段保持同色 path
   assert.deepEqual(
     branchFlowPaths.map((path) => path.d),
     [
-      'M 15 39 L 15 65',
-      'M 15 65 L 15 117',
-      'M 15 65 L 25 78 L 25 91',
-      'M 15 117 L 15 169',
-      'M 15 169 L 15 208 L 5 221',
+      'M 19 45 L 19 75',
+      'M 19 75 L 19 135',
+      'M 19 75 L 29 90 L 29 105',
+      'M 19 135 L 19 195',
+      'M 19 195 L 19 240 L 9 255',
     ],
   );
 });
@@ -196,5 +204,6 @@ test('merge commit 指向被合入分支的长斜线使用 parent flow 颜色', 
   const result = renderGraph(graph);
   const longBranch = result.paths.find((path) => path.order === 1);
   assert.equal(longBranch?.colorIndex, 1);
-  assert.equal(longBranch?.d, 'M 5 13 L 15 26 L 15 247');
+  // v2.46：path d x 加 +FLOW_LEFT_PAD = 4，y 已 v2.40 ROW_HEIGHT 26→30 更新
+  assert.equal(longBranch?.d, 'M 9 15 L 19 30 L 19 285');
 });
