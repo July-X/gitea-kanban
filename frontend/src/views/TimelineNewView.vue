@@ -1911,16 +1911,8 @@ function refBadgeClass(refType?: string): string {
 /* v2.47：rows 容器（包住所有 commit-row + accordion，flex 右子项）
  *   - flex: 1 占据剩余空间（跟 bg 容器并排）
  *   - min-width: 0 允许内容收缩（默认 flex item 不会收缩到 min-content 以下）
- *   - overflow: visible 让手风琴展开时自然延伸（手风琴自身 max-width 兜底）
- * v2.61：display: flex + flex-direction: column 显式声明
- *   - 历史问题：GitHub ASCII 模式下 commit-row 行间距有视觉异常（用户报告 2026-06-28 19:00）
- *   - 根因诊断：rows 容器之前没显式声明 display，子元素 commit-row 是 block 但没有
- *     明确的 column flow 约束，浏览器在某些情况下可能不按预期垂直堆叠
- *   - 修复：显式 display: flex + flex-direction: column，让 commit-row 严格按列垂直排列
- *   - 防御性：future-proof，如果有人把 .commit-row 改回 display: block 也能正确工作 */
+ *   - overflow: visible 让手风琴展开时自然延伸（手风琴自身 max-width 兜底）*/
 .git-graph-rows {
-  display: flex;
-  flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   overflow: visible;
