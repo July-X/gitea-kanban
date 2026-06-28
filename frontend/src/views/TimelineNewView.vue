@@ -1099,11 +1099,11 @@ const gridTemplateColumns = computed(() => {
 /** 表格最小宽度（v2.47：脱钩 svgWidth）
  * 之前 = handleLeft + 内容列宽 + svgWidth → 200 lane 时 2014 + 840 = 2854px，撑爆视口
  * 现在只跟 handleLeft + 内容列固定宽（4 个内容列 + 12px 边距），跟 lane 数完全脱钩。
- * 多 lane 的水平滚动交给 SVG 内部（.git-graph-bg 的横向 overflow），不影响 commit 文字布局。 */
+ * 多 lane 的水平滚动交给 SVG 内部（.git-graph-bg 的横向 overflow），不影响 commit 文字布局。
+ * v2.48：desc 用 1fr 占满剩余空间，最小宽度基于 MIN_CONTENT_COL_WIDTH 而非 w.desc。 */
 const tableMinWidth = computed(() => {
   const w = colWidths.value;
-  // v2.47：+ 12px padding-right + 1px border-right 兼容
-  return handleLeft.value + w.desc + w.author + w.date + w.sha + 12;
+  return handleLeft.value + MIN_CONTENT_COL_WIDTH + w.author + w.date + w.sha + 12;
 });
 
 /** 列分隔手柄 mousedown */
@@ -1185,14 +1185,16 @@ let colDragHandles: [HTMLElement | null, HTMLElement | null, HTMLElement | null]
 /** 拖拽开始时的 handleLeft 快照（避免在 mousemove 中读响应式 handleLeft.value） */
 let colDragHandleLeft = 0;
 
-/** 把 widths 序列化成 CSS grid-template-columns 字符串（与 gridTemplateColumns computed 一致）
+/** 把 widths 序列化成 CSS grid-template-columns 字符串
  *
- * v2.x：desc 列用 `minmax(MIN_CONTENT_COL_WIDTH, auto)` —— col 缩到内容宽度，
- * 后面不留空白（旧 `minmax(480, 1fr)` 强制最小 480 时 col 2 右侧会有大块空白）。
- * 拖拽 desc 列宽仍能撑大 col 2（用户拖到 600 → minmax(60, 600) = 600 撑大）。
- * MIN_CONTENT_COL_WIDTH (60) 保证 col 2 不会缩到 0（subject 看不见）。 */
+ * v2.48：desc 列用 `minmax(MIN_CONTENT_COL_WIDTH, 1fr)` —— 占满剩余屏宽，
+ * 让表格显示饱满（用户诉求：“描述”列尽可能占用多的屏宽）。
+ * 旧版 `minmax(60, 480px)` 把 desc 锁在最大 480px，右侧出现大量空白。
+ * author/date/sha 仍用固定 px（用户拖拽这些列分隔手柄时改变它们的宽度）。
+ * desc 字段（colWidths.desc）只在拖拽期间的固定 grid 里用（colWidthsToFixedGridTemplate），
+ * 非拖拽态用 1fr 占满，所以持久化的 desc 值不影响正常显示宽度。 */
 function colWidthsToGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
-  return `minmax(${MIN_CONTENT_COL_WIDTH}px, ${w.desc}px) ${w.author}px ${w.date}px ${w.sha}px`;
+  return `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) ${w.author}px ${w.date}px ${w.sha}px`;
 }
 
 function colWidthsToFixedGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
