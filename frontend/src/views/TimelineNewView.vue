@@ -2249,19 +2249,14 @@ function refBadgeClass(refType?: string): string {
       /* 让内部 panel 能用 height: 100% 撑满手风琴（v2.12 双栏 4:6 必需） */
       display: flex;
       flex-direction: column;
-      /* v1.9 + v2.0 手风琴宽度语义 —— 锁定为 4 列内容总宽：
-   - 左边用 margin-left 推到 graph 列右边（不侵入 graph SVG）
-   - width = calc(100% - graph-col-width - 4px) 让总宽 = 4 列总宽
-   - margin-right 必须为 0，否则 width 会让手风琴再缩 12px（实测少 4px）
-   - 上下 margin 4px 让手风琴跟展开 row + 下方 row 视觉呼吸（v2.14 设计）
-   - v2.0 加 min-width: 0 —— 默认 min-width: auto 会让 accordion 拒绝收缩到
-     比内容自然宽度小，导致 panel 内超长内容（如长 file path / 长 commit message
-     的 <pre>）反向把 commit-row 和 wrapper 撑大。min-width:0 强制收缩 + overflow:hidden
-     让长内容被裁剪或走 panel 内部横向滚动。*/
+      /* v2.51：手风琴现在在 .git-graph-rows 内部（rows 是 flex item，已经从 bg 容器右边开始），
+         自然对齐 desc 列左边缘 = 对齐 bg 容器右边缘。不再用 margin-left 推 130px（那是 v2.14
+         之前 .git-graph-list 在 wrapper 直接子元素时的旧规则，现在双重偏移会让手风琴左边
+         出现 130px 空白"未对齐最左侧"）。
+         宽度 = 100% 自动填满 rows 容器（=wrapper 宽 - bg 容器宽）。 */
       margin: 4px 0;
-      margin-left: calc(var(--git-graph-col-width, 130px) + 4px);
-      width: calc(100% - var(--git-graph-col-width, 130px) - 4px);
-      max-width: calc(100% - var(--git-graph-col-width, 130px) - 4px);
+      width: 100%;
+      max-width: 100%;
       min-width: 0;
       flex-shrink: 0;
     }
