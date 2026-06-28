@@ -1422,7 +1422,7 @@ function refBadgeClass(refType?: string): string {
                       top: `${c.cy - c.size / 2}px`,
                       width: `${c.size}px`,
                       height: `${c.size}px`,
-                      backgroundColor: c.colorHex,
+                      ...(c.colorHex ? { backgroundColor: c.colorHex } : {}),
                     }"
                     :title="c.title"
                   />
@@ -2230,7 +2230,7 @@ function refBadgeClass(refType?: string): string {
  * - 与普通 commit 形成视觉层级，用户一眼能区分"我的 commit" vs "merge commit"
  * - 颜色取自 --color-text-tertiary（设计系统三级文字），比 --color-text-primary 略淡
  *   在 dark mode 下差异更明显，light mode 下也是合理的弱化 */
-.commit-row--merge .commit-row__subject,
+.commit-row--merge .commit-subject,
 .commit-row--merge .commit-row__col--desc {
   color: var(--color-text-tertiary, rgba(255, 255, 255, 0.55));
 }
