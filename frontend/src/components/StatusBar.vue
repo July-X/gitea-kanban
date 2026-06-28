@@ -413,6 +413,17 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   accountPickerOpen.value = false;
   try {
     await auth.switchAccount(account.id);
+    // 切账号后必须重新加载仓库列表（旧列表是旧账号的）+ 重新检查 clone 状态
+    // loadRepos 用 auth.accounts[0] 拉取，新账号已排第一会自动用新账号
+    await repo.loadRepos('', true);
+    await repo.refreshClonedStatus();
+    // 通知当前活动视图重新加载自身数据（Git Graph / 看板 / 合并请求等可能依赖旧账号上下文）
+    window.dispatchEvent(new CustomEvent('app:refresh'));
+    showToast({
+      type: 'success',
+      message: '已切换账号',
+      description: `当前账号：${account.userInfo?.login ?? account.username}`,
+    });
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     showToast({ type: 'error', message: '切换账号失败', description: err.messageText ?? err.message ?? '请稍后重试' });
@@ -732,6 +743,15 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 
 .statusbar__repo-count {
   font-feature-settings: 'tnum';
+  /* v2.53：保持单行显示——窗口窄时数字过长用 ellipsis 截断
+     （避免布局变动：N 个仓库 / N+M 个仓库 / Nx10 个仓库 都是不同宽度，
+     单行 + ellipsis 保证 StatusBar 布局稳定，"保持单行显示是基本要求"）。
+     flex-shrink: 0 保证不被 flex 压缩到不可见（完全消失），只会 ellipsis。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: 160px;
 }
 
 .statusbar__avatar {
