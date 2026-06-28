@@ -1485,57 +1485,65 @@ function refBadgeClass(refType?: string): string {
             <div class="git-graph-header__col git-graph-header__col--sha">SHA</div>
           </div>
 
-          <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row） -->
+          <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row）
+               v2.47：bg 容器宽度 = handleLeft（视觉上跟 commit-row 第一列同宽），
+               内部 .git-graph-bg-scroll 用 min-width: svgWidth 让 SVG 完整渲染，
+               bg 容器 overflow-x: hidden 裁剪掉超出 handleLeft 的部分 -->
           <div class="git-graph-body" :style="{ minHeight: svgHeight }">
-            <!-- 背景层：整张 SVG + 圆点 overlay 铺在 body 底层，commit-row 透明显示 -->
+            <!-- 背景层：视觉宽度 = handleLeft -->
             <div
               class="git-graph-bg"
               :style="{
-                width: svgWidth,
+                width: `${handleLeft}px`,
                 height: svgHeight,
               }"
             >
-              <svg
-                class="git-graph-svg"
-                :viewBox="viewBox"
-                :width="svgWidth"
-                :height="svgHeight"
-              >
-                <g
-                  v-for="pg in pathGroups"
-                  :key="`flow-${pg.colorIndex}`"
-                  class="flow-group"
-                  :class="pg.colorClass"
-                  :data-color="pg.colorIndex"
+              <!-- v2.47：bgScroll width = handleLeft (跟 bg 容器同宽,视觉上 130px)，
+                   但 bgScroll 内部 SVG 完整渲染 width: svgWidth (2014px) 超出色边界，
+                   bgScroll overflow-x: auto 出横向滚动条让用户滚动 SVG -->
+              <div class="git-graph-bg-scroll" :style="{ height: svgHeight }">
+                <svg
+                  class="git-graph-svg"
+                  :viewBox="viewBox"
+                  :width="svgWidth"
+                  :height="svgHeight"
                 >
-                  <path
-                    v-if="pg.d"
-                    :d="pg.d"
-                    v-bind="pg.colorHex ? { stroke: pg.colorHex } : {}"
-                    stroke-width="2"
-                    fill="none"
-                    stroke-linecap="round"
-                    vector-effect="non-scaling-stroke"
-                  />
-                </g>
-              </svg>
+                  <g
+                    v-for="pg in pathGroups"
+                    :key="`flow-${pg.colorIndex}`"
+                    class="flow-group"
+                    :class="pg.colorClass"
+                    :data-color="pg.colorIndex"
+                  >
+                    <path
+                      v-if="pg.d"
+                      :d="pg.d"
+                      v-bind="pg.colorHex ? { stroke: pg.colorHex } : {}"
+                      stroke-width="2"
+                      fill="none"
+                      stroke-linecap="round"
+                      vector-effect="non-scaling-stroke"
+                    />
+                  </g>
+                </svg>
 
-              <!-- 圆点 overlay：固定大小 = lane 间距 -->
-              <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
-                <div
-                  v-for="c in dotNodes"
-                  :key="`dot-${c.sha}`"
-                  class="commit-dot"
-                  :class="[c.colorClass, { 'commit-dot--active': hoveredGraphRow === c.row }]"
-                  :style="{
-                    left: `${c.cx - c.size / 2}px`,
-                    top: `${c.cy - c.size / 2}px`,
-                    width: `${c.size}px`,
-                    height: `${c.size}px`,
-                    backgroundColor: c.colorHex,
-                  }"
-                  :title="c.title"
-                />
+                <!-- 圆点 overlay：固定大小 = lane 间距 -->
+                <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
+                  <div
+                    v-for="c in dotNodes"
+                    :key="`dot-${c.sha}`"
+                    class="commit-dot"
+                    :class="[c.colorClass, { 'commit-dot--active': hoveredGraphRow === c.row }]"
+                    :style="{
+                      left: `${c.cx - c.size / 2}px`,
+                      top: `${c.cy - c.size / 2}px`,
+                      width: `${c.size}px`,
+                      height: `${c.size}px`,
+                      backgroundColor: c.colorHex,
+                    }"
+                    :title="c.title"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1939,10 +1947,9 @@ function refBadgeClass(refType?: string): string {
  *
  * v2.47 改造 (GitHub 风格)：
  *   - 改 `position: absolute` → `position: sticky; top: 0; left: 0`
- *   - 加 `overflow-x: auto` 让多 lane (svgWidth > handleLeft) 时 SVG 自身横向滚动
- *   - 加 `overflow-y: hidden` 防止 commit-row 高度溢出
- *   - 加 `min-width: handleLeft` 保证背景层至少跟 commit-row 第一列同宽
- *   - 加 `flex-shrink: 0` 防止 flex 容器挤压 SVG
+ *   - 视觉宽度 = handleLeft（不再 = svgWidth，避免 200 lane 把 bg 容器撑成 2014px）
+ *   - 内部 .git-graph-bg-scroll 装 SVG + dots，min-width: svgWidth（让 SVG 完整渲染）
+ *   - overflow: hidden 真实裁剪 absolute 子元素（让 bgScroll 不超出 bg 容器视觉边界）
  *   - 配合 .git-graph-body 的 `display: flex` 让 commit-rows 容器和 bg 容器并列
  *     → 多 lane 时 bg 容器内部横向滚动，commit-rows 容器固定宽度（不再撑大 wrapper）*/
 .git-graph-bg {
@@ -1953,10 +1960,23 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
   content-visibility: auto;
   contain-intrinsic-size: auto 30px;
+  /* 用 overflow: clip 强制裁剪 absolute 子元素（overflow: hidden 对 absolute 子元素不生效） */
+  overflow: clip;
+  flex: 0 0 auto;
+}
+
+/* v2.47：bg 内部 scroll 容器（装 SVG + dots）
+ *   - position: absolute 让它脱离 bg 容器 flow，width 不影响 bg 容器宽度
+ *   - inline style 设 min-width = svgWidth（多 lane 时完整渲染 SVG）
+ *   - left: 0 锚定到 bg 左缘
+ *   - overflow-x: auto + bg overflow: hidden 配合，bg 容器外的部分裁剪掉，bgScroll 内部出滚动条
+ *   - 注意：不在 CSS 里写 min-width 让 inline 胜出（CSS min-width 会覆盖 inline） */
+.git-graph-bg-scroll {
+  position: absolute;
+  top: 0;
+  left: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  min-width: var(--git-graph-col-width, 130px);
-  flex-shrink: 0;
 }
 
 /* SVG 自身 */
