@@ -325,10 +325,14 @@ async function pickRepo(r: RepoDto): Promise<void> {
 }
 
 function onDocClick(e: MouseEvent): void {
-  if (!pickerOpen.value) return;
   const target = e.target as Node | null;
-  if (target && pickerEl.value && !pickerEl.value.contains(target)) {
+  // 仓库 picker：点外部关闭
+  if (pickerOpen.value && pickerEl.value && !pickerEl.value.contains(target)) {
     pickerOpen.value = false;
+  }
+  // 账号 picker：点外部关闭
+  if (accountPickerOpen.value && accountPickerEl.value && !accountPickerEl.value.contains(target)) {
+    accountPickerOpen.value = false;
   }
 }
 
@@ -380,6 +384,39 @@ async function onThemeCycleClick(): Promise<void> {
 const accountDialogOpen = ref(false);
 function onLogoutClick(): void {
   accountDialogOpen.value = true;
+}
+
+// ===== 账号 picker（仿仓库 picker 模式） =====
+// 点击用户名 → 弹出 popover：顶部显示当前账号详情 + 下方列表可切换其他账号
+// 如果只绑定了 1 个或 0 个账号 → trigger 不可点击（忽略）
+
+/** 是否有 2+ 个已绑定账号（picker 才可交互） */
+const hasMultipleAccounts = computed(() => auth.accounts.length > 1);
+/** picker 当前打开状态 */
+const accountPickerOpen = ref(false);
+/** picker 容器 DOM ref（onDocClick 关闭用） */
+const accountPickerEl = ref<HTMLElement | null>(null);
+
+/** 切换账号 picker 显隐（只绑定了 1 个或 0 个账号时忽略） */
+function toggleAccountPicker(): void {
+  if (!hasMultipleAccounts.value) return;
+  accountPickerOpen.value = !accountPickerOpen.value;
+}
+
+/** 选中其他账号 → 切换（后端会重排 accounts 让该账号排第一 + 刷新 currentUser） */
+async function pickAccount(account: (typeof auth.accounts)[number]): Promise<void> {
+  if (account.id === auth.accounts[0]?.id) {
+    // 点击的是当前账号 → 只关闭 picker，不重新切
+    accountPickerOpen.value = false;
+    return;
+  }
+  accountPickerOpen.value = false;
+  try {
+    await auth.switchAccount(account.id);
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    showToast({ type: 'error', message: '切换账号失败', description: err.messageText ?? err.message ?? '请稍后重试' });
+  }
 }
 </script>
 
@@ -523,16 +560,102 @@ function onLogoutClick(): void {
           <Package :size="12" :stroke-width="2" aria-hidden="true" />
           <span>共 {{ repo.repos.length }} 个</span>
         </span>
-        <span v-if="auth.currentUser" class="statusbar__user">
-          <img
-            v-if="auth.currentUser.avatarUrl"
-            :src="auth.currentUser.avatarUrl"
-            :alt="`${auth.currentUser.login} 头像`"
-            class="statusbar__avatar"
-          />
-          <User v-else :size="12" :stroke-width="2" aria-hidden="true" />
-          <span>{{ auth.currentUser.login }}</span>
-        </span>
+        <!-- v2.52：账号 picker —— 点击用户名弹出 popover（仿仓库 picker 风格）
+             顶部显示当前账号详情（avatar / login / platform / giteaUrl），
+             下方列表显示其他已绑定账号可切换。
+             只绑定了 1 个或 0 个账号 → trigger 不可点击（忽略）。 -->
+        <div
+          v-if="auth.currentUser"
+          ref="accountPickerEl"
+          class="statusbar__account-picker"
+          :class="{ 'statusbar__account-picker--open': accountPickerOpen }"
+        >
+          <button
+            type="button"
+            class="statusbar__account-trigger"
+            :class="{ 'statusbar__account-trigger--disabled': !hasMultipleAccounts }"
+            :title="hasMultipleAccounts ? `切换账号（当前：${auth.currentUser.login}）` : '只绑定了 1 个账号'"
+            :disabled="!hasMultipleAccounts"
+            @click="toggleAccountPicker"
+          >
+            <img
+              v-if="auth.currentUser.avatarUrl"
+              :src="auth.currentUser.avatarUrl"
+              :alt="`${auth.currentUser.login} 头像`"
+              class="statusbar__avatar"
+            />
+            <User v-else :size="12" :stroke-width="2" aria-hidden="true" />
+            <span>{{ auth.currentUser.login }}</span>
+            <ChevronDown
+              v-if="hasMultipleAccounts"
+              :size="12"
+              :stroke-width="2"
+              aria-hidden="true"
+            />
+          </button>
+
+          <div
+            v-if="accountPickerOpen && hasMultipleAccounts"
+            class="statusbar__account-dropdown"
+            role="dialog"
+            :aria-label="`账号管理（当前：${auth.currentUser.login}）`"
+          >
+            <!-- 顶部：当前账号详情（展开界面显示账号信息） -->
+            <div class="statusbar__account-info">
+              <img
+                v-if="auth.currentUser.avatarUrl"
+                :src="auth.currentUser.avatarUrl"
+                :alt="`${auth.currentUser.login} 头像`"
+                class="statusbar__account-info-avatar"
+              />
+              <div v-else class="statusbar__account-info-avatar statusbar__account-info-avatar--placeholder">
+                <User :size="20" :stroke-width="2" aria-hidden="true" />
+              </div>
+              <div class="statusbar__account-info-main">
+                <div class="statusbar__account-info-line1">
+                  <span class="statusbar__account-info-login">{{ auth.currentUser.login }}</span>
+                  <span class="statusbar__account-info-tag">当前</span>
+                </div>
+                <p class="statusbar__account-info-url">
+                  {{ auth.currentGiteaUrl || (auth.accounts[0]?.giteaUrl ?? '') }}
+                </p>
+              </div>
+            </div>
+
+            <!-- 列表分隔线 -->
+            <div v-if="auth.accounts.length > 1" class="statusbar__account-divider">
+              <span>切换到其他账号</span>
+            </div>
+
+            <!-- 其他账号列表（点击切换） -->
+            <ul class="statusbar__account-list">
+              <li
+                v-for="acc in auth.accounts.filter((a) => a.id !== auth.accounts[0]?.id)"
+                :key="acc.id"
+                class="statusbar__account-row"
+                :title="`切换到 ${acc.userInfo?.login ?? acc.username}@${acc.giteaUrl}`"
+                @click="pickAccount(acc)"
+              >
+                <img
+                  v-if="acc.userInfo?.avatarUrl"
+                  :src="acc.userInfo.avatarUrl"
+                  :alt="`${acc.userInfo?.login ?? acc.username} 头像`"
+                  class="statusbar__account-row-avatar"
+                />
+                <div v-else class="statusbar__account-row-avatar statusbar__account-row-avatar--placeholder">
+                  <User :size="12" :stroke-width="2" aria-hidden="true" />
+                </div>
+                <div class="statusbar__account-row-main">
+                  <div class="statusbar__account-row-line1">
+                    <span class="statusbar__account-row-login">{{ acc.userInfo?.login ?? acc.username }}</span>
+                    <span v-if="(acc.platform ?? 'gitea') === 'github'" class="statusbar__account-row-tag">GitHub</span>
+                  </div>
+                  <p class="statusbar__account-row-url">{{ acc.giteaUrl }}</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
         <button
           v-if="auth.isConnected"
           type="button"
@@ -607,14 +730,6 @@ function onLogoutClick(): void {
   max-width: 240px;
 }
 
-.statusbar__user,
-.statusbar__repo-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-text-secondary);
-}
-
 .statusbar__repo-count {
   font-feature-settings: 'tnum';
 }
@@ -626,6 +741,221 @@ function onLogoutClick(): void {
   object-fit: cover;
   vertical-align: middle;
 }
+
+/* ===== v2.52 账号 picker（仿仓库 picker 风格） =====
+   - trigger：avatar + login + ChevronDown，hover 高亮，disabled 态（只 1 个账号）不可点
+   - dropdown：顶部当前账号详情 + 下方其他账号列表（点击切换） */
+.statusbar__account-picker {
+  position: relative;
+}
+.statusbar__account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  max-width: 220px;
+  min-width: 0;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.statusbar__account-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.statusbar__account-trigger:not(.statusbar__account-trigger--disabled):hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+.statusbar__account-picker--open .statusbar__account-trigger {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-primary) 50%, transparent);
+}
+.statusbar__account-trigger--disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.statusbar__account-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-nav);
+  overflow: hidden;
+}
+
+/* 顶部：当前账号详情卡（展开界面显示账号信息） */
+.statusbar__account-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: var(--color-primary-soft);
+  border-bottom: 1px solid var(--color-divider);
+}
+.statusbar__account-info-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.statusbar__account-info-avatar--placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+.statusbar__account-info-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.statusbar__account-info-line1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.statusbar__account-info-login {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statusbar__account-info-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  flex-shrink: 0;
+}
+.statusbar__account-info-url {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.statusbar__account-divider {
+  padding: 6px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+/* 下方：其他账号列表 */
+.statusbar__account-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-1);
+  list-style: none;
+  margin: 0;
+}
+.statusbar__account-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.statusbar__account-row + .statusbar__account-row {
+  margin-top: 2px;
+}
+.statusbar__account-row:hover {
+  background: var(--color-bg-hover);
+}
+.statusbar__account-row-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.statusbar__account-row-avatar--placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+.statusbar__account-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.statusbar__account-row-line1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.statusbar__account-row-login {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.statusbar__account-row-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(100, 116, 139, 0.12);
+  color: #64748b;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  flex-shrink: 0;
+}
+.statusbar__account-row-url {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+/* v2.52：删除旧 .statusbar__user 规则 —— 已被 .statusbar__account-picker 替代。
+   旧规则保留注释供 git blame 参考。 */
 
 .statusbar__action {
   display: inline-flex;
