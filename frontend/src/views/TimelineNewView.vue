@@ -1766,6 +1766,12 @@ function refBadgeClass(refType?: string): string {
   transition:
     box-shadow 0.12s ease,
     transform 0.12s ease;
+  /* v2.60：z-index 提高到 3 确保在 SVG path 之上（z-index: 0 默认）
+     修复：GitHub ASCII 模式下 dot 视觉反馈不明显（用户反馈 scale 1.5 修复无效），
+     实际上是因为 dot 可能被 SVG path 视觉遮挡。加上 z-index 让 dot 始终在 SVG 之上。 */
+  z-index: 3;
+  /* v2.60：transform-origin 显式 center（默认就是 center，但写明语义清晰） */
+  transform-origin: center center;
 }
 /* v2.42 + v2.57：hover 时只让 dot 变大（scale 1.25 → 1.5，8px → 12px），不再叠加绿色 box-shadow 外圈。
  * 之前 .commit-dot--active 有 3 重 box-shadow（3px shell-bg + 5px 绿色 + 14px glow），
