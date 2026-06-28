@@ -743,6 +743,11 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 
 .statusbar__repo-count {
   font-feature-settings: 'tnum';
+  /* v2.56：inline-flex + align-items: center 让 Package svg 与文本在同一行垂直居中
+     （之前是默认 inline，svg 走 baseline 对齐被推到容器顶部） */
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   /* v2.53：保持单行显示——窗口窄时数字过长用 ellipsis 截断
      （避免布局变动：N 个仓库 / N+M 个仓库 / Nx10 个仓库 都是不同宽度，
      单行 + ellipsis 保证 StatusBar 布局稳定，"保持单行显示是基本要求"）。
@@ -752,6 +757,13 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   text-overflow: ellipsis;
   flex-shrink: 0;
   max-width: 160px;
+  /* line-height: 1 让 svg baseline 不被行高推上去 */
+  line-height: 1;
+}
+/* v2.56：svg 显式 vertical-align: middle 防止 baseline 对齐推 icon 到顶部 */
+.statusbar__repo-count :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .statusbar__avatar {

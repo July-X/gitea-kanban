@@ -1031,6 +1031,17 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* v2.56：panel 变体下移除独立 background + border + border-radius —
+     手风琴已是 elevated 底色 + 边框 + 圆角的卡片（v2.11 视觉卡片化），
+     内部 .cd-files__list 再叠一层会显得"加了其他颜色"。
+     改为透明继承手风琴背景，仅保留 flex 布局 + 行间分隔线（border-bottom 在 .cd-file-row）。 */
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+/* v2.56：dialog 变体下保留独立的卡片样式（弹窗壳外层是 dialog 背景，
+   files__list 需要 border + background 才能跟周围内容区分） */
+.cd-panel--dialog .cd-files__list {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm, 6px);
   background: var(--color-bg);
