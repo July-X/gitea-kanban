@@ -1037,10 +1037,10 @@ function refTypeFromGroup(refGroup: string): string {
 
 /** 列宽状态：每个列的初始宽度（px） */
 const DEFAULT_COL_WIDTHS: { desc: number; author: number; date: number; sha: number } = {
-  desc: 480, // Description 列（refs + subject）
-  author: 160, // Author 列
+  desc: 480, // Description 列（refs + subject）—— v2.48 起用 1fr 占满剩余，此值仅拖拽临时态用
+  author: 180, // Author 列——v2.49：160→180，确保常见用户名 + avatar + padding 不被截断
   date: 120, // Date 列
-  sha: 80, // SHA 列
+  sha: 96, // SHA 列——v2.49：80→96，确保 7 位 shortSha + padding 不被截断
 };
 
 /** 列宽存储 key */
@@ -1052,11 +1052,14 @@ function loadColWidths(): typeof DEFAULT_COL_WIDTHS {
     const stored = localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
+      // v2.49：对每个列宽取 max(存储值, 默认值)，确保旧 localStorage 里的较小值
+      //（如 v2.48 之前的 author=160/sha=80）不会覆盖调大的新默认值。
+      // 用户拖拽后存的更大值仍保留。
       return {
         desc: typeof parsed.desc === 'number' ? parsed.desc : DEFAULT_COL_WIDTHS.desc,
-        author: typeof parsed.author === 'number' ? parsed.author : DEFAULT_COL_WIDTHS.author,
-        date: typeof parsed.date === 'number' ? parsed.date : DEFAULT_COL_WIDTHS.date,
-        sha: typeof parsed.sha === 'number' ? parsed.sha : DEFAULT_COL_WIDTHS.sha,
+        author: Math.max(parsed.author ?? DEFAULT_COL_WIDTHS.author, DEFAULT_COL_WIDTHS.author),
+        date: Math.max(parsed.date ?? DEFAULT_COL_WIDTHS.date, DEFAULT_COL_WIDTHS.date),
+        sha: Math.max(parsed.sha ?? DEFAULT_COL_WIDTHS.sha, DEFAULT_COL_WIDTHS.sha),
       };
     }
   } catch {
@@ -1189,14 +1192,12 @@ let colDragHandleLeft = 0;
  *
  * v2.48：desc 列用 `minmax(MIN_CONTENT_COL_WIDTH, 1fr)` —— 占满剩余屏宽，
  * 让表格显示饱满（用户诉求："描述"列尽可能占用多的屏宽）。
- * v2.49：author/date/sha 用 `minmax(w.xxx, auto)` —— 最小宽度 = 持久化值，
- * 内容更宽时自动撑开（用户诉求："后面3列显示全的前提下"）。
- * 旧版纯固定 px（160/120/80）+ padding 24px 会让长作者名/长 SHA 被截断。
- * minmax 的下限保证表头与行有稳定的对齐基准（不会因 auto 缩到比表头窄），
- * 上限 auto 让内容自适应撑开，永不截断。
- * 拖拽期间仍用 colWidthsToFixedGridTemplate（固定 px）保证精确像素控制。 */
+ * v2.49：author/date/sha 用固定 px —— 保证拖拽列分隔手柄时改变列宽能生效
+ * （minmax(w, auto) 下内容宽 > w 时列宽由 auto 主导，拖拽改 w 无效）。
+ * 默认宽度已调大确保常见内容不被截断（见 DEFAULT_COL_WIDTHS）。
+ * 拖拽期间用 colWidthsToFixedGridTemplate（同样固定 px）保证精确像素控制。 */
 function colWidthsToGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
-  return `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) minmax(${w.author}px, auto) minmax(${w.date}px, auto) minmax(${w.sha}px, auto)`;
+  return `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) ${w.author}px ${w.date}px ${w.sha}px`;
 }
 
 function colWidthsToFixedGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {

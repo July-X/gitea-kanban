@@ -140,6 +140,52 @@ fallback_commit_subject() {
   esac
 }
 
+subject_from_details() {
+  local TEXT TYPE LINE
+  TEXT="$(printf '%s' "$1" | tr -d '\r')"
+  TYPE="$(guess_commit_type)"
+
+  if printf '%s\n' "$TEXT" | grep -Eq '表头中文化'; then
+    printf '%s: 中文化 git-graph 表头' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'author/date/sha.*minmax|作者、日期、SHA.*遮挡|最后 3 列.*遮挡'; then
+    printf '%s: 放宽作者日期 SHA 列宽' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'minmax\(480px, 1fr\).*minmax\(60px|描述列.*内部.*空白'; then
+    printf '%s: 降低描述列最小宽度' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'desc 列.*1fr|描述列.*占用.*屏宽|占满剩余'; then
+    printf '%s: 让描述列占满剩余宽度' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq '移除.*graph.*占位|graph 占位列|130px 空白'; then
+    printf '%s: 移除提交行图形占位列' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'userHandleLeft|handleLeft.*svgWidth|持久化.*380'; then
+    printf '%s: 按 lane 数限制图形列宽' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq '放弃 flex|文字流|display: block'; then
+    printf '%s: 改用文字流展示提交描述' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'margin-left: auto|紧跟 subject|紧跟提交'; then
+    printf '%s: 让分支标记紧跟提交标题' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'commit-subject.*commit-refs.*之前|subject.*贴左'; then
+    printf '%s: 让提交标题优先左对齐' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'accounts\[0\]|projectId.*Platform|按 platform 分流'; then
+    printf '%s: 按项目平台选择同步入口' "$TYPE"
+  elif printf '%s\n' "$TEXT" | grep -Eq 'COL_WIDTH.*10|lane 间距|FLOW_LEFT_PAD|中线对齐'; then
+    printf '%s: 统一 GitHub 与 Gitea 图谱间距' "$TYPE"
+  else
+    LINE="$(printf '%s\n' "$TEXT" |
+      awk '
+        /^(问题|根因|验证|统计|变更文件|总结|修复完成|本轮修复总结)/ { next }
+        /^\*\*(问题|根因|验证|修复|效果)/ { next }
+        /^(修复|调整|统一|新增|移除|去掉|限制|放宽|改用|让)/ {
+          gsub(/^[-*0-9.[:space:]]+/, "")
+          gsub(/[`*_（）()]/, "")
+          print
+          exit
+        }
+      ' |
+      sed -E 's/[：:].*$//; s/[。；;].*$//' | trim_text)"
+    if [ -n "$LINE" ]; then
+      printf '%s: %s' "$TYPE" "$LINE" | cut -c 1-72
+    fi
+  fi
+}
+
 # ---------- 阶段函数：失败立即停止 ----------
 stage_format() {
   log "阶段 1/4：格式化 (gofmt)"
@@ -336,6 +382,10 @@ make_commit_message() {
 
   if [ -n "$ASSISTANT_TEXT" ]; then
     SUBJECT="$(normalize_commit_subject "$ASSISTANT_TEXT" || true)"
+  fi
+
+  if [ -z "$SUBJECT" ] && [ -n "$ASSISTANT_TEXT" ]; then
+    SUBJECT="$(subject_from_details "$ASSISTANT_TEXT" || true)"
   fi
 
   if [ -z "$SUBJECT" ]; then
