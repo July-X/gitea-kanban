@@ -11,10 +11,11 @@
  */
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { X, User, LogOut, UserPlus, Check } from 'lucide-vue-next';
+import { X, User, UserPlus, Check } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { showToast } from '@renderer/lib/toast';
+import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 import {
   GITHUB_CLI_INSTALL_LABEL,
   GITHUB_CLI_INSTALL_URL,
@@ -30,63 +31,39 @@ const auth = useAuthStore();
 const repo = useRepoStore();
 const router = useRouter();
 
-// ===== 切换账号 =====
-async function onSwitch(account: GiteaAccountDto): Promise<void> {
-  try {
-    await auth.switchAccount(account.id);
-    // 切换后重载数据
-    repo.repos.length = 0;
-    repo.selectProject(null);
-    void repo.persistLastSelected(null, null, '');
-    await repo.loadRepos('', true);
-    showToast({
-      type: 'success',
-      message: '已切换账号',
-      description: account.platform === 'github'
-        ? 'GitHub 仓库会使用 gh 快速加载提交记录'
-        : undefined,
-    });
-    close();
-  } catch (e) {
-    const err = e as { messageText?: string };
-    showToast({ type: 'error', message: '切换失败', description: err.messageText ?? '' });
-  }
-}
-
 // ===== 移除单个账号 =====
-async function onRemove(account: GiteaAccountDto): Promise<void> {
+// v2.58：移除账号时二次确认（防误触）+ 同步清理该账号对应的仓库信息
+const confirmTarget = ref<GiteaAccountDto | null>(null);
+/** 打开二次确认弹窗（每次点击"移除"时调用） */
+function askRemove(account: GiteaAccountDto): void {
+  confirmTarget.value = account;
+}
+/** 二次确认弹窗 → 用户点确认 → 执行移除 */
+async function confirmRemove(): Promise<void> {
+  const account = confirmTarget.value;
+  if (!account) return;
+  confirmTarget.value = null;
   try {
     await auth.disconnectOne(account.giteaUrl, account.username);
     showToast({ type: 'success', message: `已移除 ${account.username}` });
-    // 如果移除的是当前账号，重载状态
-    if (auth.accounts.length === 0) {
+    // v2.58：移除任意账号都同步清理该账号对应的仓库信息（不仅是当前账号）
+    // - 当前账号被移除：清空所有仓库 + 清空 last-selected 持久化 + 跳 /auth
+    // - 其他账号被移除：loadRepos 重新拉取（后端按 accounts[0] 拉），过滤掉已删账号的仓库
+    const wasCurrent = account.id === auth.accounts[0]?.id;
+    if (wasCurrent) {
+      // 当前账号被移除 → 重置仓库 + 选区 + 持久化
       repo.repos.length = 0;
       repo.selectProject(null);
       void repo.persistLastSelected(null, null, '');
       await router.push('/auth');
       close();
+    } else {
+      // 非当前账号被移除 → 重新拉当前账号的仓库列表（后端按 accounts[0] 过滤）
+      await repo.loadRepos('', true);
     }
   } catch (e) {
     const err = e as { messageText?: string };
     showToast({ type: 'error', message: '移除失败', description: err.messageText ?? '' });
-  }
-}
-
-// ===== 退出并移除当前账号 =====
-async function onLogoutAndRemove(): Promise<void> {
-  const current = auth.accounts[0];
-  if (!current) return;
-  try {
-    await auth.disconnectOne(current.giteaUrl, current.username);
-    repo.repos.length = 0;
-    repo.selectProject(null);
-    void repo.persistLastSelected(null, null, '');
-    showToast({ type: 'success', message: '已退出并移除当前账号' });
-    await router.push('/auth');
-    close();
-  } catch (e) {
-    const err = e as { messageText?: string };
-    showToast({ type: 'error', message: '退出失败', description: err.messageText ?? '' });
   }
 }
 
@@ -181,19 +158,13 @@ function isCurrent(account: GiteaAccountDto): boolean {
               </div>
             </div>
             <div class="am-account__actions">
-              <button
-                v-if="!isCurrent(account)"
-                type="button"
-                class="am-btn am-btn--ghost"
-                @click="onSwitch(account)"
-              >
-                切换
-              </button>
+              <!-- v2.57：移除"切换"按钮 —— StatusBar 已加账号 picker。
+                   v2.58：移除前先 askRemove → ConfirmDialog 二次确认。 -->
               <button
                 type="button"
                 class="am-btn am-btn--ghost am-btn--danger"
                 :title="isCurrent(account) ? '退出并移除此账号' : '从历史中移除'"
-                @click="onRemove(account)"
+                @click="askRemove(account)"
               >
                 移除
               </button>
@@ -204,17 +175,9 @@ function isCurrent(account: GiteaAccountDto): boolean {
           </div>
         </div>
 
-        <!-- 底部操作 -->
+        <!-- 底部操作（v2.58：删除"退出并移除当前账号"按钮 —— 账号列表里当前账号行的"移除"
+             按钮已承担该功能，且二次确认更安全。footer 只保留"添加新账号"入口） -->
         <div class="am-footer">
-          <button
-            v-if="auth.isConnected"
-            type="button"
-            class="am-btn am-btn--danger-outline"
-            @click="onLogoutAndRemove"
-          >
-            <LogOut :size="14" />
-            退出并移除当前账号
-          </button>
           <button
             type="button"
             class="am-btn am-btn--primary"
@@ -319,6 +282,24 @@ function isCurrent(account: GiteaAccountDto): boolean {
         </div>
       </div>
     </div>
+
+    <!-- v2.58：移除账号二次确认弹窗（防误触，AGENTS §8.2 + OVERRIDE §本项目 #2 二次确认） -->
+    <ConfirmDialog
+      :open="confirmTarget !== null"
+      :title="confirmTarget ? `移除账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}` : '移除账号'"
+      :description="confirmTarget
+        ? (isCurrent(confirmTarget)
+          ? `将退出当前账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}，并从 keychain 删除令牌、清空仓库列表。\n\n（同步清除本账号对应的仓库信息：仓库列表、当前选中仓库、最近使用记录）`
+          : `将从历史中移除账号 ${confirmTarget.userInfo?.login ?? confirmTarget.username}@${confirmTarget.giteaUrl}。\n\n（当前账号不变，仍可正常加载该账号的仓库）`)
+        : ''"
+      confirm-label="移除"
+      cancel-label="再想想"
+      :danger="true"
+      :confirm-keyword="confirmTarget ? (confirmTarget.userInfo?.login ?? confirmTarget.username) : ''"
+      @update:open="(v) => { if (!v) confirmTarget = null }"
+      @confirm="confirmRemove"
+      @cancel="confirmTarget = null"
+    />
   </Teleport>
 </template>
 
