@@ -143,8 +143,11 @@ const hoveredGraphRow = ref<number | null>(null);
  * expanded row 之后的 commit 视觉 y 坐标 = displayRow*ROW_H + expansionHeight
  * （VSCode 行为：lane 直线自动拉伸延伸覆盖展开行） */
 const expandedHeight = ref(0);
-/** 监听手风琴 DOM 元素的实际高度（max-height 600px，content-driven） */
+/** 监听手风琴 DOM 元素的实际高度（max-height 600px，content-driven）
+ *  ponytail: rAF 节流 + 值不变不写回，避免 observer 喂回自己触发
+ *  "ResizeObserver loop completed with undelivered notifications" */
 let accordionResizeObserver: ResizeObserver | null = null;
+let accordionResizeRaf = 0;
 function bindAccordionObserver(el: HTMLElement | null) {
   if (accordionResizeObserver) {
     accordionResizeObserver.disconnect();
@@ -155,15 +158,20 @@ function bindAccordionObserver(el: HTMLElement | null) {
     return;
   }
   accordionResizeObserver = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      const h = entry.contentRect.height;
-      // 加上 4px margin-top + 4px margin-bottom（CSS 上有 margin: 4px 0）
-      expandedHeight.value = h + 8;
-    }
+    if (accordionResizeRaf) return; // ponytail: 已在下一帧排好，丢掉本轮
+    accordionResizeRaf = requestAnimationFrame(() => {
+      accordionResizeRaf = 0;
+      for (const entry of entries) {
+        const h = entry.contentRect.height + 8; // 4px margin-top + 4px margin-bottom
+        if (expandedHeight.value !== h) expandedHeight.value = h;
+      }
+    });
   });
   accordionResizeObserver.observe(el);
 }
 onUnmounted(() => {
+  if (accordionResizeRaf) cancelAnimationFrame(accordionResizeRaf);
+  accordionResizeRaf = 0;
   if (accordionResizeObserver) {
     accordionResizeObserver.disconnect();
     accordionResizeObserver = null;
