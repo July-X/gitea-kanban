@@ -244,9 +244,7 @@ export function layoutVscodeGraph(
     .sort((a, b) => a.row - b.row);
   if (commits.length === 0) return { nodes: new Map(), paths: [], laneCount: 0 };
 
-  const bySha = new Map(commits.map((c) => [c.sha, c]));
   const nodeBySha = new Map<string, VscodeGraphNode>();
-  const edges: Array<{ from: GitGraphCommit; to: GitGraphCommit; colorNumber: number }> = [];
   let maxLane = 0;
 
   for (const commit of commits) {
@@ -258,52 +256,17 @@ export function layoutVscodeGraph(
       lane,
       colorNumber,
     });
-
-    const visibleParents = commit.parents.filter((parentSha) => bySha.has(parentSha));
-    visibleParents.forEach((parentSha, parentIndex) => {
-      const parent = bySha.get(parentSha)!;
-      const edgeColor = parentIndex === 0 ? colorNumber : (graph.flows.get(parent.flowId)?.colorNumber ?? parent.column);
-      edges.push({ from: commit, to: parent, colorNumber: edgeColor });
-    });
-
     maxLane = Math.max(maxLane, lane);
   }
 
-  const displayTop = (displayRow: number) =>
-    displayRow * ROW_HEIGHT + (rowOffsets?.get(displayRow) ?? 0);
-  const point = (commit: GitGraphCommit) => {
-    const node = nodeBySha.get(commit.sha)!;
-    return {
-      x: node.lane * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD,
-      y: displayTop(node.row) + ROW_HEIGHT / 2,
-    };
-  };
-  const colorOf = (commit: GitGraphCommit) => nodeBySha.get(commit.sha)?.colorNumber ?? 0;
-  const edgePath = (from: GitGraphCommit, to: GitGraphCommit) => {
-    const a = point(from);
-    const b = point(to);
-    if (a.x === b.x) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
-
-    const dir = b.y > a.y ? 1 : -1;
-    const turnY = a.y + dir * ROW_HEIGHT / 2;
-    const ease = ROW_HEIGHT / 3;
-    return `M ${a.x} ${a.y} C ${a.x} ${a.y + dir * ease}, ${b.x} ${turnY - dir * ease}, ${b.x} ${turnY} L ${b.x} ${b.y}`;
-  };
-
   const paths: CompactGraphPath[] = [];
-  for (const commit of commits) {
-    const p = point(commit);
+  for (const flow of [...graph.flows.values()].sort((a, b) => a.id - b.id)) {
+    const d = flowToPathDCompact(flow, rowRemap, { rowOffsets });
+    if (!d) continue;
     paths.push({
-      id: `${commit.sha}-spine`,
-      colorNumber: colorOf(commit),
-      d: `M ${p.x} ${p.y - ROW_HEIGHT / 2} L ${p.x} ${p.y + ROW_HEIGHT / 2}`,
-    });
-  }
-  for (const edge of edges) {
-    paths.push({
-      id: `${edge.from.sha}-${edge.to.sha}`,
-      colorNumber: edge.colorNumber,
-      d: edgePath(edge.from, edge.to),
+      id: `flow-${flow.id}`,
+      colorNumber: flow.colorNumber,
+      d,
     });
   }
 
