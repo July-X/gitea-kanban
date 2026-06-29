@@ -1748,6 +1748,9 @@ function refBadgeClass(refType?: string): string {
   padding: 0 var(--space-3, 12px);
   overflow: hidden;
   text-overflow: ellipsis;
+  /* v2.66：border-box 让 padding 计入 grid track，表头列宽 = 180/120/80，
+   * 与 commit-row 列宽一致（表头 / 行 hover 背景完美对齐） */
+  box-sizing: border-box;
   white-space: nowrap;
   /* v2.26：表头中文居中显示（与 SourceTree / VSCode Git Graph 风格一致） */
   text-align: center;
@@ -2317,6 +2320,10 @@ function refBadgeClass(refType?: string): string {
   gap: var(--space-2, 8px);
   min-width: 0;
   overflow: hidden;
+  /* v2.66：border-box 让 padding/border 计入 grid track，hover 背景宽度 = 列宽
+   * 旧 content-box 下 12px padding 溢出 track，author/date/sha 实际可见宽度
+   * 跟 grid-template-columns 写的 180/120/80 对不上，三列 hover 高亮宽度不一致。*/
+  box-sizing: border-box;
   /* v2.31 revert：恢复 v2.27 行为——内容列有自身背景，遮住下方背景层 SVG/圆点（commit-row 整行透明） */
   background: var(--color-shell-main-bg);
 }
