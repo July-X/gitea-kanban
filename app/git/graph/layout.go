@@ -64,6 +64,10 @@ type GraphNode struct {
 	// 分支/tag badge，无需额外 API 调用。
 	Refs     []string
 	RefTypes []git.RefType // v2.8：与 Refs 一一对应的 ref 类型（branch / remoteBranch / tag）
+	// IsCurrent 是否 HEAD 节点 (vscode Vertex.draw 画成空心 stroke-only)
+	IsCurrent bool
+	// IsStash 是否 stash 节点 (vscode Vertex.draw 画成 r=4.5 外圈 + r=2 内圈)
+	IsStash bool
 }
 
 // GraphEdge 图中的一条连线

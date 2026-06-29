@@ -36,6 +36,14 @@ export interface GraphNodeDto {
    * "branch" / "remoteBranch" / "tag"
    */
   refTypes?: string[];
+  /**
+   * 是否 HEAD 节点 (vscode Vertex.draw 画成空心 circle: fill=bg, stroke=color)
+   */
+  isCurrent?: boolean;
+  /**
+   * 是否 stash 节点 (vscode Vertex.draw 画成 r=4.5 外圈 + r=2 内圈)
+   */
+  isStash?: boolean;
 }
 
 /** 边类型 */

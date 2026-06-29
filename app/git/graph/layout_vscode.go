@@ -434,6 +434,7 @@ func (g *graphVscode) buildResult() *GraphResult {
 	nodes := make([]GraphNode, len(g.sorted))
 	for i := range g.sorted {
 		c := &g.sorted[i]
+		v := g.vertices[i]
 		nodes[i] = GraphNode{
 			Row:         i,
 			Lane:        commitLane[i],
@@ -448,6 +449,8 @@ func (g *graphVscode) buildResult() *GraphResult {
 			Parents:     append([]string(nil), c.Parents...),
 			Refs:        append([]string(nil), c.Refs...),
 			RefTypes:    append([]git.RefType(nil), c.RefTypes...),
+			IsCurrent:   v.isCurrent,
+			IsStash:     v.isStash,
 		}
 	}
 

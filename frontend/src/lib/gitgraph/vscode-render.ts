@@ -314,7 +314,7 @@ export function renderGraphVscode(
 		nodes.push({
 			cx,
 			cy,
-			r: VSCODE_VERTEX_RADIUS,
+			r: node.isStash ? VSCODE_VERTEX_RADIUS + 0.5 : VSCODE_VERTEX_RADIUS,
 			sha: node.sha,
 			shortSha: node.shortSha,
 			subject: node.subject,
@@ -327,6 +327,8 @@ export function renderGraphVscode(
 			refs: node.refs,
 			refTypes: node.refTypes,
 			colorHex,
+			isCurrent: node.isCurrent,
+			isStash: node.isStash,
 		});
 	}
 

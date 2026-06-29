@@ -867,6 +867,8 @@ interface DotOverlayNode {
   size: number;
   colorHex?: string;
   colorClass?: string;
+  isCurrent?: boolean;
+  isStash?: boolean;
 }
 
 function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string {
@@ -907,6 +909,8 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     cy: node.cy,
     size: DOT_SIZE,
     colorHex: node.colorHex,
+    isCurrent: node.isCurrent,
+    isStash: node.isStash,
   }));
 });
 
@@ -1401,13 +1405,19 @@ function refBadgeClass(refType?: string): string {
                     v-for="c in dotNodes"
                     :key="`dot-${c.sha}`"
                     class="commit-dot"
-                    :class="[c.colorClass, { 'commit-dot--active': hoveredGraphRow === c.row }]"
+                    :class="[
+                      c.colorClass,
+                      { 'commit-dot--active': hoveredGraphRow === c.row },
+                      { 'commit-dot--head': c.isCurrent },
+                      { 'commit-dot--stash': c.isStash },
+                    ]"
                     :style="{
                       left: `${c.cx - c.size / 2}px`,
                       top: `${c.cy - c.size / 2}px`,
                       width: `${c.size}px`,
                       height: `${c.size}px`,
-                      ...(c.colorHex ? { backgroundColor: c.colorHex } : {}),
+                      ...(c.colorHex && !c.isCurrent ? { backgroundColor: c.colorHex } : {}),
+                      ...(c.colorHex && c.isCurrent ? { borderColor: c.colorHex } : {}),
                     }"
                     :title="c.title"
                   />
