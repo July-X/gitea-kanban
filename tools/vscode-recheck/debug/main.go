@@ -243,7 +243,13 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 		simplified := []placedT{}
 		for _, seg := range placed {
 			last := len(simplified) - 1
-			if last >= 0 && simplified[last].p2x == seg.p1x && simplified[last].p2y == seg.p1y && simplified[last].p2x == seg.p2x {
+			// vscode Branch.draw:106-116: 只合并"同列 + 首尾相接"的垂直线
+			// (跨 lane 的 line 即使 p1 接 p2 也不合并, 因为贝塞尔曲线需要独立)
+			if last >= 0 &&
+				simplified[last].p1x == simplified[last].p2x &&
+				simplified[last].p2x == seg.p1x &&
+				simplified[last].p2y == seg.p1y &&
+				seg.p1x == seg.p2x {
 				simplified[last].p2y = seg.p2y
 			} else {
 				simplified = append(simplified, seg)
