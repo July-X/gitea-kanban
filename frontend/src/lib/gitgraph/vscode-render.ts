@@ -26,10 +26,11 @@
 import type { GraphNodeDto, GraphResultDto } from './structured.js';
 
 // vscode 默认 grid 配置 (对齐 graph.ts GraphConfig 默认值)
+// vscode-git-graph config.ts:278 默认值
 export const VSCODE_GRID_X = 16;
 export const VSCODE_GRID_Y = 24;
-export const VSCODE_OFFSET_X = 4;
-export const VSCODE_OFFSET_Y = 4;
+export const VSCODE_OFFSET_X = 16;
+export const VSCODE_OFFSET_Y = 12;
 export const VSCODE_VERTEX_RADIUS = 4;
 export const VSCODE_EXPAND_Y = 250; // vscode config.ts:278 expandY 默认值
 
@@ -354,10 +355,14 @@ export function renderGraphVscode(
 
 	// ===== 5. 尺寸 =====
 	// vscode Graph.getContentWidth: 2*offsetX + (maxX-1)*gridX
-	// vscode Graph.getHeight: vertices.length * gridY + offsetY - gridY/2
+	// vscode Graph.getHeight (graph.ts:476): vertices.length * gridY + offsetY - gridY/2 + (expandAt ? expandY : 0)
 	const maxLane = graph.maxLane;
 	const width = 2 * VSCODE_OFFSET_X + maxLane * VSCODE_GRID_X + VSCODE_GRID_X;
-	const height = graph.nodes.length * VSCODE_GRID_Y + VSCODE_OFFSET_Y + (expandedAt !== null ? VSCODE_EXPAND_Y : 0);
+	const height =
+		graph.nodes.length * VSCODE_GRID_Y +
+		VSCODE_OFFSET_Y -
+		VSCODE_GRID_Y / 2 +
+		(expandedAt !== null ? VSCODE_EXPAND_Y : 0);
 
 	return { paths, nodes, width, height, style };
 }

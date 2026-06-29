@@ -83,7 +83,7 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		// 从 (0,0) 到 (1,0), 像素 = (4, 4) → (4, 28)
-		// path d: M 4 4 L 4 28
+		// path d: M 16 12 L 16 36
 		// shadow + line = 2 entries (vscode Branch.drawPath 画 2 遍)
 		assert.equal(r.paths.length, 2);
 		// shadow first, line second
@@ -91,8 +91,8 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		assert.equal(r.paths[1]?.kind, 'line');
 		assert.equal(r.paths[0]?.d, r.paths[1]?.d, 'shadow / line d 必须相同');
 		const d = r.paths[0]?.d ?? '';
-		assert.ok(d.includes('M 4 4'), `path 应以 M 4 4 开头, 实际: ${d}`);
-		assert.ok(d.includes('L 4 28'), `path 应包含 L 4 28, 实际: ${d}`);
+		assert.ok(d.includes('M 16 12'), `path 应以 M 16 12 开头, 实际: ${d}`);
+		assert.ok(d.includes('L 16 36'), `path 应包含 L 16 36, 实际: ${d}`);
 	});
 
 	test('跨 lane 转场用 C 贝塞尔 (rounded 风格)', () => {
@@ -108,10 +108,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		//   p1 = (4, 4), p2 = (20, 28)
 		//   控制点 1: (4, 4+19.2) = (4, 23.2)
 		//   控制点 2: (20, 28-19.2) = (20, 8.8)
-		//   path: M 4 4.0 C 4 23.2 20 8.8 20 28.0
-		assert.ok(d.startsWith('M 4 4'), `path 应以 M 4 4 开头, 实际: ${d}`);
-		assert.ok(d.includes('C 4 23.2'), `path 应包含 C 4 23.2 (控制点 1), 实际: ${d}`);
-		assert.ok(d.includes('20 8.8'), `path 应包含 20 8.8 (控制点 2), 实际: ${d}`);
+		//   path: M 16 12.0 C 16 31.2 32 16.8 32 36.0
+		assert.ok(d.startsWith('M 16 12'), `path 应以 M 16 12 开头, 实际: ${d}`);
+		assert.ok(d.includes('C 16 31.2'), `path 应包含 C 16 31.2 (控制点 1), 实际: ${d}`);
+		assert.ok(d.includes('32 16.8'), `path 应包含 32 16.8 (控制点 2), 实际: ${d}`);
 	});
 
 	test('angular 风格:跨 lane 用 L 折线,38% 拐点', () => {
@@ -128,9 +128,9 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		//   dy = GRID_Y * 0.38 = 9.12
 		//   lockedFirst = true (p1.x < p2.x)
 		//   midX = x2 = 20, midY = y2 - 9.12 = 18.88
-		//   path: M 4 4.0 L 20 18.9 L 20 28.0
-		assert.ok(d.includes('L 20 18.9'), `angular 拐点应在中点 18.9, 实际: ${d}`);
-		assert.ok(d.includes('L 20 28'), `angular 终点 28, 实际: ${d}`);
+		//   path: M 16 12.0 L 32 26.9 L 32 36.0
+		assert.ok(d.includes('L 32 26.9'), `angular 拐点应在中点 18.9, 实际: ${d}`);
+		assert.ok(d.includes('L 32 36'), `angular 终点 28, 实际: ${d}`);
 		// 必须不包含 C
 		assert.ok(!d.includes('C '), `angular 不应有 C 命令, 实际: ${d}`);
 	});
@@ -179,7 +179,7 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		};
 		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
-		const expectedHeight = 3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
+		const expectedHeight = 3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2;
 		assert.equal(r.height, expectedHeight);
 	});
 
@@ -192,10 +192,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph, { expandedAt: 0 });
 		// 展开 row 0 后, row 1 的 y 加 EXPAND_Y (250, vscode config.ts:278)
-		// 节点 b 的 cy = 1*24 + 4 + 250 = 278
+		// 节点 b 的 cy = 1*24 + 12 + 250 = 286
 		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250);
-		// path 终点 = 28 + 250 = 278
+		// path 终点 = 36 + 250 = 286
 		const d = r.paths[0]?.d ?? '';
-		assert.ok(d.includes('L 4 278'), `展开后 path 终点应为 278, 实际: ${d}`);
+		assert.ok(d.includes('L 16 286'), `展开后 path 终点应为 286, 实际: ${d}`);
 	});
 });
