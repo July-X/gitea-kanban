@@ -21,12 +21,20 @@ import (
 )
 
 const (
+	// 对齐 vscode-git-graph src/config.ts:278
+	// grid.x=16, grid.y=24, offsetX=16, offsetY=12, expandY=250
 	GRID_X        = 16
 	GRID_Y        = 24
-	OFFSET_X      = 4
-	OFFSET_Y      = 4
+	OFFSET_X      = 16
+	OFFSET_Y      = 12
 	VERTEX_RADIUS = 4
-	EXPAND_Y      = 120
+	EXPAND_Y      = 250
+
+	// 跨 lane 贝塞尔控制点 y 偏移
+	// vscode 默认 GRID_Y * 0.8 = 19.2 让曲线拉得"很缓",但跟真实仓里
+	// dot-to-dot 紧凑过渡不符 (dot 圆心之间只有 24px 高度,曲线应紧凑)
+	// 设为 6px ≈ dot 半径,让弯折在 row1 底→row2 顶 的小空间内完成
+	CURVE_CONTROL_DY = 6
 )
 
 // 对齐 vscode-git-graph web/graph.ts config.colours 默认 12 色
@@ -212,8 +220,8 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 				simplified = append(simplified, seg)
 			}
 		}
-		// 3) 拼 path d (1:1 复刻 Branch.draw: rounded 风格贝塞尔 C)
-		curve := GRID_Y * 0.8
+		// 3) 拼 path d: 跨 lane 过渡采用 "dot-to-dot 紧凑 S 形" (3 段 L 命令)
+		// 见下方 x1 != x2 分支注释
 		cur := ""
 		for i, seg := range simplified {
 			x1, y1, x2, y2 := seg.p1x, seg.p1y, seg.p2x, seg.p2y
@@ -223,7 +231,14 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 			if x1 == x2 {
 				cur += fmt.Sprintf(" L %.0f %.1f", x2, y2)
 			} else {
-				cur += fmt.Sprintf(" C %.0f %.1f %.0f %.1f %.0f %.1f", x1, y1+curve, x2, y2-curve, x2, y2)
+				// dot-to-dot 紧凑 S 形过渡: 在 row1 底→row2 顶 的小空间内完成
+				// (vscode 原版 C 贝塞尔 d=0.8*GRID_Y=19.2 拉得太缓, 跟"dot 之间紧凑过渡"不符)
+				// 策略: dot 中心 (x1,y1) → row1 底部 midY1 沿 x 走到 x2 → 垂直降到 row2 顶部 midY2 → 沿 x 到 (x2,y2)
+				dy := CURVE_CONTROL_DY
+				midY1 := y1 + GRID_Y/2 - dy
+				midY2 := y2 - GRID_Y/2 + dy
+				cur += fmt.Sprintf(" L %.0f %.1f L %.0f %.1f L %.0f %.1f",
+					x1, midY1, x2, midY1, x2, midY2)
 			}
 		}
 		if cur != "" {
