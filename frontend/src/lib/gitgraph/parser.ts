@@ -44,7 +44,6 @@ import {
   newGraph,
   newFlow,
   RELATION_COMMIT_ID,
-  compactColumns,
   type Flow,
   type GitGraphCommit,
   type Glyph,
@@ -527,7 +526,7 @@ export function addLineToGraph(
 
     // 对角线的另一端列号（\ 从 parent 分叉，/ 合并到 parent）
     // 注：svg.ts 渲染斜线时改用 Gitea 几何（跨 2 lane），用 column±1 算起点终点；
-    //     parentColumn 保留供 compactColumns / 调试参考（不影响渲染）。
+    //     parentColumn 保留供调试参考（不影响渲染）。
     let parentColumn: number | undefined;
     if (glyph === '\\' && columnIdx > 0) {
       parentColumn = columnIdx - 1; // \ 起点在 ASCII lane columnIdx-1 的右缘
@@ -683,9 +682,6 @@ export function parseLines(
   for (const flow of graph.flows.values()) {
     flow.glyphs.sort((a, b) => a.row - b.row || a.column - b.column);
   }
-
-  // 列压缩：复用已死 flow 的列号，让 active flows 尽量左靠
-  compactColumns(graph);
 
   // commits 按 row 升序（与 Gitea 一致）
   graph.commits.sort((a, b) => a.row - b.row);

@@ -44,12 +44,9 @@ export { type GitRef };
  */
 export const COL_WIDTH = 10;
 
-/** SVG 单位行高（unit）
- *  v2.45：19 → 30px，让 ASCII 路径 commit-row 容器与 Gitea 路径完全统一
- *    （font 14px × line-height 1.571 ≈ 22px line-box, row 30px - 22px = 8px 上下气口，
- *     与 Gitea 路径的 8px 间距完全一致 —— 解决 ASCII 路径密集 commit 时行间距 < 8px 的问题）。
- *  v2.43：16 → 19px（中间值，已废弃）。
- *  v2.41：12 → 16px（GitHub 平台 commit-row 上下气口）。
+/** SVG 单位行高（unit）。
+ *  v2.45 调整到 30px，让 ASCII 路径 commit-row 容器与 Gitea 路径完全统一
+ *  （font 14px × line-height 1.571 ≈ 22px line-box, row 30px - 22px = 8px 上下气口）。
  *
  *  ⚠️ 同步影响：svg.ts（ASCII 路径 path d 生成）+ TimelineNewView.vue 的 ROW_H / dot cy
  *  / svgHeight 全部从 19 变 30，commit-row 容器高度跟着抬到 30px。
@@ -233,20 +230,8 @@ export function svgHeightPx(g: Graph): string {
 // ============================================================
 // 列压缩：flow 尽量左靠，复用已死 column
 // ============================================================
-
-/**
- * 压缩列号分配 —— 已废弃（v2.x 修复多 MR 仓库断线）。
- *
- * 历史：v2.6 之前 `column = flowID`，为了让 SVG path 按 lane 紧凑布局，按 flow
- *       时间区间复用 column（不同 flow 时间不重叠时共用 column）。
- * 现状：v2.x 改 `column = ASCII 字符流下标`（lane 编号）以保证 / \ 几何正确连接，
- *       此时 ASCII lane 已是紧凑表示（git log --graph 输出 left-aligned），
- *       不能再压缩：压缩会破坏 / \ 跨 lane 的几何连接（多 MR 仓库断线）。
- *
- * 保留函数签名（no-op）以避免破坏调用方和未来重新设计。
- */
-export function compactColumns(graph: Graph): void {
-  // no-op: column 已是 ASCII lane，压缩会破坏斜线几何。
-  // 若未来要恢复"lane 复用"，需要同时改 svg.ts 用 (column, lane) 两套坐标。
-  void graph;
-}
+//
+// v2.6 前 column = flowID（按时间复用已死 flow 的 column）。
+// v2.x 后 column = ASCII lane 下标（/ \ 跨 lane 几何正确），
+// ASCII lane 已是紧凑表示，不能再压缩，compress 会破坏斜线几何。
+// 旧 no-op `compactColumns` 已删除。

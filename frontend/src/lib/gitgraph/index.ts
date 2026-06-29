@@ -51,7 +51,6 @@ export {
   svgViewBox,
   svgWidthPx,
   svgHeightPx,
-  compactColumns,
 } from './models.js';
 
 // 与 main 端 IPC 协议共享的 DTO
