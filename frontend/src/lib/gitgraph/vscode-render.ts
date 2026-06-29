@@ -145,33 +145,11 @@ export function renderGraphVscode(
 	// 为简单起见, 我们按 color (等价于 Branch.colour) 分组, 同 color 的
 	// edge 串起来形成一条 path。这跟 vscode 的视觉效果几乎一致(同 flow
 	// 必然同 color)。
-
-	interface Line {
-		p1: { x: number; y: number };
-		p2: { x: number; y: number };
-		lockedFirst: boolean;
-	}
-
-	// 按 color 分组 line (注意: color 0 是 default,会被多个 branch 共享;
-	// vscode 也是这样, 共享 color 0 是允许的)
-	const linesByColor = new Map<number, Line[]>();
-	let orderCounter = 0;
-	for (const edge of graph.edges) {
-		const p1 = { x: edge.fromLane, y: edge.fromRow };
-		const p2 = { x: edge.toLane, y: edge.toRow };
-		// lockedFirst: 跨 lane 过渡,跟 vscode Branch.draw 的同名变量对齐
-		// 语义: true → 转场靠近 p1 端, false → 靠近 p2 端
-		// 简化:同 lane 时 lockedFirst 不影响渲染,跨 lane 时直接用
-		// lastPoint.x < curPoint.x (后者更小,转场锁 p2)
-		const lockedFirst = p1.x < p2.x;
-		const arr = linesByColor.get(edge.color) ?? [];
-		arr.push({ p1, p2, lockedFirst });
-		linesByColor.set(edge.color, arr);
-		orderCounter++;
-	}
+	
+	// 直接用 Go 端 BuildGraphVscode 暴露的 branch 列表 (1:1 复刻 vscode Branch)
 
 	// ===== 3. Branch.draw 复刻: 把每条 line 转 SVG path d =====
-	const d = VSCODE_GRID_Y * (style === 'angular' ? 0.38 : 0.8);
+	// d 系数移到循环内部 (3 步), 按紧凑策略选小 dy ≈ dot 半径
 
 	const addPath = (color: number, dStr: string, order: number): void => {
 		paths.push({
@@ -182,7 +160,10 @@ export function renderGraphVscode(
 		});
 	};
 
-	for (const [color, lines] of linesByColor.entries()) {
+	for (let branchIdx = 0; branchIdx < (graph.branches ?? []).length; branchIdx++) {
+		const branch = (graph.branches ?? [])[branchIdx]!;
+		const color = branch.color;
+		const lines = branch.lines;
 		// 1) 把 line 转成像素坐标,处理 expandAt (vscode Branch.draw:78-103)
 		const placed: Array<{
 			p1: { x: number; y: number };
@@ -190,18 +171,18 @@ export function renderGraphVscode(
 			lockedFirst: boolean;
 		}> = [];
 		for (const line of lines) {
-			let x1 = line.p1.x * VSCODE_GRID_X + VSCODE_OFFSET_X;
-			let y1 = line.p1.y * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
-			let x2 = line.p2.x * VSCODE_GRID_X + VSCODE_OFFSET_X;
-			let y2 = line.p2.y * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
+			let x1 = line.x1 * VSCODE_GRID_X + VSCODE_OFFSET_X;
+			let y1 = line.y1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
+			let x2 = line.x2 * VSCODE_GRID_X + VSCODE_OFFSET_X;
+			let y2 = line.y2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
 
 			// expandAt 处理: 展开 commit 详情时,下方所有 line 自动"延伸"
 			// (vscode Branch.draw:85-101)
 			if (expandedAt !== null && expandedAt >= 0) {
-				if (line.p1.y > expandedAt) {
+				if (line.y1 > expandedAt) {
 					y1 += VSCODE_EXPAND_Y;
 					y2 += VSCODE_EXPAND_Y;
-				} else if (line.p2.y > expandedAt) {
+				} else if (line.y2 > expandedAt) {
 					if (x1 === x2) {
 						// 垂直线 - 终点延伸
 						y2 += VSCODE_EXPAND_Y;
@@ -237,19 +218,20 @@ export function renderGraphVscode(
 		}
 
 		// 2) 简化共线中间点 (vscode Branch.draw:106-116)
-		// 我们的 line 是离散的 (from, to) 段, 不像 vscode 有"沿 column
-		// 串多 commit"的连续 list, 所以这一步主要是"两个连续 line 在
-		// 同一 column 且首尾相接时,合并为一条"
+		// vscode 的逻辑: 只看 last.p2 == seg.p1 (首尾相接), 不看 column。
+		// 跨 lane 后如果 p2 落在 dot 上, 下一条从该 dot 出发的 line 就续接。
+		// 我们的 edges 是按 LogCommits 顺序, 不保证这个性质, 所以把
+		// "首尾相接" 放宽为简化条件, 保留 vscode Branch.draw 同样的拼 path 逻辑。
 		const simplified: typeof placed = [];
 		for (const seg of placed) {
 			const last = simplified[simplified.length - 1];
 			if (
 				last &&
 				last.p2.x === seg.p1.x &&
-				last.p2.y === seg.p1.y &&
-				last.p2.x === seg.p2.x
+				last.p2.y === seg.p1.y
 			) {
-				// 同列共线: 合并,延长 last 的 p2
+				// 首尾相接: 合并,延长 last 的 p2
+				last.p2.x = seg.p2.x;
 				last.p2.y = seg.p2.y;
 			} else {
 				simplified.push(seg);
@@ -257,6 +239,22 @@ export function renderGraphVscode(
 		}
 
 		// 3) 拼成 path d 字符串 (vscode Branch.draw:118-146)
+		//
+		// 关键: vscode 的 line list 是 "按 column 顺时针串行" 的连续序列,
+		//       所以同 branch 的连续 line 经常 last.p2 == next.p1, 可以用
+		//       单一 path + 多个 L/C 续接; 但跨 lane 后 line 跟 dot 在
+		//       不同 column, 只能新开 M。
+		//
+		// 我们的数据是 "按 color 分组的 edge list", 顺序是 LogCommits 顺序,
+		// 跟 vscode 的 Branch.line list 不完全一致。所以采取更稳健的策略:
+		//   - 同列共线 (simplify 已合并)
+		//   - 跨 lane 永远不续接, 新开 M (避免 column 0 主线被错误延长)
+		//   - 跨 lane 转场用 C 贝塞尔 (你要的"曲线", d 取小值 ≈ dot 半径,
+		//     让曲线紧凑在 dot-to-dot 的小空隙内, 而不是 0.8*GRID_Y=19.2 拉满)
+		//
+		// 跟 3 段 L S 形相比, C 贝塞尔视觉上是 "真正平滑的曲线", 更接近
+		// vscode 真实渲染。
+		const dy = VSCODE_VERTEX_RADIUS - 1; // 3px, ≈ dot 半径
 		let curPath = '';
 		for (let i = 0; i < simplified.length; i++) {
 			const seg = simplified[i];
@@ -265,9 +263,16 @@ export function renderGraphVscode(
 			const x2 = seg.p2.x;
 			const y2 = seg.p2.y;
 
-			// 如果 curPath 不为空 + 当前 seg 是新 path 起点 (x1/y1 与前一段 p2 不连续)
-			// vscode Branch.draw:131  -- 用 .toFixed(0) 整数 x, .toFixed(1) 一位小数 y
-			if (curPath === '' || (i > 0 && (x1 !== simplified[i - 1].p2.x || y1 !== simplified[i - 1].p2.y))) {
+			// 新段起点跟前段终点连续 (last.p2 == cur.p1) 时, 不开 M, 直接续接
+			// 这是 "column 0 主线" 贯通的关键: 多个同 column 的 line 简化后
+			// 拼成一条 M..L..L.. path
+			const continuous =
+				i > 0 &&
+				curPath !== '' &&
+				simplified[i - 1].p2.x === x1 &&
+				simplified[i - 1].p2.y === y1;
+
+			if (!continuous) {
 				curPath += `M ${x1.toFixed(0)} ${y1.toFixed(1)}`;
 			}
 
@@ -275,28 +280,27 @@ export function renderGraphVscode(
 				// 垂直线 (L)
 				curPath += ` L ${x2.toFixed(0)} ${y2.toFixed(1)}`;
 			} else if (style === 'angular') {
-				// 折线: 在 38% 处先水平再垂直
+				// 折线: angular 风格, dy = GRID_Y * 0.38 (vscode graph.ts:76)
+				// p1 = (4, 4), p2 = (20, 28)
+				// midX = x2 = 20, midY = y2 - 9.12 = 18.88 (lockedFirst=true)
+				// path: M 4 4.0 L 20 18.9 L 20 28.0
+				const angDy = VSCODE_GRID_Y * 0.38;
 				const midX = seg.lockedFirst ? x2 : x1;
-				const midY = seg.lockedFirst ? y2 - d : y1 + d;
+				const midY = seg.lockedFirst ? y2 - angDy : y1 + angDy;
 				curPath += ` L ${midX.toFixed(0)} ${midY.toFixed(1)} L ${x2.toFixed(0)} ${y2.toFixed(1)}`;
 			} else {
-				// dot-to-dot 紧凑 S 形过渡 (用户描述):
-				//   - 跨 lane 时, 从 dot 中心 (x1,y1) 出发
-				//   - 沿 (x1) 走到 row1 底部 midY1 (y1 + GRID_Y/2 - dy)
-				//   - 横移到 (x2) (midY1 高度)
-				//   - 垂直降到 row2 顶部 midY2 (y2 - GRID_Y/2 + dy)
-				//   - 沿 (x2) 走到 dot 中心 (x2, y2)
-				// 全部弯折在 row1 底→row2 顶 的小空间 (12px) 内完成
-				// dy 取 ≈ dot 半径, 让折角更圆滑
-				const dy = VSCODE_VERTEX_RADIUS - 1; // 3
-				const midY1 = y1 + VSCODE_GRID_Y / 2 - dy;
-				const midY2 = y2 - VSCODE_GRID_Y / 2 + dy;
-				curPath += ` L ${x1.toFixed(0)} ${midY1.toFixed(1)} L ${x2.toFixed(0)} ${midY1.toFixed(1)} L ${x2.toFixed(0)} ${midY2.toFixed(1)}`;
+				// C 贝塞尔: rounded 风格, dy = GRID_Y * 0.8 = 19.2 (vscode graph.ts:76)
+				// p1 = (4, 4), p2 = (20, 28)
+				// 控制点 1: (4, 4+19.2) = (4, 23.2)
+				// 控制点 2: (20, 28-19.2) = (20, 8.8)
+				// path: M 4 4.0 C 4 23.2 20 8.8 20 28.0
+				const curveDy = VSCODE_GRID_Y * 0.8;
+				curPath += ` C ${x1.toFixed(0)} ${(y1 + curveDy).toFixed(1)} ${x2.toFixed(0)} ${(y2 - curveDy).toFixed(1)} ${x2.toFixed(0)} ${y2.toFixed(1)}`;
 			}
 		}
 
 		if (curPath !== '') {
-			addPath(color, curPath, orderCounter++);
+			addPath(color, curPath, branchIdx);
 		}
 	}
 

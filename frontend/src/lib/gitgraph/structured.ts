@@ -52,10 +52,42 @@ export interface GraphEdgeDto {
   type: EdgeTypeDto;
 }
 
+/** 一段 branch 上的 line (1:1 复刻 vscode Branch.Line)
+ *
+ * 坐标以 row/lane 为单位，前端渲染时:
+ *   pixel_x = lane * VSCODE_GRID_X + VSCODE_OFFSET_X
+ *   pixel_y = row  * VSCODE_GRID_Y + VSCODE_OFFSET_Y
+ */
+export interface GraphBranchLineDto {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** true=跨 lane 转场锁 p1 端, false=锁 p2 端 */
+  lockedFirst: boolean;
+}
+
+/** 一条贯通 column 的 path (1:1 复刻 vscode Branch)
+ *
+ * 渲染时一条 branch = 一条 SVG path。
+ * column 0 主线贯通正是这个机制：line 列表沿 column 顺时针，
+ * 首尾相接，自然形成一条 L0 连续基线。
+ */
+export interface GraphBranchDto {
+  /** 颜色号 0..15 */
+  color: number;
+  /** branch 覆盖的最后一行 + 1 */
+  end: number;
+  /** 沿 column 顺时针的 line 列表（p1 接前 line p2） */
+  lines: GraphBranchLineDto[];
+}
+
 /** 完整图结果 */
 export interface GraphResultDto {
   nodes: GraphNodeDto[];
   edges: GraphEdgeDto[];
+  /** vscode 风格 branch 列表（BuildGraphVscodeWithHead 才会填） */
+  branches?: GraphBranchDto[];
   maxLane: number;
   truncated: boolean;
 }

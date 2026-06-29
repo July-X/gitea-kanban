@@ -76,6 +76,26 @@ type GraphEdge struct {
 	Type     EdgeType
 }
 
+// GraphBranchLine 一段 branch 上的 line (1:1 复刻 vscode Branch.Line)
+//
+// 坐标以 row/lane 为单位 (像素 = row*GRID_Y + offsetY, lane*GRID_X + offsetX)
+// 渲染时 (前端) 直接读这个列表拼 path d
+type GraphBranchLine struct {
+	X1, Y1     int  // 起点 (lane, row)
+	X2, Y2     int  // 终点 (lane, row)
+	LockedFirst bool // 跨 lane 转场方向(true=锁 p1, false=锁 p2)
+}
+
+// GraphBranch 一条贯通 column 的 path (1:1 复刻 vscode Branch)
+//
+// 这是 vscode-git-graph 的核心渲染单位: 一条 branch = 一条完整 SVG path
+// 包含若干 line 段, 沿 column 顺时针串行。column 0 主线贯通正是这个机制。
+type GraphBranch struct {
+	Color int               // 颜色号
+	End   int               // branch 覆盖的最后一行 + 1
+	Lines []GraphBranchLine // 沿 column 顺时针的 line 列表 (p1 接前 line p2)
+}
+
 // EdgeType 边类型（与 Gitea `git log --graph` 字形 1:1）
 type EdgeType int
 
@@ -89,6 +109,11 @@ const (
 type GraphResult struct {
 	Nodes     []GraphNode
 	Edges     []GraphEdge
+	// Branches 1:1 复刻 vscode-git-graph 的 Branch 对象列表
+	// 渲染时按 branch 画 path, 保留"column 0 主线贯通" 的几何
+	// (vscode 真实: 每条 branch 一条 path, line 沿 column 顺时针)
+	// nil 表示非 vscode 风格(Gitea 风格 BuildGraph 不会填这个字段)
+	Branches  []GraphBranch
 	MaxLane   int // 最大 lane 号（对齐 Gitea MaxColumn）
 	MaxColor  int // 实际用到的最大颜色号（≤15）
 	Truncated bool

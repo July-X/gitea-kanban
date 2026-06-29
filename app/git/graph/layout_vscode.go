@@ -389,6 +389,26 @@ func (g *graphVscode) buildResult() *GraphResult {
 		return &GraphResult{}
 	}
 
+	// 0) 序列化 branches (vscode 风格)
+	// 这是 column 0 主线"贯通"的关键: 前端按 branch 画 path,
+	// 而不是按 color/edge 画, 完整保留 vscode Branch.draw 的几何。
+	branches := make([]GraphBranch, 0, len(g.branches))
+	for _, b := range g.branches {
+		lines := make([]GraphBranchLine, 0, len(b.lines))
+		for _, ln := range b.lines {
+			lines = append(lines, GraphBranchLine{
+				X1: ln.p1.x, Y1: ln.p1.y,
+				X2: ln.p2.x, Y2: ln.p2.y,
+				LockedFirst: ln.lockedFirst,
+			})
+		}
+		branches = append(branches, GraphBranch{
+			Color: b.colour,
+			End:   b.end,
+			Lines: lines,
+		})
+	}
+
 	// 收集每个 commit 的最终 lane / color
 	commitLane := make(map[int]int, len(g.vertices))
 	commitColor := make(map[int]int, len(g.vertices))
@@ -483,6 +503,7 @@ func (g *graphVscode) buildResult() *GraphResult {
 	return &GraphResult{
 		Nodes:    nodes,
 		Edges:    edges,
+		Branches: branches,
 		MaxLane:  maxLane,
 		MaxColor: g.maxColorSeen,
 	}

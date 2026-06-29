@@ -12,6 +12,25 @@ import {
 } from '../vscode-render.ts';
 import type { GraphResultDto } from '../structured.ts';
 
+// 测试用: 把 (fromRow, fromLane) → (toRow, toLane) 的 edge 转成单个 branch line
+// (跟 Go 端 BuildGraphVscode 的 Branch.lines 格式一致)
+function edgesToBranches(
+	edges: { fromRow: number; toRow: number; fromLane: number; toLane: number; color: number }[]
+) {
+	// 按 color 分组, 每个 color 一个 branch
+	const byColor = new Map<number, { x1: number; y1: number; x2: number; y2: number; lockedFirst: boolean }[]>();
+	for (const e of edges) {
+		const arr = byColor.get(e.color) ?? [];
+		arr.push({
+			x1: e.fromLane, y1: e.fromRow,
+			x2: e.toLane, y2: e.toRow,
+			lockedFirst: e.fromLane < e.toLane,
+		});
+		byColor.set(e.color, arr);
+	}
+	return Array.from(byColor.entries()).map(([color, lines]) => ({ color, end: 0, lines }));
+}
+
 function node(row: number, lane: number, color: number, sha: string, parents: string[] = []) {
 	return {
 		row,
@@ -32,10 +51,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('LANE=0 的顶点 cx = offsetX (4), cy = row*GRID_Y + offsetY (4)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a')],
-			edges: [],
-			maxLane: 0,
+			edges: [],maxLane: 0,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		assert.equal(r.nodes[0]?.cx, VSCODE_OFFSET_X);
 		assert.equal(r.nodes[0]?.cy, VSCODE_OFFSET_Y);
@@ -45,10 +64,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('LANE 间距对齐 GRID_X=16 (vscode 默认)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b')],
-			edges: [],
-			maxLane: 1,
+			edges: [],maxLane: 1,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		const a = r.nodes[0]!;
 		const b = r.nodes[1]!;
@@ -58,10 +77,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('同 lane EdgeNormal 渲染为 L 直线 (垂直)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
-			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
-			maxLane: 0,
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],maxLane: 0,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		// 从 (0,0) 到 (1,0), 像素 = (4, 4) → (4, 28)
 		// path d: M 4 4 L 4 28
@@ -74,42 +93,37 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('跨 lane 转场用 C 贝塞尔 (rounded 风格)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b')],
-			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 1, color: 1, type: 1 }],
-			maxLane: 1,
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 1, color: 1, type: 1 }],maxLane: 1,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		const d = r.paths[0]?.d ?? '';
-		// dot-to-dot 紧凑 S 形 (rounded 风格):
+		// rounded 风格: C 贝塞尔, dy = GRID_Y * 0.8 = 19.2 (vscode graph.ts:76)
 		//   p1 = (4, 4), p2 = (20, 28)
-		//   GRID_Y/2 = 12, dy = 3 (VSCODE_VERTEX_RADIUS - 1)
-		//   midY1 = 4 + 12 - 3 = 13
-		//   midY2 = 28 - 12 + 3 = 19
-		//   path: M 4 4 L 4 13 L 20 13 L 20 19
+		//   控制点 1: (4, 4+19.2) = (4, 23.2)
+		//   控制点 2: (20, 28-19.2) = (20, 8.8)
+		//   path: M 4 4.0 C 4 23.2 20 8.8 20 28.0
 		assert.ok(d.startsWith('M 4 4'), `path 应以 M 4 4 开头, 实际: ${d}`);
-		assert.ok(d.includes('L 4 13'), `path 应包含 L 4 13 (row1 底), 实际: ${d}`);
-		assert.ok(d.includes('L 20 13'), `path 应包含 L 20 13 (横移到 x2), 实际: ${d}`);
-		assert.ok(d.includes('L 20 19'), `path 应包含 L 20 19 (row2 顶), 实际: ${d}`);
-		// 必须在 row1 底→row2 顶 的小空间 (12px) 内完成, 即 y ∈ [13, 19]
-		assert.ok(!/L 4 \d{2}\.\d$|L 20 \d{2}\.\d$/.test(d) || d.split('L').slice(1).every(p => {
-			const y = parseFloat(p.trim().split(' ')[1]);
-			return y >= 13 && y <= 19 || y === 28; // 端点 y2=28 除外
-		}), `弯折应紧凑在 [13,19] 内, 实际: ${d}`);
+		assert.ok(d.includes('C 4 23.2'), `path 应包含 C 4 23.2 (控制点 1), 实际: ${d}`);
+		assert.ok(d.includes('20 8.8'), `path 应包含 20 8.8 (控制点 2), 实际: ${d}`);
 	});
 
 	test('angular 风格:跨 lane 用 L 折线,38% 拐点', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b')],
-			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 1, color: 1, type: 1 }],
-			maxLane: 1,
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 1, color: 1, type: 1 }],maxLane: 1,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph, { style: 'angular' });
 		const d = r.paths[0]?.d ?? '';
-		// d = 24*0.38 = 9.12
-		// lockedFirst = true (p1.x < p2.x)
-		// midX = x2 = 20, midY = y2 - d = 28 - 9.12 = 18.88
-		// path: M 4 4 L 20 18.9 L 20 28
+		// angular 风格:跨 lane 用 L 折线,38% 拐点 (vscode graph.ts:76)
+		//   p1 = (4, 4), p2 = (20, 28)
+		//   dy = GRID_Y * 0.38 = 9.12
+		//   lockedFirst = true (p1.x < p2.x)
+		//   midX = x2 = 20, midY = y2 - 9.12 = 18.88
+		//   path: M 4 4.0 L 20 18.9 L 20 28.0
 		assert.ok(d.includes('L 20 18.9'), `angular 拐点应在中点 18.9, 实际: ${d}`);
 		assert.ok(d.includes('L 20 28'), `angular 终点 28, 实际: ${d}`);
 		// 必须不包含 C
@@ -119,10 +133,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('颜色用 VSCODE_COLORS 调色板 (16 色循环)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 5, 'a')],
-			edges: [],
-			maxLane: 0,
+			edges: [],maxLane: 0,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		assert.equal(r.nodes[0]?.colorHex, VSCODE_COLORS[5]);
 	});
@@ -130,10 +144,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('merge commit 的 vertex 圆点跟 vscode Vertex.draw 一样画 (默认 fill, 非 stroke-only)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a', ['p1', 'p2'])],
-			edges: [],
-			maxLane: 0,
+			edges: [],maxLane: 0,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		// 圆点 = cx=4, cy=4, r=4
 		assert.equal(r.nodes[0]?.isMerge, true);
@@ -143,10 +157,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('SVG 总宽度 = 2*offsetX + (maxLane+1)*GRID_X', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b'), node(2, 2, 2, 'c')],
-			edges: [],
-			maxLane: 2,
+			edges: [],maxLane: 2,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		const expectedWidth = 2 * VSCODE_OFFSET_X + (2 + 1) * VSCODE_GRID_X;
 		assert.equal(r.width, expectedWidth);
@@ -155,10 +169,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('SVG 总高度 = commitCount*GRID_Y + offsetY', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b'), node(2, 0, 0, 'c')],
-			edges: [],
-			maxLane: 0,
+			edges: [],maxLane: 0,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
 		const expectedHeight = 3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
 		assert.equal(r.height, expectedHeight);
@@ -167,16 +181,16 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 	test('expandAt 处理: 展开后下方所有 line 自动 +EXPAND_Y (vscode Branch.draw 行为)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
-			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
-			maxLane: 0,
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],maxLane: 0,
 			truncated: false,
 		};
+		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph, { expandedAt: 0 });
-		// 展开 row 0 后, row 1 的 y 加 EXPAND_Y (120)
-		// 节点 b 的 cy = 1*24 + 4 + 120 = 148
-		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 120);
-		// path 终点 = 28 + 120 = 148
+		// 展开 row 0 后, row 1 的 y 加 EXPAND_Y (250, vscode config.ts:278)
+		// 节点 b 的 cy = 1*24 + 4 + 250 = 278
+		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250);
+		// path 终点 = 28 + 250 = 278
 		const d = r.paths[0]?.d ?? '';
-		assert.ok(d.includes('L 4 148'), `展开后 path 终点应为 148, 实际: ${d}`);
+		assert.ok(d.includes('L 4 278'), `展开后 path 终点应为 278, 实际: ${d}`);
 	});
 });

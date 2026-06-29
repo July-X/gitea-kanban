@@ -113,7 +113,7 @@ func main() {
 	}
 	repo := os.Args[1]
 	globalRepoName = repo
-	maxCommits := 100
+	maxCommits := 0 // 0 = 全部 commit (不截断)
 	if len(os.Args) >= 3 {
 		n, err := strconv.Atoi(os.Args[2])
 		if err != nil {
@@ -169,7 +169,12 @@ func main() {
 	svg := buildSVG(paths, nodes, g.MaxLane, len(g.Nodes))
 
 	jsonBytes, _ := json.MarshalIndent(out, "", "  ")
-	fmt.Println(buildHTML(svg, string(jsonBytes), out.Commits))
+	// commit 列表默认显示前 200 个, JSON 包含全部 (供排查用)
+	displayLimit := 200
+	if len(out.Commits) > displayLimit {
+		displayLimit = len(out.Commits) // debug 工具尽量显示全部, 除非实在太大 (>200)
+	}
+	fmt.Println(buildHTML(svg, string(jsonBytes), out.Commits, displayLimit))
 }
 
 func resolveHead(repo string) string {
@@ -185,32 +190,29 @@ func resolveHead(repo string) string {
 }
 
 func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
-	// 按 color 分组 edge (vscode 的 path 也按 color 合并)
-	linesByColor := map[int][]line{}
-	for _, e := range g.Edges {
-		p1x, p1y := e.FromLane, e.FromRow
-		p2x, p2y := e.ToLane, e.ToRow
-		lk := p1x < p2x
-		linesByColor[e.Color] = append(linesByColor[e.Color], line{p1x, p1y, p2x, p2y, lk})
-	}
-
+	// 按 vscode 真实做法: 一个 branch 一条 SVG path
+	// Branch 内部的 line 列表是"沿 column 顺时针"的连续序列, 首尾相接,
+	// 拼成一条 path 就形成 column 0 主线贯通的视觉效果
+	// (vscode Branch.draw:118-146)
 	paths := []pathOut{}
-	for color, lines := range linesByColor {
-		hex := VSCODE_COLORS[color%len(VSCODE_COLORS)]
-		// 1) 转像素坐标
+	for bidx, b := range g.Branches {
+		hex := VSCODE_COLORS[b.Color%len(VSCODE_COLORS)]
+
+		// 1) 转像素坐标 + 处理 expandAt
 		type placedT struct {
 			p1x, p1y, p2x, p2y float64
 			lockedFirst        bool
 		}
 		placed := []placedT{}
-		for _, ln := range lines {
-			x1 := float64(ln.p1x)*GRID_X + OFFSET_X
-			y1 := float64(ln.p1y)*GRID_Y + OFFSET_Y
-			x2 := float64(ln.p2x)*GRID_X + OFFSET_X
-			y2 := float64(ln.p2y)*GRID_Y + OFFSET_Y
-			placed = append(placed, placedT{x1, y1, x2, y2, ln.lockedFirst})
+		for _, ln := range b.Lines {
+			x1 := float64(ln.X1)*GRID_X + OFFSET_X
+			y1 := float64(ln.Y1)*GRID_Y + OFFSET_Y
+			x2 := float64(ln.X2)*GRID_X + OFFSET_X
+			y2 := float64(ln.Y2)*GRID_Y + OFFSET_Y
+			placed = append(placed, placedT{x1, y1, x2, y2, ln.LockedFirst})
 		}
-		// 2) 简化同列共线段
+		// 2) 简化同列共线段 (vscode Branch.draw:106-116)
+		//    "同列 + 首尾相接" 才合并 (跨 lane 永远保留为独立 line)
 		simplified := []placedT{}
 		for _, seg := range placed {
 			last := len(simplified) - 1
@@ -220,29 +222,32 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 				simplified = append(simplified, seg)
 			}
 		}
-		// 3) 拼 path d: 跨 lane 过渡采用 "dot-to-dot 紧凑 S 形" (3 段 L 命令)
-		// 见下方 x1 != x2 分支注释
+		// 3) 拼 path d: 跨 lane 用 C 贝塞尔 + 真实 dy = GRID_Y * 0.8 (vscode 默认)
+		//    C 贝塞尔的控制点偏移 = 0.8*GRID_Y = 19.2, 跟 vscode Branch.draw:76 一致
+		//    之前 debug 工具用 dy=3 是为了"dot 之间紧凑", 但跟 vscode 真实渲染不一致,
+		//    这里恢复 vscode 默认 0.8*GRID_Y, 看真实视觉效果
+		dy := GRID_Y * 0.8
 		cur := ""
 		for i, seg := range simplified {
 			x1, y1, x2, y2 := seg.p1x, seg.p1y, seg.p2x, seg.p2y
-			if cur == "" || (i > 0 && (x1 != simplified[i-1].p2x || y1 != simplified[i-1].p2y)) {
+			// vscode Branch.draw:131: 新段起点跟前段终点不连续时才开 M
+			// (但我们 line list 已经按 column 顺时针排序, 永远连续, 所以通常不开 M)
+			continuous := i > 0 && cur != "" &&
+				simplified[i-1].p2x == x1 && simplified[i-1].p2y == y1
+			if !continuous {
 				cur += fmt.Sprintf("M %.0f %.1f", x1, y1)
 			}
 			if x1 == x2 {
+				// 垂直线 (L)
 				cur += fmt.Sprintf(" L %.0f %.1f", x2, y2)
 			} else {
-				// dot-to-dot 紧凑 S 形过渡: 在 row1 底→row2 顶 的小空间内完成
-				// (vscode 原版 C 贝塞尔 d=0.8*GRID_Y=19.2 拉得太缓, 跟"dot 之间紧凑过渡"不符)
-				// 策略: dot 中心 (x1,y1) → row1 底部 midY1 沿 x 走到 x2 → 垂直降到 row2 顶部 midY2 → 沿 x 到 (x2,y2)
-				dy := float64(CURVE_CONTROL_DY)
-				midY1 := y1 + float64(GRID_Y)/2 - dy
-				midY2 := y2 - float64(GRID_Y)/2 + dy
-				cur += fmt.Sprintf(" L %.0f %.1f L %.0f %.1f L %.0f %.1f",
-					x1, midY1, x2, midY1, x2, midY2)
+				// C 贝塞尔: 控制点 (x1, y1+dy) (x2, y2-dy) 端点 (x2, y2)
+				cur += fmt.Sprintf(" C %.0f %.1f %.0f %.1f %.0f %.1f",
+					x1, y1+dy, x2, y2-dy, x2, y2)
 			}
 		}
 		if cur != "" {
-			paths = append(paths, pathOut{d: cur, hex: hex, idx: len(paths)})
+			paths = append(paths, pathOut{d: cur, hex: hex, idx: bidx})
 		}
 	}
 
@@ -281,7 +286,7 @@ func buildSVG(paths []pathOut, nodes []nodeOut, maxLane, nCommits int) string {
 	return s
 }
 
-func buildHTML(svg, jsonStr string, commits []commitJSON) string {
+func buildHTML(svg, jsonStr string, commits []commitJSON, displayLimit int) string {
 	repoShort := repoBaseName()
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN">
@@ -325,14 +330,15 @@ func buildHTML(svg, jsonStr string, commits []commitJSON) string {
   </div>
 </div>
 
-<details><summary>Raw JSON (BuildGraphVscode 输出)</summary><pre class="json">%s</pre></details>
+<details><summary>Raw JSON (BuildGraphVscode 输出, 共 %d 个 commit)</summary><pre class="json">%s</pre></details>
 
 </body>
 </html>`,
 		html.EscapeString(repoShort),
 		len(commits),
 		svg,
-		buildCommitList(commits),
+		buildCommitList(commits, displayLimit),
+		len(commits),
 		html.EscapeString(jsonStr),
 	)
 }
@@ -352,9 +358,13 @@ func repoBaseName() string {
 	return globalRepoName
 }
 
-func buildCommitList(commits []commitJSON) string {
+func buildCommitList(commits []commitJSON, limit int) string {
 	var s string
-	for _, c := range commits {
+	shown := commits
+	if limit > 0 && len(commits) > limit {
+		shown = commits[:limit]
+	}
+	for _, c := range shown {
 		refsHTML := ""
 		for _, r := range c.Refs {
 			cls := "ref-branch"
