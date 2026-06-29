@@ -154,15 +154,22 @@ function bindAccordionObserver(el: HTMLElement | null) {
     accordionResizeObserver = null;
   }
   if (!el) {
-    expandedHeight.value = 0;
+    // v2.66：保留旧 expandedHeight —— 收起瞬间避免 row 高度 30px 闪一下
+    // 下一帧再次展开时 ref callback 同步读 offsetHeight 覆盖回真实值
     return;
   }
+  // v2.66：accordion mount 瞬间同步读一次高度，避免首帧 expandedHeight=0
+  // 导致 row 高度只有 ROW_H(30px)，hover 命中 30px 而 300px 面板溢出可见
+  // 但不在 row hover 范围内（用户反馈"hover 没对齐"）。
+  // ResizeObserver 是异步的，第一帧不会 fire，必须同步读 offsetHeight。
+  const initialH = el.offsetHeight + 8; // 4px margin-top + 4px margin-bottom
+  if (initialH > 0) expandedHeight.value = initialH;
   accordionResizeObserver = new ResizeObserver((entries) => {
     if (accordionResizeRaf) return; // ponytail: 已在下一帧排好，丢掉本轮
     accordionResizeRaf = requestAnimationFrame(() => {
       accordionResizeRaf = 0;
       for (const entry of entries) {
-        const h = entry.contentRect.height + 8; // 4px margin-top + 4px margin-bottom
+        const h = entry.contentRect.height + 8;
         if (expandedHeight.value !== h) expandedHeight.value = h;
       }
     });
@@ -2161,7 +2168,12 @@ function refBadgeClass(refType?: string): string {
   line-height: 1.571;
   letter-spacing: -0.005em;
   white-space: nowrap;
-  overflow: hidden;
+  /* v2.66：去掉 overflow: hidden —— 嵌入 .commit-accordion 后需要让它溢出
+   * 显示（row 高度 = ROW_H + expandedHeight = 338px 容纳 300px 面板 + 余量），
+   * 旧 overflow: hidden 会把 accordion 裁掉只剩 30px 可视高度，导致
+   * "hover 背景只到 30px = 用户视觉的 row"——也覆盖不到展开面板。
+   * desc/author/date/sha 列的 ellipsis 由各 .commit-row__col 自身 overflow:hidden 兜底。*/
+  overflow: visible;
   /* v2.28：移除 commit-row 的 border-bottom（用户：下方的内容区，暂时不用 1px 的表格线） */
   border-bottom: none;
   box-sizing: border-box;
