@@ -84,12 +84,28 @@ type output struct {
 	Commits []commitJSON `json:"commits"`
 	Edges   []edgeJSON   `json:"edges"`
 	MaxLane int          `json:"max_lane"`
+	Branches []branchJSON `json:"branches"`
+}
+
+type lineJSON struct {
+	X1          int  `json:"x1"`
+	Y1          int  `json:"y1"`
+	X2          int  `json:"x2"`
+	Y2          int  `json:"y2"`
+	LockedFirst bool `json:"locked_first"`
+}
+
+type branchJSON struct {
+	Color int       `json:"color"`
+	End   int       `json:"end"`
+	Lines []lineJSON `json:"lines"`
 }
 
 type pathOut struct {
-	d   string
-	hex string
-	idx int
+	d    string
+	hex  string
+	idx  int
+	kind string // "line" 或 "shadow" (vscode Branch.drawPath:149-159)
 }
 
 type nodeOut struct {
@@ -99,6 +115,8 @@ type nodeOut struct {
 	sha     string
 	short   string
 	subject string
+	isCurrent bool // HEAD 节点 (vscode Vertex.draw: 空心 stroke-only)
+	isStash   bool // stash 节点 (外圈 r=4.5 + 内圈 r=2)
 }
 
 type line struct {
@@ -163,6 +181,15 @@ func main() {
 			FromLane: e.FromLane, ToLane: e.ToLane,
 			Color: e.Color, Type: t,
 		})
+	}
+
+	// 序列化 branches (vscode 真实输出格式: color + end + lines)
+	for _, b := range g.Branches {
+		lines := make([]lineJSON, 0, len(b.Lines))
+		for _, ln := range b.Lines {
+			lines = append(lines, lineJSON{X1: ln.X1, Y1: ln.Y1, X2: ln.X2, Y2: ln.Y2, LockedFirst: ln.LockedFirst})
+		}
+		out.Branches = append(out.Branches, branchJSON{Color: b.Color, End: b.End, Lines: lines})
 	}
 
 	paths, nodes := renderGraphVscode(g)
@@ -247,7 +274,10 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 			}
 		}
 		if cur != "" {
-			paths = append(paths, pathOut{d: cur, hex: hex, idx: bidx})
+			// vscode Branch.drawPath (graph.ts:149-159) 每条 path 画 2 遍:
+			//   shadow (stroke-width=4 stroke-opacity=0.25) + line (stroke-width=2)
+			paths = append(paths, pathOut{d: cur, hex: hex, idx: bidx, kind: "shadow"})
+			paths = append(paths, pathOut{d: cur, hex: hex, idx: bidx, kind: "line"})
 		}
 	}
 
@@ -263,6 +293,8 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 		nodes = append(nodes, nodeOut{
 			cx: cx, cy: cy, r: VERTEX_RADIUS,
 			hex: hex, sha: n.SHA, short: short, subject: n.Subject,
+			isCurrent: n.IsCurrent,
+			isStash:   n.IsStash,
 		})
 	}
 	return paths, nodes
@@ -275,12 +307,33 @@ func buildSVG(paths []pathOut, nodes []nodeOut, maxLane, nCommits int) string {
 	s += fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" style="background:#fafafa">`,
 		width, height, width, height)
 	for _, p := range paths {
-		s += fmt.Sprintf(`<path d="%s" stroke="%s" stroke-width="2" fill="none" stroke-linecap="round"/>`,
-			html.EscapeString(p.d), p.hex)
+		if p.kind == "shadow" {
+			// vscode main.css:110-114: shadow stroke-width=4 stroke-opacity=0.75
+			// 这里 stroke-opacity=0.25 比 vscode 略淡, 跟浅底色背景更协调
+			s += fmt.Sprintf(`<path d="%s" stroke="%s" stroke-width="4" stroke-opacity="0.25" fill="none" stroke-linecap="round"/>`,
+				html.EscapeString(p.d), p.hex)
+		} else {
+			s += fmt.Sprintf(`<path d="%s" stroke="%s" stroke-width="2" fill="none" stroke-linecap="round"/>`,
+				html.EscapeString(p.d), p.hex)
+		}
 	}
 	for _, n := range nodes {
-		s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="#fff" stroke-width="1.5"/>`,
-			n.cx, n.cy, n.r, n.hex)
+		// vscode Vertex.draw: dot r=4, HEAD 空心 (fill=#bg stroke=color stroke-width=2),
+		// 普通 dot stroke=#bg stroke-width=1 stroke-opacity=0.75
+		if n.isCurrent {
+			// HEAD: fill=白底, stroke=color, stroke-width=2
+			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="#fff" stroke="%s" stroke-width="2"/>`,
+				n.cx, n.cy, n.r, n.hex)
+		} else if n.isStash {
+			// stash: 外圈 r=4.5 + 内圈 r=2
+			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="%s" stroke-width="1.5"/>`,
+				n.cx, n.cy, n.r, n.hex)
+			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="%s" stroke-width="1"/>`,
+				n.cx, n.cy, n.r-2.5, n.hex)
+		} else {
+			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="#fff" stroke-width="1" stroke-opacity="0.75"/>`,
+				n.cx, n.cy, n.r, n.hex)
+		}
 	}
 	s += `</svg>`
 	return s

@@ -57,6 +57,12 @@ export interface VscodeSvgPath {
 	colorIndex: number;
 	colorHex: string;
 	order: number;
+	/**
+	 * 'line' (默认实色, stroke-width=2) 或 'shadow' (半透明描边, stroke-width=4)
+	 * vscode Branch.drawPath (graph.ts:149-159) 每个 path 画 2 遍:
+	 * shadow (暗背景下光晕) + line (实色)。
+	 */
+	kind?: 'line' | 'shadow';
 }
 
 export interface VscodeSvgNode {
@@ -75,7 +81,9 @@ export interface VscodeSvgNode {
 	refs?: string[];
 	refTypes?: string[];
 	colorHex: string;
-	isCurrent?: boolean; // HEAD 标记 (vscode Vertex.draw 画成空心 stroke-only)
+	/** HEAD 标记 (vscode Vertex.draw: 空心 circle, fill=bg, stroke=color, stroke-width=2) */
+	isCurrent?: boolean;
+	/** stash 标记 (vscode Vertex.draw: r=4.5 outer + r=2 inner 双圈) */
 	isStash?: boolean;
 }
 
@@ -151,12 +159,24 @@ export function renderGraphVscode(
 	// ===== 3. Branch.draw 复刻: 把每条 line 转 SVG path d =====
 	// d 系数移到循环内部 (3 步), 按紧凑策略选小 dy ≈ dot 半径
 
+	// vscode Branch.drawPath (graph.ts:149-159) 每条 path 画 2 遍:
+	//   - shadow: stroke-width=4 stroke-opacity=0.75 stroke=bg (暗背景下"光晕")
+	//   - line:   stroke-width=2 stroke=color 实色
+	// 我们在 DTO 区分两者,前端 CSS 给 shadow 加粗 + 半透明背景色描边
 	const addPath = (color: number, dStr: string, order: number): void => {
 		paths.push({
 			d: dStr,
 			colorIndex: color,
 			colorHex: VSCODE_COLORS[color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0],
 			order,
+			kind: 'shadow',
+		});
+		paths.push({
+			d: dStr,
+			colorIndex: color,
+			colorHex: VSCODE_COLORS[color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0],
+			order,
+			kind: 'line',
 		});
 	};
 

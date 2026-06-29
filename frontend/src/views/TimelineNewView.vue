@@ -697,6 +697,7 @@ interface PathGroup {
   colorClass: string; // 'flow-color-16-N'
   colorHex?: string; // v2.6 fix：结构化路径用内联 hex；ASCII fallback 走 CSS class
   d: string; // 单条 path 的 d
+  kind?: 'line' | 'shadow'; // vscode Branch.drawPath: shadow (stroke-width=4) + line (stroke-width=2)
 }
 
 const pathGroups = computed<PathGroup[]>(() => {
@@ -714,13 +715,15 @@ const pathGroups = computed<PathGroup[]>(() => {
   const r = svgRender.value;
   if (!r) return [];
   // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
+  // 每个 vscode path 拆成 shadow + line 两条 (Branch.drawPath:149-159)
   return r.paths.map((p) => ({
-    id: `structured-${p.order}`,
+    id: `structured-${p.kind ?? 'line'}-${p.order}`,
     order: p.order,
     colorIndex: p.colorIndex,
     colorClass: `flow-color-16-${p.colorIndex}`,
     colorHex: p.colorHex,
     d: p.d,
+    kind: p.kind,
   }));
 });
 
@@ -1384,14 +1387,17 @@ function refBadgeClass(refType?: string): string {
                     v-for="pg in pathGroups"
                     :key="pg.id"
                     class="flow-group"
-                    :class="pg.colorClass"
+                    :class="[pg.colorClass, { 'flow-group--shadow': pg.kind === 'shadow' }]"
                     :data-color="pg.colorIndex"
                   >
                     <path
                       v-if="pg.d"
                       :d="pg.d"
-                      v-bind="pg.colorHex ? { stroke: pg.colorHex } : {}"
-                      stroke-width="2"
+                      v-bind="pg.kind === 'shadow'
+                        ? (pg.colorHex ? { stroke: pg.colorHex } : {})
+                        : (pg.colorHex ? { stroke: pg.colorHex } : {})"
+                      :stroke-width="pg.kind === 'shadow' ? 4 : 2"
+                      :stroke-opacity="pg.kind === 'shadow' ? 0.25 : 1"
                       fill="none"
                       stroke-linecap="round"
                       vector-effect="non-scaling-stroke"
@@ -1931,6 +1937,37 @@ function refBadgeClass(refType?: string): string {
  * hover 高亮通过尺寸变化表达， 配合 .git-graph-bg:hover / SVG path highlight（如果有）共同传达 focus 状态。*/
 .commit-dot--active {
   transform: scale(1.5);
+}
+
+/* HEAD 节点 (vscode Vertex.draw:310-315 + main.css:96-99)
+   circle.current: fill=editor-bg(白), stroke=color, stroke-width=2 */
+.commit-dot--head {
+  background-color: var(--app-bg, #fff);
+  border-width: 2px;
+  border-style: solid;
+}
+
+/* stash 节点 (vscode Vertex.draw:318-326 + main.css:105-108)
+   外圈 r=4.5 + 内圈 r=2 双圈; inner 用 box-shadow inset 实现 */
+.commit-dot--stash {
+  position: relative;
+}
+.commit-dot--stash::after {
+  content: '';
+  position: absolute;
+  inset: 25%; /* (r-r_inner)/r = (4.5-2)/4.5 ≈ 33% */
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid currentColor;
+  pointer-events: none;
+}
+
+/* 圆点描边 (vscode main.css:100-103): 非 HEAD 都加 1px 半透明描边 */
+.commit-dot:not(.commit-dot--head) {
+  border: 1px solid var(--app-bg, #fff);
+  border-style: solid;
+  border-width: 1px;
+  box-sizing: border-box;
 }
 
 /* 圆点背景色（HTML div 用 background-color，不是 SVG fill） */

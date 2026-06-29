@@ -84,7 +84,12 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		const r = renderGraphVscode(graph);
 		// 从 (0,0) 到 (1,0), 像素 = (4, 4) → (4, 28)
 		// path d: M 4 4 L 4 28
-		assert.equal(r.paths.length, 1);
+		// shadow + line = 2 entries (vscode Branch.drawPath 画 2 遍)
+		assert.equal(r.paths.length, 2);
+		// shadow first, line second
+		assert.equal(r.paths[0]?.kind, 'shadow');
+		assert.equal(r.paths[1]?.kind, 'line');
+		assert.equal(r.paths[0]?.d, r.paths[1]?.d, 'shadow / line d 必须相同');
 		const d = r.paths[0]?.d ?? '';
 		assert.ok(d.includes('M 4 4'), `path 应以 M 4 4 开头, 实际: ${d}`);
 		assert.ok(d.includes('L 4 28'), `path 应包含 L 4 28, 实际: ${d}`);
