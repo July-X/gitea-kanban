@@ -31,7 +31,7 @@ export const VSCODE_GRID_Y = 24;
 export const VSCODE_OFFSET_X = 4;
 export const VSCODE_OFFSET_Y = 4;
 export const VSCODE_VERTEX_RADIUS = 4;
-export const VSCODE_EXPAND_Y = 120; // 展开 commit 时给后下方留出的额外行高
+export const VSCODE_EXPAND_Y = 250; // vscode config.ts:278 expandY 默认值
 
 // 对齐 vscode-git-graph web/graph.ts config.colours 默认 16 色
 // (与 layout.go 注释里提到的 graphColours 数组一致)
