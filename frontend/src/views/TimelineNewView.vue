@@ -131,7 +131,7 @@ const pulling = ref(false);
 // v2.9 commit 详情：行下手风琴（inline 展开）
 // ============================================================
 // 同时只展开 1 个 commit（VSCode Git Graph 默认行为）。
-// 展开面板高度上限 260px → 超出出纵向滚动条（panel 内部已 max-height）。
+// 展开面板高度上限 300px → 超出出纵向滚动条（panel 内部已 max-height）。
 // 复用 CommitDetailPanel 组件（与 CommitDetailDialog 共用同一份面板 + 缓存）。
 /** 当前展开的 commit SHA；null = 全部收起 */
 const expandedSha = ref<string | null>(null);
@@ -143,7 +143,7 @@ const hoveredGraphRow = ref<number | null>(null);
  * expanded row 之后的 commit 视觉 y 坐标 = displayRow*ROW_H + expansionHeight
  * （VSCode 行为：lane 直线自动拉伸延伸覆盖展开行） */
 const expandedHeight = ref(0);
-/** 监听手风琴 DOM 元素的实际高度（max-height 600px，content-driven）
+/** 监听手风琴 DOM 元素的实际高度（max-height 300px，content-driven）
  *  ponytail: rAF 节流 + 值不变不写回，避免 observer 喂回自己触发
  *  "ResizeObserver loop completed with undelivered notifications" */
 let accordionResizeObserver: ResizeObserver | null = null;
@@ -2417,18 +2417,16 @@ function refBadgeClass(refType?: string): string {
      *   - 8px 圆角 + 1px --color-divider 描边
      *   - --shadow-sm 单层柔和阴影
      *
-     * max-height 固定 260px（用户拍板固定阈值，跟 VSCode Git Graph 行为对齐）
+     * max-height 固定 300px（v2.66 由 600 减半，跟 VSCode Git Graph 行为对齐）
      */
     .commit-accordion {
       background: var(--color-bg-elevated);
       border: 1px solid var(--color-divider);
       border-radius: var(--radius-card, 8px);
       box-shadow: var(--shadow-sm);
-      /* v2.64：max-height 260 → 600，让 4:6 双栏 panel 完整显示。
-         旧 260px 只够装 header + commit message title，4:6 双栏（message body + files）
-         被 overflow: hidden 截断（用户报告"手风琴展开失败"——实际是内容截断）。
+      /* v2.66：max-height 600 → 300（用户拍板"缩减一半"）。
          4:6 panel 内部 .cd-panel__left/right 各自有 overflow-y: auto，超出仍可滚。 */
-      max-height: 600px;
+      max-height: 300px;
       /* v2.12：panel 内部 grid 4:6 各自滚，accordion 本身隐藏外层滚动避免双滚动条 */
       overflow: hidden;
       /* 滚动条样式：兜底滚动时使用（理论上不会触发） */
