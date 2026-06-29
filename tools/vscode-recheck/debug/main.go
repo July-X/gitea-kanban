@@ -55,14 +55,14 @@ type edgeJSON struct {
 }
 
 type commitJSON struct {
-	SHA     string `json:"sha"`
-	Row     int    `json:"row"`
-	Lane    int    `json:"lane"`
-	Color   int    `json:"color"`
-	IsMerge bool   `json:"is_merge"`
-	Subject string `json:"subject"`
-	Author  string `json:"author"`
-	Date    string `json:"date"`
+	SHA     string   `json:"sha"`
+	Row     int      `json:"row"`
+	Lane    int      `json:"lane"`
+	Color   int      `json:"color"`
+	IsMerge bool     `json:"is_merge"`
+	Subject string   `json:"subject"`
+	Author  string   `json:"author"`
+	Date    string   `json:"date"`
 	Parents []string `json:"parents"`
 	Refs    []string `json:"refs"`
 }
@@ -78,12 +78,33 @@ type output struct {
 	MaxLane int          `json:"max_lane"`
 }
 
+type pathOut struct {
+	d   string
+	hex string
+	idx int
+}
+
+type nodeOut struct {
+	cx, cy  float64
+	r       float64
+	hex     string
+	sha     string
+	short   string
+	subject string
+}
+
+type line struct {
+	p1x, p1y, p2x, p2y int
+	lockedFirst        bool
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: debug <repo_path> [max_commits]")
 		os.Exit(2)
 	}
 	repo := os.Args[1]
+	globalRepoName = repo
 	maxCommits := 100
 	if len(os.Args) >= 3 {
 		n, err := strconv.Atoi(os.Args[2])
@@ -102,44 +123,25 @@ func main() {
 	}
 	head := resolveHead(repo)
 
-	// 同一组 commit 跑两种算法, 让用户对比 vscode vs Gitea 风格
-	gVscode := graph.BuildGraphVscodeWithHead(logRes.Commits, head)
-	gGitea := graph.BuildGraph(logRes.Commits)
+	g := graph.BuildGraphVscodeWithHead(logRes.Commits, head)
 
 	out := output{}
 	out.Meta.Repo = repo
 	out.Meta.MaxCommits = maxCommits
 	out.Meta.Head = head
-	out.MaxLane = gVscode.MaxLane
+	out.MaxLane = g.MaxLane
 
-	vscodeCommits, vscodeEdges := gToJSON(gVscode, "vscode")
-	giteaCommits, _ := gToJSON(gGitea, "gitea")
-	out.Commits = vscodeCommits
-	out.Edges = vscodeEdges
-
-	// 渲染两种 SVG: vscode 风格 + Gitea 风格 (旧 L 直线 + 斜出斜入)
-	pathsVscode, nodesVscode := renderGraphVscode(gVscode)
-	svgVscode := buildSVG(pathsVscode, nodesVscode, gVscode.MaxLane, len(gVscode.Nodes))
-	pathsGitea, nodesGitea := renderGraphGitea(gGitea)
-	svgGitea := buildSVG(pathsGitea, nodesGitea, gGitea.MaxLane, len(gGitea.Nodes))
-
-	// 输出完整 HTML
-	jsonBytes, _ := json.MarshalIndent(out, "", "  ")
-	fmt.Println(buildHTML(svgVscode, svgGitea, string(jsonBytes), out, vscodeCommits, giteaCommits))
-}
-
-// gToJSON 把 GraphResult 转成 JSON-friendly 列表
-func gToJSON(g *graph.GraphResult, _ string) ([]commitJSON, []edgeJSON) {
-	cs := []commitJSON{}
 	for _, n := range g.Nodes {
-		cs = append(cs, commitJSON{
+		t := "normal"
+		_ = t
+		c := commitJSON{
 			SHA: n.SHA, Row: n.Row, Lane: n.Lane, Color: n.Color,
 			IsMerge: n.IsMerge, Subject: n.Subject,
 			Author: n.AuthorName, Date: n.Date,
 			Parents: n.Parents, Refs: n.Refs,
-		})
+		}
+		out.Commits = append(out.Commits, c)
 	}
-	es := []edgeJSON{}
 	for _, e := range g.Edges {
 		t := "normal"
 		switch e.Type {
@@ -148,13 +150,18 @@ func gToJSON(g *graph.GraphResult, _ string) ([]commitJSON, []edgeJSON) {
 		case graph.EdgeMerge:
 			t = "merge"
 		}
-		es = append(es, edgeJSON{
+		out.Edges = append(out.Edges, edgeJSON{
 			FromRow: e.FromRow, ToRow: e.ToRow,
 			FromLane: e.FromLane, ToLane: e.ToLane,
 			Color: e.Color, Type: t,
 		})
 	}
-	return cs, es
+
+	paths, nodes := renderGraphVscode(g)
+	svg := buildSVG(paths, nodes, g.MaxLane, len(g.Nodes))
+
+	jsonBytes, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Println(buildHTML(svg, string(jsonBytes), out.Commits))
 }
 
 func resolveHead(repo string) string {
@@ -169,29 +176,8 @@ func resolveHead(repo string) string {
 	return head.Hash().String()
 }
 
-// line 对应 graph.ts::Line
-type line struct {
-	p1x, p1y, p2x, p2y int
-	lockedFirst        bool
-}
-
-type pathOut struct {
-	d    string
-	hex  string
-	idx  int
-}
-
-type nodeOut struct {
-	cx, cy float64
-	r      float64
-	hex    string
-	sha    string
-	short  string
-	subject string
-}
-
 func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
-	// 按 color 分组 edge
+	// 按 color 分组 edge (vscode 的 path 也按 color 合并)
 	linesByColor := map[int][]line{}
 	for _, e := range g.Edges {
 		p1x, p1y := e.FromLane, e.FromRow
@@ -204,7 +190,10 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 	for color, lines := range linesByColor {
 		hex := VSCODE_COLORS[color%len(VSCODE_COLORS)]
 		// 1) 转像素坐标
-		type placedT struct{ p1x, p1y, p2x, p2y float64; lockedFirst bool }
+		type placedT struct {
+			p1x, p1y, p2x, p2y float64
+			lockedFirst        bool
+		}
 		placed := []placedT{}
 		for _, ln := range lines {
 			x1 := float64(ln.p1x)*GRID_X + OFFSET_X
@@ -242,7 +231,6 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 		}
 	}
 
-	// 4) 节点
 	nodes := []nodeOut{}
 	for _, n := range g.Nodes {
 		cx := float64(n.Lane)*GRID_X + OFFSET_X
@@ -260,75 +248,16 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 	return paths, nodes
 }
 
-// renderGraphGitea 旧 Gitea 风格 (LANE_WIDTH=10, ROW_HEIGHT=30, L 直线 + 斜出斜入)
-// 用于对比展示 vscode 风格的几何差异
-func renderGraphGitea(g *graph.GraphResult) ([]pathOut, []nodeOut) {
-	const CW = 10
-	const RH = 30
-	const FLOW_LEFT_PAD = 4
-	rowCenter := func(row int) float64 { return float64(row)*RH + RH/2 }
-	rowTop := func(row int) float64 { return float64(row) * RH }
-	rowBottom := func(row int) float64 { return float64(row+1) * RH }
-	laneX := func(lane int) float64 { return float64(lane)*CW + CW/2 + FLOW_LEFT_PAD }
-
-	paths := []pathOut{}
-	// Gitea 调色板 (16 色, 对齐 layout.go 注释的 Gitea series-16)
-	giteaColors := []string{
-		"#4fc4d6", "#74b830", "#f76707", "#db2828", "#6366f1", "#a855f7",
-		"#eab308", "#14b8a6", "#0ea5e9", "#ec4899", "#84cc16", "#f43f5e",
-		"#8b5cf6", "#06b6d4", "#facc15", "#10b981",
-	}
-	for _, e := range g.Edges {
-		x1 := laneX(e.FromLane)
-		y1 := rowCenter(e.FromRow)
-		x2 := laneX(e.ToLane)
-		y2 := rowCenter(e.ToRow)
-		hex := giteaColors[e.Color%len(giteaColors)]
-		var d string
-		if e.FromLane == e.ToLane {
-			d = fmt.Sprintf("M %.0f %.0f L %.0f %.0f", x1, y1, x2, y2)
-		} else if e.ToLane > e.FromLane {
-			// 向右分叉: 先斜出再沿目标 lane 下行
-			branchY := rowTop(e.FromRow + 1)
-			d = fmt.Sprintf("M %.0f %.0f L %.0f %.0f L %.0f %.0f", x1, y1, x2, branchY, x2, y2)
-		} else {
-			// 向左回收: 先沿当前 lane 下行再斜回
-			branchY := rowTop(e.ToRow)
-			d = fmt.Sprintf("M %.0f %.0f L %.0f %.0f L %.0f %.0f", x1, y1, x1, branchY, x2, y2)
-		}
-		_ = rowBottom
-		paths = append(paths, pathOut{d: d, hex: hex, idx: len(paths)})
-	}
-
-	nodes := []nodeOut{}
-	for _, n := range g.Nodes {
-		cx := laneX(n.Lane)
-		cy := rowCenter(n.Row)
-		hex := giteaColors[n.Color%len(giteaColors)]
-		short := n.SHA
-		if len(short) > 7 {
-			short = short[:7]
-		}
-		nodes = append(nodes, nodeOut{
-			cx: cx, cy: cy, r: 4,
-			hex: hex, sha: n.SHA, short: short, subject: n.Subject,
-		})
-	}
-	return paths, nodes
-}
-
 func buildSVG(paths []pathOut, nodes []nodeOut, maxLane, nCommits int) string {
 	width := 2*OFFSET_X + (maxLane+1)*GRID_X
 	height := nCommits*GRID_Y + OFFSET_Y
 	var s string
 	s += fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" style="background:#fafafa">`,
 		width, height, width, height)
-	// 阴影 + 路径
 	for _, p := range paths {
 		s += fmt.Sprintf(`<path d="%s" stroke="%s" stroke-width="2" fill="none" stroke-linecap="round"/>`,
 			html.EscapeString(p.d), p.hex)
 	}
-	// 圆点
 	for _, n := range nodes {
 		s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="#fff" stroke-width="1.5"/>`,
 			n.cx, n.cy, n.r, n.hex)
@@ -337,38 +266,18 @@ func buildSVG(paths []pathOut, nodes []nodeOut, maxLane, nCommits int) string {
 	return s
 }
 
-func buildHTML(svgVscode, svgGitea, jsonStr string, data output, vscodeCommits, giteaCommits []commitJSON) string {
-	repoShort := data.Meta.Repo
-	if idx := lastIndex(repoShort, "/"); idx >= 0 {
-		repoShort = repoShort[idx+1:]
-	}
-
-	// 取出 max lane (vscode)
-	maxLaneVscode := 0
-	for _, c := range vscodeCommits {
-		if c.Lane > maxLaneVscode {
-			maxLaneVscode = c.Lane
-		}
-	}
-	maxLaneGitea := 0
-	for _, c := range giteaCommits {
-		if c.Lane > maxLaneGitea {
-			maxLaneGitea = c.Lane
-		}
-	}
-
+func buildHTML(svg, jsonStr string, commits []commitJSON) string {
+	repoShort := repoBaseName()
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>vscode-git-graph 渲染: %s</title>
+<title>vscode-git-graph 渲染</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 24px; background: #f0f0f0; }
   h1 { margin: 0 0 8px 0; font-size: 20px; }
   h2 { margin: 24px 0 8px 0; font-size: 16px; padding: 8px 12px; background: #2d2d2d; color: #fff; border-radius: 4px; }
-  h2 .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px; vertical-align: middle; }
-  h2 .tag-vscode { background: #0085d9; }
-  h2 .tag-gitea { background: #74b830; }
+  h2 .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px; vertical-align: middle; background: #0085d9; }
   .meta { color: #666; font-size: 13px; margin-bottom: 16px; }
   .container { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 16px; overflow-x: auto; }
   .layout { display: flex; gap: 24px; align-items: flex-start; }
@@ -384,40 +293,20 @@ func buildHTML(svgVscode, svgGitea, jsonStr string, data output, vscodeCommits, 
   .ref-branch { background: #e3f2fd; color: #1565c0; }
   .ref-tag { background: #fff3e0; color: #e65100; }
   .ref-remote { background: #f3e5f5; color: #6a1b9a; }
-  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .compare > div { background: white; border-radius: 8px; padding: 16px; }
-  .diff-note { background: #fffde7; border-left: 3px solid #ffc107; padding: 8px 12px; margin: 12px 0; font-size: 12px; color: #5d4037; }
 </style>
 </head>
 <body>
-<h1>Git Graph 渲染对比: %s</h1>
+<h1>vscode-git-graph 风格渲染: %s</h1>
 <div class="meta">
-  repo: <code>%s</code> &middot;
-  commits: %d (max=%d) &middot;
-  vscode.maxLane: %d &middot;
-  gitea.maxLane: %d
+  commits: %d &middot;
+  algorithm: BuildGraphVscode (1:1 复刻 web/graph.ts::Branch.draw)
 </div>
 
-<div class="diff-note">
-  <b>本 HTML 同时展示 2 种渲染:</b><br>
-  ① <b style="color:#0085d9">vscode-git-graph 风格 (1:1 复刻 web/graph.ts::Branch.draw)</b> — GRID 16×24, 跨 lane 贝塞尔 C 曲线, 12 色调色板 #0085d9 等<br>
-  ② <b style="color:#74b830">Gitea 风格 (旧 BuildGraph 路径)</b> — GRID 10×30, 跨 lane 斜出/斜入直线, 16 色调色板 #4fc4d6 等
-</div>
-
-<div class="compare">
-  <div>
-    <h2>vscode-git-graph 风格 <span class="tag tag-vscode">NEW</span></h2>
-    <div class="layout">
-      <div class="graph">%s</div>
-      <div class="commit-list">%s</div>
-    </div>
-  </div>
-  <div>
-    <h2>Gitea 风格 (旧 BuildGraph) <span class="tag tag-gitea">OLD</span></h2>
-    <div class="layout">
-      <div class="graph">%s</div>
-      <div class="commit-list">%s</div>
-    </div>
+<div class="container">
+  <h2>SVG 渲染 <span class="tag">vscode 风格</span></h2>
+  <div class="layout">
+    <div class="graph">%s</div>
+    <div class="commit-list">%s</div>
   </div>
 </div>
 
@@ -426,16 +315,26 @@ func buildHTML(svgVscode, svgGitea, jsonStr string, data output, vscodeCommits, 
 </body>
 </html>`,
 		html.EscapeString(repoShort),
-		html.EscapeString(repoShort),
-		html.EscapeString(data.Meta.Repo),
-		len(data.Commits), data.Meta.MaxCommits,
-		maxLaneVscode, maxLaneGitea,
-		svgVscode,
-		buildCommitList(vscodeCommits),
-		svgGitea,
-		buildCommitList(giteaCommits),
+		len(commits),
+		svg,
+		buildCommitList(commits),
 		html.EscapeString(jsonStr),
 	)
+}
+
+var globalRepoName = ""
+
+func repoBaseName() string {
+	// 简单取最后一个路径段
+	if globalRepoName == "" {
+		return "repo"
+	}
+	for i := len(globalRepoName) - 1; i >= 0; i-- {
+		if globalRepoName[i] == '/' {
+			return globalRepoName[i+1:]
+		}
+	}
+	return globalRepoName
 }
 
 func buildCommitList(commits []commitJSON) string {
@@ -480,13 +379,4 @@ func buildCommitList(commits []commitJSON) string {
 
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
-func lastIndex(s, sub string) int {
-	for i := len(s) - len(sub); i >= 0; i-- {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
