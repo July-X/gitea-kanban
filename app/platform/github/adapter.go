@@ -332,7 +332,7 @@ func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts pla
 		return nil, err
 	}
 
-	graphResult := graph.BuildGraph(logResult.Commits)
+	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, "")
 	return graphResultToDTO(graphResult), nil
 }
 

@@ -38,6 +38,12 @@ import {
   type SvgRenderResult,
 } from '@renderer/lib/gitgraph/structured';
 import {
+  renderGraphVscode,
+  VSCODE_GRID_X as VSCODE_LANE_WIDTH,
+  VSCODE_GRID_Y as VSCODE_ROW_HEIGHT,
+  type VscodeSvgRenderResult,
+} from '@renderer/lib/gitgraph/vscode-render';
+import {
   COL_WIDTH as ASCII_COL_WIDTH,
   DISPLAY_SCALE,
   DISPLAY_SCALE as ASCII_DISPLAY_SCALE,
@@ -85,8 +91,8 @@ const activeRepo = computed(() => {
 
 /** v2.6：Go 后端直接返回的结构化 Graph（含 nodes+edges+16 色字段） */
 const graphDto = ref<GraphResultDto | null>(null);
-/** v2.6：前端从 GraphResultDto 渲染出的 SVG 数据（paths 按 color 分组） */
-const svgRender = ref<SvgRenderResult | null>(null);
+/** v2.6 + v2.9 (vscode-port)：前端从 GraphResultDto 渲染出的 SVG 数据 */
+const svgRender = ref<VscodeSvgRenderResult | null>(null);
 /** GitHub/gh 超大仓库：git log --graph 字符流解析后的 Graph */
 const asciiGraph = ref<Graph | null>(null);
 /** GitHub/gh 超大仓库：后端返回的原始字符流行 */
@@ -410,8 +416,9 @@ async function loadGraph(): Promise<void> {
       // 不要在这里 return，让 finally 块清理状态
     } else {
       graphDto.value = dto;
-      // 直接渲染为 SVG（path 按 color 分组、节点含坐标）
-      svgRender.value = renderGraph(dto);
+      // v2.9 (vscode-port)：使用 vscode-git-graph 风格 1:1 复刻渲染 (renderGraphVscode)
+      // 替代之前的 Gitea 风格 renderGraph。GRID 16x24 + 贝塞尔曲线 + 12 色调色板
+      svgRender.value = renderGraphVscode(dto);
       asciiGraph.value = null;
       asciiLines.value = [];
     }
