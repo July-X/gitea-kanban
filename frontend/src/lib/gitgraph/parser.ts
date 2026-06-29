@@ -510,9 +510,7 @@ export function addLineToGraph(
   parseGlyphs(p, glyphs);
 
   // 2. 遍历当前行，把每个非空格 glyph 写入 graph
-  //    注意：column 写入 graph 时用 columnIdx（ASCII 字符流下标 = lane 编号），
-  //          这样 / \ 几何跨 lane 能正确连接；flowId 只用于颜色归类。
-  //    git log --graph 输出 left-aligned，无前导空格，columnIdx 即 lane 编号。
+  //    git log --graph 的 lane 之间有空格，屏幕坐标使用 columnIdx / 2 压紧。
   let commitDone = false;
   for (let columnIdx = 0; columnIdx < p.glyphs.length; columnIdx++) {
     const glyph = p.glyphs[columnIdx]!;
@@ -520,18 +518,15 @@ export function addLineToGraph(
 
     const flowID = p.flows[columnIdx]!;
     const color = p.colors[columnIdx]!;
-    // v2.x 修复（多 MR 仓库断线）：column 改为 ASCII lane 下标，不再用 flowID。
-    // 旧版 `column = flowID` 让同 flow 的 / 和 * 挤到同一 lane，几何上 / 终点与 * 起点错位断线。
-    const column = columnIdx;
+    const column = columnIdx / 2;
 
     // 对角线的另一端列号（\ 从 parent 分叉，/ 合并到 parent）
-    // 注：svg.ts 渲染斜线时改用 Gitea 几何（跨 2 lane），用 column±1 算起点终点；
-    //     parentColumn 保留供调试参考（不影响渲染）。
+    // 注：parentColumn 同样使用压缩后的字符坐标，和 debug HTML 保持一致。
     let parentColumn: number | undefined;
     if (glyph === '\\' && columnIdx > 0) {
-      parentColumn = columnIdx - 1; // \ 起点在 ASCII lane columnIdx-1 的右缘
+      parentColumn = (columnIdx - 1) / 2;
     } else if (glyph === '/' && columnIdx > 0) {
-      parentColumn = columnIdx - 1; // / 终点在 ASCII lane columnIdx-1 的右缘
+      parentColumn = (columnIdx - 1) / 2;
     }
     addGlyphToGraph(graph, row, column, flowID, color, glyph, parentColumn);
 

@@ -45,14 +45,12 @@ import {
   ROW_HEIGHT as ASCII_ROW_HEIGHT,
   FLOW_LEFT_PAD,
   flowColorClass,
-  flowToPathDCompact,
+  layoutVscodeGraph,
   parseLines,
-  svgViewBox as asciiSvgViewBox,
-  svgWidthPx as asciiSvgWidthPx,
-  type Flow,
   type GitGraphCommit,
   type Graph,
   type GraphLine,
+  type VscodeGraphLayout,
 } from '@renderer/lib/gitgraph';
 
 // ============================================================
@@ -640,26 +638,32 @@ const asciiRowOffsets = computed<Map<number, number>>(() => {
   return map;
 });
 
+const asciiLayout = computed<VscodeGraphLayout | null>(() => {
+  if (!asciiGraph.value) return null;
+  return layoutVscodeGraph(asciiGraph.value, displayRowMap.value, {
+    rowOffsets: asciiRowOffsets.value,
+  });
+});
+
+const asciiWidthUnits = computed(() => {
+  const laneCount = Math.max(1, asciiLayout.value?.laneCount ?? 1);
+  return laneCount * ASCII_COL_WIDTH + ASCII_COL_WIDTH + FLOW_LEFT_PAD;
+});
+
 const viewBox = computed(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
     // v2.65：viewBox 高度 = commit 数 * ROW_HEIGHT + 累计 rowOffset
     // 手风琴展开时 viewBox 自动扩张，给 path d 留出延伸空间。
-    const g = asciiGraph.value;
-    const commitCount = g.commits.length;
-    const baseViewBox = asciiSvgViewBox(g);
-    const parts = baseViewBox.split(' ');
-    const x = parts[0]!;
-    const y = parts[1]!;
-    const w = parts[2]!;
+    const commitCount = asciiGraph.value.commits.length;
     const totalHeight = commitCount * ROW_HEIGHT + expandedHeight.value;
-    return `${x} ${y} ${w} ${totalHeight}`;
+    return `0 0 ${asciiWidthUnits.value} ${totalHeight}`;
   }
   const r = svgRender.value;
   return r ? `0 0 ${r.width} ${r.height}` : '0 0 0 0';
 });
 const svgWidth = computed(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    return asciiSvgWidthPx(asciiGraph.value);
+    return `${asciiWidthUnits.value * ASCII_DISPLAY_SCALE}px`;
   }
   const r = svgRender.value;
   return r ? `${r.width}px` : '0px';
@@ -680,6 +684,7 @@ const svgHeight = computed(() => {
 // Path 分组（按 color 分组，对齐 Gitea flow-color-16-N 染色）
 // ============================================================
 interface PathGroup {
+  id: string;
   order: number;
   colorIndex: number; // 0..15，对齐 Gitea Color16()
   colorClass: string; // 'flow-color-16-N'
@@ -689,26 +694,21 @@ interface PathGroup {
 
 const pathGroups = computed<PathGroup[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    // v2.65：ASCII 路径用 S 曲线 + 手风琴展开 rowOffsets
-    // - 跨 lane 时用 C 命令画 S 曲线（VSCode 风格）
-    // - 手风琴展开时，expanded row 之后的 commit y 自动 +expandedHeight
-    //   → lane 直线自动"拉伸延伸"覆盖展开行高度（VSCode 行为）
-    return [...asciiGraph.value.flows.values()]
-      .sort((a, b) => a.id - b.id)
-      .map((flow: Flow) => ({
-        order: flow.id,
-        colorIndex: flow.colorNumber % 16,
-        colorClass: flowColorClass(flow.colorNumber),
-        d: flowToPathDCompact(flow, displayRowMap.value, {
-          curve: true,
-          rowOffsets: asciiRowOffsets.value,
-        }),
-      }));
+    // GitHub fallback：ASCII 只负责提供 commit + parents，线条按 DAG parent edge 重排。
+    // VSCode Git Graph 也是 parent-edge 语义，不等同于 `git log --graph` 字符流。
+    return (asciiLayout.value?.paths ?? []).map((path, index) => ({
+      id: `ascii-edge-${path.id}`,
+      order: index,
+      colorIndex: path.colorNumber % 16,
+      colorClass: flowColorClass(path.colorNumber),
+      d: path.d,
+    }));
   }
   const r = svgRender.value;
   if (!r) return [];
   // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
   return r.paths.map((p) => ({
+    id: `structured-${p.order}`,
     order: p.order,
     colorIndex: p.colorIndex,
     colorClass: `flow-color-16-${p.colorIndex}`,
@@ -869,26 +869,12 @@ function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string
 
 const dotNodes = computed<DotOverlayNode[]>(() => {
   if (useAsciiGraph.value && asciiGraph.value) {
-    // 圆点 overlay 是 HTML 绝对定位 px，必须与 SVG viewBox 映射后的像素坐标对齐。
-    // SVG viewBox 的 minX = graph.minColumn * COL_WIDTH（见 models.ts svgViewBox v2.42），
-    // 线条经 viewBox 映射后整体左移 minX*SCALE。圆点若用绝对 px (col*CW+CW/2)*SCALE
-    // 不减 minX，会恒定偏右 minX*SCALE（minColumn 几乎总是 1 → 偏右 10px），
-    // 表现为"圆点偏右、线条偏左"。这里减去 minX 对齐。
-    // v2.42：+FLOW_LEFT_PAD 让 ASCII flow 1 (column 0) 圆心距 commit list 左 9px（圆缘 5px），
-    //   之前圆心 4.5px，圆缘 0.5px 贴边。viewBox x 和 dot cx 同步偏移保持对齐。
-    // v2.46：dot cx 从 lane 右缘 (col*CW + CW) 改成 lane 中线 (col*CW + CW/2)，
-    //   与 structured 路径 laneX() + node.cx() 公式完全对齐：
-    //   - path d x = col*CW + CW/2 + FLOW_LEFT_PAD（lane 0 = 9px）
-    //   - dot cx = col*CW + CW/2 + FLOW_LEFT_PAD - minX（lane 0 minX=0 时 = 9px）
-    //   → dot 与 line 完美重合 ✓，与 structured 路径也一致 ✓。
-    const minX = asciiGraph.value.minColumn * ASCII_COL_WIDTH;
-    // v2.15：SVG 完整渲染不缩放，圆点 cx 直接用 (col*CW+CW/2-minX+FLOW_LEFT_PAD)*SCALE，
-    // 圆点 size = 8px（DOT_SIZE），圆点视觉上落在 lane 中线（与 Gitea path + structured 路径一致）。
-    // v2.65 GitHub parser 修复 + VSCode 风格：cy 用 displayRow + rowOffset
-    // （手风琴展开时 expanded row 之后的 dot 自动下移，与 SVG path 同步）
     return asciiGraph.value.commits.map((commit) => {
       const displayRow = displayRowMap.value.get(commit.row) ?? 0;
       const rowOffset = asciiRowOffsets.value.get(displayRow) ?? 0;
+      const node = asciiLayout.value?.nodes.get(commit.sha);
+      const lane = node?.lane ?? 0;
+      const colorNumber = node?.colorNumber ?? 0;
       return {
         sha: commit.sha,
         subject: commit.subject,
@@ -898,12 +884,10 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
           commit.refs.map((r) => refTypeFromGroup(r.refGroup)),
         ),
         row: displayRow,
-        cx: (commit.column * ASCII_COL_WIDTH + ASCII_COL_WIDTH / 2 - minX + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
+        cx: (lane * ASCII_COL_WIDTH + ASCII_COL_WIDTH / 2 + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
         cy: (displayRow * ASCII_ROW_HEIGHT + rowOffset + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
         size: DOT_SIZE,
-        colorClass: flowColorClass(
-          asciiGraph.value?.flows.get(commit.flowId)?.colorNumber ?? commit.flowId,
-        ),
+        colorClass: flowColorClass(colorNumber),
       };
     });
   }
@@ -962,6 +946,12 @@ let dragStartX = 0;
 let dragStartHandleLeft = 0;
 let dragLatestX = 0;
 
+function currentGraphSvgWidth(): number {
+  return useAsciiGraph.value
+    ? (Number.parseFloat(svgWidth.value) || DEFAULT_GRAPH_COL_WIDTH)
+    : (svgRender.value?.width ?? DEFAULT_GRAPH_COL_WIDTH);
+}
+
 /**
  * handle 实际位置（min(userHandleLeft, svgWidth+30) —— 自适应缩窄到不空白）
  *
@@ -977,9 +967,12 @@ let dragLatestX = 0;
  * .git-graph-bg 容器宽度 = handleLeft。
  */
 const handleLeft = computed(() => {
-  const svgW = svgRender.value?.width ?? DEFAULT_GRAPH_COL_WIDTH;
+  const svgW = currentGraphSvgWidth();
   // 自适应宽度：svgWidth + 30 (lane 数 + padding) ，最小 130
   const adaptive = Math.max(DEFAULT_GRAPH_COL_WIDTH, svgW + 30);
+  if (useAsciiGraph.value) {
+    return Math.min(MAX_GRAPH_COL_WIDTH, adaptive);
+  }
   if (userHandleLeft.value === null) {
     return Math.min(MAX_GRAPH_COL_WIDTH, adaptive);
   }
@@ -1091,7 +1084,7 @@ function onDragEnd(): void {
     //   handleLeft 被 userHandleLeft 持久化值主导，col 1 内 350+ 像素空白。
     //   持久化 min 值，下次打开仍然是合理宽度（不空白）。
     if (graphDragFinalLeft !== null) {
-      const svgW = svgRender.value?.width ?? DEFAULT_GRAPH_COL_WIDTH;
+      const svgW = currentGraphSvgWidth();
       const clamped = Math.min(graphDragFinalLeft, Math.max(DEFAULT_GRAPH_COL_WIDTH, svgW + 30));
       userHandleLeft.value = clamped;
     }
@@ -1408,7 +1401,7 @@ function refBadgeClass(refType?: string): string {
                 >
                   <g
                     v-for="pg in pathGroups"
-                    :key="`flow-${pg.colorIndex}`"
+                    :key="pg.id"
                     class="flow-group"
                     :class="pg.colorClass"
                     :data-color="pg.colorIndex"

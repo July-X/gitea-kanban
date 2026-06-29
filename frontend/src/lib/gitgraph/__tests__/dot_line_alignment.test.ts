@@ -14,12 +14,11 @@ import assert from 'node:assert/strict';
 
 import {
   parseLines,
-  flowToPathDCompact,
+  layoutVscodeGraph,
   ROW_HEIGHT,
   COL_WIDTH,
   FLOW_LEFT_PAD,
   DISPLAY_SCALE,
-  type Flow,
 } from '../index.ts';
 
 interface TestLine {
@@ -70,6 +69,36 @@ function makeTestLines(): TestLine[] {
   ];
 }
 
+function makeDeepSeekReasonixLines(): TestLine[] {
+  return [
+    { row: 0, glyph: '*   ', commit: { sha: '9ffb7b223', subject: 'Merge org/main-v2', isMerge: true, parents: ['x','y'] } },
+    { row: 1, glyph: '|\\  ' },
+    { row: 2, glyph: '| *   ', commit: { sha: 'b9d1ffc60', subject: 'Merge pull request #5470', isMerge: true, parents: ['x','y'] } },
+    { row: 3, glyph: '| |\\  ' },
+    { row: 4, glyph: '| | * ', commit: { sha: 'e4a72782c', subject: 'Fix file references in plan revisions', isMerge: false, parents: ['x'] } },
+    { row: 5, glyph: '| |/  ' },
+    { row: 6, glyph: '| *   ', commit: { sha: '5efbb7384', subject: 'Merge pull request #5454', isMerge: true, parents: ['x','y'] } },
+    { row: 7, glyph: '| |\\  ' },
+    { row: 8, glyph: '| | * ', commit: { sha: 'f54c76353', subject: 'Fix live bot approval mode updates', isMerge: false, parents: ['x'] } },
+    { row: 9, glyph: '* | | ', commit: { sha: '3682bcb7a', subject: 'Merge org/main-v2', isMerge: true, parents: ['x','y'] } },
+    { row: 10, glyph: '|\\| | ' },
+    { row: 11, glyph: '| * |   ', commit: { sha: '427658bc8', subject: 'Merge pull request #5453', isMerge: true, parents: ['x','y'] } },
+    { row: 12, glyph: '| |\\ \\  ' },
+    { row: 13, glyph: '| | * \\   ', commit: { sha: '8a8daad59', subject: 'Merge main-v2 into external folder refs', isMerge: true, parents: ['x','y'] } },
+    { row: 14, glyph: '| | |\\ \\  ' },
+    { row: 15, glyph: '| | |/ /  ' },
+    { row: 16, glyph: '| |/| |   ' },
+    { row: 17, glyph: '| | * | ', commit: { sha: '1976a217e', subject: 'feat: let read tools resolve external folder refs', isMerge: false, parents: ['x'] } },
+    { row: 18, glyph: '| | * | ', commit: { sha: 'a81a46583', subject: 'feat: clarify directory ref context', isMerge: false, parents: ['x'] } },
+    { row: 19, glyph: '| | * | ', commit: { sha: 'af3d3805e', subject: 'feat: support external folder subpath refs', isMerge: false, parents: ['x'] } },
+    { row: 20, glyph: '| * | |   ', commit: { sha: '20e99f691', subject: 'Merge pull request #5452', isMerge: true, parents: ['x','y'] } },
+    { row: 21, glyph: '| |\\ \\ \\  ' },
+    { row: 22, glyph: '| | * | | ', commit: { sha: '35d247697', subject: 'Fix memory and permission hardening regressions', isMerge: false, parents: ['x'] } },
+    { row: 23, glyph: '| |/ / /  ' },
+    { row: 24, glyph: '| | | * ', commit: { sha: '20ccf46d2', subject: 'fix(bot): approval restart', isMerge: false, parents: ['x'] } },
+  ];
+}
+
 /**
  * 提取 SVG path d 里所有 path 段（不含 M 起点）。
  * 返回 [{x1, y1, x2, y2}, ...] 形式的线段数组。
@@ -78,124 +107,92 @@ function makeTestLines(): TestLine[] {
  *   简化对齐验证：dot center (x, y+ROW_H/2) 是否在曲线"包围盒"内：
  *   包围盒 = (min_x, midY-curveDy) 到 (max_x, midY+curveDy) 之间的纵向范围
  */
-function extractPathSegments(d: string, prevX: number, prevY: number): Array<{ x1: number; y1: number; x2: number; y2: number; kind: 'v' | 'l' | 'c' }> {
-  const segments: Array<{ x1: number; y1: number; x2: number; y2: number; kind: 'v' | 'l' | 'c' }> = [];
-  let curX = prevX, curY = prevY;
-  const tokens = d.match(/[MLVCv]|-?\d+(?:\.\d+)?/g) ?? [];
+function pathTouchesPoint(d: string, x: number, y: number): boolean {
+  const tokens = d.match(/[MLC]|-?\d+(?:\.\d+)?/g) ?? [];
   let i = 0;
+  let curX = 0;
+  let curY = 0;
   while (i < tokens.length) {
     const cmd = tokens[i]!;
     if (cmd === 'M') {
       curX = Number(tokens[i + 1]!);
       curY = Number(tokens[i + 2]!);
+      if (Math.abs(curX - x) < 0.001 && Math.abs(curY - y) < 0.001) return true;
       i += 3;
     } else if (cmd === 'L') {
-      const x = Number(tokens[i + 1]!);
-      const y = Number(tokens[i + 2]!);
-      segments.push({ x1: curX, y1: curY, x2: x, y2: y, kind: 'l' });
-      curX = x;
-      curY = y;
+      const x2 = Number(tokens[i + 1]!);
+      const y2 = Number(tokens[i + 2]!);
+      const cross = Math.abs((x - curX) * (y2 - curY) - (y - curY) * (x2 - curX));
+      const within =
+        x >= Math.min(curX, x2) - 0.001 &&
+        x <= Math.max(curX, x2) + 0.001 &&
+        y >= Math.min(curY, y2) - 0.001 &&
+        y <= Math.max(curY, y2) + 0.001;
+      if (cross < 0.001 && within) return true;
+      curX = x2;
+      curY = y2;
       i += 3;
-    } else if (cmd === 'V' || cmd === 'v') {
-      const dy = Number(tokens[i + 1]!);
-      const y = cmd === 'V' ? dy : curY + dy;
-      segments.push({ x1: curX, y1: curY, x2: curX, y2: y, kind: 'v' });
-      curY = y;
-      i += 2;
     } else if (cmd === 'C') {
-      const x = Number(tokens[i + 6]!);
-      const y = Number(tokens[i + 5]!); // C 最后第二个是 y
-      // 实际解析：tokens: C x1 y1, x2 y2, x y → tokens[i+1]=x1, [i+2]=y1, [i+3]=x2, [i+4]=y2, [i+5]=x, [i+6]=y
-      // 重新调整
-      const finalY = Number(tokens[i + 6]!);
-      segments.push({ x1: curX, y1: curY, x2: x, y2: finalY, kind: 'c' });
-      curX = x;
-      curY = finalY;
+      const x2 = Number(tokens[i + 5]!);
+      const y2 = Number(tokens[i + 6]!);
+      if (Math.abs(curX - x) < 0.001 && Math.abs(curY - y) < 0.001) return true;
+      if (Math.abs(x2 - x) < 0.001 && Math.abs(y2 - y) < 0.001) {
+        return true;
+      }
+      curX = x2;
+      curY = y2;
       i += 7;
     } else {
       i++;
     }
   }
-  return segments;
+  return false;
 }
 
-describe('gitgraph dot/line 对齐', () => {
-test('v2.66 dot 和 line 严格对齐：每个 dot center 必须落在对应 path 线段中点（±ROW_H/4 容差）', () => {
-  const testLines = makeTestLines();
+function assertDotsOnLines(testLines: TestLine[]): void {
   const { graph } = parseLines(testLines as any);
   const sorted = [...graph.commits].sort((a, b) => a.row - b.row);
   const displayRowMap = new Map<number, number>();
   sorted.forEach((c, i) => displayRowMap.set(c.row, i));
-
-  const minX = graph.minColumn * COL_WIDTH;
-
-  // 1. 验证 viewBox/svgHeight 跟 commit 数匹配
-  const commitCount = graph.commits.length;
-  const expectedTotalHeight = commitCount * ROW_HEIGHT + 0;
-  assert.equal(expectedTotalHeight, commitCount * ROW_HEIGHT, 'viewBox 高度 = commitCount * ROW_HEIGHT');
-
-  // 2. 对每个 commit，验证 dot cy 与对应 path 段的对齐
   let totalMismatches = 0;
   let totalChecks = 0;
 
-  for (const flow of graph.flows.values()) {
-    const d = flowToPathDCompact(flow, displayRowMap, { curve: true, rowOffsets: new Map() });
-    if (!d) continue;
+  const layout = layoutVscodeGraph(graph, displayRowMap, { rowOffsets: new Map() });
+  const paths = layout.paths.map((path) => path.d);
 
-    const flowCommits = flow.commits
-      .filter((c) => displayRowMap.has(c.row))
-      .sort((a, b) => a.row - b.row);
-    if (flowCommits.length === 0) continue;
-
-    // 提取所有 path 段
-    const firstCommit = flowCommits[0]!;
-    const segments = extractPathSegments(d, 0, 0); // 起点 prev_x/y 不用，因为第一段用 M 起点覆盖
-
-    // 对每个 commit，验证 dot (cx, cy) 落在某条 path 段上
-    for (const c of flowCommits) {
-      const dr = displayRowMap.get(c.row)!;
-      const dotCx = (c.column * COL_WIDTH + COL_WIDTH / 2 - minX + FLOW_LEFT_PAD) * DISPLAY_SCALE;
-      const dotCy = (dr * ROW_HEIGHT + 0 + ROW_HEIGHT / 2) * DISPLAY_SCALE;
-
-      // 找到 dot 所在的 path 段（必须有一条段 x 范围包含 dotCx, y 范围包含 dotCy）
-      const hit = segments.some(seg => {
-        if (seg.kind === 'v') {
-          // 垂直线：x = 固定，y 范围 [y1, y2]
-          if (Math.abs(seg.x1 - dotCx) > 0.1) return false;
-          const yMin = Math.min(seg.y1, seg.y2);
-          const yMax = Math.max(seg.y1, seg.y2);
-          return dotCy >= yMin && dotCy <= yMax;
-        } else if (seg.kind === 'l') {
-          // 直线：x 范围 [x1, x2], y 范围 [y1, y2]
-          const xMin = Math.min(seg.x1, seg.x2);
-          const xMax = Math.max(seg.x1, seg.x2);
-          const yMin = Math.min(seg.y1, seg.y2);
-          const yMax = Math.max(seg.y1, seg.y2);
-          return dotCx >= xMin && dotCx <= xMax && dotCy >= yMin && dotCy <= yMax;
-        } else if (seg.kind === 'c') {
-          // S 曲线：dot (cx, cy) 跟曲线起点 (x1, y1) 和终点 (x2, y2) 形成的包围盒对齐
-          // 简化：dot cy 必须在 [min(y1, y2) - ROW_H/4, max(y1, y2) + ROW_H/4] 范围内
-          // 且 dot cx 必须在 [min(x1, x2), max(x1, x2)] 范围内（曲线从 x1 走到 x2）
-          const xMin = Math.min(seg.x1, seg.x2);
-          const xMax = Math.max(seg.x1, seg.x2);
-          const yMin = Math.min(seg.y1, seg.y2);
-          const yMax = Math.max(seg.y1, seg.y2);
-          return dotCx >= xMin - 0.1 && dotCx <= xMax + 0.1 &&
-                 dotCy >= yMin - ROW_HEIGHT / 2 && dotCy <= yMax + ROW_HEIGHT / 2;
-        }
-        return false;
-      });
-
-      totalChecks++;
-      if (!hit) {
-        totalMismatches++;
-        console.error(`MISMATCH: Flow ${flow.id} commit sha=${c.sha.slice(0, 6)} asciiRow=${c.row} displayRow=${dr} → dot (${dotCx}, ${dotCy}) 不在任何 path 段上`);
-      }
+  for (const c of graph.commits) {
+    const dr = displayRowMap.get(c.row)!;
+    const lane = layout.nodes.get(c.sha)?.lane ?? 0;
+    const dotCx = (lane * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD) * DISPLAY_SCALE;
+    const dotCy = (dr * ROW_HEIGHT + ROW_HEIGHT / 2) * DISPLAY_SCALE;
+    const graphCx = dotCx / DISPLAY_SCALE;
+    const graphCy = dotCy / DISPLAY_SCALE;
+    const hit = paths.some((d) => pathTouchesPoint(d, graphCx, graphCy));
+    totalChecks++;
+    if (!hit) {
+      totalMismatches++;
+      console.error(`MISMATCH: commit sha=${c.sha.slice(0, 9)} asciiRow=${c.row} displayRow=${dr} → dot (${dotCx}, ${dotCy}) 不在任何父子边端点上`);
     }
   }
 
   console.log(`  total checks: ${totalChecks}, mismatches: ${totalMismatches}`);
   assert.equal(totalMismatches, 0, `所有 dot 必须落在线上，mismatches=${totalMismatches}`);
+}
+
+describe('gitgraph dot/line 对齐', () => {
+test('v2.66 dot 和 line 严格对齐：每个 dot center 必须落在对应 path 线段中点（±ROW_H/4 容差）', () => {
+  assertDotsOnLines(makeTestLines());
+
+  // 1. 验证 viewBox/svgHeight 跟 commit 数匹配
+  const testLines = makeTestLines();
+  const { graph } = parseLines(testLines as any);
+  const commitCount = graph.commits.length;
+  const expectedTotalHeight = commitCount * ROW_HEIGHT + 0;
+  assert.equal(expectedTotalHeight, commitCount * ROW_HEIGHT, 'viewBox 高度 = commitCount * ROW_HEIGHT');
+});
+
+test('DeepSeek-Reasonix 真实多 PR glyph：dot 必须落在对应分支线上', () => {
+  assertDotsOnLines(makeDeepSeekReasonixLines());
 });
 
 test('v2.66 viewBox 高度 = commitCount * ROW_HEIGHT（不依赖 maxRow，maxRow 包含 edge 行）', () => {

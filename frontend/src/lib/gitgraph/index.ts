@@ -63,4 +63,13 @@ export { Parser, parseGlyphs, addLineToGraph, parseLines } from './parser.js';
 // 旧 adapter.ts / graphResultToGraph 已删除
 
 // SVG 工具
-export { glyphToPathD, flowToPathD, flowToPathDCompact } from './svg.js';
+export {
+  glyphToPathD,
+  flowToPathD,
+  flowToPathDCompact,
+  graphToParentPaths,
+  layoutVscodeGraph,
+  type CompactGraphPath,
+  type VscodeGraphLayout,
+  type VscodeGraphNode,
+} from './svg.js';

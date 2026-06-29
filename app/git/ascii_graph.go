@@ -60,9 +60,9 @@ const graphLogPrettyFormat = "DATA:%D|%H|%ad|%h|%P|%an|%ae|%s"
 
 // RunGraphLog 使用系统 git 的 --graph 字符流生成 Git Graph。
 //
-// 这个路径主要给 GitHub/gh partial clone 的超大仓库使用：仓库只需要 commit 元信息，
-// 由 git 自己完成 date-order + graph ASCII 布局，前端复用旧 parser 渲染，避免结构化
-// lane 算法在超大浅历史上生成过宽 SVG。
+// 这个路径主要给 GitHub/gh partial clone 的超大仓库使用：仓库只需要 commit 元信息。
+// git log 的 ASCII 字符流只用于保留排序与父节点数据，前端会按 parents 重新计算
+// VSCode 风格的 DAG lane，而不是把 git log --graph 字符图当最终显示结果。
 //
 // 超宽 graph 保护（v2.x 修复 July-X/UnrealEngine 渲染卡死）：
 // UnrealEngine release 分支中段有一段把大量 promotional 分支同步 merge 进来的历史，
@@ -106,7 +106,7 @@ func RunGraphLog(localPath string, opts RunGraphLogOptions) (*GraphLinesResult, 
 }
 
 // maxGraphLaneWidth 触发 --first-parent 回退的单行 lane 阈值。
-// 64 lane 对应 SVG ~320px 宽（COL_WIDTH=5 × DISPLAY_SCALE=2），前端可流畅渲染。
+// 64 lane 对应 SVG 约 1920px 宽（COL_WIDTH=15 × DISPLAY_SCALE=2），前端仍可流畅渲染。
 const maxGraphLaneWidth = 64
 
 // maxLineLaneWidth 统计所有行中最大的非空格 glyph 数（≈ 该行的并发 lane 数）。

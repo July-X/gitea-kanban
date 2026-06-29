@@ -21,7 +21,8 @@
  *                        底部水平长线（lane 左缘 → 中线 → 右缘 → 右邻中线，2 个 lane 宽）
  *
  * 这些公式跟 structured.ts laneX(lane) = lane*LANE_WIDTH + LANE_WIDTH/2 + FLOW_LEFT_PAD
- * 完全镜像（structured 路径 LANE_WIDTH 与本模块 COL_WIDTH 都是 10）。dot cx 也用中线公式，
+ * 完全镜像 dot 的中线公式：column*COL_WIDTH + COL_WIDTH/2 + FLOW_LEFT_PAD，
+ * dot cx 也用中线公式，
  * path d 与 dot 都在 lane 中线对齐（SourceTree 风格）。
  *
  * 关键前提：g.column 是 ASCII 字符流下标（lane 编号），不是 flowID。
@@ -31,7 +32,7 @@
  * 渲染端直接 `<path :d="path.d" ...>`。
  */
 
-import type { Flow, Glyph } from './models.js';
+import type { Flow, Glyph, GitGraphCommit, Graph } from './models.js';
 import { COL_WIDTH, FLOW_LEFT_PAD, ROW_HEIGHT } from './models.js';
 
 // ============================================================
@@ -145,49 +146,201 @@ export function flowToPathDCompact(
   rowRemap: Map<number, number>,
   options?: { curve?: boolean; rowOffsets?: Map<number, number> },
 ): string {
-  const useCurve = options?.curve ?? true;
   const rowOffsets = options?.rowOffsets;
   const commits = flow.commits
     .filter((c) => rowRemap.has(c.row))
     .sort((a, b) => a.row - b.row);
   if (commits.length < 1) return '';
 
-  // 收集每个 commit 的绝对位置
-  // y = displayRow * ROW_HEIGHT + rowOffsets.get(displayRow) ?? 0
-  // （手风琴展开时，expandedRow 及之后的所有 commit 视觉位置都往下推 rowOffsets[displayRow]）
-  const pts = commits.map((c) => {
-    const displayRow = rowRemap.get(c.row)!;
-    return {
-      x: c.column * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD,
-      y: displayRow * ROW_HEIGHT + (rowOffsets?.get(displayRow) ?? 0),
-    };
-  });
+  const remappedRows = [...rowRemap.entries()].sort((a, b) => a[0] - b[0]);
+  const displayTop = (displayRow: number) =>
+    displayRow * ROW_HEIGHT + (rowOffsets?.get(displayRow) ?? 0);
 
+  const rowTop = (asciiRow: number): number => {
+    const exact = rowRemap.get(asciiRow);
+    if (exact !== undefined) return displayTop(exact);
+
+    let prev: [number, number] | undefined;
+    let next: [number, number] | undefined;
+    for (const entry of remappedRows) {
+      if (entry[0] < asciiRow) prev = entry;
+      if (entry[0] > asciiRow) {
+        next = entry;
+        break;
+      }
+    }
+    if (prev && next) {
+      const [prevRow, prevDisplayRow] = prev;
+      const [nextRow, nextDisplayRow] = next;
+      const t = (asciiRow - prevRow) / (nextRow - prevRow);
+      return displayTop(prevDisplayRow) + (displayTop(nextDisplayRow) - displayTop(prevDisplayRow)) * t;
+    }
+    if (prev) return displayTop(prev[1]) + (asciiRow - prev[0]) * ROW_HEIGHT;
+    if (next) return displayTop(next[1]) - (next[0] - asciiRow) * ROW_HEIGHT;
+    return asciiRow * ROW_HEIGHT;
+  };
+
+  const laneX = (column: number) => column * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD;
   const parts: string[] = [];
-  // 起点：第一个 commit 的左上角
-  parts.push(`M ${pts[0]!.x} ${pts[0]!.y}`);
-  // 依次连到每个后续 commit
-  for (let i = 1; i < pts.length; i++) {
-    const prev = pts[i - 1]!;
-    const cur = pts[i]!;
-    if (cur.x === prev.x) {
-      // 同 lane：垂直 V 命令
-      parts.push(`V ${cur.y}`);
-    } else if (!useCurve) {
-      parts.push(`L ${cur.x} ${cur.y}`);
-    } else {
-      // 跨 lane：S 曲线（VSCode 风格 —— 控制点 y 几乎贴两端，让 cubic bezier 端点切线垂直，
-      // 中段大幅横向弯过去，整体像"两段 90° 折角"的圆润版）
-      const dy = cur.y - prev.y;
-      // curveDy 至少 80% dy，让曲线贴近两端垂直；上限 ROW_HEIGHT*1.2 防超长跨度失控
-      const curveDy = Math.min(Math.abs(dy) * 0.8, ROW_HEIGHT * 1.2);
-      parts.push(
-        `C ${prev.x} ${prev.y + curveDy}, ${cur.x} ${cur.y - curveDy}, ${cur.x} ${cur.y}`,
-      );
+  for (const g of flow.glyphs) {
+    const y1 = rowTop(g.row);
+    const y2 = rowTop(g.row + 1);
+    const x = laneX(g.column);
+    switch (g.glyph) {
+      case '*':
+      case '|':
+        parts.push(`M ${x} ${y1} L ${x} ${y2}`);
+        break;
+      case '/': {
+        const parentColumn = g.parentColumn ?? g.column - 1;
+        parts.push(`M ${laneX(g.column + (g.column - parentColumn))} ${y1} L ${laneX(parentColumn)} ${y2}`);
+        break;
+      }
+      case '\\': {
+        const parentColumn = g.parentColumn ?? g.column - 1;
+        parts.push(`M ${laneX(parentColumn)} ${y1} L ${laneX(g.column + (g.column - parentColumn))} ${y2}`);
+        break;
+      }
+      case '-':
+      case '.':
+        parts.push(`M ${x - COL_WIDTH / 2} ${y2} L ${x + COL_WIDTH / 2} ${y2}`);
+        break;
+      case '_':
+        parts.push(`M ${x - COL_WIDTH / 2} ${y2} L ${x + COL_WIDTH * 1.5} ${y2}`);
+        break;
     }
   }
-  // 末尾追加 ROW_HEIGHT 竖线，让线条穿过最后一个 commit 的 row
-  parts.push(`v ${ROW_HEIGHT}`);
 
   return parts.join(' ');
+}
+
+export interface CompactGraphPath {
+  id: string;
+  colorNumber: number;
+  d: string;
+}
+
+export interface VscodeGraphNode {
+  sha: string;
+  row: number;
+  lane: number;
+  colorNumber: number;
+}
+
+export interface VscodeGraphLayout {
+  nodes: Map<string, VscodeGraphNode>;
+  paths: CompactGraphPath[];
+  laneCount: number;
+}
+
+export function layoutVscodeGraph(
+  graph: Graph,
+  rowRemap: Map<number, number>,
+  options?: { rowOffsets?: Map<number, number> },
+): VscodeGraphLayout {
+  const rowOffsets = options?.rowOffsets;
+  const commits = graph.commits
+    .filter((c) => rowRemap.has(c.row))
+    .sort((a, b) => a.row - b.row);
+  if (commits.length === 0) return { nodes: new Map(), paths: [], laneCount: 0 };
+
+  const bySha = new Map(commits.map((c) => [c.sha, c]));
+  const visible = new Set(bySha.keys());
+  const active: Array<{ sha: string; colorNumber: number }> = [];
+  const nodeBySha = new Map<string, VscodeGraphNode>();
+  const edges: Array<{ from: GitGraphCommit; to: GitGraphCommit; colorNumber: number }> = [];
+  let nextColor = 0;
+  let maxLane = 0;
+
+  for (const commit of commits) {
+    let lane = active.findIndex((entry) => entry.sha === commit.sha);
+    if (lane < 0) {
+      lane = active.length;
+      active.push({ sha: commit.sha, colorNumber: nextColor++ });
+    }
+
+    const current = active[lane]!;
+    nodeBySha.set(commit.sha, {
+      sha: commit.sha,
+      row: rowRemap.get(commit.row)!,
+      lane,
+      colorNumber: current.colorNumber,
+    });
+
+    active.splice(lane, 1);
+    const visibleParents = commit.parents.filter((parentSha) => visible.has(parentSha));
+    visibleParents.forEach((parentSha, parentIndex) => {
+      const parent = bySha.get(parentSha)!;
+      let parentLane = active.findIndex((entry) => entry.sha === parentSha);
+      let colorNumber: number;
+
+      if (parentLane < 0) {
+        parentLane = Math.min(active.length, lane + (parentIndex === 0 ? 0 : parentIndex));
+        colorNumber = parentIndex === 0 ? current.colorNumber : nextColor++;
+        active.splice(parentLane, 0, { sha: parentSha, colorNumber });
+      } else {
+        colorNumber = active[parentLane]!.colorNumber;
+      }
+
+      edges.push({ from: commit, to: parent, colorNumber });
+    });
+
+    maxLane = Math.max(maxLane, lane, active.length - 1);
+  }
+
+  const displayTop = (displayRow: number) =>
+    displayRow * ROW_HEIGHT + (rowOffsets?.get(displayRow) ?? 0);
+  const point = (commit: GitGraphCommit) => {
+    const node = nodeBySha.get(commit.sha)!;
+    return {
+      x: node.lane * COL_WIDTH + COL_WIDTH / 2 + FLOW_LEFT_PAD,
+      y: displayTop(node.row) + ROW_HEIGHT / 2,
+    };
+  };
+  const colorOf = (commit: GitGraphCommit) => nodeBySha.get(commit.sha)?.colorNumber ?? 0;
+  const edgePath = (from: GitGraphCommit, to: GitGraphCommit) => {
+    const a = point(from);
+    const b = point(to);
+    if (a.x === b.x) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+
+    const dir = b.y > a.y ? 1 : -1;
+    const turnY = a.y + dir * ROW_HEIGHT / 2;
+    const ease = ROW_HEIGHT / 3;
+    return `M ${a.x} ${a.y} C ${a.x} ${a.y + dir * ease}, ${b.x} ${turnY - dir * ease}, ${b.x} ${turnY} L ${b.x} ${b.y}`;
+  };
+
+  const paths: CompactGraphPath[] = [];
+  const hasVisibleChild = new Set<string>();
+  for (const edge of edges) {
+    hasVisibleChild.add(edge.to.sha);
+    paths.push({
+      id: `${edge.from.sha}-${edge.to.sha}`,
+      colorNumber: edge.colorNumber,
+      d: edgePath(edge.from, edge.to),
+    });
+  }
+
+  for (const commit of commits) {
+    const visibleParentCount = commit.parents.filter((parentSha) => bySha.has(parentSha)).length;
+    if (visibleParentCount > 0 || hasVisibleChild.has(commit.sha)) {
+      continue;
+    }
+    const p = point(commit);
+    paths.push({
+      id: `${commit.sha}-stub`,
+      colorNumber: colorOf(commit),
+      d: `M ${p.x} ${p.y - ROW_HEIGHT / 2} L ${p.x} ${p.y + ROW_HEIGHT / 2}`,
+    });
+  }
+
+  const laneCount = Math.max(0, maxLane, ...[...nodeBySha.values()].map((node) => node.lane)) + 1;
+  return { nodes: nodeBySha, paths, laneCount };
+}
+
+export function graphToParentPaths(
+  graph: Graph,
+  rowRemap: Map<number, number>,
+  options?: { rowOffsets?: Map<number, number> },
+): CompactGraphPath[] {
+  return layoutVscodeGraph(graph, rowRemap, options).paths;
 }

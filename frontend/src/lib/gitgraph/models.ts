@@ -39,10 +39,10 @@ export { type GitRef };
  *
  *   ⚠️ 此改动只影响 ASCII 路径（git --graph 字符流渲染）。
  *   structured 路径用 structured.ts 自己的 LANE_WIDTH=10，与本常量无关。
- *   - svgWidth = graphWidth * 10 + 10（与 Gitea SVG 容器一致）
- *   - 之前是 5（lane 5px），改 10 后 ASCII git-graph 整体更接近 structured 视觉
+ * v2.68：20 → 15。20px 在真实 GitHub 图里过宽；15px 给 8px dot 留出间隔，
+ *   同时接近 VSCode Git Graph 的 lane 密度。
  */
-export const COL_WIDTH = 10;
+export const COL_WIDTH = 15;
 
 /** SVG 单位行高（unit）。
  *  v2.45 调整到 30px，让 ASCII 路径 commit-row 容器与 Gitea 路径完全统一
