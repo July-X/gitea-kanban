@@ -1393,11 +1393,11 @@ function refBadgeClass(refType?: string): string {
                     <path
                       v-if="pg.d"
                       :d="pg.d"
-                      v-bind="pg.kind === 'shadow'
-                        ? (pg.colorHex ? { stroke: pg.colorHex } : {})
-                        : (pg.colorHex ? { stroke: pg.colorHex } : {})"
+                      :stroke="pg.kind === 'shadow'
+                        ? '#000'
+                        : (pg.colorHex ?? '#888')"
                       :stroke-width="pg.kind === 'shadow' ? 4 : 2"
-                      :stroke-opacity="pg.kind === 'shadow' ? 0.25 : 1"
+                      :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
                       fill="none"
                       stroke-linecap="round"
                       vector-effect="non-scaling-stroke"
@@ -1962,9 +1962,10 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
 }
 
-/* 圆点描边 (vscode main.css:100-103): 非 HEAD 都加 1px 半透明描边 */
+/* 圆点描边 (vscode main.css:100-103): 非 HEAD 都加 1px 半透明描边
+   stroke-opacity=0.75 用 stroke-opacity 实现 */
 .commit-dot:not(.commit-dot--head) {
-  border: 1px solid var(--app-bg, #fff);
+  border: 1px solid var(--app-bg, #1e1e1e);
   border-style: solid;
   border-width: 1px;
   box-sizing: border-box;
