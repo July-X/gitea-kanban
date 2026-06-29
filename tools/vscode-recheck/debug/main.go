@@ -304,14 +304,15 @@ func buildSVG(paths []pathOut, nodes []nodeOut, maxLane, nCommits int) string {
 	width := 2*OFFSET_X + (maxLane+1)*GRID_X
 	height := nCommits*GRID_Y + OFFSET_Y
 	var s string
-	s += fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" style="background:#fafafa">`,
+	s += fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" style="background:#1e1e1e">`,
 		width, height, width, height)
 	for _, p := range paths {
 		if p.kind == "shadow" {
 			// vscode main.css:110-114: shadow stroke-width=4 stroke-opacity=0.75
-			// 这里 stroke-opacity=0.25 比 vscode 略淡, 跟浅底色背景更协调
-			s += fmt.Sprintf(`<path d="%s" stroke="%s" stroke-width="4" stroke-opacity="0.25" fill="none" stroke-linecap="round"/>`,
-				html.EscapeString(p.d), p.hex)
+			// shadow 用 editor-background 色 (暗主题下是 #000) 而不是主线色,
+			// 才能产生光晕效果. 之前用 p.hex 导致 shadow 跟主线同色, 看不出层次
+			s += fmt.Sprintf(`<path d="%s" stroke="#000" stroke-width="4" stroke-opacity="0.75" fill="none" stroke-linecap="round"/>`,
+				html.EscapeString(p.d))
 		} else {
 			s += fmt.Sprintf(`<path d="%s" stroke="%s" stroke-width="2" fill="none" stroke-linecap="round"/>`,
 				html.EscapeString(p.d), p.hex)
@@ -320,8 +321,9 @@ func buildSVG(paths []pathOut, nodes []nodeOut, maxLane, nCommits int) string {
 	for _, n := range nodes {
 		// vscode Vertex.draw: dot r=4, HEAD 空心 (fill=#bg stroke=color stroke-width=2),
 		// 普通 dot stroke=#bg stroke-width=1 stroke-opacity=0.75
+		// 暗主题用 #252526, 浅主题用 #fff; debug HTML 用浅色背景, 所以用 #000 接近 vscode 暗主题
 		if n.isCurrent {
-			// HEAD: fill=白底, stroke=color, stroke-width=2
+			// HEAD: fill=editor-bg, stroke=color, stroke-width=2
 			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="#fff" stroke="%s" stroke-width="2"/>`,
 				n.cx, n.cy, n.r, n.hex)
 		} else if n.isStash {
@@ -331,7 +333,7 @@ func buildSVG(paths []pathOut, nodes []nodeOut, maxLane, nCommits int) string {
 			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="%s" stroke-width="1"/>`,
 				n.cx, n.cy, n.r-2.5, n.hex)
 		} else {
-			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="#fff" stroke-width="1" stroke-opacity="0.75"/>`,
+			s += fmt.Sprintf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="#000" stroke-width="1" stroke-opacity="0.75"/>`,
 				n.cx, n.cy, n.r, n.hex)
 		}
 	}
@@ -352,7 +354,7 @@ func buildHTML(svg, jsonStr string, commits []commitJSON, displayLimit int) stri
   h2 { margin: 24px 0 8px 0; font-size: 16px; padding: 8px 12px; background: #2d2d2d; color: #fff; border-radius: 4px; }
   h2 .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px; vertical-align: middle; background: #0085d9; }
   .meta { color: #666; font-size: 13px; margin-bottom: 16px; }
-  .container { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 16px; overflow-x: auto; }
+  .container { background: #252526; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 16px; overflow-x: auto; }
   .layout { display: flex; gap: 24px; align-items: flex-start; }
   .graph { flex-shrink: 0; border: 1px dashed #ddd; }
   .commit-list { flex: 1; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
