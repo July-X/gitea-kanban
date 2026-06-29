@@ -234,9 +234,9 @@ func renderGraphVscode(g *graph.GraphResult) ([]pathOut, []nodeOut) {
 				// dot-to-dot 紧凑 S 形过渡: 在 row1 底→row2 顶 的小空间内完成
 				// (vscode 原版 C 贝塞尔 d=0.8*GRID_Y=19.2 拉得太缓, 跟"dot 之间紧凑过渡"不符)
 				// 策略: dot 中心 (x1,y1) → row1 底部 midY1 沿 x 走到 x2 → 垂直降到 row2 顶部 midY2 → 沿 x 到 (x2,y2)
-				dy := CURVE_CONTROL_DY
-				midY1 := y1 + GRID_Y/2 - dy
-				midY2 := y2 - GRID_Y/2 + dy
+				dy := float64(CURVE_CONTROL_DY)
+				midY1 := y1 + float64(GRID_Y)/2 - dy
+				midY2 := y2 - float64(GRID_Y)/2 + dy
 				cur += fmt.Sprintf(" L %.0f %.1f L %.0f %.1f L %.0f %.1f",
 					x1, midY1, x2, midY1, x2, midY2)
 			}

@@ -280,8 +280,18 @@ export function renderGraphVscode(
 				const midY = seg.lockedFirst ? y2 - d : y1 + d;
 				curPath += ` L ${midX.toFixed(0)} ${midY.toFixed(1)} L ${x2.toFixed(0)} ${y2.toFixed(1)}`;
 			} else {
-				// rounded 风格: 三阶贝塞尔, 控制点在 p1 下 0.8*GRID_Y + p2 上 0.8*GRID_Y
-				curPath += ` C ${x1.toFixed(0)} ${(y1 + d).toFixed(1)} ${x2.toFixed(0)} ${(y2 - d).toFixed(1)} ${x2.toFixed(0)} ${y2.toFixed(1)}`;
+				// dot-to-dot 紧凑 S 形过渡 (用户描述):
+				//   - 跨 lane 时, 从 dot 中心 (x1,y1) 出发
+				//   - 沿 (x1) 走到 row1 底部 midY1 (y1 + GRID_Y/2 - dy)
+				//   - 横移到 (x2) (midY1 高度)
+				//   - 垂直降到 row2 顶部 midY2 (y2 - GRID_Y/2 + dy)
+				//   - 沿 (x2) 走到 dot 中心 (x2, y2)
+				// 全部弯折在 row1 底→row2 顶 的小空间 (12px) 内完成
+				// dy 取 ≈ dot 半径, 让折角更圆滑
+				const dy = VSCODE_VERTEX_RADIUS - 1; // 3
+				const midY1 = y1 + VSCODE_GRID_Y / 2 - dy;
+				const midY2 = y2 - VSCODE_GRID_Y / 2 + dy;
+				curPath += ` L ${x1.toFixed(0)} ${midY1.toFixed(1)} L ${x2.toFixed(0)} ${midY1.toFixed(1)} L ${x2.toFixed(0)} ${midY2.toFixed(1)}`;
 			}
 		}
 

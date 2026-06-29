@@ -80,14 +80,21 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		};
 		const r = renderGraphVscode(graph);
 		const d = r.paths[0]?.d ?? '';
-		// rounded: C x1 (y1+d) x2 (y2-d) x2 y2
-		// d = 24*0.8 = 19.2
-		// p1 = (4, 4), p2 = (20, 28)
-		// path: M 4 4 C 4 23.2 20 8.8 20 28
+		// dot-to-dot 紧凑 S 形 (rounded 风格):
+		//   p1 = (4, 4), p2 = (20, 28)
+		//   GRID_Y/2 = 12, dy = 3 (VSCODE_VERTEX_RADIUS - 1)
+		//   midY1 = 4 + 12 - 3 = 13
+		//   midY2 = 28 - 12 + 3 = 19
+		//   path: M 4 4 L 4 13 L 20 13 L 20 19
 		assert.ok(d.startsWith('M 4 4'), `path 应以 M 4 4 开头, 实际: ${d}`);
-		assert.ok(d.includes('C 4'), `path 必须包含贝塞尔 C 4 ..., 实际: ${d}`);
-		// 端点 y2 - d = 28 - 19.2 = 8.8
-		assert.ok(d.includes('8.8'), `path 应包含 8.8 (y2-d), 实际: ${d}`);
+		assert.ok(d.includes('L 4 13'), `path 应包含 L 4 13 (row1 底), 实际: ${d}`);
+		assert.ok(d.includes('L 20 13'), `path 应包含 L 20 13 (横移到 x2), 实际: ${d}`);
+		assert.ok(d.includes('L 20 19'), `path 应包含 L 20 19 (row2 顶), 实际: ${d}`);
+		// 必须在 row1 底→row2 顶 的小空间 (12px) 内完成, 即 y ∈ [13, 19]
+		assert.ok(!/L 4 \d{2}\.\d$|L 20 \d{2}\.\d$/.test(d) || d.split('L').slice(1).every(p => {
+			const y = parseFloat(p.trim().split(' ')[1]);
+			return y >= 13 && y <= 19 || y === 28; // 端点 y2=28 除外
+		}), `弯折应紧凑在 [13,19] 内, 实际: ${d}`);
 	});
 
 	test('angular 风格:跨 lane 用 L 折线,38% 拐点', () => {
