@@ -914,7 +914,7 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
 // - SVG 完整渲染固定不动；handle 物理位置变化
 // ============================================================
 
-const MIN_GRAPH_COL_WIDTH = 60;
+const MIN_GRAPH_COL_WIDTH = 56;
 const MAX_GRAPH_COL_WIDTH = 800;
 const MIN_CONTENT_COL_WIDTH = 60;
 const GRAPH_WIDTH_STORAGE_KEY = 'gitea-kanban:gitgraph:graph-width';
@@ -922,9 +922,9 @@ const GRAPH_WIDTH_STORAGE_KEY = 'gitea-kanban:gitgraph:graph-width';
 /** 默认 graph 列宽度（v2.47：脱钩 svgWidth，避免多 lane 仓库把表格撑爆视口）
  * 之前 userHandleLeft 为 null 时 handleLeft = parseSvgPx(svgWidth)，200 lane → 2014px
  * → tableMinWidth 暴涨 → 整个表格出现大横向滚动条 → 用户必须左右扫才能看完整信息
- * 现在默认固定 130px（v2.27 旧默认值），用户拖过才用持久化值。
+ * 现在默认固定到接近 VSCode Git Graph 的窄列，用户拖过才用持久化值。
  * 真实 lane 数显示靠 SVG 内部横向滚动（见 .git-graph-bg 改造）。 */
-const DEFAULT_GRAPH_COL_WIDTH = 130;
+const DEFAULT_GRAPH_COL_WIDTH = 96;
 function loadGraphWidth(): number | null {
   try {
     const stored = localStorage.getItem(GRAPH_WIDTH_STORAGE_KEY);
@@ -946,41 +946,14 @@ let dragStartX = 0;
 let dragStartHandleLeft = 0;
 let dragLatestX = 0;
 
-function currentGraphSvgWidth(): number {
-  return useAsciiGraph.value
-    ? (Number.parseFloat(svgWidth.value) || DEFAULT_GRAPH_COL_WIDTH)
-    : (svgRender.value?.width ?? DEFAULT_GRAPH_COL_WIDTH);
-}
-
 /**
- * handle 实际位置（min(userHandleLeft, svgWidth+30) —— 自适应缩窄到不空白）
- *
- * v2.x：之前 userHandleLeft 持久化（如 380）会跟小 lane 仓库 (svgWidth ≈ 30) 冲突，
- *       col 1 内 350+ 像素空白（用户报告"中间的空白"）。
- *
- * 现在 handleLeft = min(userHandleLeft, svgWidth + 30)：
- *   - 小 lane 仓库 (svgWidth ≈ 30) + 用户拖宽 (380) → handleLeft = min(380, 60) = 60 ✓ 无空白
- *   - 大 lane 仓库 (svgWidth ≈ 500) + 用户拖宽 (380) → handleLeft = min(380, 530) = 380 ✓ 保留
- *   - 默认 (userHandleLeft = null) → handleLeft = max(DEFAULT_GRAPH_COL_WIDTH, svgWidth+30) ≥ 130
- *
- * 拖拽手柄位置 = handleLeft (跟 col 1 终点对齐)，commit-row col 1 宽度 = handleLeft，
- * .git-graph-bg 容器宽度 = handleLeft。
+ * handle 实际位置：默认窄列；用户拖过后完全尊重持久化宽度。
  */
 const handleLeft = computed(() => {
-  const svgW = currentGraphSvgWidth();
-  // 自适应宽度：svgWidth + 30 (lane 数 + padding) ，最小 130
-  const adaptive = Math.max(DEFAULT_GRAPH_COL_WIDTH, svgW + 30);
-  if (useAsciiGraph.value) {
-    return Math.min(MAX_GRAPH_COL_WIDTH, adaptive);
-  }
   if (userHandleLeft.value === null) {
-    return Math.min(MAX_GRAPH_COL_WIDTH, adaptive);
+    return DEFAULT_GRAPH_COL_WIDTH;
   }
-  // 用户拖宽的宽度 vs 自适应宽度，取较小（缩到不会留白的最大宽度）
-  return Math.max(
-    MIN_GRAPH_COL_WIDTH,
-    Math.min(MAX_GRAPH_COL_WIDTH, Math.min(userHandleLeft.value, adaptive)),
-  );
+  return Math.max(MIN_GRAPH_COL_WIDTH, Math.min(MAX_GRAPH_COL_WIDTH, userHandleLeft.value));
 });
 
 /**
@@ -1079,14 +1052,11 @@ function onDragEnd(): void {
     graphDragRafId = 0;
   }
   if (dragging.value) {
-    // v2.x：拖拽结束时只持久化"合理宽度"——min(graphDragFinalLeft, svgWidth + 30)
-    //   避免用户拖宽到 380 但仓库只有 1-2 lane (svgWidth ≈ 30) 时，
-    //   handleLeft 被 userHandleLeft 持久化值主导，col 1 内 350+ 像素空白。
-    //   持久化 min 值，下次打开仍然是合理宽度（不空白）。
     if (graphDragFinalLeft !== null) {
-      const svgW = currentGraphSvgWidth();
-      const clamped = Math.min(graphDragFinalLeft, Math.max(DEFAULT_GRAPH_COL_WIDTH, svgW + 30));
-      userHandleLeft.value = clamped;
+      userHandleLeft.value = Math.max(
+        MIN_GRAPH_COL_WIDTH,
+        Math.min(MAX_GRAPH_COL_WIDTH, graphDragFinalLeft),
+      );
     }
     if (userHandleLeft.value !== null) {
       try {
@@ -1723,7 +1693,7 @@ function refBadgeClass(refType?: string): string {
  * 现在 .git-graph-table-width 只跟 handleLeft + 4 内容列走，多 lane 由 SVG 内部横向滚动兜底。*/
 .git-graph-header {
   display: grid;
-  grid-template-columns: var(--git-graph-col-width, 130px) var(--grid-template-columns, 480px 160px 120px 80px);
+  grid-template-columns: var(--git-graph-col-width, 96px) var(--grid-template-columns, 480px 160px 120px 80px);
   align-items: center;
   height: 32px;
   background: var(--color-shell-main-bg);

@@ -245,47 +245,28 @@ export function layoutVscodeGraph(
   if (commits.length === 0) return { nodes: new Map(), paths: [], laneCount: 0 };
 
   const bySha = new Map(commits.map((c) => [c.sha, c]));
-  const visible = new Set(bySha.keys());
-  const active: Array<{ sha: string; colorNumber: number }> = [];
   const nodeBySha = new Map<string, VscodeGraphNode>();
   const edges: Array<{ from: GitGraphCommit; to: GitGraphCommit; colorNumber: number }> = [];
-  let nextColor = 0;
   let maxLane = 0;
 
   for (const commit of commits) {
-    let lane = active.findIndex((entry) => entry.sha === commit.sha);
-    if (lane < 0) {
-      lane = active.length;
-      active.push({ sha: commit.sha, colorNumber: nextColor++ });
-    }
-
-    const current = active[lane]!;
+    const lane = Math.max(0, commit.column);
+    const colorNumber = graph.flows.get(commit.flowId)?.colorNumber ?? lane;
     nodeBySha.set(commit.sha, {
       sha: commit.sha,
       row: rowRemap.get(commit.row)!,
       lane,
-      colorNumber: current.colorNumber,
+      colorNumber,
     });
 
-    active.splice(lane, 1);
-    const visibleParents = commit.parents.filter((parentSha) => visible.has(parentSha));
+    const visibleParents = commit.parents.filter((parentSha) => bySha.has(parentSha));
     visibleParents.forEach((parentSha, parentIndex) => {
       const parent = bySha.get(parentSha)!;
-      let parentLane = active.findIndex((entry) => entry.sha === parentSha);
-      let colorNumber: number;
-
-      if (parentLane < 0) {
-        parentLane = Math.min(active.length, lane + (parentIndex === 0 ? 0 : parentIndex));
-        colorNumber = parentIndex === 0 ? current.colorNumber : nextColor++;
-        active.splice(parentLane, 0, { sha: parentSha, colorNumber });
-      } else {
-        colorNumber = active[parentLane]!.colorNumber;
-      }
-
-      edges.push({ from: commit, to: parent, colorNumber });
+      const edgeColor = parentIndex === 0 ? colorNumber : (graph.flows.get(parent.flowId)?.colorNumber ?? parent.column);
+      edges.push({ from: commit, to: parent, colorNumber: edgeColor });
     });
 
-    maxLane = Math.max(maxLane, lane, active.length - 1);
+    maxLane = Math.max(maxLane, lane);
   }
 
   const displayTop = (displayRow: number) =>

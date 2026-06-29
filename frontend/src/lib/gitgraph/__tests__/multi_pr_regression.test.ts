@@ -16,7 +16,6 @@ import {
   parseLines,
   ROW_HEIGHT,
   flowToPathDCompact,
-  graphToParentPaths,
   layoutVscodeGraph,
 } from '../index.ts';
 import type { GraphLine } from '../types.ts';
@@ -47,11 +46,6 @@ function makeLine(
     },
   };
 }
-
-const dotPoint = (commit: { column: number; row: number }, displayRowMap: Map<number, number>) => ({
-  x: laneX(commit.column),
-  y: displayRowMap.get(commit.row)! * ROW_HEIGHT + ROW_HEIGHT / 2,
-});
 
 const layoutDotPoint = (
   commit: { sha: string; row: number },
@@ -590,6 +584,47 @@ test('GitHub fallback lane 规则：dot lane 使用 parser flow，而不是 git 
       ['m2', 0],
     ],
     '主线保持 lane 0，侧线使用压缩后的 git graph 字符坐标',
+  );
+});
+
+test('DeepSeek-Reasonix 顶部回归：第 5 条 commit 连到第 8 条 parent commit', () => {
+  const lines: GraphLine[] = [
+    makeLine(0, '*   ', '458595af5', 'Merge org/main-v2 into main-v2', ['aaaf863c1']),
+    makeLine(1, '|\\  '),
+    makeLine(2, '| *   ', 'aaaf863c1', 'Merge pull request #5532', ['284e65d91', 'a0ce934d1']),
+    makeLine(3, '| |\\  '),
+    makeLine(4, '| | * ', 'a0ce934d1', 'Soften themed user message bubbles', ['284e65d91']),
+    makeLine(5, '| |/  '),
+    makeLine(6, '| *   ', '284e65d91', 'Merge pull request #5529', ['d7f49d1f5', '2a9c3f5ed']),
+    makeLine(7, '| |\\  '),
+    makeLine(8, '| | * ', '2a9c3f5ed', 'fix(edit): tolerate whitespace drift', ['02bd3d95b']),
+    makeLine(9, '| * |   ', 'd7f49d1f5', 'Merge pull request #5528', ['02bd3d95b', '633d60271']),
+    makeLine(10, '| |\\ \\  '),
+    makeLine(11, '| | |\\  '),
+    makeLine(12, '| | |/  '),
+    makeLine(13, '| | * ', '633d60271', 'fix(desktop): keep run_skill subject', ['0256e836e']),
+    makeLine(14, '| * |   ', '02bd3d95b', 'Merge pull request #5512', ['1c19a0483', '0da7fe832']),
+  ];
+  const { graph } = parseLines(lines);
+  const sorted = [...graph.commits].sort((a, b) => a.row - b.row);
+  const displayRowMap = new Map<number, number>();
+  sorted.forEach((c, i) => displayRowMap.set(c.row, i));
+
+  const layout = layoutVscodeGraph(graph, displayRowMap);
+  const from = graph.commits.find((c) => c.sha === '2a9c3f5ed')!;
+  const to = graph.commits.find((c) => c.sha === '02bd3d95b')!;
+  const edge = layout.paths.find((p) => p.id === '2a9c3f5ed-02bd3d95b');
+
+  assert.equal(layout.nodes.get(from.sha)?.lane, from.column, '第 5 条 dot 使用 git graph lane');
+  assert.equal(layout.nodes.get(to.sha)?.lane, to.column, '第 8 条 dot 使用 git graph lane');
+  assert.ok(edge, '第 5 条 commit 必须有到第 8 条 parent commit 的 edge');
+  assert.ok(
+    pathTouchesPoint(edge!.d, layoutDotPoint(from, displayRowMap, layout).x, layoutDotPoint(from, displayRowMap, layout).y),
+    `edge 必须从第 5 条 dot 出发，实际: ${edge!.d}`,
+  );
+  assert.ok(
+    pathTouchesPoint(edge!.d, layoutDotPoint(to, displayRowMap, layout).x, layoutDotPoint(to, displayRowMap, layout).y),
+    `edge 必须落到第 8 条 dot，实际: ${edge!.d}`,
   );
 });
 
