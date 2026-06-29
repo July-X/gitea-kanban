@@ -52,7 +52,7 @@ export const COL_WIDTH = 15;
  *  / svgHeight 全部从 19 变 30，commit-row 容器高度跟着抬到 30px。
  *  structured 路径独立维护自己的 ROW_HEIGHT=30（structured.ts:76），本来就一致。
  */
-export const ROW_HEIGHT = 30;
+export const ROW_HEIGHT = 24;
 
 /** 显示缩放系数（1 SVG unit = SCALE px） */
 export const DISPLAY_SCALE = 1;

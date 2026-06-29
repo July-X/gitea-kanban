@@ -291,26 +291,19 @@ export function layoutVscodeGraph(
   };
 
   const paths: CompactGraphPath[] = [];
-  const hasVisibleChild = new Set<string>();
+  for (const commit of commits) {
+    const p = point(commit);
+    paths.push({
+      id: `${commit.sha}-spine`,
+      colorNumber: colorOf(commit),
+      d: `M ${p.x} ${p.y - ROW_HEIGHT / 2} L ${p.x} ${p.y + ROW_HEIGHT / 2}`,
+    });
+  }
   for (const edge of edges) {
-    hasVisibleChild.add(edge.to.sha);
     paths.push({
       id: `${edge.from.sha}-${edge.to.sha}`,
       colorNumber: edge.colorNumber,
       d: edgePath(edge.from, edge.to),
-    });
-  }
-
-  for (const commit of commits) {
-    const visibleParentCount = commit.parents.filter((parentSha) => bySha.has(parentSha)).length;
-    if (visibleParentCount > 0 || hasVisibleChild.has(commit.sha)) {
-      continue;
-    }
-    const p = point(commit);
-    paths.push({
-      id: `${commit.sha}-stub`,
-      colorNumber: colorOf(commit),
-      d: `M ${p.x} ${p.y - ROW_HEIGHT / 2} L ${p.x} ${p.y + ROW_HEIGHT / 2}`,
     });
   }
 

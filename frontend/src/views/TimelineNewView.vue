@@ -1823,7 +1823,7 @@ function refBadgeClass(refType?: string): string {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  min-height: var(--git-graph-row-height, 30px);
+  min-height: var(--git-graph-row-height, 24px);
 }
 
 /* 背景层：SVG + dot overlay，整张铺在 body 左上角
@@ -1849,7 +1849,7 @@ function refBadgeClass(refType?: string): string {
   z-index: 2;
   pointer-events: none;
   content-visibility: auto;
-  contain-intrinsic-size: auto 30px;
+  contain-intrinsic-size: auto 24px;
   /* 用 overflow: clip 强制裁剪 absolute 子元素（overflow: hidden 对 absolute 子元素不生效） */
   overflow: clip;
   flex: 0 0 auto;
@@ -1888,7 +1888,7 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
   z-index: 2;
   content-visibility: auto;
-  contain-intrinsic-size: auto 30px;
+  contain-intrinsic-size: auto 24px;
 }
 .commit-dot {
   position: absolute;
@@ -2106,7 +2106,7 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   gap: 0;
   /* v2.43 高度由内联 style 绑定 ROW_H（ASCII = 19px, structured = 30px），与 SVG 行高 1:1 对齐 */
-  height: 30px; /* fallback（被 inline style 覆盖） */
+  height: 24px; /* fallback（被 inline style 覆盖） */
   /* v2.43：行间距统一到 8px（Gitea + GitHub 一致体验）
    *   row 30px = line-box 22px (font 14 × line-height 1.571) + 间距 8px
    *   之前 v2.40 padding 5 + line-height 1.35 = 间距 11.11px（过大）*/
@@ -2144,7 +2144,7 @@ function refBadgeClass(refType?: string): string {
    * 但浏览器对每个 row 单独走 hit-test 后才知道哪行 hover，所以 c-v: auto 仍有效。*/
   content-visibility: auto;
   /* v2.40：26 → 30px，与 commit-row 高度 + SVG ROW_HEIGHT 同步（content-visibility 离屏预估高度） */
-  contain-intrinsic-size: auto 30px;
+  contain-intrinsic-size: auto 24px;
 }
 /* v2.44：真正统一 Gitea + GitHub 两个平台 commit-row 视觉表现（用户无感）
  * 之前 v2.43 把 ASCII 路径做"小一号"（font 11px, row 19px, line-height 1.0）让行间距统一 8px，
@@ -2158,7 +2158,7 @@ function refBadgeClass(refType?: string): string {
   /* 完全继承 .commit-row 样式（font-size, line-height, padding, height = 30px）—— 视觉统一 */
   /* SVG 几何与容器都走 ROW_HEIGHT=30（models.ts v2.45），无需 transform 压缩 */
   /* contain-intrinsic-size 跟随 row 30px 离屏预估 */
-  contain-intrinsic-size: auto 30px;
+  contain-intrinsic-size: auto 24px;
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
@@ -2221,7 +2221,7 @@ function refBadgeClass(refType?: string): string {
 .commit-row--relation {
   pointer-events: none;
   background: transparent;
-  height: 30px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
+  height: 24px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
 }
 .commit-row--relation:hover {
   background: transparent;
@@ -2327,7 +2327,7 @@ function refBadgeClass(refType?: string): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 30px;
+  line-height: inherit;
 }
 .commit-row__col--author {
   /* v2.39：13px → 12px，与主体(14px)拉开层次但不显拥挤 */
