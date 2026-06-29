@@ -63,16 +63,18 @@ type edgeJSON struct {
 }
 
 type commitJSON struct {
-	SHA     string   `json:"sha"`
-	Row     int      `json:"row"`
-	Lane    int      `json:"lane"`
-	Color   int      `json:"color"`
-	IsMerge bool     `json:"is_merge"`
-	Subject string   `json:"subject"`
-	Author  string   `json:"author"`
-	Date    string   `json:"date"`
-	Parents []string `json:"parents"`
-	Refs    []string `json:"refs"`
+	SHA       string   `json:"sha"`
+	Row       int      `json:"row"`
+	Lane      int      `json:"lane"`
+	Color     int      `json:"color"`
+	IsMerge   bool     `json:"is_merge"`
+	IsCurrent bool     `json:"is_current"`
+	IsStash   bool     `json:"is_stash"`
+	Subject   string   `json:"subject"`
+	Author    string   `json:"author"`
+	Date      string   `json:"date"`
+	Parents   []string `json:"parents"`
+	Refs      []string `json:"refs"`
 }
 
 type output struct {
@@ -162,7 +164,8 @@ func main() {
 		_ = t
 		c := commitJSON{
 			SHA: n.SHA, Row: n.Row, Lane: n.Lane, Color: n.Color,
-			IsMerge: n.IsMerge, Subject: n.Subject,
+			IsMerge: n.IsMerge, IsCurrent: n.IsCurrent, IsStash: n.IsStash,
+			Subject: n.Subject,
 			Author: n.AuthorName, Date: n.Date,
 			Parents: n.Parents, Refs: n.Refs,
 		}

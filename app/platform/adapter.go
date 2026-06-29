@@ -142,6 +142,9 @@ type ListPullsOpts struct {
 type LogGraphOpts struct {
 	Branches []string
 	MaxCount int
+	// Head 当前 checkout 的 commit hash, 用于标记 isCurrent (vscode HEAD 高亮).
+	// 空字符串则全部 isCurrent=false (HEAD 由 vscode 自身显示 uncommitted dot)
+	Head string
 }
 
 // GraphResult Graph 布局结果（与 app/git/graph.GraphResult 对齐，但作为 DTO 不含内部类型）

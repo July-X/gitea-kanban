@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 
+	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
@@ -200,9 +201,28 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		return nil, err
 	}
 
-	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, "")
+	// 解析 HEAD (跟 debug 工具保持一致): 空则全不标 isCurrent
+	head := opts.Head
+	if head == "" {
+		head = resolveLocalHead(localPath)
+	}
+
+	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, head)
 
 	return graphResultToDTO(graphResult), nil
+}
+
+// resolveLocalHead 用 go-git 读本地 HEAD hash, 失败返回 ""
+func resolveLocalHead(localPath string) string {
+	r, err := gogit.PlainOpen(localPath)
+	if err != nil {
+		return ""
+	}
+	head, err := r.Head()
+	if err != nil {
+		return ""
+	}
+	return head.Hash().String()
 }
 
 // ===== 以下首期仅 Gitea 完整实现 =====
