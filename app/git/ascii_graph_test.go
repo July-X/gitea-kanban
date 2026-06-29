@@ -38,6 +38,46 @@ func TestRunGraphLog(t *testing.T) {
 	}
 }
 
+func TestRunGraphLogEnrichesRefs(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not found: %v", err)
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+	runGit(t, dir, "config", "user.name", "Test User")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	writeAndCommit(t, dir, "one.txt", "one\n", "one")
+	sha := strings.TrimSpace(string(runGitOutput(t, dir, "rev-parse", "HEAD")))
+	runGit(t, dir, "branch", "release")
+	runGit(t, dir, "update-ref", "refs/remotes/origin/main", sha)
+	runGit(t, dir, "tag", "lightweight")
+	runGit(t, dir, "tag", "-a", "annotated", "-m", "annotated tag")
+
+	result, err := RunGraphLog(dir, RunGraphLogOptions{MaxCount: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := result.Lines[0].Commit
+	if commit == nil {
+		t.Fatalf("commit is nil")
+	}
+	got := map[string]string{}
+	for _, ref := range commit.Refs {
+		got[ref.ShortName] = ref.RefGroup
+	}
+	for name, group := range map[string]string{
+		"main":        "heads",
+		"release":     "heads",
+		"origin/main": "remotes",
+		"lightweight": "tags",
+		"annotated":   "tags",
+	} {
+		if got[name] != group {
+			t.Fatalf("ref %s group = %q, want %q; refs=%#v", name, got[name], group, commit.Refs)
+		}
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -46,6 +86,26 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
 	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+	}
+	return out
+}
+
+func writeAndCommit(t *testing.T, dir, name, content, msg string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", name)
+	runGit(t, dir, "commit", "-m", msg)
 }
 
 func TestParseGraphLogOutput(t *testing.T) {

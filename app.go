@@ -2125,6 +2125,12 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 		return PullRepoResult{}, ipc.NewInternal("token 为空")
 	}
 
+	if account.Platform == "github" {
+		if gh, ok := a.githubAdapter.(*github.GitHubAdapter); ok {
+			_ = gh.EnsureForkParentRemote(a.ctx, account.GiteaURL, token, project.Owner, project.Name, localPath)
+		}
+	}
+
 	// 5. 调 git.PullRepo（v2.6：装 progress 回调）
 	singleBranch := account.Platform == "github"
 	depth := 0

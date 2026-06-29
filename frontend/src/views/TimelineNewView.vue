@@ -1486,10 +1486,6 @@ function refBadgeClass(refType?: string): string {
                 <template v-if="r.commit">
                   <!-- v2.22：Description 列（refs + subject） -->
                   <div class="commit-row__col commit-row__col--desc">
-                    <!-- v2.x：subject 永远是第一个 flex 子元素，贴描述列最左（padding 12px 起点），
-                         不再被前面的 ref badge 挤到右侧。ref badges 用 margin-left: auto 推到列右端。
-                         视觉风格对齐 SourceTree / VSCode Git Graph：subject 在前，ref 在右。 -->
-                    <span class="commit-subject">{{ r.commit.subject }}</span>
                     <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
                          这里按类型渲染 badge 颜色，不再用启发式猜。 -->
                     <span v-if="r.commit.refs && r.commit.refs.length > 0" class="commit-refs">
@@ -1515,6 +1511,7 @@ function refBadgeClass(refType?: string): string {
                         <span>{{ ref }}</span>
                       </span>
                     </span>
+                    <span class="commit-subject">{{ r.commit.subject }}</span>
                   </div>
                   <!-- v2.22：Author 列 -->
                   <div class="commit-row__col commit-row__col--author">
@@ -2313,23 +2310,20 @@ function refBadgeClass(refType?: string): string {
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
-/* commit-refs 容器：多个 badge 横向排列
- * v2.x：inline 文字流 —— 紧跟 subject 后面（行内盒），不在 flex 中被推到列最右。
- * 与 commit-subject 一起在 desc 列的 white-space:nowrap + ellipsis 下被整体截断。*/
+/* commit-refs 容器：多个 badge 横向排列，按 VSCode 风格放在 subject 前面。*/
 .commit-refs {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  /* 与 subject 之间留 8px 视觉间隔（行内盒 margin-left 仍生效） */
-  margin-left: 8px;
+  margin-right: 8px;
   vertical-align: middle;
 }
 
 .commit-subject {
-  /* v2.x：行内文字流 —— subject 文本 + 后面紧跟的 refs 一起组成 desc 列内容。
+  /* v2.x：行内文字流 —— refs + subject 一起组成 desc 列内容。
      desc 列的 white-space:nowrap + overflow:hidden + text-overflow:ellipsis
-     负责整体截断（subject 太长时 subject + refs 一起被 … 截断在右边界）。*/
+     负责整体截断。*/
   display: inline;
   color: var(--color-text);
   /* v2.39：15px → 14px，与 26px 行高比例更舒适；letter-spacing 微收紧 */
@@ -2356,11 +2350,7 @@ function refBadgeClass(refType?: string): string {
 .commit-row__col--desc {
   /* v2.x：放弃 flex 布局，改 block 文字流 —— subject 和 refs 都 inline，
      整体被 desc 列的 overflow:hidden + text-overflow:ellipsis 截断。
-     这样：
-       - subject 永远贴描述列最左（12px padding 起点）
-       - refs 紧跟 subject 后面（行内流，无 margin-left:auto 把 refs 推到列最右）
-       - subject 太长时整段（subject + refs 一起）被 ellipsis 截断，**不留空白**
-     旧 flex 布局有"subject 撑满 + refs 紧跟"导致 refs 之后仍有空白的问题。*/
+     这样 refs 和 subject 都在同一行内流里，不会被推到列最右。*/
   display: block;
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -49,8 +50,7 @@ func CloneWithFilter(url, localPath string, depth int, token string) error {
 		"--",
 		"--filter=blob:none", // 关键：不下载 blob（文件内容）
 		"--no-checkout",      // 不 checkout 到工作区
-		"--single-branch",    // 只拉取默认分支
-		"--no-tags",          // 不拉取 tags
+		"--no-single-branch", // depth 默认隐含 single-branch；这里要保留所有分支 refs
 	}
 
 	if depth > 0 {
@@ -116,18 +116,81 @@ func FetchWithFilter(localPath string, depth int, token string) error {
 		return err
 	}
 
-	// 构造 git fetch 命令
+	remotes, err := listGitRemotes(localPath)
+	if err != nil {
+		return err
+	}
+	if len(remotes) == 0 {
+		return fmt.Errorf("仓库没有配置远程: %s", localPath)
+	}
+	for _, remote := range remotes {
+		if err := fetchRemoteWithFilter(localPath, remote, depth, token); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// EnsureRemote 确保仓库存在指定 remote；URL 变化时更新。
+func EnsureRemote(localPath, name, remoteURL string) error {
+	name = strings.TrimSpace(name)
+	remoteURL = strings.TrimSpace(remoteURL)
+	if name == "" || remoteURL == "" {
+		return fmt.Errorf("remote 名称和 URL 不能为空")
+	}
+	if !RepoExists(localPath) {
+		return fmt.Errorf("仓库不存在: %s", localPath)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
+	defer cancel()
+	getCmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote", "get-url", name)
+	if output, err := getCmd.Output(); err == nil {
+		if strings.TrimSpace(string(output)) == remoteURL {
+			return nil
+		}
+		setCmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote", "set-url", name, remoteURL)
+		if out, err := setCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("更新 remote %s 失败: %w\n输出: %s", name, err, string(out))
+		}
+		return nil
+	}
+
+	addCmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote", "add", name, remoteURL)
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("添加 remote %s 失败: %w\n输出: %s", name, err, string(out))
+	}
+	return nil
+}
+
+func listGitRemotes(localPath string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("读取 remote 列表失败: %w", err)
+	}
+	return strings.Fields(string(output)), nil
+}
+
+func fetchRemoteWithFilter(localPath, remote string, depth int, token string) error {
 	args := []string{
 		"-C", localPath, // 在指定目录执行
 		"-c", "credential.helper=!gh auth git-credential",
 		"fetch",
 		"--filter=blob:none", // 不下载 blob
-		"--no-tags",          // 不拉取 tags
 	}
 
 	if depth > 0 {
 		args = append(args, fmt.Sprintf("--depth=%d", depth))
 	}
+
+	args = append(args,
+		remote,
+		fmt.Sprintf("+refs/heads/*:refs/remotes/%s/*", remote),
+		"+refs/tags/*:refs/tags/*",
+	)
 
 	// 执行命令
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
@@ -140,7 +203,7 @@ func FetchWithFilter(localPath string, depth int, token string) error {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("git fetch 超时（%s）：%w", nativeGitTimeout, ctx.Err())
 		}
-		return fmt.Errorf("git fetch 失败: %w\n输出: %s", err, string(output))
+		return fmt.Errorf("git fetch %s 失败: %w\n输出: %s", remote, err, string(output))
 	}
 
 	return nil

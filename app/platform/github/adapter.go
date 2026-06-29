@@ -258,6 +258,7 @@ func (a *GitHubAdapter) ListBranches(ctx context.Context, hostURL, username, tok
 //   - "https://github.com"                     → 不变
 //   - 自托管 GHES: https://github.acme.com     → 不变(保留 host,git clone 走自己的 host)
 func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token, owner, repo, workspacePath, accountUsername string, progress git.ProgressCallback) (string, error) {
+	apiHostURL := normalizeGitHubHostURL(hostURL)
 	hostURL = strings.TrimRight(strings.TrimSpace(hostURL), "/")
 	if hostURL == "" {
 		hostURL = "https://github.com"
@@ -277,15 +278,47 @@ func (a *GitHubAdapter) CloneRepo(ctx context.Context, hostURL, username, token,
 		AccountUsername: accountUsername,
 		NoCheckout:      true, // v2.4：只拉元信息
 		Depth:           largeRepoGraphDepth,
-		SingleBranch:    true,
-		NoTags:          true,
 		Progress:        progress,
 		UseGitHubCLI:    true,
 	})
 	if err != nil {
 		return "", err
 	}
+	_ = a.EnsureForkParentRemote(ctx, apiHostURL, token, owner, repo, result.LocalPath)
 	return result.LocalPath, nil
+}
+
+// EnsureForkParentRemote 为 GitHub fork 仓库补齐上游 remote。
+//
+// VSCode Git Graph 会显示工作区里已有的 upstream 分支和 tag。应用自己的轻量克隆如果只拉
+// origin，就会漏掉 fork parent 上的发布 tag / org 分支，表现为第二条 commit 没有标签。
+// 这里不把失败升级成 clone/sync 失败：parent remote 是 Graph 装饰信息，origin 仍是主数据源。
+func (a *GitHubAdapter) EnsureForkParentRemote(ctx context.Context, hostURL, token, owner, repo, localPath string) error {
+	parentCloneURL, err := a.parentCloneURL(ctx, hostURL, token, owner, repo)
+	if err != nil || parentCloneURL == "" {
+		return err
+	}
+	if err := git.EnsureRemote(localPath, "org", parentCloneURL); err != nil {
+		return err
+	}
+	return git.FetchWithFilter(localPath, largeRepoGraphDepth, token)
+}
+
+func (a *GitHubAdapter) parentCloneURL(ctx context.Context, hostURL, token, owner, repo string) (string, error) {
+	var raw struct {
+		Fork   bool `json:"fork"`
+		Parent *struct {
+			CloneURL string `json:"clone_url"`
+		} `json:"parent"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo))
+	if err := a.doRequest(ctx, normalizeGitHubHostURL(hostURL), token, "GET", path, nil, &raw); err != nil {
+		return "", err
+	}
+	if !raw.Fork || raw.Parent == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(raw.Parent.CloneURL), nil
 }
 
 // LogGraph 获取 commit 历史并构建 Graph 布局（与 Gitea 共用）

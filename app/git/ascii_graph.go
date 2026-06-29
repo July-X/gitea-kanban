@@ -98,10 +98,12 @@ func RunGraphLog(localPath string, opts RunGraphLogOptions) (*GraphLinesResult, 
 		fpResult, fpErr := runGraphLogOnce(localPath, opts, true)
 		if fpErr == nil && len(fpResult.Lines) > 0 {
 			fpResult.Truncated = result.Truncated
+			enrichGraphRefs(localPath, &fpResult)
 			return &fpResult, nil
 		}
 		// first-parent 失败则保留原结果（至少有数据）
 	}
+	enrichGraphRefs(localPath, &result)
 	return &result, nil
 }
 
@@ -245,6 +247,73 @@ func parseGraphLineCommit(dataPart string) *GraphLineCommit {
 	}
 }
 
+func enrichGraphRefs(localPath string, result *GraphLinesResult) {
+	refsByCommit, err := listRefsByCommit(localPath)
+	if err != nil {
+		return
+	}
+	for i := range result.Lines {
+		commit := result.Lines[i].Commit
+		if commit == nil {
+			continue
+		}
+		commit.Refs = mergeRefs(commit.Refs, refsByCommit[commit.SHA])
+	}
+}
+
+func listRefsByCommit(localPath string) (map[string][]GitRef, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(
+		ctx,
+		"git",
+		"-C", localPath,
+		"for-each-ref",
+		"--format=%(refname)%00%(objectname)%00%(*objectname)",
+		"refs/heads",
+		"refs/remotes",
+		"refs/tags",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[string][]GitRef)
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Split(line, "\x00")
+		if len(fields) < 2 {
+			continue
+		}
+		sha := fields[1]
+		if len(fields) > 2 && fields[2] != "" {
+			sha = fields[2]
+		}
+		ref, ok := gitRefFromName(fields[0])
+		if !ok || sha == "" {
+			continue
+		}
+		out[sha] = append(out[sha], ref)
+	}
+	return out, nil
+}
+
+func mergeRefs(base, extra []GitRef) []GitRef {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(base)+len(extra))
+	out := make([]GitRef, 0, len(base)+len(extra))
+	for _, ref := range append(base, extra...) {
+		if ref.Name == "" || seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
+		out = append(out, ref)
+	}
+	return out
+}
+
 func parseGraphDecorations(refsStr string) []GitRef {
 	if strings.TrimSpace(refsStr) == "" {
 		return []GitRef{}
@@ -263,25 +332,41 @@ func parseGraphDecorations(refsStr string) []GitRef {
 			chunks := strings.Split(part, " -> ")
 			part = strings.TrimSpace(chunks[len(chunks)-1])
 		}
-		switch {
-		case strings.HasPrefix(part, "tag: "):
-			raw := strings.TrimSpace(strings.TrimPrefix(part, "tag: "))
-			short := strings.TrimPrefix(raw, "refs/tags/")
-			refs = append(refs, GitRef{Name: "refs/tags/" + short, RefGroup: "tags", ShortName: short})
-		case strings.HasPrefix(part, "refs/heads/"):
-			short := strings.TrimPrefix(part, "refs/heads/")
-			refs = append(refs, GitRef{Name: part, RefGroup: "heads", ShortName: short})
-		case strings.HasPrefix(part, "refs/remotes/"):
-			short := strings.TrimPrefix(part, "refs/remotes/")
-			refs = append(refs, GitRef{Name: part, RefGroup: "remotes", ShortName: short})
-		case strings.HasPrefix(part, "refs/tags/"):
-			short := strings.TrimPrefix(part, "refs/tags/")
-			refs = append(refs, GitRef{Name: part, RefGroup: "tags", ShortName: short})
-		case strings.Contains(part, "/"):
-			refs = append(refs, GitRef{Name: "refs/remotes/" + part, RefGroup: "remotes", ShortName: part})
-		default:
-			refs = append(refs, GitRef{Name: "refs/heads/" + part, RefGroup: "heads", ShortName: part})
+		ref, ok := gitRefFromName(part)
+		if ok {
+			refs = append(refs, ref)
 		}
 	}
 	return refs
+}
+
+func gitRefFromName(name string) (GitRef, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return GitRef{}, false
+	}
+	if strings.HasPrefix(name, "tag: ") {
+		name = strings.TrimSpace(strings.TrimPrefix(name, "tag: "))
+	}
+	switch {
+	case strings.HasPrefix(name, "refs/heads/"):
+		short := strings.TrimPrefix(name, "refs/heads/")
+		return GitRef{Name: name, RefGroup: "heads", ShortName: short}, true
+	case strings.HasPrefix(name, "refs/remotes/"):
+		short := strings.TrimPrefix(name, "refs/remotes/")
+		if strings.HasSuffix(short, "/HEAD") {
+			return GitRef{}, false
+		}
+		return GitRef{Name: name, RefGroup: "remotes", ShortName: short}, true
+	case strings.HasPrefix(name, "refs/tags/"):
+		short := strings.TrimPrefix(name, "refs/tags/")
+		return GitRef{Name: name, RefGroup: "tags", ShortName: short}, true
+	case strings.Contains(name, "/"):
+		if strings.HasSuffix(name, "/HEAD") {
+			return GitRef{}, false
+		}
+		return GitRef{Name: "refs/remotes/" + name, RefGroup: "remotes", ShortName: name}, true
+	default:
+		return GitRef{Name: "refs/heads/" + name, RefGroup: "heads", ShortName: name}, true
+	}
 }
