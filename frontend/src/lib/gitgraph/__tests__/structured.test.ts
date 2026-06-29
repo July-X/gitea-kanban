@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { describe, test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import {
@@ -26,6 +26,7 @@ function node(row: number, lane: number, color: number, sha: string) {
   };
 }
 
+describe('gitgraph structured', () => {
 test('向右分叉时先斜出再沿目标 lane 下行', () => {
   const graph: GraphResultDto = {
     nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b')],
@@ -206,4 +207,5 @@ test('merge commit 指向被合入分支的长斜线使用 parent flow 颜色', 
   assert.equal(longBranch?.colorIndex, 1);
   // v2.46：path d x 加 +FLOW_LEFT_PAD = 4，y 已 v2.40 ROW_HEIGHT 26→30 更新
   assert.equal(longBranch?.d, 'M 9 15 L 19 30 L 19 285');
+});
 });

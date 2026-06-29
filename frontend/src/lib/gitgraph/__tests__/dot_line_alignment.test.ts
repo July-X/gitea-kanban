@@ -9,7 +9,7 @@
  * 要求：每个 dot center 必须落在对应 path 线段 [y_start, y_end] 范围内
  * （cy = y_start + ROW_HEIGHT/2，正好是 path 线段的中点）
  */
-import test from 'node:test';
+import { describe, test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import {
@@ -119,6 +119,7 @@ function extractPathSegments(d: string, prevX: number, prevY: number): Array<{ x
   return segments;
 }
 
+describe('gitgraph dot/line 对齐', () => {
 test('v2.66 dot 和 line 严格对齐：每个 dot center 必须落在对应 path 线段中点（±ROW_H/4 容差）', () => {
   const testLines = makeTestLines();
   const { graph } = parseLines(testLines as any);
@@ -211,4 +212,5 @@ test('v2.66 viewBox 高度 = commitCount * ROW_HEIGHT（不依赖 maxRow，maxRo
   // viewBox 高度 = commitCount * ROW_HEIGHT（不是 maxRow+1 * ROW_HEIGHT）
   const currentViewBoxHeight = commitCount * ROW_HEIGHT;
   assert.equal(currentViewBoxHeight, expectedViewBoxHeight, 'viewBox 高度正确');
+});
 });
