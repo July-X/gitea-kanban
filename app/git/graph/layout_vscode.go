@@ -254,7 +254,10 @@ func (g *graphVscode) determinePath(startAt int) {
 				cp := vsPoint{x: curVertex.nextX, y: curVertex.id}
 				curPoint = &cp
 			}
-			lockedFirst := !foundPointToParent && curVertex != parentVertex && lastPoint.x < curPoint.x
+			lockedFirst := true
+			if !foundPointToParent && curVertex != parentVertex {
+				lockedFirst = lastPoint.x < curPoint.x
+			}
 			parentBranch.addLine(lastPoint, *curPoint, vertex.isCommitted, lockedFirst)
 			curVertex.registerUnavailablePoint(curPoint.x, parentVertex, parentBranch)
 			lastPoint = *curPoint
@@ -373,6 +376,7 @@ func (g *graphVscode) loadCommits(commits []git.CommitInfo, head string) {
 			// pathological input — bail out instead of infinite-looping
 			break
 		}
+		// 1:1 复刻 vscode graph.ts:434
 		v := g.vertices[i]
 		nextParent := v.getNextParent()
 		if nextParent != nil || v.isNotOnBranch() {
