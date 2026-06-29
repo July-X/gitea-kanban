@@ -1463,7 +1463,13 @@ function refBadgeClass(refType?: string): string {
                   'commit-row--merge': r.commit.isMerge,
                 }"
                 :style="{
-                  height: ROW_H + 'px',
+                  /* v2.66：展开时把 accordion 高度并入 row 高度，让 .commit-row:hover
+                   * 选择器能覆盖 row + 下方 accordion 整段（用户反馈 hover 背景高度
+                   * 跟展开面板不对齐——row 固定 30px 时 hover 只到 col 顶端）。
+                   * 没展开的 row 仍走 ROW_H（30px）。 */
+                  height: (r.commit && expandedSha === r.commit.sha
+                    ? ROW_H + expandedHeight
+                    : ROW_H) + 'px',
                 }"
                 :role="r.commit ? 'button' : undefined"
                 :tabindex="r.commit ? 0 : undefined"
@@ -1535,25 +1541,26 @@ function refBadgeClass(refType?: string): string {
                   <div class="commit-row__col commit-row__col--date" />
                   <div class="commit-row__col commit-row__col--sha" />
                 </template>
+                <!-- v2.14：行下手风琴 —— v2.66 改为嵌入 commit-row 内部：
+                     让 .commit-row:hover 选择器能覆盖到 accordion 区域，
+                     鼠标移到展开面板时 row hover 高亮不中断（用户反馈 hover 高度不对齐）。
+                     row 高度已并入 accordion 高度（见上方 :style.height）。-->
+                <div
+                  v-if="r.commit && expandedSha === r.commit.sha"
+                  :ref="(el) => { if (el) bindAccordionObserver(el as HTMLElement) }"
+                  class="commit-accordion"
+                  :data-sha="r.commit.sha"
+                >
+                  <CommitDetailPanel
+                    v-if="expandedCommitNode && expandedCommitNode.sha === r.commit.sha"
+                    :commit="buildBasicCommit(r.commit)"
+                    :project-id="activeProjectId"
+                    :platform="currentPlatform"
+                    :gitea-repo-url="giteaRepoUrl"
+                    variant="panel"
+                  />
+                </div>
               </div>
-               <!-- v2.14：行下手风琴 —— 流式插入 body 内部，跨整宽（不再只是右列），
-                    v2.27：跨整宽包含 graph 列背景，accordion 自身有 elevated 底色。
-                    v2.65：用 ref 绑定 DOM 给 ResizeObserver，让 SVG path 自动拉伸延伸 -->
-               <div
-                 v-if="r.commit && expandedSha === r.commit.sha"
-                 :ref="(el) => { if (el) bindAccordionObserver(el as HTMLElement) }"
-                 class="commit-accordion"
-                 :data-sha="r.commit.sha"
-               >
-                 <CommitDetailPanel
-                   v-if="expandedCommitNode && expandedCommitNode.sha === r.commit.sha"
-                   :commit="buildBasicCommit(r.commit)"
-                   :project-id="activeProjectId"
-                   :platform="currentPlatform"
-                   :gitea-repo-url="giteaRepoUrl"
-                   variant="panel"
-                 />
-               </div>
             </template>
             </div><!-- /.git-graph-rows -->
           </div>
@@ -2183,13 +2190,18 @@ function refBadgeClass(refType?: string): string {
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
- * 右侧内容列用实底色；左侧 graph 列用半透明轨道，让 SVG flow 和圆点仍在轨道上方可见。*/
+ * 右侧内容列用实底色；左侧 graph 列用半透明轨道，让 SVG flow 和圆点仍在轨道上方可见。
+ * v2.66：accordion 嵌入 row 后，hover 选择器也命中展开面板，覆盖其 elevated 底色，
+ * 视觉上 row + accordion 整段统一高亮（用户反馈 hover 高度未对齐）。*/
 .commit-row:hover .commit-row__col--desc,
 .commit-row:hover .commit-row__col--author,
 .commit-row:hover .commit-row__col--date,
 .commit-row:hover .commit-row__col--sha {
   background: var(--color-bg-hover);
   border-right-color: transparent;
+}
+.commit-row:hover .commit-accordion {
+  background: var(--color-bg-hover);
 }
 /* v1.6 可点击的 commit 行 */
 .commit-row--clickable {
@@ -2202,6 +2214,9 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable:hover .commit-row__col--sha {
   background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
   border-right-color: transparent;
+}
+.commit-row--clickable:hover .commit-accordion {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
 }
 .commit-row--clickable:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -2222,6 +2237,10 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--date,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha {
+  background: var(--color-bg-hover);
+  filter: brightness(1.08);
+}
+.commit-row--clickable.commit-row--expanded:hover .commit-accordion {
   background: var(--color-bg-hover);
   filter: brightness(1.08);
 }
@@ -2431,6 +2450,8 @@ function refBadgeClass(refType?: string): string {
       border: 1px solid var(--color-divider);
       border-radius: var(--radius-card, 8px);
       box-shadow: var(--shadow-sm);
+      /* v2.66：嵌入 commit-row 内部后，跨过 4 个内容列占整行宽（与原"流式插入"等效） */
+      grid-column: 1 / -1;
       /* v2.66：max-height 600 → 300（用户拍板"缩减一半"）。
          4:6 panel 内部 .cd-panel__left/right 各自有 overflow-y: auto，超出仍可滚。 */
       max-height: 300px;
