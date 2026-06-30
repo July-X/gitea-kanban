@@ -686,16 +686,12 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  min-width: 0; /* v2.0：允许 grid 子项收缩到内容自然宽度以下 */
-  /* v2.0 → v3.7：改为纵向滚动限死。*/
+  min-width: 0;
+  width: 100%;
   overflow-y: auto;
-  overflow-x: hidden; /* 防止任何横向滚动，内容在 min-width:0 的 message 区自动换行 */
-  /* v2.34：滚动到底后阻止滚轮事件穿透到外层 .commit-accordion / .timeline-new__main。
-   * overscroll-behavior: contain 把滚动链限定在本容器内 —— 用户滚到底时
-   * 不再"意外"滚动外层 commit log 或主区，体验与 VSCode Git Graph 一致 */
+  overflow-x: hidden;
   overscroll-behavior: contain;
   border-right: 1px solid var(--color-divider);
-  /* 滚动条样式 */
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
@@ -746,9 +742,13 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  /* v3.8：去掉 overflow:hidden —— 让 message title 自然换行显示，
-   * 换行后 title 可能超出左栏高度，由 .cd-panel__left 自身 overflow-y:auto 滚动接管。
-   * vscode cdvSummary 的 message 区域也没有 overflow 裁剪。 */
+  /* 强制换行的三层约束：
+   * 1. width:100% 让 flex item 宽度等于父容器（左栏/grid 列宽）
+   * 2. min-width:0 让 flex item 接受收缩，不以内容宽度为最小值
+   * 3. overflow:hidden 裁剪溢出，配合 min-width:0 让内部子元素被迫换行 */
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 .cd-panel--panel .cd-panel__meta {
   border-bottom: none;
@@ -841,13 +841,14 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.4;
-  /* break-word: 在自然断点（空格）处优先换行，必要时才强制断字
-   * break-all: 无视词义强行断字（适合路径 / URL / 无空格长串）
-   * 用 break-word 优先自然换行，仅对"fix: update webui/src/components/..."这种
-   * 有空格但行尾仍放不下的场景强制在空格后换行，保持可读性。*/
+  /* 强制换行的最小宽度约束：width:100% 让标题宽度等于父容器，
+   * min-width:0 接受收缩（覆盖 flex item 默认 min-width:auto），
+   * max-width:100% 明确不超过父容器，word-break:break-word 实现文本换行。*/
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   word-break: break-word;
   overflow-wrap: anywhere;
-  /* overflow:hidden 在父级 .cd-panel__message，title 在此约束内必须换行 */
 }
 .cd-panel--dialog .cd-message__title {
   font-size: var(--font-md, 14px);
