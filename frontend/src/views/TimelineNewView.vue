@@ -1107,13 +1107,24 @@ function onColDragMove(e: MouseEvent): void {
     const startWidths = colDragStartWidths;
 
     if (col === 0) {
-      // v3.4：拖 Graph 列 —— 纯数据驱动（对齐 vscode main.ts:1759-1764）
-      //   只更新 colDragPreviewWidths，让 graphColumnWidth/svgMaxWidth/gridTemplateColumns
-      //   computed 自动响应。Graph 列拖动只调 limitMaxWidth（SVG 坐标不变，释放/隐藏宽度）
-      //   删除所有手动 DOM style.width 写入（与 Vue computed 冲突会导致回弹/错乱）
+      // v3.5：拖 Graph 列 —— 纯数据驱动（对齐 vscode main.ts:1759-1764）
+      //   Graph 列拖动只调 limitMaxWidth（SVG 坐标不变，释放/隐藏宽度）
+      //   边界检查（对齐 vscode main.ts:1760-1761）：
+      //   1. col 0 ≥ MIN_GRAPH_COL_WIDTH(60)
+      //   2. col 1(Description) 剩余宽度 ≥ MIN_DESC_COL_WIDTH(40)
+      //      → col 0 最大 = wrapperWidth - 其他列总宽 - MIN_DESC_COL_WIDTH
       const startW = startWidths[0]!;
       const baseW = startW === COLUMN_AUTO ? graphColumnWidth.value : startW;
-      const newW = clampColWidth(0, baseW + delta);
+      let newW = baseW + delta;
+      // 下限：Graph 列最小 60px
+      if (newW < MIN_GRAPH_COL_WIDTH) newW = MIN_GRAPH_COL_WIDTH;
+      // 上限：Graph 列不能超过 MAX_GRAPH_COL_WIDTH(715)
+      if (newW > MAX_GRAPH_COL_WIDTH) newW = MAX_GRAPH_COL_WIDTH;
+      // 上限：Description 列(1fr)剩余空间 ≥ MIN_DESC_COL_WIDTH(40)
+      //   wrapperWidth - graphCol(with padding) - 其他列总宽 - MIN_DESC_COL_WIDTH
+      const otherColsWidth = resolveColPx(2) + resolveColPx(3) + resolveColPx(4);
+      const maxByDesc = wrapperClientWidth.value - (newW + COLUMN_LEFT_RIGHT_PADDING) - otherColsWidth - MIN_DESC_COL_WIDTH;
+      if (maxByDesc < newW) newW = Math.max(MIN_GRAPH_COL_WIDTH, maxByDesc);
       const next: ColumnWidth[] = [...startWidths];
       next[0] = newW;
       colDragFinalWidths = next;
@@ -1942,8 +1953,10 @@ function refBadgeClass(refType?: string): string {
 }
 .git-graph-header__col {
   padding: 0 var(--space-3, 12px);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* v3.5：overflow: visible —— 让 resize handle(right:-3px) 不被裁剪
+   *   之前 overflow:hidden 裁剪了 handle 超出 col 右边缘的 3px，导致可点击区域只有 3px
+   *   header 文字（"Graph"/"描述"/"日期"/"作者"/"提交"）都很短，不需要 ellipsis 截断 */
+  overflow: visible;
   box-sizing: border-box;
   white-space: nowrap;
   text-align: center;
