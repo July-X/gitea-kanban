@@ -687,10 +687,9 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   flex-direction: column;
   min-height: 0;
   min-width: 0; /* v2.0：允许 grid 子项收缩到内容自然宽度以下 */
-  /* v2.0 → v3.7：改为纵向滚动限死 —— 说明信息无横向溢出场景（长 ref badge 已 wrap），
-   * 横条干扰阅读体验，移除。*/
+  /* v2.0 → v3.7：改为纵向滚动限死。*/
   overflow-y: auto;
-  /* overflow-x: auto 不需要（commit message 自动换行，ref badge 已 wrap）*/
+  overflow-x: hidden; /* 防止任何横向滚动，内容在 min-width:0 的 message 区自动换行 */
   /* v2.34：滚动到底后阻止滚轮事件穿透到外层 .commit-accordion / .timeline-new__main。
    * overscroll-behavior: contain 把滚动链限定在本容器内 —— 用户滚到底时
    * 不再"意外"滚动外层 commit log 或主区，体验与 VSCode Git Graph 一致 */
@@ -829,6 +828,9 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   padding: var(--space-2, 8px) var(--space-3, 12px);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  /* 关键：min-width:0 让 flex item 能收缩到 grid 列宽以下，
+   * 配合 .cd-panel__left 的 overflow-x:hidden，强制 title 换行而非撑开列宽。*/
+  min-width: 0;
 }
 .cd-panel--dialog .cd-panel__message {
   padding: var(--space-3, 12px) var(--space-4, 16px);
