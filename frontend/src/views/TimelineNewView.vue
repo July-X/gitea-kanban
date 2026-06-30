@@ -857,7 +857,7 @@ const expandedCommitNode = computed<
  * 圆点视觉直径（px）= 8px（v2.29 用户要求：flow 线条上的圆点调整为 8px 宽）
  * 比 lane 间距（5px）大，圆点视觉上"凸"在 lane 线上、跟 flow 路径有明显视觉对比。
  */
-const DOT_SIZE = 8;
+const DOT_SIZE = 8; // vscode Vertex.draw r=4 (直径 8)
 
 interface DotOverlayNode {
   sha: string;
@@ -1382,6 +1382,7 @@ function refBadgeClass(refType?: string): string {
                   :viewBox="viewBox"
                   :width="svgWidth"
                   :height="svgHeight"
+                  style="background:#1e1e1e"
                 >
                   <g
                     v-for="pg in pathGroups"
@@ -1948,26 +1949,28 @@ function refBadgeClass(refType?: string): string {
 }
 
 /* stash 节点 (vscode Vertex.draw:318-326 + main.css:105-108)
-   外圈 r=4.5 + 内圈 r=2 双圈; inner 用 box-shadow inset 实现 */
+   外圈 r=4.5 + 内圈 r=2 双圈; inner 用 box-shadow inset 实现
+   应用 dot 是 8x8 (r=4), inner 4x4 (r=2), inset = (4-2)/4 = 50% */
 .commit-dot--stash {
   position: relative;
+  background-color: transparent !important;
 }
 .commit-dot--stash::after {
   content: '';
   position: absolute;
-  inset: 25%; /* (r-r_inner)/r = (4.5-2)/4.5 ≈ 33% */
+  inset: 50%;
   border-radius: 50%;
   background: transparent;
   border: 1px solid currentColor;
   pointer-events: none;
 }
 
-/* 圆点描边 (vscode main.css:100-103): 非 HEAD 都加 1px 半透明描边
-   stroke-opacity=0.75 用 stroke-opacity 实现 */
+/* 圆点描边 (vscode main.css:100-103): 非 HEAD 都加 1px 半透明描边 */
 .commit-dot:not(.commit-dot--head) {
   border: 1px solid var(--app-bg, #1e1e1e);
   border-style: solid;
   border-width: 1px;
+  border-color: rgba(30, 30, 30, 0.75); /* vscode stroke-opacity=0.75 */
   box-sizing: border-box;
 }
 
