@@ -557,9 +557,29 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 		})
 	}
 
+	branches := make([]platform.GraphBranchDTO, 0, len(r.Branches))
+	for _, b := range r.Branches {
+		lines := make([]platform.GraphBranchLineDTO, 0, len(b.Lines))
+		for _, ln := range b.Lines {
+			lines = append(lines, platform.GraphBranchLineDTO{
+				X1:          ln.X1,
+				Y1:          ln.Y1,
+				X2:          ln.X2,
+				Y2:          ln.Y2,
+				LockedFirst: ln.LockedFirst,
+			})
+		}
+		branches = append(branches, platform.GraphBranchDTO{
+			Color: b.Color,
+			End:   b.End,
+			Lines: lines,
+		})
+	}
+
 	return &platform.GraphResult{
 		Nodes:     nodes,
 		Edges:     edges,
+		Branches:  branches,
 		MaxLane:   r.MaxLane,
 		Truncated: r.Truncated,
 	}

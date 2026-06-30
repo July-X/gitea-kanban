@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	appgit "gitea-kanban/app/git"
+	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/platform"
 )
@@ -110,6 +112,39 @@ func TestGitHubAdapter_Platform(t *testing.T) {
 	adapter := NewGitHubAdapter()
 	if adapter.Platform() != "github" {
 		t.Errorf("Platform = %q, want github", adapter.Platform())
+	}
+}
+
+func TestGraphResultToDTO_IncludesBranches(t *testing.T) {
+	dto := graphResultToDTO(&graph.GraphResult{
+		Nodes: []graph.GraphNode{{
+			Row:      0,
+			Lane:     0,
+			Color:    1,
+			SHA:      "abcdef",
+			ShortSHA: "abcdef",
+			RefTypes: []appgit.RefType{appgit.RefTypeRemoteBranch},
+		}},
+		Branches: []graph.GraphBranch{{
+			Color: 2,
+			End:   2,
+			Lines: []graph.GraphBranchLine{{
+				X1: 0, Y1: 0,
+				X2: 1, Y2: 1,
+				LockedFirst: true,
+			}},
+		}},
+		MaxLane: 1,
+	})
+	if dto == nil || len(dto.Branches) != 1 {
+		t.Fatalf("branches not propagated: %#v", dto)
+	}
+	line := dto.Branches[0].Lines[0]
+	if line.X1 != 0 || line.X2 != 1 || !line.LockedFirst {
+		t.Fatalf("branch line mismatch: %#v", line)
+	}
+	if got := dto.Nodes[0].RefTypes[0]; got != "remoteBranch" {
+		t.Fatalf("ref type = %q, want remoteBranch", got)
 	}
 }
 

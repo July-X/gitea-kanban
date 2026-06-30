@@ -241,23 +241,22 @@ export function renderGraphVscode(
 		}
 
 		// 2) 简化共线中间点 (vscode Branch.draw:106-116)
-		// vscode 的逻辑: 只看 last.p2 == seg.p1 (首尾相接), 不看 column。
-		// 跨 lane 后如果 p2 落在 dot 上, 下一条从该 dot 出发的 line 就续接。
-		// 我们的 edges 是按 LogCommits 顺序, 不保证这个性质, 所以把
-		// "首尾相接" 放宽为简化条件, 保留 vscode Branch.draw 同样的拼 path 逻辑。
-		const simplified: typeof placed = [];
-		for (const seg of placed) {
-			const last = simplified[simplified.length - 1];
+		// 只合并同列且首尾相接的垂直线。跨 lane 线段即使首尾相接也必须保留，
+		// 否则会吞掉 VSCode 依赖行间距生成的 C 贝塞尔转场。
+		let i = 0;
+		while (i < placed.length - 1) {
+			const line = placed[i]!;
+			const nextLine = placed[i + 1]!;
 			if (
-				last &&
-				last.p2.x === seg.p1.x &&
-				last.p2.y === seg.p1.y
+				line.p1.x === line.p2.x &&
+				line.p2.x === nextLine.p1.x &&
+				nextLine.p1.x === nextLine.p2.x &&
+				line.p2.y === nextLine.p1.y
 			) {
-				// 首尾相接: 合并,延长 last 的 p2
-				last.p2.x = seg.p2.x;
-				last.p2.y = seg.p2.y;
+				line.p2.y = nextLine.p2.y;
+				placed.splice(i + 1, 1);
 			} else {
-				simplified.push(seg);
+				i++;
 			}
 		}
 
@@ -265,22 +264,13 @@ export function renderGraphVscode(
 		//
 		// 关键: vscode 的 line list 是 "按 column 顺时针串行" 的连续序列,
 		//       所以同 branch 的连续 line 经常 last.p2 == next.p1, 可以用
-		//       单一 path + 多个 L/C 续接; 但跨 lane 后 line 跟 dot 在
-		//       不同 column, 只能新开 M。
+		//       单一 path + 多个 L/C 续接。
 		//
-		// 我们的数据是 "按 color 分组的 edge list", 顺序是 LogCommits 顺序,
-		// 跟 vscode 的 Branch.line list 不完全一致。所以采取更稳健的策略:
-		//   - 同列共线 (simplify 已合并)
-		//   - 跨 lane 永远不续接, 新开 M (避免 column 0 主线被错误延长)
-		//   - 跨 lane 转场用 C 贝塞尔 (你要的"曲线", d 取小值 ≈ dot 半径,
-		//     让曲线紧凑在 dot-to-dot 的小空隙内, 而不是 0.8*GRID_Y=19.2 拉满)
-		//
-		// 跟 3 段 L S 形相比, C 贝塞尔视觉上是 "真正平滑的曲线", 更接近
-		// vscode 真实渲染。
-		const dy = VSCODE_VERTEX_RADIUS - 1; // 3px, ≈ dot 半径
+		// 跨 lane 转场继续沿当前 path 输出，使用 VSCode 默认 0.8 * GRID_Y
+		// 控制点偏移，靠行间距完成曲线形变后连接到目标 lane。
 		let curPath = '';
-		for (let i = 0; i < simplified.length; i++) {
-			const seg = simplified[i];
+		for (let i = 0; i < placed.length; i++) {
+			const seg = placed[i];
 			const x1 = seg.p1.x;
 			const y1 = seg.p1.y;
 			const x2 = seg.p2.x;
@@ -292,8 +282,8 @@ export function renderGraphVscode(
 			const continuous =
 				i > 0 &&
 				curPath !== '' &&
-				simplified[i - 1].p2.x === x1 &&
-				simplified[i - 1].p2.y === y1;
+				placed[i - 1]!.p2.x === x1 &&
+				placed[i - 1]!.p2.y === y1;
 
 			if (!continuous) {
 				curPath += `M ${x1.toFixed(0)} ${y1.toFixed(1)}`;

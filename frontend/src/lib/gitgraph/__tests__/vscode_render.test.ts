@@ -126,6 +126,29 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		assert.ok(d.includes('32 16.8'), `path 应包含 32 16.8 (控制点 2), 实际: ${d}`);
 	});
 
+	test('跨 lane 后接垂直线时保留 VSCode 的曲线转场', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 1, 0, 'b'), node(2, 1, 0, 'c')],
+			edges: [],
+			branches: [
+				{
+					color: 0,
+					end: 3,
+					lines: [
+						{ x1: 0, y1: 0, x2: 1, y2: 1, lockedFirst: true },
+						{ x1: 1, y1: 1, x2: 1, y2: 2, lockedFirst: false },
+					],
+				},
+			],
+			maxLane: 1,
+			truncated: false,
+		};
+		const r = renderGraphVscode(graph);
+		const d = r.paths[0]?.d ?? '';
+		assert.ok(d.includes('C 16 31.2 32 16.8 32 36.0'), `应保留跨 lane 曲线，实际: ${d}`);
+		assert.ok(d.includes('L 32 60.0'), `曲线后应继续连接目标 lane 垂直线，实际: ${d}`);
+	});
+
 	test('angular 风格:跨 lane 用 L 折线,38% 拐点', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b')],

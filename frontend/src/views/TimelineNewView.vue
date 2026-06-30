@@ -1882,7 +1882,7 @@ function refBadgeClass(refType?: string): string {
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: var(--git-graph-row-height, 24px);
-  letter-spacing: -0.005em;
+  color: var(--color-text);
   white-space: nowrap;
   /* v2.66：去掉 overflow: hidden —— 嵌入 .commit-accordion 后需要让它溢出显示。
    * desc/author/date/sha 列的 ellipsis 由各 .commit-row__col 自身 overflow:hidden 兜底。*/
@@ -1907,11 +1907,11 @@ function refBadgeClass(refType?: string): string {
 .commit-row:hover .commit-row__col--author,
 .commit-row:hover .commit-row__col--date,
 .commit-row:hover .commit-row__col--sha {
-  background: var(--color-bg-hover);
+  background: rgba(128, 128, 128, 0.15);
   border-right-color: transparent;
 }
 .commit-row:hover .commit-accordion {
-  background: var(--color-bg-hover);
+  background: rgba(128, 128, 128, 0.15);
 }
 /* v1.6 可点击的 commit 行 */
 .commit-row--clickable {
@@ -1922,11 +1922,11 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable:hover .commit-row__col--author,
 .commit-row--clickable:hover .commit-row__col--date,
 .commit-row--clickable:hover .commit-row__col--sha {
-  background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
+  background: rgba(128, 128, 128, 0.15);
   border-right-color: transparent;
 }
 .commit-row--clickable:hover .commit-accordion {
-  background: var(--color-primary-soft, rgba(116, 184, 48, 0.06));
+  background: rgba(128, 128, 128, 0.15);
 }
 .commit-row--clickable:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -1939,7 +1939,7 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable.commit-row--expanded .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded .commit-row__col--date,
 .commit-row--clickable.commit-row--expanded .commit-row__col--sha {
-  background: var(--color-bg-hover);
+  background: rgba(128, 128, 128, 0.25);
   border-bottom-color: transparent;
   border-right-color: transparent;
 }
@@ -1947,12 +1947,10 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--author,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--date,
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha {
-  background: var(--color-bg-hover);
-  filter: brightness(1.08);
+  background: rgba(128, 128, 128, 0.35);
 }
 .commit-row--clickable.commit-row--expanded:hover .commit-accordion {
-  background: var(--color-bg-hover);
-  filter: brightness(1.08);
+  background: rgba(128, 128, 128, 0.35);
 }
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * v2.40：26 → 30px，与 commit-row / SVG ROW_HEIGHT 同步（dot 行节奏对齐） */
@@ -1972,10 +1970,7 @@ function refBadgeClass(refType?: string): string {
  *   在 dark mode 下差异更明显，light mode 下也是合理的弱化 */
 .commit-row--merge .commit-subject,
 .commit-row--merge .commit-row__col--desc {
-  /* 用 --color-text-muted 而不是 --color-text-tertiary：
-   * muted 在 dark 下 5.29:1 / light 下 6.39:1 ✓ 都过 WCAG AA，
-   * 比 tertiary 的 rgba(255,255,255,0.55) 在 light 下几乎不可见友好。*/
-  color: var(--color-text-muted, rgba(154, 170, 182, 0.85));
+  opacity: 0.5;
 }
 
 .ref-badge {
@@ -2033,9 +2028,8 @@ function refBadgeClass(refType?: string): string {
      desc 列的 white-space:nowrap + overflow:hidden + text-overflow:ellipsis
      负责整体截断。*/
   display: inline;
-  color: var(--color-text);
-  font-size: 13px;
-  letter-spacing: -0.005em;
+  color: inherit;
+  font-size: inherit;
 }
 
 /* v2.22：列容器（grid item） */
@@ -2068,25 +2062,20 @@ function refBadgeClass(refType?: string): string {
   line-height: var(--git-graph-row-height, 24px);
 }
 .commit-row__col--author {
-  /* v2.39：13px → 12px，与主体(14px)拉开层次但不显拥挤 */
-  font-size: 12px;
-  color: var(--color-text-secondary);
+  font-size: inherit;
+  color: inherit;
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--date {
-  /* v2.39：13px → 12px */
-  font-size: 12px;
-  color: var(--color-text-secondary);
+  font-size: inherit;
+  color: inherit;
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .commit-row__col--sha {
-  /* v2.39：monospace → var(--font-mono-stack)（JetBrains Mono 优先） */
-  font-family: var(--font-mono-stack);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  color: var(--color-text-secondary);
+  font-size: inherit;
+  color: inherit;
   /* 右侧间距由 commit-row 的 padding-right 提供，避免叠加 */
   padding: 0 0 0 12px;
 }
@@ -2095,7 +2084,7 @@ function refBadgeClass(refType?: string): string {
   display: flex;
   align-items: center;
   gap: var(--space-2, 8px);
-  color: var(--color-text-secondary);
+  color: inherit;
   flex-shrink: 0;
 }
 .commit-avatar {
@@ -2109,20 +2098,16 @@ function refBadgeClass(refType?: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* v2.35：从 11px 提升到 13px */
-  font-size: 13px;
+  font-size: inherit;
 }
 .commit-time {
   white-space: nowrap;
-  /* v2.35：从 11px 提升到 13px */
-  font-size: 13px;
+  font-size: inherit;
 }
 
 .commit-sha {
-  font-family: monospace;
-  /* v2.35：从 11px 提升到 12px */
-  font-size: 12px;
-  color: var(--color-text-secondary);
+  font-size: inherit;
+  color: inherit;
   flex-shrink: 0;
 }
 
