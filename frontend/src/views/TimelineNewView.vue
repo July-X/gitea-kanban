@@ -1982,7 +1982,7 @@ function refBadgeClass(refType?: string): string {
   position: relative;
   display: flex;
   flex-direction: row;
-  align-items: stretch;
+  align-items: flex-start; /* v3.3: 改为 flex-start，确保 .git-graph-bg 从顶部对齐 */
   min-height: var(--git-graph-row-height, 24px);
 }
 
