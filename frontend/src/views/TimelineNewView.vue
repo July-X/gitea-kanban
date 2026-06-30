@@ -628,10 +628,7 @@ const maxRowPlusOne = computed(() => {
   return Math.max(...dto.nodes.map((n) => n.row)) + 1;
 });
 
-const viewBox = computed(() => {
-  const r = svgRender.value;
-  return r ? `0 0 ${r.contentWidth} ${r.height}` : '0 0 0 0';
-});
+// v3.5：viewBox computed 已移除——SVG 不用 viewBox，直接像素坐标（对齐 vscode）
 /**
  * v3.3：SVG 元素的实际渲染宽度
  *  对齐 vscode-git-graph graph.ts:697-700 setSvgWidth()
@@ -926,13 +923,17 @@ function saveColumnWidths(): void {
 }
 
 /** col 是否可见（不是 HIDDEN） */
+/** v3.5：拖动时优先读 colDragPreviewWidths */
 function isColVisible(col: number): boolean {
-  return columnWidths.value[col] !== COLUMN_HIDDEN;
+  const widths = colDragPreviewWidths.value || columnWidths.value;
+  return widths[col] !== COLUMN_HIDDEN;
 }
 
-/** 解析某列的实际 px 宽（AUTO 时取默认像素，HIDDEN 时 0，数字时用该数字） */
+/** 解析某列的实际 px 宽（AUTO 时取默认像素，HIDDEN 时 0，数字时用该数字）
+ *  v3.5：拖动时优先读 colDragPreviewWidths，让 3/4/5 列拖动实时响应 */
 function resolveColPx(col: number): number {
-  const w = columnWidths.value[col];
+  const widths = colDragPreviewWidths.value || columnWidths.value;
+  const w = widths[col];
   if (w === undefined || w === COLUMN_HIDDEN) return 0;
   if (w === COLUMN_AUTO) return DEFAULT_COL_WIDTHS_PIXEL[col] ?? 0;
   return w;
@@ -1514,14 +1515,17 @@ function refBadgeClass(refType?: string): string {
                 height: svgHeight,
               }"
             >
+              <!-- v3.5：移除 viewBox（对齐 vscode-git-graph）
+                vscode SVG 不用 viewBox，直接 width/height 像素属性，内部坐标 1:1 映射。
+                之前 viewBox + width=min(contentWidth,maxWidth) 导致 maxWidth < contentWidth 时
+                浏览器等比缩放整个图形（缩小+下移）。移除后坐标=像素，超出部分 overflow:hidden + mask fade -->
               <svg
                 class="git-graph-svg"
                 :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > graphColumnWidth }"
                 :style="{ maskImage: svgMaskGradient, WebkitMaskImage: svgMaskGradient }"
-                :viewBox="viewBox"
                 :width="svgWidth"
                 :height="svgHeight"
-            >
+              >
                   <!--
                     v2.65：渐变 fade 改用 CSS mask-image（在 .git-graph-svg 上），不再用 SVG <defs>+<mask>。
                     原因：v2.64 的 SVG mask + maskUnits=userSpaceOnUse + 默认 x=-10%/width=120% 在不同浏览器
@@ -1541,7 +1545,7 @@ function refBadgeClass(refType?: string): string {
                       v-if="pg.d"
                       :d="pg.d"
                       :stroke="pg.kind === 'shadow'
-                        ? '#000'
+                        ? 'var(--color-graph-bg, var(--color-shell-main-bg))'
                         : (pg.colorHex ?? '#888')"
                       :stroke-width="pg.kind === 'shadow' ? 4 : 2"
                       :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
@@ -1885,12 +1889,11 @@ function refBadgeClass(refType?: string): string {
   min-height: 1px;
   display: block;
   width: 100%;
-  /* v3.2：overflow-x: auto —— AUTO 模式 graph 列被 MAX_GRAPH_AUTO_WIDTH=240 clamp 后，
-     contentWidth > 240 时 .git-graph-bg 容器超 wrapper 宽，wrapper 出横向滚动条
-     让用户能横向滚动看完整 graph（vscode main.ts:1703 table-layout auto 行为）
-     之前 v2.47/v3.0 用 overflow: hidden 把超出的裁掉，30+ lane 仓库看不到全部 lane */
-  overflow-x: auto;
-  overflow-y: visible;
+  /* v3.5：overflow: visible —— 让 .git-graph-header 的 position:sticky 相对于
+   *   .timeline-new__main（overflow:auto）生效，表头固定不随纵向滚动。
+   *   之前 overflow-x:auto 让 wrapper 成为 sticky 的滚动祖先，但 wrapper 纵向不滚动，
+   *   导致 header sticky 失效。横向溢出改由 .timeline-new__main(overflow:auto) 处理。 */
+  overflow: visible;
 }
 
 /* v1.7 性能优化：拖拽时布局隔离
@@ -2090,6 +2093,9 @@ function refBadgeClass(refType?: string): string {
 .git-graph-svg {
   display: block;
   background: var(--color-graph-bg, var(--color-shell-main-bg));
+  /* v3.5：overflow:hidden 裁剪超出 width 的 path（对齐 vscode SVG 默认行为）
+   *   CSS mask-image 再做渐变 fade（vscode 用 SVG <mask>，等价效果） */
+  overflow: hidden;
 }
 .git-graph-svg--fade {
   -webkit-mask-image: linear-gradient(
