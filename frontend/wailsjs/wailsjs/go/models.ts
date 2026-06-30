@@ -1,14 +1,14 @@
 export namespace git {
-
+	
 	export class GitRef {
 	    name: string;
 	    refGroup: string;
 	    shortName: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GitRef(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -26,11 +26,11 @@ export namespace git {
 	    isMerge: boolean;
 	    parents: string[];
 	    refs: GitRef[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphLineCommit(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sha = source["sha"];
@@ -43,7 +43,7 @@ export namespace git {
 	        this.parents = source["parents"];
 	        this.refs = this.convertValues(source["refs"], GitRef);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -66,18 +66,18 @@ export namespace git {
 	    row: number;
 	    glyph: string;
 	    commit?: GraphLineCommit;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphLine(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.row = source["row"];
 	        this.glyph = source["glyph"];
 	        this.commit = this.convertValues(source["commit"], GraphLineCommit);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -96,15 +96,15 @@ export namespace git {
 		    return a;
 		}
 	}
-
+	
 	export class GraphRange {
 	    from: string;
 	    to: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphRange(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.from = source["from"];
@@ -116,11 +116,11 @@ export namespace git {
 	    totalCommits: number;
 	    truncated: boolean;
 	    range: GraphRange;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphLinesResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.lines = this.convertValues(source["lines"], GraphLine);
@@ -128,7 +128,7 @@ export namespace git {
 	        this.truncated = source["truncated"];
 	        this.range = this.convertValues(source["range"], GraphRange);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -151,7 +151,7 @@ export namespace git {
 }
 
 export namespace main {
-
+	
 	export class UserInfo {
 	    giteaUserId: number;
 	    login: string;
@@ -159,11 +159,11 @@ export namespace main {
 	    email?: string;
 	    avatarUrl?: string;
 	    updatedAt: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new UserInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.giteaUserId = source["giteaUserId"];
@@ -182,11 +182,11 @@ export namespace main {
 	    keychainService: string;
 	    createdAt: string;
 	    userInfo?: UserInfo;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AccountDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -197,7 +197,7 @@ export namespace main {
 	        this.createdAt = source["createdAt"];
 	        this.userInfo = this.convertValues(source["userInfo"], UserInfo);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -220,11 +220,11 @@ export namespace main {
 	    giteaAccountId: string;
 	    owner: string;
 	    name: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AddProjectArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.giteaAccountId = source["giteaAccountId"];
@@ -234,16 +234,16 @@ export namespace main {
 	}
 	export class AddProjectResult {
 	    project: store.RepoProject;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AddProjectResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.project = this.convertValues(source["project"], store.RepoProject);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -266,11 +266,11 @@ export namespace main {
 	    version: string;
 	    dataDir: string;
 	    platform: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AppInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -282,11 +282,11 @@ export namespace main {
 	    name: string;
 	    commitSha: string;
 	    isProtected: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BranchDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -301,11 +301,11 @@ export namespace main {
 	    username: string;
 	    owner: string;
 	    repo: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new CloneRepoArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -319,11 +319,11 @@ export namespace main {
 	export class CloneRepoResult {
 	    localPath: string;
 	    reused: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new CloneRepoResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.localPath = source["localPath"];
@@ -336,11 +336,11 @@ export namespace main {
 	    title: string;
 	    position: number;
 	    wipLimit?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ColumnDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -357,11 +357,11 @@ export namespace main {
 	    additions: number;
 	    deletions: number;
 	    binary?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileChangeDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.filename = source["filename"];
@@ -385,11 +385,11 @@ export namespace main {
 	    additions?: number;
 	    deletions?: number;
 	    filesChanged?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new CommitDetailDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sha = source["sha"];
@@ -405,7 +405,7 @@ export namespace main {
 	        this.deletions = source["deletions"];
 	        this.filesChanged = source["filesChanged"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -428,11 +428,11 @@ export namespace main {
 	    platform: string;
 	    giteaUrl: string;
 	    token: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConnectArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.platform = source["platform"];
@@ -446,11 +446,11 @@ export namespace main {
 	    fullName?: string;
 	    email?: string;
 	    avatarUrl?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new UserDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -463,17 +463,17 @@ export namespace main {
 	export class ConnectResult {
 	    account: AccountDTO;
 	    user: UserDTO;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConnectResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.account = this.convertValues(source["account"], AccountDTO);
 	        this.user = this.convertValues(source["user"], UserDTO);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -496,11 +496,11 @@ export namespace main {
 	    projectId: string;
 	    title: string;
 	    position: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new CreateColumnArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -511,11 +511,11 @@ export namespace main {
 	export class DeepenRepoArgs {
 	    projectId: string;
 	    deepenBy: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DeepenRepoArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -525,11 +525,11 @@ export namespace main {
 	export class DeepenRepoResult {
 	    success: boolean;
 	    message: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DeepenRepoResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -538,11 +538,11 @@ export namespace main {
 	}
 	export class DeleteColumnArgs {
 	    columnId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DeleteColumnArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.columnId = source["columnId"];
@@ -550,11 +550,11 @@ export namespace main {
 	}
 	export class DisconnectArgs {
 	    giteaUrl: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DisconnectArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.giteaUrl = source["giteaUrl"];
@@ -563,11 +563,11 @@ export namespace main {
 	export class DisconnectOneArgs {
 	    giteaUrl: string;
 	    username: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DisconnectOneArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.giteaUrl = source["giteaUrl"];
@@ -576,25 +576,25 @@ export namespace main {
 	}
 	export class FetchRepoResultDTO {
 	    updated: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FetchRepoResultDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.updated = source["updated"];
 	    }
 	}
-
+	
 	export class GetCommitDetailArgs {
 	    localPath: string;
 	    sha: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GetCommitDetailArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.localPath = source["localPath"];
@@ -605,11 +605,11 @@ export namespace main {
 	    projectId: string;
 	    branches?: string[];
 	    maxCount?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GetGitGraphArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -619,11 +619,11 @@ export namespace main {
 	}
 	export class GetRepoByIdArgs {
 	    projectId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GetRepoByIdArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -634,11 +634,11 @@ export namespace main {
 	    account: AccountDTO;
 	    localPath: string;
 	    cloned: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GetRepoByIdResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.project = this.convertValues(source["project"], store.RepoProject);
@@ -646,7 +646,7 @@ export namespace main {
 	        this.localPath = source["localPath"];
 	        this.cloned = source["cloned"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -667,11 +667,11 @@ export namespace main {
 	}
 	export class GetUserPrefsArgs {
 	    keys: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GetUserPrefsArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.keys = source["keys"];
@@ -683,11 +683,11 @@ export namespace main {
 	    x2: number;
 	    y2: number;
 	    lockedFirst: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphBranchLineDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.x1 = source["x1"];
@@ -701,18 +701,18 @@ export namespace main {
 	    color: number;
 	    end: number;
 	    lines: GraphBranchLineDTO[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphBranchDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.color = source["color"];
 	        this.end = source["end"];
 	        this.lines = this.convertValues(source["lines"], GraphBranchLineDTO);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -731,7 +731,7 @@ export namespace main {
 		    return a;
 		}
 	}
-
+	
 	export class GraphEdgeDTO {
 	    fromRow: number;
 	    toRow: number;
@@ -739,11 +739,11 @@ export namespace main {
 	    toLane: number;
 	    color: number;
 	    type: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphEdgeDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.fromRow = source["fromRow"];
@@ -770,11 +770,11 @@ export namespace main {
 	    refTypes?: string[];
 	    isCurrent?: boolean;
 	    isStash?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphNodeDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.row = source["row"];
@@ -800,11 +800,11 @@ export namespace main {
 	    branches?: GraphBranchDTO[];
 	    maxLane: number;
 	    truncated: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GraphResultDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.nodes = this.convertValues(source["nodes"], GraphNodeDTO);
@@ -813,7 +813,7 @@ export namespace main {
 	        this.maxLane = source["maxLane"];
 	        this.truncated = source["truncated"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -836,11 +836,11 @@ export namespace main {
 	    username?: string;
 	    owner: string;
 	    repo: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new IsRepoClonedArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.username = source["username"];
@@ -854,11 +854,11 @@ export namespace main {
 	    state: string;
 	    body?: string;
 	    author: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new IssueDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.index = source["index"];
@@ -875,11 +875,11 @@ export namespace main {
 	    token: string;
 	    owner: string;
 	    repo: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ListBranchesArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.platform = source["platform"];
@@ -892,11 +892,11 @@ export namespace main {
 	}
 	export class ListColumnsArgs {
 	    projectId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ListColumnsArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -910,11 +910,11 @@ export namespace main {
 	    owner: string;
 	    repo: string;
 	    state: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ListIssuesArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.platform = source["platform"];
@@ -931,11 +931,11 @@ export namespace main {
 	    query?: string;
 	    limit: number;
 	    page: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ListReposArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.giteaAccountId = source["giteaAccountId"];
@@ -949,11 +949,11 @@ export namespace main {
 	    total: number;
 	    page: number;
 	    hasMore: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ListReposResp(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.items = this.convertValues(source["items"], platform.RepoDTO);
@@ -961,7 +961,7 @@ export namespace main {
 	        this.page = source["page"];
 	        this.hasMore = source["hasMore"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -982,11 +982,11 @@ export namespace main {
 	}
 	export class ListStarredBranchesArgs {
 	    projectId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ListStarredBranchesArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -997,11 +997,11 @@ export namespace main {
 	    message: string;
 	    description?: string;
 	    source?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new LogFrontendArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.level = source["level"];
@@ -1015,11 +1015,11 @@ export namespace main {
 	    localPath: string;
 	    branches: string[];
 	    maxCount: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new LogGraphArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.platform = source["platform"];
@@ -1030,11 +1030,11 @@ export namespace main {
 	}
 	export class PullRepoArgs {
 	    localPath: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PullRepoArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.localPath = source["localPath"];
@@ -1042,11 +1042,11 @@ export namespace main {
 	}
 	export class PullRepoByProjectIdArgs {
 	    projectId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PullRepoByProjectIdArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -1059,11 +1059,11 @@ export namespace main {
 	    headBefore: string;
 	    headAfter: string;
 	    headChanged: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PullRepoResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.beforeCount = source["beforeCount"];
@@ -1076,11 +1076,11 @@ export namespace main {
 	}
 	export class RemoveProjectArgs {
 	    projectId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RemoveProjectArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -1088,11 +1088,11 @@ export namespace main {
 	}
 	export class RemoveWorkspaceReposArgs {
 	    username: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RemoveWorkspaceReposArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.username = source["username"];
@@ -1101,11 +1101,11 @@ export namespace main {
 	export class RemoveWorkspaceReposResult {
 	    removedCount: number;
 	    message: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RemoveWorkspaceReposResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.removedCount = source["removedCount"];
@@ -1114,11 +1114,11 @@ export namespace main {
 	}
 	export class SetUserPrefsArgs {
 	    entries: Record<string, any>;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SetUserPrefsArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.entries = source["entries"];
@@ -1126,11 +1126,11 @@ export namespace main {
 	}
 	export class SetWorkspaceArgs {
 	    cwd: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SetWorkspaceArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.cwd = source["cwd"];
@@ -1139,11 +1139,11 @@ export namespace main {
 	export class StarBranchArgs {
 	    projectId: string;
 	    branch: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new StarBranchArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
@@ -1153,17 +1153,17 @@ export namespace main {
 	export class StatusResult {
 	    accounts: AccountDTO[];
 	    currentUser?: UserDTO;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new StatusResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.accounts = this.convertValues(source["accounts"], AccountDTO);
 	        this.currentUser = this.convertValues(source["currentUser"], UserDTO);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1184,11 +1184,11 @@ export namespace main {
 	}
 	export class SwitchAccountArgs {
 	    accountId: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SwitchAccountArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.accountId = source["accountId"];
@@ -1197,29 +1197,29 @@ export namespace main {
 	export class UnstarBranchArgs {
 	    projectId: string;
 	    branch: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new UnstarBranchArgs(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
 	        this.branch = source["branch"];
 	    }
 	}
-
-
+	
+	
 	export class WorkspaceInfo {
 	    cwd: string;
 	    isDefault: boolean;
 	    validated: boolean;
 	    dataDir: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WorkspaceInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.cwd = source["cwd"];
@@ -1232,16 +1232,16 @@ export namespace main {
 }
 
 export namespace platform {
-
+	
 	export class RepoPermissions {
 	    pull: boolean;
 	    push: boolean;
 	    admin: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RepoPermissions(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.pull = source["pull"];
@@ -1263,11 +1263,11 @@ export namespace platform {
 	    projectId?: string;
 	    isProject: boolean;
 	    lastSyncAt?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RepoDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.owner = source["owner"];
@@ -1284,7 +1284,7 @@ export namespace platform {
 	        this.isProject = source["isProject"];
 	        this.lastSyncAt = source["lastSyncAt"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1307,7 +1307,7 @@ export namespace platform {
 }
 
 export namespace store {
-
+	
 	export class RepoProject {
 	    id: string;
 	    platform: string;
@@ -1317,11 +1317,11 @@ export namespace store {
 	    defaultBranch: string;
 	    lastSyncAt: number;
 	    createdAt: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RepoProject(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
