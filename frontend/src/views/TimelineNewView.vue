@@ -121,53 +121,25 @@ const hoveredDotSha = ref<string | null>(null);
 const hoveredDotColor = ref<string | null>(null);
 
 /**
- * v3.10：dot tooltip 状态（1:1 复刻 vscode-git-graph graph.ts vertexOver/vertexOut）
- *  - dotEnter → set active state + 100ms 延迟显示 tooltip
- *  - dotLeave → 立即清除 active + 关闭 tooltip
- * Tooltip 内容：commit SHA / 所在分支 / 标签（refs / refTypes 由 svgCircleNodes 携带）
+ * v3.12：dot hover 状态（tooltip 是普通 HTML div，在 .git-graph-body 内绝对定位）
+ *  dotEnter(event, c):
+ *    1. 写 --active-lane-color（CSS var 驱动 ref-badge 变色）
+ *    2. 置 tooltipPending + 100ms 后显示 tooltip
+ *  dotLeave():
+ *    1. 立即清 tooltipPending（但不立即清 tooltipVisible，等 dot→tooltip 的几ms）
+ *    2. 200ms 后清 tooltipVisible（mouse 离开到 tooltip 外时最终隐藏）
+ *  策略：tooltip div 在 .git-graph-body 内（z-index 高于 commit-row），
+ *  mouse 从 circle 移到 tooltip 几乎 0ms，tooltipPending 不被清除，tooltip 正常显示。
+ *  mouse 离开整个 dot-hover-group 区域后，200ms delay 保证 mouse 有机会到 tooltip div。
  */
-interface DotTooltipData {
-  sha: string;
-  shortSha: string;
-  subject: string;
-  authorName: string;
-  date: string;
-  colorHex: string | undefined;
-  refs?: string[];
-  refTypes?: string[];
-  isCurrent?: boolean;
-}
+const tooltipPending = ref(false);
+const tooltipPendingTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+const tooltipVisible = ref(false);
+const tooltipX = ref(0);
+const tooltipY = ref(0);
+const tooltipContent = ref<{ shortSha: string; colorHex: string | undefined; refs?: string[] } | null>(null);
 
-const tooltipTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
-const tooltipData = ref<DotTooltipData | null>(null);
-const tooltipStyle = ref<{ top: string; left: string }>({ top: '0px', left: '0px' });
-
-function showTooltip(c: DotTooltipData, circleElem: SVGCircleElement) {
-  const rect = circleElem.getBoundingClientRect();
-  const bodyElem = document.querySelector('.git-graph-body') as HTMLElement | null;
-  if (!bodyElem) return;
-  const bodyRect = bodyElem.getBoundingClientRect();
-  // 对齐 vscode graph.ts:811：tooltip 锚点在 dot 顶部 +4px（dot r=4 → y+4 = dot 顶部）
-  const top = rect.top - bodyRect.top + 4;
-  const left = rect.left - bodyRect.left;
-  tooltipStyle.value = { top: `${top}px`, left: `${left}px` };
-  tooltipData.value = c;
-}
-
-function hideTooltip() {
-  if (tooltipTimeout.value !== null) {
-    clearTimeout(tooltipTimeout.value);
-    tooltipTimeout.value = null;
-  }
-  tooltipData.value = null;
-}
-
-/**
- * dotEnter — dot hover 时设置 active state + 100ms 后显示 tooltip
- * @param c    DotTooltipData（含 refs 列表，供 tooltip 展示）
- * @param event mouseenter 事件，用于取 circle 元素坐标
- */
-function dotEnter(c: DotTooltipData, event: MouseEvent) {
+function dotEnter(event: MouseEvent, c: SvgCircleNode) {
   hoveredDotSha.value = c.sha;
   hoveredDotColor.value = c.colorHex ?? null;
   const body = document.querySelector('.git-graph-body') as HTMLElement | null;
@@ -178,21 +150,57 @@ function dotEnter(c: DotTooltipData, event: MouseEvent) {
       body.style.removeProperty('--active-lane-color');
     }
   }
-  hideTooltip();
-  // vscode graph.ts:784：100ms 后显示 tooltip
-  tooltipTimeout.value = setTimeout(() => {
-    tooltipTimeout.value = null;
-    const target = event.target as SVGCircleElement | null;
-    if (target) showTooltip(c, target);
+  // 立即置 pending，100ms 后显示 tooltip
+  tooltipPending.value = true;
+  if (tooltipPendingTimer.value !== null) {
+    clearTimeout(tooltipPendingTimer.value);
+    tooltipPendingTimer.value = null;
+  }
+  tooltipPendingTimer.value = setTimeout(() => {
+    tooltipPendingTimer.value = null;
+    if (!tooltipPending.value) return; // 已离开，不显示
+    // 计算 dot 在 .git-graph-body 内的相对坐标
+    const bodyElem = document.querySelector('.git-graph-body') as HTMLElement | null;
+    const svgElem = document.querySelector('.git-graph-svg') as SVGElement | null;
+    if (!bodyElem || !svgElem) return;
+    const bodyRect = bodyElem.getBoundingClientRect();
+    const svgRect = svgElem.getBoundingClientRect();
+    // dot 的 SVG 坐标：cx = c.cx, cy = c.cy
+    // 转换到 .git-graph-body 坐标系：dot 相对于 SVG origin (0,0)，而 SVG 相对于 body origin
+    const dotX = c.cx; // SVG 坐标系中的 x
+    const dotY = c.cy; // SVG 坐标系中的 y
+    // SVG 相对于 body 的偏移（SVG 在 .git-graph-bg 内，body 在外层）
+    const svgOffsetX = svgRect.left - bodyRect.left;
+    const svgOffsetY = svgRect.top - bodyRect.top;
+    tooltipX.value = svgOffsetX + dotX - 8; // 稍微偏左，让 tooltip 在 dot 下方
+    tooltipY.value = svgOffsetY + dotY + 6;
+    tooltipContent.value = {
+      shortSha: c.shortSha,
+      colorHex: c.colorHex,
+      refs: c.refs,
+    };
+    tooltipVisible.value = true;
   }, 100);
 }
 
 function dotLeave() {
-  hoveredDotSha.value = null;
-  hoveredDotColor.value = null;
-  hideTooltip();
-  const body = document.querySelector('.git-graph-body') as HTMLElement | null;
-  if (body) body.style.removeProperty('--active-lane-color');
+  tooltipPending.value = false;
+  // 不立即清 tooltipVisible，等 mouse 到达/错过 tooltip div（200ms）
+  if (tooltipPendingTimer.value !== null) {
+    clearTimeout(tooltipPendingTimer.value);
+    tooltipPendingTimer.value = null;
+  }
+  if (tooltipVisible.value) {
+    setTimeout(() => {
+      if (!tooltipPending.value) {
+        tooltipVisible.value = false;
+        hoveredDotSha.value = null;
+        hoveredDotColor.value = null;
+        const body = document.querySelector('.git-graph-body') as HTMLElement | null;
+        if (body) body.style.removeProperty('--active-lane-color');
+      }
+    }, 200);
+  }
 }
 
 /** v2.65：手风琴展开高度（实际渲染像素，ResizeObserver 实时更新）
@@ -1747,63 +1755,60 @@ function refBadgeClass(refType?: string): string {
                   </g>
                   <g class="git-graph-vertices">
                     <template v-for="c in svgCircleNodes" :key="`dot-${c.sha}`">
-                      <!-- v3.10：简化 dot 样式：
-                           - hover 时 white fill + lane color stroke（VSCode 风格）
-                           - 弃用 drop-shadow filter，改用 stroke 做白色边框
-                             stroke 2px 内边=1px / 外边=1px，叠加 r=5 让视觉边界=r+1=5
-                           - @mouseenter 传 $event 用于 tooltip 定位 -->
-                      <circle
-                        class="commit-vertex"
-                        :class="{
-                          'commit-vertex--head': c.isCurrent,
-                          'commit-vertex--stash': c.isStash && !c.isCurrent,
-                          'commit-vertex--active': hoveredDotSha === c.sha,
-                        }"
-                        :cx="c.cx"
-                        :cy="c.cy"
-                        :r="c.r + 1"
-                        :fill="hoveredDotSha === c.sha ? '#fff' : (c.colorHex ?? '#888')"
-                        :stroke="hoveredDotSha === c.sha ? (c.colorHex ?? '#888') : (c.stroke ?? 'rgba(30, 30, 30, 0.75)')"
-                        :stroke-width="hoveredDotSha === c.sha ? 2 : (c.strokeWidth ?? 1)"
-                        :stroke-opacity="hoveredDotSha === c.sha ? 1 : (c.strokeOpacity ?? 0.75)"
-                        @mouseenter="dotEnter(c, $event)"
+                      <!-- v3.12：每个 dot 一个 <g> 容器，只包含 circle
+                           - @mouseenter 写 --active-lane-color + 置 tooltipPending（100ms 后显示）
+                           - @mouseleave 立即清 tooltipPending（mouse 到 tooltip 的几ms内不清 tooltip）
+                             tooltip div 有 v-show，pending 时不清除，100ms 后显示
+                           - foreignObject 不使用：Wails WebKit WebView 会把它渲染成可见元素 -->
+                      <g
+                        class="dot-hover-group"
+                        @mouseenter="dotEnter($event, c)"
                         @mouseleave="dotLeave"
                       >
-                        <title>{{ c.title }}</title>
-                      </circle>
+                        <circle
+                          class="commit-vertex"
+                          :class="{
+                            'commit-vertex--head': c.isCurrent,
+                            'commit-vertex--stash': c.isStash && !c.isCurrent,
+                            'commit-vertex--active': hoveredDotSha === c.sha,
+                          }"
+                          :cx="c.cx"
+                          :cy="c.cy"
+                          :r="c.r + 1"
+                          :fill="hoveredDotSha === c.sha ? '#fff' : (c.colorHex ?? '#888')"
+                          :stroke="hoveredDotSha === c.sha ? (c.colorHex ?? '#888') : (c.stroke ?? 'rgba(30, 30, 30, 0.75)')"
+                          :stroke-width="hoveredDotSha === c.sha ? 2 : (c.strokeWidth ?? 1)"
+                          :stroke-opacity="hoveredDotSha === c.sha ? 1 : (c.strokeOpacity ?? 0.75)"
+                        >
+                          <title>{{ c.title }}</title>
+                        </circle>
+                      </g>
                     </template>
                   </g>
                 </svg>
             </div>
 
-            <!-- v3.10：dot hover tooltip（1:1 复刻 vscode-git-graph graph.ts showTooltip）
-                 position:absolute 挂在 .git-graph-body 内，top/left = dot 相对位置
-                 - pointer（小三角）：lane color 填充
-                 - content：lane color 边框，commit SHA / branches / tags
-                 - 100ms 延迟显示（dotEnter 中 setTimeout） -->
+            <!-- v3.12：dot hover tooltip（普通 HTML div，在 .git-graph-body 内绝对定位）
+                 v-show 控制显隐（不用 v-if，保持 DOM 存在，mouse 可达）
+                 dotEnter → 100ms 后显示；dotLeave → 200ms 后隐藏
+                 背景用 --tooltip-color（由 tooltipContent.colorHex 注入） -->
             <div
-              v-if="tooltipData"
               class="git-graph-tooltip"
-              :style="tooltipStyle"
+              v-show="tooltipVisible"
+              :style="{
+                top: tooltipY + 'px',
+                left: tooltipX + 'px',
+                '--tooltip-color': tooltipContent?.colorHex ?? '#888',
+              }"
             >
-              <div
-                class="git-graph-tooltip__pointer"
-                :style="{ backgroundColor: tooltipData.colorHex }"
-              ></div>
-              <div
-                class="git-graph-tooltip__content"
-                :style="{ borderColor: tooltipData.colorHex }"
-              >
+              <div class="git-graph-tooltip__pointer"></div>
+              <div class="git-graph-tooltip__content">
                 <div class="git-graph-tooltip__title">
-                  提交 {{ tooltipData.shortSha }}
+                  提交 {{ tooltipContent?.shortSha ?? '' }}
                 </div>
-                <div v-if="tooltipData.refs && tooltipData.refs.length > 0" class="git-graph-tooltip__section">
-                  所在分支：
-                  <template v-for="(ref, idx) in tooltipData.refs" :key="idx">
-                    <span
-                      class="git-graph-tooltip__ref"
-                      :style="{ borderColor: tooltipData.colorHex, color: tooltipData.colorHex }"
-                    >{{ ref }}</span>
+                <div v-if="tooltipContent?.refs?.length" class="git-graph-tooltip__section">
+                  <template v-for="(ref, idx) in tooltipContent.refs" :key="idx">
+                    <span class="git-graph-tooltip__ref">{{ ref }}</span>
                   </template>
                 </div>
               </div>
@@ -2777,40 +2782,40 @@ function refBadgeClass(refType?: string): string {
   transition: filter var(--t-fast, 120ms) var(--ease, ease-out);
 }
 
-/* v3.10：ref-badge 在 dot-hover 时用 lane 色背景（对齐 VSCode Git Graph）
- *  当 dot 被 hover 时，lane color CSS var 生效，ref badge 边框和背景都用 lane 色 */
+/* v3.11：ref-badge 在 dot-hover 时用 lane 色（对齐 VSCode Git Graph .gitRef.active）
+ *  - .commit-row--dot-active 时：使用 --active-lane-color CSS var（由 dotEnter 注入）
+ *  - .commit-row:hover 时：鼠标从 dot 移到 badge 时 row hover 捕获，badge 也变 lane 色
+ *    这是比 --active-lane-color 更可靠的方式（不依赖 JS 注入 CSS var）
+ *  - color-mix: lane 色 22% 透明度背景 + 实色边框/文字
+ *  - pointer-events:none 确保 badge 不干扰 row hover 状态（用户报告 hover 时 badge 闪一下）*/
+.commit-row:hover .ref-badge,
 .commit-row--dot-active .ref-badge {
-  background-color: color-mix(in srgb, var(--active-lane-color) 18%, transparent);
-  border-color: var(--active-lane-color);
-  color: var(--active-lane-color);
+  background-color: color-mix(in srgb, var(--active-lane-color, var(--color-primary)) 22%, transparent);
+  border-color: var(--active-lane-color, var(--color-primary));
+  color: var(--active-lane-color, var(--color-primary));
+  transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease;
 }
+.commit-row:hover .ref-badge__icon,
 .commit-row--dot-active .ref-badge__icon {
-  stroke: var(--active-lane-color);
+  stroke: var(--active-lane-color, var(--color-primary));
 }
 
-/* v3.10：dot hover tooltip（对齐 vscode-git-graph graph.ts showTooltip 样式）
- *  position:absolute 相对 .git-graph-body
- *  pointer（三角）= lane color 填充
- *  content = lane color 边框，z-index 高于 commit-row */
+/* v3.12：dot hover tooltip（普通 HTML div，绝对定位于 .git-graph-body 内）
+ *  v-show 控制显隐：tooltip 始终在 DOM 中，mouse 可达
+ *  dotEnter 100ms 后显示；dotLeave 200ms 后隐藏
+ *  z-index 200 高于 commit-row，保证盖在内容上方 */
 .git-graph-tooltip {
   position: absolute;
   z-index: 200;
-  /* left/top 由 tooltipStyle ref 动态注入 */
   pointer-events: none;
-  /* 默认透明，等 opacity 动画 */
-  opacity: 0;
-  animation: graphTooltipFadeIn 120ms ease-out forwards;
-}
-@keyframes graphTooltipFadeIn {
-  from { opacity: 0; transform: translateY(-2px); }
-  to   { opacity: 1; transform: translateY(0); }
 }
 .git-graph-tooltip__pointer {
   position: absolute;
   left: -5px;
   top: 0;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
+  background-color: var(--tooltip-color, #888);
   transform: rotate(45deg);
   border-radius: 1px;
 }
@@ -2818,34 +2823,36 @@ function refBadgeClass(refType?: string): string {
   position: relative;
   margin-left: 8px;
   background: var(--color-bg-elevated, #1e1e1e);
-  border: 1px solid;
+  border: 1.5px solid var(--tooltip-color, #888);
   border-radius: 4px;
-  padding: 6px 10px;
-  min-width: 120px;
-  max-width: 320px;
+  padding: 5px 8px;
+  min-width: 100px;
+  max-width: 200px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 .git-graph-tooltip__title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text, #ccc);
-  margin-bottom: 4px;
+  margin-bottom: 3px;
+  white-space: nowrap;
 }
 .git-graph-tooltip__section {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-secondary, #888);
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
   align-items: center;
 }
 .git-graph-tooltip__ref {
   display: inline-flex;
   align-items: center;
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: 3px;
-  border: 1px solid;
-  font-size: 11px;
+  border: 1px solid var(--tooltip-color, #888);
+  color: var(--tooltip-color, #888);
+  font-size: 10px;
   font-weight: 500;
   background: transparent;
   white-space: nowrap;
