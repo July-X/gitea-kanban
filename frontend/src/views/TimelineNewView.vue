@@ -2553,14 +2553,20 @@ function refBadgeClass(refType?: string): string {
   background: transparent;
 }
 
-/* v2.65：merge commit 视觉降级（VSCode 风格）
- * - isMerge=true 的 commit（merge / pull request 合并提交）subject 文字用更淡的灰色
- * - 与普通 commit 形成视觉层级，用户一眼能区分"我的 commit" vs "merge commit"
- * - 颜色取自 --color-text-tertiary（设计系统三级文字），比 --color-text-primary 略淡
- *   在 dark mode 下差异更明显，light mode 下也是合理的弱化 */
-.commit-row--merge .commit-subject,
-.commit-row--merge .commit-row__col--desc {
-  opacity: 0.5;
+/* v3.0：merge commit（PR 合并提交）视觉降级 ——
+ * 旧实现用 opacity: 0.5 直接砍半亮度，user 反馈"commit row 的 PR 信息看不清"
+ * （暗色底上 50% opacity ≈ 对比度从 7+ 直接掉到 3.5:1，掉出 AA）。
+ *
+ * 新实现：改用 --color-text-muted 给 subject 显式降级，
+ *   - 仍跟普通 commit（--color-text）形成视觉层级："我的 commit" vs "merge commit"
+ *   - 但对比度保留在 6.40:1，过 WCAG AA Large 4.5:1，且跟 hover/状态色叠加不冲突
+ *   - 旧的 col--desc opacity 也去掉 —— 容器是 block 不是文字，opacity 砍的是整个盒子透明度（包括未来加的 ref-badge），副作用大
+ *   - 跟 MergesView 的 merge-item__meta-text 走同一档 muted，跨视图一致
+ *
+ * 配色跟 VSCode Git Graph 的 merge commit 灰度策略对齐（VSCode 用 tokenColorModifiers，
+ * 本项目用 muted token；语义等价）。*/
+.commit-row--merge .commit-subject {
+  color: var(--color-text-muted);
 }
 
 .ref-badge {
