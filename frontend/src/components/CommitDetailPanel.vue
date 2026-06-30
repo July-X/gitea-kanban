@@ -679,6 +679,11 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   min-height: 0;
   min-width: 0; /* v2.0：grid 容器允许子项收缩 */
   /* v3.7：去掉 overflow: hidden —— accordion 自己滚，body 不再裁剪 */
+  /* v3.11：加 height:100% 让 grid 继承 .cd-panel--panel 的高度约束（来自
+   * .commit-accordion max-height:min(70vh,600px)），这样 .cd-panel__right
+   * 的 overflow-y:auto 才能生效 —— 否则 grid 无高度约束时子项无限撑高，
+   * .cd-panel__right 永远不触发 overflow，文件列表被截断不可见。*/
+  height: 100%;
   /* 4:6 之间的纵向分隔线 */
   border-top: 1px solid var(--color-divider);
 }
