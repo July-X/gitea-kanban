@@ -828,9 +828,10 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   padding: var(--space-2, 8px) var(--space-3, 12px);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  /* 关键：min-width:0 让 flex item 能收缩到 grid 列宽以下，
-   * 配合 .cd-panel__left 的 overflow-x:hidden，强制 title 换行而非撑开列宽。*/
+  /* 关键：overflow:hidden 让 flex column 约束子元素宽度，
+   * 配合 min-width:0，让 title 在 grid 列宽内被强制压缩换行。*/
   min-width: 0;
+  overflow: hidden;
 }
 .cd-panel--dialog .cd-panel__message {
   padding: var(--space-3, 12px) var(--space-4, 16px);
@@ -840,9 +841,13 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.4;
+  /* break-word: 在自然断点（空格）处优先换行，必要时才强制断字
+   * break-all: 无视词义强行断字（适合路径 / URL / 无空格长串）
+   * 用 break-word 优先自然换行，仅对"fix: update webui/src/components/..."这种
+   * 有空格但行尾仍放不下的场景强制在空格后换行，保持可读性。*/
   word-break: break-word;
   overflow-wrap: anywhere;
-  /* 确保超长无空格文本也强制换行，不被截断 */
+  /* overflow:hidden 在父级 .cd-panel__message，title 在此约束内必须换行 */
 }
 .cd-panel--dialog .cd-message__title {
   font-size: var(--font-md, 14px);
