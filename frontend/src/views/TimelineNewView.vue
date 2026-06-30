@@ -111,6 +111,36 @@ const pulling = ref(false);
 const expandedSha = ref<string | null>(null);
 /** 当前 hover 的 commit 行，用于同步高亮左侧 graph 圆点 */
 const hoveredGraphRow = ref<number | null>(null);
+/** v3.0：当前 hover 的 dot（精细化到具体圆点，对齐 vscode-git-graph graphVertexActive 行为）
+ *  - dotEnter(c) / dotLeave() 绑在每个 SVG circle 上
+ *  - hoveredDotSha === row.commit.sha 时，给该行加 commit-row--dot-active class
+ *  - 同时把 lane color 通过 CSS var --active-lane-color 写到 .git-graph-body
+ *    （不是 row 上 —— SVG circle 和 row 是兄弟，CSS var 要找共同祖先才能被两边继承）
+ *    .commit-row__col--graph 用它做 lane 色软底，.commit-vertex--active 用它做 drop-shadow halo */
+const hoveredDotSha = ref<string | null>(null);
+const hoveredDotColor = ref<string | null>(null);
+
+function dotEnter(c: { sha: string; colorHex?: string }) {
+  hoveredDotSha.value = c.sha;
+  hoveredDotColor.value = c.colorHex ?? null;
+  // 把 lane color 写到 .git-graph-body（SVG + rows 的共同祖先），
+  // 让 .commit-row--dot-active .commit-row__col--graph 和 .commit-vertex--active
+  // 都能通过 var(--active-lane-color) 拿到同一个颜色。
+  const body = document.querySelector('.git-graph-body') as HTMLElement | null;
+  if (body) {
+    if (c.colorHex) {
+      body.style.setProperty('--active-lane-color', c.colorHex);
+    } else {
+      body.style.removeProperty('--active-lane-color');
+    }
+  }
+}
+function dotLeave() {
+  hoveredDotSha.value = null;
+  hoveredDotColor.value = null;
+  const body = document.querySelector('.git-graph-body') as HTMLElement | null;
+  if (body) body.style.removeProperty('--active-lane-color');
+}
 
 /** v2.65：手风琴展开高度（实际渲染像素，ResizeObserver 实时更新）
  * 用于 SVG path d + dot cy 的 VSCode expandY：手风琴展开时，
@@ -1657,25 +1687,31 @@ function refBadgeClass(refType?: string): string {
                       <circle
                         v-if="c.isCurrent"
                         class="commit-vertex commit-vertex--head"
+                        :class="{ 'commit-vertex--active': hoveredDotSha === c.sha }"
                         :cx="c.cx"
                         :cy="c.cy"
-                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                        :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? c.r + 2 : c.r"
                         fill="#fff"
                         :stroke="c.stroke ?? c.colorHex ?? '#888'"
-                        :stroke-width="c.strokeWidth ?? 2"
+                        :stroke-width="hoveredDotSha === c.sha ? 3 : (c.strokeWidth ?? 2)"
                         :stroke-opacity="c.strokeOpacity ?? 1"
+                        @mouseenter="dotEnter(c)"
+                        @mouseleave="dotLeave"
                       >
                         <title>{{ c.title }}</title>
                       </circle>
                       <template v-else-if="c.isStash">
                         <circle
                           class="commit-vertex commit-vertex--stash"
+                          :class="{ 'commit-vertex--active': hoveredDotSha === c.sha }"
                           :cx="c.cx"
                           :cy="c.cy"
-                          :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                          :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? c.r + 2 : c.r"
                           fill="none"
                           :stroke="c.colorHex ?? '#888'"
                           stroke-width="1"
+                          @mouseenter="dotEnter(c)"
+                          @mouseleave="dotLeave"
                         >
                           <title>{{ c.title }}</title>
                         </circle>
@@ -1683,7 +1719,7 @@ function refBadgeClass(refType?: string): string {
                           class="commit-vertex commit-vertex--stash-inner"
                           :cx="c.cx"
                           :cy="c.cy"
-                          :r="hoveredGraphRow === c.row ? 3 : 2"
+                          :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? 3 : 2"
                           fill="none"
                           :stroke="c.colorHex ?? '#888'"
                           stroke-width="1"
@@ -1694,13 +1730,16 @@ function refBadgeClass(refType?: string): string {
                       <circle
                         v-else
                         class="commit-vertex"
+                        :class="{ 'commit-vertex--active': hoveredDotSha === c.sha }"
                         :cx="c.cx"
                         :cy="c.cy"
-                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                        :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? c.r + 2 : c.r"
                         :fill="c.colorHex ?? '#888'"
-                        :stroke="c.stroke ?? 'rgba(30, 30, 30, 0.75)'"
-                        :stroke-width="c.strokeWidth ?? 1"
-                        :stroke-opacity="c.strokeOpacity ?? 0.75"
+                        :stroke="hoveredDotSha === c.sha ? (c.colorHex ?? '#888') : (c.stroke ?? 'rgba(30, 30, 30, 0.75)')"
+                        :stroke-width="hoveredDotSha === c.sha ? 3 : (c.strokeWidth ?? 1)"
+                        :stroke-opacity="hoveredDotSha === c.sha ? 1 : (c.strokeOpacity ?? 0.75)"
+                        @mouseenter="dotEnter(c)"
+                        @mouseleave="dotLeave"
                       >
                         <title>{{ c.title }}</title>
                       </circle>
@@ -1731,6 +1770,9 @@ function refBadgeClass(refType?: string): string {
                   'commit-row--clickable': r.commit,
                   'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
                   'commit-row--merge': r.commit.isMerge,
+                  /* v3.0：vscode-git-graph 风格的 dot hover —— 该行 dot 被 hover 时，
+                   * 整行 graph 列用 lane 色软底（CSS var --active-lane-color 来自 dot）*/
+                  'commit-row--dot-active': r.commit && hoveredDotSha === r.commit.sha,
                 }"
                 :style="{
                   /* VSCode row model：第一行固定 ROW_H，展开面板作为第二行插入。
@@ -2650,6 +2692,28 @@ function refBadgeClass(refType?: string): string {
 .commit-row__col--graph {
   background: transparent;
   pointer-events: none;
+}
+/* v3.0：vscode-git-graph 风格的 dot hover —— dot 被 hover 时，该行 graph 列用 lane 色软底
+ * （颜色由 dotEnter() 注入到 .git-graph-body 的 --active-lane-color CSS var，
+ *  因为 SVG circle 和 commit-row 是兄弟节点，CSS var 必须挂在共同祖先才能被两边继承）
+ * - 走 linear-gradient 右淡出，避免色块硬切到 desc 列背景
+ * - 38% alpha 让 lane 色在深底上可见但不刺眼（与 commit-row hover 的 rgba(128,128,128,0.15) 灰叠加重）
+ * - transition 让 hover/unhover 平滑而非硬切 */
+.commit-row--dot-active .commit-row__col--graph {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--active-lane-color) 38%, transparent) 0%,
+    color-mix(in srgb, var(--active-lane-color) 18%, transparent) 70%,
+    transparent 100%
+  );
+  transition: background var(--t-fast, 120ms) var(--ease, ease-out);
+}
+
+/* v3.0：dot active 状态 —— 当 dot 被 hover 时给个 lane 色 halo
+ * 用 filter: drop-shadow 比额外 circle 更轻量，且对三种 dot（head/stash/普通）统一生效 */
+.commit-vertex--active {
+  filter: drop-shadow(0 0 4px var(--active-lane-color, currentColor));
+  transition: filter var(--t-fast, 120ms) var(--ease, ease-out);
 }
 /* v2.48 旧注释：.commit-row__col--graph 曾被移除，v3.4 恢复（5 列统一对齐） */
 .commit-row__col--desc {
