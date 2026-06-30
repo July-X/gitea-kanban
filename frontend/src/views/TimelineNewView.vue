@@ -2686,18 +2686,19 @@ function refBadgeClass(refType?: string): string {
   color: var(--color-text-muted);
 }
 
-/* v3.13：ref badge 样式（1:1 复刻 VSCode Git Graph web/styles/main.css .gitRef）
- *  - 无圆角（border-radius: 0）—— VSCode Git Graph 风格
- *  - 透明背景，1px solid border + 文字全部用 --row-lane-color（commit 所在 lane 色）
- *  - 图标（branch/tag SVG）背景填充 lane 色，图形填充背景色（对比色）
+/* v3.14：ref badge 样式（对齐 VSCode Git Graph .gitRef）
+ *  - 小圆角（border-radius: 3px）
+ *  - 透明背景，1px solid border 用 lane 色（commit 所在 lane 色）
+ *  - 文字颜色保持默认（深色），不随 lane 变色
+ *  - 图标背景填充 lane 色，SVG 图形用深色（对比）
  *  - --row-lane-color 由各 commit-row 自身绑定（非 hover 依赖） */
 .ref-badge {
   display: inline-flex;
   align-items: center;
   gap: 0;
   padding: 0;
-  /* 无圆角：对齐 VSCode .gitRef */
-  border-radius: 0;
+  /* 小圆角：对齐 VSCode Git Graph .gitRef */
+  border-radius: 3px;
   border: 1px solid var(--row-lane-color, var(--color-primary));
   font-size: 11px;
   font-weight: 500;
@@ -2705,13 +2706,13 @@ function refBadgeClass(refType?: string): string {
   white-space: nowrap;
   /* 透明背景：对齐 VSCode */
   background-color: transparent;
-  color: var(--row-lane-color, var(--color-primary));
-  /* 图标和文字共处一行：icon 占 18x18，文字在旁边 */
+  /* 文字颜色保持默认，不随 lane 变色（VSCode .gitRef 文字色=编辑器默认色） */
+  color: var(--color-text, #ccc);
   line-height: 18px;
   height: 18px;
   overflow: hidden;
 }
-/* v3.13：图标容器 —— 图标背景用 lane 色填充，SVG 图形用背景色（深底上对比） */
+/* v3.14：图标容器 —— 图标背景用 lane 色填充，SVG 图形用深色（VSCode .gitRef > svg） */
 .ref-badge__icon {
   flex: 0 0 auto;
   width: 14px;
@@ -2719,18 +2720,15 @@ function refBadgeClass(refType?: string): string {
   padding: 2px;
   /* 图标背景 = lane 色（VSCode .gitRef > svg） */
   background-color: var(--row-lane-color, var(--color-primary));
-  /* SVG stroke/fill 由父容器背景色决定（用 currentColor 或 bg） */
+  /* SVG 图形 = 深色（VSCode .gitRef > svg fill=editor-background） */
   stroke: var(--color-shell-main-bg, #0f1115);
   stroke-width: 2;
   fill: none;
-  /* SVG 与文字无 gap，合并为整体 lane 色边框块 */
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-/* hover 行时 badge 不变色（VSCode .gitRef:hover 叠了 rgba(128,128,128,0.1)，
- * 但对 ref badge 来说保持 lane 色更直观；行 hover 高亮由 .commit-row:hover 提供） */
 
 /* commit-refs 容器：多个 badge 横向排列，按 VSCode 风格放在 subject 前面。*/
 .commit-refs {
