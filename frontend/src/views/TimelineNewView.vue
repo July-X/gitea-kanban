@@ -243,16 +243,22 @@ const activeExpandY = computed(() =>
 const svgRender = computed<VscodeSvgRenderResult | null>(() => {
   const dto = graphDto.value;
   if (!dto) return null;
+  // v3.0: maxWidth 直接从 columnWidths[0] 算，不通过 graphColumnWidth
+  // 避免 computed 循环引用 → TS 推断失败
+  //   - AUTO → -1（不限制，SVG 完整渲染）
+  //   - HIDDEN → 0
+  //   - 数字 → 该数字（用户拖 graph 列后的固定宽）
+  const col0 = columnWidths.value[0];
+  const maxWidth =
+    col0 === undefined || col0 === COLUMN_AUTO
+      ? -1
+      : col0 === COLUMN_HIDDEN
+        ? 0
+        : col0;
   return renderGraphVscode(dto, {
     expandedAt: expandedRow.value,
     expandY: activeExpandY.value || undefined,
-    // v2.65: 把 handleLeft 透传给 renderGraphVscode 作为 maxWidth。
-    // 对齐 vscode-git-graph Graph.setSvgWidth (graph.ts:697-700)：
-    //   SVG 渲染宽度 = min(contentWidth, maxWidth)
-    //   超出 maxWidth 的 lane 在 (maxWidth-12)px ~ maxWidth px 区间 CSS mask 渐变 fade
-    //   （v2.65 改用 CSS mask-image 而非 SVG <mask>，规避 maskUnits=userSpaceOnUse
-    //   + 默认 -10%/120% 在不同浏览器的不一致行为）
-    maxWidth: handleLeft.value,
+    maxWidth,
   });
 });
 
@@ -326,14 +332,14 @@ watch(expandedSha, async (sha) => {
   scrollContainer.scrollTo({ top: targetScroll, behavior: 'smooth' });
 });
 
-/** 组件卸载时清理事件监听器（v2.16：拖拽已恢复） */
+/** 组件卸载时清理事件监听器 */
 onUnmounted(() => {
-  document.removeEventListener('mousemove', onDragMove);
-  document.removeEventListener('mouseup', onDragEnd);
+  document.removeEventListener('mousemove', onColDragMove);
+  document.removeEventListener('mouseup', onColDragEnd);
   document.removeEventListener('app:refresh', onAppRefresh);
-  if (graphDragRafId !== 0) {
-    cancelAnimationFrame(graphDragRafId);
-    graphDragRafId = 0;
+  if (colDragRafId !== 0) {
+    cancelAnimationFrame(colDragRafId);
+    colDragRafId = 0;
   }
 });
 
@@ -560,20 +566,15 @@ const viewBox = computed(() => {
   return r ? `0 0 ${r.contentWidth} ${r.height}` : '0 0 0 0';
 });
 /**
- * v2.65：SVG :width 绑到 handleLeft（用户拖的列宽），不再绑到 r.width (min contentWidth/maxWidth)。
- *
- * 原因：v2.64 用 SVG <mask> 处理渐变 fade 时，SVG :width 必须是 min(contentWidth, maxWidth)
- * 才能让 mask rect 正确跨过 SVG 视口。v2.65 改用 CSS mask-image（更稳的浏览器一致方案）：
- *   - SVG :width = handleLeft（CSS 视觉宽度 = 用户拖的列宽）
+ * v3.0：SVG :width = graphColumnWidth（Graph 列用户拖宽后的实际像素宽）
+ *   - SVG :width = graphColumnWidth（CSS 视觉宽度 = Graph 列宽）
  *   - viewBox = 0 0 contentWidth height（坐标系不变）
- *   - CSS mask-image 在 SVG 元素上以 handleLeft 实际像素为单位
+ *   - CSS mask-image 在 SVG 元素上以 graphColumnWidth 实际像素为单位
  *     渐变 black 0% → black calc(100% - 12px) → transparent 100%
  *     等价于 vscode-git-graph (maxWidth-12, maxWidth) 12px 渐变
- *   - 这样 viewBox 0..contentWidth 内部坐标全在 SVG 视口内，
- *     不再需要 renderGraphVscode 截短 width（但保留 maxWidth 接口对齐 vscode 命名）
  */
 const svgWidth = computed(() => {
-  return `${handleLeft.value}px`;
+  return `${graphColumnWidth.value}px`;
 });
 const svgHeight = computed(() => {
   const r = svgRender.value;
@@ -743,257 +744,216 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
 });
 
 // ============================================================
-// v2.21：拖拽栅格栏（SourceTree 风格）
-// - handle 物理位置：position: absolute，left 由 userHandleLeft 控制
-//   - 默认 = svgWidth（handle 在 SVG area 右边缘）
-//   - 用户拖拽后停在新位置（不回弹）
-//   - 边界：handleLeft ∈ [60, 800]
-// - handle 左侧显示背景色遮罩（用 :before 伪元素全宽背景）盖住部分 git-graph
-// - commit list 起点 = handleLeft（紧邻 handle 右边）
-// - SVG 完整渲染固定不动；handle 物理位置变化
+// v3.0：列宽模型 + 拖动 + 双击隐藏（严格 1:1 复刻 vscode-git-graph）
+// 对齐 vscode-git-graph web/main.ts + web/utils.ts + web/styles/main.css：
+//   - 5 列：Graph (col 0) / Description (col 1) / Date (col 2) / Author (col 3) / Commit (col 4)
+//   - columnWidths: number[] （COLUMN_HIDDEN=-100 / COLUMN_AUTO=-101 / 数字=px）
+//   - 拖动：mousedown 缓存 startWidths + startX，mousemove 直接改 cols[i].style.width
+//     （DOM 写入，跟 vscode main.ts:1706-1777 行为一致）
+//   - 双击 handle：toggle HIDDEN ↔ AUTO/defaultWidth（main.ts:1811-1815）
+//   - 右键菜单：toggle Date/Author/Commit 显隐（main.ts:1808-1865）
+//   - 持久化：localStorage[COLUMN_WIDTHS_V3_KEY]，旧 key 不用兼容（"丢弃历史包袱"）
+//   - 保留中文 UI（AGENTS §9.1 零术语：日期/作者/提交；Graph/Description 保留英文）
 // ============================================================
 
-const MIN_GRAPH_COL_WIDTH = 56;
-const MAX_GRAPH_COL_WIDTH = 800;
-const MIN_CONTENT_COL_WIDTH = 60;
-const GRAPH_WIDTH_STORAGE_KEY = 'gitea-kanban:gitgraph:graph-width';
+/** vscode constants（对齐 web/utils.ts:69-73） */
+const COLUMN_HIDDEN = -100;
+const COLUMN_AUTO = -101;
+const COLUMN_MIN_WIDTH = 40;
+const COLUMN_LEFT_RIGHT_PADDING = 24;
 
-/** 默认 graph 列宽度（v2.47：脱钩 svgWidth，避免多 lane 仓库把表格撑爆视口）
- * 之前 userHandleLeft 为 null 时 handleLeft = parseSvgPx(svgWidth)，200 lane → 2014px
- * → tableMinWidth 暴涨 → 整个表格出现大横向滚动条 → 用户必须左右扫才能看完整信息
- * 现在默认固定到接近 VSCode Git Graph 的窄列，用户拖过才用持久化值。
- * 真实 lane 数显示靠 SVG 内部横向滚动（见 .git-graph-bg 改造）。 */
-const DEFAULT_GRAPH_COL_WIDTH = 96;
-function loadGraphWidth(): number | null {
+/** 列宽状态类型（数字可以是 HIDDEN/AUTO/px） */
+type ColumnWidth = number;
+
+/** 5 列默认宽度（vscode 默认全部 AUTO，web/main.ts:1724） */
+const DEFAULT_COLUMN_WIDTHS: ColumnWidth[] = [
+  COLUMN_AUTO, // 0: Graph — 自适应所有 lane
+  COLUMN_AUTO, // 1: Description — 1fr 占满
+  COLUMN_AUTO, // 2: Date
+  COLUMN_AUTO, // 3: Author
+  COLUMN_AUTO, // 4: Commit
+];
+
+/** 列的默认像素宽（拖动后变数字时用）—— vscode main.ts:1829-1841 defaultWidth */
+const DEFAULT_COL_WIDTHS_PIXEL: Record<number, number> = {
+  0: 96, // Graph
+  2: 128, // Date
+  3: 128, // Author
+  4: 80, // Commit
+};
+
+/** 列宽存储 key（v3.0 格式：number[]） */
+const COLUMN_WIDTHS_V3_KEY = 'gitea-kanban:gitgraph:column-widths-v3';
+
+function loadColumnWidths(): ColumnWidth[] {
   try {
-    const stored = localStorage.getItem(GRAPH_WIDTH_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = Number.parseFloat(stored);
-    if (!Number.isFinite(parsed)) return null;
-    return Math.max(MIN_GRAPH_COL_WIDTH, Math.min(MAX_GRAPH_COL_WIDTH, parsed));
+    const stored = localStorage.getItem(COLUMN_WIDTHS_V3_KEY);
+    if (stored) {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length === 5) {
+        return parsed.map((v: unknown, i: number): ColumnWidth => {
+          if (v === COLUMN_HIDDEN || v === COLUMN_AUTO) return v;
+          if (typeof v === 'number' && v >= COLUMN_MIN_WIDTH) return v;
+          return DEFAULT_COLUMN_WIDTHS[i]!;
+        });
+      }
+    }
   } catch {
-    return null;
+    /* 忽略 */
+  }
+  return [...DEFAULT_COLUMN_WIDTHS];
+}
+
+const columnWidths = ref<ColumnWidth[]>(loadColumnWidths());
+
+/** 持久化 columnWidths（vscode saveColumnWidths main.ts:739-741） */
+function saveColumnWidths(): void {
+  try {
+    localStorage.setItem(COLUMN_WIDTHS_V3_KEY, JSON.stringify(columnWidths.value));
+  } catch {
+    /* 忽略 */
   }
 }
 
-/** handle 物理位置（px），默认 = DEFAULT_GRAPH_COL_WIDTH（v2.47：脱钩 svgWidth）
- * 用户拖拽后停在 [60, 800] 范围内 */
-const userHandleLeft = ref<number | null>(loadGraphWidth());
-/** 是否正在拖拽 */
-const dragging = ref(false);
-let dragStartX = 0;
-let dragStartHandleLeft = 0;
-let dragLatestX = 0;
+/** col 是否可见（不是 HIDDEN） */
+function isColVisible(col: number): boolean {
+  return columnWidths.value[col] !== COLUMN_HIDDEN;
+}
 
-/**
- * handle 实际位置：默认窄列；用户拖过后完全尊重持久化宽度。
- */
-const handleLeft = computed(() => {
-  if (userHandleLeft.value === null) {
-    return DEFAULT_GRAPH_COL_WIDTH;
+/** 解析某列的实际 px 宽（AUTO 时取默认像素，HIDDEN 时 0，数字时用该数字） */
+function resolveColPx(col: number): number {
+  const w = columnWidths.value[col];
+  if (w === undefined || w === COLUMN_HIDDEN) return 0;
+  if (w === COLUMN_AUTO) return DEFAULT_COL_WIDTHS_PIXEL[col] ?? 0;
+  return w;
+}
+
+/** Graph 列实际像素宽（AUTO 时 = svgContentWidth + padding） */
+const graphColumnWidth = computed<number>(() => {
+  const w = columnWidths.value[0];
+  if (w === undefined || w === COLUMN_HIDDEN) return 0;
+  if (w === COLUMN_AUTO) {
+    const r = svgRender.value;
+    if (!r) return DEFAULT_COL_WIDTHS_PIXEL[0]!;
+    return r.contentWidth + COLUMN_LEFT_RIGHT_PADDING;
   }
-  return Math.max(MIN_GRAPH_COL_WIDTH, Math.min(MAX_GRAPH_COL_WIDTH, userHandleLeft.value));
+  return w;
 });
 
-/**
- * graph 列分隔手柄 mousedown —— v2.34：缓存所有需要的 DOM ref 和响应式快照
- *
- * 拖拽期间 mousemove 完全不写响应式 ref（避免触发 1000 行 commit-row 的 CSS 变量
- * 重新解析 + template 重渲染调 colHandleLeft 里的 querySelector + getBoundingClientRect）。
- */
-function onDragStart(e: MouseEvent): void {
-  e.preventDefault();
-  dragging.value = true;
-  dragStartX = e.clientX;
-  dragLatestX = e.clientX;
-  dragStartHandleLeft = handleLeft.value;
-  // v2.51：缓存所有需要的 DOM ref 和响应式快照
-  graphDragWrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
-  if (graphDragWrapper) {
-    graphDragHandles = {
-      headerGraphCol: graphDragWrapper.querySelector('.git-graph-header__col--graph') as HTMLElement | null,
-    };
-    // 拖拽 graph 列时内容列不变，mousemove 直接用当前列宽快照。
-    graphDragSnapshot = { ...colWidths.value };
-  }
-  document.addEventListener('mousemove', onDragMove);
-  document.addEventListener('mouseup', onDragEnd);
-}
+/** 5 列 grid-template-columns 字符串
+ *  对齐 vscode CSS #commitTable td nth-child(2) / .dateCol / .authorCol
+ *  - col 0: Graph —— px
+ *  - col 1: Description —— minmax(40px, 1fr) 占满余下空间
+ *  - col 2-4: Date/Author/Commit —— 数字（HIDDEN 时 0） */
+const gridTemplateColumns = computed<string>(() => {
+  const graph = graphColumnWidth.value;
+  const desc = 'minmax(40px, 1fr)';
+  const date = isColVisible(2) ? `${resolveColPx(2)}px` : '0';
+  const author = isColVisible(3) ? `${resolveColPx(3)}px` : '0';
+  const commit = isColVisible(4) ? `${resolveColPx(4)}px` : '0';
+  return `${graph}px ${desc} ${date} ${author} ${commit}`;
+});
 
-/**
- * graph 列分隔手柄拖拽 mousemove —— v2.34：完全绕过 Vue 响应式
- *
- * 关键优化（旧版卡顿根因）：
- * - 旧版每帧 rAF 写 `userHandleLeft.value = ...` → 触发 handleLeft / tableMinWidth /
- *   gridTemplateColumns 3 个 computed 重算 → wrapper inline style 重写 → 1000 行
- *   commit-row 重新解析 3 个 CSS 变量 + 重新计算 grid-template-columns → template
- *   重渲染调 colHandleLeft(n) 里 querySelector + getBoundingClientRect（强制 layout）。
- * - 新版 mousemove **完全不写 ref**：只更新 wrapper CSS 变量和表头手柄 DOM，
- *   不逐行写入 commit-row inline style。
- * - rAF pending 期间继续记录最新 clientX，下一帧直接使用最新位置，避免快速拖动滞后。
- * - mouseup 才把最终 handleLeft 写回 userHandleLeft.value，让响应式系统同步一次状态
- *   用于持久化。
- */
-let graphDragRafId = 0;
-/** 缓存的 DOM ref 和初始 left 值（mousedown 时拿一次） */
-let graphDragWrapper: HTMLElement | null = null;
-let graphDragHandles: {
-  headerGraphCol: HTMLElement | null;
-} = {
-  headerGraphCol: null,
-};
-/** 列宽快照（mousedown 时缓存，mousemove 用快照避免读响应式） */
-let graphDragSnapshot: { desc: number; author: number; date: number; sha: number } | null = null;
+/** Description 列最小宽度（minmax 下限） */
+const MIN_DESC_COL_WIDTH = 40;
 
-function onDragMove(e: MouseEvent): void {
-  if (!dragging.value) return;
-  dragLatestX = e.clientX;
-  if (graphDragRafId !== 0) return; // 已有 pending frame，跳过
-  const startHandleLeft = dragStartHandleLeft;
-  graphDragRafId = requestAnimationFrame(() => {
-    graphDragRafId = 0;
-    if (!dragging.value) return;
-    const delta = dragLatestX - dragStartX;
-    // 计算新 handleLeft（夹紧到 [MIN, MAX]）
-    const newLeft = Math.max(
-      MIN_GRAPH_COL_WIDTH,
-      Math.min(MAX_GRAPH_COL_WIDTH, startHandleLeft + delta),
-    );
-    // 缓存最终值（mouseup 时回写响应式）
-    graphDragFinalLeft = newLeft;
-    // v2.34：完全绕过 Vue 响应式，直接改 DOM
-    if (graphDragWrapper) {
-      // 1. wrapper 的 CSS 变量（1000 行 commit-row 的 var(--git-graph-col-width) 直接生效）
-      graphDragWrapper.style.setProperty('--git-graph-col-width', `${newLeft}px`);
-      // 2. tableMinWidth 也要更新（避免外层 timeline-new__main 横向滚动条失准）
-      // v2.50：desc 用 1fr，最小宽度基于 MIN_CONTENT_COL_WIDTH 而非 w.desc
-      const w = graphDragSnapshot ?? DEFAULT_COL_WIDTHS;
-      const newTableMin = newLeft + MIN_CONTENT_COL_WIDTH + w.author + w.date + w.sha;
-      graphDragWrapper.style.setProperty('--git-graph-table-width', `${newTableMin}px`);
-      // 3. 表头 graph 列宽度（v2.51：列是 grid item，宽度由 grid-template-columns 第一列决定，
-      //    这里直接写 inline style 覆盖 grid 值，拖拽期间实时跟随 newLeft）
-      if (graphDragHandles.headerGraphCol) {
-        graphDragHandles.headerGraphCol.style.width = `${newLeft}px`;
-      }
-      // v2.51：删除旧版表头手柄 left 和列分隔手柄 0/1/2 left 更新逻辑——
-      // 旧版独立 .git-graph-header__resize div 已删除，手柄现在是 GRAPH 列的 ::after 伪元素，
-      // 永远紧贴列右边线，无需 left 同步。
-    }
-  });
-}
-
-/** 拖拽结束时的最终 handleLeft（mouseup 时回写响应式用） */
-let graphDragFinalLeft: number | null = null;
-
-function onDragEnd(): void {
-  if (graphDragRafId !== 0) {
-    cancelAnimationFrame(graphDragRafId);
-    graphDragRafId = 0;
-  }
-  if (dragging.value) {
-    if (graphDragFinalLeft !== null) {
-      userHandleLeft.value = Math.max(
-        MIN_GRAPH_COL_WIDTH,
-        Math.min(MAX_GRAPH_COL_WIDTH, graphDragFinalLeft),
-      );
-    }
-    if (userHandleLeft.value !== null) {
-      try {
-        localStorage.setItem(GRAPH_WIDTH_STORAGE_KEY, String(userHandleLeft.value));
-      } catch {
-        /* 忽略持久化错误 */
-      }
-    }
-  }
-  dragging.value = false;
-  // 清空缓存
-  graphDragWrapper = null;
-  graphDragHandles = { headerGraphCol: null };
-  graphDragFinalLeft = null;
-  graphDragSnapshot = null;
-  document.removeEventListener('mousemove', onDragMove);
-  document.removeEventListener('mouseup', onDragEnd);
-}
+/** 表格最小宽度 = 5 列固定宽 + 12px 边距 */
+const tableMinWidth = computed<number>(() => {
+  return (
+    graphColumnWidth.value +
+    MIN_DESC_COL_WIDTH +
+    (isColVisible(2) ? resolveColPx(2) : 0) +
+    (isColVisible(3) ? resolveColPx(3) : 0) +
+    (isColVisible(4) ? resolveColPx(4) : 0) +
+    12
+  );
+});
 
 // ============================================================
-// v2.67：3 个内容列（author / date / sha）的列宽拖动
-// 对齐 vscode-git-graph column resize 行为：
-//   - 每个手柄 = 列分隔条 = 6px 命中区，cursor: col-resize
-//   - 拖动期间：mousemove 绕过 Vue 响应式，直接改 wrapper 的 --grid-template-columns CSS 变量
-//     （1000 行 commit-row 实时跟随，但 colWidths ref 不更新，避免触发 5 个 computed 重算）
-//   - mouseup：把最终 colWidths 写回 ref + 持久化到 localStorage
-//   - desc 列保持 1fr 自动填满余下空间（拖 author/date/sha 时 desc 跟着压缩/扩张）
+// v3.0：通用列宽拖动（vscode column resize 行为 1:1 复刻）
+// - mousedown 缓存 startWidths + startX + header cell 引用
+// - mousemove 直接改 cols[i].style.width（DOM 写入，跟 vscode main.ts:1706-1777 一致）
+// - mouseup 持久化到 ref + localStorage
+// - 双击 handle：toggle HIDDEN ↔ AUTO/default（main.ts:1811-1815）
 // ============================================================
 
-/** 列宽拖动目标：手柄决定拖哪一列 */
-type ColDragTarget = 'author' | 'date' | 'sha';
+type ColIndex = 0 | 1 | 2 | 3 | 4;
 
 const colDragging = ref(false);
-let colDragTarget: ColDragTarget | null = null;
+let colDragCol: ColIndex | null = null;
 let colDragStartX = 0;
-/** mousedown 时缓存的 3 列起始宽度（避免读响应式） */
-let colDragStartWidths: { author: number; date: number; sha: number } | null = null;
-/** mouseup 时回写 colWidths + 持久化用的最终宽度 */
-let colDragFinalWidths: { author: number; date: number; sha: number } | null = null;
+let colDragStartWidths: ColumnWidth[] | null = null;
+let colDragFinalWidths: ColumnWidth[] | null = null;
+let colDragHeaderCells: HTMLElement[] | null = null;
 let colDragRafId = 0;
-let colDragWrapper: HTMLElement | null = null;
 
-// 列宽边界（与 DEFAULT_COL_WIDTHS 对齐，参考 vscode-git-graph COLUMN_MIN_WIDTH=40 但更宽避免截断）
-const MIN_AUTHOR_COL_WIDTH = 80;
-const MAX_AUTHOR_COL_WIDTH = 320;
-const MIN_DATE_COL_WIDTH = 80;
-const MAX_DATE_COL_WIDTH = 200;
-const MIN_SHA_COL_WIDTH = 64;
-const MAX_SHA_COL_WIDTH = 160;
-
-function clampAuthorCol(w: number): number {
-  return Math.max(MIN_AUTHOR_COL_WIDTH, Math.min(MAX_AUTHOR_COL_WIDTH, w));
-}
-function clampDateCol(w: number): number {
-  return Math.max(MIN_DATE_COL_WIDTH, Math.min(MAX_DATE_COL_WIDTH, w));
-}
-function clampShaCol(w: number): number {
-  return Math.max(MIN_SHA_COL_WIDTH, Math.min(MAX_SHA_COL_WIDTH, w));
+function clampColWidth(w: number): number {
+  return Math.max(COLUMN_MIN_WIDTH, w);
 }
 
-/** 内容列分隔手柄 mousedown —— 复用 v2.34 的"绕过 Vue 响应式"模式 */
-function onColDragStart(target: ColDragTarget, e: MouseEvent): void {
+/** 列分隔手柄 mousedown —— 通用 5 列拖动入口 */
+function onColDragStart(col: ColIndex, e: MouseEvent): void {
   e.preventDefault();
-  e.stopPropagation(); // 阻止冒泡到 wrapper
+  e.stopPropagation();
   colDragging.value = true;
-  colDragTarget = target;
+  colDragCol = col;
   colDragStartX = e.clientX;
-  colDragStartWidths = {
-    author: colWidths.value.author,
-    date: colWidths.value.date,
-    sha: colWidths.value.sha,
-  };
-  colDragWrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
+  colDragStartWidths = [...columnWidths.value];
+  const wrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
+  if (wrapper) {
+    colDragHeaderCells = Array.from(
+      wrapper.querySelectorAll('.git-graph-header__col'),
+    ) as HTMLElement[];
+  }
   document.addEventListener('mousemove', onColDragMove);
   document.addEventListener('mouseup', onColDragEnd);
 }
 
 function onColDragMove(e: MouseEvent): void {
-  if (!colDragging.value || !colDragTarget || !colDragStartWidths) return;
-  if (colDragRafId !== 0) return; // 已有 pending frame，跳过
+  if (
+    !colDragging.value ||
+    colDragCol === null ||
+    !colDragStartWidths ||
+    !colDragHeaderCells
+  ) {
+    return;
+  }
+  if (colDragRafId !== 0) return;
   colDragRafId = requestAnimationFrame(() => {
     colDragRafId = 0;
-    if (!colDragging.value || !colDragTarget || !colDragStartWidths) return;
-    const delta = e.clientX - colDragStartX;
-    const start = colDragStartWidths;
-    let newAuthor = start.author;
-    let newDate = start.date;
-    let newSha = start.sha;
-    if (colDragTarget === 'author') newAuthor = clampAuthorCol(start.author + delta);
-    if (colDragTarget === 'date') newDate = clampDateCol(start.date + delta);
-    if (colDragTarget === 'sha') newSha = clampShaCol(start.sha + delta);
-    colDragFinalWidths = { author: newAuthor, date: newDate, sha: newSha };
-    if (colDragWrapper) {
-      // 绕过 Vue 响应式，直接改 CSS 变量让 1000 行 commit-row 实时跟随
-      // 格式跟 colWidthsToGridTemplate 一致：desc 用 minmax(MIN, 1fr) 占满余下空间
-      const newGrid = `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) ${newAuthor}px ${newDate}px ${newSha}px`;
-      colDragWrapper.style.setProperty('--grid-template-columns', newGrid);
+    if (
+      !colDragging.value ||
+      colDragCol === null ||
+      !colDragStartWidths ||
+      !colDragHeaderCells
+    ) {
+      return;
     }
+    const col = colDragCol;
+    const delta = e.clientX - colDragStartX;
+    const startWidths = colDragStartWidths;
+
+    if (col === 0) {
+      const startW = startWidths[0]!;
+      const baseW = startW === COLUMN_AUTO ? graphColumnWidth.value : startW;
+      const newW = clampColWidth(baseW + delta);
+      const next: ColumnWidth[] = [...startWidths];
+      next[0] = newW;
+      colDragFinalWidths = next;
+      if (colDragHeaderCells[0]) colDragHeaderCells[0].style.width = `${newW}px`;
+      return;
+    }
+
+    if (col === 1) return; // Description 1fr 自动填满
+
+    const startW = startWidths[col]!;
+    if (startW === COLUMN_HIDDEN) return; // 隐藏列不能拖
+    const baseW = startW === COLUMN_AUTO ? DEFAULT_COL_WIDTHS_PIXEL[col]! : startW;
+    const newW = clampColWidth(baseW + delta);
+    const next: ColumnWidth[] = [...startWidths];
+    next[col] = newW;
+    colDragFinalWidths = next;
+    if (colDragHeaderCells[col]) colDragHeaderCells[col].style.width = `${newW}px`;
   });
 }
 
@@ -1003,26 +963,89 @@ function onColDragEnd(): void {
     colDragRafId = 0;
   }
   if (colDragging.value && colDragFinalWidths) {
-    colWidths.value = { ...colWidths.value, ...colDragFinalWidths };
-    try {
-      localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(colWidths.value));
-    } catch {
-      /* 忽略持久化错误 */
-    }
+    columnWidths.value = colDragFinalWidths;
+    saveColumnWidths();
   }
   colDragging.value = false;
-  colDragTarget = null;
+  colDragCol = null;
   colDragStartWidths = null;
   colDragFinalWidths = null;
-  colDragWrapper = null;
+  colDragHeaderCells = null;
   document.removeEventListener('mousemove', onColDragMove);
   document.removeEventListener('mouseup', onColDragEnd);
 }
 
+/** 双击 handle：toggle HIDDEN ↔ AUTO/default
+ *  对齐 vscode main.ts:1811-1815 toggleColumnState */
+function onColHandleDblClick(col: ColIndex, e: MouseEvent): void {
+  e.preventDefault();
+  e.stopPropagation();
+  const current = columnWidths.value[col];
+  const next: ColumnWidth[] = [...columnWidths.value];
+  if (current === COLUMN_HIDDEN) {
+    // 恢复：col 1 用 AUTO，col 0/2/3/4 用 defaultWidth
+    next[col] = col === 1 ? COLUMN_AUTO : DEFAULT_COL_WIDTHS_PIXEL[col]!;
+  } else {
+    next[col] = COLUMN_HIDDEN;
+  }
+  columnWidths.value = next;
+  saveColumnWidths();
+}
+
+/** 右键菜单状态：当前右键触发的列（null = 未触发） */
+const contextMenuCol = ref<ColIndex | null>(null);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+
+/** 表头 contextmenu：打开列显隐菜单
+ *  对齐 vscode main.ts:1808-1865（Date/Author/Commit 显隐） */
+function onHeaderContextMenu(e: MouseEvent): void {
+  e.preventDefault();
+  contextMenuX.value = e.clientX;
+  contextMenuY.value = e.clientY;
+  const target = e.target as HTMLElement;
+  const colAttr = target.closest('[data-col]')?.getAttribute('data-col');
+  if (colAttr !== null && colAttr !== undefined) {
+    contextMenuCol.value = Number(colAttr) as ColIndex;
+  } else {
+    contextMenuCol.value = null;
+  }
+}
+
+/** 列显隐切换（vscode toggleColumnState main.ts:1811-1815） */
+function toggleColumnVisibility(col: ColIndex): void {
+  const current = columnWidths.value[col];
+  const next: ColumnWidth[] = [...columnWidths.value];
+  if (current === COLUMN_HIDDEN) {
+    next[col] = col === 1 ? COLUMN_AUTO : DEFAULT_COL_WIDTHS_PIXEL[col]!;
+  } else {
+    next[col] = COLUMN_HIDDEN;
+  }
+  columnWidths.value = next;
+  saveColumnWidths();
+  contextMenuCol.value = null;
+}
+
+/** 全局点击关闭右键菜单 */
+function onDocumentClickForContextMenu(e: MouseEvent): void {
+  if (contextMenuCol.value === null) return;
+  const target = e.target as HTMLElement | null;
+  // 命中菜单内部 → 不关
+  if (target?.closest('.git-graph-header__context-menu')) return;
+  contextMenuCol.value = null;
+}
+
+// 注册/卸载全局点击监听（v3.0 phase 5）
+onMounted(() => {
+  document.addEventListener('mousedown', onDocumentClickForContextMenu);
+});
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocumentClickForContextMenu);
+});
+
 /** 生成 fallback avatar：取名字首字符 */
 function avatarInitial(name: string): string {
   if (!name) return '?';
-  // 取第一个非空白字符
   const ch = name.trim()[0];
   return ch ? ch.toUpperCase() : '?';
 }
@@ -1034,91 +1057,6 @@ function avatarColorIndex(name: string): number {
     hash = (hash * 31 + name.charCodeAt(i)) | 0;
   }
   return Math.abs(hash) % 16;
-}
-
-// ============================================================
-// v2.22：SourceTree 风格表头 —— 列宽状态管理
-// 列：Description (refs+subject) / Author / Date / SHA
-// 拖动表头列分隔手柄调整列宽（commit-row 同步调整 grid-template-columns）
-// 列宽持久化到 localStorage（用户偏好保存）
-// ============================================================
-
-/** 列宽状态：每个列的初始宽度（px） */
-const DEFAULT_COL_WIDTHS: { desc: number; author: number; date: number; sha: number } = {
-  desc: 480, // Description 列（refs + subject）—— v2.48 起用 1fr 占满剩余，此值仅拖拽临时态用
-  author: 180, // Author 列——v2.49：160→180，确保常见用户名 + avatar + padding 不被截断
-  date: 120, // Date 列
-  sha: 96, // SHA 列——v2.49：80→96，确保 7 位 shortSha + padding 不被截断
-};
-
-/** 列宽存储 key */
-const COL_WIDTHS_STORAGE_KEY = 'gitea-kanban:gitgraph:column-widths';
-
-/** 加载持久化的列宽（如果有） */
-function loadColWidths(): typeof DEFAULT_COL_WIDTHS {
-  try {
-    const stored = localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      // v2.49：对每个列宽取 max(存储值, 默认值)，确保旧 localStorage 里的较小值
-      //（如 v2.48 之前的 author=160/sha=80）不会覆盖调大的新默认值。
-      // 用户拖拽后存的更大值仍保留。
-      return {
-        desc: typeof parsed.desc === 'number' ? parsed.desc : DEFAULT_COL_WIDTHS.desc,
-        author: Math.max(parsed.author ?? DEFAULT_COL_WIDTHS.author, DEFAULT_COL_WIDTHS.author),
-        date: Math.max(parsed.date ?? DEFAULT_COL_WIDTHS.date, DEFAULT_COL_WIDTHS.date),
-        sha: Math.max(parsed.sha ?? DEFAULT_COL_WIDTHS.sha, DEFAULT_COL_WIDTHS.sha),
-      };
-    }
-  } catch {
-    /* localStorage 可能不可用（SSR/隐私模式） */
-  }
-  return { ...DEFAULT_COL_WIDTHS };
-}
-
-/** 列宽状态（响应式，初始从 localStorage 加载） */
-const colWidths = ref({ ...loadColWidths() });
-
-/**
- * v1.9 列宽语义重构：
- *   - desc 列：minmax(60px, 1fr) —— 默认占满余下空间，让表格内容区撑满父容器宽度
- *   - author/date/sha 列：固定 px —— 用户拖拽这些列分隔手柄时改变它们的宽度
- *   - 拖 colHandle 0（desc-author 间）实际改变 author 列宽（因为 desc 用 1fr 自然填满，
- *     拖右边就是 author 的左边界）。
- *   - 拖 colHandle 1/2（author-date/date-sha 间）改变 author/date 列宽。
- *
- * 关键：1fr 不带 px 单位，浏览器自动按"父容器 - 其他列总和 - 边距"分配余下空间。
- * 这样窗口 resize / 拖 author 列时，desc 列自动伸缩填满，**手风琴宽度也跟随同步
- * （手风琴用 100% 相对 .git-graph-body，自动同步）**。
- *
- * 持久化：colWidths.author/date/sha 存 px；desc 字段保留旧值兼容历史，但实际渲染
- * 用 1fr 替换。
- */
-const gridTemplateColumns = computed(() => {
-  const w = colWidths.value;
-  return colWidthsToGridTemplate(w);
-});
-
-/** 整张 5 列表格的最小宽度，用于让主内容区自然出现横向滚动
- *  v1.9：desc 不再是固定 px，最小宽度 = handleLeft + author + date + sha + MIN_DESC */
-/** 表格最小宽度（v2.47：脱钩 svgWidth）
- * 之前 = handleLeft + 内容列宽 + svgWidth → 200 lane 时 2014 + 840 = 2854px，撑爆视口
- * 现在只跟 handleLeft + 内容列固定宽（4 个内容列 + 12px 边距），跟 lane 数完全脱钩。
- * 多 lane 的水平滚动交给 SVG 内部（.git-graph-bg 的横向 overflow），不影响 commit 文字布局。
- * v2.48：desc 用 1fr 占满剩余空间，最小宽度基于 MIN_CONTENT_COL_WIDTH 而非 w.desc。 */
-const tableMinWidth = computed(() => {
-  const w = colWidths.value;
-  return handleLeft.value + MIN_CONTENT_COL_WIDTH + w.author + w.date + w.sha + 12;
-});
-
-/** 把 widths 序列化成 CSS grid-template-columns 字符串
- *
- * v2.48：desc 列用 `minmax(MIN_CONTENT_COL_WIDTH, 1fr)` —— 占满剩余屏宽，
- * 让表格显示饱满（用户诉求："描述"列尽可能占用多的屏宽）。
- * v2.49：author/date/sha 用固定 px —— v2.50 起列分隔手柄已移除（只保留 graph 手柄），
- * 这些宽度走 DEFAULT_COL_WIDTHS 默认值，不再支持用户拖拽调整。 */
-function colWidthsToGridTemplate(w: { desc: number; author: number; date: number; sha: number }): string {
-  return `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) ${w.author}px ${w.date}px ${w.sha}px`;
 }
 
 /**
@@ -1198,7 +1136,7 @@ function refBadgeClass(refType?: string): string {
     <!-- ===== 主内容 ===== -->
     <div
       class="timeline-new__main"
-      :class="{ 'timeline-new__main--dragging': dragging }"
+      :class="{ 'timeline-new__main--dragging': colDragging }"
     >
       <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
@@ -1244,97 +1182,149 @@ function refBadgeClass(refType?: string): string {
         -->
         <div
           class="git-graph-wrapper"
-          :data-dragging="dragging ? '' : null"
+          :data-dragging="colDragging ? '' : null"
           :style="{
             '--grid-template-columns': gridTemplateColumns,
-            '--git-graph-col-width': `${handleLeft}px`,
+            '--git-graph-col-width': `${graphColumnWidth}px`,
             '--git-graph-table-width': `${tableMinWidth}px`,
           }"
         >
-          <!-- v2.22：SourceTree 风格表头（5 列：graph + 描述/作者/日期/SHA） -->
-          <div class="git-graph-header" @mousedown.stop>
-            <!-- v2.27：第一列 graph 标题格（与 commit-row 第一列同宽）
-                 v2.34：宽度由 grid-template-columns 的 var(--git-graph-col-width) 决定，
-                 不再挂 inline style（避免每个 header 跟随 handleLeft 重渲染） -->
-            <!-- v2.51：graph 列（与 commit-row graph 列同宽）
-                 resize handle 是列的真实右边缘——独立 div 用 right: -3px 定位，
-                 永远紧贴列右边线（不再用 :style="{left: handleLeft}" 浮动定位），
-                 与列宽变化 1:1 同步，不会出现"手柄位置跟列宽脱节"的视觉错位。
-                 这是正常 table column resize 的标准模式：列右边线 = 命中区。 -->
-            <div class="git-graph-header__col git-graph-header__col--graph">
+          <!--
+            v3.0：5 列表头（对齐 vscode-git-graph web/main.ts:821-824）
+            列顺序：Graph (col 0) / Description (col 1) / Date (col 2) / Author (col 3) / Commit (col 4)
+            列名 UI 翻译（AGENTS §9.1 零术语）：
+              - Graph → "Graph"（保留英文，vscode 也用这个）
+              - Description → "描述"
+              - Date → "日期"
+              - Author → "作者"
+              - Commit → "提交"（短 SHA 列，区分"提交 SHA"vs"提交内容"）
+            每个 col 内嵌 2 个 .resizeCol left/right（vscode styles/main.css:280-294）：
+              - left handle 改 col 自身宽度（AUTO 状态下变 HIDDEN/拖宽）
+              - right handle 改 col+1 宽度（v3.0 暂用 left 模式，对齐 SourceTree 风格）
+            双击 handle → toggle HIDDEN ↔ AUTO/default
+            右键 header → 列显隐菜单（v3.0 暂未实现菜单 UI，placeholder）
+          -->
+          <div class="git-graph-header" @mousedown.stop @contextmenu="onHeaderContextMenu">
+            <!-- col 0: Graph -->
+            <div class="git-graph-header__col git-graph-header__col--graph" data-col="0">
               <span class="git-graph-header__col-label">Graph</span>
-            </div>
-            <!-- resize handle：紧贴 GRAPH 列右边，命中区 6px（中心对齐 1px border-right） -->
-            <div
-              class="git-graph-header__resize-handle"
-              :class="{ 'git-graph-header__resize-handle--active': dragging }"
-              @mousedown="onDragStart"
-              title="拖动调整 Graph 列宽度"
-            />
-            <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
-            <div class="git-graph-header__col git-graph-header__col--author">
-              作者
-              <!--
-                v2.67：作者列 resize handle（紧贴列右边缘）
-                - position: absolute + right: -3px + width: 6px → 命中区中心对齐列右边线
-                - 拖动调 author 列宽（desc 用 1fr 自动填满余下空间）
-                - vscode-git-graph 风格：handle 是该列本身的命中区，跟列宽 1:1 同步
-              -->
               <div
-                class="git-graph-header__col-resize-handle"
-                :class="{ 'git-graph-header__col-resize-handle--active': colDragging }"
-                @mousedown.stop="onColDragStart('author', $event)"
-                title="拖动调整作者列宽度"
+                class="resizeCol"
+                :class="{ 'resizeCol--active': colDragging && colDragCol === 0 }"
+                @mousedown.stop="onColDragStart(0, $event)"
+                @dblclick.stop="onColHandleDblClick(0, $event)"
+                title="拖动调整 Graph 列宽度（双击隐藏/恢复）"
               />
             </div>
-            <div class="git-graph-header__col git-graph-header__col--date">
+            <!-- col 1: Description -->
+            <div class="git-graph-header__col git-graph-header__col--desc" data-col="1">
+              描述
+            </div>
+            <!-- col 2: Date -->
+            <div
+              v-if="isColVisible(2)"
+              class="git-graph-header__col git-graph-header__col--date"
+              data-col="2"
+            >
               日期
               <div
-                class="git-graph-header__col-resize-handle"
-                :class="{ 'git-graph-header__col-resize-handle--active': colDragging }"
-                @mousedown.stop="onColDragStart('date', $event)"
-                title="拖动调整日期列宽度"
+                class="resizeCol"
+                :class="{ 'resizeCol--active': colDragging && colDragCol === 2 }"
+                @mousedown.stop="onColDragStart(2, $event)"
+                @dblclick.stop="onColHandleDblClick(2, $event)"
+                title="拖动调整日期列宽度（双击隐藏/恢复）"
               />
             </div>
-            <div class="git-graph-header__col git-graph-header__col--sha">
-              SHA
+            <!-- col 3: Author -->
+            <div
+              v-if="isColVisible(3)"
+              class="git-graph-header__col git-graph-header__col--author"
+              data-col="3"
+            >
+              作者
               <div
-                class="git-graph-header__col-resize-handle"
-                :class="{ 'git-graph-header__col-resize-handle--active': colDragging }"
-                @mousedown.stop="onColDragStart('sha', $event)"
-                title="拖动调整 SHA 列宽度"
+                class="resizeCol"
+                :class="{ 'resizeCol--active': colDragging && colDragCol === 3 }"
+                @mousedown.stop="onColDragStart(3, $event)"
+                @dblclick.stop="onColHandleDblClick(3, $event)"
+                title="拖动调整作者列宽度（双击隐藏/恢复）"
+              />
+            </div>
+            <!-- col 4: Commit -->
+            <div
+              v-if="isColVisible(4)"
+              class="git-graph-header__col git-graph-header__col--sha"
+              data-col="4"
+            >
+              提交
+              <div
+                class="resizeCol"
+                :class="{ 'resizeCol--active': colDragging && colDragCol === 4 }"
+                @mousedown.stop="onColDragStart(4, $event)"
+                @dblclick.stop="onColHandleDblClick(4, $event)"
+                title="拖动调整提交 SHA 列宽度（双击隐藏/恢复）"
               />
             </div>
           </div>
 
           <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row）
-               v2.64：mask 渐变遮盖（对齐 vscode-git-graph Graph.applyMaxWidth），
-               SVG 内部完整渲染 contentWidth，外层 mask 在 (handleLeft-12)px ~ handleLeft px
-               区间 12px 渐变 fade，超出 handleLeft 的 lane 视觉上消失
+               v3.0：mask 渐变遮盖，对齐 vscode-git-graph Graph.applyMaxWidth (graph.ts:689-695)，
+               SVG 内部完整渲染 contentWidth，外层 CSS mask 在
+               (graphColumnWidth-12)px ~ graphColumnWidth px 区间 12px 渐变 fade，
+               超出 graphColumnWidth 的 lane 视觉上消失
                （替代 v2.47 的 .git-graph-bg overflow-x: hidden 物理裁切）-->
+          <!--
+            v3.0：右键菜单浮层（vscode main.ts:1808-1865）
+            - 在表头任意位置点右键 → 打开菜单，可 toggle Date/Author/Commit 列显隐
+            - 全局 mousedown 监听关闭（onDocumentClickForContextMenu）
+            - 用 fixed 定位 + z-index 高于 sticky header
+          -->
+          <div
+            v-if="contextMenuCol !== null"
+            class="git-graph-header__context-menu"
+            :style="{ left: `${contextMenuX}px`, top: `${contextMenuY}px` }"
+            @click.stop
+          >
+            <button
+              class="git-graph-header__context-menu-item"
+              :class="{ 'git-graph-header__context-menu-item--checked': isColVisible(2) }"
+              @click="toggleColumnVisibility(2)"
+              type="button"
+            >
+              日期
+            </button>
+            <button
+              class="git-graph-header__context-menu-item"
+              :class="{ 'git-graph-header__context-menu-item--checked': isColVisible(3) }"
+              @click="toggleColumnVisibility(3)"
+              type="button"
+            >
+              作者
+            </button>
+            <button
+              class="git-graph-header__context-menu-item"
+              :class="{ 'git-graph-header__context-menu-item--checked': isColVisible(4) }"
+              @click="toggleColumnVisibility(4)"
+              type="button"
+            >
+              提交
+            </button>
+          </div>
           <div class="git-graph-body" :style="{ minHeight: svgHeight }">
-            <!-- 背景层：视觉宽度 = handleLeft（vscode git-graph 行为） -->
+            <!-- 背景层：视觉宽度 = graphColumnWidth（vscode git-graph 行为） -->
             <div
               class="git-graph-bg"
               :style="{
-                width: `${handleLeft}px`,
+                width: `${graphColumnWidth}px`,
                 height: svgHeight,
               }"
             >
-              <!--
-              v2.66：删掉多余的 .git-graph-bg-scroll 中间层
-              v2.65 root cause：.git-graph-bg-scroll 是 position:absolute 但 inline style 只设 height
-              没设 width → absolute 元素 auto width = 0 → SVG 容器被压成 0 宽 → 整图不可见
-              修复：SVG 直接放进 .git-graph-bg（已设 width=handleLeft）
-              .git-graph-bg 是 position:sticky + width:handleLeft + overflow:visible
-              SVG 自身的 CSS mask-image 处理渐变 fade，不需要 .git-graph-bg-scroll 兜底
-            -->
-            <svg
-              class="git-graph-svg"
-              :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > handleLeft }"
-              :viewBox="viewBox"
-              :width="svgWidth"
-              :height="svgHeight"
+              <svg
+                class="git-graph-svg"
+                :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > graphColumnWidth }"
+                :viewBox="viewBox"
+                :width="svgWidth"
+                :height="svgHeight"
             >
                   <!--
                     v2.65：渐变 fade 改用 CSS mask-image（在 .git-graph-svg 上），不再用 SVG <defs>+<mask>。
@@ -1464,7 +1454,7 @@ function refBadgeClass(refType?: string): string {
                      容器，commit-row 内的 graph 占位列变成纯空白（描述列左侧 130px 空白根因）。
                      commit-row 改为 4 列 grid（desc/author/date/sha），直接对齐表头 desc 列。 -->
                 <template v-if="r.commit">
-                  <!-- v2.22：Description 列（refs + subject） -->
+                  <!-- col 1: Description 列（refs + subject） -->
                   <div class="commit-row__col commit-row__col--desc">
                     <!-- v2.8：refs + refTypes 由后端 LogCommits 附带（branch / remoteBranch / tag），
                          这里按类型渲染 badge 颜色，不再用启发式猜。 -->
@@ -1493,8 +1483,18 @@ function refBadgeClass(refType?: string): string {
                     </span>
                     <span class="commit-subject">{{ r.commit.subject }}</span>
                   </div>
-                  <!-- v2.22：Author 列 -->
-                  <div class="commit-row__col commit-row__col--author">
+                  <!-- col 2: Date 列（v3.0：v-if 控制显隐） -->
+                  <div
+                    v-if="isColVisible(2)"
+                    class="commit-row__col commit-row__col--date"
+                  >
+                    <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
+                  </div>
+                  <!-- col 3: Author 列 -->
+                  <div
+                    v-if="isColVisible(3)"
+                    class="commit-row__col commit-row__col--author"
+                  >
                     <span
                       class="commit-avatar-fallback"
                       :class="`flow-color-16-${avatarColorIndex(r.commit.authorName)}`"
@@ -1502,21 +1502,20 @@ function refBadgeClass(refType?: string): string {
                     >{{ avatarInitial(r.commit.authorName) }}</span>
                     <span class="commit-author">{{ r.commit.authorName }}</span>
                   </div>
-                  <!-- v2.22：Date 列 -->
-                  <div class="commit-row__col commit-row__col--date">
-                    <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
-                  </div>
-                  <!-- v2.22：SHA 列 -->
-                  <div class="commit-row__col commit-row__col--sha">
+                  <!-- col 4: Commit（短 SHA）列 -->
+                  <div
+                    v-if="isColVisible(4)"
+                    class="commit-row__col commit-row__col--sha"
+                  >
                     <span class="commit-sha">{{ r.commit.shortSha }}</span>
                   </div>
                 </template>
                 <template v-else>
                   <!-- 关系占位行（merge edge 中间段）—— 4 个空 col 占位 -->
                   <div class="commit-row__col commit-row__col--desc" />
-                  <div class="commit-row__col commit-row__col--author" />
-                  <div class="commit-row__col commit-row__col--date" />
-                  <div class="commit-row__col commit-row__col--sha" />
+                  <div v-if="isColVisible(2)" class="commit-row__col commit-row__col--date" />
+                  <div v-if="isColVisible(3)" class="commit-row__col commit-row__col--author" />
+                  <div v-if="isColVisible(4)" class="commit-row__col commit-row__col--sha" />
                 </template>
                 <!-- v2.14：行下手风琴 —— v2.66 改为嵌入 commit-row 内部：
                      让 .commit-row:hover 选择器能覆盖到 accordion 区域，
@@ -1695,20 +1694,20 @@ function refBadgeClass(refType?: string): string {
   isolation: isolate;
 }
 
-/* 表头（5 列 grid）
+/* 表头（5 列 grid，对齐 vscode-git-graph web/main.ts:821-824）
  *
- * v2.47：min-width 改成 handleLeft + 4 内容列固定宽（不再依赖 var(--git-graph-table-width)）。
- * 之前 .git-graph-table-width = handleLeft + 4 内容列 + svgWidth（line 1088 旧版），
- * 多 lane 仓库（200 lane）下 .git-graph-table-width = 2854px → 表头撑出 wrapper 横向滚动条。
- * 现在 .git-graph-table-width 只跟 handleLeft + 4 内容列走，多 lane 由 SVG 内部横向滚动兜底。*/
+ * v3.0：5 列 = Graph (col 0) / Description (col 1) / Date (col 2) / Author (col 3) / Commit (col 4)
+ *   - col 0: var(--git-graph-col-width) —— graphColumnWidth
+ *   - col 1: minmax(40px, 1fr) —— Description
+ *   - col 2/3/4: 固定 px（来自 --grid-template-columns CSS 变量，inline 注入）
+ *   - Date/Author/Commit 列 HIDDEN 时 = 0（v-if 不渲染）
+ */
 .git-graph-header {
   display: grid;
-  grid-template-columns: var(--git-graph-col-width, 96px) var(--grid-template-columns, 480px 160px 120px 80px);
+  grid-template-columns: var(--git-graph-col-width, 96px) var(--grid-template-columns, 1fr 128px 128px 80px);
   align-items: center;
   height: 32px;
   background: var(--color-shell-main-bg);
-  /* v2.29：用 --color-divider 替换 --color-border（border 在两个主题下都是 transparent，
-     所以用户看不到表头底下的 1px 线，无法方便拖拽列分隔手柄） */
   border-bottom: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   border-top: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   font-family: var(--font-sans);
@@ -1719,39 +1718,27 @@ function refBadgeClass(refType?: string): string {
   letter-spacing: 0.05em;
   user-select: none;
   padding-right: var(--space-3, 12px);
-  /* v2.0：去掉 min-width —— 让 header 宽度跟 wrapper 走（wrapper 已 100% 父容器），
-   * 不再硬性 920px，避免极窄窗口被强制撑开。表格整体可被 wrapper overflow-x 滚动。*/
   box-sizing: border-box;
-  position: sticky; /* v2.27：表头 sticky 顶部，body 滚动时表头保持可见 */
+  position: sticky;
   top: 0;
-  /* v2.32：z-index 提高到 5（高于 commit-dots-overlay z-index: 2 和 commit-row z-index: 1），
-     让 sticky 表头在向下滚动时浮在 commit-row 之上，避免背景看起来"透明" */
   z-index: 5;
 }
 .git-graph-header__col {
   padding: 0 var(--space-3, 12px);
   overflow: hidden;
   text-overflow: ellipsis;
-  /* v2.66：border-box 让 padding 计入 grid track，表头列宽 = 180/120/80，
-   * 与 commit-row 列宽一致（表头 / 行 hover 背景完美对齐） */
   box-sizing: border-box;
   white-space: nowrap;
-  /* v2.26：表头中文居中显示（与 SourceTree / VSCode Git Graph 风格一致） */
   text-align: center;
-  /* v2.28：min-width: 0 防止内容撑大列宽（否则 SHA 会被挤到下一行） */
   min-width: 0;
-  /* v2.67：relative 让 col 内 .git-graph-header__col-resize-handle 能 absolute 定位到列右边缘 */
   position: relative;
 }
 .git-graph-header__col--graph {
-  /* 第一列 graph 标题（宽度由 inline 绑定 handleLeft） */
   display: flex;
   align-items: center;
   justify-content: flex-start;
   padding-left: var(--space-2, 8px);
   padding-right: var(--space-2, 8px);
-  /* v2.29：用 --color-divider 替换 --color-border（border 在两个主题下都是 transparent，
-     用户看不到 graph 列与 desc 列之间的纵向分隔线） */
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   background: var(--color-shell-main-bg);
 }
@@ -1763,7 +1750,6 @@ function refBadgeClass(refType?: string): string {
 }
 .git-graph-header__col--desc {
   padding-left: 0;
-  /* v2.29：desc 列右侧纵向分隔线（用 --color-divider 可见） */
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
 }
 .git-graph-header__col--author {
@@ -1779,56 +1765,18 @@ function refBadgeClass(refType?: string): string {
 .git-graph-header__col--sha {
   padding: 0 var(--space-2, 8px);
 }
-/* v2.51：GRAPH 列右边缘 resize handle —— 正常 table column resize 模式
- *  - 独立 div 用 right: -3px 定位（不是 :style="{left: handleLeft}" 浮动定位）
- *  - 永远紧贴 GRAPH 列右边线（right: -3px + width: 6px → 中心对齐 1px border-right）
- *  - 与列宽变化 1:1 同步，不会出现"手柄位置跟列宽脱节"
- *  - 这是 mouse 命中区（cursor + mousedown），也是视觉反馈区（hover/active 时高亮）
- *  - 与 v2.50 之前的 .git-graph-header__resize 区别：旧版用 left 浮动定位，
- *    手柄看起来"飘"在某个位置；新版紧贴列真实右边缘，正常 column 缩放体验 */
-.git-graph-header__resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  /* 紧贴 GRAPH 列右边缘：right: -3px + width: 6px → 中心在列右边线 */
-  right: -3px;
-  width: 6px;
-  cursor: col-resize;
-  z-index: 6;
-  background: transparent;
-  transition: background 0.12s;
-}
-.git-graph-header__resize-handle:hover,
-.git-graph-header__resize-handle--active {
-  background: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
-}
-.git-graph-header__resize-handle:hover::before,
-.git-graph-header__resize-handle--active::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 16px;
-  background: var(--color-primary, #74b830);
-  border-radius: 1px;
-}
-
-/* v2.51：旧 .git-graph-header__resize 规则已删除——v2.50 起不再用浮动定位的独立手柄。
-   旧规则保留注释供 git blame 参考。*/
-
-/* v2.67：author/date/sha 三个内容列的 resize handle（紧贴列右边缘）
- *   - 跟 .git-graph-header__resize-handle 风格一致：right: -3px + width: 6px
- *   - 父元素 .git-graph-header__col 加了 position: relative 让 absolute 生效
- *   - 拖动调**该列**的列宽（desc 用 1fr 自动填满余下空间）
- *   - hover/active 时显示高亮 1px 主色竖线 + soft 背景（与 graph 列 handle 一致）
+/* v3.0：resize handle（vscode-git-graph web/styles/main.css:280-294 .resizeCol 1:1 复刻）
+ *   - position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize
+ *   - 嵌在 .git-graph-header__col 内（col 自身 position: relative）
+ *   - 紧贴列右边缘（命中区 6px 跨列右边线 ±3px）
+ *   - hover/active 时显示高亮 1px 主色竖线 + soft 背景
+ *   - mousedown 触发 onColDragStart(col, e) 调对应列宽
+ *   - dblclick 触发 onColHandleDblClick(col, e) toggle HIDDEN ↔ AUTO
  */
-.git-graph-header__col-resize-handle {
+.resizeCol {
   position: absolute;
   top: 0;
   bottom: 0;
-  /* 紧贴列右边缘：right: -3px + width: 6px → 中心在列右边线 */
   right: -3px;
   width: 6px;
   cursor: col-resize;
@@ -1836,12 +1784,12 @@ function refBadgeClass(refType?: string): string {
   background: transparent;
   transition: background 0.12s;
 }
-.git-graph-header__col-resize-handle:hover,
-.git-graph-header__col-resize-handle--active {
+.resizeCol:hover,
+.resizeCol--active {
   background: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
 }
-.git-graph-header__col-resize-handle:hover::before,
-.git-graph-header__col-resize-handle--active::before {
+.resizeCol:hover::before,
+.resizeCol--active::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -1852,7 +1800,6 @@ function refBadgeClass(refType?: string): string {
   background: var(--color-primary, #74b830);
   border-radius: 1px;
 }
-
 /* v2.47：body 容器（包含背景层 SVG + 行层 commit-row）
  *
  * 之前 layout：body 是 block + relative，bg 是 absolute + left:0，commit-row 是普通 flow。
@@ -2482,6 +2429,44 @@ function refBadgeClass(refType?: string): string {
 }
 .timeline-new__main--dragging * {
   cursor: col-resize !important;
+}
+
+/* v3.0：表头右键菜单浮层（vscode-git-graph contextMenu.show 风格）
+ *   - position: fixed，按右键位置 left/top 定位
+ *   - z-index 高于 sticky header（5）+ resize handle（6）
+ *   - 暗主题：背景 #252526 + 1px border；亮主题：#fff + 1px border
+ *   - 每项：hover 时背景 primary-soft，checked 时显示 ✓
+ */
+.git-graph-header__context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 140px;
+  background: var(--color-bg-elevated, #252526);
+  border: 1px solid var(--color-divider, rgba(128, 128, 128, 0.35));
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 4px 0;
+}
+.git-graph-header__context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  color: var(--color-text, #ccc);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.git-graph-header__context-menu-item:hover {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.2));
+}
+.git-graph-header__context-menu-item--checked::before {
+  content: '✓';
+  color: var(--color-primary, #74b830);
+  font-weight: 600;
 }
 
 /* ===== v1.6 Avatar fallback（无头像时显示首字母） ===== */
