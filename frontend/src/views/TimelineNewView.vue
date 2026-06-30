@@ -787,29 +787,56 @@ const activeCommitCount = computed(() => {
 // 辅助
 // ============================================================
 /**
- * v3.8：authorDate 相对时间（commit row 日期列展示）
- *   - 时间源：go-git `commit.Author.When`（commit object 的 author 字段时间，含原作者时区）
- *     对齐 vscode-git-graph dataSource.ts:1373 authorDate
- *   - 展示：固定相对时间（vscode formatShortDate.Relative 默认行为）
- *   - 时区：JS `new Date(iso)` 自动按用户电脑时区解析 + getTime() 转 UTC 毫秒数对比
- *     → diff = 用户电脑时区的"现在" - 作者时区的 commit 时间（已归一为 UTC 毫秒对比）
- *   - 输入：ISO 8601 字符串（带 author timezone offset，例如 "2026-06-30T14:23:45+08:00"）
+ * v3.8 → v3.9 修复：authorDate 相对时间（对齐 vscode-git-graph web/utils.ts:280-302）
+ *
+ * v3.9 修复项：
+ *   - 新增「周」单位（7 天 = 604800s 边界），旧版缺失导致 7-29 天全显示为 "Xd前"
+ *   - 改用 Math.round（四舍五入），旧版用 Math.floor（向下取整）导致偏差大
+ *     例：36 小时前 → 旧版 "1天前"，新版 "2天前"（对齐 vscode "2 days ago"）
+ *   - 月/年阈值对齐 vscode：2629800s/月（30.4375 天均值）、31557600s/年（365.25 天）
+ *     旧版用 Math.floor(day/30)/Math.floor(mo/12) 级联截断，累积误差更大
+ *   - 新增防御：无效日期（NaN/空串）返回 "—"，未来日期返回 "刚刚"
+ *   - 时间源：go-git commit.Author.When（ISO 8601 字符串），getTime() 返回 UTC 毫秒
+ *     Date.now() 也是 UTC 毫秒 → diff 是真实流逝时间，作者时区不影响计算
+ *
+ * vscode 算法（web/utils.ts formatShortDate.Relative 分支）：
+ *   diff = now_seconds - unix_timestamp
+ *   < 60s: "X seconds ago"
+ *   < 3600s: "X minute(s) ago" (diff/60, round)
+ *   < 86400s: "X hour(s) ago" (diff/3600, round)
+ *   < 604800s: "X day(s) ago" (diff/86400, round)
+ *   < 2629800s: "X week(s) ago" (diff/604800, round)
+ *   < 31557600s: "X month(s) ago" (diff/2629800, round)
+ *   >= 31557600s: "X year(s) ago" (diff/31557600, round)
  */
 function formatRelative(iso: string): string {
-  // getTime() 返回 UTC 毫秒数（与时区无关），Date.now() 也是 UTC 毫秒数
-  // → diff 是真实的"流逝时间"，作者时区不影响计算
   const t = new Date(iso).getTime();
-  const diff = Date.now() - t;
-  const min = Math.floor(diff / 60_000);
-  if (min < 1) return '刚刚';
-  if (min < 60) return `${min}m前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h前`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}天前`;
-  const mo = Math.floor(day / 30);
-  if (mo < 12) return `${mo}月前`;
-  return `${Math.floor(mo / 12)}年前`;
+  if (Number.isNaN(t)) return '—';
+  const diffSec = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (diffSec < 60) return '刚刚';
+  let val: number;
+  if (diffSec < 3600) {
+    val = Math.round(diffSec / 60);
+    return `${val}分钟前`;
+  }
+  if (diffSec < 86400) {
+    val = Math.round(diffSec / 3600);
+    return `${val}小时前`;
+  }
+  if (diffSec < 604800) {
+    val = Math.round(diffSec / 86400);
+    return `${val}天前`;
+  }
+  if (diffSec < 2629800) {
+    val = Math.round(diffSec / 604800);
+    return `${val}周前`;
+  }
+  if (diffSec < 31557600) {
+    val = Math.round(diffSec / 2629800);
+    return `${val}月前`;
+  }
+  val = Math.round(diffSec / 31557600);
+  return `${val}年前`;
 }
 
 /**
@@ -1817,6 +1844,7 @@ function refBadgeClass(refType?: string): string {
                   :ref="(el) => { if (el) bindAccordionObserver(el as HTMLElement) }"
                   class="commit-accordion"
                   :data-sha="r.commit.sha"
+                  @click.stop
                 >
                   <CommitDetailPanel
                     v-if="expandedCommitNode && expandedCommitNode.sha === r.commit.sha"
@@ -2514,10 +2542,6 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable.commit-row--expanded:hover .commit-row__col--sha {
   background: rgba(128, 128, 128, 0.35);
 }
-.commit-row--clickable.commit-row--expanded:hover .commit-accordion {
-  background: rgba(128, 128, 128, 0.35);
-}
-/* v3.7：删除 .commit-row--clickable.commit-row--expanded:hover .commit-accordion hover 规则（详情面板不应被 hover 改） */
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * v2.40：26 → 30px，与 commit-row / SVG ROW_HEIGHT 同步（dot 行节奏对齐） */
 .commit-row--relation {
@@ -2711,24 +2735,17 @@ function refBadgeClass(refType?: string): string {
       border: 1px solid var(--color-divider);
       border-radius: var(--radius-card, 8px);
       box-shadow: var(--shadow-sm);
-      /* v3.7：跨 commit-row 的 4 个内容列（desc/author/date/sha），从 col 2 到 col 5
-       *   commit-row 是 5 列 grid（col 1=graph 占位 + col 2~5 内容列）
-       *   accordion 跳过 graph 占位列，只跨 4 个内容列，宽度与列宽完美匹配
-       *   之前 grid-column: 1 / -1 跨了 5 列（含 graph 占位列），左边多了一段空隙 */
       grid-column: 2 / 6;
-      /* v3.7：取消 300px 硬控高度（对齐用户反馈"还有空间就别出纵向滚动条"）
-       *   - max-height 改为 min(70vh, 600px) 作为软上限，超出才滚动
-       *   - 默认 overflow: visible（小内容不显示空滚动条），
-       *     超上限时 CSS 自动转 overflow: auto（max-height 触发）
-       *   - 让 commit-row 高度 = ROW_H + accordion 自然高度（vscode: 内容撑高）
-       * 之前 v2.66 hardcode 300px，导致 panel flex:1 在内容 < 300px 时
-       * 给内部左右栏一个空容器高度，触发空滚动条。 */
+      /* v3.7：禁止 accordion 自身纵向滚动（overflow-y:hidden）。
+       * 左栏 / 右栏各自有 overflow-y:auto，内容超限时各自内部滚动，互不干扰。
+       * overflow-x:auto 允许文件列表横向滚动（vscode 原始 #cdvFiles li 无横向滚动但保留设置）。
+       * max-height: min(70vh, 600px) 限制 accordion 高度上限，超出时内容被裁剪，
+       * 由左右栏自身滚动接管 —— 跟 vscode 行为一致。 */
       max-height: min(70vh, 600px);
-      overflow: auto;
-      /* v2.12：panel 内部 grid 4:6 各自滚，accordion 本身隐藏外层滚动避免双滚动条 */
-      /* v2.12 → v3.7：去掉 overflow:hidden 反而能自然显示，max-height 触发滚动 */
-      scrollbar-width: thin;
-      scrollbar-color: var(--scrollbar-thumb) transparent;
+      overflow: hidden auto; /* x=hidden 禁止纵向滚动；y=auto 内容超限时栏内滚动 */
+      /* v3.8：去掉 scrollbar-width——accordion 不再有纵向滚动条，滚动由 .cd-panel__left/right 接管 */
+      scrollbar-width: none; /* 隐藏纵向滚动条 */
+      scrollbar-gutter: stable; /* 预留滚动条槽位（即使无滚动条也占位，避免宽度跳变） */
       /* 入场动画 */
       animation: cdAccordionOpen 180ms cubic-bezier(0.16, 1, 0.3, 1);
       /* 让内部 panel 用 height: 100% 撑满手风琴 */

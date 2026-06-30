@@ -11,7 +11,11 @@ import (
 	"time"
 )
 
-const vscodeLogFormat = "%H%x1f%P%x1f%an%x1f%ae%x1f%ct%x1f%s"
+// v3.9 修复：%ct（committer date）→ %at（author date）
+// 旧版用 %ct 导致 rebase/cherry-pick/force-push 后所有 commit 显示同一次操作时间
+// （committer date 在 rebase 等操作后会被更新为操作时间，author date 保留原始创作时间）
+// 对齐 go-git 路径（log.go）的 c.Author.When（author date）+ vscode-git-graph 默认展示 author date
+const vscodeLogFormat = "%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s"
 const defaultVscodeInitialLoadCommits = 300
 
 // LogCommitsVscode 使用 vscode-git-graph 同款 git log 入口读取提交。
