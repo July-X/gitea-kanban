@@ -786,7 +786,18 @@ const activeCommitCount = computed(() => {
 // ============================================================
 // 辅助
 // ============================================================
+/**
+ * v3.8：authorDate 相对时间（commit row 日期列展示）
+ *   - 时间源：go-git `commit.Author.When`（commit object 的 author 字段时间，含原作者时区）
+ *     对齐 vscode-git-graph dataSource.ts:1373 authorDate
+ *   - 展示：固定相对时间（vscode formatShortDate.Relative 默认行为）
+ *   - 时区：JS `new Date(iso)` 自动按用户电脑时区解析 + getTime() 转 UTC 毫秒数对比
+ *     → diff = 用户电脑时区的"现在" - 作者时区的 commit 时间（已归一为 UTC 毫秒对比）
+ *   - 输入：ISO 8601 字符串（带 author timezone offset，例如 "2026-06-30T14:23:45+08:00"）
+ */
 function formatRelative(iso: string): string {
+  // getTime() 返回 UTC 毫秒数（与时区无关），Date.now() 也是 UTC 毫秒数
+  // → diff 是真实的"流逝时间"，作者时区不影响计算
   const t = new Date(iso).getTime();
   const diff = Date.now() - t;
   const min = Math.floor(diff / 60_000);
@@ -802,9 +813,12 @@ function formatRelative(iso: string): string {
 }
 
 /**
- * v3.7：完整绝对时间（ISO 时间 → "2026-06-30 14:23:45" 本地时区格式）
- *   - 用作 commit-row 日期列的 title tooltip（对齐 vscode web/utils.ts:305 formatShortDate.title）
- *   - 显示本地时区更符合用户直觉（vscode 也是 Date 对象 getHours/getMinutes）
+ * v3.8：authorDate 完整绝对时间（commit row 日期列 title tooltip）
+ *   - 时间源：同 formatRelative（commit.Author.When）
+ *   - 时区：用户电脑时区（getHours/getMinutes 自动按浏览器系统时区）
+ *     → 例：author 时区是 +08:00 的"2026-06-30 14:23:45"，用户电脑是 +09:00 → 显示 "2026-06-30 15:23:45"
+ *   - vscode web/utils.ts:305 title 是同模式（getHours 等 Date 实例方法 → 本地时区）
+ *   - 注意：日期部分 getFullYear/getMonth/getDate 也是本地时区，与时间字段语义一致
  */
 function formatAbsolute(iso: string): string {
   const d = new Date(iso);
@@ -1747,6 +1761,10 @@ function refBadgeClass(refType?: string): string {
                     class="commit-row__col commit-row__col--date"
                     data-col="2"
                   >
+                    <!-- v3.8：日期列固定展示 authorDate 相对时间（用户电脑时区）
+                         - r.commit.date = go-git commit.Author.When = author time（含作者时区 ISO 8601）
+                         - 显示：formatRelative（"12m前"/"5天前"等固定相对时间）
+                         - title：formatAbsolute（用户电脑时区的完整绝对时间，hover 看） -->
                     <span class="commit-time" :title="formatAbsolute(r.commit.date)">{{ formatRelative(r.commit.date) }}</span>
                   </div>
                   <!-- col 3: Author 列 -->
