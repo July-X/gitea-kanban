@@ -382,6 +382,13 @@ func (g *graphVscode) loadCommits(commits []git.CommitInfo, head string) {
 
 // buildResult assembles the public GraphResult from internal state
 func (g *graphVscode) buildResult() *GraphResult {
+	return g.buildResultWithTruncated(false)
+}
+
+// v3.6：buildResultWithTruncated 接收 truncated 标志（对齐 vscode git-graph）
+//   - dataSource.ts:171 通过请求 maxCount+1 判断 truncated
+//   - 我们 Go 端 LogCommits.LogResult.Truncated 已计算，adapter 透传到这里
+func (g *graphVscode) buildResultWithTruncated(truncated bool) *GraphResult {
 	if len(g.vertices) == 0 {
 		return &GraphResult{}
 	}
@@ -501,23 +508,26 @@ func (g *graphVscode) buildResult() *GraphResult {
 	}
 
 	return &GraphResult{
-		Nodes:    nodes,
-		Edges:    edges,
-		Branches: branches,
-		MaxLane:  maxLane,
-		MaxColor: g.maxColorSeen,
+		Nodes:     nodes,
+		Edges:     edges,
+		Branches:  branches,
+		MaxLane:   maxLane,
+		MaxColor:  g.maxColorSeen,
+		Truncated: truncated,
 	}
 }
 
 // BuildGraphVscode is the vscode-style entry point. Used by recheck tooling
 // and the frontend comparison.
-func BuildGraphVscode(commits []git.CommitInfo) *GraphResult {
-	return BuildGraphVscodeWithHead(commits, "")
+// BuildGraphVscode builds a vscode-style graph with no HEAD info.
+func BuildGraphVscode(commits []git.CommitInfo, truncated bool) *GraphResult {
+	return BuildGraphVscodeWithHead(commits, "", truncated)
 }
 
 // BuildGraphVscodeWithHead is the vscode-style entry point with HEAD info.
-func BuildGraphVscodeWithHead(commits []git.CommitInfo, head string) *GraphResult {
+// v3.6：truncated 标志让前端判断是否还有更早历史可加载（对齐 vscode git-graph dataSource.ts:171）
+func BuildGraphVscodeWithHead(commits []git.CommitInfo, head string, truncated bool) *GraphResult {
 	g := newGraphVscode(defaultMaxColors)
 	g.loadCommits(commits, head)
-	return g.buildResult()
+	return g.buildResultWithTruncated(truncated)
 }

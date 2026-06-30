@@ -207,7 +207,7 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		head = resolveLocalHead(localPath)
 	}
 
-	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, head)
+	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, head, logResult.Truncated)
 
 	return graphResultToDTO(graphResult), nil
 }

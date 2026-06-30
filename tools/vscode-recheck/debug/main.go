@@ -151,7 +151,7 @@ func main() {
 	}
 	head := resolveHead(repo)
 
-	g := graph.BuildGraphVscodeWithHead(logRes.Commits, head)
+	g := graph.BuildGraphVscodeWithHead(logRes.Commits, head, logRes.Truncated)
 
 	out := output{}
 	out.Meta.Repo = repo

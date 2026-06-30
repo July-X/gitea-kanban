@@ -91,7 +91,7 @@ func main() {
 	var g *graph.GraphResult
 	switch algorithm {
 	case "vscode":
-		g = graph.BuildGraphVscodeWithHead(logRes.Commits, head)
+		g = graph.BuildGraphVscodeWithHead(logRes.Commits, head, logRes.Truncated)
 	case "gitea":
 		g = graph.BuildGraph(logRes.Commits)
 	default:
