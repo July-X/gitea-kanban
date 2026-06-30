@@ -915,6 +915,110 @@ function onDragEnd(): void {
   document.removeEventListener('mouseup', onDragEnd);
 }
 
+// ============================================================
+// v2.67：3 个内容列（author / date / sha）的列宽拖动
+// 对齐 vscode-git-graph column resize 行为：
+//   - 每个手柄 = 列分隔条 = 6px 命中区，cursor: col-resize
+//   - 拖动期间：mousemove 绕过 Vue 响应式，直接改 wrapper 的 --grid-template-columns CSS 变量
+//     （1000 行 commit-row 实时跟随，但 colWidths ref 不更新，避免触发 5 个 computed 重算）
+//   - mouseup：把最终 colWidths 写回 ref + 持久化到 localStorage
+//   - desc 列保持 1fr 自动填满余下空间（拖 author/date/sha 时 desc 跟着压缩/扩张）
+// ============================================================
+
+/** 列宽拖动目标：手柄决定拖哪一列 */
+type ColDragTarget = 'author' | 'date' | 'sha';
+
+const colDragging = ref(false);
+let colDragTarget: ColDragTarget | null = null;
+let colDragStartX = 0;
+/** mousedown 时缓存的 3 列起始宽度（避免读响应式） */
+let colDragStartWidths: { author: number; date: number; sha: number } | null = null;
+/** mouseup 时回写 colWidths + 持久化用的最终宽度 */
+let colDragFinalWidths: { author: number; date: number; sha: number } | null = null;
+let colDragRafId = 0;
+let colDragWrapper: HTMLElement | null = null;
+
+// 列宽边界（与 DEFAULT_COL_WIDTHS 对齐，参考 vscode-git-graph COLUMN_MIN_WIDTH=40 但更宽避免截断）
+const MIN_AUTHOR_COL_WIDTH = 80;
+const MAX_AUTHOR_COL_WIDTH = 320;
+const MIN_DATE_COL_WIDTH = 80;
+const MAX_DATE_COL_WIDTH = 200;
+const MIN_SHA_COL_WIDTH = 64;
+const MAX_SHA_COL_WIDTH = 160;
+
+function clampAuthorCol(w: number): number {
+  return Math.max(MIN_AUTHOR_COL_WIDTH, Math.min(MAX_AUTHOR_COL_WIDTH, w));
+}
+function clampDateCol(w: number): number {
+  return Math.max(MIN_DATE_COL_WIDTH, Math.min(MAX_DATE_COL_WIDTH, w));
+}
+function clampShaCol(w: number): number {
+  return Math.max(MIN_SHA_COL_WIDTH, Math.min(MAX_SHA_COL_WIDTH, w));
+}
+
+/** 内容列分隔手柄 mousedown —— 复用 v2.34 的"绕过 Vue 响应式"模式 */
+function onColDragStart(target: ColDragTarget, e: MouseEvent): void {
+  e.preventDefault();
+  e.stopPropagation(); // 阻止冒泡到 wrapper
+  colDragging.value = true;
+  colDragTarget = target;
+  colDragStartX = e.clientX;
+  colDragStartWidths = {
+    author: colWidths.value.author,
+    date: colWidths.value.date,
+    sha: colWidths.value.sha,
+  };
+  colDragWrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
+  document.addEventListener('mousemove', onColDragMove);
+  document.addEventListener('mouseup', onColDragEnd);
+}
+
+function onColDragMove(e: MouseEvent): void {
+  if (!colDragging.value || !colDragTarget || !colDragStartWidths) return;
+  if (colDragRafId !== 0) return; // 已有 pending frame，跳过
+  colDragRafId = requestAnimationFrame(() => {
+    colDragRafId = 0;
+    if (!colDragging.value || !colDragTarget || !colDragStartWidths) return;
+    const delta = e.clientX - colDragStartX;
+    const start = colDragStartWidths;
+    let newAuthor = start.author;
+    let newDate = start.date;
+    let newSha = start.sha;
+    if (colDragTarget === 'author') newAuthor = clampAuthorCol(start.author + delta);
+    if (colDragTarget === 'date') newDate = clampDateCol(start.date + delta);
+    if (colDragTarget === 'sha') newSha = clampShaCol(start.sha + delta);
+    colDragFinalWidths = { author: newAuthor, date: newDate, sha: newSha };
+    if (colDragWrapper) {
+      // 绕过 Vue 响应式，直接改 CSS 变量让 1000 行 commit-row 实时跟随
+      // 格式跟 colWidthsToGridTemplate 一致：desc 用 minmax(MIN, 1fr) 占满余下空间
+      const newGrid = `minmax(${MIN_CONTENT_COL_WIDTH}px, 1fr) ${newAuthor}px ${newDate}px ${newSha}px`;
+      colDragWrapper.style.setProperty('--grid-template-columns', newGrid);
+    }
+  });
+}
+
+function onColDragEnd(): void {
+  if (colDragRafId !== 0) {
+    cancelAnimationFrame(colDragRafId);
+    colDragRafId = 0;
+  }
+  if (colDragging.value && colDragFinalWidths) {
+    colWidths.value = { ...colWidths.value, ...colDragFinalWidths };
+    try {
+      localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(colWidths.value));
+    } catch {
+      /* 忽略持久化错误 */
+    }
+  }
+  colDragging.value = false;
+  colDragTarget = null;
+  colDragStartWidths = null;
+  colDragFinalWidths = null;
+  colDragWrapper = null;
+  document.removeEventListener('mousemove', onColDragMove);
+  document.removeEventListener('mouseup', onColDragEnd);
+}
+
 /** 生成 fallback avatar：取名字首字符 */
 function avatarInitial(name: string): string {
   if (!name) return '?';
@@ -1168,9 +1272,39 @@ function refBadgeClass(refType?: string): string {
               title="拖动调整 Graph 列宽度"
             />
             <div class="git-graph-header__col git-graph-header__col--desc">描述</div>
-            <div class="git-graph-header__col git-graph-header__col--author">作者</div>
-            <div class="git-graph-header__col git-graph-header__col--date">日期</div>
-            <div class="git-graph-header__col git-graph-header__col--sha">SHA</div>
+            <div class="git-graph-header__col git-graph-header__col--author">
+              作者
+              <!--
+                v2.67：作者列 resize handle（紧贴列右边缘）
+                - position: absolute + right: -3px + width: 6px → 命中区中心对齐列右边线
+                - 拖动调 author 列宽（desc 用 1fr 自动填满余下空间）
+                - vscode-git-graph 风格：handle 是该列本身的命中区，跟列宽 1:1 同步
+              -->
+              <div
+                class="git-graph-header__col-resize-handle"
+                :class="{ 'git-graph-header__col-resize-handle--active': colDragging }"
+                @mousedown.stop="onColDragStart('author', $event)"
+                title="拖动调整作者列宽度"
+              />
+            </div>
+            <div class="git-graph-header__col git-graph-header__col--date">
+              日期
+              <div
+                class="git-graph-header__col-resize-handle"
+                :class="{ 'git-graph-header__col-resize-handle--active': colDragging }"
+                @mousedown.stop="onColDragStart('date', $event)"
+                title="拖动调整日期列宽度"
+              />
+            </div>
+            <div class="git-graph-header__col git-graph-header__col--sha">
+              SHA
+              <div
+                class="git-graph-header__col-resize-handle"
+                :class="{ 'git-graph-header__col-resize-handle--active': colDragging }"
+                @mousedown.stop="onColDragStart('sha', $event)"
+                title="拖动调整 SHA 列宽度"
+              />
+            </div>
           </div>
 
           <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row）
@@ -1606,6 +1740,8 @@ function refBadgeClass(refType?: string): string {
   text-align: center;
   /* v2.28：min-width: 0 防止内容撑大列宽（否则 SHA 会被挤到下一行） */
   min-width: 0;
+  /* v2.67：relative 让 col 内 .git-graph-header__col-resize-handle 能 absolute 定位到列右边缘 */
+  position: relative;
 }
 .git-graph-header__col--graph {
   /* 第一列 graph 标题（宽度由 inline 绑定 handleLeft） */
@@ -1681,6 +1817,41 @@ function refBadgeClass(refType?: string): string {
 
 /* v2.51：旧 .git-graph-header__resize 规则已删除——v2.50 起不再用浮动定位的独立手柄。
    旧规则保留注释供 git blame 参考。*/
+
+/* v2.67：author/date/sha 三个内容列的 resize handle（紧贴列右边缘）
+ *   - 跟 .git-graph-header__resize-handle 风格一致：right: -3px + width: 6px
+ *   - 父元素 .git-graph-header__col 加了 position: relative 让 absolute 生效
+ *   - 拖动调**该列**的列宽（desc 用 1fr 自动填满余下空间）
+ *   - hover/active 时显示高亮 1px 主色竖线 + soft 背景（与 graph 列 handle 一致）
+ */
+.git-graph-header__col-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* 紧贴列右边缘：right: -3px + width: 6px → 中心在列右边线 */
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 6;
+  background: transparent;
+  transition: background 0.12s;
+}
+.git-graph-header__col-resize-handle:hover,
+.git-graph-header__col-resize-handle--active {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
+}
+.git-graph-header__col-resize-handle:hover::before,
+.git-graph-header__col-resize-handle--active::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 16px;
+  background: var(--color-primary, #74b830);
+  border-radius: 1px;
+}
 
 /* v2.47：body 容器（包含背景层 SVG + 行层 commit-row）
  *
