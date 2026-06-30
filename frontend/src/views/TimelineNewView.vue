@@ -246,10 +246,12 @@ const svgRender = computed<VscodeSvgRenderResult | null>(() => {
   return renderGraphVscode(dto, {
     expandedAt: expandedRow.value,
     expandY: activeExpandY.value || undefined,
-    // v2.64: 把 handleLeft 透传给 renderGraphVscode 作为 maxWidth。
-    // 对齐 vscode-git-graph Graph.limitMaxWidth (graph.ts:677-680)：
+    // v2.65: 把 handleLeft 透传给 renderGraphVscode 作为 maxWidth。
+    // 对齐 vscode-git-graph Graph.setSvgWidth (graph.ts:697-700)：
     //   SVG 渲染宽度 = min(contentWidth, maxWidth)
-    //   超出 maxWidth 的 lane 在 (maxWidth-12)px ~ maxWidth px 区间 mask 渐变 fade
+    //   超出 maxWidth 的 lane 在 (maxWidth-12)px ~ maxWidth px 区间 CSS mask 渐变 fade
+    //   （v2.65 改用 CSS mask-image 而非 SVG <mask>，规避 maskUnits=userSpaceOnUse
+    //   + 默认 -10%/120% 在不同浏览器的不一致行为）
     maxWidth: handleLeft.value,
   });
 });
@@ -557,36 +559,26 @@ const viewBox = computed(() => {
   const r = svgRender.value;
   return r ? `0 0 ${r.contentWidth} ${r.height}` : '0 0 0 0';
 });
+/**
+ * v2.65：SVG :width 绑到 handleLeft（用户拖的列宽），不再绑到 r.width (min contentWidth/maxWidth)。
+ *
+ * 原因：v2.64 用 SVG <mask> 处理渐变 fade 时，SVG :width 必须是 min(contentWidth, maxWidth)
+ * 才能让 mask rect 正确跨过 SVG 视口。v2.65 改用 CSS mask-image（更稳的浏览器一致方案）：
+ *   - SVG :width = handleLeft（CSS 视觉宽度 = 用户拖的列宽）
+ *   - viewBox = 0 0 contentWidth height（坐标系不变）
+ *   - CSS mask-image 在 SVG 元素上以 handleLeft 实际像素为单位
+ *     渐变 black 0% → black calc(100% - 12px) → transparent 100%
+ *     等价于 vscode-git-graph (maxWidth-12, maxWidth) 12px 渐变
+ *   - 这样 viewBox 0..contentWidth 内部坐标全在 SVG 视口内，
+ *     不再需要 renderGraphVscode 截短 width（但保留 maxWidth 接口对齐 vscode 命名）
+ */
 const svgWidth = computed(() => {
-  const r = svgRender.value;
-  return r ? `${r.width}px` : '0px';
+  return `${handleLeft.value}px`;
 });
 const svgHeight = computed(() => {
   const r = svgRender.value;
   return r ? `${r.height}px` : '0px';
 });
-
-/**
- * v2.64：mask 渐变 fade 的 offset 计算。
- *
- * 对齐 vscode-git-graph Graph.applyMaxWidth (graph.ts:689-695)：
- *   offset1 = maxWidth > -1 ? (maxWidth - 12) / contentWidth : 1
- *   offset2 = maxWidth > -1 ? maxWidth / contentWidth : 1
- *
- * - contentWidth <= maxWidth：两个 stop 都退到 1，mask 100% 白 = 整图可见（无 fade）
- * - contentWidth >  maxWidth：从 (maxWidth-12)px 开始 12px 渐变到 maxWidth 变黑 = 超出的 lane 渐变消失
- *
- * 返回字符串值绑到 SVG <stop> 的 offset 属性。
- */
-function maskOffset(contentWidth: number, maxWidth: number, which: 1 | 2): string {
-  if (maxWidth <= 0 || contentWidth <= maxWidth) {
-    return '1';
-  }
-  const numerator = which === 1 ? maxWidth - 12 : maxWidth;
-  // 防止负数：maxWidth < 12 时 offset1 会越界，直接退到 0 让整图黑
-  if (which === 1 && maxWidth < 12) return '0';
-  return `${numerator / contentWidth}`;
-}
 
 // ============================================================
 // Path 分组（按 color 分组，对齐 Gitea flow-color-16-N 染色）
@@ -1198,125 +1190,92 @@ function refBadgeClass(refType?: string): string {
               <div class="git-graph-bg-scroll" :style="{ height: svgHeight }">
                 <svg
                   class="git-graph-svg"
+                  :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > handleLeft }"
                   :viewBox="viewBox"
                   :width="svgWidth"
                   :height="svgHeight"
                 >
                   <!--
-                    v2.64：对齐 vscode-git-graph Graph.svg 构造 (graph.ts:370-388)
-                    - linearGradient #gg-graph-gradient: 0..1 横向 stop，白→黑
-                    - mask #gg-graph-mask: 整图 fill 这个 gradient，alpha 跟随 gradient
-                    - 整个 graph group 用 mask="url(#gg-graph-mask)"
-                    - stop offset 由 handleLeft / contentWidth 动态算：
-                        contentWidth <= maxWidth:  全白（无 fade）= offset1=offset2=1
-                        contentWidth >  maxWidth:  从 (maxWidth-12)/contentWidth 渐变到 maxWidth/contentWidth
+                    v2.65：渐变 fade 改用 CSS mask-image（在 .git-graph-svg 上），不再用 SVG <defs>+<mask>。
+                    原因：v2.64 的 SVG mask + maskUnits=userSpaceOnUse + 默认 x=-10%/width=120% 在不同浏览器
+                    （WebKit/WebView2/Chromium）行为不一致，少数情况下整图被 mask 全黑遮住不可见。
+                    CSS mask-image 用 linear-gradient 在 SVG 元素像素坐标下渐变，浏览器一致性更好。
+                    视觉等价：黑 0% → 黑 calc(100% - 12px) → 透明 100% = vscode-git-graph (maxWidth-12, maxWidth) 12px 渐变
                   -->
-                  <defs>
-                    <linearGradient
-                      id="gg-graph-gradient"
-                      x1="0"
-                      y1="0"
-                      x2="1"
-                      y2="0"
-                    >
-                      <stop
-                        :offset="maskOffset(svgRender?.contentWidth ?? 0, handleLeft, 1)"
-                        stop-color="white"
-                      />
-                      <stop
-                        :offset="maskOffset(svgRender?.contentWidth ?? 0, handleLeft, 2)"
-                        stop-color="black"
-                      />
-                    </linearGradient>
-                    <mask
-                      id="gg-graph-mask"
-                      maskUnits="userSpaceOnUse"
-                    >
-                      <rect
-                        class="gg-graph-mask-rect"
-                        :width="svgRender?.contentWidth ?? 0"
-                        :height="svgRender?.height ?? 0"
-                        fill="url(#gg-graph-gradient)"
-                      />
-                    </mask>
-                  </defs>
 
-                  <!-- 应用 mask：所有 path + circle 都受 mask 渐变影响 -->
-                  <g mask="url(#gg-graph-mask)">
-                    <g
-                      v-for="pg in pathGroups"
-                      :key="pg.id"
-                      class="flow-group"
-                      :class="[pg.colorClass, { 'flow-group--shadow': pg.kind === 'shadow' }]"
-                      :data-color="pg.colorIndex"
-                    >
-                      <path
-                        v-if="pg.d"
-                        :d="pg.d"
-                        :stroke="pg.kind === 'shadow'
-                          ? '#000'
-                          : (pg.colorHex ?? '#888')"
-                        :stroke-width="pg.kind === 'shadow' ? 4 : 2"
-                        :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
-                        fill="none"
-                        stroke-linecap="round"
-                        vector-effect="non-scaling-stroke"
-                      />
-                    </g>
-                    <g class="git-graph-vertices">
-                      <template v-for="c in svgCircleNodes" :key="`dot-${c.sha}`">
+                  <g
+                    v-for="pg in pathGroups"
+                    :key="pg.id"
+                    class="flow-group"
+                    :class="[pg.colorClass, { 'flow-group--shadow': pg.kind === 'shadow' }]"
+                    :data-color="pg.colorIndex"
+                  >
+                    <path
+                      v-if="pg.d"
+                      :d="pg.d"
+                      :stroke="pg.kind === 'shadow'
+                        ? '#000'
+                        : (pg.colorHex ?? '#888')"
+                      :stroke-width="pg.kind === 'shadow' ? 4 : 2"
+                      :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
+                      fill="none"
+                      stroke-linecap="round"
+                      vector-effect="non-scaling-stroke"
+                    />
+                  </g>
+                  <g class="git-graph-vertices">
+                    <template v-for="c in svgCircleNodes" :key="`dot-${c.sha}`">
+                      <circle
+                        v-if="c.isCurrent"
+                        class="commit-vertex commit-vertex--head"
+                        :cx="c.cx"
+                        :cy="c.cy"
+                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                        fill="#fff"
+                        :stroke="c.stroke ?? c.colorHex ?? '#888'"
+                        :stroke-width="c.strokeWidth ?? 2"
+                        :stroke-opacity="c.strokeOpacity ?? 1"
+                      >
+                        <title>{{ c.title }}</title>
+                      </circle>
+                      <template v-else-if="c.isStash">
                         <circle
-                          v-if="c.isCurrent"
-                          class="commit-vertex commit-vertex--head"
+                          class="commit-vertex commit-vertex--stash"
                           :cx="c.cx"
                           :cy="c.cy"
                           :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
-                          fill="#fff"
-                          :stroke="c.stroke ?? c.colorHex ?? '#888'"
-                          :stroke-width="c.strokeWidth ?? 2"
-                          :stroke-opacity="c.strokeOpacity ?? 1"
+                          fill="none"
+                          :stroke="c.colorHex ?? '#888'"
+                          stroke-width="1"
                         >
                           <title>{{ c.title }}</title>
                         </circle>
-                        <template v-else-if="c.isStash">
-                          <circle
-                            class="commit-vertex commit-vertex--stash"
-                            :cx="c.cx"
-                            :cy="c.cy"
-                            :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
-                            fill="none"
-                            :stroke="c.colorHex ?? '#888'"
-                            stroke-width="1"
-                          >
-                            <title>{{ c.title }}</title>
-                          </circle>
-                          <circle
-                            class="commit-vertex commit-vertex--stash-inner"
-                            :cx="c.cx"
-                            :cy="c.cy"
-                            :r="hoveredGraphRow === c.row ? 3 : 2"
-                            fill="none"
-                            :stroke="c.colorHex ?? '#888'"
-                            stroke-width="1"
-                          >
-                            <title>{{ c.title }}</title>
-                          </circle>
-                        </template>
                         <circle
-                          v-else
-                          class="commit-vertex"
+                          class="commit-vertex commit-vertex--stash-inner"
                           :cx="c.cx"
                           :cy="c.cy"
-                          :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
-                          :fill="c.colorHex ?? '#888'"
-                          :stroke="c.stroke ?? 'rgba(30, 30, 30, 0.75)'"
-                          :stroke-width="c.strokeWidth ?? 1"
-                          :stroke-opacity="c.strokeOpacity ?? 0.75"
+                          :r="hoveredGraphRow === c.row ? 3 : 2"
+                          fill="none"
+                          :stroke="c.colorHex ?? '#888'"
+                          stroke-width="1"
                         >
                           <title>{{ c.title }}</title>
                         </circle>
                       </template>
-                    </g>
+                      <circle
+                        v-else
+                        class="commit-vertex"
+                        :cx="c.cx"
+                        :cy="c.cy"
+                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                        :fill="c.colorHex ?? '#888'"
+                        :stroke="c.stroke ?? 'rgba(30, 30, 30, 0.75)'"
+                        :stroke-width="c.strokeWidth ?? 1"
+                        :stroke-opacity="c.strokeOpacity ?? 0.75"
+                      >
+                        <title>{{ c.title }}</title>
+                      </circle>
+                    </template>
                   </g>
                 </svg>
               </div>
@@ -1781,10 +1740,39 @@ function refBadgeClass(refType?: string): string {
   overflow: visible;
 }
 
-/* SVG 自身 */
+/* v2.65：渐变 fade 改用 CSS mask-image
+ *   - 默认无 mask（少量 lane 时 graph 完整显示，无渐变）
+ *   - 加 .git-graph-svg--fade 时启用 mask-image：
+ *       黑 0% → 黑 calc(100% - 12px) → 透明 100%
+ *     等价于 vscode-git-graph (maxWidth-12, maxWidth) 12px 渐变 (graph.ts:689-695)
+ *   - mask-image 在 SVG 元素自身像素坐标下渐变，跟 :width 走
+ *   - WebKit 前缀兼容 Wails 的 macOS WebKit WebView
+ *   - 触发条件：contentWidth > handleLeft（多 lane 场景），
+ *     少量 lane 时不加 class，避免误把无渐变的 lane fade 掉
+ *   - 12px 渐变落在 SVG 视口最后 12px（handleLeft 实际像素），
+ *     对应 viewBox 内部坐标 (contentWidth - 12*contentWidth/handleLeft) .. contentWidth
+ */
 .git-graph-svg {
   display: block;
   background: var(--color-graph-bg, var(--color-shell-main-bg));
+}
+.git-graph-svg--fade {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    black 0%,
+    black calc(100% - 12px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    black 0%,
+    black calc(100% - 12px),
+    transparent 100%
+  );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 .git-graph-vertices {
