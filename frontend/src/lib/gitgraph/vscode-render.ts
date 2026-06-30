@@ -86,6 +86,9 @@ export interface VscodeSvgNode {
 	isCurrent?: boolean;
 	/** stash 标记 (vscode Vertex.draw: r=4.5 outer + r=2 inner 双圈) */
 	isStash?: boolean;
+	/** 是否已提交 (true) 还是未提交的 worktree 变更 (false)
+	 * 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080 */
+	isCommitted?: boolean;
 }
 
 export interface VscodeSvgRenderResult {
@@ -387,6 +390,7 @@ export function renderGraphVscode(
 			colorHex,
 			isCurrent: node.isCurrent,
 			isStash: node.isStash,
+			isCommitted: node.isCommitted,
 		});
 	}
 

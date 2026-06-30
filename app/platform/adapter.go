@@ -199,6 +199,9 @@ type GraphNodeDTO struct {
 	IsCurrent bool `json:"isCurrent,omitempty"`
 	// IsStash 是否 stash 节点 (vscode Vertex.draw 画成 r=4.5 外圈 + r=2 内圈)
 	IsStash bool `json:"isStash,omitempty"`
+	// IsCommitted 是否已提交 (true) 还是未提交的 worktree 变更 (false)
+	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 stroke = #808080
+	IsCommitted bool `json:"isCommitted,omitempty"`
 }
 
 // GraphEdgeDTO 图边

@@ -485,6 +485,7 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 			RefTypes:    refTypes,
 			IsCurrent:   n.IsCurrent,
 			IsStash:     n.IsStash,
+			IsCommitted: n.IsCommitted,
 		})
 	}
 

@@ -68,6 +68,10 @@ type GraphNode struct {
 	IsCurrent bool
 	// IsStash 是否 stash 节点 (vscode Vertex.draw 画成 r=4.5 外圈 + r=2 内圈)
 	IsStash bool
+	// IsCommitted 是否已提交 (true) 还是未提交的 worktree 变更 (false)
+	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080
+	// 目前 NoCheckout:true 模式工作区永远为空，此字段始终为 true
+	IsCommitted bool
 }
 
 // GraphEdge 图中的一条连线

@@ -334,6 +334,7 @@ func (g *graphVscode) loadCommits(commits []git.CommitInfo, head string) {
 			id:          i,
 			sha:         c.SHA,
 			isStash:     false, // 当前数据源不传 stash
+			isCommitted: true,  // 默认已提交；uncommitted 顶点在 vscode 中由 Vertex.setNotCommitted() 标记
 			connections: make(map[int]*vsUnavailablePoint),
 		}
 	}
@@ -455,6 +456,7 @@ func (g *graphVscode) buildResultWithTruncated(truncated bool) *GraphResult {
 			RefTypes:    append([]git.RefType(nil), c.RefTypes...),
 			IsCurrent:   v.isCurrent,
 			IsStash:     v.isStash,
+			IsCommitted: v.isCommitted,
 		}
 	}
 

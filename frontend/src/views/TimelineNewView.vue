@@ -990,6 +990,7 @@ interface SvgCircleNode {
   colorHex?: string;
   isCurrent?: boolean;
   isStash?: boolean;
+  isCommitted?: boolean;
   refs?: string[];
   refTypes?: string[];
   authorName: string;
@@ -1017,6 +1018,7 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
     colorHex: node.colorHex,
     isCurrent: node.isCurrent,
     isStash: node.isStash,
+    isCommitted: node.isCommitted,
     refs: node.refs,
     refTypes: node.refTypes,
     authorName: node.authorName,
@@ -1776,15 +1778,14 @@ function refBadgeClass(refType?: string): string {
                           :class="{
                             'commit-vertex--head': c.isCurrent,
                             'commit-vertex--stash': c.isStash && !c.isCurrent,
-                            'commit-vertex--active': hoveredDotSha === c.sha,
                           }"
                           :cx="c.cx"
                           :cy="c.cy"
-                          :r="c.r + 1"
-                          :fill="hoveredDotSha === c.sha ? '#fff' : (c.colorHex ?? '#888')"
-                          :stroke="hoveredDotSha === c.sha ? (c.colorHex ?? '#888') : (c.stroke ?? 'rgba(30, 30, 30, 0.75)')"
-                          :stroke-width="hoveredDotSha === c.sha ? 2 : (c.strokeWidth ?? 1)"
-                          :stroke-opacity="hoveredDotSha === c.sha ? 1 : (c.strokeOpacity ?? 0.75)"
+                          :r="c.r"
+                          :fill="c.isCurrent ? 'transparent' : (c.colorHex ?? '#888')"
+                          :stroke="c.isCommitted === false ? '#808080' : (c.isCurrent ? (c.colorHex ?? '#888') : 'rgba(30, 30, 30, 0.75)')"
+                          :stroke-width="c.isCurrent ? 2 : 1"
+                          :stroke-opacity="c.isCurrent ? 1 : 0.75"
                         >
                           <title>{{ c.title }}</title>
                         </circle>
@@ -2697,29 +2698,30 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   gap: 0;
   padding: 0;
-  /* 小圆角：对齐 VSCode Git Graph .gitRef */
-  border-radius: 3px;
-  border: 1px solid var(--row-lane-color, var(--color-primary));
+  /* VSCode Git Graph .gitRef 默认样式：灰底 + 灰边框 + 圆角 5px */
+  border-radius: 5px;
+  border: 1px solid rgba(128, 128, 128, 0.75);
   font-size: 11px;
   font-weight: 500;
   flex-shrink: 0;
   white-space: nowrap;
-  /* 透明背景：对齐 VSCode */
-  background-color: transparent;
-  /* 文字颜色保持默认，不随 lane 变色（VSCode .gitRef 文字色=编辑器默认色） */
+  background-color: rgba(128, 128, 128, 0.15);
   color: var(--color-text, #ccc);
   line-height: 18px;
   height: 18px;
   overflow: hidden;
 }
-/* v3.14：图标容器 —— 图标背景用 lane 色填充，SVG 图形用深色（VSCode .gitRef > svg） */
+/* 图标容器（VSCode .gitRef > svg）：
+ * - 图标背景 = lane 色（--row-lane-color，来自 commit 所在 lane）
+ * - 图标 SVG 图形 = 深色（fill = editor-background）
+ * dot hover 时通过 .commit-row--dot-active .ref-badge 变 border-color */
 .ref-badge__icon {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
   padding: 2px;
   /* 图标背景 = lane 色（VSCode .gitRef > svg） */
-  background-color: var(--row-lane-color, var(--color-primary));
+  background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
   /* SVG 图形 = 深色（VSCode .gitRef > svg fill=editor-background） */
   stroke: var(--color-shell-main-bg, #0f1115);
   stroke-width: 2;
@@ -2728,6 +2730,10 @@ function refBadgeClass(refType?: string): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+/* dot-hover 时 border 变 lane 色（对齐 VSCode .gitRef.active） */
+.commit-row--dot-active .ref-badge {
+  border-color: var(--row-lane-color);
 }
 
 /* commit-refs 容器：多个 badge 横向排列，按 VSCode 风格放在 subject 前面。*/
@@ -2788,14 +2794,6 @@ function refBadgeClass(refType?: string): string {
   transition: background var(--t-fast, 120ms) var(--ease, ease-out);
 }
 
-/* v3.0：dot active 状态 —— 当 dot 被 hover 时给个 lane 色 halo
- * 用 filter: drop-shadow 比额外 circle 更轻量，且对三种 dot（head/stash/普通）统一生效 */
-.commit-vertex--active {
-  filter: drop-shadow(0 0 4px var(--active-lane-color, currentColor));
-  transition: filter var(--t-fast, 120ms) var(--ease, ease-out);
-}
-
-
 
 /* v3.12：dot hover tooltip（普通 HTML div，绝对定位于 .git-graph-body 内）
  *  v-show 控制显隐：tooltip 始终在 DOM 中，mouse 可达
@@ -2807,21 +2805,21 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
 }
 .git-graph-tooltip__pointer {
+  /* vscode 风格：左侧竖线 30px × 2px，lane 色 */
   position: absolute;
-  left: -5px;
+  left: 4px;
   top: 0;
-  width: 8px;
-  height: 8px;
+  width: 30px;
+  height: 2px;
+  margin-top: -1px;
   background-color: var(--tooltip-color, #888);
-  transform: rotate(45deg);
-  border-radius: 1px;
 }
 .git-graph-tooltip__content {
   position: relative;
-  margin-left: 8px;
+  margin-left: 23px;
   background: var(--color-bg-elevated, #1e1e1e);
   border: 1.5px solid var(--tooltip-color, #888);
-  border-radius: 4px;
+  border-radius: 5px;
   padding: 5px 8px;
   min-width: 100px;
   max-width: 200px;
