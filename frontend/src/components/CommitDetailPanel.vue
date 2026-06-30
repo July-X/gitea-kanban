@@ -616,21 +616,15 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 }
 
 /* panel 变体（inline 手风琴）：
- *   - flex column：header 顶 + body 撑开
- *   - 让内部子元素可以各自滚动 */
+ *   - v3.7：改 flex: 1 1 auto → display: block
+ *     之前 flex:1 撑满 accordion 容器（=300px），导致 cd-panel__left/right 强制撑到容器高度，
+ *     内容 < 容器时空滚动条出现。现在 accordion 自己 max-height + overflow: auto 控制滚动，
+ *     panel 用 block 让内容自然撑高。*/
 .cd-panel--panel {
   background: transparent;
   border-top: none;
   padding: 0;
-  /* v1.8 bugfix：原 `height: 100%` 在 flex column 父容器 (.commit-accordion) 里
-   * 不会起作用 —— flex 子元素的高度由 flex 属性决定，height:100% 被忽略。
-   * 结果：cd-panel 高度 = 内容自然高度，accordion 容器 260px max-height 形同虚设，
-   * 整个面板撑开到屏幕底部。
-   * 改用 `flex: 1 1 auto` + `min-height: 0`：
-   *   - flex:1 让它撑满 accordion 容器剩余空间（260px - 自身 margin 等）
-   *   - min-height:0 允许内部 body/左右栏被压缩、出现滚动条
-   * 配合 .commit-accordion 的 max-height:260px + overflow:hidden 形成完整裁剪。*/
-  flex: 1 1 auto;
+  display: block;
   min-height: 0;
 }
 
@@ -677,10 +671,12 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 .cd-panel__body {
   display: grid;
   grid-template-columns: 4fr 6fr;
-  flex: 1;
+  /* v3.7：去掉 flex: 1 —— parent (.cd-panel--panel) 现在是 block，flex:1 无效
+   * accordion 自身 max-height + overflow: auto 负责整体滚动
+   * 之前 max-height:300px + overflow:hidden 时靠 .cd-panel__left/right 各自滚动 */
   min-height: 0;
   min-width: 0; /* v2.0：grid 容器允许子项收缩 */
-  overflow: hidden;
+  /* v3.7：去掉 overflow: hidden —— accordion 自己滚，body 不再裁剪 */
   /* 4:6 之间的纵向分隔线 */
   border-top: 1px solid var(--color-divider);
 }

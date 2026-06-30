@@ -802,6 +802,18 @@ function formatRelative(iso: string): string {
 }
 
 /**
+ * v3.7：完整绝对时间（ISO 时间 → "2026-06-30 14:23:45" 本地时区格式）
+ *   - 用作 commit-row 日期列的 title tooltip（对齐 vscode web/utils.ts:305 formatShortDate.title）
+ *   - 显示本地时区更符合用户直觉（vscode 也是 Date 对象 getHours/getMinutes）
+ */
+function formatAbsolute(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/**
  * v2.10：当前展开的 commit node（直接从 allRows 拿，懒加载 detail 用）
  */
 const expandedCommitNode = computed<
@@ -1735,7 +1747,7 @@ function refBadgeClass(refType?: string): string {
                     class="commit-row__col commit-row__col--date"
                     data-col="2"
                   >
-                    <span class="commit-time">{{ formatRelative(r.commit.date) }}</span>
+                    <span class="commit-time" :title="formatAbsolute(r.commit.date)">{{ formatRelative(r.commit.date) }}</span>
                   </div>
                   <!-- col 3: Author 列 -->
                   <div
@@ -2439,8 +2451,9 @@ function refBadgeClass(refType?: string): string {
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
  * 右侧内容列用实底色；左侧 graph 列用半透明轨道，让 SVG flow 和圆点仍在轨道上方可见。
- * v2.66：accordion 嵌入 row 后，hover 选择器也命中展开面板，覆盖其 elevated 底色，
- * 视觉上 row + accordion 整段统一高亮（用户反馈 hover 高度未对齐）。*/
+ * v3.7：accordion 不再被 hover 选择器命中（详情面板要有自己的 elevated 卡片样式，
+ * 不能被 commit-row 整体 hover 覆盖成灰色。彻底对齐 vscode-git-graph——vscode
+ * 详情面板有独立背景，hover 不影响。*/
 .commit-row:hover .commit-row__col--desc,
 .commit-row:hover .commit-row__col--author,
 .commit-row:hover .commit-row__col--date,
@@ -2448,9 +2461,7 @@ function refBadgeClass(refType?: string): string {
   background: rgba(128, 128, 128, 0.15);
   border-right-color: transparent;
 }
-.commit-row:hover .commit-accordion {
-  background: rgba(128, 128, 128, 0.15);
-}
+/* v3.7：删除 .commit-row:hover .commit-accordion 规则（详情面板不应该被 hover 改动） */
 /* v1.6 可点击的 commit 行 */
 .commit-row--clickable {
   cursor: pointer;
@@ -2463,9 +2474,7 @@ function refBadgeClass(refType?: string): string {
   background: rgba(128, 128, 128, 0.15);
   border-right-color: transparent;
 }
-.commit-row--clickable:hover .commit-accordion {
-  background: rgba(128, 128, 128, 0.15);
-}
+/* v3.7：删除 .commit-row--clickable:hover .commit-accordion（详情面板不应被 hover 改） */
 .commit-row--clickable:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
@@ -2490,6 +2499,7 @@ function refBadgeClass(refType?: string): string {
 .commit-row--clickable.commit-row--expanded:hover .commit-accordion {
   background: rgba(128, 128, 128, 0.35);
 }
+/* v3.7：删除 .commit-row--clickable.commit-row--expanded:hover .commit-accordion hover 规则（详情面板不应被 hover 改） */
 /* Transition 行（merge edge 中间段，无 commit）—— 占位用，与 dot overlay 行节奏对齐
  * v2.40：26 → 30px，与 commit-row / SVG ROW_HEIGHT 同步（dot 行节奏对齐） */
 .commit-row--relation {
@@ -2688,23 +2698,25 @@ function refBadgeClass(refType?: string): string {
        *   accordion 跳过 graph 占位列，只跨 4 个内容列，宽度与列宽完美匹配
        *   之前 grid-column: 1 / -1 跨了 5 列（含 graph 占位列），左边多了一段空隙 */
       grid-column: 2 / 6;
-      /* v2.66：max-height 600 → 300（用户拍板"缩减一半"）。
-         4:6 panel 内部 .cd-panel__left/right 各自有 overflow-y: auto，超出仍可滚。 */
-      max-height: 300px;
+      /* v3.7：取消 300px 硬控高度（对齐用户反馈"还有空间就别出纵向滚动条"）
+       *   - max-height 改为 min(70vh, 600px) 作为软上限，超出才滚动
+       *   - 默认 overflow: visible（小内容不显示空滚动条），
+       *     超上限时 CSS 自动转 overflow: auto（max-height 触发）
+       *   - 让 commit-row 高度 = ROW_H + accordion 自然高度（vscode: 内容撑高）
+       * 之前 v2.66 hardcode 300px，导致 panel flex:1 在内容 < 300px 时
+       * 给内部左右栏一个空容器高度，触发空滚动条。 */
+      max-height: min(70vh, 600px);
+      overflow: auto;
       /* v2.12：panel 内部 grid 4:6 各自滚，accordion 本身隐藏外层滚动避免双滚动条 */
-      overflow: hidden;
-      /* 滚动条样式：兜底滚动时使用（理论上不会触发） */
+      /* v2.12 → v3.7：去掉 overflow:hidden 反而能自然显示，max-height 触发滚动 */
       scrollbar-width: thin;
       scrollbar-color: var(--scrollbar-thumb) transparent;
       /* 入场动画 */
       animation: cdAccordionOpen 180ms cubic-bezier(0.16, 1, 0.3, 1);
-      /* 让内部 panel 能用 height: 100% 撑满手风琴（v2.12 双栏 4:6 必需） */
+      /* 让内部 panel 用 height: 100% 撑满手风琴 */
       display: flex;
       flex-direction: column;
       /* v2.51：手风琴现在在 .git-graph-rows 内部（rows 是 flex item，已经从 bg 容器右边开始），
-         自然对齐 desc 列左边缘 = 对齐 bg 容器右边缘。不再用 margin-left 推 130px（那是 v2.14
-         之前 .git-graph-list 在 wrapper 直接子元素时的旧规则，现在双重偏移会让手风琴左边
-         出现 130px 空白"未对齐最左侧"）。
          宽度 = 100% 自动填满 rows 容器（=wrapper 宽 - bg 容器宽）。 */
       margin: 4px 0;
       width: 100%;
