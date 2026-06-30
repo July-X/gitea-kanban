@@ -433,10 +433,27 @@ func (a *App) SetUserPrefs(args SetUserPrefsArgs) (map[string]any, error) {
 
 // GraphResultDTO 图结果（暴露给前端，与 platform.GraphResult 对齐）
 type GraphResultDTO struct {
-	Nodes     []GraphNodeDTO `json:"nodes"`
-	Edges     []GraphEdgeDTO `json:"edges"`
-	MaxLane   int            `json:"maxLane"`
-	Truncated bool           `json:"truncated"`
+	Nodes     []GraphNodeDTO   `json:"nodes"`
+	Edges     []GraphEdgeDTO   `json:"edges"`
+	Branches  []GraphBranchDTO `json:"branches,omitempty"`
+	MaxLane   int              `json:"maxLane"`
+	Truncated bool             `json:"truncated"`
+}
+
+// GraphBranchDTO 一条完整 branch path（对齐 platform.GraphBranchDTO）
+type GraphBranchDTO struct {
+	Color int                  `json:"color"`
+	End   int                  `json:"end"`
+	Lines []GraphBranchLineDTO `json:"lines"`
+}
+
+// GraphBranchLineDTO branch 上的一段线（对齐 platform.GraphBranchLineDTO）
+type GraphBranchLineDTO struct {
+	X1          int  `json:"x1"`
+	Y1          int  `json:"y1"`
+	X2          int  `json:"x2"`
+	Y2          int  `json:"y2"`
+	LockedFirst bool `json:"lockedFirst"`
 }
 
 // GraphNodeDTO 图节点
@@ -454,6 +471,8 @@ type GraphNodeDTO struct {
 	Parents     []string `json:"parents"`
 	Refs        []string `json:"refs,omitempty"`
 	RefTypes    []string `json:"refTypes,omitempty"`
+	IsCurrent   bool     `json:"isCurrent,omitempty"`
+	IsStash     bool     `json:"isStash,omitempty"`
 }
 
 // GraphEdgeDTO 图边
@@ -2498,6 +2517,8 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 			Parents:     n.Parents,
 			Refs:        n.Refs,
 			RefTypes:    n.RefTypes,
+			IsCurrent:   n.IsCurrent,
+			IsStash:     n.IsStash,
 		})
 	}
 
@@ -2513,9 +2534,29 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 		})
 	}
 
+	branches := make([]GraphBranchDTO, 0, len(r.Branches))
+	for _, b := range r.Branches {
+		lines := make([]GraphBranchLineDTO, 0, len(b.Lines))
+		for _, ln := range b.Lines {
+			lines = append(lines, GraphBranchLineDTO{
+				X1:          ln.X1,
+				Y1:          ln.Y1,
+				X2:          ln.X2,
+				Y2:          ln.Y2,
+				LockedFirst: ln.LockedFirst,
+			})
+		}
+		branches = append(branches, GraphBranchDTO{
+			Color: b.Color,
+			End:   b.End,
+			Lines: lines,
+		})
+	}
+
 	return GraphResultDTO{
 		Nodes:     nodes,
 		Edges:     edges,
+		Branches:  branches,
 		MaxLane:   r.MaxLane,
 		Truncated: r.Truncated,
 	}

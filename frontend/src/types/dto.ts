@@ -549,6 +549,10 @@ export interface GraphNodeDto {
    * 'branch' | 'remoteBranch' | 'tag'，让前端严格区分 badge 颜色，不再用启发式猜
    */
   refTypes?: string[];
+  /** HEAD 节点，vscode 风格渲染为空心圆 */
+  isCurrent?: boolean;
+  /** stash 节点，vscode 风格渲染为双圈 */
+  isStash?: boolean;
 }
 
 /** 边类型：0=normal(直线下行), 1=branch(分支), 2=merge(合并) */
@@ -565,10 +569,25 @@ export interface GraphEdgeDto {
   type: GraphEdgeTypeDto;
 }
 
+export interface GraphBranchLineDto {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  lockedFirst: boolean;
+}
+
+export interface GraphBranchDto {
+  color: number;
+  end: number;
+  lines: GraphBranchLineDto[];
+}
+
 /** 结构化 Graph 完整结果（Go BuildGraph 输出） */
 export interface GraphResultDto {
   nodes: GraphNodeDto[];
   edges: GraphEdgeDto[];
+  branches?: GraphBranchDto[];
   maxLane: number;
   truncated: boolean;
 }

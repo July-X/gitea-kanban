@@ -18,11 +18,7 @@ package graph
 // 与原 BuildGraph 并行存在,后端 adapter 切换到 BuildGraphVscode 前不影响
 // Gitea 风格的 BuildGraph 路径。
 
-import (
-	"sort"
-
-	"gitea-kanban/app/git"
-)
+import "gitea-kanban/app/git"
 
 // vsNULL_VERTEX_ID mirrors graph.ts:2 (NULL_VERTEX_ID = -1)
 const vsNULL_VERTEX_ID = -1
@@ -35,7 +31,7 @@ type vsPoint struct {
 
 // vsLine mirrors graph.ts:21-26 (PlacedLine 之前的 Line + lockedFirst)
 type vsLine struct {
-	p1, p2     vsPoint
+	p1, p2      vsPoint
 	lockedFirst bool
 }
 
@@ -47,8 +43,8 @@ type vsUnavailablePoint struct {
 
 // vsBranch mirrors graph.ts:38-55
 type vsBranch struct {
-	colour         int   // 颜色索引(全局)
-	end            int   // branch 覆盖的最后一行 + 1
+	colour         int // 颜色索引(全局)
+	end            int // branch 覆盖的最后一行 + 1
 	lines          []vsLine
 	numUncommitted int
 }
@@ -74,11 +70,11 @@ type vsVertex struct {
 	nextX       int // 下一个"空闲" lane(从 0 开始扫)
 	parents     []*vsVertex
 	children    []*vsVertex
-	nextParent  int                          // 还没处理完的 parent 索引
-	onBranch    *vsBranch                    // 当前 vertex 挂在哪个 branch 上(nil = 未挂)
-	isCommitted bool                         // true 表示 commit 已落地
-	isCurrent   bool                         // HEAD 标记
-	connections map[int]*vsUnavailablePoint   // 该 vertex 的哪些 lane 已被 branch 占用
+	nextParent  int                         // 还没处理完的 parent 索引
+	onBranch    *vsBranch                   // 当前 vertex 挂在哪个 branch 上(nil = 未挂)
+	isCommitted bool                        // true 表示 commit 已落地
+	isCurrent   bool                        // HEAD 标记
+	connections map[int]*vsUnavailablePoint // 该 vertex 的哪些 lane 已被 branch 占用
 }
 
 // addChild mirrors graph.ts:187-189
@@ -165,14 +161,14 @@ func (v *vsVertex) getColour() int {
 
 // graphVscode mirrors graph.ts:337-... Graph class
 type graphVscode struct {
-	maxColors    int
-	sorted       []git.CommitInfo
-	shaToRow     map[string]int
-	vertices     []*vsVertex
-	branches     []*vsBranch
+	maxColors        int
+	sorted           []git.CommitInfo
+	shaToRow         map[string]int
+	vertices         []*vsVertex
+	branches         []*vsBranch
 	availableColours []int // graph.ts:342; size = 已用颜色数,每元素是该颜色最后一次被使用时的行
-	nextColor    int      // 顺序取色计数器 (g.nextColor)
-	maxColorSeen int
+	nextColor        int   // 顺序取色计数器 (g.nextColor)
+	maxColorSeen     int
 }
 
 // newGraphVscode mirrors graph.ts: initial state
@@ -181,7 +177,7 @@ func newGraphVscode(maxColors int) *graphVscode {
 		maxColors = 2
 	}
 	return &graphVscode{
-		maxColors:       maxColors,
+		maxColors:        maxColors,
 		availableColours: make([]int, 0),
 	}
 }
@@ -318,15 +314,12 @@ func (g *graphVscode) loadCommits(commits []git.CommitInfo, head string) {
 		return
 	}
 
-	// 1) Stable sort by author date desc, SHA tie-breaker
+	// 1) 保持上游顺序。
+	// LogCommits / 外部对比驱动已经给出了最终展示顺序，vscode Graph.loadCommits
+	// 直接消费传入数组，不会在这里再次按时间/SHA 重排。这里若二次排序，
+	// 会把同时间戳 commit 的相对顺序打乱，导致 branch stitch 行号整体错位。
 	g.sorted = make([]git.CommitInfo, len(commits))
 	copy(g.sorted, commits)
-	sort.SliceStable(g.sorted, func(i, j int) bool {
-		if !g.sorted[i].AuthorWhen.Equal(g.sorted[j].AuthorWhen) {
-			return g.sorted[i].AuthorWhen.After(g.sorted[j].AuthorWhen)
-		}
-		return g.sorted[i].SHA < g.sorted[j].SHA
-	})
 
 	// 2) SHA → row
 	g.shaToRow = make(map[string]int, len(g.sorted))

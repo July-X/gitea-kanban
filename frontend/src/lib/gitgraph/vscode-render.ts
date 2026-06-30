@@ -114,10 +114,11 @@ export interface VscodeSvgRenderResult {
  */
 export function renderGraphVscode(
 	graph: GraphResultDto,
-	options?: { style?: VscodeGraphStyle; expandedAt?: number | null },
+	options?: { style?: VscodeGraphStyle; expandedAt?: number | null; expandY?: number },
 ): VscodeSvgRenderResult {
 	const style = options?.style ?? 'rounded';
 	const expandedAt = options?.expandedAt ?? null;
+	const expandY = options?.expandY ?? VSCODE_EXPAND_Y;
 
 	const nodes: VscodeSvgNode[] = [];
 	const paths: VscodeSvgPath[] = [];
@@ -181,8 +182,9 @@ export function renderGraphVscode(
 		});
 	};
 
-	for (let branchIdx = 0; branchIdx < (graph.branches ?? []).length; branchIdx++) {
-		const branch = (graph.branches ?? [])[branchIdx]!;
+	const branches = (graph.branches?.length ? graph.branches : edgesToFallbackBranches(graph));
+	for (let branchIdx = 0; branchIdx < branches.length; branchIdx++) {
+		const branch = branches[branchIdx]!;
 		const color = branch.color;
 		const lines = branch.lines;
 		// 1) 把 line 转成像素坐标,处理 expandAt (vscode Branch.draw:78-103)
@@ -201,12 +203,12 @@ export function renderGraphVscode(
 			// (vscode Branch.draw:85-101)
 			if (expandedAt !== null && expandedAt >= 0) {
 				if (line.y1 > expandedAt) {
-					y1 += VSCODE_EXPAND_Y;
-					y2 += VSCODE_EXPAND_Y;
+					y1 += expandY;
+					y2 += expandY;
 				} else if (line.y2 > expandedAt) {
 					if (x1 === x2) {
 						// 垂直线 - 终点延伸
-						y2 += VSCODE_EXPAND_Y;
+						y2 += expandY;
 					} else {
 						// 跨 lane - 锁定方向延伸
 						if (line.lockedFirst) {
@@ -218,7 +220,7 @@ export function renderGraphVscode(
 							});
 							placed.push({
 								p1: { x: x2, y: y1 + VSCODE_GRID_Y },
-								p2: { x: x2, y: y2 + VSCODE_EXPAND_Y },
+								p2: { x: x2, y: y2 + expandY },
 								lockedFirst: line.lockedFirst,
 							});
 							continue;
@@ -226,11 +228,11 @@ export function renderGraphVscode(
 							// 转场在 p2 端:先延伸到 p2 上方,再做转场
 							placed.push({
 								p1: { x: x1, y: y1 },
-								p2: { x: x1, y: y2 - VSCODE_GRID_Y + VSCODE_EXPAND_Y },
+								p2: { x: x1, y: y2 - VSCODE_GRID_Y + expandY },
 								lockedFirst: line.lockedFirst,
 							});
-							y1 += VSCODE_EXPAND_Y;
-							y2 += VSCODE_EXPAND_Y;
+							y1 += expandY;
+							y2 += expandY;
 						}
 					}
 				}
@@ -329,7 +331,7 @@ export function renderGraphVscode(
 	// (vscode Vertex.draw:298-331)
 	for (const node of graph.nodes) {
 		const cx = node.lane * VSCODE_GRID_X + VSCODE_OFFSET_X;
-		const cy = node.row * VSCODE_GRID_Y + VSCODE_OFFSET_Y + (expandedAt !== null && node.row > expandedAt ? VSCODE_EXPAND_Y : 0);
+		const cy = node.row * VSCODE_GRID_Y + VSCODE_OFFSET_Y + (expandedAt !== null && node.row > expandedAt ? expandY : 0);
 		const colorHex = VSCODE_COLORS[node.color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0];
 
 		nodes.push({
@@ -362,7 +364,23 @@ export function renderGraphVscode(
 		graph.nodes.length * VSCODE_GRID_Y +
 		VSCODE_OFFSET_Y -
 		VSCODE_GRID_Y / 2 +
-		(expandedAt !== null ? VSCODE_EXPAND_Y : 0);
+		(expandedAt !== null ? expandY : 0);
 
 	return { paths, nodes, width, height, style };
+}
+
+function edgesToFallbackBranches(graph: GraphResultDto): NonNullable<GraphResultDto['branches']> {
+	return graph.edges.map((edge) => ({
+		color: edge.color,
+		end: Math.max(edge.fromRow, edge.toRow) + 1,
+		lines: [
+			{
+				x1: edge.fromLane,
+				y1: edge.fromRow,
+				x2: edge.toLane,
+				y2: edge.toRow,
+				lockedFirst: edge.fromLane < edge.toLane,
+			},
+		],
+	}));
 }

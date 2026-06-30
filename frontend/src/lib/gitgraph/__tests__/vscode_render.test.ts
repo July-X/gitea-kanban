@@ -95,6 +95,18 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		assert.ok(d.includes('L 16 36'), `path 应包含 L 16 36, 实际: ${d}`);
 	});
 
+	test('branches 缺失时从 edges fallback 渲染 flow path', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
+			maxLane: 0,
+			truncated: false,
+		};
+		const r = renderGraphVscode(graph);
+		assert.equal(r.paths.length, 2);
+		assert.ok(r.paths[0]?.d.includes('L 16 36'), `fallback path 应连接两行，实际: ${r.paths[0]?.d}`);
+	});
+
 	test('跨 lane 转场用 C 贝塞尔 (rounded 风格)', () => {
 		const graph: GraphResultDto = {
 			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b')],
@@ -197,5 +209,21 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		// path 终点 = 36 + 250 = 286
 		const d = r.paths[0]?.d ?? '';
 		assert.ok(d.includes('L 16 286'), `展开后 path 终点应为 286, 实际: ${d}`);
+	});
+
+	test('自定义 expandY 同时作用于 dot、path 和 SVG 高度', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
+			maxLane: 0,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+
+		const r = renderGraphVscode(graph, { expandedAt: 0, expandY: 120 });
+
+		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 120);
+		assert.ok(r.paths[0]?.d.includes('L 16 156'), `path 应使用自定义 expandY，实际: ${r.paths[0]?.d}`);
+		assert.equal(r.height, 2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2 + 120);
 	});
 });

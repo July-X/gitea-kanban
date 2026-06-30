@@ -149,20 +149,20 @@ type LogGraphOpts struct {
 
 // GraphResult Graph 布局结果（与 app/git/graph.GraphResult 对齐，但作为 DTO 不含内部类型）
 type GraphResult struct {
-	Nodes     []GraphNodeDTO    `json:"nodes"`
-	Edges     []GraphEdgeDTO    `json:"edges"`
+	Nodes []GraphNodeDTO `json:"nodes"`
+	Edges []GraphEdgeDTO `json:"edges"`
 	// Branches vscode 风格 branch 列表 (BuildGraphVscodeWithHead 才会填)
 	// 前端按 branch 画 SVG path, 完整保留 vscode Branch.draw 几何
-	Branches  []GraphBranchDTO  `json:"branches,omitempty"`
-	MaxLane   int               `json:"maxLane"`
-	Truncated bool              `json:"truncated"`
+	Branches  []GraphBranchDTO `json:"branches,omitempty"`
+	MaxLane   int              `json:"maxLane"`
+	Truncated bool             `json:"truncated"`
 }
 
 // GraphBranchDTO 1:1 复刻 vscode-git-graph 的 Branch 对象
 // 一条 branch = 一条完整 SVG path
 type GraphBranchDTO struct {
-	Color int                 `json:"color"`
-	End   int                 `json:"end"`
+	Color int                  `json:"color"`
+	End   int                  `json:"end"`
 	Lines []GraphBranchLineDTO `json:"lines"`
 }
 
@@ -173,7 +173,7 @@ type GraphBranchLineDTO struct {
 	Y1          int  `json:"y1"`
 	X2          int  `json:"x2"`
 	Y2          int  `json:"y2"`
-	LockedFirst bool `json:"locked_first"`
+	LockedFirst bool `json:"lockedFirst"`
 }
 
 // GraphNodeDTO 图节点

@@ -112,8 +112,29 @@ type WailsApp = {
   GetCommitDetail?: (args: { localPath: string; sha: string }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token） */
   GetGitGraph?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<{
-    nodes: Array<{ row: number; lane: number; sha: string; shortSha: string; subject: string; authorName: string; authorEmail: string; date: string; isMerge: boolean; parents: string[]; refs?: string[] }>;
-    edges: Array<{ fromRow: number; toRow: number; fromLane: number; toLane: number; type: number }>;
+    nodes: Array<{
+      row: number;
+      lane: number;
+      color: number;
+      sha: string;
+      shortSha: string;
+      subject: string;
+      authorName: string;
+      authorEmail: string;
+      date: string;
+      isMerge: boolean;
+      parents: string[];
+      refs?: string[];
+      refTypes?: string[];
+      isCurrent?: boolean;
+      isStash?: boolean;
+    }>;
+    edges: Array<{ fromRow: number; toRow: number; fromLane: number; toLane: number; color: number; type: number }>;
+    branches?: Array<{
+      color: number;
+      end: number;
+      lines: Array<{ x1: number; y1: number; x2: number; y2: number; lockedFirst: boolean }>;
+    }>;
     maxLane: number;
     truncated: boolean;
   }>;
@@ -337,7 +358,7 @@ const apiShim = {
      * 现在转发到 window.go.main.App.GetGitGraph({projectId, branches, maxCount})
      *   - Go 端按 projectId 反查 localPath + token
      *   - 调 adapter.LogGraph（go-git DAG + 自研 layout）
-     *   - 返 GraphResultDTO（结构化 nodes + edges）
+     *   - 返 GraphResultDTO（结构化 nodes + edges + branches）
      */
     gitgraphLines: (args: unknown): Promise<unknown> => {
       const a = (args ?? {}) as {

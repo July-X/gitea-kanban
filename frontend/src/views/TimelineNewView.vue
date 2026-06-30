@@ -19,7 +19,6 @@ import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import {
-  commitsGitgraphAsciiLines,
   commitsGitgraphLines,
   commitsGitgraphCloneRepo,
   commitsGitgraphPull,
@@ -31,38 +30,18 @@ import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
 import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
-import {
-  renderGraph,
-  ROW_HEIGHT as STRUCTURED_ROW_HEIGHT,
-  type GraphResultDto,
-  type SvgRenderResult,
-} from '@renderer/lib/gitgraph/structured';
+import type { GraphResultDto } from '@renderer/lib/gitgraph/structured';
 import {
   renderGraphVscode,
-  VSCODE_GRID_X as VSCODE_LANE_WIDTH,
-  VSCODE_GRID_Y as VSCODE_ROW_HEIGHT,
+  VSCODE_EXPAND_Y,
+  VSCODE_GRID_Y,
   type VscodeSvgRenderResult,
 } from '@renderer/lib/gitgraph/vscode-render';
-import {
-  COL_WIDTH as ASCII_COL_WIDTH,
-  DISPLAY_SCALE,
-  DISPLAY_SCALE as ASCII_DISPLAY_SCALE,
-  ROW_HEIGHT,
-  ROW_HEIGHT as ASCII_ROW_HEIGHT,
-  FLOW_LEFT_PAD,
-  flowColorClass,
-  layoutVscodeGraph,
-  parseLines,
-  type GitGraphCommit,
-  type Graph,
-  type GraphLine,
-  type VscodeGraphLayout,
-} from '@renderer/lib/gitgraph';
 
 // ============================================================
 // 常量
 // ============================================================
-// ROW_H 在下方 SVG 渲染坐标节定义（v2.6：直接用 STRUCTURED_ROW_HEIGHT）
+// ROW_H 在下方 SVG 渲染坐标节定义（vscode-port：直接用 VSCODE_GRID_Y）
 
 // ============================================================
 // Store & 上下文
@@ -91,12 +70,6 @@ const activeRepo = computed(() => {
 
 /** v2.6：Go 后端直接返回的结构化 Graph（含 nodes+edges+16 色字段） */
 const graphDto = ref<GraphResultDto | null>(null);
-/** v2.6 + v2.9 (vscode-port)：前端从 GraphResultDto 渲染出的 SVG 数据 */
-const svgRender = ref<VscodeSvgRenderResult | null>(null);
-/** GitHub/gh 超大仓库：git log --graph 字符流解析后的 Graph */
-const asciiGraph = ref<Graph | null>(null);
-/** GitHub/gh 超大仓库：后端返回的原始字符流行 */
-const asciiLines = ref<GraphLine[]>([]);
 /** 加载态 */
 const loading = ref(false);
 /** 本地错误信息 */
@@ -143,7 +116,7 @@ const expandedSha = ref<string | null>(null);
 const hoveredGraphRow = ref<number | null>(null);
 
 /** v2.65：手风琴展开高度（实际渲染像素，ResizeObserver 实时更新）
- * 用于 SVG path d + dot cy 的 rowOffsets：手风琴展开时，
+ * 用于 SVG path d + dot cy 的 VSCode expandY：手风琴展开时，
  * expanded row 之后的 commit 视觉 y 坐标 = displayRow*ROW_H + expansionHeight
  * （VSCode 行为：lane 直线自动拉伸延伸覆盖展开行） */
 const expandedHeight = ref(0);
@@ -158,12 +131,12 @@ function bindAccordionObserver(el: HTMLElement | null) {
     accordionResizeObserver = null;
   }
   if (!el) {
-    // v2.66：保留旧 expandedHeight —— 收起瞬间避免 row 高度 30px 闪一下
+    // v2.66：保留旧 expandedHeight —— 收起瞬间避免 row 高度闪一下
     // 下一帧再次展开时 ref callback 同步读 offsetHeight 覆盖回真实值
     return;
   }
   // v2.66：accordion mount 瞬间同步读一次高度，避免首帧 expandedHeight=0
-  // 导致 row 高度只有 ROW_H(30px)，hover 命中 30px 而 300px 面板溢出可见
+  // 导致 row 高度只有 ROW_H，hover 命中基础行而面板溢出可见
   // 但不在 row hover 范围内（用户反馈"hover 没对齐"）。
   // ResizeObserver 是异步的，第一帧不会 fire，必须同步读 offsetHeight。
   const initialH = el.offsetHeight + 8; // 4px margin-top + 4px margin-bottom
@@ -210,8 +183,6 @@ const giteaRepoUrl = computed(() => {
 const currentPlatform = computed<'gitea' | 'github'>(
   () => (repo.currentProject?.platform ?? auth.accounts[0]?.platform ?? 'gitea') as 'gitea' | 'github',
 );
-const useAsciiGraph = computed(() => currentPlatform.value === 'github');
-
 interface DisplayCommit {
   sha: string;
   shortSha: string;
@@ -252,6 +223,30 @@ function buildBasicCommit(commit: DisplayCommit): BasicCommit {
     refTypes: commit.refTypes,
   };
 }
+
+const expandedRow = computed<number | null>(() => {
+  if (!expandedSha.value) return null;
+  const rows = allRows.value;
+  for (const row of rows) {
+    if (row.commit?.sha === expandedSha.value) return row.row;
+  }
+  return null;
+});
+
+const activeExpandY = computed(() =>
+  expandedRow.value !== null && expandedHeight.value > 0
+    ? Math.max(VSCODE_EXPAND_Y, expandedHeight.value)
+    : 0,
+);
+
+const svgRender = computed<VscodeSvgRenderResult | null>(() => {
+  const dto = graphDto.value;
+  if (!dto) return null;
+  return renderGraphVscode(dto, {
+    expandedAt: expandedRow.value,
+    expandY: activeExpandY.value || undefined,
+  });
+});
 
 // ============================================================
 // 生命周期
@@ -384,22 +379,9 @@ async function loadGraph(): Promise<void> {
   featureDisabled.value = false;
   useGlobalLoadingStore().show('timeline');
   try {
-    if (useAsciiGraph.value) {
-      const dto = await commitsGitgraphAsciiLines({
-        projectId: activeProjectId.value,
-        limit: graphLimit.value,
-      });
-      asciiLines.value = dto.lines;
-      asciiGraph.value = parseLines(dto.lines).graph;
-      graphDto.value = null;
-      svgRender.value = null;
-      expandedSha.value = null;
-      return;
-    }
-
     // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
-    // 跳过 v1 字符流往返（adapter.ts 反编码 → parser.ts 解析），消除 bug1-bug4
-    // v2.10：增加 limit 以支持加载更多功能
+    // v2.68：GitHub 与 Gitea 统一走这条 structured/vscode 链路，
+    // 不再按平台切回 ASCII parser。
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
       limit: graphLimit.value,
@@ -410,17 +392,9 @@ async function loadGraph(): Promise<void> {
     if (nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
       featureDisabled.value = true;
       graphDto.value = null;
-      svgRender.value = null;
-      asciiGraph.value = null;
-      asciiLines.value = [];
       // 不要在这里 return，让 finally 块清理状态
     } else {
       graphDto.value = dto;
-      // v2.9 (vscode-port)：使用 vscode-git-graph 风格 1:1 复刻渲染 (renderGraphVscode)
-      // 替代之前的 Gitea 风格 renderGraph。GRID 16x24 + 贝塞尔曲线 + 12 色调色板
-      svgRender.value = renderGraphVscode(dto);
-      asciiGraph.value = null;
-      asciiLines.value = [];
     }
     // v2.9：新数据加载完收起展开（防 SHA 失效）
     expandedSha.value = null;
@@ -440,16 +414,10 @@ async function loadGraph(): Promise<void> {
     if (looksLikeDisabled) {
       featureDisabled.value = true;
       graphDto.value = null;
-      svgRender.value = null;
-      asciiGraph.value = null;
-      asciiLines.value = [];
       // 不要在这里 return，让 finally 块清理状态
     } else {
       localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
       graphDto.value = null;
-      svgRender.value = null;
-      asciiGraph.value = null;
-      asciiLines.value = [];
     }
   } finally {
     loading.value = false;
@@ -566,123 +534,28 @@ async function enableGitGraph(): Promise<void> {
 }
 
 // ============================================================
-// SVG 渲染坐标（v2.6：对齐 structured.ts 的 LANE_WIDTH/ROW_HEIGHT）
+// SVG 渲染坐标（vscode-port：对齐 vscode-render.ts 的 GRID_Y）
 // ============================================================
 //
 // v2.6 改用结构化渲染（不再走字符流）：
-// - viewBox = `0 0 width height`（width/height 由 renderGraph 计算）
-// - SVG 单位：LANE_WIDTH = 10 px / lane，ROW_HEIGHT = 30 px / row（v2.40 26 → 30,密集 commit-row 文字间距 +42%）
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
-// v2.45：ASCII 路径 ROW_HEIGHT models.ts 19 → 30px（与 Gitea 路径完全统一，commit-row 行间距统一 8px）
+const ROW_H = VSCODE_GRID_Y;
 
-const ROW_H = computed(() =>
-  useAsciiGraph.value ? ASCII_ROW_HEIGHT * ASCII_DISPLAY_SCALE : STRUCTURED_ROW_HEIGHT,
-); // commit 行高（px），与当前 SVG 路径一致
-
-// v2.62 → v2.63 GitHub parser 修复：grid-template-rows 不再用 maxRow+1（包含 edge 行）
-// 而是直接用 commit 数（displayRow 0..N-1 连续），彻底消除"看不见的空行"。
 const maxRowPlusOne = computed(() => {
-  if (useAsciiGraph.value && asciiGraph.value) {
-    // ASCII 路径：grid 行数 = commit 数（displayRow 0..N-1 连续，无 edge row 占位）
-    return asciiGraph.value.commits.length;
-  }
   const dto = graphDto.value;
   if (!dto || dto.nodes.length === 0) return 0;
   return Math.max(...dto.nodes.map((n) => n.row)) + 1;
 });
 
-/**
- * v2.63 GitHub parser 修复：ASCII 字符流行号 → displayRow 映射
- *
- * 背景：parseLines 返回的 commit.row 是 git --graph 字符流行号（多 PR 场景
- * 下不连续，row 0/2/3/5/7/8/10 这种，中间有 edge 行）。
- * 修复：commit 排成连续 displayRow 0..N-1，grid 容器跟 commit 数对齐。
- * SVG（path d + dot cy）也要在 displayRow 坐标系里绘制，否则线条跟 commit
- * 错位。
- *
- * - displayRowMap：asciiRow → displayRow
- * - sortedAsciiCommits：按 displayRow 升序的 commit 列表（rendering 用）
- */
-const sortedAsciiCommits = computed<GitGraphCommit[]>(() => {
-  if (!asciiGraph.value) return [];
-  return [...asciiGraph.value.commits].sort((a, b) => a.row - b.row);
-});
-
-const displayRowMap = computed<Map<number, number>>(() => {
-  const map = new Map<number, number>();
-  sortedAsciiCommits.value.forEach((c, i) => map.set(c.row, i));
-  return map;
-});
-
-/**
- * v2.65：手风琴展开时，expanded row 之后的所有 displayRow 视觉 y 都需要
- * 加上 expandedHeight（手风琴实际渲染高度）。
- * VSCode 行为：lane 直线自动延伸覆盖展开行高度。
- *
- * 关键：offset 应用到 rowOffsets[displayRow > expandedRow]，不加到 expandedRow 自身
- * （expandedRow 自身的视觉位置不变，只是它下面多出一段扩展区域）。
- */
-const expandedDisplayRow = computed<number | null>(() => {
-  if (!expandedSha.value) return null;
-  for (const c of asciiGraph.value?.commits ?? []) {
-    if (c.sha === expandedSha.value) {
-      return displayRowMap.value.get(c.row) ?? null;
-    }
-  }
-  return null;
-});
-
-const asciiRowOffsets = computed<Map<number, number>>(() => {
-  const map = new Map<number, number>();
-  const expandedAt = expandedDisplayRow.value;
-  const offset = expandedHeight.value;
-  if (expandedAt === null || offset <= 0) return map;
-  // expandedAt 之后的所有 displayRow 都需要 offset
-  const total = asciiGraph.value?.commits.length ?? 0;
-  for (let r = expandedAt + 1; r < total; r++) {
-    map.set(r, offset);
-  }
-  return map;
-});
-
-const asciiLayout = computed<VscodeGraphLayout | null>(() => {
-  if (!asciiGraph.value) return null;
-  return layoutVscodeGraph(asciiGraph.value, displayRowMap.value, {
-    rowOffsets: asciiRowOffsets.value,
-  });
-});
-
-const asciiWidthUnits = computed(() => {
-  const laneCount = Math.max(1, asciiLayout.value?.laneCount ?? 1);
-  return laneCount * ASCII_COL_WIDTH + ASCII_COL_WIDTH + FLOW_LEFT_PAD;
-});
-
 const viewBox = computed(() => {
-  if (useAsciiGraph.value && asciiGraph.value) {
-    // v2.65：viewBox 高度 = commit 数 * ROW_HEIGHT + 累计 rowOffset
-    // 手风琴展开时 viewBox 自动扩张，给 path d 留出延伸空间。
-    const commitCount = asciiGraph.value.commits.length;
-    const totalHeight = commitCount * ROW_HEIGHT + expandedHeight.value;
-    return `0 0 ${asciiWidthUnits.value} ${totalHeight}`;
-  }
   const r = svgRender.value;
   return r ? `0 0 ${r.width} ${r.height}` : '0 0 0 0';
 });
 const svgWidth = computed(() => {
-  if (useAsciiGraph.value && asciiGraph.value) {
-    return `${asciiWidthUnits.value * ASCII_DISPLAY_SCALE}px`;
-  }
   const r = svgRender.value;
   return r ? `${r.width}px` : '0px';
 });
 const svgHeight = computed(() => {
-  if (useAsciiGraph.value && asciiGraph.value) {
-    // v2.65：SVG 高度 = commit 数 * ROW_HEIGHT + 累计 rowOffset
-    // 手风琴展开时 SVG 自动扩张，跟 commit-row 容器（grid + accordion 流式）视觉一致
-    const commitCount = asciiGraph.value.commits.length;
-    const totalHeight = (commitCount * ROW_HEIGHT + expandedHeight.value) * DISPLAY_SCALE;
-    return `${totalHeight}px`;
-  }
   const r = svgRender.value;
   return r ? `${r.height}px` : '0px';
 });
@@ -695,23 +568,12 @@ interface PathGroup {
   order: number;
   colorIndex: number; // 0..15，对齐 Gitea Color16()
   colorClass: string; // 'flow-color-16-N'
-  colorHex?: string; // v2.6 fix：结构化路径用内联 hex；ASCII fallback 走 CSS class
+  colorHex?: string;
   d: string; // 单条 path 的 d
   kind?: 'line' | 'shadow'; // vscode Branch.drawPath: shadow (stroke-width=4) + line (stroke-width=2)
 }
 
 const pathGroups = computed<PathGroup[]>(() => {
-  if (useAsciiGraph.value && asciiGraph.value) {
-    // GitHub fallback：ASCII 只负责提供 commit + parents，线条按 DAG parent edge 重排。
-    // VSCode Git Graph 也是 parent-edge 语义，不等同于 `git log --graph` 字符流。
-    return (asciiLayout.value?.paths ?? []).map((path, index) => ({
-      id: `ascii-edge-${path.id}`,
-      order: index,
-      colorIndex: path.colorNumber % 16,
-      colorClass: flowColorClass(path.colorNumber),
-      d: path.d,
-    }));
-  }
   const r = svgRender.value;
   if (!r) return [];
   // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
@@ -739,38 +601,7 @@ interface DisplayRow {
   row: number;
   commit: DisplayCommit | null;
 }
-/**
- * 完整行数组（row 0..maxRow）—— v2.6 简化 + v2.63 修复
- *
- * v2.6 旧逻辑（ASCII 路径）：for row in 0..maxRow → 包含 edge row（commit=null），
- * 渲染时 v-if 跳过 commit=null 容器，但 grid-template-rows: repeat(maxRow+1)
- * 仍然分配 30px 高度的 grid cell → 中间出现"看不见的 30px 空行"。
- *
- * v2.63 新逻辑（ASCII 路径）：allRows 直接由 sortedAsciiCommits 构造，
- * row 字段 = displayRow（0..N-1 连续），grid 行数 = commit 数（无空行）。
- * SVG（path + dot）用 displayRowMap 把 asciiRow 映射到 displayRow，
- * 视觉上 commit 与 flow 线条完全对齐。
- */
 const allRows = computed<DisplayRow[]>(() => {
-  if (useAsciiGraph.value && asciiGraph.value) {
-    return sortedAsciiCommits.value.map((commit, displayRow) => ({
-      row: displayRow,
-      commit: {
-        sha: commit.sha,
-        shortSha: commit.shortSha,
-        subject: commit.subject,
-        date: commit.date,
-        authorName: commit.authorName,
-        authorEmail: commit.authorEmail,
-        // v2.65：merge commit 视觉降级
-        isMerge: commit.isMerge,
-        refs: Array.isArray(commit.refs) ? commit.refs.map((r) => r.shortName) : [],
-        refTypes: Array.isArray(commit.refs)
-          ? commit.refs.map((r) => refTypeFromGroup(r.refGroup))
-          : [],
-      },
-    }));
-  }
   const dto = graphDto.value;
   if (!dto) return [];
   const sorted = [...dto.nodes].sort((a, b) => a.row - b.row);
@@ -801,7 +632,6 @@ const allRows = computed<DisplayRow[]>(() => {
 });
 
 const activeCommitCount = computed(() => {
-  if (useAsciiGraph.value) return asciiGraph.value?.commits.length ?? 0;
   return graphDto.value?.nodes.length ?? 0;
 });
 
@@ -853,25 +683,20 @@ const expandedCommitNode = computed<
  *   - 不再有\"拉宽/缩窄拖拽缩放\"，避免圆点和线不同步缩放造成视觉错位
  */
 
-/**
- * 圆点视觉直径（px）= 8px（v2.29 用户要求：flow 线条上的圆点调整为 8px 宽）
- * 比 lane 间距（5px）大，圆点视觉上"凸"在 lane 线上、跟 flow 路径有明显视觉对比。
- */
-const DOT_SIZE = 8; // vscode Vertex.draw r=4 (直径 8)
-
-interface DotOverlayNode {
+interface SvgCircleNode {
   sha: string;
   subject: string;
   title: string;
   row: number;
   cx: number;
   cy: number;
-  /** 圆点直径（px），随 lane 缩放（保证圆点跟 lane 一起变密/变疏） */
-  size: number;
+  r: number;
   colorHex?: string;
-  colorClass?: string;
   isCurrent?: boolean;
   isStash?: boolean;
+  stroke?: string;
+  strokeWidth?: number;
+  strokeOpacity?: number;
 }
 
 function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string {
@@ -879,30 +704,7 @@ function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string
   return branch ?? refs?.[0] ?? subject;
 }
 
-const dotNodes = computed<DotOverlayNode[]>(() => {
-  if (useAsciiGraph.value && asciiGraph.value) {
-    return asciiGraph.value.commits.map((commit) => {
-      const displayRow = displayRowMap.value.get(commit.row) ?? 0;
-      const rowOffset = asciiRowOffsets.value.get(displayRow) ?? 0;
-      const node = asciiLayout.value?.nodes.get(commit.sha);
-      const lane = node?.lane ?? 0;
-      const colorNumber = node?.colorNumber ?? 0;
-      return {
-        sha: commit.sha,
-        subject: commit.subject,
-        title: dotTitle(
-          commit.subject,
-          commit.refs.map((r) => r.shortName),
-          commit.refs.map((r) => refTypeFromGroup(r.refGroup)),
-        ),
-        row: displayRow,
-        cx: (lane * ASCII_COL_WIDTH + ASCII_COL_WIDTH / 2 + FLOW_LEFT_PAD) * ASCII_DISPLAY_SCALE,
-        cy: (displayRow * ASCII_ROW_HEIGHT + rowOffset + ASCII_ROW_HEIGHT / 2) * ASCII_DISPLAY_SCALE,
-        size: DOT_SIZE,
-        colorClass: flowColorClass(colorNumber),
-      };
-    });
-  }
+const svgCircleNodes = computed<SvgCircleNode[]>(() => {
   return (svgRender.value?.nodes ?? []).map((node) => ({
     sha: node.sha,
     subject: node.subject,
@@ -910,10 +712,13 @@ const dotNodes = computed<DotOverlayNode[]>(() => {
     row: node.row,
     cx: node.cx,
     cy: node.cy,
-    size: DOT_SIZE,
+    r: node.isStash ? 4.5 : 4,
     colorHex: node.colorHex,
     isCurrent: node.isCurrent,
     isStash: node.isStash,
+    stroke: node.isCurrent ? node.colorHex : 'rgba(30, 30, 30, 0.75)',
+    strokeWidth: node.isCurrent ? 2 : 1,
+    strokeOpacity: node.isCurrent ? 1 : 0.75,
   }));
 });
 
@@ -1105,18 +910,6 @@ function avatarColorIndex(name: string): number {
     hash = (hash * 31 + name.charCodeAt(i)) | 0;
   }
   return Math.abs(hash) % 16;
-}
-
-function refTypeFromGroup(refGroup: string): string {
-  switch (refGroup) {
-    case 'tags':
-      return 'tag';
-    case 'remotes':
-      return 'remoteBranch';
-    case 'heads':
-    default:
-      return 'branch';
-  }
 }
 
 // ============================================================
@@ -1382,7 +1175,6 @@ function refBadgeClass(refType?: string): string {
                   :viewBox="viewBox"
                   :width="svgWidth"
                   :height="svgHeight"
-                  style="background:#1e1e1e"
                 >
                   <g
                     v-for="pg in pathGroups"
@@ -1404,31 +1196,61 @@ function refBadgeClass(refType?: string): string {
                       vector-effect="non-scaling-stroke"
                     />
                   </g>
+                  <g class="git-graph-vertices">
+                    <template v-for="c in svgCircleNodes" :key="`dot-${c.sha}`">
+                      <circle
+                        v-if="c.isCurrent"
+                        class="commit-vertex commit-vertex--head"
+                        :cx="c.cx"
+                        :cy="c.cy"
+                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                        fill="#fff"
+                        :stroke="c.stroke ?? c.colorHex ?? '#888'"
+                        :stroke-width="c.strokeWidth ?? 2"
+                        :stroke-opacity="c.strokeOpacity ?? 1"
+                      >
+                        <title>{{ c.title }}</title>
+                      </circle>
+                      <template v-else-if="c.isStash">
+                        <circle
+                          class="commit-vertex commit-vertex--stash"
+                          :cx="c.cx"
+                          :cy="c.cy"
+                          :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                          fill="none"
+                          :stroke="c.colorHex ?? '#888'"
+                          stroke-width="1"
+                        >
+                          <title>{{ c.title }}</title>
+                        </circle>
+                        <circle
+                          class="commit-vertex commit-vertex--stash-inner"
+                          :cx="c.cx"
+                          :cy="c.cy"
+                          :r="hoveredGraphRow === c.row ? 3 : 2"
+                          fill="none"
+                          :stroke="c.colorHex ?? '#888'"
+                          stroke-width="1"
+                        >
+                          <title>{{ c.title }}</title>
+                        </circle>
+                      </template>
+                      <circle
+                        v-else
+                        class="commit-vertex"
+                        :cx="c.cx"
+                        :cy="c.cy"
+                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                        :fill="c.colorHex ?? '#888'"
+                        :stroke="c.stroke ?? 'rgba(30, 30, 30, 0.75)'"
+                        :stroke-width="c.strokeWidth ?? 1"
+                        :stroke-opacity="c.strokeOpacity ?? 0.75"
+                      >
+                        <title>{{ c.title }}</title>
+                      </circle>
+                    </template>
+                  </g>
                 </svg>
-
-                <!-- 圆点 overlay：固定大小 = lane 间距 -->
-                <div class="commit-dots-overlay" :style="{ width: svgWidth, height: svgHeight }">
-                  <div
-                    v-for="c in dotNodes"
-                    :key="`dot-${c.sha}`"
-                    class="commit-dot"
-                    :class="[
-                      c.colorClass,
-                      { 'commit-dot--active': hoveredGraphRow === c.row },
-                      { 'commit-dot--head': c.isCurrent },
-                      { 'commit-dot--stash': c.isStash },
-                    ]"
-                    :style="{
-                      left: `${c.cx - c.size / 2}px`,
-                      top: `${c.cy - c.size / 2}px`,
-                      width: `${c.size}px`,
-                      height: `${c.size}px`,
-                      ...(c.colorHex && !c.isCurrent ? { backgroundColor: c.colorHex } : {}),
-                      ...(c.colorHex && c.isCurrent ? { borderColor: c.colorHex } : {}),
-                    }"
-                    :title="c.title"
-                  />
-                </div>
               </div>
             </div>
 
@@ -1453,16 +1275,13 @@ function refBadgeClass(refType?: string): string {
                 :class="{
                   'commit-row--clickable': r.commit,
                   'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
-                  'commit-row--ascii': useAsciiGraph,
                   'commit-row--merge': r.commit.isMerge,
                 }"
                 :style="{
-                  /* v2.66：展开时把 accordion 高度并入 row 高度，让 .commit-row:hover
-                   * 选择器能覆盖 row + 下方 accordion 整段（用户反馈 hover 背景高度
-                   * 跟展开面板不对齐——row 固定 30px 时 hover 只到 col 顶端）。
-                   * 没展开的 row 仍走 ROW_H（30px）。 */
+                  /* VSCode row model：第一行固定 ROW_H，展开面板作为第二行插入。
+                   * 这样 commit 文字仍在 row*24+12 的中心，不会被展开高度挤到中间。 */
                   height: (r.commit && expandedSha === r.commit.sha
-                    ? ROW_H + expandedHeight
+                    ? ROW_H + activeExpandY
                     : ROW_H) + 'px',
                 }"
                 :role="r.commit ? 'button' : undefined"
@@ -1871,6 +1690,7 @@ function refBadgeClass(refType?: string): string {
   top: 0;
   left: 0;
   z-index: 2;
+  background: var(--color-graph-bg, var(--color-shell-main-bg));
   pointer-events: none;
   content-visibility: auto;
   contain-intrinsic-size: auto 24px;
@@ -1889,6 +1709,7 @@ function refBadgeClass(refType?: string): string {
   position: absolute;
   top: 0;
   left: 0;
+  background: var(--color-graph-bg, var(--color-shell-main-bg));
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -1896,132 +1717,16 @@ function refBadgeClass(refType?: string): string {
 /* SVG 自身 */
 .git-graph-svg {
   display: block;
+  background: var(--color-graph-bg, var(--color-shell-main-bg));
 }
 
-/* 圆点 overlay：绝对定位在 SVG 之上，固定大小 = lane 间距（10px）
- *
- * v1.7 性能优化：`content-visibility: auto` 让屏幕外圆点不参与渲染——
- * 1000 个 absolute 定位的 div，每个浏览器都要 hit-test + paint，
- * 全部跳过渲染后滚动 fps 显著提升。
- * v2.40：圆点行高 = 30px（与 commit-row / SVG ROW_HEIGHT 同步），整容器高度 = maxRow * 30px。
- * contain-intrinsic-size 26 → 30 与 commit-row 同步。*/
-.commit-dots-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  z-index: 2;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 24px;
-}
-.commit-dot {
-  position: absolute;
-  /* 默认尺寸（被 inline style 覆盖，inline size = lane 间距 跟随缩放） */
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  box-sizing: border-box;
-  transition:
-    box-shadow 0.12s ease,
-    transform 0.12s ease;
-  /* v2.60：z-index 提高到 3 确保在 SVG path 之上（z-index: 0 默认）
-     修复：GitHub ASCII 模式下 dot 视觉反馈不明显（用户反馈 scale 1.5 修复无效），
-     实际上是因为 dot 可能被 SVG path 视觉遮挡。加上 z-index 让 dot 始终在 SVG 之上。 */
-  z-index: 3;
-  /* v2.60：transform-origin 显式 center（默认就是 center，但写明语义清晰） */
-  transform-origin: center center;
-}
-/* v2.42 + v2.57：hover 时只让 dot 变大（scale 1.25 → 1.5，8px → 12px），不再叠加绿色 box-shadow 外圈。
- * 之前 .commit-dot--active 有 3 重 box-shadow（3px shell-bg + 5px 绿色 + 14px glow），
- * 在 dot 周围画一个绿色圆环（用户反馈"外部画一个绿色的圆圈"，不够干净）。
- * 现在只保留 scale(1.5)（v2.57 从 1.25 调到 1.5，更明显的视觉变化），dot 视觉放大，
- * hover 高亮通过尺寸变化表达， 配合 .git-graph-bg:hover / SVG path highlight（如果有）共同传达 focus 状态。*/
-.commit-dot--active {
-  transform: scale(1.5);
-}
-
-/* HEAD 节点 (vscode Vertex.draw:310-315 + main.css:96-99)
-   circle.current: fill=editor-bg(白), stroke=color, stroke-width=2 */
-.commit-dot--head {
-  background-color: var(--app-bg, #fff);
-  border-width: 2px;
-  border-style: solid;
-}
-
-/* stash 节点 (vscode Vertex.draw:318-326 + main.css:105-108)
-   外圈 r=4.5 + 内圈 r=2 双圈; inner 用 box-shadow inset 实现
-   应用 dot 是 8x8 (r=4), inner 4x4 (r=2), inset = (4-2)/4 = 50% */
-.commit-dot--stash {
-  position: relative;
-  background-color: transparent !important;
-}
-.commit-dot--stash::after {
-  content: '';
-  position: absolute;
-  inset: 50%;
-  border-radius: 50%;
-  background: transparent;
-  border: 1px solid currentColor;
+.git-graph-vertices {
   pointer-events: none;
 }
 
-/* 圆点描边 (vscode main.css:100-103): 非 HEAD 都加 1px 半透明描边 */
-.commit-dot:not(.commit-dot--head) {
-  border: 1px solid var(--app-bg, #1e1e1e);
-  border-style: solid;
-  border-width: 1px;
-  border-color: rgba(30, 30, 30, 0.75); /* vscode stroke-opacity=0.75 */
-  box-sizing: border-box;
-}
-
-/* 圆点背景色（HTML div 用 background-color，不是 SVG fill） */
-.commit-dot.flow-color-16-0 {
-  background-color: var(--color-series-16-0);
-}
-.commit-dot.flow-color-16-1 {
-  background-color: var(--color-series-16-1);
-}
-.commit-dot.flow-color-16-2 {
-  background-color: var(--color-series-16-2);
-}
-.commit-dot.flow-color-16-3 {
-  background-color: var(--color-series-16-3);
-}
-.commit-dot.flow-color-16-4 {
-  background-color: var(--color-series-16-4);
-}
-.commit-dot.flow-color-16-5 {
-  background-color: var(--color-series-16-5);
-}
-.commit-dot.flow-color-16-6 {
-  background-color: var(--color-series-16-6);
-}
-.commit-dot.flow-color-16-7 {
-  background-color: var(--color-series-16-7);
-}
-.commit-dot.flow-color-16-8 {
-  background-color: var(--color-series-16-8);
-}
-.commit-dot.flow-color-16-9 {
-  background-color: var(--color-series-16-9);
-}
-.commit-dot.flow-color-16-10 {
-  background-color: var(--color-series-16-10);
-}
-.commit-dot.flow-color-16-11 {
-  background-color: var(--color-series-16-11);
-}
-.commit-dot.flow-color-16-12 {
-  background-color: var(--color-series-16-12);
-}
-.commit-dot.flow-color-16-13 {
-  background-color: var(--color-series-16-13);
-}
-.commit-dot.flow-color-16-14 {
-  background-color: var(--color-series-16-14);
-}
-.commit-dot.flow-color-16-15 {
-  background-color: var(--color-series-16-15);
+.commit-vertex {
+  vector-effect: non-scaling-stroke;
+  transition: all 120ms ease;
 }
 
 /* ===== Flow 分组着色（对齐 Gitea gitgraph.css flow-color-16-N）=====
@@ -2161,13 +1866,11 @@ function refBadgeClass(refType?: string): string {
   /* v2.48：移除 graph 占位列（第一列 var(--git-graph-col-width)），改为 4 列 grid。
      v2.47 改 flex 两栏后 SVG 在独立 .git-graph-bg 容器，commit-row 不再需要 graph 占位列。 */
   grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
-  align-items: center;
+  grid-template-rows: var(--git-graph-row-height, 24px) auto;
+  align-items: stretch;
   gap: 0;
-  /* v2.43 高度由内联 style 绑定 ROW_H（ASCII = 19px, structured = 30px），与 SVG 行高 1:1 对齐 */
+  /* VSCode row model：commit line 固定 24px；dot cy = row*24+12。 */
   height: 24px; /* fallback（被 inline style 覆盖） */
-  /* v2.43：行间距统一到 8px（Gitea + GitHub 一致体验）
-   *   row 30px = line-box 22px (font 14 × line-height 1.571) + 间距 8px
-   *   之前 v2.40 padding 5 + line-height 1.35 = 间距 11.11px（过大）*/
   /* v2.31 revert：恢复 v2.27 的"行透明 + 内容列自身背景"机制
      用户原意："只需要表头是非透明的背景即可"——表头 .git-graph-header 使用实色主内容背景，
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
@@ -2176,20 +1879,12 @@ function refBadgeClass(refType?: string): string {
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
-  /* v2.35：用户诉求——commit row 主体字号加大到 15px,提升可读性
-   * v2.39：整体调优——字号回归 14px（26px 行高下更舒适），显式声明系统字体栈 +
-   *   letter-spacing 微调，各列 padding 统一 12px，避免文字贴边。 */
-  /* v2.43：行间距统一 8px（用户要求 Gitea + GitHub 一致）
-   *   line-height 1.35 → 1.571（line-box 14×1.571≈22px），row 30px - 22px = 8px 间距。*/
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.571;
+  font-size: 13px;
+  line-height: var(--git-graph-row-height, 24px);
   letter-spacing: -0.005em;
   white-space: nowrap;
-  /* v2.66：去掉 overflow: hidden —— 嵌入 .commit-accordion 后需要让它溢出
-   * 显示（row 高度 = ROW_H + expandedHeight = 338px 容纳 300px 面板 + 余量），
-   * 旧 overflow: hidden 会把 accordion 裁掉只剩 30px 可视高度，导致
-   * "hover 背景只到 30px = 用户视觉的 row"——也覆盖不到展开面板。
+  /* v2.66：去掉 overflow: hidden —— 嵌入 .commit-accordion 后需要让它溢出显示。
    * desc/author/date/sha 列的 ellipsis 由各 .commit-row__col 自身 overflow:hidden 兜底。*/
   overflow: visible;
   /* v2.28：移除 commit-row 的 border-bottom（用户：下方的内容区，暂时不用 1px 的表格线） */
@@ -2201,21 +1896,6 @@ function refBadgeClass(refType?: string): string {
    * 注意：contain: layout 与 :hover 状态不影响——hover 时只重渲染当前 row，
    * 但浏览器对每个 row 单独走 hit-test 后才知道哪行 hover，所以 c-v: auto 仍有效。*/
   content-visibility: auto;
-  /* v2.40：26 → 30px，与 commit-row 高度 + SVG ROW_HEIGHT 同步（content-visibility 离屏预估高度） */
-  contain-intrinsic-size: auto 24px;
-}
-/* v2.44：真正统一 Gitea + GitHub 两个平台 commit-row 视觉表现（用户无感）
- * 之前 v2.43 把 ASCII 路径做"小一号"（font 11px, row 19px, line-height 1.0）让行间距统一 8px，
- * 但行间距统一 ≠ 视觉统一——用户切换平台仍能感受到 row 高度/字号差异。
- * v2.45 方案：彻底删掉 19px 这个中间值，models.ts 的 ROW_HEIGHT 直接 = 30（与 structured.ts 一致），
- * SVG path/dot/容器高度全部走 30px，font 14px、line-height 1.571、line-box 22px、上下气口 8px。
- * 结果：Gitea 和 GitHub 视觉完全一致（font 14px, row 30px, line-height 1.571, 间距 8px），用户无感。
- * 之前 v2.44 注释里"transform: scaleY(19/30)"和"ROW_HEIGHT=19 保持 SVG 几何"是中间方案，
- * 实际并未真正落地（commit-row 容器还是 19px），现在 v2.45 一次性补上。*/
-.commit-row--ascii {
-  /* 完全继承 .commit-row 样式（font-size, line-height, padding, height = 30px）—— 视觉统一 */
-  /* SVG 几何与容器都走 ROW_HEIGHT=30（models.ts v2.45），无需 transform 压缩 */
-  /* contain-intrinsic-size 跟随 row 30px 离屏预估 */
   contain-intrinsic-size: auto 24px;
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
@@ -2354,8 +2034,7 @@ function refBadgeClass(refType?: string): string {
      负责整体截断。*/
   display: inline;
   color: var(--color-text);
-  /* v2.39：15px → 14px，与 26px 行高比例更舒适；letter-spacing 微收紧 */
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: -0.005em;
 }
 
@@ -2364,6 +2043,7 @@ function refBadgeClass(refType?: string): string {
   display: flex;
   align-items: center;
   gap: var(--space-2, 8px);
+  grid-row: 1;
   min-width: 0;
   overflow: hidden;
   /* v2.66：border-box 让 padding/border 计入 grid track，hover 背景宽度 = 列宽
@@ -2385,7 +2065,7 @@ function refBadgeClass(refType?: string): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: inherit;
+  line-height: var(--git-graph-row-height, 24px);
 }
 .commit-row__col--author {
   /* v2.39：13px → 12px，与主体(14px)拉开层次但不显拥挤 */
