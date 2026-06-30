@@ -828,25 +828,37 @@ function resolveColPx(col: number): number {
   return w;
 }
 
-/** Graph 列实际像素宽（AUTO 时 = svgContentWidth + padding） */
+/**
+ * Graph 列实际像素宽
+ *  对齐 vscode-git-graph Graph.setSvgWidth (graph.ts:697-700)：
+ *    width = maxWidth > -1 ? min(contentWidth, maxWidth) : contentWidth
+ *  v3.1 修复：vscode SVG 元素 width 严格 = contentWidth（不加 padding），
+ *    但 graph cell 的 max-width = columnWidths[0] + COLUMN_LEFT_RIGHT_PADDING (main.ts:1713)
+ *    —— 这 padding 仅作 cell 视觉边距，SVG 自身不占。
+ *  v3.1 clamp：AUTO 模式限制最大宽度 480px 防止 200 lane 撑爆视口
+ *    （vscode 不限制，让 table 横向滚动；我们 CSS grid + wrapper overflow:hidden 没横向滚动，
+ *    必须 clamp；用户拖到具体 px 后无 clamp 限制）。
+ */
+const MAX_GRAPH_AUTO_WIDTH = 480;
 const graphColumnWidth = computed<number>(() => {
   const w = columnWidths.value[0];
   if (w === undefined || w === COLUMN_HIDDEN) return 0;
   if (w === COLUMN_AUTO) {
     const r = svgRender.value;
     if (!r) return DEFAULT_COL_WIDTHS_PIXEL[0]!;
-    return r.contentWidth + COLUMN_LEFT_RIGHT_PADDING;
+    return Math.min(r.contentWidth, MAX_GRAPH_AUTO_WIDTH);
   }
   return w;
 });
 
 /** 5 列 grid-template-columns 字符串
  *  对齐 vscode CSS #commitTable td nth-child(2) / .dateCol / .authorCol
- *  - col 0: Graph —— px
+ *  - col 0: Graph —— graphColumnWidth + COLUMN_LEFT_RIGHT_PADDING (24px)
+ *    （跟 .git-graph-bg 容器同宽，dot 视觉位置与 commit-row 第 0 列边界对齐）
  *  - col 1: Description —— minmax(40px, 1fr) 占满余下空间
  *  - col 2-4: Date/Author/Commit —— 数字（HIDDEN 时 0） */
 const gridTemplateColumns = computed<string>(() => {
-  const graph = graphColumnWidth.value;
+  const graph = graphColumnWidth.value + COLUMN_LEFT_RIGHT_PADDING;
   const desc = 'minmax(40px, 1fr)';
   const date = isColVisible(2) ? `${resolveColPx(2)}px` : '0';
   const author = isColVisible(3) ? `${resolveColPx(3)}px` : '0';
@@ -860,7 +872,7 @@ const MIN_DESC_COL_WIDTH = 40;
 /** 表格最小宽度 = 5 列固定宽 + 12px 边距 */
 const tableMinWidth = computed<number>(() => {
   return (
-    graphColumnWidth.value +
+    (graphColumnWidth.value + COLUMN_LEFT_RIGHT_PADDING) +
     MIN_DESC_COL_WIDTH +
     (isColVisible(2) ? resolveColPx(2) : 0) +
     (isColVisible(3) ? resolveColPx(3) : 0) +
@@ -887,6 +899,16 @@ let colDragFinalWidths: ColumnWidth[] | null = null;
 let colDragHeaderCells: HTMLElement[] | null = null;
 let colDragRafId = 0;
 
+/**
+ * v3.1：拖动期间需要同步的额外 DOM 引用（col 0 = Graph 列时）
+ *   - .git-graph-bg：背景容器，width 必须跟 header col 0 同步
+ *   - .git-graph-svg：SVG 元素，width 必须跟 .git-graph-bg 同步
+ * 不在 colDragHeaderCells 里（那个是 5 个 header col cell），
+ * 这里专门缓存 col 0 拖动时的 bg + svg 引用。
+ */
+let colDragGraphBg: HTMLElement | null = null;
+let colDragGraphSvg: HTMLElement | null = null;
+
 function clampColWidth(w: number): number {
   return Math.max(COLUMN_MIN_WIDTH, w);
 }
@@ -904,6 +926,12 @@ function onColDragStart(col: ColIndex, e: MouseEvent): void {
     colDragHeaderCells = Array.from(
       wrapper.querySelectorAll('.git-graph-header__col'),
     ) as HTMLElement[];
+    // v3.1：col 0 (Graph) 拖动时缓存 .git-graph-bg + .git-graph-svg 引用
+    // 让 mousemove 期间同时改 3 个元素的 width（保证 dot 不跟 commit-row 错位）
+    if (col === 0) {
+      colDragGraphBg = wrapper.querySelector('.git-graph-bg') as HTMLElement | null;
+      colDragGraphSvg = wrapper.querySelector('.git-graph-svg') as HTMLElement | null;
+    }
   }
   document.addEventListener('mousemove', onColDragMove);
   document.addEventListener('mouseup', onColDragEnd);
@@ -940,7 +968,13 @@ function onColDragMove(e: MouseEvent): void {
       const next: ColumnWidth[] = [...startWidths];
       next[0] = newW;
       colDragFinalWidths = next;
+      // v3.1：同步改 3 个元素的 width
+      // 1. header col 0（grid 共享给 commit-row 第 0 列）
       if (colDragHeaderCells[0]) colDragHeaderCells[0].style.width = `${newW}px`;
+      // 2. .git-graph-bg 容器（背景层宽度）
+      if (colDragGraphBg) colDragGraphBg.style.width = `${newW}px`;
+      // 3. .git-graph-svg 元素（SVG :width，内部 viewBox 仍是 contentWidth）
+      if (colDragGraphSvg) colDragGraphSvg.style.width = `${newW}px`;
       return;
     }
 
@@ -971,6 +1005,8 @@ function onColDragEnd(): void {
   colDragStartWidths = null;
   colDragFinalWidths = null;
   colDragHeaderCells = null;
+  colDragGraphBg = null;
+  colDragGraphSvg = null;
   document.removeEventListener('mousemove', onColDragMove);
   document.removeEventListener('mouseup', onColDragEnd);
 }
@@ -1311,11 +1347,16 @@ function refBadgeClass(refType?: string): string {
             </button>
           </div>
           <div class="git-graph-body" :style="{ minHeight: svgHeight }">
-            <!-- 背景层：视觉宽度 = graphColumnWidth（vscode git-graph 行为） -->
+            <!--
+              v3.1：背景层视觉宽度 = graphColumnWidth + COLUMN_LEFT_RIGHT_PADDING (24px)
+              对齐 vscode main.ts:1713 --limitGraphWidth = columnWidths[0] + COLUMN_LEFT_RIGHT_PADDING
+              (cell 视觉边距 24px，SVG 自身不占这个 padding)
+              SVG :width 仍 = graphColumnWidth（vscode setSvgWidth 不加 padding，graph.ts:697-700）
+            -->
             <div
               class="git-graph-bg"
               :style="{
-                width: `${graphColumnWidth}px`,
+                width: `${graphColumnWidth + COLUMN_LEFT_RIGHT_PADDING}px`,
                 height: svgHeight,
               }"
             >
