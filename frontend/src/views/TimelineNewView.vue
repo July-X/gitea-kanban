@@ -35,6 +35,7 @@ import {
   renderGraphVscode,
   VSCODE_EXPAND_Y,
   VSCODE_GRID_Y,
+  VSCODE_COLORS,
   type VscodeSvgRenderResult,
 } from '@renderer/lib/gitgraph/vscode-render';
 
@@ -292,6 +293,8 @@ interface DisplayCommit {
   isMerge?: boolean;
   refs?: string[];
   refTypes?: string[];
+  /** v3.13：commit 所在 lane 的颜色 hex，用于 ref badge 染色（1:1 对齐 VSCode） */
+  colorHex: string;
 }
 
 /**
@@ -860,6 +863,9 @@ const allRows = computed<DisplayRow[]>(() => {
             isMerge: commit.isMerge,
             refs: commit.refs,
             refTypes: commit.refTypes,
+            // v3.13：lane 色 hex，对齐 VSCode Git Graph ref badge 染色
+            // dto.color 是 0-15，颜色由 Go 端 BuildGraphVscode 给出，前端用 LANE_COLORS 转 hex
+            colorHex: VSCODE_COLORS[commit.color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0] ?? '#0085d9',
           }
         : null,
     });
@@ -1846,6 +1852,9 @@ function refBadgeClass(refType?: string): string {
                   height: (r.commit && expandedSha === r.commit.sha
                     ? ROW_H + activeExpandY
                     : ROW_H) + 'px',
+                  /* v3.13：绑定该 commit 所在 lane 的颜色，供 ref badge 和 dot stroke 使用。
+                   * ref badge 的 border/text/icon fill 用它（不依赖 hover） */
+                  '--row-lane-color': r.commit ? r.commit.colorHex : 'transparent',
                 }"
                 :role="r.commit ? 'button' : undefined"
                 :tabindex="r.commit ? 0 : undefined"
@@ -2677,45 +2686,51 @@ function refBadgeClass(refType?: string): string {
   color: var(--color-text-muted);
 }
 
+/* v3.13：ref badge 样式（1:1 复刻 VSCode Git Graph web/styles/main.css .gitRef）
+ *  - 无圆角（border-radius: 0）—— VSCode Git Graph 风格
+ *  - 透明背景，1px solid border + 文字全部用 --row-lane-color（commit 所在 lane 色）
+ *  - 图标（branch/tag SVG）背景填充 lane 色，图形填充背景色（对比色）
+ *  - --row-lane-color 由各 commit-row 自身绑定（非 hover 依赖） */
 .ref-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
-  border-radius: 8px;
+  gap: 0;
+  padding: 0;
+  /* 无圆角：对齐 VSCode .gitRef */
+  border-radius: 0;
+  border: 1px solid var(--row-lane-color, var(--color-primary));
   font-size: 11px;
   font-weight: 500;
-  /* 不截断 —— 分支名完整显示，单行布局由 commit-row 的 overflow:hidden 兜底 */
   flex-shrink: 0;
   white-space: nowrap;
+  /* 透明背景：对齐 VSCode */
+  background-color: transparent;
+  color: var(--row-lane-color, var(--color-primary));
+  /* 图标和文字共处一行：icon 占 18x18，文字在旁边 */
+  line-height: 18px;
+  height: 18px;
+  overflow: hidden;
 }
+/* v3.13：图标容器 —— 图标背景用 lane 色填充，SVG 图形用背景色（深底上对比） */
 .ref-badge__icon {
   flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 2px;
+  /* 图标背景 = lane 色（VSCode .gitRef > svg） */
+  background-color: var(--row-lane-color, var(--color-primary));
+  /* SVG stroke/fill 由父容器背景色决定（用 currentColor 或 bg） */
+  stroke: var(--color-shell-main-bg, #0f1115);
   stroke-width: 2;
+  fill: none;
+  /* SVG 与文字无 gap，合并为整体 lane 色边框块 */
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-
-/* v2.7：refs badge 类型区分（branch 绿、remote 蓝、tag 灰）
- * 后端 LogCommits 收集 refs 时已剥前缀：
- *   - 本地分支: refs/heads/main → "main"
- *   - 远程跟踪分支: refs/remotes/origin/main → "origin/main"
- *   - tag: refs/tags/v1.0 → "v1.0"
- * v2.7 简化按是否含 `/` 区分 branch vs remote（tag v2.8 加 RefType 字段后严格区分）
- */
-.ref-badge--branch {
-  background-color: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
-  color: var(--color-primary, #74b830);
-  border: 1px solid var(--color-primary-soft, rgba(116, 184, 48, 0.3));
-}
-.ref-badge--remote {
-  background-color: rgba(100, 116, 139, 0.12);
-  color: #64748b;
-  border: 1px solid rgba(100, 116, 139, 0.3);
-}
-.ref-badge--tag {
-  background-color: rgba(245, 158, 11, 0.12);
-  color: #d97706;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-}
+/* hover 行时 badge 不变色（VSCode .gitRef:hover 叠了 rgba(128,128,128,0.1)，
+ * 但对 ref badge 来说保持 lane 色更直观；行 hover 高亮由 .commit-row:hover 提供） */
 
 /* commit-refs 容器：多个 badge 横向排列，按 VSCode 风格放在 subject 前面。*/
 .commit-refs {
@@ -2782,23 +2797,7 @@ function refBadgeClass(refType?: string): string {
   transition: filter var(--t-fast, 120ms) var(--ease, ease-out);
 }
 
-/* v3.11：ref-badge 在 dot-hover 时用 lane 色（对齐 VSCode Git Graph .gitRef.active）
- *  - .commit-row--dot-active 时：使用 --active-lane-color CSS var（由 dotEnter 注入）
- *  - .commit-row:hover 时：鼠标从 dot 移到 badge 时 row hover 捕获，badge 也变 lane 色
- *    这是比 --active-lane-color 更可靠的方式（不依赖 JS 注入 CSS var）
- *  - color-mix: lane 色 22% 透明度背景 + 实色边框/文字
- *  - pointer-events:none 确保 badge 不干扰 row hover 状态（用户报告 hover 时 badge 闪一下）*/
-.commit-row:hover .ref-badge,
-.commit-row--dot-active .ref-badge {
-  background-color: color-mix(in srgb, var(--active-lane-color, var(--color-primary)) 22%, transparent);
-  border-color: var(--active-lane-color, var(--color-primary));
-  color: var(--active-lane-color, var(--color-primary));
-  transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease;
-}
-.commit-row:hover .ref-badge__icon,
-.commit-row--dot-active .ref-badge__icon {
-  stroke: var(--active-lane-color, var(--color-primary));
-}
+
 
 /* v3.12：dot hover tooltip（普通 HTML div，绝对定位于 .git-graph-body 内）
  *  v-show 控制显隐：tooltip 始终在 DOM 中，mouse 可达
