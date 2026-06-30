@@ -161,6 +161,11 @@ onUnmounted(() => {
     accordionResizeObserver.disconnect();
     accordionResizeObserver = null;
   }
+  // v3.4：清理动态行高 observer
+  if (rowHeightResizeObserver) {
+    rowHeightResizeObserver.disconnect();
+    rowHeightResizeObserver = null;
+  }
 });
 
 /** 仓库 web URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
@@ -252,6 +257,9 @@ const svgRender = computed<VscodeSvgRenderResult | null>(() => {
     expandedAt: expandedRow.value,
     expandY: activeExpandY.value || undefined,
     maxWidth: svgMaxWidth.value, // 使用正确的 maxWidth（包含 padding）
+    // v3.4：动态行高对齐（vscode main.ts:801,804）
+    gridY: dynamicGridY.value,
+    offsetY: dynamicOffsetY.value,
   });
 });
 
@@ -278,6 +286,8 @@ onMounted(async () => {
   }
   // 注册全局刷新事件监听器
   document.addEventListener('app:refresh', onAppRefresh);
+  // v3.4：动态行高对齐——数据加载后测量 + 监听尺寸变化
+  setupRowHeightObserver();
 });
 
 watch(
@@ -402,6 +412,8 @@ async function loadGraph(): Promise<void> {
       // 不要在这里 return，让 finally 块清理状态
     } else {
       graphDto.value = dto;
+      // v3.4：数据变化后重新测量行高（commit 数变化导致 gridY 变化）
+      nextTick(() => measureRowHeights());
     }
     // v2.9：新数据加载完收起展开（防 SHA 失效）
     expandedSha.value = null;
@@ -546,7 +558,69 @@ async function enableGitGraph(): Promise<void> {
 //
 // v2.6 改用结构化渲染（不再走字符流）：
 // - dot 圆点用 HTML overlay（不受 SVG 缩放影响）+ commit 列表逐行对齐
+//
+// v3.4：动态行高对齐（vscode-git-graph main.ts:801,804）
+//   - grid.y = (bodyHeight - headerHeight) / commits.length（动态）
+//   - offsetY = headerHeight + grid.y / 2（补偿表头）
+//   - dot cy 精确落在每行中心，不依赖固定 24px
 const ROW_H = VSCODE_GRID_Y;
+
+/** 动态表头高度（ResizeObserver 实时测量 .git-graph-header） */
+const headerHeightPx = ref(32);
+/** v3.4：wrapper 实际宽度（替代 window.innerWidth，对齐 vscode viewElem.clientWidth） */
+const wrapperClientWidth = ref(1200);
+/** 动态行高（ResizeObserver 实时测量 .git-graph-body / commits.length） */
+const dynamicGridY = ref(VSCODE_GRID_Y);
+/**
+ * v3.4：动态 offsetY（对齐 vscode main.ts:804）
+ *   - vscode: offsetY = headerHeight + gridY/2（SVG 覆盖整个表格含 header）
+ *   - 我们: SVG 在 body 内（body 在 header 下方），原点在 body 顶部，
+ *     所以 offsetY = gridY/2（不含 headerHeight，让第一行 dot 落在行中心）
+ */
+const dynamicOffsetY = computed(() => dynamicGridY.value / 2);
+
+/** v3.4：动态行高 observer（测量 header + body 实际渲染高度，对齐 vscode main.ts:801） */
+let rowHeightResizeObserver: ResizeObserver | null = null;
+
+/** 测量并更新 headerHeightPx / dynamicGridY / wrapperClientWidth */
+function measureRowHeights(): void {
+  const wrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
+  if (!wrapper) return;
+  // v3.4：测量 wrapper 实际宽度（替代 window.innerWidth，对齐 vscode viewElem.clientWidth）
+  wrapperClientWidth.value = wrapper.clientWidth;
+  const header = wrapper.querySelector('.git-graph-header') as HTMLElement | null;
+  const body = wrapper.querySelector('.git-graph-body') as HTMLElement | null;
+  if (header) {
+    headerHeightPx.value = header.clientHeight;
+  }
+  // vscode main.ts:801: grid.y = (tableHeight - headerHeight) / commits.length
+  // 这里用第一个 commit-row 的实际高度作为单行高度（更直接，避免 body 含 accordion 撑高）
+  if (body) {
+    const firstRow = body.querySelector('.commit-row') as HTMLElement | null;
+    if (firstRow) {
+      const rowH = firstRow.clientHeight;
+      if (rowH > 0) dynamicGridY.value = rowH;
+    }
+  }
+}
+
+function setupRowHeightObserver(): void {
+  if (rowHeightResizeObserver) rowHeightResizeObserver.disconnect();
+  nextTick(() => {
+    measureRowHeights();
+    const wrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
+    if (!wrapper) return;
+    rowHeightResizeObserver = new ResizeObserver(() => {
+      measureRowHeights();
+    });
+    // v3.4：观察 wrapper（宽度变化）、header（高度变化）、body（行高变化）
+    rowHeightResizeObserver.observe(wrapper);
+    const header = wrapper.querySelector('.git-graph-header');
+    const body = wrapper.querySelector('.git-graph-body');
+    if (header) rowHeightResizeObserver.observe(header);
+    if (body) rowHeightResizeObserver.observe(body);
+  });
+}
 
 const maxRowPlusOne = computed(() => {
   const dto = graphDto.value;
@@ -766,7 +840,7 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
 // 对齐 vscode-git-graph web/main.ts + web/utils.ts + web/styles/main.css：
 //   - 5 列：Graph (col 0) / Description (col 1) / Date (col 2) / Author (col 3) / Commit (col 4)
 //   - columnWidths: number[] （COLUMN_HIDDEN=-100 / COLUMN_AUTO=-101 / 数字=px）
-//   - 拖动：mousedown 缓存 startWidths + startX，mousemove 直接改 cols[i].style.width
+//   - 拖动：mousedown 缓存 startWidths + startX，mousemove 更新 colDragPreviewWidths ref
 //     （DOM 写入，跟 vscode main.ts:1706-1777 行为一致）
 //   - 双击 handle：toggle HIDDEN ↔ AUTO/defaultWidth（main.ts:1811-1815）
 //   - 右键菜单：toggle Date/Author/Commit 显隐（main.ts:1808-1865）
@@ -885,11 +959,12 @@ const graphColumnWidth = computed<number>(() => {
   if (w === undefined || w === COLUMN_HIDDEN) return 0;
 
   if (w === COLUMN_AUTO) {
-    // AUTO 模式：自适应 contentWidth，限制在 viewWidth * 0.333
+    // AUTO 模式：自适应 contentWidth，限制在 wrapperWidth * 0.333
+    // v3.4：用 wrapperClientWidth 替代 window.innerWidth（对齐 vscode viewElem.clientWidth）
     const r = svgRender.value;
     if (!r) return DEFAULT_GRAPH_COL_WIDTH; // fallback（渲染前）
     const contentW = r.contentWidth;
-    const maxW = Math.round((window.innerWidth || 1200) * 0.333);
+    const maxW = Math.round(wrapperClientWidth.value * 0.333);
     return Math.min(contentW, maxW);
   }
 
@@ -915,8 +990,9 @@ const svgMaxWidth = computed<number>(() => {
   const w = widths[0];
 
   if (w === COLUMN_AUTO) {
-    // AUTO 模式：限制到 viewWidth * 0.333 + padding
-    const maxW = Math.round((window.innerWidth || 1200) * 0.333);
+    // AUTO 模式：限制到 wrapperWidth * 0.333 + padding
+    // v3.4：用 wrapperClientWidth 替代 window.innerWidth
+    const maxW = Math.round(wrapperClientWidth.value * 0.333);
     return maxW + COLUMN_LEFT_RIGHT_PADDING;
   }
 
@@ -961,7 +1037,7 @@ const tableMinWidth = computed<number>(() => {
 // ============================================================
 // v3.0：通用列宽拖动（vscode column resize 行为 1:1 复刻）
 // - mousedown 缓存 startWidths + startX + header cell 引用
-// - mousemove 直接改 cols[i].style.width（DOM 写入，跟 vscode main.ts:1706-1777 一致）
+// - mousemove 更新 colDragPreviewWidths ref（纯数据驱动，Vue computed 自动响应）
 // - mouseup 持久化到 ref + localStorage
 // - 双击 handle：toggle HIDDEN ↔ AUTO/default（main.ts:1811-1815）
 // ============================================================
@@ -973,22 +1049,14 @@ let colDragCol: ColIndex | null = null;
 let colDragStartX = 0;
 let colDragStartWidths: ColumnWidth[] | null = null;
 let colDragFinalWidths: ColumnWidth[] | null = null;
-let colDragHeaderCells: HTMLElement[] | null = null;
 let colDragRafId = 0;
 
 /**
- * v3.3：拖动预览状态（实时更新，触发 computed 重算）
- *  用于在 mousemove 期间让 svgMaxWidth / graphColumnWidth computed 实时响应
- *  避免只改 DOM 而 Vue computed 不更新的问题
+ * v3.4：拖动预览状态（纯数据驱动，触发 computed 重算）
+ *  mousemove 期间更新此 ref，graphColumnWidth/svgMaxWidth/gridTemplateColumns
+ *  computed 自动响应，无需手动操作 DOM
  */
 const colDragPreviewWidths = ref<ColumnWidth[] | null>(null);
-
-/**
- * v3.3：拖动期间需要同步的额外 DOM 引用（col 0 = Graph 列时）
- *   - .git-graph-bg：背景容器，width 必须跟 header col 0 同步
- *   SVG width 通过 Vue computed（svgWidth）自动响应，不需要手动操作
- */
-let colDragGraphBg: HTMLElement | null = null;
 
 /**
  * v3.2：列宽 clamp —— 区分 Graph 列 vs 其他列
@@ -1010,16 +1078,7 @@ function onColDragStart(col: ColIndex, e: MouseEvent): void {
   colDragCol = col;
   colDragStartX = e.clientX;
   colDragStartWidths = [...columnWidths.value];
-  const wrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
-  if (wrapper) {
-    colDragHeaderCells = Array.from(
-      wrapper.querySelectorAll('.git-graph-header__col'),
-    ) as HTMLElement[];
-    // v3.3：col 0 (Graph) 拖动时缓存 .git-graph-bg 引用
-    if (col === 0) {
-      colDragGraphBg = wrapper.querySelector('.git-graph-bg') as HTMLElement | null;
-    }
-  }
+  // v3.4：纯数据驱动，不再缓存 DOM 引用（删除手动 style.width 写入）
   document.addEventListener('mousemove', onColDragMove);
   document.addEventListener('mouseup', onColDragEnd);
 }
@@ -1028,8 +1087,7 @@ function onColDragMove(e: MouseEvent): void {
   if (
     !colDragging.value ||
     colDragCol === null ||
-    !colDragStartWidths ||
-    !colDragHeaderCells
+    !colDragStartWidths
   ) {
     return;
   }
@@ -1039,8 +1097,7 @@ function onColDragMove(e: MouseEvent): void {
     if (
       !colDragging.value ||
       colDragCol === null ||
-      !colDragStartWidths ||
-      !colDragHeaderCells
+      !colDragStartWidths
     ) {
       return;
     }
@@ -1049,30 +1106,25 @@ function onColDragMove(e: MouseEvent): void {
     const startWidths = colDragStartWidths;
 
     if (col === 0) {
-      // v3.3：拖 Graph 列 —— 实时更新预览值 + DOM（对齐 vscode main.ts:1759-1764）
+      // v3.4：拖 Graph 列 —— 纯数据驱动（对齐 vscode main.ts:1759-1764）
+      //   只更新 colDragPreviewWidths，让 graphColumnWidth/svgMaxWidth/gridTemplateColumns
+      //   computed 自动响应。Graph 列拖动只调 limitMaxWidth（SVG 坐标不变，释放/隐藏宽度）
+      //   删除所有手动 DOM style.width 写入（与 Vue computed 冲突会导致回弹/错乱）
       const startW = startWidths[0]!;
       const baseW = startW === COLUMN_AUTO ? graphColumnWidth.value : startW;
       const newW = clampColWidth(0, baseW + delta);
       const next: ColumnWidth[] = [...startWidths];
       next[0] = newW;
       colDragFinalWidths = next;
-      colDragPreviewWidths.value = next; // 实时更新，触发 svgMaxWidth / graphColumnWidth 重算
-
-      // DOM 直接写入（即时视觉反馈）
-      // 注意：bg 和 svg 的 width 应该 = newW + COLUMN_LEFT_RIGHT_PADDING
-      // 但 vscode 是在 CSS 中处理 padding，这里先保持原逻辑（后续通过 computed 修正）
-      if (colDragHeaderCells[0]) colDragHeaderCells[0].style.width = `${newW + COLUMN_LEFT_RIGHT_PADDING}px`;
-      if (colDragGraphBg) colDragGraphBg.style.width = `${newW + COLUMN_LEFT_RIGHT_PADDING}px`;
-      // 移除对 svg 的直接操作，让 Vue 的 svgWidth computed 处理
+      colDragPreviewWidths.value = next; // 实时更新，触发 computed 重算
       return;
     }
 
     if (col === 1) return; // Description 1fr 自动填满，vscode 也不响应拖动（main.ts:1772）
 
-    // v3.3：拖 col 2/3/4 —— vscode 双列联动 (main.ts:1765-1778)
-    //   拖 col[k] 改 columnWidths[k] 和 columnWidths[k+1]（一增一减）
-    //   nextCol 跳过 HIDDEN 列（HIDDEN 不参与空间计算）
-    //   边界检查：当前列和 nextCol 都不小于 COLUMN_MIN_WIDTH
+    // v3.4：拖 col 2/3/4 —— 纯数据驱动双列联动 (vscode main.ts:1765-1778)
+    //   只更新 colDragPreviewWidths，让 gridTemplateColumns computed 自动响应
+    //   删除手动 DOM style.width 写入（与 grid-template-columns CSS 冲突）
     const startW = startWidths[col]!;
     if (startW === COLUMN_HIDDEN) return; // 隐藏列不能拖
     const colWidth = startW === COLUMN_AUTO ? DEFAULT_COL_WIDTHS_PIXEL[col]! : startW;
@@ -1091,11 +1143,7 @@ function onColDragMove(e: MouseEvent): void {
     next[col] = newW;
     next[nextCol] = newNextW;
     colDragFinalWidths = next;
-    colDragPreviewWidths.value = next; // v3.3：实时更新，触发 gridTemplateColumns 重算
-
-    // v3.3：只改 header cell width（commit-row 通过 CSS grid 自动跟随）
-    if (colDragHeaderCells[col]) colDragHeaderCells[col].style.width = `${newW}px`;
-    if (colDragHeaderCells[nextCol]) colDragHeaderCells[nextCol].style.width = `${newNextW}px`;
+    colDragPreviewWidths.value = next; // 实时更新，触发 gridTemplateColumns 重算
   });
 }
 
@@ -1112,9 +1160,7 @@ function onColDragEnd(): void {
   colDragCol = null;
   colDragStartWidths = null;
   colDragFinalWidths = null;
-  colDragPreviewWidths.value = null; // v3.3：清除预览状态
-  colDragHeaderCells = null;
-  colDragGraphBg = null;
+  colDragPreviewWidths.value = null; // v3.4：清除预览状态
   document.removeEventListener('mousemove', onColDragMove);
   document.removeEventListener('mouseup', onColDragEnd);
 }
@@ -1600,9 +1646,10 @@ function refBadgeClass(refType?: string): string {
                 @keydown.enter.prevent="r.commit && toggleCommitDetail(r.commit)"
                 @keydown.space.prevent="r.commit && toggleCommitDetail(r.commit)"
               >
-                <!-- v2.48：移除 graph 占位列——v2.47 改 flex 两栏后 SVG 已在独立 .git-graph-bg
-                     容器，commit-row 内的 graph 占位列变成纯空白（描述列左侧 130px 空白根因）。
-                     commit-row 改为 4 列 grid（desc/author/date/sha），直接对齐表头 desc 列。 -->
+                <!-- v3.4：恢复 graph 占位列（第一列，透明让 SVG 透出）
+                     v2.48 曾移除它，但导致 commit-row 4 列 vs header 5 列错位。
+                     现在统一 5 列，graph 占位列高度 = ROW_H，让背景 SVG dot 精确对齐每行。 -->
+                <div class="commit-row__col commit-row__col--graph" aria-hidden="true"></div>
                 <template v-if="r.commit">
                   <!-- col 1: Description 列（refs + subject） -->
                   <div class="commit-row__col commit-row__col--desc">
@@ -1870,7 +1917,9 @@ function refBadgeClass(refType?: string): string {
  */
 .git-graph-header {
   display: grid;
-  grid-template-columns: var(--git-graph-col-width, 96px) var(--grid-template-columns, 1fr 128px 128px 80px);
+  /* v3.4：5 列统一（gridTemplateColumns 已含 graph 列，不再额外加 --git-graph-col-width）
+   *   之前 var(--git-graph-col-width) var(--grid-template-columns) = 6 列，与 commit-row 5 列不匹配 */
+  grid-template-columns: var(--grid-template-columns, 96px 1fr 128px 128px 80px);
   align-items: center;
   height: 32px;
   background: var(--color-shell-main-bg);
@@ -1979,10 +2028,12 @@ function refBadgeClass(refType?: string): string {
  *   - wrapper 不再因为 commit-row min-width 撑出横向滚动条
  */
 .git-graph-body {
+  /* v3.4：block 布局（bg 改 absolute 后不需要 flex，rows 自然占满宽度）
+   *   - position: relative —— bg absolute 的定位上下文
+   *   - display: block —— rows 容器占满 body 宽度
+   *   - 之前 display: flex 是为了 bg(sticky) + rows 并列，现在 bg absolute 脱离文档流 */
   position: relative;
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start; /* v3.3: 改为 flex-start，确保 .git-graph-bg 从顶部对齐 */
+  display: block;
   min-height: var(--git-graph-row-height, 24px);
 }
 
@@ -2003,7 +2054,11 @@ function refBadgeClass(refType?: string): string {
  *   - 配合 .git-graph-body 的 `display: flex` 让 commit-rows 容器和 bg 容器并列
  *     → 多 lane 时 bg 容器内部横向滚动，commit-rows 容器固定宽度（不再撑大 wrapper）*/
 .git-graph-bg {
-  position: sticky;
+  /* v3.4：SVG 绝对定位覆盖 body 顶部（对齐 vscode SVG 覆盖整个表格）
+   *   - position: absolute; top: 0; left: 0 —— SVG 原点在 body 顶部
+   *   - offsetY = gridY/2，第一行 dot 落在第一个 commit-row 中心
+   *   - 之前 position: sticky 会在滚动时偏移，导致 dot 与 row 错位 */
+  position: absolute;
   top: 0;
   left: 0;
   z-index: 2;
@@ -2011,13 +2066,8 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
   content-visibility: auto;
   contain-intrinsic-size: auto 24px;
-  /* v2.64: 改用 overflow: visible —— 超 handleLeft 的 lane 由 SVG mask 渐变 fade，
-     不再用物理裁切；用户拖动列宽到内容宽度内时所有 lane 完整可见。 */
   overflow: visible;
   flex: 0 0 auto;
-  /* v2.66：直接装 SVG，不再用 .git-graph-bg-scroll 中间层。
-     之前的 scroll 容器是 position:absolute 但 inline style 只设了 height 没设 width，
-     导致 auto width = 0，SVG 容器被压成 0 宽，整图不可见。 */
   display: block;
 }
 
@@ -2159,10 +2209,13 @@ function refBadgeClass(refType?: string): string {
  * 不再用 grid 后：commit-row 不再需要 :style="gridRow: r.row+1"，
  * 改为固定 height: ROW_H，row 顺序由 v-for 自然保证。*/
 .git-graph-rows {
-  flex: 1 1 auto;
+  /* v3.4：占满 body 宽度（block 布局，不再 flex:1） */
+  width: 100%;
   min-width: 0;
   overflow: visible;
   display: block;
+  position: relative;
+  z-index: 1;
 }
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
@@ -2203,9 +2256,10 @@ function refBadgeClass(refType?: string): string {
  *   （之前 .git-graph-table-width = svgWidth + 840 → 撑爆视口）*/
 .commit-row {
   display: grid;
-  /* v2.48：移除 graph 占位列（第一列 var(--git-graph-col-width)），改为 4 列 grid。
-     v2.47 改 flex 两栏后 SVG 在独立 .git-graph-bg 容器，commit-row 不再需要 graph 占位列。 */
-  grid-template-columns: var(--grid-template-columns, 480px 160px 120px 80px);
+  /* v3.4：5 列统一（跟 header 一致，第一列是 graph 占位，透明让 SVG 透出）
+   *   gridTemplateColumns = graphPx 1fr datePx authorPx commitPx
+   *   之前 v2.48 移除了 graph 占位列导致 commit-row 4 列 vs header 5/6 列错位 */
+  grid-template-columns: var(--grid-template-columns, 96px 1fr 128px 128px 80px);
   grid-template-rows: var(--git-graph-row-height, 24px) auto;
   align-items: stretch;
   gap: 0;
@@ -2387,8 +2441,15 @@ function refBadgeClass(refType?: string): string {
   /* v2.31 revert：恢复 v2.27 行为——内容列有自身背景，遮住下方背景层 SVG/圆点（commit-row 整行透明） */
   background: var(--color-shell-main-bg);
 }
-/* v2.48：.commit-row__col--graph 已移除——v2.47 flex 两栏后 SVG 在独立 .git-graph-bg
- * 容器，commit-row 不再需要 graph 占位列（旧规则保留注释供 git blame 参考） */
+/* v3.4：graph 占位列（第一列，透明让背景 SVG 透出）
+ *   - background: transparent —— 不遮挡 .git-graph-bg 的 SVG
+ *   - pointer-events: none —— 鼠标事件穿透到 commit-row（hover 高亮整行）
+ *   - 跟 header __col--graph 同宽（var --grid-template-columns 第一列） */
+.commit-row__col--graph {
+  background: transparent;
+  pointer-events: none;
+}
+/* v2.48 旧注释：.commit-row__col--graph 曾被移除，v3.4 恢复（5 列统一对齐） */
 .commit-row__col--desc {
   /* v2.x：放弃 flex 布局，改 block 文字流 —— subject 和 refs 都 inline，
      整体被 desc 列的 overflow:hidden + text-overflow:ellipsis 截断。

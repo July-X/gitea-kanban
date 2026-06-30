@@ -138,12 +138,32 @@ export function renderGraphVscode(
 		 *   （(maxWidth-12)px ~ maxWidth px 渐变 12px）
 		 */
 		maxWidth?: number;
+		/**
+		 * 动态行高（对齐 vscode-git-graph main.ts:801 动态 grid.y）。
+		 * - 默认 VSCODE_GRID_Y(24)：固定行高
+		 * - 传入实际行高：dot cy 与 commit-row 中心精确对齐
+		 * vscode main.ts:801: grid.y = (tableHeight - headerHeight) / commits.length
+		 */
+		gridY?: number;
+		/**
+		 * 垂直偏移（对齐 vscode-git-graph main.ts:804 动态 offsetY）。
+		 * - 默认 VSCODE_OFFSET_Y(12)
+		 * - 传入 headerHeight + gridY/2：补偿表头高度，让第一行 dot 落在行中心
+		 * vscode main.ts:804: offsetY = headerHeight + grid.y / 2
+		 */
+		offsetY?: number;
 	},
 ): VscodeSvgRenderResult {
 	const style = options?.style ?? 'rounded';
 	const expandedAt = options?.expandedAt ?? null;
 	const expandY = options?.expandY ?? VSCODE_EXPAND_Y;
 	const maxWidth = options?.maxWidth ?? -1;
+	// v3.4：动态行高对齐（vscode main.ts:801,804）
+	const gridY = options?.gridY ?? VSCODE_GRID_Y;
+	const offsetY = options?.offsetY ?? VSCODE_OFFSET_Y;
+	// GRID_X / OFFSET_X 保持固定（横向 lane 间距不变，vscode 也是固定 16）
+	const gridX = VSCODE_GRID_X;
+	const offsetX = VSCODE_OFFSET_X;
 
 	const nodes: VscodeSvgNode[] = [];
 	const paths: VscodeSvgPath[] = [];
@@ -219,10 +239,10 @@ export function renderGraphVscode(
 			lockedFirst: boolean;
 		}> = [];
 		for (const line of lines) {
-			let x1 = line.x1 * VSCODE_GRID_X + VSCODE_OFFSET_X;
-			let y1 = line.y1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
-			let x2 = line.x2 * VSCODE_GRID_X + VSCODE_OFFSET_X;
-			let y2 = line.y2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y;
+			let x1 = line.x1 * gridX + offsetX;
+			let y1 = line.y1 * gridY + offsetY;
+			let x2 = line.x2 * gridX + offsetX;
+			let y2 = line.y2 * gridY + offsetY;
 
 			// expandAt 处理: 展开 commit 详情时,下方所有 line 自动"延伸"
 			// (vscode Branch.draw:85-101)
@@ -244,7 +264,7 @@ export function renderGraphVscode(
 								lockedFirst: line.lockedFirst,
 							});
 							placed.push({
-								p1: { x: x2, y: y1 + VSCODE_GRID_Y },
+								p1: { x: x2, y: y1 + gridY },
 								p2: { x: x2, y: y2 + expandY },
 								lockedFirst: line.lockedFirst,
 							});
@@ -253,7 +273,7 @@ export function renderGraphVscode(
 							// 转场在 p2 端:先延伸到 p2 上方,再做转场
 							placed.push({
 								p1: { x: x1, y: y1 },
-								p2: { x: x1, y: y2 - VSCODE_GRID_Y + expandY },
+								p2: { x: x1, y: y2 - gridY + expandY },
 								lockedFirst: line.lockedFirst,
 							});
 							y1 += expandY;
@@ -322,7 +342,7 @@ export function renderGraphVscode(
 				// p1 = (4, 4), p2 = (20, 28)
 				// midX = x2 = 20, midY = y2 - 9.12 = 18.88 (lockedFirst=true)
 				// path: M 4 4.0 L 20 18.9 L 20 28.0
-				const angDy = VSCODE_GRID_Y * 0.38;
+				const angDy = gridY * 0.38;
 				const midX = seg.lockedFirst ? x2 : x1;
 				const midY = seg.lockedFirst ? y2 - angDy : y1 + angDy;
 				curPath += ` L ${midX.toFixed(0)} ${midY.toFixed(1)} L ${x2.toFixed(0)} ${y2.toFixed(1)}`;
@@ -332,7 +352,7 @@ export function renderGraphVscode(
 				// 控制点 1: (4, 4+19.2) = (4, 23.2)
 				// 控制点 2: (20, 28-19.2) = (20, 8.8)
 				// path: M 4 4.0 C 4 23.2 20 8.8 20 28.0
-				const curveDy = VSCODE_GRID_Y * 0.8;
+				const curveDy = gridY * 0.8;
 				curPath += ` C ${x1.toFixed(0)} ${(y1 + curveDy).toFixed(1)} ${x2.toFixed(0)} ${(y2 - curveDy).toFixed(1)} ${x2.toFixed(0)} ${y2.toFixed(1)}`;
 			}
 		}
@@ -345,8 +365,8 @@ export function renderGraphVscode(
 	// ===== 4. Vertex.draw 复刻: 圆点 =====
 	// (vscode Vertex.draw:298-331)
 	for (const node of graph.nodes) {
-		const cx = node.lane * VSCODE_GRID_X + VSCODE_OFFSET_X;
-		const cy = node.row * VSCODE_GRID_Y + VSCODE_OFFSET_Y + (expandedAt !== null && node.row > expandedAt ? expandY : 0);
+		const cx = node.lane * gridX + offsetX;
+		const cy = node.row * gridY + offsetY + (expandedAt !== null && node.row > expandedAt ? expandY : 0);
 		const colorHex = VSCODE_COLORS[node.color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0];
 
 		nodes.push({
@@ -374,13 +394,13 @@ export function renderGraphVscode(
 	// vscode Graph.getContentWidth: 2*offsetX + (maxX-1)*gridX
 	// vscode Graph.getHeight (graph.ts:476): vertices.length * gridY + offsetY - gridY/2 + (expandAt ? expandY : 0)
 	const maxLane = graph.maxLane;
-	const contentWidth = 2 * VSCODE_OFFSET_X + maxLane * VSCODE_GRID_X + VSCODE_GRID_X;
+	const contentWidth = 2 * offsetX + maxLane * gridX + gridX;
 	// vscode Graph.setSvgWidth (graph.ts:697-700): SVG 实际渲染宽度 = min(contentWidth, maxWidth)
 	const width = maxWidth > -1 ? Math.min(contentWidth, maxWidth) : contentWidth;
 	const height =
-		graph.nodes.length * VSCODE_GRID_Y +
-		VSCODE_OFFSET_Y -
-		VSCODE_GRID_Y / 2 +
+		graph.nodes.length * gridY +
+		offsetY -
+		gridY / 2 +
 		(expandedAt !== null ? expandY : 0);
 
 	return { paths, nodes, width, contentWidth, height, style };
