@@ -1187,14 +1187,21 @@ function refBadgeClass(refType?: string): string {
                 height: svgHeight,
               }"
             >
-              <div class="git-graph-bg-scroll" :style="{ height: svgHeight }">
-                <svg
-                  class="git-graph-svg"
-                  :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > handleLeft }"
-                  :viewBox="viewBox"
-                  :width="svgWidth"
-                  :height="svgHeight"
-                >
+              <!--
+              v2.66：删掉多余的 .git-graph-bg-scroll 中间层
+              v2.65 root cause：.git-graph-bg-scroll 是 position:absolute 但 inline style 只设 height
+              没设 width → absolute 元素 auto width = 0 → SVG 容器被压成 0 宽 → 整图不可见
+              修复：SVG 直接放进 .git-graph-bg（已设 width=handleLeft）
+              .git-graph-bg 是 position:sticky + width:handleLeft + overflow:visible
+              SVG 自身的 CSS mask-image 处理渐变 fade，不需要 .git-graph-bg-scroll 兜底
+            -->
+            <svg
+              class="git-graph-svg"
+              :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > handleLeft }"
+              :viewBox="viewBox"
+              :width="svgWidth"
+              :height="svgHeight"
+            >
                   <!--
                     v2.65：渐变 fade 改用 CSS mask-image（在 .git-graph-svg 上），不再用 SVG <defs>+<mask>。
                     原因：v2.64 的 SVG mask + maskUnits=userSpaceOnUse + 默认 x=-10%/width=120% 在不同浏览器
@@ -1278,7 +1285,6 @@ function refBadgeClass(refType?: string): string {
                     </template>
                   </g>
                 </svg>
-              </div>
             </div>
 
             <!-- 行层：每行 grid 5 列，第一列是 graph 占位让背景 SVG 透出
@@ -1725,20 +1731,15 @@ function refBadgeClass(refType?: string): string {
      不再用物理裁切；用户拖动列宽到内容宽度内时所有 lane 完整可见。 */
   overflow: visible;
   flex: 0 0 auto;
+  /* v2.66：直接装 SVG，不再用 .git-graph-bg-scroll 中间层。
+     之前的 scroll 容器是 position:absolute 但 inline style 只设了 height 没设 width，
+     导致 auto width = 0，SVG 容器被压成 0 宽，整图不可见。 */
+  display: block;
 }
 
-/* v2.64: bg 内部 scroll 容器（装 SVG + dots）—— 改用 mask 渐变后不再需要横向滚动
- *   - position: absolute 让它脱离 bg 容器 flow，width 不影响 bg 容器宽度
- *   - inline style 设 width = svgWidth（多 lane 时完整渲染 SVG，让 mask 渐变 fade）
- *   - overflow: visible 让超 handleLeft 的 lane 由 mask 处理
- *   - 注意：不在 CSS 里写 width 让 inline 胜出（CSS width 会覆盖 inline） */
-.git-graph-bg-scroll {
-  position: absolute;
-  top: 0;
-  left: 0;
-  background: var(--color-graph-bg, var(--color-shell-main-bg));
-  overflow: visible;
-}
+/* v2.66：删除 .git-graph-bg-scroll 中间层——v2.65 的 root cause。
+   旧容器 position:absolute + inline style 只设 height → auto width = 0 → SVG 0 宽。
+   现在 SVG 直接在 .git-graph-bg 内部，width 由 SVG :width=handleLeft 显式控制。 */
 
 /* v2.65：渐变 fade 改用 CSS mask-image
  *   - 默认无 mask（少量 lane 时 graph 完整显示，无渐变）
