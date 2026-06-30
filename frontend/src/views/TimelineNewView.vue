@@ -2683,8 +2683,11 @@ function refBadgeClass(refType?: string): string {
       border: 1px solid var(--color-divider);
       border-radius: var(--radius-card, 8px);
       box-shadow: var(--shadow-sm);
-      /* v2.66：嵌入 commit-row 内部后，跨过 4 个内容列占整行宽（与原"流式插入"等效） */
-      grid-column: 1 / -1;
+      /* v3.7：跨 commit-row 的 4 个内容列（desc/author/date/sha），从 col 2 到 col 5
+       *   commit-row 是 5 列 grid（col 1=graph 占位 + col 2~5 内容列）
+       *   accordion 跳过 graph 占位列，只跨 4 个内容列，宽度与列宽完美匹配
+       *   之前 grid-column: 1 / -1 跨了 5 列（含 graph 占位列），左边多了一段空隙 */
+      grid-column: 2 / 6;
       /* v2.66：max-height 600 → 300（用户拍板"缩减一半"）。
          4:6 panel 内部 .cd-panel__left/right 各自有 overflow-y: auto，超出仍可滚。 */
       max-height: 300px;
