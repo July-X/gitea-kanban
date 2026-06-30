@@ -240,25 +240,18 @@ const activeExpandY = computed(() =>
     : 0,
 );
 
+/**
+ * v3.3：SVG 渲染结果（使用正确的 maxWidth 参数）
+ *  对齐 vscode-git-graph main.ts:1713, 1740, 1764 调用 graph.limitMaxWidth() 时
+ *  传的是"容器宽度 + padding"
+ */
 const svgRender = computed<VscodeSvgRenderResult | null>(() => {
   const dto = graphDto.value;
   if (!dto) return null;
-  // v3.0: maxWidth 直接从 columnWidths[0] 算，不通过 graphColumnWidth
-  // 避免 computed 循环引用 → TS 推断失败
-  //   - AUTO → -1（不限制，SVG 完整渲染）
-  //   - HIDDEN → 0
-  //   - 数字 → 该数字（用户拖 graph 列后的固定宽）
-  const col0 = columnWidths.value[0];
-  const maxWidth =
-    col0 === undefined || col0 === COLUMN_AUTO
-      ? -1
-      : col0 === COLUMN_HIDDEN
-        ? 0
-        : col0;
   return renderGraphVscode(dto, {
     expandedAt: expandedRow.value,
     expandY: activeExpandY.value || undefined,
-    maxWidth,
+    maxWidth: svgMaxWidth.value, // 使用正确的 maxWidth（包含 padding）
   });
 });
 
@@ -566,15 +559,40 @@ const viewBox = computed(() => {
   return r ? `0 0 ${r.contentWidth} ${r.height}` : '0 0 0 0';
 });
 /**
- * v3.0：SVG :width = graphColumnWidth（Graph 列用户拖宽后的实际像素宽）
- *   - SVG :width = graphColumnWidth（CSS 视觉宽度 = Graph 列宽）
- *   - viewBox = 0 0 contentWidth height（坐标系不变）
- *   - CSS mask-image 在 SVG 元素上以 graphColumnWidth 实际像素为单位
- *     渐变 black 0% → black calc(100% - 12px) → transparent 100%
- *     等价于 vscode-git-graph (maxWidth-12, maxWidth) 12px 渐变
+ * v3.3：SVG 元素的实际渲染宽度
+ *  对齐 vscode-git-graph graph.ts:697-700 setSvgWidth()
+ *  SVG width = min(contentWidth, maxWidth)
+ *  - contentWidth：所有 lane 完整渲染需要的宽度
+ *  - maxWidth：容器限制（来自 svgMaxWidth，包含 padding）
+ *  当 contentWidth > maxWidth 时，SVG 截断到 maxWidth，右侧用 CSS mask 渐变淡出
  */
 const svgWidth = computed(() => {
-  return `${graphColumnWidth.value}px`;
+  const r = svgRender.value;
+  if (!r) return '0px';
+  const contentW = r.contentWidth;
+  const maxW = svgMaxWidth.value;
+  // maxW > 0 时取 min，否则完整渲染
+  const w = maxW > 0 ? Math.min(contentW, maxW) : contentW;
+  return `${w}px`;
+});
+
+/**
+ * v3.3：SVG mask 渐变（动态计算）
+ *  对齐 vscode-git-graph graph.ts:691-694 applyMaxWidth()
+ *  当 contentWidth > maxWidth 时，右侧 12px 渐变淡出
+ *  offset1 = (maxWidth - 12) / contentWidth
+ *  offset2 = maxWidth / contentWidth
+ */
+const svgMaskGradient = computed(() => {
+  const r = svgRender.value;
+  if (!r) return 'none';
+  const contentW = r.contentWidth;
+  const maxW = svgMaxWidth.value;
+  if (maxW <= 0 || contentW <= maxW) return 'none'; // 不需要 mask
+  // vscode 渐变：(maxW-12)/contentW → maxW/contentW
+  const offset1 = ((maxW - 12) / contentW) * 100;
+  const offset2 = (maxW / contentW) * 100;
+  return `linear-gradient(to right, black 0%, black ${offset1}%, transparent ${offset2}%)`;
 });
 const svgHeight = computed(() => {
   const r = svgRender.value;
@@ -766,20 +784,18 @@ const COLUMN_LEFT_RIGHT_PADDING = 24;
 type ColumnWidth = number;
 
 /**
- * v3.2：5 列默认宽度
+ * v3.3：5 列默认宽度（严格对齐 vscode-git-graph）
  *  对齐 vscode-git-graph web/main.ts:1724 首次跑仓库时的 columnWidths 默认值：
- *    - col 0 Graph：AUTO
- *    - col 1 Description：AUTO (1fr 占满)
- *    - col 2-4 Date/Author/Commit：AUTO 或 HIDDEN（按用户配置）
- *  v3.2 修整：Graph 列默认实际展示宽度 = 300px（vscode autoLayout 时按
- *    viewWidth * 0.333 限制；user 反馈 300px 是合理展示宽度），
- *    其他列 4 个保留 AUTO 行为。
+ *    - col 0 Graph：COLUMN_AUTO（自适应 contentWidth，限制在 viewWidth * 0.333）
+ *    - col 1 Description：COLUMN_AUTO (1fr 占满)
+ *    - col 2-4 Date/Author/Commit：COLUMN_AUTO 或 HIDDEN（按用户配置）
+ *  vscode 行为：AUTO 模式下 Graph 列视觉宽度 = min(contentWidth, viewWidth * 0.333)
+ *  拖动后变为固定数字，双击恢复为 COLUMN_AUTO（main.ts:1811-1815）
  *  vscode main.ts:1829-1841 双击恢复的 defaultWidth：Date 128 / Author 128 / Commit 80
- *  Graph 列无 toggleColumnState（永远可见），v3.2 默认 300 = 恢复时的 defaultWidth
  */
-const DEFAULT_GRAPH_COL_WIDTH = 300;
+const DEFAULT_GRAPH_COL_WIDTH = 300; // Graph 列 AUTO 模式下的视觉默认宽度（用于 CSS fallback）
 const DEFAULT_COL_WIDTHS: ColumnWidth[] = [
-  DEFAULT_GRAPH_COL_WIDTH, // 0: Graph 默认 300px
+  COLUMN_AUTO, // 0: Graph — 自适应（严格对齐 vscode）
   COLUMN_AUTO, // 1: Description — 1fr 占满
   COLUMN_AUTO, // 2: Date
   COLUMN_AUTO, // 3: Author
@@ -788,7 +804,7 @@ const DEFAULT_COL_WIDTHS: ColumnWidth[] = [
 
 /** 列的默认像素宽（拖动后变数字或双击恢复时用）—— vscode main.ts:1829-1841 defaultWidth */
 const DEFAULT_COL_WIDTHS_PIXEL: Record<number, number> = {
-  0: DEFAULT_GRAPH_COL_WIDTH, // Graph = 300 (vscode 默认展示宽度)
+  0: DEFAULT_GRAPH_COL_WIDTH, // Graph 双击恢复时用 300（vscode 无 Graph toggleColumnState，这个值仅作 fallback）
   2: 128, // Date
   3: 128, // Author
   4: 80, // Commit
@@ -814,14 +830,14 @@ function loadColumnWidths(): ColumnWidth[] {
         return parsed.map((v: unknown, i: number): ColumnWidth => {
           if (v === COLUMN_HIDDEN || v === COLUMN_AUTO) return v;
           if (typeof v === 'number' && v >= COLUMN_MIN_WIDTH) return v;
-          return DEFAULT_COLUMN_WIDTHS[i]!;
+          return DEFAULT_COL_WIDTHS[i]!;
         });
       }
     }
   } catch {
     /* 忽略 */
   }
-  return [...DEFAULT_COLUMN_WIDTHS];
+  return [...DEFAULT_COL_WIDTHS];
 }
 
 const columnWidths = ref<ColumnWidth[]>(loadColumnWidths());
@@ -836,9 +852,6 @@ function saveColumnWidths(): void {
 }
 
 /** col 是否可见（不是 HIDDEN） */
-let colDragCommitRowCells: Record<number, HTMLElement> = {};
-/** v3.2：拖动时 wrapper 引用（用于 querySelector commit-row 元素） */
-let colDragWrapper: HTMLElement | null = null;
 function isColVisible(col: number): boolean {
   return columnWidths.value[col] !== COLUMN_HIDDEN;
 }
@@ -852,25 +865,67 @@ function resolveColPx(col: number): number {
 }
 
 /**
- * Graph 列实际像素宽
- *  v3.2 修整：vscode main.ts:1724 默认 Graph 列 = COLUMN_AUTO (-101)，
- *  但 vscode autoLayout 时把 maxWidth 限到 viewWidth * 0.333（main.ts:1738），
- *  视觉效果 ≈ 300-450px。user 指引"默认展示宽度 300px"是 33% 视口宽的合理值。
- *  v3.2 行为：Graph 列默认 300px（列宽状态里 col 0 = 数字，不是 AUTO），
- *  vscode 双击恢复 defaultWidth = 300。
- *  AUTO 状态保留（兼容旧 localStorage）但实际不会触发（AUTO → loadColumnWidths
- *  不会从 stored 拿，因为 stored 默认不会含 AUTO）。
- *  vscode setSvgWidth 严格 = contentWidth（不加 padding），拖动时 +COLUMN_LEFT_RIGHT_PADDING(24)
- *  作 cell 视觉边距。
+ * v3.3：Graph 列实际像素宽（用于 grid-template-columns）
+ *  严格对齐 vscode-git-graph main.ts:1730-1752 两种模式：
+ *
+ *  1. AUTO 模式（columnWidths[0] === COLUMN_AUTO）：
+ *     - Graph 列宽度 = min(contentWidth, viewWidth * 0.333)
+ *     - 对齐 vscode main.ts:1738 autoLayout 行为
+ *
+ *  2. Fixed 模式（columnWidths[0] 为数字）：
+ *     - Graph 列宽度 = columnWidths[0]（用户拖动后的固定宽度）
+ *     - 对齐 vscode main.ts:1731-1732 fixedLayout 行为
+ *
+ *  拖动时优先读 colDragPreviewWidths（实时响应）
  */
 const graphColumnWidth = computed<number>(() => {
-  const w = columnWidths.value[0];
+  // 拖动中优先用预览值
+  const widths = colDragPreviewWidths.value || columnWidths.value;
+  const w = widths[0];
   if (w === undefined || w === COLUMN_HIDDEN) return 0;
+
   if (w === COLUMN_AUTO) {
-    // 兼容路径：旧 localStorage 可能有 AUTO 残留
-    return DEFAULT_GRAPH_COL_WIDTH;
+    // AUTO 模式：自适应 contentWidth，限制在 viewWidth * 0.333
+    const r = svgRender.value;
+    if (!r) return DEFAULT_GRAPH_COL_WIDTH; // fallback（渲染前）
+    const contentW = r.contentWidth;
+    const maxW = Math.round((window.innerWidth || 1200) * 0.333);
+    return Math.min(contentW, maxW);
   }
+
+  // Fixed 模式：用户拖动后的固定宽度
   return w;
+});
+
+/**
+ * v3.3：SVG maxWidth 参数（传给 renderGraphVscode）
+ *  严格对齐 vscode-git-graph graph.ts:677-700 + main.ts:1713, 1740, 1764
+ *  vscode 调用 graph.limitMaxWidth() 时传的是"容器宽度"（= columnWidth + padding）
+ *
+ *  行为：
+ *  - AUTO 模式：maxWidth = viewWidth * 0.333 + COLUMN_LEFT_RIGHT_PADDING
+ *  - Fixed 模式：maxWidth = columnWidths[0] + COLUMN_LEFT_RIGHT_PADDING
+ *  - renderGraphVscode 内部会用 min(contentWidth, maxWidth) 渲染 SVG
+ *
+ *  拖动时优先读 colDragPreviewWidths（实时响应）
+ */
+const svgMaxWidth = computed<number>(() => {
+  // 拖动中优先用预览值
+  const widths = colDragPreviewWidths.value || columnWidths.value;
+  const w = widths[0];
+
+  if (w === COLUMN_AUTO) {
+    // AUTO 模式：限制到 viewWidth * 0.333 + padding
+    const maxW = Math.round((window.innerWidth || 1200) * 0.333);
+    return maxW + COLUMN_LEFT_RIGHT_PADDING;
+  }
+
+  if (typeof w === 'number' && w > 0) {
+    // Fixed 模式：用户固定宽度 + padding
+    return w + COLUMN_LEFT_RIGHT_PADDING;
+  }
+
+  return -1; // 不限制（理论上不会到达）
 });
 
 /** 5 列 grid-template-columns 字符串
@@ -922,21 +977,18 @@ let colDragHeaderCells: HTMLElement[] | null = null;
 let colDragRafId = 0;
 
 /**
- * v3.1：拖动期间需要同步的额外 DOM 引用（col 0 = Graph 列时）
- *   - .git-graph-bg：背景容器，width 必须跟 header col 0 同步
- *   - .git-graph-svg：SVG 元素，width 必须跟 .git-graph-bg 同步
- * 不在 colDragHeaderCells 里（那个是 5 个 header col cell），
- * 这里专门缓存 col 0 拖动时的 bg + svg 引用。
+ * v3.3：拖动预览状态（实时更新，触发 computed 重算）
+ *  用于在 mousemove 期间让 svgMaxWidth / graphColumnWidth computed 实时响应
+ *  避免只改 DOM 而 Vue computed 不更新的问题
  */
-let colDragGraphBg: HTMLElement | null = null;
-let colDragGraphSvg: HTMLElement | null = null;
+const colDragPreviewWidths = ref<ColumnWidth[] | null>(null);
 
 /**
- * v3.2：commit-row 4 列 col 引用（拖动 col 2/3/4 时 header 跟 commit-row 双侧列宽同步，
- * 否则 grid-template-columns CSS 变量不更新，commit-row 列宽跟 header 视觉错位）
- *   - keyed by data-col（2/3/4）
- *   - 取首个 .commit-row 的 col 元素（mousedown 缓存，避免 querySelectorAll N 次）
- *   - 用法：mousemove 改 colWidth 时同时改对应 commit-row col width
+ * v3.3：拖动期间需要同步的额外 DOM 引用（col 0 = Graph 列时）
+ *   - .git-graph-bg：背景容器，width 必须跟 header col 0 同步
+ *   SVG width 通过 Vue computed（svgWidth）自动响应，不需要手动操作
+ */
+let colDragGraphBg: HTMLElement | null = null;
 
 /**
  * v3.2：列宽 clamp —— 区分 Graph 列 vs 其他列
@@ -959,27 +1011,13 @@ function onColDragStart(col: ColIndex, e: MouseEvent): void {
   colDragStartX = e.clientX;
   colDragStartWidths = [...columnWidths.value];
   const wrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
-  colDragWrapper = wrapper;
   if (wrapper) {
     colDragHeaderCells = Array.from(
       wrapper.querySelectorAll('.git-graph-header__col'),
     ) as HTMLElement[];
-    // v3.1：col 0 (Graph) 拖动时缓存 .git-graph-bg + .git-graph-svg 引用
-    // 让 mousemove 期间同时改 3 个元素的 width（保证 dot 不跟 commit-row 错位）
+    // v3.3：col 0 (Graph) 拖动时缓存 .git-graph-bg 引用
     if (col === 0) {
       colDragGraphBg = wrapper.querySelector('.git-graph-bg') as HTMLElement | null;
-      colDragGraphSvg = wrapper.querySelector('.git-graph-svg') as HTMLElement | null;
-    }
-    // v3.2：拖动 col 2/3/4 时缓存 commit-row 对应 col 引用（按 data-col 匹配）
-    // commit-row 是 4 列 grid，data-col 跟 header col index 一致（2/3/4）
-    if (col >= 2) {
-      const firstRow = wrapper.querySelector('.commit-row');
-      if (firstRow) {
-        const cell = firstRow.querySelector(
-          `.commit-row__col[data-col="${col}"]`,
-        ) as HTMLElement | null;
-        if (cell) colDragCommitRowCells[col] = cell;
-      }
     }
   }
   document.addEventListener('mousemove', onColDragMove);
@@ -1011,23 +1049,27 @@ function onColDragMove(e: MouseEvent): void {
     const startWidths = colDragStartWidths;
 
     if (col === 0) {
-      // v3.1 → v3.2：拖 Graph 列 —— 改 col 0 width + bg 容器 + svg 元素 3 处
-      // v3.2：clamp 用 [60, 715] 边界（vscode 实际行为）
+      // v3.3：拖 Graph 列 —— 实时更新预览值 + DOM（对齐 vscode main.ts:1759-1764）
       const startW = startWidths[0]!;
       const baseW = startW === COLUMN_AUTO ? graphColumnWidth.value : startW;
       const newW = clampColWidth(0, baseW + delta);
       const next: ColumnWidth[] = [...startWidths];
       next[0] = newW;
       colDragFinalWidths = next;
-      if (colDragHeaderCells[0]) colDragHeaderCells[0].style.width = `${newW}px`;
-      if (colDragGraphBg) colDragGraphBg.style.width = `${newW}px`;
-      if (colDragGraphSvg) colDragGraphSvg.style.width = `${newW}px`;
+      colDragPreviewWidths.value = next; // 实时更新，触发 svgMaxWidth / graphColumnWidth 重算
+
+      // DOM 直接写入（即时视觉反馈）
+      // 注意：bg 和 svg 的 width 应该 = newW + COLUMN_LEFT_RIGHT_PADDING
+      // 但 vscode 是在 CSS 中处理 padding，这里先保持原逻辑（后续通过 computed 修正）
+      if (colDragHeaderCells[0]) colDragHeaderCells[0].style.width = `${newW + COLUMN_LEFT_RIGHT_PADDING}px`;
+      if (colDragGraphBg) colDragGraphBg.style.width = `${newW + COLUMN_LEFT_RIGHT_PADDING}px`;
+      // 移除对 svg 的直接操作，让 Vue 的 svgWidth computed 处理
       return;
     }
 
     if (col === 1) return; // Description 1fr 自动填满，vscode 也不响应拖动（main.ts:1772）
 
-    // v3.2：拖 col 2/3/4 —— vscode 双列联动 (main.ts:1765-1778)
+    // v3.3：拖 col 2/3/4 —— vscode 双列联动 (main.ts:1765-1778)
     //   拖 col[k] 改 columnWidths[k] 和 columnWidths[k+1]（一增一减）
     //   nextCol 跳过 HIDDEN 列（HIDDEN 不参与空间计算）
     //   边界检查：当前列和 nextCol 都不小于 COLUMN_MIN_WIDTH
@@ -1049,20 +1091,11 @@ function onColDragMove(e: MouseEvent): void {
     next[col] = newW;
     next[nextCol] = newNextW;
     colDragFinalWidths = next;
-    // v3.2：header col 跟 commit-row col 双侧同步改 width（直接 DOM 写入）
-    // commit-row 是 4 列 grid，data-col 跟 header col index 一致（2/3/4）
+    colDragPreviewWidths.value = next; // v3.3：实时更新，触发 gridTemplateColumns 重算
+
+    // v3.3：只改 header cell width（commit-row 通过 CSS grid 自动跟随）
     if (colDragHeaderCells[col]) colDragHeaderCells[col].style.width = `${newW}px`;
     if (colDragHeaderCells[nextCol]) colDragHeaderCells[nextCol].style.width = `${newNextW}px`;
-    const commitCellCol = colDragCommitRowCells[col];
-    if (commitCellCol) commitCellCol.style.width = `${newW}px`;
-    // nextCol 在 commit-row 中对应 col index（v-if isColVisible 跳过 HIDDEN）
-    // 简化：直接 querySelector 找（少量调用，可接受）
-    if (colDragWrapper) {
-      const commitCellNext = colDragWrapper.querySelector(
-        `.commit-row__col[data-col="${nextCol}"]`,
-      ) as HTMLElement | null;
-      if (commitCellNext) commitCellNext.style.width = `${newNextW}px`;
-    }
   });
 }
 
@@ -1079,9 +1112,9 @@ function onColDragEnd(): void {
   colDragCol = null;
   colDragStartWidths = null;
   colDragFinalWidths = null;
+  colDragPreviewWidths.value = null; // v3.3：清除预览状态
   colDragHeaderCells = null;
   colDragGraphBg = null;
-  colDragGraphSvg = null;
   document.removeEventListener('mousemove', onColDragMove);
   document.removeEventListener('mouseup', onColDragEnd);
 }
@@ -1438,6 +1471,7 @@ function refBadgeClass(refType?: string): string {
               <svg
                 class="git-graph-svg"
                 :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > graphColumnWidth }"
+                :style="{ maskImage: svgMaskGradient, WebkitMaskImage: svgMaskGradient }"
                 :viewBox="viewBox"
                 :width="svgWidth"
                 :height="svgHeight"
