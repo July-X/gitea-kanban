@@ -120,12 +120,56 @@ const hoveredGraphRow = ref<number | null>(null);
 const hoveredDotSha = ref<string | null>(null);
 const hoveredDotColor = ref<string | null>(null);
 
-function dotEnter(c: { sha: string; colorHex?: string }) {
+/**
+ * v3.10：dot tooltip 状态（1:1 复刻 vscode-git-graph graph.ts vertexOver/vertexOut）
+ *  - dotEnter → set active state + 100ms 延迟显示 tooltip
+ *  - dotLeave → 立即清除 active + 关闭 tooltip
+ * Tooltip 内容：commit SHA / 所在分支 / 标签（refs / refTypes 由 svgCircleNodes 携带）
+ */
+interface DotTooltipData {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  authorName: string;
+  date: string;
+  colorHex: string | undefined;
+  refs?: string[];
+  refTypes?: string[];
+  isCurrent?: boolean;
+}
+
+const tooltipTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
+const tooltipData = ref<DotTooltipData | null>(null);
+const tooltipStyle = ref<{ top: string; left: string }>({ top: '0px', left: '0px' });
+
+function showTooltip(c: DotTooltipData, circleElem: SVGCircleElement) {
+  const rect = circleElem.getBoundingClientRect();
+  const bodyElem = document.querySelector('.git-graph-body') as HTMLElement | null;
+  if (!bodyElem) return;
+  const bodyRect = bodyElem.getBoundingClientRect();
+  // 对齐 vscode graph.ts:811：tooltip 锚点在 dot 顶部 +4px（dot r=4 → y+4 = dot 顶部）
+  const top = rect.top - bodyRect.top + 4;
+  const left = rect.left - bodyRect.left;
+  tooltipStyle.value = { top: `${top}px`, left: `${left}px` };
+  tooltipData.value = c;
+}
+
+function hideTooltip() {
+  if (tooltipTimeout.value !== null) {
+    clearTimeout(tooltipTimeout.value);
+    tooltipTimeout.value = null;
+  }
+  tooltipData.value = null;
+}
+
+/**
+ * dotEnter — dot hover 时设置 active state + 100ms 后显示 tooltip
+ * @param c    DotTooltipData（含 refs 列表，供 tooltip 展示）
+ * @param event mouseenter 事件，用于取 circle 元素坐标
+ */
+function dotEnter(c: DotTooltipData, event: MouseEvent) {
   hoveredDotSha.value = c.sha;
   hoveredDotColor.value = c.colorHex ?? null;
-  // 把 lane color 写到 .git-graph-body（SVG + rows 的共同祖先），
-  // 让 .commit-row--dot-active .commit-row__col--graph 和 .commit-vertex--active
-  // 都能通过 var(--active-lane-color) 拿到同一个颜色。
   const body = document.querySelector('.git-graph-body') as HTMLElement | null;
   if (body) {
     if (c.colorHex) {
@@ -134,10 +178,19 @@ function dotEnter(c: { sha: string; colorHex?: string }) {
       body.style.removeProperty('--active-lane-color');
     }
   }
+  hideTooltip();
+  // vscode graph.ts:784：100ms 后显示 tooltip
+  tooltipTimeout.value = setTimeout(() => {
+    tooltipTimeout.value = null;
+    const target = event.target as SVGCircleElement | null;
+    if (target) showTooltip(c, target);
+  }, 100);
 }
+
 function dotLeave() {
   hoveredDotSha.value = null;
   hoveredDotColor.value = null;
+  hideTooltip();
   const body = document.querySelector('.git-graph-body') as HTMLElement | null;
   if (body) body.style.removeProperty('--active-lane-color');
 }
@@ -913,6 +966,7 @@ const expandedCommitNode = computed<
 
 interface SvgCircleNode {
   sha: string;
+  shortSha: string;
   subject: string;
   title: string;
   row: number;
@@ -922,6 +976,10 @@ interface SvgCircleNode {
   colorHex?: string;
   isCurrent?: boolean;
   isStash?: boolean;
+  refs?: string[];
+  refTypes?: string[];
+  authorName: string;
+  date: string;
   stroke?: string;
   strokeWidth?: number;
   strokeOpacity?: number;
@@ -935,6 +993,7 @@ function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string
 const svgCircleNodes = computed<SvgCircleNode[]>(() => {
   return (svgRender.value?.nodes ?? []).map((node) => ({
     sha: node.sha,
+    shortSha: node.shortSha,
     subject: node.subject,
     title: dotTitle(node.subject, node.refs, node.refTypes),
     row: node.row,
@@ -944,6 +1003,10 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
     colorHex: node.colorHex,
     isCurrent: node.isCurrent,
     isStash: node.isStash,
+    refs: node.refs,
+    refTypes: node.refTypes,
+    authorName: node.authorName,
+    date: node.date,
     stroke: node.isCurrent ? node.colorHex : 'rgba(30, 30, 30, 0.75)',
     strokeWidth: node.isCurrent ? 2 : 1,
     strokeOpacity: node.isCurrent ? 1 : 0.75,
@@ -1684,61 +1747,26 @@ function refBadgeClass(refType?: string): string {
                   </g>
                   <g class="git-graph-vertices">
                     <template v-for="c in svgCircleNodes" :key="`dot-${c.sha}`">
+                      <!-- v3.10：简化 dot 样式：
+                           - hover 时 white fill + lane color stroke（VSCode 风格）
+                           - 弃用 drop-shadow filter，改用 stroke 做白色边框
+                             stroke 2px 内边=1px / 外边=1px，叠加 r=5 让视觉边界=r+1=5
+                           - @mouseenter 传 $event 用于 tooltip 定位 -->
                       <circle
-                        v-if="c.isCurrent"
-                        class="commit-vertex commit-vertex--head"
-                        :class="{ 'commit-vertex--active': hoveredDotSha === c.sha }"
-                        :cx="c.cx"
-                        :cy="c.cy"
-                        :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? c.r + 2 : c.r"
-                        fill="#fff"
-                        :stroke="c.stroke ?? c.colorHex ?? '#888'"
-                        :stroke-width="hoveredDotSha === c.sha ? 3 : (c.strokeWidth ?? 2)"
-                        :stroke-opacity="c.strokeOpacity ?? 1"
-                        @mouseenter="dotEnter(c)"
-                        @mouseleave="dotLeave"
-                      >
-                        <title>{{ c.title }}</title>
-                      </circle>
-                      <template v-else-if="c.isStash">
-                        <circle
-                          class="commit-vertex commit-vertex--stash"
-                          :class="{ 'commit-vertex--active': hoveredDotSha === c.sha }"
-                          :cx="c.cx"
-                          :cy="c.cy"
-                          :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? c.r + 2 : c.r"
-                          fill="none"
-                          :stroke="c.colorHex ?? '#888'"
-                          stroke-width="1"
-                          @mouseenter="dotEnter(c)"
-                          @mouseleave="dotLeave"
-                        >
-                          <title>{{ c.title }}</title>
-                        </circle>
-                        <circle
-                          class="commit-vertex commit-vertex--stash-inner"
-                          :cx="c.cx"
-                          :cy="c.cy"
-                          :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? 3 : 2"
-                          fill="none"
-                          :stroke="c.colorHex ?? '#888'"
-                          stroke-width="1"
-                        >
-                          <title>{{ c.title }}</title>
-                        </circle>
-                      </template>
-                      <circle
-                        v-else
                         class="commit-vertex"
-                        :class="{ 'commit-vertex--active': hoveredDotSha === c.sha }"
+                        :class="{
+                          'commit-vertex--head': c.isCurrent,
+                          'commit-vertex--stash': c.isStash && !c.isCurrent,
+                          'commit-vertex--active': hoveredDotSha === c.sha,
+                        }"
                         :cx="c.cx"
                         :cy="c.cy"
-                        :r="hoveredGraphRow === c.row || hoveredDotSha === c.sha ? c.r + 2 : c.r"
-                        :fill="c.colorHex ?? '#888'"
+                        :r="c.r + 1"
+                        :fill="hoveredDotSha === c.sha ? '#fff' : (c.colorHex ?? '#888')"
                         :stroke="hoveredDotSha === c.sha ? (c.colorHex ?? '#888') : (c.stroke ?? 'rgba(30, 30, 30, 0.75)')"
-                        :stroke-width="hoveredDotSha === c.sha ? 3 : (c.strokeWidth ?? 1)"
+                        :stroke-width="hoveredDotSha === c.sha ? 2 : (c.strokeWidth ?? 1)"
                         :stroke-opacity="hoveredDotSha === c.sha ? 1 : (c.strokeOpacity ?? 0.75)"
-                        @mouseenter="dotEnter(c)"
+                        @mouseenter="dotEnter(c, $event)"
                         @mouseleave="dotLeave"
                       >
                         <title>{{ c.title }}</title>
@@ -1746,6 +1774,39 @@ function refBadgeClass(refType?: string): string {
                     </template>
                   </g>
                 </svg>
+            </div>
+
+            <!-- v3.10：dot hover tooltip（1:1 复刻 vscode-git-graph graph.ts showTooltip）
+                 position:absolute 挂在 .git-graph-body 内，top/left = dot 相对位置
+                 - pointer（小三角）：lane color 填充
+                 - content：lane color 边框，commit SHA / branches / tags
+                 - 100ms 延迟显示（dotEnter 中 setTimeout） -->
+            <div
+              v-if="tooltipData"
+              class="git-graph-tooltip"
+              :style="tooltipStyle"
+            >
+              <div
+                class="git-graph-tooltip__pointer"
+                :style="{ backgroundColor: tooltipData.colorHex }"
+              ></div>
+              <div
+                class="git-graph-tooltip__content"
+                :style="{ borderColor: tooltipData.colorHex }"
+              >
+                <div class="git-graph-tooltip__title">
+                  提交 {{ tooltipData.shortSha }}
+                </div>
+                <div v-if="tooltipData.refs && tooltipData.refs.length > 0" class="git-graph-tooltip__section">
+                  所在分支：
+                  <template v-for="(ref, idx) in tooltipData.refs" :key="idx">
+                    <span
+                      class="git-graph-tooltip__ref"
+                      :style="{ borderColor: tooltipData.colorHex, color: tooltipData.colorHex }"
+                    >{{ ref }}</span>
+                  </template>
+                </div>
+              </div>
             </div>
 
             <!-- 行层：每行 grid 5 列，第一列是 graph 占位让背景 SVG 透出
@@ -2714,6 +2775,80 @@ function refBadgeClass(refType?: string): string {
 .commit-vertex--active {
   filter: drop-shadow(0 0 4px var(--active-lane-color, currentColor));
   transition: filter var(--t-fast, 120ms) var(--ease, ease-out);
+}
+
+/* v3.10：ref-badge 在 dot-hover 时用 lane 色背景（对齐 VSCode Git Graph）
+ *  当 dot 被 hover 时，lane color CSS var 生效，ref badge 边框和背景都用 lane 色 */
+.commit-row--dot-active .ref-badge {
+  background-color: color-mix(in srgb, var(--active-lane-color) 18%, transparent);
+  border-color: var(--active-lane-color);
+  color: var(--active-lane-color);
+}
+.commit-row--dot-active .ref-badge__icon {
+  stroke: var(--active-lane-color);
+}
+
+/* v3.10：dot hover tooltip（对齐 vscode-git-graph graph.ts showTooltip 样式）
+ *  position:absolute 相对 .git-graph-body
+ *  pointer（三角）= lane color 填充
+ *  content = lane color 边框，z-index 高于 commit-row */
+.git-graph-tooltip {
+  position: absolute;
+  z-index: 200;
+  /* left/top 由 tooltipStyle ref 动态注入 */
+  pointer-events: none;
+  /* 默认透明，等 opacity 动画 */
+  opacity: 0;
+  animation: graphTooltipFadeIn 120ms ease-out forwards;
+}
+@keyframes graphTooltipFadeIn {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.git-graph-tooltip__pointer {
+  position: absolute;
+  left: -5px;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  border-radius: 1px;
+}
+.git-graph-tooltip__content {
+  position: relative;
+  margin-left: 8px;
+  background: var(--color-bg-elevated, #1e1e1e);
+  border: 1px solid;
+  border-radius: 4px;
+  padding: 6px 10px;
+  min-width: 120px;
+  max-width: 320px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.git-graph-tooltip__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text, #ccc);
+  margin-bottom: 4px;
+}
+.git-graph-tooltip__section {
+  font-size: 11px;
+  color: var(--color-text-secondary, #888);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.git-graph-tooltip__ref {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  white-space: nowrap;
 }
 /* v2.48 旧注释：.commit-row__col--graph 曾被移除，v3.4 恢复（5 列统一对齐） */
 .commit-row__col--desc {
