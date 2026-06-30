@@ -53,9 +53,10 @@ const repo = useRepoStore();
 // v2.x 修复 July-X/UnrealEngine 渲染卡死：UnrealEngine release 分支中段有一段超宽 merge
 // 历史（单行 1407 lane / 963 flow），-n 5000 会把这段拉进来，前端 6836 div + 963 超长 path
 // 直接卡死主线程（用户看到"只有圆点、列表空白"的卡顿中间态）。
-// 降到 1000：最近的提交 graph 很窄（列宽 ≤3），DOM 秒渲染；更早历史交给「加载更多」按需拉。
-const INITIAL_GRAPH_LIMIT = 1000;
-const LOAD_MORE_DEEPEN_BY = 200;
+// 对齐 vscode-git-graph 默认分页：initialLoad=300，loadMore=100；
+// 更早历史交给「加载更多」按需拉，避免首屏一次性处理超宽历史。
+const INITIAL_GRAPH_LIMIT = 300;
+const LOAD_MORE_DEEPEN_BY = 100;
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const activeRepo = computed(() => {
   const fn = repo.currentProject

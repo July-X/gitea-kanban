@@ -4,7 +4,7 @@
 //   - VerifyToken：GET /user，Authorization: Bearer <token>
 //   - ListRepos：GET /user/repos，列当前登录用户可访问的仓库（含 collaborator）
 //   - CloneRepo：gh repo clone + partial clone（避免超大仓库下载 blob）
-//   - LogGraph：go-git DAG Log + 自研 lane 布局（与 Gitea 共用）
+//   - LogGraph：vscode-git-graph 同款 git log 输入 + 自研 VSCode lane 布局
 //   - 其余方法返回 ErrNotSupported
 //
 // GitHub PAT scope 要求：
@@ -321,11 +321,13 @@ func (a *GitHubAdapter) parentCloneURL(ctx context.Context, hostURL, token, owne
 	return strings.TrimSpace(raw.Parent.CloneURL), nil
 }
 
-// LogGraph 获取 commit 历史并构建 Graph 布局（与 Gitea 共用）
+// LogGraph 获取 commit 历史并构建 Graph 布局。
+//
+// GitHub 路径固定对齐 vscode-git-graph：用系统 git log 一次性读取
+// --branches --remotes HEAD，并用 --max-count=N+1 判断是否还有更多提交。
 func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts platform.LogGraphOpts) (*platform.GraphResult, error) {
-	logResult, err := git.LogCommits(git.LogOptions{
+	logResult, err := git.LogCommitsVscode(ctx, git.LogOptions{
 		LocalPath: localPath,
-		Branches:  opts.Branches,
 		MaxCount:  opts.MaxCount,
 	})
 	if err != nil {

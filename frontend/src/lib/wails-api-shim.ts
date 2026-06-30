@@ -357,7 +357,7 @@ const apiShim = {
      * 旧版 stubEmpty → 永远返空 graph，看板/TimelineNewView/Merges 都看不见 commit
      * 现在转发到 window.go.main.App.GetGitGraph({projectId, branches, maxCount})
      *   - Go 端按 projectId 反查 localPath + token
-     *   - 调 adapter.LogGraph（go-git DAG + 自研 layout）
+     *   - 调 adapter.LogGraph（GitHub 对齐 vscode-git-graph 的 git log 输入 + 自研 layout）
      *   - 返 GraphResultDTO（结构化 nodes + edges + branches）
      */
     gitgraphLines: (args: unknown): Promise<unknown> => {

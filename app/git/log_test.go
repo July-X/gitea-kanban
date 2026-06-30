@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -466,5 +467,33 @@ func TestLogCommits_IncludesRecentRemoteBranchWithinMaxCount(t *testing.T) {
 	}
 	if !contains(result.Commits[0].Refs, "org/recent-feature") {
 		t.Fatalf("remote ref missing from latest commit: refs=%v", result.Commits[0].Refs)
+	}
+
+	vscodeResult, err := LogCommitsVscode(context.Background(), LogOptions{LocalPath: dir, MaxCount: 20})
+	if err != nil {
+		t.Fatalf("LogCommitsVscode failed: %v", err)
+	}
+	if len(vscodeResult.Commits) != 20 {
+		t.Fatalf("vscode len(commits) = %d, want 20", len(vscodeResult.Commits))
+	}
+	if !vscodeResult.Truncated {
+		t.Fatalf("vscode truncated = false, want true from max-count+1 sentinel")
+	}
+	if vscodeResult.Commits[0].Subject != "remote branch latest" {
+		t.Fatalf("vscode first commit = %q, want remote branch latest", vscodeResult.Commits[0].Subject)
+	}
+	if !contains(vscodeResult.Commits[0].Refs, "org/recent-feature") {
+		t.Fatalf("vscode remote ref missing from latest commit: refs=%v", vscodeResult.Commits[0].Refs)
+	}
+
+	defaultLimitResult, err := LogCommitsVscode(context.Background(), LogOptions{LocalPath: dir})
+	if err != nil {
+		t.Fatalf("LogCommitsVscode default limit failed: %v", err)
+	}
+	if len(defaultLimitResult.Commits) != 62 {
+		t.Fatalf("vscode default len(commits) = %d, want all 62 fixture commits", len(defaultLimitResult.Commits))
+	}
+	if defaultLimitResult.Truncated {
+		t.Fatalf("vscode default truncated = true, want false for 62 commits under default 300")
 	}
 }
