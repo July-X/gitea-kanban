@@ -1521,8 +1521,7 @@ function refBadgeClass(refType?: string): string {
                 浏览器等比缩放整个图形（缩小+下移）。移除后坐标=像素，超出部分 overflow:hidden + mask fade -->
               <svg
                 class="git-graph-svg"
-                :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > graphColumnWidth }"
-                :style="{ maskImage: svgMaskGradient, WebkitMaskImage: svgMaskGradient }"
+                :class="{ 'git-graph-svg--fade': (svgRender?.contentWidth ?? 0) > (svgMaxWidth > 0 ? svgMaxWidth : graphColumnWidth) }"
                 :width="svgWidth"
                 :height="svgHeight"
               >
