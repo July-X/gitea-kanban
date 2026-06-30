@@ -246,6 +246,11 @@ const svgRender = computed<VscodeSvgRenderResult | null>(() => {
   return renderGraphVscode(dto, {
     expandedAt: expandedRow.value,
     expandY: activeExpandY.value || undefined,
+    // v2.64: 把 handleLeft 透传给 renderGraphVscode 作为 maxWidth。
+    // 对齐 vscode-git-graph Graph.limitMaxWidth (graph.ts:677-680)：
+    //   SVG 渲染宽度 = min(contentWidth, maxWidth)
+    //   超出 maxWidth 的 lane 在 (maxWidth-12)px ~ maxWidth px 区间 mask 渐变 fade
+    maxWidth: handleLeft.value,
   });
 });
 
@@ -550,7 +555,7 @@ const maxRowPlusOne = computed(() => {
 
 const viewBox = computed(() => {
   const r = svgRender.value;
-  return r ? `0 0 ${r.width} ${r.height}` : '0 0 0 0';
+  return r ? `0 0 ${r.contentWidth} ${r.height}` : '0 0 0 0';
 });
 const svgWidth = computed(() => {
   const r = svgRender.value;
@@ -560,6 +565,28 @@ const svgHeight = computed(() => {
   const r = svgRender.value;
   return r ? `${r.height}px` : '0px';
 });
+
+/**
+ * v2.64：mask 渐变 fade 的 offset 计算。
+ *
+ * 对齐 vscode-git-graph Graph.applyMaxWidth (graph.ts:689-695)：
+ *   offset1 = maxWidth > -1 ? (maxWidth - 12) / contentWidth : 1
+ *   offset2 = maxWidth > -1 ? maxWidth / contentWidth : 1
+ *
+ * - contentWidth <= maxWidth：两个 stop 都退到 1，mask 100% 白 = 整图可见（无 fade）
+ * - contentWidth >  maxWidth：从 (maxWidth-12)px 开始 12px 渐变到 maxWidth 变黑 = 超出的 lane 渐变消失
+ *
+ * 返回字符串值绑到 SVG <stop> 的 offset 属性。
+ */
+function maskOffset(contentWidth: number, maxWidth: number, which: 1 | 2): string {
+  if (maxWidth <= 0 || contentWidth <= maxWidth) {
+    return '1';
+  }
+  const numerator = which === 1 ? maxWidth - 12 : maxWidth;
+  // 防止负数：maxWidth < 12 时 offset1 会越界，直接退到 0 让整图黑
+  if (which === 1 && maxWidth < 12) return '0';
+  return `${numerator / contentWidth}`;
+}
 
 // ============================================================
 // Path 分组（按 color 分组，对齐 Gitea flow-color-16-N 染色）
@@ -1155,11 +1182,12 @@ function refBadgeClass(refType?: string): string {
           </div>
 
           <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row）
-               v2.47：bg 容器宽度 = handleLeft（视觉上跟 commit-row 第一列同宽），
-               内部 .git-graph-bg-scroll 用 min-width: svgWidth 让 SVG 完整渲染，
-               bg 容器 overflow-x: hidden 裁剪掉超出 handleLeft 的部分 -->
+               v2.64：mask 渐变遮盖（对齐 vscode-git-graph Graph.applyMaxWidth），
+               SVG 内部完整渲染 contentWidth，外层 mask 在 (handleLeft-12)px ~ handleLeft px
+               区间 12px 渐变 fade，超出 handleLeft 的 lane 视觉上消失
+               （替代 v2.47 的 .git-graph-bg overflow-x: hidden 物理裁切）-->
           <div class="git-graph-body" :style="{ minHeight: svgHeight }">
-            <!-- 背景层：视觉宽度 = handleLeft -->
+            <!-- 背景层：视觉宽度 = handleLeft（vscode git-graph 行为） -->
             <div
               class="git-graph-bg"
               :style="{
@@ -1167,9 +1195,6 @@ function refBadgeClass(refType?: string): string {
                 height: svgHeight,
               }"
             >
-              <!-- v2.47：bgScroll width = handleLeft (跟 bg 容器同宽,视觉上 130px)，
-                   但 bgScroll 内部 SVG 完整渲染 width: svgWidth (2014px) 超出色边界，
-                   bgScroll overflow-x: auto 出横向滚动条让用户滚动 SVG -->
               <div class="git-graph-bg-scroll" :style="{ height: svgHeight }">
                 <svg
                   class="git-graph-svg"
@@ -1177,79 +1202,121 @@ function refBadgeClass(refType?: string): string {
                   :width="svgWidth"
                   :height="svgHeight"
                 >
-                  <g
-                    v-for="pg in pathGroups"
-                    :key="pg.id"
-                    class="flow-group"
-                    :class="[pg.colorClass, { 'flow-group--shadow': pg.kind === 'shadow' }]"
-                    :data-color="pg.colorIndex"
-                  >
-                    <path
-                      v-if="pg.d"
-                      :d="pg.d"
-                      :stroke="pg.kind === 'shadow'
-                        ? '#000'
-                        : (pg.colorHex ?? '#888')"
-                      :stroke-width="pg.kind === 'shadow' ? 4 : 2"
-                      :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
-                      fill="none"
-                      stroke-linecap="round"
-                      vector-effect="non-scaling-stroke"
-                    />
-                  </g>
-                  <g class="git-graph-vertices">
-                    <template v-for="c in svgCircleNodes" :key="`dot-${c.sha}`">
-                      <circle
-                        v-if="c.isCurrent"
-                        class="commit-vertex commit-vertex--head"
-                        :cx="c.cx"
-                        :cy="c.cy"
-                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
-                        fill="#fff"
-                        :stroke="c.stroke ?? c.colorHex ?? '#888'"
-                        :stroke-width="c.strokeWidth ?? 2"
-                        :stroke-opacity="c.strokeOpacity ?? 1"
-                      >
-                        <title>{{ c.title }}</title>
-                      </circle>
-                      <template v-else-if="c.isStash">
+                  <!--
+                    v2.64：对齐 vscode-git-graph Graph.svg 构造 (graph.ts:370-388)
+                    - linearGradient #gg-graph-gradient: 0..1 横向 stop，白→黑
+                    - mask #gg-graph-mask: 整图 fill 这个 gradient，alpha 跟随 gradient
+                    - 整个 graph group 用 mask="url(#gg-graph-mask)"
+                    - stop offset 由 handleLeft / contentWidth 动态算：
+                        contentWidth <= maxWidth:  全白（无 fade）= offset1=offset2=1
+                        contentWidth >  maxWidth:  从 (maxWidth-12)/contentWidth 渐变到 maxWidth/contentWidth
+                  -->
+                  <defs>
+                    <linearGradient
+                      id="gg-graph-gradient"
+                      x1="0"
+                      y1="0"
+                      x2="1"
+                      y2="0"
+                    >
+                      <stop
+                        :offset="maskOffset(svgRender?.contentWidth ?? 0, handleLeft, 1)"
+                        stop-color="white"
+                      />
+                      <stop
+                        :offset="maskOffset(svgRender?.contentWidth ?? 0, handleLeft, 2)"
+                        stop-color="black"
+                      />
+                    </linearGradient>
+                    <mask
+                      id="gg-graph-mask"
+                      maskUnits="userSpaceOnUse"
+                    >
+                      <rect
+                        class="gg-graph-mask-rect"
+                        :width="svgRender?.contentWidth ?? 0"
+                        :height="svgRender?.height ?? 0"
+                        fill="url(#gg-graph-gradient)"
+                      />
+                    </mask>
+                  </defs>
+
+                  <!-- 应用 mask：所有 path + circle 都受 mask 渐变影响 -->
+                  <g mask="url(#gg-graph-mask)">
+                    <g
+                      v-for="pg in pathGroups"
+                      :key="pg.id"
+                      class="flow-group"
+                      :class="[pg.colorClass, { 'flow-group--shadow': pg.kind === 'shadow' }]"
+                      :data-color="pg.colorIndex"
+                    >
+                      <path
+                        v-if="pg.d"
+                        :d="pg.d"
+                        :stroke="pg.kind === 'shadow'
+                          ? '#000'
+                          : (pg.colorHex ?? '#888')"
+                        :stroke-width="pg.kind === 'shadow' ? 4 : 2"
+                        :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
+                        fill="none"
+                        stroke-linecap="round"
+                        vector-effect="non-scaling-stroke"
+                      />
+                    </g>
+                    <g class="git-graph-vertices">
+                      <template v-for="c in svgCircleNodes" :key="`dot-${c.sha}`">
                         <circle
-                          class="commit-vertex commit-vertex--stash"
+                          v-if="c.isCurrent"
+                          class="commit-vertex commit-vertex--head"
                           :cx="c.cx"
                           :cy="c.cy"
                           :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
-                          fill="none"
-                          :stroke="c.colorHex ?? '#888'"
-                          stroke-width="1"
+                          fill="#fff"
+                          :stroke="c.stroke ?? c.colorHex ?? '#888'"
+                          :stroke-width="c.strokeWidth ?? 2"
+                          :stroke-opacity="c.strokeOpacity ?? 1"
                         >
                           <title>{{ c.title }}</title>
                         </circle>
+                        <template v-else-if="c.isStash">
+                          <circle
+                            class="commit-vertex commit-vertex--stash"
+                            :cx="c.cx"
+                            :cy="c.cy"
+                            :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                            fill="none"
+                            :stroke="c.colorHex ?? '#888'"
+                            stroke-width="1"
+                          >
+                            <title>{{ c.title }}</title>
+                          </circle>
+                          <circle
+                            class="commit-vertex commit-vertex--stash-inner"
+                            :cx="c.cx"
+                            :cy="c.cy"
+                            :r="hoveredGraphRow === c.row ? 3 : 2"
+                            fill="none"
+                            :stroke="c.colorHex ?? '#888'"
+                            stroke-width="1"
+                          >
+                            <title>{{ c.title }}</title>
+                          </circle>
+                        </template>
                         <circle
-                          class="commit-vertex commit-vertex--stash-inner"
+                          v-else
+                          class="commit-vertex"
                           :cx="c.cx"
                           :cy="c.cy"
-                          :r="hoveredGraphRow === c.row ? 3 : 2"
-                          fill="none"
-                          :stroke="c.colorHex ?? '#888'"
-                          stroke-width="1"
+                          :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
+                          :fill="c.colorHex ?? '#888'"
+                          :stroke="c.stroke ?? 'rgba(30, 30, 30, 0.75)'"
+                          :stroke-width="c.strokeWidth ?? 1"
+                          :stroke-opacity="c.strokeOpacity ?? 0.75"
                         >
                           <title>{{ c.title }}</title>
                         </circle>
                       </template>
-                      <circle
-                        v-else
-                        class="commit-vertex"
-                        :cx="c.cx"
-                        :cy="c.cy"
-                        :r="hoveredGraphRow === c.row ? c.r + 1 : c.r"
-                        :fill="c.colorHex ?? '#888'"
-                        :stroke="c.stroke ?? 'rgba(30, 30, 30, 0.75)'"
-                        :stroke-width="c.strokeWidth ?? 1"
-                        :stroke-opacity="c.strokeOpacity ?? 0.75"
-                      >
-                        <title>{{ c.title }}</title>
-                      </circle>
-                    </template>
+                    </g>
                   </g>
                 </svg>
               </div>
@@ -1695,24 +1762,23 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
   content-visibility: auto;
   contain-intrinsic-size: auto 24px;
-  /* 用 overflow: clip 强制裁剪 absolute 子元素（overflow: hidden 对 absolute 子元素不生效） */
-  overflow: clip;
+  /* v2.64: 改用 overflow: visible —— 超 handleLeft 的 lane 由 SVG mask 渐变 fade，
+     不再用物理裁切；用户拖动列宽到内容宽度内时所有 lane 完整可见。 */
+  overflow: visible;
   flex: 0 0 auto;
 }
 
-/* v2.47：bg 内部 scroll 容器（装 SVG + dots）
+/* v2.64: bg 内部 scroll 容器（装 SVG + dots）—— 改用 mask 渐变后不再需要横向滚动
  *   - position: absolute 让它脱离 bg 容器 flow，width 不影响 bg 容器宽度
- *   - inline style 设 min-width = svgWidth（多 lane 时完整渲染 SVG）
- *   - left: 0 锚定到 bg 左缘
- *   - overflow-x: auto + bg overflow: hidden 配合，bg 容器外的部分裁剪掉，bgScroll 内部出滚动条
- *   - 注意：不在 CSS 里写 min-width 让 inline 胜出（CSS min-width 会覆盖 inline） */
+ *   - inline style 设 width = svgWidth（多 lane 时完整渲染 SVG，让 mask 渐变 fade）
+ *   - overflow: visible 让超 handleLeft 的 lane 由 mask 处理
+ *   - 注意：不在 CSS 里写 width 让 inline 胜出（CSS width 会覆盖 inline） */
 .git-graph-bg-scroll {
   position: absolute;
   top: 0;
   left: 0;
   background: var(--color-graph-bg, var(--color-shell-main-bg));
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
 }
 
 /* SVG 自身 */

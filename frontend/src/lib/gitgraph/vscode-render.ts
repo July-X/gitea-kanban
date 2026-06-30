@@ -91,7 +91,19 @@ export interface VscodeSvgNode {
 export interface VscodeSvgRenderResult {
 	paths: VscodeSvgPath[];
 	nodes: VscodeSvgNode[];
+	/**
+	 * SVG 实际渲染宽度（= min(contentWidth, maxWidth)）。
+	 * 对齐 vscode-git-graph Graph.setSvgWidth (graph.ts:697-700):
+	 *   width = maxWidth > -1 ? min(contentWidth, maxWidth) : contentWidth
+	 * 当 maxWidth=-1 时无限制，整个 content 完整渲染
+	 */
 	width: number;
+	/**
+	 * SVG 坐标系总宽度（不被 maxWidth 截短）。
+	 * 用于 mask/linearGradient 渐变计算 offset。
+	 * 对齐 vscode-git-graph Graph.getContentWidth (graph.ts:467-473)
+	 */
+	contentWidth: number;
 	height: number;
 	style: VscodeGraphStyle;
 }
@@ -114,11 +126,24 @@ export interface VscodeSvgRenderResult {
  */
 export function renderGraphVscode(
 	graph: GraphResultDto,
-	options?: { style?: VscodeGraphStyle; expandedAt?: number | null; expandY?: number },
+	options?: {
+		style?: VscodeGraphStyle;
+		expandedAt?: number | null;
+		expandY?: number;
+		/**
+		 * graph 列最大可见宽度（对齐 vscode-git-graph Graph.limitMaxWidth）。
+		 * - 默认 -1：不限制，SVG 完整渲染 contentWidth
+		 * - 传入 px：SVG 渲染宽度被截短到 min(contentWidth, maxWidth)，
+		 *   超出 maxWidth 的 lane 在 mask 渐变 fade 区间内
+		 *   （(maxWidth-12)px ~ maxWidth px 渐变 12px）
+		 */
+		maxWidth?: number;
+	},
 ): VscodeSvgRenderResult {
 	const style = options?.style ?? 'rounded';
 	const expandedAt = options?.expandedAt ?? null;
 	const expandY = options?.expandY ?? VSCODE_EXPAND_Y;
+	const maxWidth = options?.maxWidth ?? -1;
 
 	const nodes: VscodeSvgNode[] = [];
 	const paths: VscodeSvgPath[] = [];
@@ -349,14 +374,16 @@ export function renderGraphVscode(
 	// vscode Graph.getContentWidth: 2*offsetX + (maxX-1)*gridX
 	// vscode Graph.getHeight (graph.ts:476): vertices.length * gridY + offsetY - gridY/2 + (expandAt ? expandY : 0)
 	const maxLane = graph.maxLane;
-	const width = 2 * VSCODE_OFFSET_X + maxLane * VSCODE_GRID_X + VSCODE_GRID_X;
+	const contentWidth = 2 * VSCODE_OFFSET_X + maxLane * VSCODE_GRID_X + VSCODE_GRID_X;
+	// vscode Graph.setSvgWidth (graph.ts:697-700): SVG 实际渲染宽度 = min(contentWidth, maxWidth)
+	const width = maxWidth > -1 ? Math.min(contentWidth, maxWidth) : contentWidth;
 	const height =
 		graph.nodes.length * VSCODE_GRID_Y +
 		VSCODE_OFFSET_Y -
 		VSCODE_GRID_Y / 2 +
 		(expandedAt !== null ? expandY : 0);
 
-	return { paths, nodes, width, height, style };
+	return { paths, nodes, width, contentWidth, height, style };
 }
 
 function edgesToFallbackBranches(graph: GraphResultDto): NonNullable<GraphResultDto['branches']> {

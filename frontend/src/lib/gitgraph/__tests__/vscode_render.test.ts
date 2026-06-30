@@ -249,4 +249,98 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		assert.ok(r.paths[0]?.d.includes('L 16 156'), `path 应使用自定义 expandY，实际: ${r.paths[0]?.d}`);
 		assert.equal(r.height, 2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2 + 120);
 	});
+
+	// ============================================================
+	// v2.64: maxWidth / contentWidth 测试
+	// 对齐 vscode-git-graph Graph.setSvgWidth (graph.ts:697-700) +
+	// Graph.applyMaxWidth (graph.ts:689-695) 渐变 fade 行为
+	// ============================================================
+	test('maxWidth=-1 (默认): width = contentWidth, 无渐变 fade', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b'), node(2, 2, 2, 'c')],
+			edges: [],
+			maxLane: 2,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+		const r = renderGraphVscode(graph);
+		const expectedContent = 2 * VSCODE_OFFSET_X + (2 + 1) * VSCODE_GRID_X;
+		assert.equal(r.contentWidth, expectedContent, 'contentWidth 必须 = 完整内容宽');
+		assert.equal(r.width, expectedContent, 'maxWidth=-1 时 width == contentWidth');
+	});
+
+	test('maxWidth > contentWidth: width = contentWidth (不被放大)', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 1, 1, 'b')],
+			edges: [],
+			maxLane: 1,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+		const r = renderGraphVscode(graph, { maxWidth: 9999 });
+		const expectedContent = 2 * VSCODE_OFFSET_X + (1 + 1) * VSCODE_GRID_X;
+		assert.equal(r.contentWidth, expectedContent);
+		assert.equal(r.width, expectedContent, 'maxWidth 远大于 contentWidth → width == contentWidth');
+	});
+
+	test('maxWidth < contentWidth: width = maxWidth (截短渲染宽度, 触发 mask 渐变)', () => {
+		const graph: GraphResultDto = {
+			nodes: [
+				node(0, 0, 0, 'a'),
+				node(1, 1, 1, 'b'),
+				node(2, 2, 2, 'c'),
+				node(3, 3, 3, 'd'),
+			],
+			edges: [],
+			maxLane: 3,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+		const r = renderGraphVscode(graph, { maxWidth: 96 });
+		const expectedContent = 2 * VSCODE_OFFSET_X + (3 + 1) * VSCODE_GRID_X;
+		assert.equal(r.contentWidth, expectedContent);
+		assert.equal(r.width, 96, 'maxWidth 截短渲染宽度 → SVG width = maxWidth');
+		// height 不受影响
+		assert.equal(
+			r.height,
+			4 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2,
+			'maxWidth 不影响 SVG 高度',
+		);
+	});
+
+	test('maxWidth=0: width = 0 (极端边界)', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a')],
+			edges: [],
+			maxLane: 0,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+		const r = renderGraphVscode(graph, { maxWidth: 0 });
+		assert.equal(r.width, 0);
+		assert.equal(r.contentWidth, 2 * VSCODE_OFFSET_X + VSCODE_GRID_X);
+	});
+
+	test('maxWidth 与 expandAt 同时工作: 截短 width 但展开区域不缩放', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
+			maxLane: 0,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+		// contentWidth = 2*16 + 1*16 = 48, maxWidth=30 < contentWidth → 截短到 30
+		const r = renderGraphVscode(graph, { expandedAt: 0, expandY: 100, maxWidth: 30 });
+		assert.equal(r.width, 30, 'maxWidth < contentWidth → width = maxWidth');
+		assert.equal(
+			r.height,
+			2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2 + 100,
+			'expandY 影响 height 但 maxWidth 不影响',
+		);
+		assert.equal(
+			r.nodes[1]?.cy,
+			1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 100,
+			'展开后下方 dot 仍 +expandY',
+		);
+	});
 });
