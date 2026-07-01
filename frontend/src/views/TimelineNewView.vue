@@ -351,19 +351,6 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
           tooltipY.value = newTooltipY;
           pointer.style.top = (contentRect.height / 2) + 'px';
           // pointer.style.left 保持 CSS 默认 (-30px)，不要在这里覆盖
-          console.log(
-            '[tooltip] dot=(%d, %d) tooltipX=%d, contentW=%d, contentH=%d, ' +
-              'newTooltipY=%d (was %d), pointer.top=%d, pointer.left(CSS)=%dpx',
-            rect.left + rect.width / 2,
-            dotCenterY,
-            tooltipX.value,
-            contentRect.width,
-            contentRect.height,
-            newTooltipY,
-            dotCenterY,
-            contentRect.height / 2,
-            -30,
-          );
         }
       }
     }, 0);
