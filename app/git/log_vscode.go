@@ -94,20 +94,12 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 	// 因为 NoCheckout 没有 worktree 无法用 `git status --porcelain`）。
 	// 探测失败 / 落后 0 commit → 跳过，不影响主流程。
 	//
-	// 插入位置对齐 vscode dataSource.ts:186-196：在 commits 列表中**找到 local HEAD
-	// 所在位置**（不是直接 unshift 到最前），把 UNCOMMITTED 插到 HEAD 之前。
-	// 这样 all-branches 视图下即使 origin/main 领先，UNCOMMITTED 仍紧贴本地 HEAD 上方。
+	// 插入位置对齐 vscode dataSource.ts:191 `commits.unshift(...)`：
+	// UNCOMMITTED 永远在 commits[0]（lane 布局 row 0），让 lane 流从顶部显示「未拉取」
+	// 区段，而不是塞在 local HEAD 之前（那样在 all-branches 视图下会跑到中间）。
 	if len(commits) > 0 {
 		if headSHA, aheadCount, found, _ := detectUnpulledCommits(opts.LocalPath); found {
-			uncommitted := buildUncommittedCommit(headSHA, aheadCount)
-			insertIdx := 0
-			for i, c := range commits {
-				if c.SHA == headSHA {
-					insertIdx = i
-					break
-				}
-			}
-			commits = append(commits[:insertIdx], append([]CommitInfo{uncommitted}, commits[insertIdx:]...)...)
+			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, aheadCount)}, commits...)
 		}
 	}
 

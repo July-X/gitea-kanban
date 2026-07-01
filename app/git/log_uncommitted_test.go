@@ -168,9 +168,8 @@ func TestDetectUnpulledCommits_BadPath(t *testing.T) {
 }
 
 func TestLogCommitsVscode_PrependsUncommitted(t *testing.T) {
-	// 集成测试：LogCommitsVscode 在 local 落后 origin 时应该 insert UNCOMMITTED 到
-	// local HEAD 之前（不是直接 unshift 到最前 —— all-branches 视图下 commits[0] 可能是
-	// origin 上的 commit，应保持原顺序，UNCOMMITTED 紧贴本地 HEAD 上方）。
+	// 集成测试：LogCommitsVscode 在 local 落后 origin 时应该 unshift UNCOMMITTED
+	// 虚拟 commit 到 commits[0]（对齐 vscode-git-graph dataSource.ts:191）。
 	localPath, remotePath := createTestRepoWithRemote(t)
 	advanceRemote(t, localPath, remotePath, 2)
 
@@ -183,35 +182,24 @@ func TestLogCommitsVscode_PrependsUncommitted(t *testing.T) {
 		t.Fatalf("LogCommitsVscode err: %v", err)
 	}
 	if len(result.Commits) < 2 {
-		t.Fatalf("commits 至少 2 个（1 本地 + 3 远端），实际 %d", len(result.Commits))
+		t.Fatalf("commits 至少 2 个（1 UNCOMMITTED + 至少 1 真实），实际 %d", len(result.Commits))
 	}
 
-	// 找到 local HEAD 在 commits 列表中的位置
+	// commits[0] 必须是 UNCOMMITTED 虚拟 commit（对齐 vscode unshift 到最前面）
+	first := result.Commits[0]
+	if first.SHA != UNCOMMITTED_HASH {
+		t.Errorf("commits[0].SHA 应该是 %q (UNCOMMITTED)，实际 %q", UNCOMMITTED_HASH, first.SHA)
+	}
+	if first.Subject == "" {
+		t.Errorf("UNCOMMITTED Subject 不应为空")
+	}
+
+	// UNCOMMITTED.Parents[0] = local HEAD SHA
 	cmd := exec.Command("git", "-C", localPath, "rev-parse", "HEAD")
 	out, _ := cmd.Output()
 	expectedHead := string(out[:len(out)-1])
-
-	headIdx := -1
-	for i, c := range result.Commits {
-		if c.SHA == expectedHead {
-			headIdx = i
-			break
-		}
-	}
-	if headIdx < 0 {
-		t.Fatalf("commits 列表中找不到本地 HEAD %q", expectedHead)
-	}
-	// headIdx - 1 必须是 UNCOMMITTED
-	uncommitted := result.Commits[headIdx-1]
-	if uncommitted.SHA != UNCOMMITTED_HASH {
-		t.Errorf("commits[headIdx-1].SHA 应该是 %q，实际 %q (headIdx=%d)",
-			UNCOMMITTED_HASH, uncommitted.SHA, headIdx)
-	}
-	if uncommitted.Subject == "" {
-		t.Errorf("UNCOMMITTED Subject 不应为空")
-	}
-	if len(uncommitted.Parents) != 1 || uncommitted.Parents[0] != expectedHead {
-		t.Errorf("UNCOMMITTED.Parents 应该是 [headSHA=%q]，实际 %v", expectedHead, uncommitted.Parents)
+	if len(first.Parents) != 1 || first.Parents[0] != expectedHead {
+		t.Errorf("UNCOMMITTED.Parents 应该是 [headSHA=%q]，实际 %v", expectedHead, first.Parents)
 	}
 }
 
