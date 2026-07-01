@@ -2020,7 +2020,10 @@ function refBadgeClass(refType?: string): string {
                         <span>{{ ref }}</span>
                       </span>
                     </span>
-                    <span class="commit-subject">{{ r.commit.subject }}</span>
+                    <span
+                      class="commit-subject"
+                      :class="{ 'commit-subject--uncommitted': r.commit.sha === '*' }"
+                    >{{ r.commit.subject }}</span>
                   </div>
                   <!-- col 2: Date 列（v3.0：v-if 控制显隐） -->
                   <div
@@ -2881,6 +2884,15 @@ function refBadgeClass(refType?: string): string {
   color: inherit;
   font-size: inherit;
 }
+
+/* v3.x：UNCOMMITTED 行的 subject ("N commits from origin ahead") 加大加粗，
+   让用户一眼能识别这是未拉取的虚拟节点。颜色用 #808080 对齐 lane 灰色。 */
+.commit-subject--uncommitted {
+   font-size: 1.15em;
+   font-weight: 600;
+   color: #808080;
+   letter-spacing: 0.01em;
+ }
 
 /* v2.22：列容器（grid item） */
 .commit-row__col {
