@@ -231,3 +231,21 @@ func changeAction(c *object.Change) string {
 	}
 	return "modified"
 }
+
+// ResolveLocalHead 用 go-git 读本地 HEAD 的完整 SHA。
+//
+// 失败返回空字符串（不会报错），让调用方决定 fallback 策略。
+// 用途：app.GetGitGraph 拿不到 opts.Head 时回退成本地 HEAD，让 layout 的
+// isCurrent 标记有值；GitHub adapter 老版本没有这个 fallback，导致 local
+// HEAD 的 dot 不会画成空心圆、tooltip 误标"不在 HEAD 中"。
+func ResolveLocalHead(localPath string) string {
+	r, err := git.PlainOpen(localPath)
+	if err != nil {
+		return ""
+	}
+	head, err := r.Head()
+	if err != nil {
+		return ""
+	}
+	return head.Hash().String()
+}

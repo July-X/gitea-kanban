@@ -838,12 +838,19 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 		return GraphResultDTO{}, ipc.NewUnsupportedPlatform(account.Platform)
 	}
 
+	// 6. 解析本地 HEAD (用于 layout 给 local HEAD 节点打 isCurrent 标记,
+	//    GitHub adapter 老版本没这个 fallback 会让 local HEAD 的 dot
+	//    画成实心、tooltip 误标"不在 HEAD 中")。失败不致命,空字符串让
+	//    layout 跳过 isCurrent 标记,跟旧行为兼容。
+	head := git.ResolveLocalHead(localPath)
+
 	// 6. token 透传给 adapter（go-git 用 BasicAuth，不需要 user 传）
 	_ = token
 
 	result, err := adapter.LogGraph(a.ctx, localPath, platformAdapter.LogGraphOpts{
 		Branches: args.Branches,
 		MaxCount: args.MaxCount,
+		Head:     head,
 	})
 	if err != nil {
 		return GraphResultDTO{}, err
