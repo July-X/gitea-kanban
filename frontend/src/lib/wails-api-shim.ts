@@ -45,7 +45,15 @@ type WailsApp = {
   AuthDisconnect?: (args: { giteaUrl: string }) => Promise<unknown>;
   AuthDisconnectOne?: (args: { giteaUrl: string; username: string }) => Promise<unknown>;
   AuthSwitchAccount?: (args: { accountId: string }) => Promise<unknown>;
-  GetWorkspace?: () => Promise<Record<string, string>>;
+  /** v2.x：拿数据根目录 + 内部 workspace 子目录
+   *  - dataRoot: 用户可感知的"全局路径"，默认 ~/.gitea-kanban
+   *  - workspacePath: 内部 git repos 目录 (= dataRoot + "/workspace")，应用自动创建 */
+  GetWorkspace?: () => Promise<{
+    dataRoot: string;
+    workspacePath: string;
+    isDefault: boolean;
+    validated: boolean;
+  }>;
   SetWorkspace?: (a: { cwd: string }) => Promise<void>;
   /** v2.2：用系统文件管理器打开应用数据目录 */
   OpenDataDir?: () => Promise<void>;
@@ -503,17 +511,23 @@ const apiShim = {
       );
     },
     gitgraphGetWorkspace: (): Promise<unknown> => {
+      // v2.x：Wails 未启动时 (前端独立 dev) 返回 mock 数据根目录
+      const mockRoot = '~/.gitea-kanban';
       return forwardToWails(
         () =>
           stubEmpty({
-            cwd: '~/.gitea-kanban/workspace',
-            suggestedRepoCwdTemplate: '${workspacePath}/repos/${owner}__${repo}.git',
+            dataRoot: mockRoot,
+            workspacePath: mockRoot + '/workspace',
+            isDefault: true,
+            validated: true,
           }),
         (app) =>
           app.GetWorkspace?.() ??
           stubEmpty({
-            cwd: '~/.gitea-kanban/workspace',
-            suggestedRepoCwdTemplate: '${workspacePath}/repos/${owner}__${repo}.git',
+            dataRoot: mockRoot,
+            workspacePath: mockRoot + '/workspace',
+            isDefault: true,
+            validated: true,
           }),
       );
     },

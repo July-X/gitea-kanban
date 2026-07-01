@@ -1442,32 +1442,39 @@ func classifyKeychainError(err error) *ipc.IpcError {
 
 // WorkspaceInfo GetWorkspace 返回值结构（对齐前端 ipc-client.ts 契约）
 type WorkspaceInfo struct {
-	Cwd       string `json:"cwd"`
+	// DataRoot 数据根目录（用户可感知的"全局路径"，默认 ~/.gitea-kanban）
+	// 应用的所有持久化数据 (state.json / logs / workspace) 都放在 DataRoot 下。
+	// 启动期若不存在自动 mkdir -p。
+	DataRoot string `json:"dataRoot"`
+	// WorkspacePath 内部 git 仓库目录 (= DataRoot + "/workspace")
+	// 由应用根据业务自动创建，前端不应让用户直接选择这个路径
+	// (用户只选 DataRoot 即可，workspace 是应用内部约定)。
+	WorkspacePath string `json:"workspacePath"`
 	IsDefault bool   `json:"isDefault"`
 	Validated bool   `json:"validated"`
-	// DataDir 应用数据根目录（前端"打开应用数据目录"按钮用）
-	DataDir string `json:"dataDir"`
 }
 
-// GetWorkspace 返回当前 workspace 路径（**git repos 目录**）
+// GetWorkspace 返回当前数据根目录（**用户可感知的"全局路径"**）
 //
-// v2.2 user 拍板：路径不可改
-//   - workspacePath = ${dataDir}/workspace（系统默认计算）
-//   - 前端不能再修改，调用 git 操作时直接用这个值
+// v2.x 重新设计：用户选的是数据根目录 (DataRoot)，不是 workspace 子目录
+//   - DataRoot = ${GITEA_KANBAN_DATA_DIR | ~/.gitea-kanban} (启动期确定)
+//   - WorkspacePath = ${DataRoot}/workspace (应用自动创建)
+//   - 前端展示 DataRoot，git 操作走 WorkspacePath
 func (a *App) GetWorkspace() WorkspaceInfo {
+	root := a.dataDir
 	wsPath := a.workspacePath
 
 	// 校验路径是否可写（前端 SettingsView 仍展示状态）
 	validated := true
-	if info, err := os.Stat(wsPath); err != nil || !info.IsDir() {
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		validated = false
 	}
 
 	return WorkspaceInfo{
-		Cwd:       wsPath,
+		DataRoot:      root,
+		WorkspacePath: wsPath,
 		IsDefault: true, // 永远默认（不可改）
 		Validated: validated,
-		DataDir:   a.dataDir,
 	}
 }
 

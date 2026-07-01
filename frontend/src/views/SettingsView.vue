@@ -52,37 +52,41 @@ const branch = useBranchStore();
 const router = useRouter();
 
 // ============================================================
-// 工作区分组（v1.5.3 · workspace 路径）
+// 应用数据目录分组（v2.x · 数据根目录 = 全局路径）
 // ============================================================
 //
-// v2.2 (user 拍板 2026-06-22)：
-//   - workspace 路径不可改，固定为 ${dataDir}/workspace
-//   - 设置页只读展示当前路径 + 状态
-//   - 提供"打开应用数据目录"按钮调 system.openPath
+// v2.x 设计（user 拍板）：
+//   - 用户选的是"数据根目录" (DataRoot)，如 ~/.gitea-kanban/
+//   - workspace 是应用根据业务在 DataRoot 下自动创建的子目录
+//     (用于放 git repos，路径不可改、用户不应直接选择)
+//   - DataRoot 启动期若不存在自动 mkdir -p
+//   - 设置页只读展示 DataRoot + 状态
+//   - 提供"打开应用数据目录"按钮调 system.openPath 打开 DataRoot
 //   - 旧版的 setWorkspace / 选目录 / 重置 / 迁移对话框 全部移除
-const workspacePath = ref('');
-const workspaceDefault = ref(true);
-const workspaceValidated = ref(true);
+const dataRootPath = ref('');
+const dataRootValidated = ref(true);
+/** 内部 git 仓库目录 (DataRoot + "/workspace")，仅前端调试可见，UI 不展示 */
+const workspacePathInternal = ref('');
 /** "打开应用数据目录" 按钮的 loading 态（避免双击） */
 const openingDataDir = ref(false);
 
-/** 启动期加载当前 workspace 信息（只读） */
+/** 启动期加载当前 dataRoot 信息（只读） */
 (async (): Promise<void> => {
   try {
     const resp = await commitsGitgraphGetWorkspace();
-    workspacePath.value = resp.cwd;
-    workspaceDefault.value = resp.isDefault;
-    workspaceValidated.value = resp.validated;
+    dataRootPath.value = resp.dataRoot;
+    workspacePathInternal.value = resp.workspacePath;
+    dataRootValidated.value = resp.validated;
   } catch {
     // getWorkspace 失败 → 静默（不阻塞设置页）
   }
 })();
 
-/** 打开系统文件管理器到应用数据目录 */
+/** 打开系统文件管理器到应用数据目录 (DataRoot, 不是 workspace) */
 async function onOpenDataDir(): Promise<void> {
   openingDataDir.value = true;
   try {
-    await systemOpenPath({ path: workspacePath.value });
+    await systemOpenPath({ path: dataRootPath.value });
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     const msg = err.messageText ?? err.message ?? String(e) ?? '打开目录失败';
@@ -362,25 +366,25 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
       </section>
 
       <!--
-        v2.2 工作区（user 拍板 2026-06-22）：只读展示 + "打开应用数据目录"按钮
-        - 当前路径 / 状态 不可改
+        v2.x 数据根目录（user 拍板）：只读展示 + "打开应用数据目录"按钮
+        - 数据根目录 (DataRoot) 是用户可感知的"全局路径"，不可修改
+        - workspace 子目录 (git repos) 由应用根据业务自动创建，UI 不暴露
         - 旧版的 "选择目录" / "重置为默认" / 迁移对话框 全部移除
       -->
       <section class="settings__card settings__card--wide">
-        <h2>应用工作区</h2>
+        <h2>应用数据目录</h2>
         <div class="settings__workspace-row">
           <div class="settings__workspace-info">
             <div class="settings__info-row">
               <span class="settings__info-label">当前路径</span>
-              <span class="settings__info-value mono" :title="workspacePath">
-                {{ workspacePath || '—' }}
-                <span v-if="workspaceDefault" class="settings__badge">默认</span>
+              <span class="settings__info-value mono" :title="dataRootPath">
+                {{ dataRootPath || '—' }}
               </span>
             </div>
             <div class="settings__info-row">
               <span class="settings__info-label">状态</span>
               <span class="settings__info-value">
-                <span v-if="workspaceValidated" class="settings__status settings__status--ok">✓ 可用</span>
+                <span v-if="dataRootValidated" class="settings__status settings__status--ok">✓ 可用</span>
                 <span v-else class="settings__status settings__status--warn">⚠ 路径不可用</span>
               </span>
             </div>
@@ -389,8 +393,8 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
             <button
               type="button"
               class="settings__save"
-              :disabled="openingDataDir || !workspacePath"
-              :title="workspacePath ? '用系统文件管理器打开 ' + workspacePath : '尚无数据目录'"
+              :disabled="openingDataDir || !dataRootPath"
+              :title="dataRootPath ? '用系统文件管理器打开 ' + dataRootPath : '尚无数据目录'"
               @click="onOpenDataDir"
             >
               <span>{{ openingDataDir ? '打开中…' : '打开应用数据目录' }}</span>
@@ -398,10 +402,10 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
           </div>
         </div>
         <p class="settings__hint settings__hint--compact">
-          工作区路径不可修改，固定为
-          <code>~/.gitea-kanban/workspace</code>（macOS/Linux） /
-          <code>%USERPROFILE%\.gitea-kanban\workspace</code>（Windows）。
-          git 同步下来的仓库会放在 <code>${'${workspacePath}'}/repos/&lt;owner&gt;__&lt;repo&gt;</code>。
+          数据根目录不可修改，默认
+          <code>~/.gitea-kanban</code>（macOS/Linux） /
+          <code>%USERPROFILE%\.gitea-kanban</code>（Windows），不存在会自动创建。
+          git 同步下来的仓库会放在数据根目录下的 <code>workspace/repos/&lt;owner&gt;__&lt;repo&gt;</code> 子目录（应用自动管理，不可指定）。
         </p>
       </section>
     </div>

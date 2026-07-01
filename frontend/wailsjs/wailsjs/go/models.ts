@@ -1215,10 +1215,10 @@ export namespace main {
 	
 	
 	export class WorkspaceInfo {
-	    cwd: string;
+	    dataRoot: string;
+	    workspacePath: string;
 	    isDefault: boolean;
 	    validated: boolean;
-	    dataDir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new WorkspaceInfo(source);
@@ -1226,10 +1226,10 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.cwd = source["cwd"];
+	        this.dataRoot = source["dataRoot"];
+	        this.workspacePath = source["workspacePath"];
 	        this.isDefault = source["isDefault"];
 	        this.validated = source["validated"];
-	        this.dataDir = source["dataDir"];
 	    }
 	}
 
