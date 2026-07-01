@@ -152,6 +152,33 @@ const tooltipContent = ref<{
   includedInHead?: boolean;
 } | null>(null);
 
+/**
+ * v3.x：收集整个 graph 里所有 refType='tag' 的 tag 短名（去重 + 稳定排序）。
+ *
+ * 用途：dot Tooltip 里的"所有标签"小节。
+ * 用户需求：hover 在不带 tag 的 commit dot 上时, 也想看到当前 graph 范围内
+ * 有哪些 tag 存在（方便判断 "这个 commit 在 v1.0 和 v1.1 之间" 之类的语义信息）。
+ *
+ * 实现：扫一遍 graphDto.nodes 的 refs + refTypes, 收集 refType==='tag' 的
+ * 短名, 用 Set 去重, 按字母序稳定排序, 避免每次 hover 都重算。
+ */
+const allTagsInGraph = computed<string[]>(() => {
+  const dto = graphDto.value;
+  if (!dto || !dto.nodes) return [];
+  const set = new Set<string>();
+  for (const n of dto.nodes) {
+    const refs = n.refs;
+    const types = n.refTypes;
+    if (!refs || !types) continue;
+    for (let i = 0; i < refs.length && i < types.length; i++) {
+      if (types[i] === 'tag' && refs[i]) {
+        set.add(refs[i]!);
+      }
+    }
+  }
+  return Array.from(set).sort();
+});
+
 function dotEnter(event: MouseEvent, c: SvgCircleNode) {
   hoveredDotSha.value = c.sha;
   hoveredDotColor.value = c.colorHex ?? null;
@@ -188,6 +215,9 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
     // 先临时存 dotCenterY，后面 setTimeout 里精确计算 tooltipY（box 居中于 dot）
     tooltipY.value = dotCenterY;
     // 对齐 vscode graph.ts showTooltip：按 ref 类型分组显示
+    // - 当前 commit 自己的 branch / tag refs (branches/tags 本地数组)
+    // - 全 graph 范围的所有 tag refs (allTags) —— 来自上方 allTagsInGraph computed,
+    //   hover 在不带 tag 的 commit dot 上时也能看到 repo 内有哪些 tag 存在
     const branches: string[] = [];
     const tags: string[] = [];
     if (c.refs) {
@@ -205,8 +235,16 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
     if (branches.length > 0) {
       sections.push({ label: '分支:', items: branches.map((b) => ({ text: b, isRef: true })) });
     }
-    if (tags.length > 0) {
-      sections.push({ label: '标签:', items: tags.map((t) => ({ text: t, isRef: true })) });
+    // 标签: 始终显示 (即使当前 commit 没 tag 也要列出 graph 内所有 tag)
+    //  - 当前 commit 自己的 tag 用 ' *' 后缀标记 (跟 git tag --contains 输出格式类似)
+    //  - 其它 tag 直接列
+    const allTags = allTagsInGraph.value;
+    if (allTags.length > 0) {
+      const tagItems: Array<{ text: string; isRef: boolean }> = allTags.map((t) => ({
+        text: tags.includes(t) ? `${t} *` : t,
+        isRef: true,
+      }));
+      sections.push({ label: tags.length > 0 ? '标签 (当前 / 全部):' : '所有标签:', items: tagItems });
     }
     // "included in HEAD" —— 严格对齐 vscode-git-graph childrenIncludesHead 语义
     // (web/graph.ts:813-825):
