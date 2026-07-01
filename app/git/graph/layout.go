@@ -92,6 +92,12 @@ type GraphBranchLine struct {
 	X1, Y1     int  // 起点 (lane, row)
 	X2, Y2     int  // 终点 (lane, row)
 	LockedFirst bool // 跨 lane 转场方向(true=锁 p1, false=锁 p2)
+	// IsCommitted 标记该 line 是否落在「已提交」commit 段。对齐 vscode Branch.draw
+	// (graph.ts:119-145)：line.isCommitted = (lineIndex >= this.numUncommitted)。
+	//   - true:  走 lane 颜色（彩色）
+	//   - false: 走 #808080 + stroke-dasharray=2px（灰色虚线）
+	// UNCOMMITTED 虚拟 commit 触发的 line 段（UNCOMMITTED → HEAD 一段）会传 false。
+	IsCommitted bool
 }
 
 // GraphBranch 一条贯通 column 的 path (1:1 复刻 vscode Branch)
@@ -511,6 +517,9 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			Parents:     commit.Parents,
 			Refs:        commit.Refs,
 			RefTypes:    commit.RefTypes,
+			// 对齐 vscode-git-graph UNCOMMITTED 模式：UNCOMMITTED 虚拟 commit
+			// 永远 isCommitted=false，lane 流上前 N 走灰色 (前端走 #808080 + dasharray)
+			IsCommitted: commit.SHA != git.UNCOMMITTED_HASH,
 		}
 		nodes = append(nodes, node)
 

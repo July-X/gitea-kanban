@@ -64,6 +64,14 @@ export interface GraphEdgeDto {
   /** 颜色号 0..15，对齐 Gitea Color16()（v2.6 后端生成，前端不再 % N 自算） */
   color: number;
   type: EdgeTypeDto;
+  /**
+   * v3.x：可选。Gitea 风格 (`structured.ts`) 的 addPath 透传给 SVG path。
+   * 缺省 / true = 走 lane 颜色; false = 走 #808080 + stroke-dasharray: 2px。
+   * vscode 风格 (`vscode-render.ts`) 不消费此字段 —— 它走的是 GraphBranchLineDto.isCommitted。
+   */
+  isCommitted?: boolean;
+  /** stroke-dasharray 属性值；isCommitted=false 时固定为 '2px'。 */
+  dasharray?: string;
 }
 
 /** 一段 branch 上的 line (1:1 复刻 vscode Branch.Line)
@@ -79,6 +87,15 @@ export interface GraphBranchLineDto {
   y2: number;
   /** true=跨 lane 转场锁 p1 端, false=锁 p2 端 */
   lockedFirst: boolean;
+  /**
+   * 该 line 是否属于「已提交」段。对齐 vscode graph.ts:102 `line.isCommitted`：
+   *   - true / undefined: 走 lane 颜色
+   *   - false:           走 #808080 + stroke-dasharray: 2px（灰色虚线）
+   * UNCOMMITTED 虚拟 commit 触发的 line 段 (UNCOMMITTED → HEAD) 会传 false。
+   * v3.x 加：trigger 是「local 落后 origin」时，row 0 的 UNCOMMITTED → row 1 HEAD
+   * 这一段会标 false；row ≥ 1 全部为 true。
+   */
+  isCommitted?: boolean;
 }
 
 /** 一条贯通 column 的 path (1:1 复刻 vscode Branch)
@@ -141,6 +158,13 @@ export interface SvgPath {
   /** 内联 hex 颜色（v2.6 fix：用 SVG attribute 而非 CSS 变量，兼容 WebKit + scoped CSS） */
   colorHex: string;
   order: number; // 保留原始 edge 顺序，避免 regroup 后覆盖主干竖线
+  /**
+   * v3.x：UNCOMMITTED 触发的灰色段。true 走 lane 色, false 走 #808080 + dasharray。
+   * 透传到 TimelineNewView 的 pathGroups,SVG <path :stroke-dasharray="..."> 消费。
+   */
+  isCommitted?: boolean;
+  /** stroke-dasharray 属性值；isCommitted=false 时固定为 '2px'。 */
+  dasharray?: string;
 }
 
 /** 一条 SVG 节点（圆点 + commit 关联） */
@@ -215,14 +239,25 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
     laneNodes.sort((a, b) => a.row - b.row);
   }
 
-  const addPath = (color: number, d: string, order: number): void => {
+  const addPath = (color: number, d: string, order: number, isCommitted: boolean): void => {
+    // v3.x：UNCOMMITTED 触发的 edge 走 #808080 + stroke-dasharray: 2px（对齐 vscode）。
+    // Gitea 风格不像 vscode 风格有 per-line IsCommitted 字段，UNCOMMITTED 永远在 row 0，
+    // 所以一条 edge 的 source 是不是 UNCOMMITTED 取决于 edge.fromRow 对应的 vertex.isCommitted。
+    const baseHex = LANE_COLORS[color] ?? LANE_COLORS[0];
+    const finalHex = isCommitted ? baseHex : '#808080';
     paths.push({
       d,
       colorIndex: color,
-      colorHex: LANE_COLORS[color] ?? LANE_COLORS[0],
+      colorHex: finalHex,
       order,
+      isCommitted,
+      dasharray: isCommitted ? undefined : '2px',
     });
   };
+
+  // v3.x: row 0 节点是 UNCOMMITTED 虚拟 commit 时，row 0 → row 1 的那条 edge
+  // （UNCOMMITTED → HEAD）是 uncommitted。所有从 row 0 出发的 edge 都是灰色的。
+  const uncommittedRow = graph.nodes[0]?.isCommitted === false ? 0 : -1;
 
   const rowCenter = (row: number): number => row * ROW_HEIGHT + ROW_HEIGHT / 2;
   const rowTop = (row: number): number => row * ROW_HEIGHT;
@@ -300,7 +335,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
       d = `M ${x1} ${y1} L ${x1} ${branchY} L ${x2} ${y2}`;
     }
 
-    addPath(edge.color, d, index);
+    addPath(edge.color, d, index, edge.fromRow !== uncommittedRow);
   }
 
   // ===== 2. 生成 nodes → SVG circles =====

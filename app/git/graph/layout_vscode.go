@@ -33,6 +33,7 @@ type vsPoint struct {
 type vsLine struct {
 	p1, p2      vsPoint
 	lockedFirst bool
+	isCommitted bool // 该 line 是否属于「已提交」段(对齐 vscode Branch.draw 的 line.isCommitted)
 }
 
 // vsUnavailablePoint mirrors graph.ts:28-31
@@ -51,7 +52,7 @@ type vsBranch struct {
 
 // addLine mirrors graph.ts:48-55
 func (b *vsBranch) addLine(p1, p2 vsPoint, isCommitted, lockedFirst bool) {
-	b.lines = append(b.lines, vsLine{p1: p1, p2: p2, lockedFirst: lockedFirst})
+	b.lines = append(b.lines, vsLine{p1: p1, p2: p2, lockedFirst: lockedFirst, isCommitted: isCommitted})
 	if isCommitted {
 		if p2.x == 0 && p2.y < b.numUncommitted {
 			b.numUncommitted = p2.y
@@ -157,6 +158,23 @@ func (v *vsVertex) getColour() int {
 		return v.onBranch.colour
 	}
 	return 0
+}
+
+// setNotCommitted mirrors graph.ts:287-289
+//
+// 标记该 vertex 是「未完成」虚拟 commit（对齐 vscode-git-graph 的
+// Vertex.setNotCommitted()）。触发条件：commit.SHA == UNCOMMITTED_HASH
+// （由 LogCommitsVscode 在探测到「local 落后 origin」时插入）。
+//
+// 后续在 determinePath 里通过 addLine(isCommitted=false) 让
+// 该 vertex 关联的 branch 段前 N 行走 #808080 + dasharray 渲染。
+func (v *vsVertex) setNotCommitted() {
+	v.isCommitted = false
+}
+
+// getIsCommitted mirrors graph.ts:286
+func (v *vsVertex) getIsCommitted() bool {
+	return v.isCommitted
 }
 
 // graphVscode mirrors graph.ts:337-... Graph class
@@ -330,13 +348,20 @@ func (g *graphVscode) loadCommits(commits []git.CommitInfo, head string) {
 	// 3) Create vertices; use a single null vertex for off-graph parents
 	g.vertices = make([]*vsVertex, len(g.sorted))
 	for i, c := range g.sorted {
-		g.vertices[i] = &vsVertex{
+		v := &vsVertex{
 			id:          i,
 			sha:         c.SHA,
 			isStash:     false, // 当前数据源不传 stash
-			isCommitted: true,  // 默认已提交；uncommitted 顶点在 vscode 中由 Vertex.setNotCommitted() 标记
+			isCommitted: true,  // 默认已提交；UNCOMMITTED 虚拟 commit 在下方 setNotCommitted() 标记
 			connections: make(map[int]*vsUnavailablePoint),
 		}
+		// 对齐 vscode graph.ts:422-430：commits[0] 是 UNCOMMITTED 时调 setNotCommitted()。
+		// 我们的 UNCOMMITTED 触发语义是「local 落后 origin」而不是 worktree uncommitted，
+		// 但 vertex 标记逻辑完全一致 —— 只要 SHA == UNCOMMITTED_HASH 即可。
+		if c.SHA == git.UNCOMMITTED_HASH {
+			v.setNotCommitted()
+		}
+		g.vertices[i] = v
 	}
 	nullVertex := &vsVertex{id: vsNULL_VERTEX_ID, sha: "<null>", nextX: -1, connections: make(map[int]*vsUnavailablePoint)}
 
@@ -402,9 +427,14 @@ func (g *graphVscode) buildResultWithTruncated(truncated bool) *GraphResult {
 		lines := make([]GraphBranchLine, 0, len(b.lines))
 		for _, ln := range b.lines {
 			lines = append(lines, GraphBranchLine{
-				X1: ln.p1.x, Y1: ln.p1.y,
-				X2: ln.p2.x, Y2: ln.p2.y,
+				X1:          ln.p1.x,
+				Y1:          ln.p1.y,
+				X2:          ln.p2.x,
+				Y2:          ln.p2.y,
 				LockedFirst: ln.lockedFirst,
+				// 对齐 vscode Branch.draw: 每条 line 自己的 isCommitted，
+				// 前端按这个字段在 line.isCommitted 变化时切路径，分别走彩色/灰色。
+				IsCommitted: ln.isCommitted,
 			})
 		}
 		branches = append(branches, GraphBranch{

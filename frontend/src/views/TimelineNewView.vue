@@ -884,6 +884,10 @@ interface PathGroup {
   colorHex?: string;
   d: string; // 单条 path 的 d
   kind?: 'line' | 'shadow'; // vscode Branch.drawPath: shadow (stroke-width=4) + line (stroke-width=2)
+  /** v3.x：UNCOMMITTED 触发的灰色段。true 走 lane 色, false 走 #808080 + dasharray。 */
+  isCommitted?: boolean;
+  /** stroke-dasharray 属性值；isCommitted=false 时固定为 '2px'。 */
+  dasharray?: string;
 }
 
 const pathGroups = computed<PathGroup[]>(() => {
@@ -891,6 +895,7 @@ const pathGroups = computed<PathGroup[]>(() => {
   if (!r) return [];
   // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
   // 每个 vscode path 拆成 shadow + line 两条 (Branch.drawPath:149-159)
+  // v3.x：透传 isCommitted / dasharray，让 UNCOMMITTED 灰色虚线段
   return r.paths.map((p) => ({
     id: `structured-${p.kind ?? 'line'}-${p.order}`,
     order: p.order,
@@ -899,6 +904,8 @@ const pathGroups = computed<PathGroup[]>(() => {
     colorHex: p.colorHex,
     d: p.d,
     kind: p.kind,
+    isCommitted: p.isCommitted,
+    dasharray: p.dasharray,
   }));
 });
 
@@ -1080,27 +1087,36 @@ function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string
 }
 
 const svgCircleNodes = computed<SvgCircleNode[]>(() => {
-  return (svgRender.value?.nodes ?? []).map((node) => ({
-    sha: node.sha,
-    shortSha: node.shortSha,
-    subject: node.subject,
-    title: dotTitle(node.subject, node.refs, node.refTypes),
-    row: node.row,
-    cx: node.cx,
-    cy: node.cy,
-    r: node.isStash ? 4.5 : 4,
-    colorHex: node.colorHex,
-    isCurrent: node.isCurrent,
-    isStash: node.isStash,
-    isCommitted: node.isCommitted,
-    refs: node.refs,
-    refTypes: node.refTypes,
-    authorName: node.authorName,
-    date: node.date,
-    stroke: node.isCurrent ? node.colorHex : 'rgba(30, 30, 30, 0.75)',
-    strokeWidth: node.isCurrent ? 2 : 1,
-    strokeOpacity: node.isCurrent ? 1 : 0.75,
-  }));
+  return (svgRender.value?.nodes ?? []).map((node) => {
+    // v3.x：UNCOMMITTED 虚拟 commit 强制 isCurrent=true，让它画成空心圆
+    // （对齐 vscode graph.ts:424-426：UNCOMMITTED + OpenCircleAtTheUncommittedChanges
+    // 风格默认是空心 + fill=bg + stroke=color）。这里用 sha === '*' 判定比
+    // node.isCommitted === false 更稳，避免将来 isCommitted 字段意义被扩展时
+    // 误触发。
+    const isUncommittedVertex = node.sha === '*';
+    const isCurrent = node.isCurrent || isUncommittedVertex;
+    return {
+      sha: node.sha,
+      shortSha: node.shortSha,
+      subject: node.subject,
+      title: dotTitle(node.subject, node.refs, node.refTypes),
+      row: node.row,
+      cx: node.cx,
+      cy: node.cy,
+      r: node.isStash ? 4.5 : 4,
+      colorHex: node.colorHex,
+      isCurrent,
+      isStash: node.isStash && !isUncommittedVertex,
+      isCommitted: node.isCommitted,
+      refs: node.refs,
+      refTypes: node.refTypes,
+      authorName: node.authorName,
+      date: node.date,
+      stroke: isCurrent ? node.colorHex : 'rgba(30, 30, 30, 0.75)',
+      strokeWidth: isCurrent ? 2 : 1,
+      strokeOpacity: isCurrent ? 1 : 0.75,
+    };
+  });
 });
 
 // ============================================================
@@ -1830,6 +1846,7 @@ function refBadgeClass(refType?: string): string {
                         : (pg.colorHex ?? '#888')"
                       :stroke-width="pg.kind === 'shadow' ? 4 : 2"
                       :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
+                      :stroke-dasharray="pg.kind === 'shadow' ? undefined : pg.dasharray"
                       fill="none"
                       stroke-linecap="round"
                       vector-effect="non-scaling-stroke"

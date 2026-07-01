@@ -51,6 +51,14 @@ export const VSCODE_COLORS = [
 	'#ffcc00', // 11
 ];
 
+// v3.x：UNCOMMITTED 虚拟 commit 触发的灰色 line 颜色。
+// 对齐 vscode graph.ts:152 `line.setAttribute('stroke', isCommitted ? colour : '#808080')`
+export const VSCODE_UNCOMMITTED_COLOR = '#808080';
+// 对齐 vscode graph.ts:155 (OpenCircleAtTheCheckedOutCommit 模式)：
+// `line.setAttribute('stroke-dasharray', '2px')`
+// 我们 v3.x 固定走这条模式（默认灰色 + 虚线），不引入二级 config。
+export const VSCODE_UNCOMMITTED_DASHARRAY = '2px';
+
 export type VscodeGraphStyle = 'rounded' | 'angular';
 
 export interface VscodeSvgPath {
@@ -64,6 +72,14 @@ export interface VscodeSvgPath {
 	 * shadow (暗背景下光晕) + line (实色)。
 	 */
 	kind?: 'line' | 'shadow';
+	/**
+	 * v3.x：isCommitted=false 时该 path 走 #808080 灰色 + stroke-dasharray: 2px（虚线）。
+	 * 对齐 vscode Branch.drawPath (graph.ts:152-155)。
+	 * 默认 undefined (true)，表示走 lane 颜色。
+	 */
+	isCommitted?: boolean;
+	/** stroke-dasharray 属性值；isCommitted=false 时固定为 '2px'。 */
+	dasharray?: string;
 }
 
 export interface VscodeSvgNode {
@@ -213,20 +229,29 @@ export function renderGraphVscode(
 	//   - shadow: stroke-width=4 stroke-opacity=0.75 stroke=bg (暗背景下"光晕")
 	//   - line:   stroke-width=2 stroke=color 实色
 	// 我们在 DTO 区分两者,前端 CSS 给 shadow 加粗 + 半透明背景色描边
-	const addPath = (color: number, dStr: string, order: number): void => {
+	//
+	// v3.x：isCommitted=false 时改走 #808080 + stroke-dasharray='2px'，对齐
+	// vscode Branch.drawPath (graph.ts:152-155)。
+	const addPath = (color: number, dStr: string, order: number, isCommitted: boolean): void => {
+		const baseHex = VSCODE_COLORS[color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0]!;
+		const finalHex = isCommitted ? baseHex : VSCODE_UNCOMMITTED_COLOR;
+		const finalDasharray = isCommitted ? undefined : VSCODE_UNCOMMITTED_DASHARRAY;
 		paths.push({
 			d: dStr,
 			colorIndex: color,
-			colorHex: VSCODE_COLORS[color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0],
+			colorHex: finalHex,
 			order,
 			kind: 'shadow',
+			isCommitted,
 		});
 		paths.push({
 			d: dStr,
 			colorIndex: color,
-			colorHex: VSCODE_COLORS[color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0],
+			colorHex: finalHex,
 			order,
 			kind: 'line',
+			isCommitted,
+			dasharray: finalDasharray,
 		});
 	};
 
@@ -236,16 +261,21 @@ export function renderGraphVscode(
 		const color = branch.color;
 		const lines = branch.lines;
 		// 1) 把 line 转成像素坐标,处理 expandAt (vscode Branch.draw:78-103)
+		// v3.x: 携带 isCommitted —— UNCOMMITTED 段走灰色虚线,其余走 lane 颜色
 		const placed: Array<{
 			p1: { x: number; y: number };
 			p2: { x: number; y: number };
 			lockedFirst: boolean;
+			isCommitted: boolean;
 		}> = [];
 		for (const line of lines) {
 			let x1 = line.x1 * gridX + offsetX;
 			let y1 = line.y1 * gridY + offsetY;
 			let x2 = line.x2 * gridX + offsetX;
 			let y2 = line.y2 * gridY + offsetY;
+			// v3.x: 缺省视作已提交（Go 端老 DTO 没有 isCommitted 字段，fallback 分支
+			// edgesToFallbackBranches 也会写 true），与 vscode 默认行为一致。
+			const isCommitted = line.isCommitted !== false;
 
 			// expandAt 处理: 展开 commit 详情时,下方所有 line 自动"延伸"
 			// (vscode Branch.draw:85-101)
@@ -265,11 +295,13 @@ export function renderGraphVscode(
 								p1: { x: x1, y: y1 },
 								p2: { x: x2, y: y2 },
 								lockedFirst: line.lockedFirst,
+								isCommitted,
 							});
 							placed.push({
 								p1: { x: x2, y: y1 + gridY },
 								p2: { x: x2, y: y2 + expandY },
 								lockedFirst: line.lockedFirst,
+								isCommitted,
 							});
 							continue;
 						} else {
@@ -278,6 +310,7 @@ export function renderGraphVscode(
 								p1: { x: x1, y: y1 },
 								p2: { x: x1, y: y2 - gridY + expandY },
 								lockedFirst: line.lockedFirst,
+								isCommitted,
 							});
 							y1 += expandY;
 							y2 += expandY;
@@ -285,12 +318,13 @@ export function renderGraphVscode(
 					}
 				}
 			}
-			placed.push({ p1: { x: x1, y: y1 }, p2: { x: x2, y: y2 }, lockedFirst: line.lockedFirst });
+			placed.push({ p1: { x: x1, y: y1 }, p2: { x: x2, y: y2 }, lockedFirst: line.lockedFirst, isCommitted });
 		}
 
 		// 2) 简化共线中间点 (vscode Branch.draw:106-116)
 		// 只合并同列且首尾相接的垂直线。跨 lane 线段即使首尾相接也必须保留，
 		// 否则会吞掉 VSCode 依赖行间距生成的 C 贝塞尔转场。
+		// v3.x: 同 isCommitted 段的 line 才能合并，跨段必须保留断点（切路径用）
 		let i = 0;
 		while (i < placed.length - 1) {
 			const line = placed[i]!;
@@ -299,7 +333,8 @@ export function renderGraphVscode(
 				line.p1.x === line.p2.x &&
 				line.p2.x === nextLine.p1.x &&
 				nextLine.p1.x === nextLine.p2.x &&
-				line.p2.y === nextLine.p1.y
+				line.p2.y === nextLine.p1.y &&
+				line.isCommitted === nextLine.isCommitted
 			) {
 				line.p2.y = nextLine.p2.y;
 				placed.splice(i + 1, 1);
@@ -316,13 +351,26 @@ export function renderGraphVscode(
 		//
 		// 跨 lane 转场继续沿当前 path 输出，使用 VSCode 默认 0.8 * GRID_Y
 		// 控制点偏移，靠行间距完成曲线形变后连接到目标 lane。
+		//
+		// v3.x: 当 seg.isCommitted 变化时切路径 (与 vscode Branch.draw:125
+		//       `line.isCommitted !== lines[i - 1].isCommitted` 等价)，分别
+		//       flush 上一段 + 开新段。确保 UNCOMMITTED 灰虚线与已提交彩色段独立 path。
 		let curPath = '';
+		let curIsCommitted: boolean | null = null;
 		for (let i = 0; i < placed.length; i++) {
-			const seg = placed[i];
+			const seg = placed[i]!;
 			const x1 = seg.p1.x;
 			const y1 = seg.p1.y;
 			const x2 = seg.p2.x;
 			const y2 = seg.p2.y;
+			const segIsCommitted = seg.isCommitted;
+
+			// 段间 committed-ness 切变: 提交当前 path 并开新段
+			if (curPath !== '' && curIsCommitted !== null && curIsCommitted !== segIsCommitted) {
+				addPath(color, curPath, branchIdx, curIsCommitted);
+				curPath = '';
+			}
+			curIsCommitted = segIsCommitted;
 
 			// 新段起点跟前段终点连续 (last.p2 == cur.p1) 时, 不开 M, 直接续接
 			// 这是 "column 0 主线" 贯通的关键: 多个同 column 的 line 简化后
@@ -361,7 +409,7 @@ export function renderGraphVscode(
 		}
 
 		if (curPath !== '') {
-			addPath(color, curPath, branchIdx);
+			addPath(color, curPath, branchIdx, curIsCommitted ?? true);
 		}
 	}
 
@@ -421,6 +469,8 @@ function edgesToFallbackBranches(graph: GraphResultDto): NonNullable<GraphResult
 				x2: edge.toLane,
 				y2: edge.toRow,
 				lockedFirst: edge.fromLane < edge.toLane,
+				// Gitea 风格 fallback：没有 UNCOMMITTED 概念，全部视作已提交
+				isCommitted: true,
 			},
 		],
 	}));

@@ -219,6 +219,27 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		truncated = true
 	}
 
+	// v3.x：探测 local HEAD 是否落后于 origin（对齐 vscode-git-graph
+	// commits[0].hash === UNCOMMITTED 模式，但触发语义改为「local 落后 origin」）。
+	// 探测失败 / 落后 0 commit → 跳过，不影响主流程。
+	//
+	// 插入位置对齐 vscode dataSource.ts:186-196：找 local HEAD 在 commits 列表中的
+	// 位置，把 UNCOMMITTED 插到 HEAD 之前（不是直接 unshift 到最前），保证
+	// all-branches 视图下 UNCOMMITTED 紧贴本地 HEAD 上方。
+	if len(commits) > 0 {
+		if headSHA, aheadCount, found, _ := detectUnpulledCommits(opts.LocalPath); found {
+			uncommitted := buildUncommittedCommit(headSHA, aheadCount)
+			insertIdx := 0
+			for i, c := range commits {
+				if c.SHA == headSHA {
+					insertIdx = i
+					break
+				}
+			}
+			commits = append(commits[:insertIdx], append([]CommitInfo{uncommitted}, commits[insertIdx:]...)...)
+		}
+	}
+
 	return &LogResult{
 		Commits:   commits,
 		Truncated: truncated,
