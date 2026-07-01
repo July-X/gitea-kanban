@@ -457,7 +457,8 @@ type GraphBranchLineDTO struct {
 	// IsCommitted 该 line 是否属于「已提交」段。
 	// 对齐 vscode graph.ts:102 `line.isCommitted` 与 Branch.drawPath:152 stroke 切换；
 	// false 时前端走 #808080 + stroke-dasharray: 2px 灰色虚线。
-	IsCommitted bool `json:"isCommitted,omitempty"`
+	// 不带 omitempty —— false（UNCOMMITTED 段）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphNodeDTO 图节点
@@ -481,7 +482,8 @@ type GraphNodeDTO struct {
 	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080。
 	// App 端 LogCommits / LogCommitsVscode 在 local 落后 origin 时 unshift 一颗
 	// UNCOMMITTED 虚拟 commit (SHA = "*")，对应节点的 IsCommitted = false。
-	IsCommitted bool `json:"isCommitted,omitempty"`
+	// 不带 omitempty —— false（UNCOMMITTED 节点）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphEdgeDTO 图边

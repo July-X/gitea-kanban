@@ -176,7 +176,8 @@ type GraphBranchLineDTO struct {
 	LockedFirst bool `json:"lockedFirst"`
 	// IsCommitted 该 line 是否属于「已提交」段。
 	// 对齐 vscode graph.ts:102 `line.isCommitted` 与 Branch.drawPath:152 stroke 切换。
-	IsCommitted bool `json:"isCommitted,omitempty"`
+	// 不带 omitempty —— false（UNCOMMITTED 段）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphNodeDTO 图节点
@@ -204,7 +205,8 @@ type GraphNodeDTO struct {
 	IsStash bool `json:"isStash,omitempty"`
 	// IsCommitted 是否已提交 (true) 还是未提交的 worktree 变更 (false)
 	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 stroke = #808080
-	IsCommitted bool `json:"isCommitted,omitempty"`
+	// 不带 omitempty —— false（UNCOMMITTED 节点）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphEdgeDTO 图边

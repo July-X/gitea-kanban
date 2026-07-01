@@ -530,3 +530,12 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 		Truncated: r.Truncated,
 	}
 }
+
+// GraphResultToDTOForTest 是 graphResultToDTO 的测试导出。
+//
+// graphResultToDTO 本身小写不可见,但根 package main 下的端到端 DTO 测试
+// (app_gitgraph_dto_e2e_test.go)需要跨包调用它,故保留这个薄包装。
+// 仅供测试使用,生产代码不要调。
+func GraphResultToDTOForTest(r *graph.GraphResult) *platform.GraphResult {
+	return graphResultToDTO(r)
+}

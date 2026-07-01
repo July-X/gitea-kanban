@@ -683,7 +683,7 @@ export namespace main {
 	    x2: number;
 	    y2: number;
 	    lockedFirst: boolean;
-	    isCommitted?: boolean;
+	    isCommitted: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GraphBranchLineDTO(source);
@@ -772,7 +772,7 @@ export namespace main {
 	    refTypes?: string[];
 	    isCurrent?: boolean;
 	    isStash?: boolean;
-	    isCommitted?: boolean;
+	    isCommitted: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GraphNodeDTO(source);
