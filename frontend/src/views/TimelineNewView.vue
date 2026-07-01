@@ -152,33 +152,6 @@ const tooltipContent = ref<{
   includedInHead?: boolean;
 } | null>(null);
 
-/**
- * v3.x：收集整个 graph 里所有 refType='tag' 的 tag 短名（去重 + 稳定排序）。
- *
- * 用途：dot Tooltip 里的"所有标签"小节。
- * 用户需求：hover 在不带 tag 的 commit dot 上时, 也想看到当前 graph 范围内
- * 有哪些 tag 存在（方便判断 "这个 commit 在 v1.0 和 v1.1 之间" 之类的语义信息）。
- *
- * 实现：扫一遍 graphDto.nodes 的 refs + refTypes, 收集 refType==='tag' 的
- * 短名, 用 Set 去重, 按字母序稳定排序, 避免每次 hover 都重算。
- */
-const allTagsInGraph = computed<string[]>(() => {
-  const dto = graphDto.value;
-  if (!dto || !dto.nodes) return [];
-  const set = new Set<string>();
-  for (const n of dto.nodes) {
-    const refs = n.refs;
-    const types = n.refTypes;
-    if (!refs || !types) continue;
-    for (let i = 0; i < refs.length && i < types.length; i++) {
-      if (types[i] === 'tag' && refs[i]) {
-        set.add(refs[i]!);
-      }
-    }
-  }
-  return Array.from(set).sort();
-});
-
 function dotEnter(event: MouseEvent, c: SvgCircleNode) {
   hoveredDotSha.value = c.sha;
   hoveredDotColor.value = c.colorHex ?? null;
@@ -242,17 +215,12 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
         items: [{ text: currentBranch, isRef: true }],
       });
     }
-    // 标签: 始终显示 (即使当前 commit 没 tag 也要列出 graph 内所有 tag)
-    // 排序: 当前 commit 自己的 tag 排前面 (顺序本身就传递"这是我的"信息, 不再
-    // 用 * 后缀, 避免冗余视觉噪声)
-    const allTags = allTagsInGraph.value;
-    if (allTags.length > 0) {
-      const currentTags = allTags.filter((t) => tags.includes(t));
-      const otherTags = allTags.filter((t) => !tags.includes(t));
-      const orderedTags = [...currentTags, ...otherTags];
+    // 标签: 只显示当前 commit 自己的 tag (跟 vscode-git-graph 一致)
+    // 当前 commit 没 tag → 整个 section 不显示
+    if (tags.length > 0) {
       sections.push({
-        label: '所有标签:',
-        items: orderedTags.map((t) => ({ text: t, isRef: true })),
+        label: '标签:',
+        items: tags.map((t) => ({ text: t, isRef: true })),
       });
     }
     // "included in HEAD" —— 严格对齐 vscode-git-graph childrenIncludesHead 语义
