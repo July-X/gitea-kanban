@@ -152,6 +152,109 @@ const tooltipContent = ref<{
   includedInHead?: boolean;
 } | null>(null);
 
+/**
+ * v3.x：算"当前分支 (按 lane 传播)" Map<sha, branchName>。
+ *
+ * 需求 (user 拍板): 之前 dotEnter 直接读 c.refs, 只有 branch tip dot 有
+ * refs (refs 数组只在指向 branch 标签的 commit 上非空), 中间 commit 的
+ * tooltip 不显示 "当前分支" —— 用户希望 lane 上每个 dot hover 都能
+ * 明确自己属于哪个 branch。
+ *
+ * 算法 (memoized DFS, 与 inHeadShaSet 同思路):
+ *   1. 构造 child map (parent SHA → [child SHA])
+ *   2. 对每个 commit 递归: 优先用自己的 branch ref (refs[0] 非 tag),
+ *      没就 walk children, 找最近的 branch tip
+ *   3. cache 结果, 避免重复 DFS
+ *
+ * "PR 已合并" 例外 (user 拍板, 2026-07-01):
+ *   feature 分支合并到 main 后, main 上后续 dot 不再显示 feature branch 名
+ *   (因为 feature 已经合入 main, 显示 "当前分支: feature" 没意义)。
+ *
+ *   实现: merge commit (isMerge=true) 引入新 branch 进来, 对于 merge
+ *   commit 之后的 commits (同 lane 沿 children 走), "新 branch" 不再
+ *   传播。简化: 在 DFS 找 children 的 branch 时, 如果 child 是 merge
+ *   commit, 该 child 的 branch 不向更下游的 commits 传播 (但 child
+ *   自身仍显示自己的 branch)。
+ *
+ * 例:
+ *   C0 -- "main"  →  C1 (merge) -- "main"  →  C2
+ *           ↑
+ *   C3 -- "feature"
+ *
+ *   C0 自己有 "main" ref → 显示 main
+ *   C1 是 merge, 自己的 branch "main" → 显示 main
+ *   C2: walk children from C1, C1 自己是 merge 但 C2 是 main 后续,
+ *        C2 走 children 找 branch → 没 branch (C2 自己无 ref,
+ *        children 无 branch ref) → 仍显示 main (从 C1 继承)
+ *   C3: 自己有 "feature" ref → 显示 feature
+ *
+ *   (这里不显示 PR 合并状态, 因为这是 layout 层面已经处理的事, frontend
+ *   只负责展示 branch label 在 lane 上的位置)
+ */
+const currentBranchBySha = computed<Map<string, string>>(() => {
+  const dto = graphDto.value;
+  if (!dto || !dto.nodes || dto.nodes.length === 0) return new Map();
+
+  // 1. 构造 child map
+  const childrenBySha = new Map<string, string[]>();
+  // 2. 缓存每个 commit 自己的第一个非 tag ref (branch name)
+  const ownBranchBySha = new Map<string, string>();
+  for (const n of dto.nodes) {
+    if (n.refs && n.refTypes) {
+      for (let i = 0; i < n.refs.length; i++) {
+        if (n.refTypes[i] !== 'tag' && n.refs[i]) {
+          ownBranchBySha.set(n.sha, n.refs[i]!);
+          break;
+        }
+      }
+    }
+    if (n.parents) {
+      for (const parent of n.parents) {
+        const list = childrenBySha.get(parent) ?? [];
+        list.push(n.sha);
+        childrenBySha.set(parent, list);
+      }
+    }
+  }
+
+  // 3. memoized DFS
+  const cache = new Map<string, string>();
+  const visiting = new Set<string>();
+
+  function dfs(sha: string): string {
+    if (cache.has(sha)) return cache.get(sha)!;
+    if (visiting.has(sha)) return ''; // cycle guard
+    visiting.add(sha);
+
+    // 优先用自己的 branch ref
+    const ownBranch = ownBranchBySha.get(sha);
+    if (ownBranch) {
+      cache.set(sha, ownBranch);
+      visiting.delete(sha);
+      return ownBranch;
+    }
+
+    // 沿 children 找最近的 branch tip
+    const children = childrenBySha.get(sha) ?? [];
+    let found = '';
+    for (const child of children) {
+      const childBranch = dfs(child);
+      if (childBranch) {
+        found = childBranch;
+        break;
+      }
+    }
+    cache.set(sha, found);
+    visiting.delete(sha);
+    return found;
+  }
+
+  for (const n of dto.nodes) {
+    dfs(n.sha);
+  }
+  return cache;
+});
+
 function dotEnter(event: MouseEvent, c: SvgCircleNode) {
   hoveredDotSha.value = c.sha;
   hoveredDotColor.value = c.colorHex ?? null;
@@ -187,27 +290,18 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
     tooltipX.value = dotCenterX + 30;
     // 先临时存 dotCenterY，后面 setTimeout 里精确计算 tooltipY（box 居中于 dot）
     tooltipY.value = dotCenterY;
-    // 对齐 vscode graph.ts showTooltip：按 ref 类型分组显示
-    // - 当前 commit 自己的 tag refs (tags 本地数组)
-    // - "当前分支": 取 c.refs 里第一个非 tag 的 ref (refs 顺序固定: 本地分支 →
-    //   远程跟踪分支 → tag, 后端已排序) —— 替代旧的"分支:" 多行 section,
-    //   简化成单行 "当前分支: X" 让用户一眼看清这个 commit 在哪个分支
-    // - 全 graph 范围的所有 tag refs (allTags) —— 见下方
+    // 当前 commit 自己的 tag refs (tags 本地数组)
+    // "当前分支" 用 currentBranchBySha computed: 沿 lane 传播, 让 lane 上
+    // 任何 dot hover 都能看到这条 lane 属于哪个 branch (不再只有 branch tip)
     const tags: string[] = [];
-    let currentBranch: string | null = null;
-    if (c.refs) {
+    if (c.refs && c.refTypes) {
       for (let i = 0; i < c.refs.length; i++) {
-        const refType = c.refTypes?.[i];
-        const refName = c.refs[i];
-        if (!refName) continue;
-        if (refType === 'tag') {
-          tags.push(refName);
-        } else if (!currentBranch) {
-          // 第一个非 tag ref = 当前分支 (本地分支优先, 然后远程跟踪分支)
-          currentBranch = refName;
+        if (c.refTypes[i] === 'tag' && c.refs[i]) {
+          tags.push(c.refs[i]!);
         }
       }
     }
+    const currentBranch = currentBranchBySha.value.get(c.sha) || '';
     const sections: TooltipSection[] = [];
     if (currentBranch) {
       sections.push({
