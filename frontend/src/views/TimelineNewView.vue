@@ -324,6 +324,8 @@ onUnmounted(() => {
     accordionResizeObserver = null;
   }
   // v3.4：清理动态行高 observer
+  if (rowHeightResizeRaf) cancelAnimationFrame(rowHeightResizeRaf);
+  rowHeightResizeRaf = 0;
   if (rowHeightResizeObserver) {
     rowHeightResizeObserver.disconnect();
     rowHeightResizeObserver = null;
@@ -782,8 +784,11 @@ const dynamicGridY = ref(VSCODE_GRID_Y);
  */
 const dynamicOffsetY = computed(() => dynamicGridY.value / 2);
 
-/** v3.4：动态行高 observer（测量 header + body 实际渲染高度，对齐 vscode main.ts:801） */
+/** v3.4：动态行高 observer（测量 header + body 实际渲染高度，对齐 vscode main.ts:801）
+ *  ponytail: rAF 节流 + 值不变不写回，避免 observer 喂回自己触发
+ *  "ResizeObserver loop completed with undelivered notifications" */
 let rowHeightResizeObserver: ResizeObserver | null = null;
+let rowHeightResizeRaf = 0;
 
 /** 测量并更新 headerHeightPx / dynamicGridY / wrapperClientWidth */
 function measureRowHeights(): void {
@@ -814,7 +819,16 @@ function setupRowHeightObserver(): void {
     const wrapper = document.querySelector('.git-graph-wrapper') as HTMLElement | null;
     if (!wrapper) return;
     rowHeightResizeObserver = new ResizeObserver(() => {
-      measureRowHeights();
+      // ponytail：observer 回调里同步写 dynamicGridY 会让 Vue 重渲，
+      // 重渲改 path d 触发新一轮 resize —— Chrome 直接报
+      // "ResizeObserver loop completed with undelivered notifications"。
+      // rAF 推迟到下一帧，且若已排好就丢本轮，避免在 observer 帧内连环触发。
+      // 值相等也不写回（measureRowHeights 内 `if (rowH > 0) dynamicGridY.value = rowH`）
+      if (rowHeightResizeRaf) return;
+      rowHeightResizeRaf = requestAnimationFrame(() => {
+        rowHeightResizeRaf = 0;
+        measureRowHeights();
+      });
     });
     // v3.4：观察 wrapper（宽度变化）、header（高度变化）、body（行高变化）
     rowHeightResizeObserver.observe(wrapper);
