@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"os/exec"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	gitpkg "gitea-kanban/app/git"
 	"gitea-kanban/app/secret"
 	"gitea-kanban/app/store"
 )
@@ -245,4 +247,71 @@ func TestApp_GetRepoById(t *testing.T) {
 	if err == nil {
 		t.Error("GetRepoById with empty projectId should fail")
 	}
+}
+
+// TestResolveLocalHead 验证 app/git.ResolveLocalHead 直接行为
+func TestResolveLocalHead(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "r")
+	mustMkdirLocal(t, repo)
+	runGitLocal(t, repo, "init")
+	runGitLocal(t, repo, "config", "user.email", "t@t")
+	runGitLocal(t, repo, "config", "user.name", "T")
+	mustWriteLocal(t, filepath.Join(repo, "f"), []byte("x"))
+	runGitLocal(t, repo, "add", ".")
+	envCommitLocal(t, repo, "first", "2026-01-01T10:00:00Z")
+
+	headCmd := exec.Command("git", "-C", repo, "rev-parse", "HEAD")
+	headOut, _ := headCmd.Output()
+	want := strings.TrimSpace(string(headOut))
+
+	got := gitpkg.ResolveLocalHead(repo)
+	if got != want {
+		t.Errorf("ResolveLocalHead = %q, want %q", got, want)
+	}
+	// 坏路径返回空字符串 (不报错)
+	if got := gitpkg.ResolveLocalHead("/nonexistent/path"); got != "" {
+		t.Errorf("bad path 应返回空,实际 %q", got)
+	}
+}
+
+// helpers
+func mustMkdirLocal(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+}
+func mustWriteLocal(t *testing.T, p string, d []byte) {
+	t.Helper()
+	if err := os.WriteFile(p, d, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+func runGitLocal(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+func envCommitLocal(t *testing.T, dir, msg, date string) {
+	t.Helper()
+	cmd := exec.Command("git", "commit", "-m", msg)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE="+date,
+		"GIT_COMMITTER_DATE="+date,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+}
+func nodeSHAs(nodes []GraphNodeDTO) []string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, n.SHA[:7])
+	}
+	return out
 }

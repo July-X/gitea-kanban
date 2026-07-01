@@ -188,53 +188,44 @@ const openInPlatformTooltip = computed(() =>
   props.platform === 'github' ? '在 GitHub 中打开' : '在 Gitea 中打开',
 );
 
-/** 文件状态缩写 —— 用 Gitea 通用单字母风格(A/M/D/R/B)
- * 替代原中文标签"新增/修改/删除/重命名/二进制"，更紧凑、更符合开发者习惯。
- * 配合 fileStatusStyle() 返回 Gitea badge 配色:绿/黄/红/蓝/灰 */
-function fileStatusLabel(status?: string): string {
+/**
+ * v3.7：文件名状态颜色类（复刻 vscode main.ts:598-606 .gitFileName.A/M/D）
+ * - A (added)   绿：新增文件
+ * - M (modified)黄：修改文件（vscode modified 用 editor.foreground 继承）
+ * - D (deleted) 红：删除文件
+ * - R (renamed) 蓝：重命名文件
+ * - B (binary)  灰：二进制文件
+ */
+function fileNameClass(status?: string): string {
   switch (status) {
     case 'added':
-      return 'A';
-    case 'modified':
-      return 'M';
+    case 'untracked':
+      return 'cd-file-name--A';
     case 'deleted':
-      return 'D';
+      return 'cd-file-name--D';
     case 'renamed':
-      return 'R';
+      return 'cd-file-name--R';
     case 'binary':
-      return 'B';
-    default:
-      return status ?? '';
-  }
-}
-
-/** 文件状态颜色 —— Gitea 配色:
- *   A (added)    绿  --color-success
- *   M (modified) 黄  --color-warning (Gitea 默认 modified 用黄/橙,提示注意)
- *   D (deleted)  红  --color-danger
- *   R (renamed)  蓝  --color-info
- *   B (binary)   灰  --color-text-secondary
- * 返回 [主色, 浅底色] 数组 —— 浅底色 = 主色 14% alpha,Gitea diff badge 风格 */
-function fileStatusPalette(status?: string): [string, string] {
-  switch (status) {
-    case 'added':
-      return ['var(--color-success, #7db233)', 'rgba(125, 178, 51, 0.14)'];
+      return 'cd-file-name--B';
     case 'modified':
-      return ['var(--color-warning, #d29922)', 'rgba(210, 153, 34, 0.14)'];
-    case 'deleted':
-      return ['var(--color-danger, #dc2626)', 'rgba(220, 38, 38, 0.14)'];
-    case 'renamed':
-      return ['var(--color-info, #3b82f6)', 'rgba(59, 130, 246, 0.14)'];
     default:
-      return ['var(--color-text-secondary)', 'rgba(127, 127, 127, 0.14)'];
+      return 'cd-file-name--M';
   }
 }
 
-/** 文件状态 inline style(Gitea badge: 主色文字 + 浅底色)
- * v2.36 替代旧的 `color: fileStatusColor(f.status)` 单属性绑定 */
-function fileStatusStyle(status?: string): { color: string; backgroundColor: string } {
-  const [color, bg] = fileStatusPalette(status);
-  return { color, backgroundColor: bg };
+/** v3.7：复制文件路径（vscode main.ts:2926 triggerCopyFilePath） */
+async function copyFilePath(path: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(path);
+    showToast({ type: 'success', message: '已复制文件路径' });
+  } catch {
+    showToast({ type: 'error', message: '复制失败' });
+  }
+}
+
+/** v3.7：点击文件行（目前 placeholder；后期可扩展"在平台打开文件"等功能） */
+function handleFileClick(_file: CommitDetail['files'] extends Array<infer T> ? T : never): void {
+  // vscode main.ts:2960 triggerOpenFile —— 当前先留空
 }
 
 /**
@@ -383,48 +374,30 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
       <!-- 左 4/10：commit message + meta -->
       <div class="cd-panel__left" @wheel="onPanelWheel($event, $event.currentTarget as HTMLElement)">
         <div class="cd-panel__message">
-          <div class="cd-message__title">{{ messageTitle }}</div>
-          <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
-        </div>
-
-        <div class="cd-panel__meta">
-          <div class="cd-meta__row">
-            <span class="cd-meta__label">作者</span>
-            <div class="cd-meta__value">
+          <!-- v3.7：紧凑 inline meta 行贴在 message title 下方（合并 message+meta，节省空间）
+               格式：👤 author &lt;email&gt;  +5 -2  #files  [branch tag]
+               无数据时整行不渲染 -->
+          <div v-if="props.commit.authorName || detail?.additions != null || props.commit.refs?.length" class="cd-message-meta">
+            <span v-if="props.commit.authorName" class="cdm-author">
               <span
                 class="cd-avatar-fallback"
                 :class="`cd-flow-${(props.commit.authorName.charCodeAt(0) || 0) % 16}`"
                 aria-hidden="true"
               >{{ props.commit.authorName.trim().charAt(0).toUpperCase() || '?' }}</span>
-              <span>{{ props.commit.authorName }}</span>
-              <span v-if="props.commit.authorEmail" class="cd-meta__email mono">
+              {{ props.commit.authorName }}
+              <span v-if="props.commit.authorEmail" class="cdm-email">
                 &lt;{{ props.commit.authorEmail }}&gt;
               </span>
-            </div>
-          </div>
-          <div
-            v-if="detail && (detail.additions != null || detail.deletions != null)"
-            class="cd-meta__row"
-          >
-            <span class="cd-meta__label">统计</span>
-            <div class="cd-meta__value cd-stats">
-              <span v-if="detail.additions != null" class="cd-stats__add">
-                <Plus :size="12" />{{ detail.additions }}
-              </span>
-              <span v-if="detail.deletions != null" class="cd-stats__del">
-                <Minus :size="12" />{{ detail.deletions }}
-              </span>
-              <span v-if="detail.filesChanged != null" class="cd-stats__files">
-                <FileText :size="12" />{{ detail.filesChanged }} 个文件
-              </span>
-            </div>
-          </div>
-          <div
-            v-if="props.commit.refs && props.commit.refs.length > 0"
-            class="cd-meta__row"
-          >
-            <span class="cd-meta__label">引用</span>
-            <div class="cd-meta__value cd-refs">
+            </span>
+            <span
+              v-if="detail && (detail.additions != null || detail.deletions != null)"
+              class="cdm-stats"
+            >
+              <span v-if="detail.additions != null" class="cdm-add">+{{ detail.additions }}</span>
+              <span v-if="detail.deletions != null" class="cdm-del">-{{ detail.deletions }}</span>
+              <span v-if="detail.filesChanged != null" class="cdm-files">{{ detail.filesChanged }} 个文件</span>
+            </span>
+            <span v-if="props.commit.refs && props.commit.refs.length > 0" class="cdm-refs">
               <span
                 v-for="(ref, idx) in props.commit.refs"
                 :key="`cd-ref-${idx}-${ref}`"
@@ -434,8 +407,10 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
               >
                 {{ ref }}
               </span>
-            </div>
+            </span>
           </div>
+          <div class="cd-message__title">{{ messageTitle }}</div>
+          <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
           <div v-if="loading" class="cd-loading">加载详情中…</div>
         </div>
       </div>
@@ -456,24 +431,37 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
           </div>
           <div class="cd-files__scroll">
             <div class="cd-files__list">
-            <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
-              <!-- v2.36：单字母 A/M/D/R/B + Gitea badge 风格(浅底色 + 主色文字) -->
-              <span
-                class="cd-file-status"
-                :style="fileStatusStyle(f.status)"
-              >
-                {{ fileStatusLabel(f.status) }}
-              </span>
-              <span class="cd-file-name mono" :title="f.filename">
-                {{ shortenPathMiddle(f.filename) }}
-                <span v-if="f.previousFilename" class="cd-file-rename">
-                  ← {{ shortenPathMiddle(f.previousFilename) }}
+            <div
+              v-for="f in detail.files"
+              :key="f.filename"
+              class="cd-file-record"
+              :title="f.filename"
+            >
+              <span class="cd-file" @click.stop="handleFileClick(f)">
+                <!-- 文件图标 -->
+                <svg class="cd-file-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="14" viewBox="0 0 30 30" aria-hidden="true">
+                  <path d="M24.707,8.793l-6.5-6.5C18.019,2.105,17.765,2,17.5,2H7C5.895,2,5,2.895,5,4v22c0,1.105,0.895,2,2,2h16c1.105,0,2-0.895,2-2V9.5C25,9.235,24.895,8.981,24.707,8.793z M18,10c-0.552,0-1-0.448-1-1V3.904L23.096,10H18z"/>
+                </svg>
+                <!-- 文件名 + (±N | -N)：合并到同一带状态色的 span，截断发生在文件名区域 -->
+                <span class="cd-file-name mono" :class="fileNameClass(f.status)">
+                  <span class="cd-file-basename">{{ shortenPathMiddle(f.filename) }}</span>
+                  <span v-if="!f.binary" class="cd-file-adddel">
+                    <span v-if="f.additions != null && f.deletions != null">
+                      +{{ f.additions }}&nbsp;<span class="cdm-del">-{{ f.deletions }}</span>
+                    </span>
+                    <span v-else-if="f.additions != null">+{{ f.additions }}</span>
+                    <span v-else-if="f.deletions != null" class="cd-file-del-only">-{{ f.deletions }}</span>
+                  </span>
+                  <span v-if="f.binary" class="cd-file-binary">二进制</span>
                 </span>
-              </span>
-              <span class="cd-file-stats">
-                <span v-if="f.additions" class="cd-stats__add">+{{ f.additions }}</span>
-                <span v-if="f.deletions" class="cd-stats__del">-{{ f.deletions }}</span>
-                <span v-if="f.binary" class="cd-file-binary">二进制</span>
+                <!-- hover 复制按钮 -->
+                <span class="cd-file-actions">
+                  <button type="button" class="cd-file-action" title="复制文件路径" @click.stop="copyFilePath(f.filename)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true">
+                      <path fill-rule="evenodd" d="M2 13h4v1H2v-1zm5-6H2v1h5V7zm2 3V8l-3 3 3 3v-2h5v-2H9zM4.5 9H2v1h2.5V9zM2 12h2.5v-1H2v1zm9 1h1v2c-.02.28-.11.52-.3.7-.19.18-.42.28-.7.3H1c-.55 0-1-.45-1-1V4c0-.55.45-1 1-1h3c0-1.11.89-2 2-2 1.11 0 2 .89 2 2h3c.55 0 1 .45 1 1v5h-1V6H1v9h10v-2zM2 5h8c0-.55-.45-1-1-1H8c-.55 0-1-.45-1-1s-.45-1-1-1-1 .45-1 1-.45 1-1 1H3c-.55 0-1 .45-1 1z"/>
+                    </svg>
+                  </button>
+                </span>
               </span>
             </div>
             </div>
@@ -519,6 +507,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
             </span>
           </div>
         </div>
+        <!-- 统计行（dialog 变体保留独立行，更宽松间距） -->
         <div
           v-if="detail && (detail.additions != null || detail.deletions != null)"
           class="cd-meta__row"
@@ -565,24 +554,37 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
           文件变更（{{ detail.files.length }}）
         </div>
         <div class="cd-files__list">
-          <div v-for="f in detail.files" :key="f.filename" class="cd-file-row">
-            <!-- v2.36：单字母 A/M/D/R/B + Gitea badge 风格 -->
-            <span
-              class="cd-file-status"
-              :style="fileStatusStyle(f.status)"
-            >
-              {{ fileStatusLabel(f.status) }}
-            </span>
-            <span class="cd-file-name mono" :title="f.filename">
-              {{ shortenPathMiddle(f.filename) }}
-              <span v-if="f.previousFilename" class="cd-file-rename">
-                ← {{ shortenPathMiddle(f.previousFilename) }}
+          <div
+            v-for="f in detail.files"
+            :key="f.filename"
+            class="cd-file-record"
+            :title="f.filename"
+          >
+            <span class="cd-file" @click.stop="handleFileClick(f)">
+              <!-- 文件图标 -->
+              <svg class="cd-file-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="14" viewBox="0 0 30 30" aria-hidden="true">
+                <path d="M24.707,8.793l-6.5-6.5C18.019,2.105,17.765,2,17.5,2H7C5.895,2,5,2.895,5,4v22c0,1.105,0.895,2,2,2h16c1.105,0,2-0.895,2-2V9.5C25,9.235,24.895,8.981,24.707,8.793z M18,10c-0.552,0-1-0.448-1-1V3.904L23.096,10H18z"/>
+              </svg>
+              <!-- 文件名 + (±N | -N)：合并到同一带状态色的 span，截断发生在文件名区域 -->
+              <span class="cd-file-name mono" :class="fileNameClass(f.status)">
+                <span class="cd-file-basename">{{ shortenPathMiddle(f.filename) }}</span>
+                <span v-if="!f.binary" class="cd-file-adddel">
+                  <span v-if="f.additions != null && f.deletions != null">
+                    +{{ f.additions }}&nbsp;<span class="cdm-del">-{{ f.deletions }}</span>
+                  </span>
+                  <span v-else-if="f.additions != null">+{{ f.additions }}</span>
+                  <span v-else-if="f.deletions != null" class="cd-file-del-only">-{{ f.deletions }}</span>
+                </span>
+                <span v-if="f.binary" class="cd-file-binary">二进制</span>
               </span>
-            </span>
-            <span class="cd-file-stats">
-              <span v-if="f.additions" class="cd-stats__add">+{{ f.additions }}</span>
-              <span v-if="f.deletions" class="cd-stats__del">-{{ f.deletions }}</span>
-              <span v-if="f.binary" class="cd-file-binary">二进制</span>
+              <!-- hover 复制按钮 -->
+              <span class="cd-file-actions">
+                <button type="button" class="cd-file-action" title="复制文件路径" @click.stop="copyFilePath(f.filename)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M2 13h4v1H2v-1zm5-6H2v1h5V7zm2 3V8l-3 3 3 3v-2h5v-2H9zM4.5 9H2v1h2.5V9zM2 12h2.5v-1H2v1zm9 1h1v2c-.02.28-.11.52-.3.7-.19.18-.42.28-.7.3H1c-.55 0-1-.45-1-1V4c0-.55.45-1 1-1h3c0-1.11.89-2 2-2 1.11 0 2 .89 2 2h3c.55 0 1 .45 1 1v5h-1V6H1v9h10v-2zM2 5h8c0-.55-.45-1-1-1H8c-.55 0-1-.45-1-1s-.45-1-1-1-1 .45-1 1-.45 1-1 1H3c-.55 0-1 .45-1 1z"/>
+                  </svg>
+                </button>
+              </span>
             </span>
           </div>
         </div>
@@ -616,21 +618,15 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 }
 
 /* panel 变体（inline 手风琴）：
- *   - flex column：header 顶 + body 撑开
- *   - 让内部子元素可以各自滚动 */
+ *   - v3.7：改 flex: 1 1 auto → display: block
+ *     之前 flex:1 撑满 accordion 容器（=300px），导致 cd-panel__left/right 强制撑到容器高度，
+ *     内容 < 容器时空滚动条出现。现在 accordion 自己 max-height + overflow: auto 控制滚动，
+ *     panel 用 block 让内容自然撑高。*/
 .cd-panel--panel {
   background: transparent;
   border-top: none;
   padding: 0;
-  /* v1.8 bugfix：原 `height: 100%` 在 flex column 父容器 (.commit-accordion) 里
-   * 不会起作用 —— flex 子元素的高度由 flex 属性决定，height:100% 被忽略。
-   * 结果：cd-panel 高度 = 内容自然高度，accordion 容器 260px max-height 形同虚设，
-   * 整个面板撑开到屏幕底部。
-   * 改用 `flex: 1 1 auto` + `min-height: 0`：
-   *   - flex:1 让它撑满 accordion 容器剩余空间（260px - 自身 margin 等）
-   *   - min-height:0 允许内部 body/左右栏被压缩、出现滚动条
-   * 配合 .commit-accordion 的 max-height:260px + overflow:hidden 形成完整裁剪。*/
-  flex: 1 1 auto;
+  display: block;
   min-height: 0;
 }
 
@@ -676,11 +672,18 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
  * 左右栏的滚动条互相干扰（一个滚动另一个跟动）。横向滚动交给左右栏各自处理。*/
 .cd-panel__body {
   display: grid;
-  grid-template-columns: 4fr 6fr;
-  flex: 1;
+  grid-template-columns: 5fr 5fr;
+  /* v3.7：去掉 flex: 1 —— parent (.cd-panel--panel) 现在是 block，flex:1 无效
+   * accordion 自身 max-height + overflow: auto 负责整体滚动
+   * 之前 max-height:300px + overflow:hidden 时靠 .cd-panel__left/right 各自滚动 */
   min-height: 0;
   min-width: 0; /* v2.0：grid 容器允许子项收缩 */
-  overflow: hidden;
+  /* v3.7：去掉 overflow: hidden —— accordion 自己滚，body 不再裁剪 */
+  /* v3.11：加 height:100% 让 grid 继承 .cd-panel--panel 的高度约束（来自
+   * .commit-accordion max-height:min(70vh,600px)），这样 .cd-panel__right
+   * 的 overflow-y:auto 才能生效 —— 否则 grid 无高度约束时子项无限撑高，
+   * .cd-panel__right 永远不触发 overflow，文件列表被截断不可见。*/
+  height: 100%;
   /* 4:6 之间的纵向分隔线 */
   border-top: 1px solid var(--color-divider);
 }
@@ -688,16 +691,12 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  min-width: 0; /* v2.0：允许 grid 子项收缩到内容自然宽度以下 */
-  /* v2.0：横纵双向滚动 —— 长 commit message / 长 author email / 长 ref badge list
-   * 在左栏内部独立滚动，不撑开 grid 容器、不撑开手风琴、不撑开 commit-row */
-  overflow: auto;
-  /* v2.34：滚动到底后阻止滚轮事件穿透到外层 .commit-accordion / .timeline-new__main。
-   * overscroll-behavior: contain 把滚动链限定在本容器内 —— 用户滚到底时
-   * 不再"意外"滚动外层 commit log 或主区，体验与 VSCode Git Graph 一致 */
+  min-width: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   border-right: 1px solid var(--color-divider);
-  /* 滚动条样式 */
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
@@ -706,8 +705,10 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   flex-direction: column;
   min-height: 0;
   min-width: 0; /* v2.0：同上 */
-  /* v2.0：横纵双向滚动 —— 长 file path / 长 card chip 列表在右栏内部独立滚动 */
-  overflow: auto;
+  /* v3.8：overflow-x: hidden —— 让 .cd-file-name 的 text-overflow:ellipsis 生效。
+   * overflow-x:visible 时 ellipsis 不显示（MDN spec）；vscode #cdvFiles li 也是 overflow-x:hidden。*/
+  overflow-y: auto;
+  overflow-x: hidden;
   /* v2.34：同上，左/右栏滚到底后阻止滚动事件穿透外层（修复 files 列表滚到底后
    * 带动整个 commit log / 主区滚动的错误体验） */
   overscroll-behavior: contain;
@@ -732,34 +733,48 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 .cd-panel__right::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
 }
-/* panel 变体下的 message / meta / files 都不再需要 border-bottom（左右两栏 + header 已分割）
- * v2.40 修复：meta 区改回 flex-shrink:0——作者/统计/引用是元信息，必须完整可见，
- *   不能被压缩重叠。左栏内容超高时由 message body 的 max-height:120px + overflow-y:auto
- *   兜底滚动，meta 区始终贴底完整展示。
- * message 仍 flex-shrink:1 + min-height:0——可被压缩，body 有滚动兜底。*/
-.cd-panel--panel .cd-panel__message,
-.cd-panel--panel .cd-files {
+/* panel 变体：message 区占满左栏剩余空间（flex:1），body 内部滚动
+ * v3.7 重构：
+ * - .cd-panel__message：flex-shrink:0，内容自然撑高不压缩，
+ *   flex:1 让 message 区填满 .cd-panel__left 剩余空间
+ * - .cd-message__body：flex:1 + min-height:0 + overflow-y:auto，
+ *   body 填满 message 区余下空间，超出时 body 自身滚动（不是 message 区滚动）
+ * - 标题固定不滚，body 内容滚动 —— 跟 vscode cdvSummary 一致 */
+.cd-panel--panel .cd-panel__message {
   border-bottom: none;
-  flex-shrink: 1;
+  flex-shrink: 0;
+  flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 强制换行的三层约束：
+   * 1. width:100% 让 flex item 宽度等于父容器（左栏/grid 列宽）
+   * 2. min-width:0 让 flex item 接受收缩，不以内容宽度为最小值
+   * 3. overflow:hidden 裁剪溢出，配合 min-width:0 让内部子元素被迫换行 */
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 .cd-panel--panel .cd-panel__meta {
   border-bottom: none;
   flex-shrink: 0;
   min-height: 0;
 }
-.cd-panel--panel .cd-cards {
+.cd-panel--panel .cd-files {
   border-bottom: none;
-  /* v1.8：cards 在右栏 flex 中保持完整可见（flex-shrink:0），
-   * 让 files 列表在 cd-files__scroll 内独立滚动，
-   * cards 始终贴底显示，不被 files 列表挤出右栏。*/
   flex-shrink: 0;
 }
-/* panel 变体下的 message body 不再叠 120px max-height 滚动（外层已是滚动容器） */
+.cd-panel--panel .cd-cards {
+  border-bottom: none;
+  flex-shrink: 0;
+}
 .cd-panel--panel .cd-message__body {
-  /* v2.40：panel 变体下也限制 body 高度——超长 commit message 不会把 meta 区
-   * 推到左栏滚动区底部。body 自身 overflow-y:auto 滚动，meta 区始终可见。*/
-  max-height: 80px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* v3.8：限制 body 最大高度 —— 超出时 body 自身滚动，不把左栏撑爆。
+   * 150px 给多行 commit message 留足阅读空间；单行消息不受影响。*/
+  max-height: 150px;
 }
 .cd-panel__header-left {
   display: flex;
@@ -818,6 +833,10 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   padding: var(--space-2, 8px) var(--space-3, 12px);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  /* 关键：overflow:hidden 让 flex column 约束子元素宽度，
+   * 配合 min-width:0，让 title 在 grid 列宽内被强制压缩换行。*/
+  min-width: 0;
+  overflow: hidden;
 }
 .cd-panel--dialog .cd-panel__message {
   padding: var(--space-3, 12px) var(--space-4, 16px);
@@ -827,7 +846,14 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.4;
+  /* 强制换行的最小宽度约束：width:100% 让标题宽度等于父容器，
+   * min-width:0 接受收缩（覆盖 flex item 默认 min-width:auto），
+   * max-width:100% 明确不超过父容器，word-break:break-word 实现文本换行。*/
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .cd-panel--dialog .cd-message__title {
   font-size: var(--font-md, 14px);
@@ -844,24 +870,73 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   overflow-y: auto;
 }
 
+/* v3.7：紧凑 inline meta（panel 变体专用，替代 .cd-panel__meta 独立区块）
+ * 合并到 .cd-panel__message 内，无独立 border/padding。
+ * 格式：👤 author <email>  +5 -2  #files  [branch tag]
+ * flex-wrap 让各组自然折行，节省纵向空间。*/
+.cd-message-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+.cdm-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.cdm-email {
+  font-size: 10px;
+  word-break: break-all;
+  white-space: normal;
+}
+.cdm-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.cdm-add {
+  color: var(--color-success, #7db233);
+  font-weight: 500;
+}
+.cdm-del {
+  color: var(--color-danger, #dc2626);
+  font-weight: 500;
+}
+.cdm-files {
+  color: var(--color-text-secondary);
+}
+.cdm-refs {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
 /* ===== Meta ===== */
+/* v3.7：panel 变体不再有独立 .cd-panel__meta 区块，内容合并到 .cd-message-meta。
+ * dialog 变体保留独立区块（弹窗空间充足）。*/
 .cd-panel__meta {
-  padding: 6px var(--space-3, 12px);
+  display: none;
+}
+.cd-panel--dialog .cd-panel__meta {
   display: flex;
   flex-direction: column;
+  padding: 6px var(--space-3, 12px);
   gap: 4px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-}
-.cd-panel--dialog .cd-panel__meta {
-  padding: var(--space-3, 12px) var(--space-4, 16px);
-  gap: var(--space-2, 8px);
 }
 .cd-meta__row {
   display: flex;
   align-items: baseline;
   gap: var(--space-2, 8px);
-  /* v2.40：每行不压缩——防止 meta 区被压缩时 row 内文字重叠 */
   flex-shrink: 0;
 }
 .cd-meta__label {
@@ -883,21 +958,14 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   color: var(--color-text);
   min-width: 0;
   flex: 1;
-  /* v2.40：允许换行——长 author name / 长 email 不再被截断重叠，
-   *   超出时自然折到下一行；row 的 flex-shrink:0 保证高度不被压缩 */
   flex-wrap: wrap;
   overflow: visible;
-}
-.cd-panel--dialog .cd-meta__value {
-  font-size: 13px;
-  gap: 8px;
 }
 .cd-meta__email {
   font-size: 10px;
   color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
+  white-space: normal;
 }
 .cd-avatar-fallback {
   display: inline-flex;
@@ -917,7 +985,6 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   height: 20px;
   font-size: 10px;
 }
-/* fallback 背景：复用 16 色变量（与 gitgraph 保持视觉一致） */
 .cd-flow-0 { background-color: var(--color-series-16-0); }
 .cd-flow-1 { background-color: var(--color-series-16-1); }
 .cd-flow-2 { background-color: var(--color-series-16-2); }
@@ -935,12 +1002,8 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 .cd-flow-14 { background-color: var(--color-series-16-14); }
 .cd-flow-15 { background-color: var(--color-series-16-15); }
 
-/* Stats */
 .cd-stats {
   gap: 10px;
-}
-.cd-panel--dialog .cd-stats {
-  gap: 12px;
 }
 .cd-stats__add {
   display: inline-flex;
@@ -966,7 +1029,6 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-size: 12px;
 }
 
-/* Refs */
 .cd-refs {
   flex-wrap: wrap;
   gap: 3px;
@@ -995,18 +1057,10 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   color: #d97706;
 }
 
-/* Loading */
-.cd-loading {
-  padding: var(--space-3, 12px);
-  text-align: center;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
 /* ===== Files ===== */
 .cd-files {
-  padding: 6px var(--space-3, 12px);
+  /* v3.7：紧凑排版，顶部 2px gap */
+  padding: 2px 8px 4px 0;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -1020,7 +1074,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
-  margin: 0 0 4px;
+  margin: 0 0 2px;
 }
 .cd-panel--dialog .cd-section-title {
   font-size: 13px;
@@ -1082,61 +1136,146 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   max-height: none;
   overflow-y: visible;
 }
-.cd-file-row {
+/* v3.8：复刻 vscode main.ts:480 #cdvFiles li
+ * - display: flex —— 建立 flex 格式化上下文，让子元素 .cd-file 获得明确宽度约束
+ *   vscode 用 <li> 自然建立块级宽度约束；我们用 flex 容器达到同样效果
+ * - width: 100% —— 让 .cd-file (flex:1) 知道自己的可用宽度，触发 text-overflow:ellipsis
+ * - overflow: hidden —— 裁剪溢出内容（配合 .cd-file flex:1 的宽度约束生效）
+ * - margin-top: 4px —— 行间距（vscode 方案）*/
+.cd-file-record {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  font-size: 11px;
-  border-bottom: 1px solid var(--color-divider, var(--color-border));
+  width: 100%;
+  overflow: hidden;
+  margin-top: 2px;
 }
-.cd-file-row:last-child {
-  border-bottom: none;
+.cd-file-record:first-child {
+  margin-top: 0;
 }
-.cd-file-status {
-  /* v2.36：单字母 A/M/D/R/B 用更紧凑布局 + Gitea 风格色块背景
-   * - flex-basis 从 36px 降到 22px(单字符宽度)
-   * - 加圆角 + 浅背景,让状态标识有"badge"质感(Gitea diff 风格)
-   * - 加 letter-spacing 让大写字母更挺 */
+.cd-file {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  flex: 0 0 22px;
-  width: 22px;
-  height: 18px;
-  border-radius: 3px;
-  font-family: var(--font-mono-stack, ui-monospace, monospace);
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0;
-  text-align: center;
-  flex-shrink: 0;
-  /* background 由内联 :style 注入半透明色 —— 比 css variable 更易调 */
-}
-.cd-file-name {
   flex: 1;
+  padding: 1px 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 3px;
+}
+.cd-file:hover {
+  background: rgba(128, 128, 128, 0.08);
+}
+/* 文件图标（vscode main.ts:548-554 fileTreeFileIcon） */
+.cd-file-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.6;
+}
+.cd-file-icon svg {
+  fill: currentColor;
+}
+/* 文件名 + (±N)：统一 flex 容器，截断只发生在 .cd-file-basename 内。
+ * .cd-file-name 用 flex + min-width:0 建立宽度约束，
+ * .cd-file-basename 用 flex:1 + text-overflow:ellipsis 截断超长文件名。*/
+.cd-file-name {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 1px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  gap: 0;
+}
+.cd-file-basename {
+  flex: 1 1 1px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.cd-file-name--A {
+  color: var(--color-success, #7db233);
+}
+.cd-file-name--M {
   color: var(--color-text);
 }
-.cd-file-rename {
-  color: var(--color-text-muted);
-  font-size: 10px;
+.cd-file-name--D {
+  color: var(--color-danger, #dc2626);
 }
-.cd-file-stats {
-  display: flex;
+.cd-file-name--R {
+  color: var(--color-info, #3b82f6);
+}
+.cd-file-name--B {
+  color: var(--color-text-muted);
+}
+/* (±N)：独立设色，亮/暗模式均清晰可见。
+ * 用圆角药片背景区分 +N 和 -N，不依赖文字颜色单独承载语义。 */
+.cd-file-adddel {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   flex-shrink: 0;
+  white-space: nowrap;
+  /* 浅色背景 + 深色文字，保证对比度 */
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #15803d;
+  background: rgba(21, 128, 61, 0.12);
+}
+/* 只有删除没有新增：红色药丸 */
+.cd-file-adddel:has(.cd-file-del-only) {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.10);
+}
+/* ± 同时存在时的 -N 片段 */
+.cd-file-adddel .cdm-del {
+  color: #b91c1c;
+  font-weight: 500;
 }
 .cd-file-binary {
   font-size: 10px;
   color: var(--color-text-muted);
-  padding: 0 4px;
-  background: var(--color-bg-hover);
+  flex-shrink: 0;
+}
+/* hover 操作按钮（vscode main.ts:562-569 fileTreeFileAction） */
+.cd-file-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.cd-file-record:hover .cd-file-actions {
+  opacity: 1;
+}
+.cd-file-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
   border-radius: 3px;
+  padding: 0;
+  transition: color 0.1s, background 0.1s;
+}
+.cd-file-action:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+.cd-file-action svg {
+  fill: currentColor;
 }
 
 /* ===== Linked Cards ===== */

@@ -36,6 +36,20 @@ export interface GraphNodeDto {
    * "branch" / "remoteBranch" / "tag"
    */
   refTypes?: string[];
+  /**
+   * 是否 HEAD 节点 (vscode Vertex.draw 画成空心 circle: fill=bg, stroke=color)
+   */
+  isCurrent?: boolean;
+  /**
+   * 是否 stash 节点 (vscode Vertex.draw 画成 r=4.5 外圈 + r=2 内圈)
+   */
+  isStash?: boolean;
+  /**
+   * 是否已提交 (true) 还是未提交的 worktree 变更 (false)
+   * 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080
+   * 目前 NoCheckout:true 模式工作区永远为空，此字段始终为 true
+   */
+  isCommitted?: boolean;
 }
 
 /** 边类型 */
@@ -50,12 +64,61 @@ export interface GraphEdgeDto {
   /** 颜色号 0..15，对齐 Gitea Color16()（v2.6 后端生成，前端不再 % N 自算） */
   color: number;
   type: EdgeTypeDto;
+  /**
+   * v3.x：可选。Gitea 风格 (`structured.ts`) 的 addPath 透传给 SVG path。
+   * 缺省 / true = 走 lane 颜色; false = 走 #808080 + stroke-dasharray: 2px。
+   * vscode 风格 (`vscode-render.ts`) 不消费此字段 —— 它走的是 GraphBranchLineDto.isCommitted。
+   */
+  isCommitted?: boolean;
+  /** stroke-dasharray 属性值；isCommitted=false 时固定为 '2px'。 */
+  dasharray?: string;
+}
+
+/** 一段 branch 上的 line (1:1 复刻 vscode Branch.Line)
+ *
+ * 坐标以 row/lane 为单位，前端渲染时:
+ *   pixel_x = lane * VSCODE_GRID_X + VSCODE_OFFSET_X
+ *   pixel_y = row  * VSCODE_GRID_Y + VSCODE_OFFSET_Y
+ */
+export interface GraphBranchLineDto {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** true=跨 lane 转场锁 p1 端, false=锁 p2 端 */
+  lockedFirst: boolean;
+  /**
+   * 该 line 是否属于「已提交」段。对齐 vscode graph.ts:102 `line.isCommitted`：
+   *   - true / undefined: 走 lane 颜色
+   *   - false:           走 #808080 + stroke-dasharray: 2px（灰色虚线）
+   * UNCOMMITTED 虚拟 commit 触发的 line 段 (UNCOMMITTED → HEAD) 会传 false。
+   * v3.x 加：trigger 是「local 落后 origin」时，row 0 的 UNCOMMITTED → row 1 HEAD
+   * 这一段会标 false；row ≥ 1 全部为 true。
+   */
+  isCommitted?: boolean;
+}
+
+/** 一条贯通 column 的 path (1:1 复刻 vscode Branch)
+ *
+ * 渲染时一条 branch = 一条 SVG path。
+ * column 0 主线贯通正是这个机制：line 列表沿 column 顺时针，
+ * 首尾相接，自然形成一条 L0 连续基线。
+ */
+export interface GraphBranchDto {
+  /** 颜色号 0..15 */
+  color: number;
+  /** branch 覆盖的最后一行 + 1 */
+  end: number;
+  /** 沿 column 顺时针的 line 列表（p1 接前 line p2） */
+  lines: GraphBranchLineDto[];
 }
 
 /** 完整图结果 */
 export interface GraphResultDto {
   nodes: GraphNodeDto[];
   edges: GraphEdgeDto[];
+  /** vscode 风格 branch 列表（BuildGraphVscodeWithHead 才会填） */
+  branches?: GraphBranchDto[];
   maxLane: number;
   truncated: boolean;
 }
@@ -95,6 +158,13 @@ export interface SvgPath {
   /** 内联 hex 颜色（v2.6 fix：用 SVG attribute 而非 CSS 变量，兼容 WebKit + scoped CSS） */
   colorHex: string;
   order: number; // 保留原始 edge 顺序，避免 regroup 后覆盖主干竖线
+  /**
+   * v3.x：UNCOMMITTED 触发的灰色段。true 走 lane 色, false 走 #808080 + dasharray。
+   * 透传到 TimelineNewView 的 pathGroups,SVG <path :stroke-dasharray="..."> 消费。
+   */
+  isCommitted?: boolean;
+  /** stroke-dasharray 属性值；isCommitted=false 时固定为 '2px'。 */
+  dasharray?: string;
 }
 
 /** 一条 SVG 节点（圆点 + commit 关联） */
@@ -169,14 +239,25 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
     laneNodes.sort((a, b) => a.row - b.row);
   }
 
-  const addPath = (color: number, d: string, order: number): void => {
+  const addPath = (color: number, d: string, order: number, isCommitted: boolean): void => {
+    // v3.x：UNCOMMITTED 触发的 edge 走 #808080 + stroke-dasharray: 2px（对齐 vscode）。
+    // Gitea 风格不像 vscode 风格有 per-line IsCommitted 字段，UNCOMMITTED 永远在 row 0，
+    // 所以一条 edge 的 source 是不是 UNCOMMITTED 取决于 edge.fromRow 对应的 vertex.isCommitted。
+    const baseHex = LANE_COLORS[color] ?? LANE_COLORS[0];
+    const finalHex = isCommitted ? baseHex : '#808080';
     paths.push({
       d,
       colorIndex: color,
-      colorHex: LANE_COLORS[color] ?? LANE_COLORS[0],
+      colorHex: finalHex,
       order,
+      isCommitted,
+      dasharray: isCommitted ? undefined : '2px',
     });
   };
+
+  // v3.x: row 0 节点是 UNCOMMITTED 虚拟 commit 时，row 0 → row 1 的那条 edge
+  // （UNCOMMITTED → HEAD）是 uncommitted。所有从 row 0 出发的 edge 都是灰色的。
+  const uncommittedRow = graph.nodes[0]?.isCommitted === false ? 0 : -1;
 
   const rowCenter = (row: number): number => row * ROW_HEIGHT + ROW_HEIGHT / 2;
   const rowTop = (row: number): number => row * ROW_HEIGHT;
@@ -254,7 +335,7 @@ export function renderGraph(graph: GraphResultDto): SvgRenderResult {
       d = `M ${x1} ${y1} L ${x1} ${branchY} L ${x2} ${y2}`;
     }
 
-    addPath(edge.color, d, index);
+    addPath(edge.color, d, index, edge.fromRow !== uncommittedRow);
   }
 
   // ===== 2. 生成 nodes → SVG circles =====

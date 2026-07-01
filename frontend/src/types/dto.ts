@@ -549,6 +549,19 @@ export interface GraphNodeDto {
    * 'branch' | 'remoteBranch' | 'tag'，让前端严格区分 badge 颜色，不再用启发式猜
    */
   refTypes?: string[];
+  /** HEAD 节点，vscode 风格渲染为空心圆 */
+  isCurrent?: boolean;
+  /** stash 节点，vscode 风格渲染为双圈 */
+  isStash?: boolean;
+  /**
+   * 该节点是否「已提交」。
+   * - true：常规 commit 节点（默认值，前端不传时按已提交渲染）
+   * - false：UNCOMMITTED 虚拟节点（Go 端 LogCommits / LogCommitsVscode 在
+   *          local 落后 origin 时 unshift 的 SHA="*" 节点），dot stroke 走 #808080 灰色
+   *
+   * 对齐 vscode graph.ts Vertex.draw:269-273。
+   */
+  isCommitted?: boolean;
 }
 
 /** 边类型：0=normal(直线下行), 1=branch(分支), 2=merge(合并) */
@@ -565,10 +578,33 @@ export interface GraphEdgeDto {
   type: GraphEdgeTypeDto;
 }
 
+export interface GraphBranchLineDto {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  lockedFirst: boolean;
+  /**
+   * 该 line 是否属于「已提交」段。
+   * - true：常规 lane 颜色（默认值）
+   * - false：UNCOMMITTED 段，stroke 走 #808080 + stroke-dasharray: 2px 灰色虚线
+   *
+   * 对齐 vscode graph.ts:102 `line.isCommitted` 与 Branch.drawPath:152 stroke 切换。
+   */
+  isCommitted?: boolean;
+}
+
+export interface GraphBranchDto {
+  color: number;
+  end: number;
+  lines: GraphBranchLineDto[];
+}
+
 /** 结构化 Graph 完整结果（Go BuildGraph 输出） */
 export interface GraphResultDto {
   nodes: GraphNodeDto[];
   edges: GraphEdgeDto[];
+  branches?: GraphBranchDto[];
   maxLane: number;
   truncated: boolean;
 }

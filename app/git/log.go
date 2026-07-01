@@ -81,7 +81,7 @@ type LogResult struct {
 // v2.7 超大仓库优化：
 //   - 限制遍历分支数（默认最多 20 个分支）
 //   - 优先遍历 HEAD + 主要分支（main/master/develop 等）
-//   - 早停策略：收集到足够 commit 后提前结束
+//   - 每个 branch head 局部限量，最终全局排序后截断
 func LogCommits(opts LogOptions) (*LogResult, error) {
 	if opts.LocalPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
@@ -118,7 +118,7 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 	//   1. 收集分支（本地 + 远程跟踪）的 HEAD hash，但限制数量
 	//   2. 对每个分支起点做 Log 遍历
 	//   3. 用 seen map 去重，合并所有 commit
-	//   4. 早停：收集到 MaxCount 后立即停止遍历其他分支
+	//   4. 最终按时间排序后再做 MaxCount 截断，避免近期 remote branch head 被主线早停吞掉
 	allHeads, err := collectLimitedBranchHeads(repo, opts.MaxCount)
 	if err != nil {
 		return nil, fmt.Errorf("收集分支列表失败: %w", err)
@@ -130,12 +130,14 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 
 	commits := make([]CommitInfo, 0)
 	seen := make(map[string]bool)
-	truncated := false
+	candidateLimit := opts.MaxCount
+	if candidateLimit <= 0 {
+		candidateLimit = 0
+	} else if candidateLimit < 50 {
+		candidateLimit = 50
+	}
 
 	for _, headHash := range allHeads {
-		if truncated {
-			break
-		}
 		gitLogOpts := &git.LogOptions{
 			From:  headHash,
 			Order: git.LogOrderCommitterTime,
@@ -144,11 +146,12 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		if err != nil {
 			continue // 某些分支可能无法遍历，跳过
 		}
+		visitedForHead := 0
 		err = iter.ForEach(func(c *object.Commit) error {
-			if opts.MaxCount > 0 && len(commits) >= opts.MaxCount {
-				truncated = true
+			if candidateLimit > 0 && visitedForHead >= candidateLimit {
 				return storer.ErrStop
 			}
+			visitedForHead++
 			if seen[c.Hash.String()] {
 				return nil
 			}
@@ -209,6 +212,22 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		}
 		return commits[i].SHA < commits[j].SHA
 	})
+
+	truncated := false
+	if opts.MaxCount > 0 && len(commits) > opts.MaxCount {
+		commits = commits[:opts.MaxCount]
+		truncated = true
+	}
+
+	// v3.x：探测 worktree dirty count，1:1 复刻 vscode-git-graph 的
+	// commits[0].hash === UNCOMMITTED 模式（数据源: git status --porcelain）。
+	// 插入位置对齐 vscode dataSource.ts:191 `commits.unshift(...)`：
+	// UNCOMMITTED 永远在 commits[0]（lane 布局 row 0）。
+	if len(commits) > 0 {
+		if headSHA, dirtyCount, found, _ := detectUncommittedChanges(opts.LocalPath); found {
+			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, dirtyCount)}, commits...)
+		}
+	}
 
 	return &LogResult{
 		Commits:   commits,

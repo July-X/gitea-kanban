@@ -45,7 +45,15 @@ type WailsApp = {
   AuthDisconnect?: (args: { giteaUrl: string }) => Promise<unknown>;
   AuthDisconnectOne?: (args: { giteaUrl: string; username: string }) => Promise<unknown>;
   AuthSwitchAccount?: (args: { accountId: string }) => Promise<unknown>;
-  GetWorkspace?: () => Promise<Record<string, string>>;
+  /** v2.x：拿数据根目录 + 内部 workspace 子目录
+   *  - dataRoot: 用户可感知的"全局路径"，默认 ~/.gitea-kanban
+   *  - workspacePath: 内部 git repos 目录 (= dataRoot + "/workspace")，应用自动创建 */
+  GetWorkspace?: () => Promise<{
+    dataRoot: string;
+    workspacePath: string;
+    isDefault: boolean;
+    validated: boolean;
+  }>;
   SetWorkspace?: (a: { cwd: string }) => Promise<void>;
   /** v2.2：用系统文件管理器打开应用数据目录 */
   OpenDataDir?: () => Promise<void>;
@@ -112,8 +120,39 @@ type WailsApp = {
   GetCommitDetail?: (args: { localPath: string; sha: string }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token） */
   GetGitGraph?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<{
-    nodes: Array<{ row: number; lane: number; sha: string; shortSha: string; subject: string; authorName: string; authorEmail: string; date: string; isMerge: boolean; parents: string[]; refs?: string[] }>;
-    edges: Array<{ fromRow: number; toRow: number; fromLane: number; toLane: number; type: number }>;
+    nodes: Array<{
+      row: number;
+      lane: number;
+      color: number;
+      sha: string;
+      shortSha: string;
+      subject: string;
+      authorName: string;
+      authorEmail: string;
+      date: string;
+      isMerge: boolean;
+      parents: string[];
+      refs?: string[];
+      refTypes?: string[];
+      isCurrent?: boolean;
+      isStash?: boolean;
+      /** v3.x：UNCOMMITTED 虚拟节点 = false，常规 commit = true（缺省视作 true） */
+      isCommitted?: boolean;
+    }>;
+    edges: Array<{ fromRow: number; toRow: number; fromLane: number; toLane: number; color: number; type: number }>;
+    branches?: Array<{
+      color: number;
+      end: number;
+      lines: Array<{
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        lockedFirst: boolean;
+        /** v3.x：UNCOMMITTED 段 = false，常规段 = true（缺省视作 true） */
+        isCommitted?: boolean;
+      }>;
+    }>;
     maxLane: number;
     truncated: boolean;
   }>;
@@ -336,8 +375,8 @@ const apiShim = {
      * 旧版 stubEmpty → 永远返空 graph，看板/TimelineNewView/Merges 都看不见 commit
      * 现在转发到 window.go.main.App.GetGitGraph({projectId, branches, maxCount})
      *   - Go 端按 projectId 反查 localPath + token
-     *   - 调 adapter.LogGraph（go-git DAG + 自研 layout）
-     *   - 返 GraphResultDTO（结构化 nodes + edges）
+     *   - 调 adapter.LogGraph（GitHub 对齐 vscode-git-graph 的 git log 输入 + 自研 layout）
+     *   - 返 GraphResultDTO（结构化 nodes + edges + branches）
      */
     gitgraphLines: (args: unknown): Promise<unknown> => {
       const a = (args ?? {}) as {
@@ -472,17 +511,23 @@ const apiShim = {
       );
     },
     gitgraphGetWorkspace: (): Promise<unknown> => {
+      // v2.x：Wails 未启动时 (前端独立 dev) 返回 mock 数据根目录
+      const mockRoot = '~/.gitea-kanban';
       return forwardToWails(
         () =>
           stubEmpty({
-            cwd: '~/.gitea-kanban/workspace',
-            suggestedRepoCwdTemplate: '${workspacePath}/repos/${owner}__${repo}.git',
+            dataRoot: mockRoot,
+            workspacePath: mockRoot + '/workspace',
+            isDefault: true,
+            validated: true,
           }),
         (app) =>
           app.GetWorkspace?.() ??
           stubEmpty({
-            cwd: '~/.gitea-kanban/workspace',
-            suggestedRepoCwdTemplate: '${workspacePath}/repos/${owner}__${repo}.git',
+            dataRoot: mockRoot,
+            workspacePath: mockRoot + '/workspace',
+            isDefault: true,
+            validated: true,
           }),
       );
     },

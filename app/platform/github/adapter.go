@@ -4,7 +4,7 @@
 //   - VerifyToken：GET /user，Authorization: Bearer <token>
 //   - ListRepos：GET /user/repos，列当前登录用户可访问的仓库（含 collaborator）
 //   - CloneRepo：gh repo clone + partial clone（避免超大仓库下载 blob）
-//   - LogGraph：go-git DAG Log + 自研 lane 布局（与 Gitea 共用）
+//   - LogGraph：vscode-git-graph 同款 git log 输入 + 自研 VSCode lane 布局
 //   - 其余方法返回 ErrNotSupported
 //
 // GitHub PAT scope 要求：
@@ -321,18 +321,20 @@ func (a *GitHubAdapter) parentCloneURL(ctx context.Context, hostURL, token, owne
 	return strings.TrimSpace(raw.Parent.CloneURL), nil
 }
 
-// LogGraph 获取 commit 历史并构建 Graph 布局（与 Gitea 共用）
+// LogGraph 获取 commit 历史并构建 Graph 布局。
+//
+// GitHub 路径固定对齐 vscode-git-graph：用系统 git log 一次性读取
+// --branches --remotes HEAD，并用 --max-count=N+1 判断是否还有更多提交。
 func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts platform.LogGraphOpts) (*platform.GraphResult, error) {
-	logResult, err := git.LogCommits(git.LogOptions{
+	logResult, err := git.LogCommitsVscode(ctx, git.LogOptions{
 		LocalPath: localPath,
-		Branches:  opts.Branches,
 		MaxCount:  opts.MaxCount,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	graphResult := graph.BuildGraph(logResult.Commits)
+	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, opts.Head, logResult.Truncated)
 	return graphResultToDTO(graphResult), nil
 }
 
@@ -542,6 +544,9 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 			Parents:     n.Parents,
 			Refs:        n.Refs,
 			RefTypes:    refTypes,
+			IsCurrent:   n.IsCurrent,
+			IsStash:     n.IsStash,
+			IsCommitted: n.IsCommitted,
 		})
 	}
 
@@ -557,9 +562,30 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 		})
 	}
 
+	branches := make([]platform.GraphBranchDTO, 0, len(r.Branches))
+	for _, b := range r.Branches {
+		lines := make([]platform.GraphBranchLineDTO, 0, len(b.Lines))
+		for _, ln := range b.Lines {
+			lines = append(lines, platform.GraphBranchLineDTO{
+				X1:          ln.X1,
+				Y1:          ln.Y1,
+				X2:          ln.X2,
+				Y2:          ln.Y2,
+				LockedFirst: ln.LockedFirst,
+				IsCommitted: ln.IsCommitted,
+			})
+		}
+		branches = append(branches, platform.GraphBranchDTO{
+			Color: b.Color,
+			End:   b.End,
+			Lines: lines,
+		})
+	}
+
 	return &platform.GraphResult{
 		Nodes:     nodes,
 		Edges:     edges,
+		Branches:  branches,
 		MaxLane:   r.MaxLane,
 		Truncated: r.Truncated,
 	}

@@ -1,9 +1,12 @@
 package git
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -402,4 +405,95 @@ func TestLogCommits_ManyBranches(t *testing.T) {
 	}
 
 	t.Logf("Created 30 branches, got %d commits (branch limiting working)", len(result.Commits))
+}
+
+func TestLogCommits_IncludesRecentRemoteBranchWithinMaxCount(t *testing.T) {
+	dir := t.TempDir()
+
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	commitAt := func(msg, date string) {
+		env := append(os.Environ(),
+			"GIT_AUTHOR_DATE="+date,
+			"GIT_COMMITTER_DATE="+date,
+		)
+		cmd := exec.Command("git", "commit", "-m", msg)
+		cmd.Dir = dir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit %q: %v\n%s", msg, err, out)
+		}
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test User")
+
+	os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644)
+	runGit("add", ".")
+	commitAt("root", "2026-01-01T00:00:00Z")
+	root := strings.TrimSpace(string(runGitOutput(t, dir, "rev-parse", "HEAD")))
+	defaultBranch := currentDefaultBranch(t, dir)
+
+	for i := 1; i <= 60; i++ {
+		name := filepath.Join(dir, "main-"+strconv.Itoa(i)+".txt")
+		os.WriteFile(name, []byte("main"), 0o644)
+		runGit("add", ".")
+		commitAt("main "+strconv.Itoa(i), fmt.Sprintf("2026-01-01T%02d:%02d:00Z", i/60, i%60))
+	}
+
+	runGit("checkout", "-b", "recent-feature", root)
+	os.WriteFile(filepath.Join(dir, "remote-feature.txt"), []byte("remote"), 0o644)
+	runGit("add", ".")
+	commitAt("remote branch latest", "2026-02-01T00:00:00Z")
+	remoteHead := strings.TrimSpace(string(runGitOutput(t, dir, "rev-parse", "HEAD")))
+	runGit("update-ref", "refs/remotes/org/recent-feature", remoteHead)
+	runGit("checkout", defaultBranch)
+
+	result, err := LogCommits(LogOptions{LocalPath: dir, MaxCount: 20})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+	if len(result.Commits) != 20 {
+		t.Fatalf("len(commits) = %d, want 20", len(result.Commits))
+	}
+	if result.Commits[0].Subject != "remote branch latest" {
+		t.Fatalf("first commit = %q, want remote branch latest", result.Commits[0].Subject)
+	}
+	if !contains(result.Commits[0].Refs, "org/recent-feature") {
+		t.Fatalf("remote ref missing from latest commit: refs=%v", result.Commits[0].Refs)
+	}
+
+	vscodeResult, err := LogCommitsVscode(context.Background(), LogOptions{LocalPath: dir, MaxCount: 20})
+	if err != nil {
+		t.Fatalf("LogCommitsVscode failed: %v", err)
+	}
+	if len(vscodeResult.Commits) != 20 {
+		t.Fatalf("vscode len(commits) = %d, want 20", len(vscodeResult.Commits))
+	}
+	if !vscodeResult.Truncated {
+		t.Fatalf("vscode truncated = false, want true from max-count+1 sentinel")
+	}
+	if vscodeResult.Commits[0].Subject != "remote branch latest" {
+		t.Fatalf("vscode first commit = %q, want remote branch latest", vscodeResult.Commits[0].Subject)
+	}
+	if !contains(vscodeResult.Commits[0].Refs, "org/recent-feature") {
+		t.Fatalf("vscode remote ref missing from latest commit: refs=%v", vscodeResult.Commits[0].Refs)
+	}
+
+	defaultLimitResult, err := LogCommitsVscode(context.Background(), LogOptions{LocalPath: dir})
+	if err != nil {
+		t.Fatalf("LogCommitsVscode default limit failed: %v", err)
+	}
+	if len(defaultLimitResult.Commits) != 62 {
+		t.Fatalf("vscode default len(commits) = %d, want all 62 fixture commits", len(defaultLimitResult.Commits))
+	}
+	if defaultLimitResult.Truncated {
+		t.Fatalf("vscode default truncated = true, want false for 62 commits under default 300")
+	}
 }

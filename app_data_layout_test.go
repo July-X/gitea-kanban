@@ -95,19 +95,21 @@ func TestApp_GetWorkspace_ReturnsRepoWorkspace(t *testing.T) {
 	app.OnStartup(context.Background())
 	defer app.OnShutdown(context.Background())
 
+	// v2.x：用户选的是数据根目录 (DataRoot)，不是 workspace 子目录
+	// WorkspacePath 是应用自动创建的内部子目录，前端展示用 DataRoot
 	got := app.GetWorkspace()
-	want := filepath.Join(tmp, "workspace")
-	if got.Cwd != want {
-		t.Errorf("GetWorkspace().Cwd = %q, want %q", got.Cwd, want)
+	if got.DataRoot != tmp {
+		t.Errorf("GetWorkspace().DataRoot = %q, want %q", got.DataRoot, tmp)
+	}
+	wantWs := filepath.Join(tmp, "workspace")
+	if got.WorkspacePath != wantWs {
+		t.Errorf("GetWorkspace().WorkspacePath = %q, want %q", got.WorkspacePath, wantWs)
 	}
 	if !got.IsDefault {
-		t.Error("IsDefault should be true (workspace 不可改 → 永远默认)")
+		t.Error("IsDefault should be true (数据根目录不可改 → 永远默认)")
 	}
 	if !got.Validated {
 		t.Error("Validated should be true (default path exists & is dir)")
-	}
-	if got.DataDir != tmp {
-		t.Errorf("GetWorkspace().DataDir = %q, want %q", got.DataDir, tmp)
 	}
 }
 

@@ -142,14 +142,42 @@ type ListPullsOpts struct {
 type LogGraphOpts struct {
 	Branches []string
 	MaxCount int
+	// Head 当前 checkout 的 commit hash, 用于标记 isCurrent (vscode HEAD 高亮).
+	// 空字符串则全部 isCurrent=false (HEAD 由 vscode 自身显示 uncommitted dot)
+	Head string
 }
 
 // GraphResult Graph 布局结果（与 app/git/graph.GraphResult 对齐，但作为 DTO 不含内部类型）
 type GraphResult struct {
-	Nodes     []GraphNodeDTO `json:"nodes"`
-	Edges     []GraphEdgeDTO `json:"edges"`
-	MaxLane   int            `json:"maxLane"`
-	Truncated bool           `json:"truncated"`
+	Nodes []GraphNodeDTO `json:"nodes"`
+	Edges []GraphEdgeDTO `json:"edges"`
+	// Branches vscode 风格 branch 列表 (BuildGraphVscodeWithHead 才会填)
+	// 前端按 branch 画 SVG path, 完整保留 vscode Branch.draw 几何
+	Branches  []GraphBranchDTO `json:"branches,omitempty"`
+	MaxLane   int              `json:"maxLane"`
+	Truncated bool             `json:"truncated"`
+}
+
+// GraphBranchDTO 1:1 复刻 vscode-git-graph 的 Branch 对象
+// 一条 branch = 一条完整 SVG path
+type GraphBranchDTO struct {
+	Color int                  `json:"color"`
+	End   int                  `json:"end"`
+	Lines []GraphBranchLineDTO `json:"lines"`
+}
+
+// GraphBranchLineDTO branch 上的一段 line
+// 坐标以 row/lane 为单位 (像素 = row*GRID_Y + offsetY, lane*GRID_X + offsetX)
+type GraphBranchLineDTO struct {
+	X1          int  `json:"x1"`
+	Y1          int  `json:"y1"`
+	X2          int  `json:"x2"`
+	Y2          int  `json:"y2"`
+	LockedFirst bool `json:"lockedFirst"`
+	// IsCommitted 该 line 是否属于「已提交」段。
+	// 对齐 vscode graph.ts:102 `line.isCommitted` 与 Branch.drawPath:152 stroke 切换。
+	// 不带 omitempty —— false（UNCOMMITTED 段）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphNodeDTO 图节点
@@ -171,6 +199,14 @@ type GraphNodeDTO struct {
 	// RefTypes 与 Refs 一一对应的 ref 类型（v2.8 新增）
 	// "branch" / "remoteBranch" / "tag"，让前端严格区分，不再用启发式猜
 	RefTypes []string `json:"refTypes,omitempty"`
+	// IsCurrent 是否 HEAD 节点 (vscode Vertex.draw 画成空心 stroke-only)
+	IsCurrent bool `json:"isCurrent,omitempty"`
+	// IsStash 是否 stash 节点 (vscode Vertex.draw 画成 r=4.5 外圈 + r=2 内圈)
+	IsStash bool `json:"isStash,omitempty"`
+	// IsCommitted 是否已提交 (true) 还是未提交的 worktree 变更 (false)
+	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 stroke = #808080
+	// 不带 omitempty —— false（UNCOMMITTED 节点）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphEdgeDTO 图边

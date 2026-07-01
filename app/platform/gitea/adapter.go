@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 
+	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
@@ -200,9 +201,28 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		return nil, err
 	}
 
-	graphResult := graph.BuildGraph(logResult.Commits)
+	// 解析 HEAD (跟 debug 工具保持一致): 空则全不标 isCurrent
+	head := opts.Head
+	if head == "" {
+		head = resolveLocalHead(localPath)
+	}
+
+	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, head, logResult.Truncated)
 
 	return graphResultToDTO(graphResult), nil
+}
+
+// resolveLocalHead 用 go-git 读本地 HEAD hash, 失败返回 ""
+func resolveLocalHead(localPath string) string {
+	r, err := gogit.PlainOpen(localPath)
+	if err != nil {
+		return ""
+	}
+	head, err := r.Head()
+	if err != nil {
+		return ""
+	}
+	return head.Hash().String()
 }
 
 // ===== 以下首期仅 Gitea 完整实现 =====
@@ -463,6 +483,9 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 			Parents:     n.Parents,
 			Refs:        n.Refs,
 			RefTypes:    refTypes,
+			IsCurrent:   n.IsCurrent,
+			IsStash:     n.IsStash,
+			IsCommitted: n.IsCommitted,
 		})
 	}
 
@@ -478,10 +501,41 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 		})
 	}
 
+	// 序列化 branches (vscode 风格: 一条 branch = 一条 SVG path)
+	branches := make([]platform.GraphBranchDTO, 0, len(r.Branches))
+	for _, b := range r.Branches {
+		lines := make([]platform.GraphBranchLineDTO, 0, len(b.Lines))
+		for _, ln := range b.Lines {
+			lines = append(lines, platform.GraphBranchLineDTO{
+				X1:          ln.X1,
+				Y1:          ln.Y1,
+				X2:          ln.X2,
+				Y2:          ln.Y2,
+				LockedFirst: ln.LockedFirst,
+				IsCommitted: ln.IsCommitted,
+			})
+		}
+		branches = append(branches, platform.GraphBranchDTO{
+			Color: b.Color,
+			End:   b.End,
+			Lines: lines,
+		})
+	}
+
 	return &platform.GraphResult{
 		Nodes:     nodes,
 		Edges:     edges,
+		Branches:  branches,
 		MaxLane:   r.MaxLane,
 		Truncated: r.Truncated,
 	}
+}
+
+// GraphResultToDTOForTest 是 graphResultToDTO 的测试导出。
+//
+// graphResultToDTO 本身小写不可见,但根 package main 下的端到端 DTO 测试
+// (app_gitgraph_dto_e2e_test.go)需要跨包调用它,故保留这个薄包装。
+// 仅供测试使用,生产代码不要调。
+func GraphResultToDTOForTest(r *graph.GraphResult) *platform.GraphResult {
+	return graphResultToDTO(r)
 }

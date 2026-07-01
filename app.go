@@ -433,10 +433,32 @@ func (a *App) SetUserPrefs(args SetUserPrefsArgs) (map[string]any, error) {
 
 // GraphResultDTO 图结果（暴露给前端，与 platform.GraphResult 对齐）
 type GraphResultDTO struct {
-	Nodes     []GraphNodeDTO `json:"nodes"`
-	Edges     []GraphEdgeDTO `json:"edges"`
-	MaxLane   int            `json:"maxLane"`
-	Truncated bool           `json:"truncated"`
+	Nodes     []GraphNodeDTO   `json:"nodes"`
+	Edges     []GraphEdgeDTO   `json:"edges"`
+	Branches  []GraphBranchDTO `json:"branches,omitempty"`
+	MaxLane   int              `json:"maxLane"`
+	Truncated bool             `json:"truncated"`
+}
+
+// GraphBranchDTO 一条完整 branch path（对齐 platform.GraphBranchDTO）
+type GraphBranchDTO struct {
+	Color int                  `json:"color"`
+	End   int                  `json:"end"`
+	Lines []GraphBranchLineDTO `json:"lines"`
+}
+
+// GraphBranchLineDTO branch 上的一段线（对齐 platform.GraphBranchLineDTO）
+type GraphBranchLineDTO struct {
+	X1          int  `json:"x1"`
+	Y1          int  `json:"y1"`
+	X2          int  `json:"x2"`
+	Y2          int  `json:"y2"`
+	LockedFirst bool `json:"lockedFirst"`
+	// IsCommitted 该 line 是否属于「已提交」段。
+	// 对齐 vscode graph.ts:102 `line.isCommitted` 与 Branch.drawPath:152 stroke 切换；
+	// false 时前端走 #808080 + stroke-dasharray: 2px 灰色虚线。
+	// 不带 omitempty —— false（UNCOMMITTED 段）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphNodeDTO 图节点
@@ -454,6 +476,14 @@ type GraphNodeDTO struct {
 	Parents     []string `json:"parents"`
 	Refs        []string `json:"refs,omitempty"`
 	RefTypes    []string `json:"refTypes,omitempty"`
+	IsCurrent   bool     `json:"isCurrent,omitempty"`
+	IsStash     bool     `json:"isStash,omitempty"`
+	// IsCommitted 该节点是否已提交 (true) 还是 UNCOMMITTED 虚拟节点 (false)。
+	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080。
+	// App 端 LogCommits / LogCommitsVscode 在 local 落后 origin 时 unshift 一颗
+	// UNCOMMITTED 虚拟 commit (SHA = "*")，对应节点的 IsCommitted = false。
+	// 不带 omitempty —— false（UNCOMMITTED 节点）也是有效信号，omitempty 会吞掉
+	IsCommitted bool `json:"isCommitted"`
 }
 
 // GraphEdgeDTO 图边
@@ -808,12 +838,19 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 		return GraphResultDTO{}, ipc.NewUnsupportedPlatform(account.Platform)
 	}
 
+	// 6. 解析本地 HEAD (用于 layout 给 local HEAD 节点打 isCurrent 标记,
+	//    GitHub adapter 老版本没这个 fallback 会让 local HEAD 的 dot
+	//    画成实心、tooltip 误标"不在 HEAD 中")。失败不致命,空字符串让
+	//    layout 跳过 isCurrent 标记,跟旧行为兼容。
+	head := git.ResolveLocalHead(localPath)
+
 	// 6. token 透传给 adapter（go-git 用 BasicAuth，不需要 user 传）
 	_ = token
 
 	result, err := adapter.LogGraph(a.ctx, localPath, platformAdapter.LogGraphOpts{
 		Branches: args.Branches,
 		MaxCount: args.MaxCount,
+		Head:     head,
 	})
 	if err != nil {
 		return GraphResultDTO{}, err
@@ -1405,32 +1442,39 @@ func classifyKeychainError(err error) *ipc.IpcError {
 
 // WorkspaceInfo GetWorkspace 返回值结构（对齐前端 ipc-client.ts 契约）
 type WorkspaceInfo struct {
-	Cwd       string `json:"cwd"`
+	// DataRoot 数据根目录（用户可感知的"全局路径"，默认 ~/.gitea-kanban）
+	// 应用的所有持久化数据 (state.json / logs / workspace) 都放在 DataRoot 下。
+	// 启动期若不存在自动 mkdir -p。
+	DataRoot string `json:"dataRoot"`
+	// WorkspacePath 内部 git 仓库目录 (= DataRoot + "/workspace")
+	// 由应用根据业务自动创建，前端不应让用户直接选择这个路径
+	// (用户只选 DataRoot 即可，workspace 是应用内部约定)。
+	WorkspacePath string `json:"workspacePath"`
 	IsDefault bool   `json:"isDefault"`
 	Validated bool   `json:"validated"`
-	// DataDir 应用数据根目录（前端"打开应用数据目录"按钮用）
-	DataDir string `json:"dataDir"`
 }
 
-// GetWorkspace 返回当前 workspace 路径（**git repos 目录**）
+// GetWorkspace 返回当前数据根目录（**用户可感知的"全局路径"**）
 //
-// v2.2 user 拍板：路径不可改
-//   - workspacePath = ${dataDir}/workspace（系统默认计算）
-//   - 前端不能再修改，调用 git 操作时直接用这个值
+// v2.x 重新设计：用户选的是数据根目录 (DataRoot)，不是 workspace 子目录
+//   - DataRoot = ${GITEA_KANBAN_DATA_DIR | ~/.gitea-kanban} (启动期确定)
+//   - WorkspacePath = ${DataRoot}/workspace (应用自动创建)
+//   - 前端展示 DataRoot，git 操作走 WorkspacePath
 func (a *App) GetWorkspace() WorkspaceInfo {
+	root := a.dataDir
 	wsPath := a.workspacePath
 
 	// 校验路径是否可写（前端 SettingsView 仍展示状态）
 	validated := true
-	if info, err := os.Stat(wsPath); err != nil || !info.IsDir() {
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		validated = false
 	}
 
 	return WorkspaceInfo{
-		Cwd:       wsPath,
+		DataRoot:      root,
+		WorkspacePath: wsPath,
 		IsDefault: true, // 永远默认（不可改）
 		Validated: validated,
-		DataDir:   a.dataDir,
 	}
 }
 
@@ -2498,6 +2542,9 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 			Parents:     n.Parents,
 			Refs:        n.Refs,
 			RefTypes:    n.RefTypes,
+			IsCurrent:   n.IsCurrent,
+			IsStash:     n.IsStash,
+			IsCommitted: n.IsCommitted,
 		})
 	}
 
@@ -2513,9 +2560,30 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 		})
 	}
 
+	branches := make([]GraphBranchDTO, 0, len(r.Branches))
+	for _, b := range r.Branches {
+		lines := make([]GraphBranchLineDTO, 0, len(b.Lines))
+		for _, ln := range b.Lines {
+			lines = append(lines, GraphBranchLineDTO{
+				X1:          ln.X1,
+				Y1:          ln.Y1,
+				X2:          ln.X2,
+				Y2:          ln.Y2,
+				LockedFirst: ln.LockedFirst,
+				IsCommitted: ln.IsCommitted,
+			})
+		}
+		branches = append(branches, GraphBranchDTO{
+			Color: b.Color,
+			End:   b.End,
+			Lines: lines,
+		})
+	}
+
 	return GraphResultDTO{
 		Nodes:     nodes,
 		Edges:     edges,
+		Branches:  branches,
 		MaxLane:   r.MaxLane,
 		Truncated: r.Truncated,
 	}

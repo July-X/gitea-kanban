@@ -58,3 +58,4 @@ reasonix.toml
 node_modules/
 .playwright-mcp/
 .github/
+.tools/

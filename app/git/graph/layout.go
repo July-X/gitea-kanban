@@ -64,6 +64,14 @@ type GraphNode struct {
 	// 分支/tag badge，无需额外 API 调用。
 	Refs     []string
 	RefTypes []git.RefType // v2.8：与 Refs 一一对应的 ref 类型（branch / remoteBranch / tag）
+	// IsCurrent 是否 HEAD 节点 (vscode Vertex.draw 画成空心 stroke-only)
+	IsCurrent bool
+	// IsStash 是否 stash 节点 (vscode Vertex.draw 画成 r=4.5 外圈 + r=2 内圈)
+	IsStash bool
+	// IsCommitted 是否已提交 (true) 还是未提交的 worktree 变更 (false)
+	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080
+	// 目前 NoCheckout:true 模式工作区永远为空，此字段始终为 true
+	IsCommitted bool
 }
 
 // GraphEdge 图中的一条连线
@@ -74,6 +82,32 @@ type GraphEdge struct {
 	ToLane   int // 结束 lane（对齐 Gitea column）
 	Color    int // 颜色号（0..15，继承自 flow 所在 lane 的颜色）
 	Type     EdgeType
+}
+
+// GraphBranchLine 一段 branch 上的 line (1:1 复刻 vscode Branch.Line)
+//
+// 坐标以 row/lane 为单位 (像素 = row*GRID_Y + offsetY, lane*GRID_X + offsetX)
+// 渲染时 (前端) 直接读这个列表拼 path d
+type GraphBranchLine struct {
+	X1, Y1     int  // 起点 (lane, row)
+	X2, Y2     int  // 终点 (lane, row)
+	LockedFirst bool // 跨 lane 转场方向(true=锁 p1, false=锁 p2)
+	// IsCommitted 标记该 line 是否落在「已提交」commit 段。对齐 vscode Branch.draw
+	// (graph.ts:119-145)：line.isCommitted = (lineIndex >= this.numUncommitted)。
+	//   - true:  走 lane 颜色（彩色）
+	//   - false: 走 #808080 + stroke-dasharray=2px（灰色虚线）
+	// UNCOMMITTED 虚拟 commit 触发的 line 段（UNCOMMITTED → HEAD 一段）会传 false。
+	IsCommitted bool
+}
+
+// GraphBranch 一条贯通 column 的 path (1:1 复刻 vscode Branch)
+//
+// 这是 vscode-git-graph 的核心渲染单位: 一条 branch = 一条完整 SVG path
+// 包含若干 line 段, 沿 column 顺时针串行。column 0 主线贯通正是这个机制。
+type GraphBranch struct {
+	Color int               // 颜色号
+	End   int               // branch 覆盖的最后一行 + 1
+	Lines []GraphBranchLine // 沿 column 顺时针的 line 列表 (p1 接前 line p2)
 }
 
 // EdgeType 边类型（与 Gitea `git log --graph` 字形 1:1）
@@ -89,6 +123,11 @@ const (
 type GraphResult struct {
 	Nodes     []GraphNode
 	Edges     []GraphEdge
+	// Branches 1:1 复刻 vscode-git-graph 的 Branch 对象列表
+	// 渲染时按 branch 画 path, 保留"column 0 主线贯通" 的几何
+	// (vscode 真实: 每条 branch 一条 path, line 沿 column 顺时针)
+	// nil 表示非 vscode 风格(Gitea 风格 BuildGraph 不会填这个字段)
+	Branches  []GraphBranch
 	MaxLane   int // 最大 lane 号（对齐 Gitea MaxColumn）
 	MaxColor  int // 实际用到的最大颜色号（≤15）
 	Truncated bool
@@ -478,6 +517,9 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 			Parents:     commit.Parents,
 			Refs:        commit.Refs,
 			RefTypes:    commit.RefTypes,
+			// 对齐 vscode-git-graph UNCOMMITTED 模式：UNCOMMITTED 虚拟 commit
+			// 永远 isCommitted=false，lane 流上前 N 走灰色 (前端走 #808080 + dasharray)
+			IsCommitted: commit.SHA != git.UNCOMMITTED_HASH,
 		}
 		nodes = append(nodes, node)
 

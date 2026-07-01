@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	appgit "gitea-kanban/app/git"
+	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/platform"
 )
 
@@ -174,5 +176,67 @@ func TestMapHTTPError(t *testing.T) {
 			t.Errorf("expected error for status %d", c.status)
 			continue
 		}
+	}
+}
+
+// TestGraphResultToDTO_PropagatesIsCommitted 验证 graphResultToDTO 把
+// graph.GraphNode.IsCommitted / graph.GraphBranchLine.IsCommitted 透传到
+// platform.GraphNodeDTO / platform.GraphBranchLineDTO。这是 v3.x UNCOMMITTED
+// 灰色虚线 lane 能正确渲染的前提：App 端 GetGitGraph → graphResultToAppDTO →
+// 前端 node.isCommitted / line.isCommitted 都要拿到正确值。
+func TestGraphResultToDTO_PropagatesIsCommitted(t *testing.T) {
+	dto := graphResultToDTO(&graph.GraphResult{
+		Nodes: []graph.GraphNode{
+			{
+				Row:         0,
+				Lane:        0,
+				Color:       1,
+				SHA:         appgit.UNCOMMITTED_HASH,
+				ShortSHA:    appgit.UNCOMMITTED_HASH,
+				IsCommitted: false,
+			},
+			{
+				Row:         1,
+				Lane:        0,
+				Color:       1,
+				SHA:         "deadbeef",
+				ShortSHA:    "deadbee",
+				IsCommitted: true,
+			},
+		},
+		Branches: []graph.GraphBranch{{
+			Color: 1,
+			End:   2,
+			Lines: []graph.GraphBranchLine{
+				{
+					X1: 0, Y1: 0, X2: 0, Y2: 1,
+					IsCommitted: false, // UNCOMMITTED → HEAD 段
+				},
+				{
+					X1: 0, Y1: 1, X2: 0, Y2: 2,
+					IsCommitted: true, // HEAD → parent 段
+				},
+			},
+		}},
+		MaxLane: 0,
+	})
+
+	if len(dto.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(dto.Nodes))
+	}
+	if dto.Nodes[0].IsCommitted {
+		t.Errorf("UNCOMMITTED 节点 IsCommitted 应该透传为 false，实际 true")
+	}
+	if !dto.Nodes[1].IsCommitted {
+		t.Errorf("HEAD 节点 IsCommitted 应该透传为 true，实际 false")
+	}
+	if len(dto.Branches) != 1 || len(dto.Branches[0].Lines) != 2 {
+		t.Fatalf("expected 1 branch with 2 lines, got %#v", dto.Branches)
+	}
+	if dto.Branches[0].Lines[0].IsCommitted {
+		t.Errorf("UNCOMMITTED→HEAD 边 IsCommitted 应该透传为 false，实际 true")
+	}
+	if !dto.Branches[0].Lines[1].IsCommitted {
+		t.Errorf("HEAD→parent 边 IsCommitted 应该透传为 true，实际 false")
 	}
 }

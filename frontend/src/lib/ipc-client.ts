@@ -624,13 +624,21 @@ export async function deepenRepo(args: {
 }
 
 /**
- * v1.5.3 应用工作区：读当前 workspace 路径
+ * v2.x 应用数据目录：读数据根目录 + 内部 workspace 子目录
  *
- * main 端 lazy init 后返回 prefs.app.workspacePath（默认 ~/.gitea-kanban/workspace）
+ * 数据根目录 = 用户可感知的"全局路径"，默认 ~/.gitea-kanban (macOS/Linux)
+ * 或 %USERPROFILE%\.gitea-kanban (Windows)，启动期不存在会自动 mkdir -p。
+ * workspace 子目录 (= dataRoot + "/workspace") 由应用根据业务自动创建，
+ * 放 git repos，UI 不暴露、用户不应直接选择。
  */
 export function commitsGitgraphGetWorkspace(): Promise<{
-  cwd: string;
+  /** 数据根目录（如 ~/.gitea-kanban） */
+  dataRoot: string;
+  /** 内部 git 仓库目录 (= dataRoot + "/workspace") */
+  workspacePath: string;
+  /** 永远是 true（数据根目录不可改 → 永远默认） */
   isDefault: boolean;
+  /** 数据根目录存在且可写 */
   validated: boolean;
 }> {
   return getIpcClient().invoke('commits', 'gitgraphGetWorkspace', {});

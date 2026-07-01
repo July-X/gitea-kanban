@@ -677,6 +677,63 @@ export namespace main {
 	        this.keys = source["keys"];
 	    }
 	}
+	export class GraphBranchLineDTO {
+	    x1: number;
+	    y1: number;
+	    x2: number;
+	    y2: number;
+	    lockedFirst: boolean;
+	    isCommitted: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GraphBranchLineDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.x1 = source["x1"];
+	        this.y1 = source["y1"];
+	        this.x2 = source["x2"];
+	        this.y2 = source["y2"];
+	        this.lockedFirst = source["lockedFirst"];
+	        this.isCommitted = source["isCommitted"];
+	    }
+	}
+	export class GraphBranchDTO {
+	    color: number;
+	    end: number;
+	    lines: GraphBranchLineDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GraphBranchDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.color = source["color"];
+	        this.end = source["end"];
+	        this.lines = this.convertValues(source["lines"], GraphBranchLineDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class GraphEdgeDTO {
 	    fromRow: number;
 	    toRow: number;
@@ -713,6 +770,9 @@ export namespace main {
 	    parents: string[];
 	    refs?: string[];
 	    refTypes?: string[];
+	    isCurrent?: boolean;
+	    isStash?: boolean;
+	    isCommitted: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GraphNodeDTO(source);
@@ -733,11 +793,15 @@ export namespace main {
 	        this.parents = source["parents"];
 	        this.refs = source["refs"];
 	        this.refTypes = source["refTypes"];
+	        this.isCurrent = source["isCurrent"];
+	        this.isStash = source["isStash"];
+	        this.isCommitted = source["isCommitted"];
 	    }
 	}
 	export class GraphResultDTO {
 	    nodes: GraphNodeDTO[];
 	    edges: GraphEdgeDTO[];
+	    branches?: GraphBranchDTO[];
 	    maxLane: number;
 	    truncated: boolean;
 	
@@ -749,6 +813,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.nodes = this.convertValues(source["nodes"], GraphNodeDTO);
 	        this.edges = this.convertValues(source["edges"], GraphEdgeDTO);
+	        this.branches = this.convertValues(source["branches"], GraphBranchDTO);
 	        this.maxLane = source["maxLane"];
 	        this.truncated = source["truncated"];
 	    }
@@ -1150,10 +1215,10 @@ export namespace main {
 	
 	
 	export class WorkspaceInfo {
-	    cwd: string;
+	    dataRoot: string;
+	    workspacePath: string;
 	    isDefault: boolean;
 	    validated: boolean;
-	    dataDir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new WorkspaceInfo(source);
@@ -1161,10 +1226,10 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.cwd = source["cwd"];
+	        this.dataRoot = source["dataRoot"];
+	        this.workspacePath = source["workspacePath"];
 	        this.isDefault = source["isDefault"];
 	        this.validated = source["validated"];
-	        this.dataDir = source["dataDir"];
 	    }
 	}
 
