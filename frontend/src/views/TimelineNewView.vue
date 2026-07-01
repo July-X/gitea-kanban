@@ -138,7 +138,20 @@ const tooltipPendingTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const tooltipVisible = ref(false);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
-const tooltipContent = ref<{ shortSha: string; colorHex: string | undefined; refs?: string[] } | null>(null);
+const tooltipRef = ref<HTMLElement | null>(null);  // tooltip div ref
+const tooltipOpacity = ref(0);  // 0=不可见, 1=完全显示（测量完高度后设为1）
+// 对齐 vscode graph.ts showTooltip 数据结构
+interface TooltipSection {
+  label: string;
+  items: Array<{ text: string; isRef?: boolean }>;
+}
+
+const tooltipContent = ref<{
+  shortSha: string;
+  colorHex: string | undefined;
+  sections: TooltipSection[];
+  includedInHead?: boolean;
+} | null>(null);
 
 function dotEnter(event: MouseEvent, c: SvgCircleNode) {
   hoveredDotSha.value = c.sha;
@@ -160,27 +173,79 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
   tooltipPendingTimer.value = setTimeout(() => {
     tooltipPendingTimer.value = null;
     if (!tooltipPending.value) return; // 已离开，不显示
-    // 计算 dot 在 .git-graph-body 内的相对坐标
-    const bodyElem = document.querySelector('.git-graph-body') as HTMLElement | null;
-    const svgElem = document.querySelector('.git-graph-svg') as SVGElement | null;
-    if (!bodyElem || !svgElem) return;
-    const bodyRect = bodyElem.getBoundingClientRect();
-    const svgRect = svgElem.getBoundingClientRect();
-    // dot 的 SVG 坐标：cx = c.cx, cy = c.cy
-    // 转换到 .git-graph-body 坐标系：dot 相对于 SVG origin (0,0)，而 SVG 相对于 body origin
-    const dotX = c.cx; // SVG 坐标系中的 x
-    const dotY = c.cy; // SVG 坐标系中的 y
-    // SVG 相对于 body 的偏移（SVG 在 .git-graph-bg 内，body 在外层）
-    const svgOffsetX = svgRect.left - bodyRect.left;
-    const svgOffsetY = svgRect.top - bodyRect.top;
-    tooltipX.value = svgOffsetX + dotX - 8; // 稍微偏左，让 tooltip 在 dot 下方
-    tooltipY.value = svgOffsetY + dotY + 6;
+    // 对齐 vscode graph.ts vertexOver：直接用 circle DOM 元素的 rect 计算 tooltip 锚点
+    const circleElem = event.target as SVGCircleElement | null;
+    if (!circleElem) {
+        return;
+    }
+    const rect = circleElem.getBoundingClientRect();
+    // tooltip box 放在 dot 右侧（viewport 坐标，position: fixed 相对于 viewport）
+    // tooltipY = dotCenterY（box 顶部 = dot 中心 Y，即 box 垂直居中于 dot）
+    // tooltip box 左侧在 dot 中心 + 30px，pointer（width=30px, left=-30px）从 box 左边缘向左延伸，
+    // pointer 右端 = tooltipX，对齐 dot 中心 dotCenterX
+    const dotCenterX = rect.left + rect.width / 2;
+    const dotCenterY = rect.top + rect.height / 2;
+    tooltipX.value = dotCenterX + 30;
+    tooltipY.value = dotCenterY;
+    // 水平边界：确保 tooltip box 左边缘不超出视口左边界
+    if (tooltipX.value < 0) tooltipX.value = 0;
+    // 对齐 vscode graph.ts showTooltip：按 ref 类型分组显示
+    const branches: string[] = [];
+    const tags: string[] = [];
+    if (c.refs) {
+      for (let i = 0; i < c.refs.length; i++) {
+        const refType = c.refTypes?.[i];
+        if (refType === 'tag') {
+          tags.push(c.refs[i]!);
+        } else {
+          // branch 或 remoteBranch 都放进分支 section
+          branches.push(c.refs[i]!);
+        }
+      }
+    }
+    const sections: TooltipSection[] = [];
+    if (branches.length > 0) {
+      sections.push({ label: '分支:', items: branches.map((b) => ({ text: b, isRef: true })) });
+    }
+    if (tags.length > 0) {
+      sections.push({ label: '标签:', items: tags.map((t) => ({ text: t, isRef: true })) });
+    }
+    // "included in HEAD" (vscode graph.ts:833-836)
+    // isCurrent=true 表示此 commit 就是 HEAD commit
+    const includedInHead = c.isCurrent === true;
     tooltipContent.value = {
       shortSha: c.shortSha,
       colorHex: c.colorHex,
-      refs: c.refs,
+      sections,
+      includedInHead,
     };
     tooltipVisible.value = true;
+    // pointer.style.top 是相对于 tooltip div 内部的像素偏移
+    // pointer 高 2px + margin-top: -1px → visual center = pointerTopInside（因为 +1-1=0）
+    // pointer 的 visual center（水平线段的几何中心）需要 = dot 的 viewport Y 坐标
+    // → pointerTopInside = dotCenterY - tooltipElRect.top
+    setTimeout(() => {
+      const tooltipEl = document.querySelector<HTMLElement>('.git-graph-tooltip');
+      if (tooltipEl) {
+        const tooltipElRect = tooltipEl.getBoundingClientRect();
+        const pointer = tooltipEl.querySelector<HTMLElement>('.git-graph-tooltip__pointer');
+        const contentEl = tooltipEl.querySelector<HTMLElement>('.git-graph-tooltip__content');
+        if (pointer && contentEl) {
+          const dotCenterY = tooltipY.value;
+          const contentRect = contentEl.getBoundingClientRect();
+          // content box CSS: left: 23px + border: 2px → 视觉左边线在 tooltip 内部 23px 处
+          // content 视觉中心 = tooltip 内部 23px + 2px(border) + contentWidth/2
+          // = 25 + contentRect.width / 2
+          const contentVisualCenter = 25 + contentRect.width / 2;
+          // pointer 的 right end = tooltipEl.left + pointerLeft + 30
+          // 需要 right end = tooltipEl.left + contentVisualCenter
+          // → pointerLeft = contentVisualCenter - 30
+          const pointerLeft = contentVisualCenter - 30;
+          pointer.style.left = pointerLeft + 'px';
+          pointer.style.top = (dotCenterY - tooltipElRect.top) + 'px';
+        }
+      }
+    }, 0);
   }, 100);
 }
 
@@ -1810,14 +1875,31 @@ function refBadgeClass(refType?: string): string {
             >
               <div class="git-graph-tooltip__pointer"></div>
               <div class="git-graph-tooltip__content">
+                <!-- 对齐 vscode graphTooltipTitle -->
                 <div class="git-graph-tooltip__title">
                   提交 {{ tooltipContent?.shortSha ?? '' }}
                 </div>
-                <div v-if="tooltipContent?.refs?.length" class="git-graph-tooltip__section">
-                  <template v-for="(ref, idx) in tooltipContent.refs" :key="idx">
-                    <span class="git-graph-tooltip__ref">{{ ref }}</span>
+                <!-- 对齐 vscode "This commit is included in HEAD" -->
+                <div v-if="tooltipContent?.includedInHead !== undefined" class="git-graph-tooltip__section">
+                  <template v-if="tooltipContent?.includedInHead">
+                    此提交包含在 <span class="git-graph-tooltip__ref">HEAD</span> 中
+                  </template>
+                  <template v-else>
+                    此提交<strong><em>不</em></strong>包含在 <span class="git-graph-tooltip__ref">HEAD</span> 中
                   </template>
                 </div>
+                <!-- 对齐 vscode Branches / Tags sections -->
+                <template v-for="section in tooltipContent?.sections ?? []" :key="section.label">
+                  <div v-if="section.items.length > 0" class="git-graph-tooltip__section">
+                    <span class="git-graph-tooltip__section-label">{{ section.label }}</span>
+                    <span
+                      v-for="(item, idx) in section.items"
+                      :key="idx"
+                      class="git-graph-tooltip__ref"
+                      :class="{ 'git-graph-tooltip__ref--highlight': item.isRef }"
+                    >{{ item.text }}</span>
+                  </div>
+                </template>
               </div>
             </div>
 
@@ -2368,6 +2450,11 @@ function refBadgeClass(refType?: string): string {
   pointer-events: none;
 }
 
+.dot-hover-group {
+  /* 关键：.git-graph-vertices 有 pointer-events:none，
+   * 这里必须显式加回来，否则 dot hover 事件被吞掉 */
+  pointer-events: auto;
+}
 .commit-vertex {
   vector-effect: non-scaling-stroke;
   transition: all 120ms ease;
@@ -2800,57 +2887,79 @@ function refBadgeClass(refType?: string): string {
  *  dotEnter 100ms 后显示；dotLeave 200ms 后隐藏
  *  z-index 200 高于 commit-row，保证盖在内容上方 */
 .git-graph-tooltip {
-  position: absolute;
+  /* 对齐 vscode: position: fixed 相对于 viewport */
+  position: fixed;
   z-index: 200;
   pointer-events: none;
 }
 .git-graph-tooltip__pointer {
-  /* vscode 风格：左侧竖线 30px × 2px，lane 色 */
+  /* pointer: 从 tooltip box 左侧中间水平向左延伸到 dot 中心
+   * tooltip box 左侧 = dotCenterX+30，pointer 右端在 tooltipX = dotCenterX+30
+   * left=-30px, width=30px → 左端=tooltipX-30=dotCenterX，右端=tooltipX=dotCenterX+30
+   * top: 0（初始值，JS 在 nextTick 里动态设为 contentH/2+1px，对齐 dot 中心）
+   * margin-top=-1px → pointer 视觉中心 = top - 1 = contentH/2 */
   position: absolute;
-  left: 4px;
+  left: -30px;
   top: 0;
   width: 30px;
   height: 2px;
   margin-top: -1px;
   background-color: var(--tooltip-color, #888);
+  z-index: 4;
 }
+/* v3.16: tooltip CSS 对齐 vscode graph.ts */
 .git-graph-tooltip__content {
   position: relative;
-  margin-left: 23px;
+  /* 内容紧跟 pointer（无额外 margin） */
+  margin-left: 0;
   background: var(--color-bg-elevated, #1e1e1e);
-  border: 1.5px solid var(--tooltip-color, #888);
+  border: 2px solid var(--tooltip-color, #888);
   border-radius: 5px;
-  padding: 5px 8px;
-  min-width: 100px;
-  max-width: 200px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 3px 10px;
+  max-width: 600px;
+  box-shadow: 0 0 30px 5px rgba(0, 0, 0, 0.4);
 }
+/* 对齐 vscode graphTooltipTitle */
 .git-graph-tooltip__title {
-  font-size: 11px;
-  font-weight: 600;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--color-text, #ccc);
-  margin-bottom: 3px;
-  white-space: nowrap;
+  padding: 3px 0;
 }
+/* 对齐 vscode graphTooltipSection */
 .git-graph-tooltip__section {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--color-text-secondary, #888);
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
+  gap: 4px;
   align-items: center;
+  padding: 3px 0;
+  border-top: 1px solid rgba(128, 128, 128, 0.5);
+  line-height: 22px;
 }
+.git-graph-tooltip__section-label {
+  margin-right: 4px;
+}
+/* 对齐 vscode graphTooltipRef */
 .git-graph-tooltip__ref {
   display: inline-flex;
   align-items: center;
-  padding: 1px 4px;
-  border-radius: 3px;
-  border: 1px solid var(--tooltip-color, #888);
-  color: var(--tooltip-color, #888);
-  font-size: 10px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid rgba(128, 128, 128, 0.75);
+  background-color: rgba(128, 128, 128, 0.15);
+  color: var(--color-text, #ccc);
+  font-size: 12px;
   font-weight: 500;
-  background: transparent;
   white-space: nowrap;
+}
+/* 高亮 ref（lane 色边框）：对应当前 lane 的 ref 标签 */
+.git-graph-tooltip__ref--highlight {
+  border-color: var(--tooltip-color, #888);
 }
 /* v2.48 旧注释：.commit-row__col--graph 曾被移除，v3.4 恢复（5 列统一对齐） */
 .commit-row__col--desc {
