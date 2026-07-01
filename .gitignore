@@ -59,3 +59,7 @@ node_modules/
 .playwright-mcp/
 .github/
 .tools/
+
+# Local build artifacts (防止 wails build / go build 产物误提交)
+/debug
+/tools/*/debug
