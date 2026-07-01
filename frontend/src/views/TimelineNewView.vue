@@ -215,25 +215,32 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
     // 先临时存 dotCenterY，后面 setTimeout 里精确计算 tooltipY（box 居中于 dot）
     tooltipY.value = dotCenterY;
     // 对齐 vscode graph.ts showTooltip：按 ref 类型分组显示
-    // - 当前 commit 自己的 branch / tag refs (branches/tags 本地数组)
-    // - 全 graph 范围的所有 tag refs (allTags) —— 来自上方 allTagsInGraph computed,
-    //   hover 在不带 tag 的 commit dot 上时也能看到 repo 内有哪些 tag 存在
-    const branches: string[] = [];
+    // - 当前 commit 自己的 tag refs (tags 本地数组)
+    // - "当前分支": 取 c.refs 里第一个非 tag 的 ref (refs 顺序固定: 本地分支 →
+    //   远程跟踪分支 → tag, 后端已排序) —— 替代旧的"分支:" 多行 section,
+    //   简化成单行 "当前分支: X" 让用户一眼看清这个 commit 在哪个分支
+    // - 全 graph 范围的所有 tag refs (allTags) —— 见下方
     const tags: string[] = [];
+    let currentBranch: string | null = null;
     if (c.refs) {
       for (let i = 0; i < c.refs.length; i++) {
         const refType = c.refTypes?.[i];
+        const refName = c.refs[i];
+        if (!refName) continue;
         if (refType === 'tag') {
-          tags.push(c.refs[i]!);
-        } else {
-          // branch 或 remoteBranch 都放进分支 section
-          branches.push(c.refs[i]!);
+          tags.push(refName);
+        } else if (!currentBranch) {
+          // 第一个非 tag ref = 当前分支 (本地分支优先, 然后远程跟踪分支)
+          currentBranch = refName;
         }
       }
     }
     const sections: TooltipSection[] = [];
-    if (branches.length > 0) {
-      sections.push({ label: '分支:', items: branches.map((b) => ({ text: b, isRef: true })) });
+    if (currentBranch) {
+      sections.push({
+        label: '当前分支:',
+        items: [{ text: currentBranch, isRef: true }],
+      });
     }
     // 标签: 始终显示 (即使当前 commit 没 tag 也要列出 graph 内所有 tag)
     // 排序: 当前 commit 自己的 tag 排前面 (顺序本身就传递"这是我的"信息, 不再
