@@ -2,42 +2,28 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-// createTestRepoWithRemote 创建一个本地仓库 + 一个 bare 远端，并 push main 上去。
-// 返回 (localPath, remotePath)。本地和远端都设置了 user.email/name。
-func createTestRepoWithRemote(t *testing.T) (string, string) {
+// createTestRepoWithCommit 创建一个本地仓库，commit 1 个文件。
+// 返回 localPath。user.email/name 已设置。
+func createTestRepoWithCommit(t *testing.T) string {
 	t.Helper()
-	base := t.TempDir()
-	localPath := filepath.Join(base, "local")
-	remotePath := filepath.Join(base, "remote.git")
-
-	// 1. 创建 bare 远端
-	if err := os.MkdirAll(remotePath, 0o755); err != nil {
-		t.Fatalf("mkdir remote: %v", err)
-	}
-	runGitAt(t, remotePath, "init", "--bare")
-
-	// 2. 创建本地仓库，提交一个 commit，push 到远端
-	if err := os.MkdirAll(localPath, 0o755); err != nil {
-		t.Fatalf("mkdir local: %v", err)
-	}
+	localPath := t.TempDir()
 	runGitAt(t, localPath, "init")
 	runGitAt(t, localPath, "config", "user.email", "test@test.com")
 	runGitAt(t, localPath, "config", "user.name", "Test User")
-
-	os.WriteFile(filepath.Join(localPath, "a.txt"), []byte("a"), 0o644)
+	if err := os.WriteFile(filepath.Join(localPath, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
 	runGitAt(t, localPath, "add", ".")
 	envCommit(t, localPath, "initial commit", "2026-01-01T10:00:00Z")
-	runGitAt(t, localPath, "branch", "-M", "main")
-	runGitAt(t, localPath, "remote", "add", "origin", remotePath)
-	runGitAt(t, localPath, "push", "-u", "origin", "main")
-
-	return localPath, remotePath
+	return localPath
 }
 
 // envCommit 显式设置 author/committer date，避免秒级时间戳冲突
@@ -54,8 +40,7 @@ func envCommit(t *testing.T, dir, msg, date string) {
 	}
 }
 
-// runGitAt 在 dir 跑 git，失败时 t.Fatal（与 ascii_graph_test.go 的 runGit
-// 冲突时改名以避免重复定义；本文件用 runGitAt 显式带 dir 参数）
+// runGitAt 在 dir 跑 git，失败时 t.Fatal
 func runGitAt(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -65,113 +50,149 @@ func runGitAt(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// advanceRemote 在远端加 N 个 commit，然后 fetch 到本地（不 merge），制造
-// "local 落后 origin" 的场景。
-func advanceRemote(t *testing.T, localPath, remotePath string, n int) {
+// dirtyWorktree 把 repo 的 worktree 弄成 N 个 dirty entry。
+// 通过创建 N 个新文件 + git add（不 commit）模拟 "staged but uncommitted"。
+// 也可以走 modify / delete / untracked 路径；这里用 add-only 是最稳定的方式。
+// 用 6 位 zero-pad suffix 保证 n > 9999 也不重名。
+func dirtyWorktree(t *testing.T, localPath string, n int) {
 	t.Helper()
-	// 1. 用一个临时 worktree 在远端目录 commit（bare 不能直接 commit）
-	workPath := t.TempDir()
-	runGitAt(t, workPath, "init")
-	runGitAt(t, workPath, "config", "user.email", "test@test.com")
-	runGitAt(t, workPath, "config", "user.name", "Test User")
-	runGitAt(t, workPath, "remote", "add", "origin", remotePath)
-	runGitAt(t, workPath, "fetch", "origin", "main")
-	runGitAt(t, workPath, "checkout", "-b", "main", "origin/main")
-
 	for i := 0; i < n; i++ {
-		fname := []byte{'a' + byte(i+1)}
-		os.WriteFile(filepath.Join(workPath, string(fname)+".txt"), fname, 0o644)
-		runGitAt(t, workPath, "add", ".")
-		date := "2026-01-02T1" + string(rune('0'+i)) + ":00:00Z"
-		envCommit(t, workPath, "remote commit "+string(fname), date)
+		name := filepath.Join(localPath, fmt.Sprintf("dirty_%06d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write dirty file %d: %v", i, err)
+		}
 	}
-	runGitAt(t, workPath, "push", "origin", "main")
-
-	// 2. 本地 fetch，但**不 pull/merge**（保持本地落后）
-	runGitAt(t, localPath, "fetch", "origin")
+	// staged but uncommitted → git status --porcelain 报告 "A  filename"
+	runGitAt(t, localPath, "add", "-A")
 }
 
-func TestDetectUnpulledCommits_NoAhead(t *testing.T) {
-	localPath, _ := createTestRepoWithRemote(t)
+// dirtyWorktreeUntracked 制造 N 个 untracked 文件（git status --porcelain 报告 "?? filename"）
+// 用 i 做 4 位 zero-pad suffix 保证 n > 9999 也不重复。
+func dirtyWorktreeUntracked(t *testing.T, localPath string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		name := filepath.Join(localPath, fmt.Sprintf("untracked_%06d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write untracked file %d: %v", i, err)
+		}
+	}
+}
 
-	headSHA, count, found, err := detectUnpulledCommits(localPath)
+// TestDetectUncommittedChanges_CleanWorktree 干净 worktree → found=false
+func TestDetectUncommittedChanges_CleanWorktree(t *testing.T) {
+	localPath := createTestRepoWithCommit(t)
+
+	headSHA, count, found, err := detectUncommittedChanges(localPath)
 	if err != nil {
-		t.Fatalf("detectUnpulledCommits err: %v", err)
+		t.Fatalf("detectUncommittedChanges err: %v", err)
 	}
 	if found {
-		t.Errorf("local 和 origin 平，应该 found=false，实际 found=true (count=%d)", count)
-	}
-	if headSHA == "" {
-		t.Errorf("headSHA 应该是本地 HEAD SHA，实际为空")
-	}
-	if count != 0 {
-		t.Errorf("count 应该为 0，实际 %d", count)
-	}
-}
-
-func TestDetectUnpulledCommits_LocalBehind(t *testing.T) {
-	localPath, remotePath := createTestRepoWithRemote(t)
-	advanceRemote(t, localPath, remotePath, 3)
-
-	headSHA, count, found, err := detectUnpulledCommits(localPath)
-	if err != nil {
-		t.Fatalf("detectUnpulledCommits err: %v", err)
-	}
-	if !found {
-		t.Fatalf("local 落后 3 commit，found 应该为 true，实际 false")
-	}
-	if count != 3 {
-		t.Errorf("count 应该为 3，实际 %d", count)
+		t.Errorf("干净 worktree 应该 found=false，实际 found=true (count=%d)", count)
 	}
 	if headSHA == "" {
 		t.Errorf("headSHA 不应为空")
 	}
-	// 验证 headSHA 真的是本地 HEAD
-	cmd := exec.Command("git", "-C", localPath, "rev-parse", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git rev-parse HEAD: %v", err)
-	}
-	if headSHA != string(out[:len(out)-1]) { // trim newline
-		t.Errorf("headSHA = %q, git rev-parse HEAD = %q", headSHA, string(out))
+	if count != 0 {
+		t.Errorf("count 应为 0，实际 %d", count)
 	}
 }
 
-func TestDetectUnpulledCommits_NoOriginHEAD(t *testing.T) {
-	// 不创建远端，本地仓库有 commit。origin/HEAD 不存在，应该 found=false
-	localPath := t.TempDir()
-	runGitAt(t, localPath, "init")
-	runGitAt(t, localPath, "config", "user.email", "test@test.com")
-	runGitAt(t, localPath, "config", "user.name", "Test User")
-	os.WriteFile(filepath.Join(localPath, "a.txt"), []byte("a"), 0o644)
-	runGitAt(t, localPath, "add", ".")
-	envCommit(t, localPath, "only commit", "2026-01-01T10:00:00Z")
+// TestDetectUncommittedChanges_StagedFiles staged-but-not-committed → found=true, count=N
+func TestDetectUncommittedChanges_StagedFiles(t *testing.T) {
+	localPath := createTestRepoWithCommit(t)
+	dirtyWorktree(t, localPath, 3)
 
-	_, _, found, err := detectUnpulledCommits(localPath)
+	headSHA, count, found, err := detectUncommittedChanges(localPath)
 	if err != nil {
-		t.Fatalf("detectUnpulledCommits err: %v", err)
+		t.Fatalf("detectUncommittedChanges err: %v", err)
+	}
+	if !found {
+		t.Fatalf("3 个 staged 文件应 found=true，实际 false")
+	}
+	if count != 3 {
+		t.Errorf("count 应为 3，实际 %d", count)
+	}
+	if headSHA == "" {
+		t.Errorf("headSHA 不应为空")
+	}
+}
+
+// TestDetectUncommittedChanges_UntrackedFiles untracked 文件 → found=true, count=N
+func TestDetectUncommittedChanges_UntrackedFiles(t *testing.T) {
+	localPath := createTestRepoWithCommit(t)
+	dirtyWorktreeUntracked(t, localPath, 5)
+
+	headSHA, count, found, err := detectUncommittedChanges(localPath)
+	if err != nil {
+		t.Fatalf("detectUncommittedChanges err: %v", err)
+	}
+	if !found {
+		t.Fatalf("5 个 untracked 文件应 found=true，实际 false")
+	}
+	if count != 5 {
+		t.Errorf("count 应为 5，实际 %d", count)
+	}
+	if headSHA == "" {
+		t.Errorf("headSHA 不应为空")
+	}
+}
+
+// TestDetectUncommittedChanges_ModifiedFiles 改一个文件的内容 → found=true
+func TestDetectUncommittedChanges_ModifiedFiles(t *testing.T) {
+	localPath := createTestRepoWithCommit(t)
+	if err := os.WriteFile(filepath.Join(localPath, "a.txt"), []byte("modified"), 0o644); err != nil {
+		t.Fatalf("modify: %v", err)
+	}
+
+	_, count, found, err := detectUncommittedChanges(localPath)
+	if err != nil {
+		t.Fatalf("detectUncommittedChanges err: %v", err)
+	}
+	if !found {
+		t.Fatalf("modified file 应 found=true")
+	}
+	if count != 1 {
+		t.Errorf("count 应为 1，实际 %d", count)
+	}
+}
+
+// TestDetectUncommittedChanges_BadPath 不存在路径 → found=false 且不返回 error
+func TestDetectUncommittedChanges_BadPath(t *testing.T) {
+	_, _, found, err := detectUncommittedChanges("/nonexistent/path/should/not/exist")
+	if err != nil {
+		t.Errorf("bad path 应 silently skip，实际 err: %v", err)
 	}
 	if found {
-		t.Errorf("没有 origin/HEAD 时应该 found=false")
+		t.Errorf("bad path 应 found=false")
 	}
 }
 
-func TestDetectUnpulledCommits_BadPath(t *testing.T) {
-	// 路径不存在应该 found=false 且不返回 error
-	_, _, found, err := detectUnpulledCommits("/nonexistent/path")
+// TestDetectUncommittedChanges_DirtyFileCap dirty 数 > cap 时仍 found=true（仅 cap 内精确计数）
+func TestDetectUncommittedChanges_DirtyFileCap(t *testing.T) {
+	localPath := createTestRepoWithCommit(t)
+	// dirty 数量 > dirtyFileCap (5000) → 函数早停但仍返回 found=true
+	dirtyWorktreeUntracked(t, localPath, dirtyFileCap+10)
+
+	_, count, found, err := detectUncommittedChanges(localPath)
 	if err != nil {
-		t.Errorf("bad path 应该 silently skip，实际返回 error: %v", err)
+		t.Fatalf("detectUncommittedChanges err: %v", err)
 	}
-	if found {
-		t.Errorf("bad path 应该 found=false")
+	if !found {
+		t.Fatalf("dirty 数 > cap 应仍 found=true")
+	}
+	// count 应 == cap+1（break 时 count 已经被 ++ 一次，实际值是 cap+1）
+	// 真实场景下 UI 看到 count >= cap 就展示 ">N files"，不再精确计数
+	if count != dirtyFileCap+1 {
+		t.Errorf("count 应早停在 cap+1=%d，实际 %d", dirtyFileCap+1, count)
 	}
 }
 
-func TestLogCommitsVscode_PrependsUncommitted(t *testing.T) {
-	// 集成测试：LogCommitsVscode 在 local 落后 origin 时应该 unshift UNCOMMITTED
-	// 虚拟 commit 到 commits[0]（对齐 vscode-git-graph dataSource.ts:191）。
-	localPath, remotePath := createTestRepoWithRemote(t)
-	advanceRemote(t, localPath, remotePath, 2)
+// TestLogCommitsVscode_PrependsUncommittedWhenDirty 集成测试：
+// LogCommitsVscode 在 worktree dirty 时应该 unshift UNCOMMITTED 虚拟 commit
+// 到 commits[0]（对齐 vscode-git-graph dataSource.ts:191）。
+func TestLogCommitsVscode_PrependsUncommittedWhenDirty(t *testing.T) {
+	localPath := createTestRepoWithCommit(t)
+	dirtyWorktree(t, localPath, 2)
 
 	ctx := context.Background()
 	result, err := LogCommitsVscode(ctx, LogOptions{
@@ -185,7 +206,7 @@ func TestLogCommitsVscode_PrependsUncommitted(t *testing.T) {
 		t.Fatalf("commits 至少 2 个（1 UNCOMMITTED + 至少 1 真实），实际 %d", len(result.Commits))
 	}
 
-	// commits[0] 必须是 UNCOMMITTED 虚拟 commit（对齐 vscode unshift 到最前面）
+	// commits[0] 必须是 UNCOMMITTED 虚拟 commit
 	first := result.Commits[0]
 	if first.SHA != UNCOMMITTED_HASH {
 		t.Errorf("commits[0].SHA 应该是 %q (UNCOMMITTED)，实际 %q", UNCOMMITTED_HASH, first.SHA)
@@ -193,19 +214,22 @@ func TestLogCommitsVscode_PrependsUncommitted(t *testing.T) {
 	if first.Subject == "" {
 		t.Errorf("UNCOMMITTED Subject 不应为空")
 	}
+	if !strings.Contains(first.Subject, "2") {
+		t.Errorf("UNCOMMITTED Subject 应包含 dirty 数 2，实际 %q", first.Subject)
+	}
 
 	// UNCOMMITTED.Parents[0] = local HEAD SHA
 	cmd := exec.Command("git", "-C", localPath, "rev-parse", "HEAD")
 	out, _ := cmd.Output()
-	expectedHead := string(out[:len(out)-1])
+	expectedHead := strings.TrimSpace(string(out))
 	if len(first.Parents) != 1 || first.Parents[0] != expectedHead {
 		t.Errorf("UNCOMMITTED.Parents 应该是 [headSHA=%q]，实际 %v", expectedHead, first.Parents)
 	}
 }
 
-func TestLogCommitsVscode_NoUncommittedWhenUpToDate(t *testing.T) {
-	// 集成测试：local 不落后时不应该有 UNCOMMITTED
-	localPath, _ := createTestRepoWithRemote(t)
+// TestLogCommitsVscode_NoUncommittedWhenClean 集成测试：clean worktree → 没有 UNCOMMITTED
+func TestLogCommitsVscode_NoUncommittedWhenClean(t *testing.T) {
+	localPath := createTestRepoWithCommit(t)
 
 	ctx := context.Background()
 	result, err := LogCommitsVscode(ctx, LogOptions{
@@ -219,6 +243,6 @@ func TestLogCommitsVscode_NoUncommittedWhenUpToDate(t *testing.T) {
 		t.Fatal("commits 不应为空")
 	}
 	if result.Commits[0].SHA == UNCOMMITTED_HASH {
-		t.Errorf("local 与 origin 平时不应该 prepend UNCOMMITTED，但 commits[0].SHA = %q", result.Commits[0].SHA)
+		t.Errorf("clean worktree 不应 prepend UNCOMMITTED，但 commits[0].SHA = %q", result.Commits[0].SHA)
 	}
 }

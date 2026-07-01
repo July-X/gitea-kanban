@@ -24,11 +24,17 @@ const defaultVscodeInitialLoadCommits = 300
 // 用作 UNCOMMITTED 虚拟 commit 的 SHA，让 lane 布局把"未完成区"当作 row 0 接到
 // 本地 HEAD 之上，再在 GraphResult 里把对应的 IsCommitted 写成 false 触发灰色样式。
 //
-// 触发语义对齐 vscode-git-graph 的 `commits[0].hash === UNCOMMITTED` 模式，
-// 但因为我们 NoCheckout 模式没有 worktree，`git status --porcelain` 不可用，
-// 改为「local HEAD 落后于 origin/<defaultBranch>」——
-// 告诉用户「远端有 N 个 commit 还没拉」，message 写「N commits from origin ahead」。
+// 触发语义 1:1 复刻 vscode-git-graph 的 `commits[0].hash === UNCOMMITTED` 模式。
+// 真实数据源 = worktree dirty count: `git status --porcelain` 的行数。
+// 任意 dirty (M / A / D / R / C / U / T / ??) 都计入 uncommitted。
+// NoCheckout 模式下 index 有但 worktree 空会全部报告为 D，语义仍然成立
+// （worktree 与 index 不一致 = uncommitted）。
 const UNCOMMITTED_HASH = "*"
+
+// dirtyFileCap 探测 worktree dirty 时从 `git status --porcelain` 最多读多少行。
+// 避免 10w+ 改动的 monorepo 误删把整个 output 拉回 Go 进程浪费内存。
+// 1143 是用户实测 DeepSeek-Reasonix 仓库的数量级，留 ~4x 余量。
+const dirtyFileCap = 5000
 
 // LogCommitsVscode 使用 vscode-git-graph 同款 git log 入口读取提交。
 //
@@ -89,17 +95,16 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 		truncated = true
 	}
 
-	// v3.x：探测 local HEAD 是否落后于 origin（对齐 vscode-git-graph
-	// commits[0].hash === UNCOMMITTED 模式，但触发语义改为「local 落后 origin」，
-	// 因为 NoCheckout 没有 worktree 无法用 `git status --porcelain`）。
-	// 探测失败 / 落后 0 commit → 跳过，不影响主流程。
+	// v3.x：探测 worktree dirty count，1:1 复刻 vscode-git-graph 的
+	// commits[0].hash === UNCOMMITTED 模式（数据源: git status --porcelain）。
+	// 探测失败 / dirty 0 → 跳过，不影响主流程。
 	//
 	// 插入位置对齐 vscode dataSource.ts:191 `commits.unshift(...)`：
-	// UNCOMMITTED 永远在 commits[0]（lane 布局 row 0），让 lane 流从顶部显示「未拉取」
-	// 区段，而不是塞在 local HEAD 之前（那样在 all-branches 视图下会跑到中间）。
+	// UNCOMMITTED 永远在 commits[0]（lane 布局 row 0），让 lane 流从顶部显示
+	// 「未提交」区段，而不是塞在 local HEAD 之前（all-branches 视图下会跑到中间）。
 	if len(commits) > 0 {
-		if headSHA, aheadCount, found, _ := detectUnpulledCommits(opts.LocalPath); found {
-			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, aheadCount)}, commits...)
+		if headSHA, dirtyCount, found, _ := detectUncommittedChanges(opts.LocalPath); found {
+			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, dirtyCount)}, commits...)
 		}
 	}
 
@@ -112,17 +117,17 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 // parents = [headSHA]（让 lane 布局把它接到本地 HEAD 之上）。
 //
 // 字段对齐 vscode-git-graph `src/dataSource.ts:191` 的最小字段集：
-//   - author / email = '*' / ''
+//   - author  = "*"  (固定占位符)
 //   - date           = now
-//   - subject        = 'N commits from origin ahead'
+//   - subject        = 'Uncommitted changes (N files)'  （N=worktree dirty 行数）
 //
 // IsCommitted 字段不在 CommitInfo 上（保持 schema 稳定），
 // 由 layout 端检测 SHA == UNCOMMITTED_HASH 写出 IsCommitted=false。
-func buildUncommittedCommit(headSHA string, aheadCount int) CommitInfo {
+func buildUncommittedCommit(headSHA string, dirtyCount int) CommitInfo {
 	return CommitInfo{
 		SHA:         UNCOMMITTED_HASH,
 		ShortSHA:    UNCOMMITTED_HASH,
-		Subject:     fmt.Sprintf("%d commits from origin ahead", aheadCount),
+		Subject:     fmt.Sprintf("Uncommitted changes (%d files)", dirtyCount),
 		AuthorName:  "*",
 		AuthorEmail: "",
 		AuthorWhen:  time.Now(),
@@ -202,23 +207,24 @@ func parseVscodeLogOutput(output []byte, refDataByHash map[string]refData) []Com
 	return commits
 }
 
-// detectUnpulledCommits 探测 local HEAD 是否落后于 origin 的默认分支。
+// detectUncommittedChanges 探测 worktree dirty count，1:1 复刻 vscode-git-graph
+// 的 UNCOMMITTED 检测路径（dataSource.ts 通过 `git status --porcelain` 判 dirty）。
 //
-// 返回 (headSHA, aheadCount, found, err)：
-//   - headSHA   本地 HEAD 的完整 SHA（用于给 UNCOMMITTED.Parents 引用）
-//   - aheadCount  origin/<defaultBranch> 比 local HEAD 多了多少 commit
-//   - found     是否真的存在未拉取的 commit（false 时不插入 UNCOMMITTED）
-//   - err       探测过程中的非致命错误（不可恢复时让 LogCommitsVscode 跳过 UNCOMMITTED）
-//
-// 默认分支探测顺序：origin/HEAD > origin/main > origin/master
-// origin/HEAD 是平台显式标记的 default branch（git remote set-head origin --auto
-// 设置后会出现），优先用；找不到时退回 main/master。
+// 返回 (headSHA, dirtyCount, found, err)：
+//   - headSHA     本地 HEAD 完整 SHA（用于给 UNCOMMITTED.Parents 引用）
+//   - dirtyCount  `git status --porcelain` 的行数（dirty file count）
+//   - found       dirtyCount > 0 时为 true（false 时不插入 UNCOMMITTED）
+//   - err         探测过程的非致命错误（不可恢复时让 LogCommitsVscode 跳过 UNCOMMITTED）
 //
 // 任何 git 调用失败都返回 found=false，让 LogCommitsVscode 优雅跳过——
-// NoCheckout 模式 + 缺少 worktree 本身就让"未拉取"的语义变弱，
-// 不应让一个次要 feature 阻断主流程。
-func detectUnpulledCommits(localPath string) (headSHA string, aheadCount int, found bool, err error) {
-	// 1. Local HEAD SHA
+// dirty 检测只是渲染增强，不应阻断主流程。
+//
+// v3.x 之前用 `refs/gitea-kanban/synced-tip` 私有 ref 检测"local HEAD 落后远端"，
+// 命名 + 语义都跟 vscode 不一致，且 synced-tip ref 在老仓库 / 手动 git 操作下
+// 不会自动维护。改回 vscode 同款 git status --porcelain 后 1:1 对齐 Git Graph
+// 实际行为：worktree 任何 dirty 都触发。
+func detectUncommittedChanges(localPath string) (headSHA string, dirtyCount int, found bool, err error) {
+	// 1. Local HEAD SHA（用作 UNCOMMITTED.Parents[0]，让 lane 流挂到本地 HEAD）
 	headOut, errOut := exec.Command("git", "-C", localPath, "rev-parse", "HEAD").Output()
 	if errOut != nil {
 		return "", 0, false, nil
@@ -228,33 +234,46 @@ func detectUnpulledCommits(localPath string) (headSHA string, aheadCount int, fo
 		return "", 0, false, nil
 	}
 
-	// 2. Try origin default branches in priority order
-	var originRefSHA string
-	candidates := []string{"origin/HEAD", "origin/main", "origin/master"}
-	for _, candidate := range candidates {
-		out, errVer := exec.Command("git", "-C", localPath, "rev-parse", "--verify", "--quiet", candidate).Output()
-		if errVer != nil {
-			continue
-		}
-		sha := strings.TrimSpace(string(out))
-		if sha == "" || sha == headSHA {
-			// origin/HEAD == local HEAD（或候选退化为 HEAD），无需插入
-			return headSHA, 0, false, nil
-		}
-		originRefSHA = sha
-		break
-	}
-	if originRefSHA == "" {
+	// 2. `git status --porcelain` 输出行数 = dirty 文件数。
+	//    --untracked-files=all 让 ??. 类的 untracked 也计入。
+	//    --porcelain=v1 走稳定的 machine-readable 格式，v2 在 git 2.36+ 才稳定。
+	//    NoCheckout 模式 worktree 是空的，但 index 有所有文件 → status 全部报告 D
+	//    → dirtyCount = 文件总数，语义仍然成立（worktree 与 index 不一致 = uncommitted）。
+	//
+	//    --porcelain=v1 走稳定的 machine-readable 格式（v2 在 git 2.36+ 才稳定，
+	//    这里统一锁 v1 保证跨平台输出格式一致）。
+	//    --untracked-files=all 让 ??. 类的 untracked 也计入（默认只报告 untracked dir）。
+	//
+	//    注意：--no-optional-locks 是 git 全局选项（必须在子命令前），不放在这里。
+	//    我们只读不写，不需要抢锁；如要全局禁用锁可改用 `git --no-optional-locks -C ... status ...`。
+	statusCtx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
+	defer cancel()
+	statusCmd := exec.CommandContext(statusCtx, "git",
+		"-C", localPath,
+		"status",
+		"--porcelain=v1",
+		"--untracked-files=all",
+	)
+	statusOut, errStatus := statusCmd.Output()
+	if errStatus != nil {
 		return headSHA, 0, false, nil
 	}
 
-	// 3. Count: HEAD..originRefSHA (unpulled commits on origin)
-	countOut, errCount := exec.Command("git", "-C", localPath, "rev-list", "--count", headSHA+".."+originRefSHA).Output()
-	if errCount != nil {
-		return headSHA, 0, false, nil
+	count := 0
+	scanner := bufio.NewScanner(bytes.NewReader(statusOut))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		if scanner.Text() == "" {
+			continue
+		}
+		count++
+		if count > dirtyFileCap {
+			// 超过 cap 仍算 dirty，但不再精确计数（避免大仓库内存爆炸）
+			// 后续 UI 可以展示 ">5000 files" 之类的描述
+			break
+		}
 	}
-	count, errAtoi := strconv.Atoi(strings.TrimSpace(string(countOut)))
-	if errAtoi != nil || count <= 0 {
+	if count == 0 {
 		return headSHA, 0, false, nil
 	}
 	return headSHA, count, true, nil

@@ -19,19 +19,17 @@ import (
 // v3.x UNCOMMITTED 灰色虚线 lane 的 IsCommitted 字段在 App 层 DTO 链路完整
 // 透传到 JSON。
 //
-// 链路：detectUnpulledCommits → LogCommitsVscode → BuildGraphVscodeWithHead
-//      → giteaAdapter.graphResultToDTO → graphResultToAppDTO → json.Marshal
+// 链路：detectUncommittedChanges (git status --porcelain) → LogCommitsVscode
+//
+//	→ BuildGraphVscodeWithHead → giteaAdapter.graphResultToDTO
+//	→ graphResultToAppDTO → json.Marshal
 //
 // 任何一环漏掉 IsCommitted 都会让 row 0 (UNCOMMITTED) 的 isCommitted=false
 // 丢失，前端无法识别灰色虚线 lane。
 func TestGraphResultToAppDTO_UncommittedIsCommittedInJSON(t *testing.T) {
-	// 1. 准备 synthetic "local 落后 origin" 仓库
+	// 1. 准备 local 仓库：1 commit + 3 untracked files（worktree dirty）
 	base := t.TempDir()
 	localPath := filepath.Join(base, "local")
-	remotePath := filepath.Join(base, "remote.git")
-
-	mustMkdir(t, remotePath)
-	runGit(t, remotePath, "init", "--bare")
 	mustMkdir(t, localPath)
 	runGit(t, localPath, "init")
 	runGit(t, localPath, "config", "user.email", "test@test.com")
@@ -39,29 +37,12 @@ func TestGraphResultToAppDTO_UncommittedIsCommittedInJSON(t *testing.T) {
 	mustWrite(t, filepath.Join(localPath, "a.txt"), []byte("a"))
 	runGit(t, localPath, "add", ".")
 	envGitCommit(t, localPath, "initial", "2026-01-01T10:00:00Z")
-	runGit(t, localPath, "branch", "-M", "main")
-	runGit(t, localPath, "remote", "add", "origin", remotePath)
-	runGit(t, localPath, "push", "-u", "origin", "main")
-
-	// 2. 在远端加 3 个 commit，本地 fetch 但不 merge
-	workPath := filepath.Join(base, "work")
-	mustMkdir(t, workPath)
-	runGit(t, workPath, "init")
-	runGit(t, workPath, "config", "user.email", "test@test.com")
-	runGit(t, workPath, "config", "user.name", "Test")
-	runGit(t, workPath, "remote", "add", "origin", remotePath)
-	runGit(t, workPath, "fetch", "origin", "main")
-	runGit(t, workPath, "checkout", "-b", "main", "origin/main")
 	for i := 0; i < 3; i++ {
-		fname := []byte{'a' + byte(i+1)}
-		mustWrite(t, filepath.Join(workPath, string(fname)+".txt"), fname)
-		runGit(t, workPath, "add", ".")
-		envGitCommit(t, workPath, "remote "+string(fname), "2026-01-02T1"+string(rune('0'+i))+":00:00Z")
+		fname := filepath.Join(localPath, "dirty_"+string(rune('a'+i))+".txt")
+		mustWrite(t, fname, []byte("x"))
 	}
-	runGit(t, workPath, "push", "origin", "main")
-	runGit(t, localPath, "fetch", "origin") // 只 fetch, 不 pull
 
-	// 3. 走 LogCommitsVscode + BuildGraphVscodeWithHead (Go 端 layout)
+	// 2. 走 LogCommitsVscode + BuildGraphVscodeWithHead (Go 端 layout)
 	logResult, err := gitpkg.LogCommitsVscode(context.Background(), gitpkg.LogOptions{
 		LocalPath: localPath,
 		MaxCount:  100,

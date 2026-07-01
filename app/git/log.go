@@ -219,14 +219,13 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		truncated = true
 	}
 
-	// v3.x：探测 local HEAD 是否落后于 origin（对齐 vscode-git-graph
-	// commits[0].hash === UNCOMMITTED 模式）。
-	//
+	// v3.x：探测 worktree dirty count，1:1 复刻 vscode-git-graph 的
+	// commits[0].hash === UNCOMMITTED 模式（数据源: git status --porcelain）。
 	// 插入位置对齐 vscode dataSource.ts:191 `commits.unshift(...)`：
 	// UNCOMMITTED 永远在 commits[0]（lane 布局 row 0）。
 	if len(commits) > 0 {
-		if headSHA, aheadCount, found, _ := detectUnpulledCommits(opts.LocalPath); found {
-			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, aheadCount)}, commits...)
+		if headSHA, dirtyCount, found, _ := detectUncommittedChanges(opts.LocalPath); found {
+			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, dirtyCount)}, commits...)
 		}
 	}
 

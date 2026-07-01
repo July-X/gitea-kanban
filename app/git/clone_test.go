@@ -241,8 +241,17 @@ func TestCloneRepo_NoCheckout_NoWorktreeFiles(t *testing.T) {
 	if len(logResult.Commits) == 0 {
 		t.Error("expected at least 1 commit, got 0")
 	}
-	if logResult.Commits[0].Subject != "initial commit" {
-		t.Errorf("commit subject = %q, want %q", logResult.Commits[0].Subject, "initial commit")
+	// v3.x: NoCheckout 模式 worktree 空, index 有文件 → git status 报告 N 个 D,
+	// detectUncommittedChanges 把 UNCOMMITTED 虚拟 commit 插到 commits[0]。
+	// 真实 commit 在 commits[1]。
+	if len(logResult.Commits) < 2 {
+		t.Fatalf("expected at least 2 commits (UNCOMMITTED + initial), got %d", len(logResult.Commits))
+	}
+	if logResult.Commits[0].SHA != UNCOMMITTED_HASH {
+		t.Errorf("commits[0].SHA = %q, want %q (UNCOMMITTED 虚拟 commit)", logResult.Commits[0].SHA, UNCOMMITTED_HASH)
+	}
+	if logResult.Commits[1].Subject != "initial commit" {
+		t.Errorf("commit[1] subject = %q, want %q", logResult.Commits[1].Subject, "initial commit")
 	}
 }
 
@@ -313,12 +322,16 @@ func TestCloneRepo_AllBranchesSynced(t *testing.T) {
 		t.Fatalf("LogCommits failed: %v", err)
 	}
 
-	// 应该看到 2 个 commit：main commit + feature commit
-	if len(logResult.Commits) != 2 {
-		t.Errorf("expected 2 commits (main + feature), got %d", len(logResult.Commits))
+	// v3.x: NoCheckout 模式会 prepend UNCOMMITTED 虚拟 commit, 所以是 3 个 commit
+	// (UNCOMMITTED + main commit + feature commit)
+	if len(logResult.Commits) != 3 {
+		t.Errorf("expected 3 commits (UNCOMMITTED + main + feature), got %d", len(logResult.Commits))
 		for i, c := range logResult.Commits {
 			t.Logf("  commit[%d]: %s", i, c.Subject)
 		}
+	}
+	if logResult.Commits[0].SHA != UNCOMMITTED_HASH {
+		t.Errorf("commits[0] 应是 UNCOMMITTED, 实际 sha=%q", logResult.Commits[0].SHA)
 	}
 
 	hasMain := false
@@ -389,11 +402,15 @@ func TestCloneRepo_LargeRepoMode_ShallowSingleBranchNoTags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LogCommits failed: %v", err)
 	}
-	if len(logResult.Commits) != 1 {
-		t.Fatalf("expected shallow clone to expose 1 commit, got %d", len(logResult.Commits))
+	// v3.x: NoCheckout 模式会 prepend UNCOMMITTED 虚拟 commit → 2 个 commit
+	if len(logResult.Commits) != 2 {
+		t.Fatalf("expected shallow clone to expose 2 commits (UNCOMMITTED + main), got %d", len(logResult.Commits))
 	}
-	if logResult.Commits[0].Subject != "main commit" {
-		t.Fatalf("expected default branch commit, got %q", logResult.Commits[0].Subject)
+	if logResult.Commits[0].SHA != UNCOMMITTED_HASH {
+		t.Fatalf("commits[0] 应是 UNCOMMITTED, 实际 sha=%q", logResult.Commits[0].SHA)
+	}
+	if logResult.Commits[1].Subject != "main commit" {
+		t.Fatalf("commits[1] 应是 main commit, 实际 %q", logResult.Commits[1].Subject)
 	}
 
 	repo, err := gogit.PlainOpen(result.LocalPath)
