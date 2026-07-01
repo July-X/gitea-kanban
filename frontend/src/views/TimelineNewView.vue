@@ -138,8 +138,7 @@ const tooltipPendingTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const tooltipVisible = ref(false);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
-const tooltipRef = ref<HTMLElement | null>(null);  // tooltip div ref
-const tooltipOpacity = ref(0);  // 0=不可见, 1=完全显示（测量完高度后设为1）
+
 // 对齐 vscode graph.ts showTooltip 数据结构
 interface TooltipSection {
   label: string;
@@ -186,9 +185,8 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
     const dotCenterX = rect.left + rect.width / 2;
     const dotCenterY = rect.top + rect.height / 2;
     tooltipX.value = dotCenterX + 30;
+    // 先临时存 dotCenterY，后面 setTimeout 里精确计算 tooltipY（box 居中于 dot）
     tooltipY.value = dotCenterY;
-    // 水平边界：确保 tooltip box 左边缘不超出视口左边界
-    if (tooltipX.value < 0) tooltipX.value = 0;
     // 对齐 vscode graph.ts showTooltip：按 ref 类型分组显示
     const branches: string[] = [];
     const tags: string[] = [];
@@ -220,29 +218,40 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
       includedInHead,
     };
     tooltipVisible.value = true;
-    // pointer.style.top 是相对于 tooltip div 内部的像素偏移
-    // pointer 高 2px + margin-top: -1px → visual center = pointerTopInside（因为 +1-1=0）
-    // pointer 的 visual center（水平线段的几何中心）需要 = dot 的 viewport Y 坐标
-    // → pointerTopInside = dotCenterY - tooltipElRect.top
+    // pointer 定位分两步：
+    //  ① box 几何中心 = dotCenterY → tooltipY = dotCenterY - contentH/2
+    //  ② pointer 在 box 内部垂直居中 → pointer.top = contentH/2
+    //    pointer 高 2px + margin-top:-1px → visual center = contentH/2
+    //    pointer 绝对 Y = box.top + contentH/2 = (dotCenterY - contentH/2) + contentH/2 = dotCenterY ✓
+    //  ③ pointer X 用 CSS 默认 { left: -30px, width: 30px }
+    //    pointer 绝对 X = (tooltipX - 30) 到 tooltipX = dotCenterX 到 dotCenterX + 30
+    //    → 左端精准压到 dot 中心，右端压在 box 左边线上，不进入 box 内部
+    // 用 setTimeout 0 等 DOM paint 完成后再测量 contentH
     setTimeout(() => {
       const tooltipEl = document.querySelector<HTMLElement>('.git-graph-tooltip');
       if (tooltipEl) {
-        const tooltipElRect = tooltipEl.getBoundingClientRect();
-        const pointer = tooltipEl.querySelector<HTMLElement>('.git-graph-tooltip__pointer');
+        const dotCenterY = tooltipY.value;
         const contentEl = tooltipEl.querySelector<HTMLElement>('.git-graph-tooltip__content');
-        if (pointer && contentEl) {
-          const dotCenterY = tooltipY.value;
+        const pointer = tooltipEl.querySelector<HTMLElement>('.git-graph-tooltip__pointer');
+        if (contentEl && pointer) {
           const contentRect = contentEl.getBoundingClientRect();
-          // content box CSS: left: 23px + border: 2px → 视觉左边线在 tooltip 内部 23px 处
-          // content 视觉中心 = tooltip 内部 23px + 2px(border) + contentWidth/2
-          // = 25 + contentRect.width / 2
-          const contentVisualCenter = 25 + contentRect.width / 2;
-          // pointer 的 right end = tooltipEl.left + pointerLeft + 30
-          // 需要 right end = tooltipEl.left + contentVisualCenter
-          // → pointerLeft = contentVisualCenter - 30
-          const pointerLeft = contentVisualCenter - 30;
-          pointer.style.left = pointerLeft + 'px';
-          pointer.style.top = (dotCenterY - tooltipElRect.top) + 'px';
+          const newTooltipY = dotCenterY - contentRect.height / 2;
+          tooltipY.value = newTooltipY;
+          pointer.style.top = (contentRect.height / 2) + 'px';
+          // pointer.style.left 保持 CSS 默认 (-30px)，不要在这里覆盖
+          console.log(
+            '[tooltip] dot=(%d, %d) tooltipX=%d, contentW=%d, contentH=%d, ' +
+              'newTooltipY=%d (was %d), pointer.top=%d, pointer.left(CSS)=%dpx',
+            rect.left + rect.width / 2,
+            dotCenterY,
+            tooltipX.value,
+            contentRect.width,
+            contentRect.height,
+            newTooltipY,
+            dotCenterY,
+            contentRect.height / 2,
+            -30,
+          );
         }
       }
     }, 0);
