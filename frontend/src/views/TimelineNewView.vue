@@ -208,9 +208,12 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
     if (tags.length > 0) {
       sections.push({ label: '标签:', items: tags.map((t) => ({ text: t, isRef: true })) });
     }
-    // "included in HEAD" (vscode graph.ts:833-836)
-    // isCurrent=true 表示此 commit 就是 HEAD commit
-    const includedInHead = c.isCurrent === true;
+    // "included in HEAD" —— 严格对齐 vscode-git-graph childrenIncludesHead 语义
+    // (web/graph.ts:813-825):
+    //   C is "in HEAD" ⇔ HEAD is a descendant of C ⇔ C is an ancestor of HEAD
+    // c.inHead 由 svgCircleNodes 计算时按祖先 BFS 标记 (见 inHeadShaSet computed),
+    // 比单纯 c.isCurrent 覆盖更广 (HEAD 自身 + 所有祖先), 与 vscode-git-graph 一致。
+    const includedInHead = c.inHead === true;
     tooltipContent.value = {
       shortSha: c.shortSha,
       colorHex: c.colorHex,
@@ -1093,12 +1096,73 @@ interface SvgCircleNode {
   stroke?: string;
   strokeWidth?: number;
   strokeOpacity?: number;
+  /**
+   * v3.x：此 commit 是否"包含在 HEAD 中"。
+   * 严格对齐 vscode-git-graph web/graph.ts:813-825 的 childrenIncludesHead 语义：
+   *   - true ⇔ HEAD 是这个 commit 的 descendant ⇔ 此 commit 是 HEAD 的 ancestor
+   *     (git 术语: reachable from HEAD via parents)
+   *   - HEAD 自身、所有 77399179 的祖先 (init commit, etc.) 都为 true
+   *   - 所有 77399179 之后 (unpulled, descendant) 的 commit 都为 false
+   *
+   * 旧实现用 c.isCurrent === true 只覆盖 HEAD 自身，太窄; 现在通过 BFS
+   * 从 HEAD 沿 parents 走一遍算出祖先集合,所有 visited 节点标 true。
+   */
+  inHead?: boolean;
 }
 
 function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string {
   const branch = refs?.find((_, i) => refTypes?.[i] !== 'tag');
   return branch ?? refs?.[0] ?? subject;
 }
+
+/**
+ * v3.x：算 HEAD 祖先集合 (strict vscode-git-graph semantic)。
+ *
+ * 算法: 从 HEAD commit 出发, 沿 node.parents (BFS) 走一遍, 标记所有 visited
+ * 为祖先。等价于 "C is reachable from HEAD via parents"。
+ *
+ * - HEAD 自身、所有 HEAD 的祖先 (older commits on HEAD 所在的 branch)
+ *   都在集合里 → tooltip 显示 "包含在 HEAD 中"
+ * - 任何 HEAD 的 descendant (unpulled commits, merge 引入的 newer commit)
+ *   不在集合里 → tooltip 显示 "不包含在 HEAD 中"
+ *
+ * 不要用 c.isCurrent: isCurrent 只覆盖 HEAD 自身, 太窄 (vscode-git-graph
+ * 把它当 "isCurrent" 是错的, 它真正用的是 ancestor-of-HEAD 语义)。
+ */
+const inHeadShaSet = computed<Set<string>>(() => {
+  const dto = graphDto.value;
+  if (!dto || !dto.nodes || dto.nodes.length === 0) return new Set();
+
+  // 1. 找 HEAD SHA (isCurrent=true 的节点)
+  let headSha: string | undefined;
+  for (const n of dto.nodes) {
+    if (n.isCurrent) {
+      headSha = n.sha;
+      break;
+    }
+  }
+  if (!headSha) return new Set();
+
+  // 2. 构造 child → parents 索引 (走 parent 链找祖先)
+  const parentsBySha = new Map<string, string[]>();
+  for (const n of dto.nodes) {
+    parentsBySha.set(n.sha, n.parents ?? []);
+  }
+
+  // 3. BFS 从 HEAD 沿 parents 走, 收集所有 visited
+  const visited = new Set<string>();
+  const queue: string[] = [headSha];
+  while (queue.length > 0) {
+    const sha = queue.shift()!;
+    if (visited.has(sha)) continue;
+    visited.add(sha);
+    const parents = parentsBySha.get(sha) ?? [];
+    for (const p of parents) {
+      if (p && !visited.has(p)) queue.push(p);
+    }
+  }
+  return visited;
+});
 
 const svgCircleNodes = computed<SvgCircleNode[]>(() => {
   return (svgRender.value?.nodes ?? []).map((node) => {
@@ -1129,6 +1193,8 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
       stroke: isCurrent ? node.colorHex : 'rgba(30, 30, 30, 0.75)',
       strokeWidth: isCurrent ? 2 : 1,
       strokeOpacity: isCurrent ? 1 : 0.75,
+      // v3.x: 走 vscode-git-graph ancestor-of-HEAD 语义, 不再用 isCurrent
+      inHead: inHeadShaSet.value.has(node.sha),
     };
   });
 });
