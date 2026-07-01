@@ -678,3 +678,66 @@ func (t redirectToServerTransport) RoundTrip(req *http.Request) (*http.Response,
 	req.URL.Host = targetURL.Host
 	return http.DefaultTransport.RoundTrip(req)
 }
+
+// TestGraphResultToDTO_PropagatesIsCommitted 验证 graphResultToDTO 把
+// graph.GraphNode.IsCommitted / graph.GraphBranchLine.IsCommitted 透传到
+// platform.GraphNodeDTO / platform.GraphBranchLineDTO（GitHub 适配器）。
+//
+// v3.x UNCOMMITTED 灰色虚线 lane 的端到端链路依赖该字段从 layout_vscode.go
+// 一路传到前端；这个测试守住 platform → 上层 App 转换的入口。
+func TestGraphResultToDTO_PropagatesIsCommitted(t *testing.T) {
+	dto := graphResultToDTO(&graph.GraphResult{
+		Nodes: []graph.GraphNode{
+			{
+				Row:         0,
+				Lane:        0,
+				Color:       1,
+				SHA:         appgit.UNCOMMITTED_HASH,
+				ShortSHA:    appgit.UNCOMMITTED_HASH,
+				IsCommitted: false,
+			},
+			{
+				Row:         1,
+				Lane:        0,
+				Color:       1,
+				SHA:         "deadbeef",
+				ShortSHA:    "deadbee",
+				IsCommitted: true,
+			},
+		},
+		Branches: []graph.GraphBranch{{
+			Color: 1,
+			End:   2,
+			Lines: []graph.GraphBranchLine{
+				{
+					X1: 0, Y1: 0, X2: 0, Y2: 1,
+					IsCommitted: false,
+				},
+				{
+					X1: 0, Y1: 1, X2: 0, Y2: 2,
+					IsCommitted: true,
+				},
+			},
+		}},
+		MaxLane: 0,
+	})
+
+	if len(dto.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(dto.Nodes))
+	}
+	if dto.Nodes[0].IsCommitted {
+		t.Errorf("UNCOMMITTED 节点 IsCommitted 应该透传为 false，实际 true")
+	}
+	if !dto.Nodes[1].IsCommitted {
+		t.Errorf("HEAD 节点 IsCommitted 应该透传为 true，实际 false")
+	}
+	if len(dto.Branches) != 1 || len(dto.Branches[0].Lines) != 2 {
+		t.Fatalf("expected 1 branch with 2 lines, got %#v", dto.Branches)
+	}
+	if dto.Branches[0].Lines[0].IsCommitted {
+		t.Errorf("UNCOMMITTED→HEAD 边 IsCommitted 应该透传为 false，实际 true")
+	}
+	if !dto.Branches[0].Lines[1].IsCommitted {
+		t.Errorf("HEAD→parent 边 IsCommitted 应该透传为 true，实际 false")
+	}
+}

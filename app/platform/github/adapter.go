@@ -572,6 +572,7 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 				X2:          ln.X2,
 				Y2:          ln.Y2,
 				LockedFirst: ln.LockedFirst,
+				IsCommitted: ln.IsCommitted,
 			})
 		}
 		branches = append(branches, platform.GraphBranchDTO{

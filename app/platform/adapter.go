@@ -174,6 +174,9 @@ type GraphBranchLineDTO struct {
 	X2          int  `json:"x2"`
 	Y2          int  `json:"y2"`
 	LockedFirst bool `json:"lockedFirst"`
+	// IsCommitted 该 line 是否属于「已提交」段。
+	// 对齐 vscode graph.ts:102 `line.isCommitted` 与 Branch.drawPath:152 stroke 切换。
+	IsCommitted bool `json:"isCommitted,omitempty"`
 }
 
 // GraphNodeDTO 图节点

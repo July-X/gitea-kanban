@@ -128,12 +128,22 @@ type WailsApp = {
       refTypes?: string[];
       isCurrent?: boolean;
       isStash?: boolean;
+      /** v3.x：UNCOMMITTED 虚拟节点 = false，常规 commit = true（缺省视作 true） */
+      isCommitted?: boolean;
     }>;
     edges: Array<{ fromRow: number; toRow: number; fromLane: number; toLane: number; color: number; type: number }>;
     branches?: Array<{
       color: number;
       end: number;
-      lines: Array<{ x1: number; y1: number; x2: number; y2: number; lockedFirst: boolean }>;
+      lines: Array<{
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        lockedFirst: boolean;
+        /** v3.x：UNCOMMITTED 段 = false，常规段 = true（缺省视作 true） */
+        isCommitted?: boolean;
+      }>;
     }>;
     maxLane: number;
     truncated: boolean;

@@ -454,6 +454,10 @@ type GraphBranchLineDTO struct {
 	X2          int  `json:"x2"`
 	Y2          int  `json:"y2"`
 	LockedFirst bool `json:"lockedFirst"`
+	// IsCommitted 该 line 是否属于「已提交」段。
+	// 对齐 vscode graph.ts:102 `line.isCommitted` 与 Branch.drawPath:152 stroke 切换；
+	// false 时前端走 #808080 + stroke-dasharray: 2px 灰色虚线。
+	IsCommitted bool `json:"isCommitted,omitempty"`
 }
 
 // GraphNodeDTO 图节点
@@ -473,6 +477,11 @@ type GraphNodeDTO struct {
 	RefTypes    []string `json:"refTypes,omitempty"`
 	IsCurrent   bool     `json:"isCurrent,omitempty"`
 	IsStash     bool     `json:"isStash,omitempty"`
+	// IsCommitted 该节点是否已提交 (true) 还是 UNCOMMITTED 虚拟节点 (false)。
+	// 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080。
+	// App 端 LogCommits / LogCommitsVscode 在 local 落后 origin 时 unshift 一颗
+	// UNCOMMITTED 虚拟 commit (SHA = "*")，对应节点的 IsCommitted = false。
+	IsCommitted bool `json:"isCommitted,omitempty"`
 }
 
 // GraphEdgeDTO 图边
@@ -2519,6 +2528,7 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 			RefTypes:    n.RefTypes,
 			IsCurrent:   n.IsCurrent,
 			IsStash:     n.IsStash,
+			IsCommitted: n.IsCommitted,
 		})
 	}
 
@@ -2544,6 +2554,7 @@ func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
 				X2:          ln.X2,
 				Y2:          ln.Y2,
 				LockedFirst: ln.LockedFirst,
+				IsCommitted: ln.IsCommitted,
 			})
 		}
 		branches = append(branches, GraphBranchDTO{

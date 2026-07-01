@@ -683,6 +683,7 @@ export namespace main {
 	    x2: number;
 	    y2: number;
 	    lockedFirst: boolean;
+	    isCommitted?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GraphBranchLineDTO(source);
@@ -695,6 +696,7 @@ export namespace main {
 	        this.x2 = source["x2"];
 	        this.y2 = source["y2"];
 	        this.lockedFirst = source["lockedFirst"];
+	        this.isCommitted = source["isCommitted"];
 	    }
 	}
 	export class GraphBranchDTO {
@@ -770,6 +772,7 @@ export namespace main {
 	    refTypes?: string[];
 	    isCurrent?: boolean;
 	    isStash?: boolean;
+	    isCommitted?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GraphNodeDTO(source);
@@ -792,6 +795,7 @@ export namespace main {
 	        this.refTypes = source["refTypes"];
 	        this.isCurrent = source["isCurrent"];
 	        this.isStash = source["isStash"];
+	        this.isCommitted = source["isCommitted"];
 	    }
 	}
 	export class GraphResultDTO {
