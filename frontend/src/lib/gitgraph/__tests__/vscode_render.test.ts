@@ -344,3 +344,68 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		);
 	});
 });
+
+describe('gitgraph vscode-render UNCOMMITTED 灰色虚线 (v3.x)', () => {
+	test('UNCOMMITTED 节点 + isCommitted=false branch line → 渲染出 #808080 + 2px dasharray 灰色虚线段', () => {
+		// 1. 构造 [UNCOMMITTED(row 0), HEAD(row 1), parent(row 2)] 三个 commit
+		// 2. branches 用 3 条 line 把 row 0↔1↔2 串起来
+		// 3. row 0↔1 line 标 isCommitted=false (模拟 Go 端 layout_vscode.go 透传)
+		// 4. 断言 renderGraphVscode 输出的 paths 里至少有一条 isCommitted=false + #808080 + '2px'
+		const graph: GraphResultDto = {
+			nodes: [
+				node(0, 0, 0, '*', ['head']),
+				node(1, 0, 0, 'head', ['parent']),
+				node(2, 0, 0, 'parent', []),
+			],
+			edges: [
+				{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 },
+				{ fromRow: 1, toRow: 2, fromLane: 0, toLane: 0, color: 0, type: 0 },
+			],
+			maxLane: 0,
+			truncated: false,
+		};
+		// 关键:branch lines 携带 isCommitted
+		(graph as any).branches = [{
+			color: 0,
+			end: 3,
+			lines: [
+				{ x1: 0, y1: 0, x2: 0, y2: 1, lockedFirst: false, isCommitted: false }, // UNCOMMITTED → HEAD
+				{ x1: 0, y1: 1, x2: 0, y2: 2, lockedFirst: false, isCommitted: true },  // HEAD → parent
+			],
+		}];
+
+		const r = renderGraphVscode(graph);
+		assert.ok(r.paths.length > 0, '应该渲染出 path');
+
+		// 关键断言:至少有一条 path 的 isCommitted=false + colorHex=#808080 + dasharray='2px'
+		const uncommittedPaths = r.paths.filter((p) => p.isCommitted === false);
+		assert.ok(
+			uncommittedPaths.length > 0,
+			'UNCOMMITTED 行应该产生 isCommitted=false 的 path, 实际: ' +
+				JSON.stringify(r.paths.map((p) => ({ isCommitted: p.isCommitted, colorHex: p.colorHex, dasharray: p.dasharray })))
+		);
+		assert.equal(uncommittedPaths[0]!.colorHex, '#808080', 'UNCOMMITTED path 颜色应该是 #808080');
+		assert.equal(uncommittedPaths[0]!.dasharray, '2px', 'UNCOMMITTED path 应该是 2px dasharray');
+	});
+
+	test('UNCOMMITTED 节点在 nodes 数组里携带 isCommitted=false → 透传到 result.nodes', () => {
+		const graph: GraphResultDto = {
+			nodes: [
+				{ ...node(0, 0, 0, '*', ['head']), isCommitted: false },
+				node(1, 0, 0, 'head', []),
+			],
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
+			maxLane: 0,
+			truncated: false,
+		};
+		(graph as any).branches = [{
+			color: 0, end: 2,
+			lines: [{ x1: 0, y1: 0, x2: 0, y2: 1, lockedFirst: false, isCommitted: false }],
+		}];
+
+		const r = renderGraphVscode(graph);
+		assert.equal(r.nodes.length, 2);
+		assert.equal(r.nodes[0]!.isCommitted, false, 'row 0 (UNCOMMITTED) 透传 isCommitted=false');
+		assert.equal(r.nodes[1]!.isCommitted, undefined, 'row 1 缺省 (undefined)');
+	});
+});

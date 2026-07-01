@@ -243,6 +243,9 @@ export function renderGraphVscode(
 			order,
 			kind: 'shadow',
 			isCommitted,
+			// v3.x：UNCOMMITTED 段 (isCommitted=false) 的 shadow 也带 dasharray，
+			// 保持和 line 一致 —— shadow 是粗描边光晕，半透明背景下视觉上也能看到虚线。
+			dasharray: finalDasharray,
 		});
 		paths.push({
 			d: dStr,
