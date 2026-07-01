@@ -236,15 +236,17 @@ function dotEnter(event: MouseEvent, c: SvgCircleNode) {
       sections.push({ label: '分支:', items: branches.map((b) => ({ text: b, isRef: true })) });
     }
     // 标签: 始终显示 (即使当前 commit 没 tag 也要列出 graph 内所有 tag)
-    //  - 当前 commit 自己的 tag 用 ' *' 后缀标记 (跟 git tag --contains 输出格式类似)
-    //  - 其它 tag 直接列
+    // 排序: 当前 commit 自己的 tag 排前面 (顺序本身就传递"这是我的"信息, 不再
+    // 用 * 后缀, 避免冗余视觉噪声)
     const allTags = allTagsInGraph.value;
     if (allTags.length > 0) {
-      const tagItems: Array<{ text: string; isRef: boolean }> = allTags.map((t) => ({
-        text: tags.includes(t) ? `${t} *` : t,
-        isRef: true,
-      }));
-      sections.push({ label: tags.length > 0 ? '标签 (当前 / 全部):' : '所有标签:', items: tagItems });
+      const currentTags = allTags.filter((t) => tags.includes(t));
+      const otherTags = allTags.filter((t) => !tags.includes(t));
+      const orderedTags = [...currentTags, ...otherTags];
+      sections.push({
+        label: '所有标签:',
+        items: orderedTags.map((t) => ({ text: t, isRef: true })),
+      });
     }
     // "included in HEAD" —— 严格对齐 vscode-git-graph childrenIncludesHead 语义
     // (web/graph.ts:813-825):
