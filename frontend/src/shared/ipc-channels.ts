@@ -1,43 +1,44 @@
 /**
  * IPC channel 名常量（zod-free）
  *
- * 唯一信息源：docs/design/02-architecture.md §5.1（端点命名）+ ADR-0002 reset
+ * 唯一信息源：AGENTS.md §6.2 Wails Binding 模式 + ADR-0005（v2.0 迁移）+ ADR-0006 §2.2（业务 binding 补全）
  *
- * 为何独立此文件：
- * - sandboxed preload 不允许 runtime require external 模块（AGENTS §8.10）
- * - preload 也用这些 channel 字符串 → 不能 import 自带 zod 的 src/main/ipc/schema.js
- * - 此文件零依赖、零运行时副作用 → 既可被 sandboxed preload 单文件 CJS bundle 静态包含
+> **⚠️ 2026-07-01 注释更新（v0.3.0 梳理）**：本文件早期注释引用的 `docs/design/02-architecture.md §5.1`（已 DEPRECATED）和 `sandboxed preload`（v2.0 起已无 preload 概念）已不再适用。当前实现：
+> - v2.0 起无 preload：渲染端通过 `window.go.main.App.<Method>()` 直接调 Go 后端（Wails 自动注入 bindings 到 `frontend/wailsjs/`）
+> - 兼容层：`frontend/src/lib/wails-api-shim.ts` 把 `window.api.<namespace>.<method>()` 老调用转译到 `window.go.main.App.*`，等所有 namespace 迁完可拆
+>
+> 端点清单（v0.5.0-m9 当前生效，44 个）：从 `frontend/wailsjs/wailsjs/go/main/App.d.ts` 生成；以 `git diff frontend/wailsjs/ main.go` 验证一致性
+ *
+ * 为何独立此文件（v1 时代历史背景）：
+ * - v1 sandboxed preload 不允许 runtime require external 模块（Electron 沙箱）
+ * - v1 preload 也用这些 channel 字符串 → 不能 import 自带 zod 的 src/main/ipc/schema.js
+ * - v1 此文件零依赖、零运行时副作用 → 既可被 sandboxed preload 单文件 CJS bundle 静态包含
  *   （不需 externalizeDeps），也可被 main 端 schema.ts re-export
  *
  * 历史：
- * - 2026-06-11：从 src/main/ipc/schema.ts 抽离（修复 preload sandbox module not found: zod）
+ * - 2026-06-11：v1 从 src/main/ipc/schema.ts 抽离（修复 preload sandbox module not found: zod）
  * - 2026-06-11 ADR-0002 reset：删 board.cards.* 7 个 + 加 issues.* 7 个 + labels.* 2 个
- * - 2026-06-12 theme-ipc（v1.1.2 主题切换）：加 THEME_GET / THEME_SET 2 个端点
- *   （持久化走 sqlite prefs 表，channel 命名沿 preferences.* 而非常规 theme.* —— 见下）
- * - 2026-06-13 clipboard：加 CLIPBOARD_WRITE 1 个端点（preferences.clipboard.write，分支/提交号复制）
- * - 2026-06-13 undo-by-project（M6 落地）：加 USER_UNDO_STATUS 1 个端点（栈深度查询；UI 灰化按钮用）
+ * - 2026-06-12 v1 theme-ipc：加 THEME_GET / THEME_SET 2 个端点
+ * - 2026-06-13 v1 clipboard：加 CLIPBOARD_WRITE 1 个端点
+ * - 2026-06-13 v1 undo-by-project：加 USER_UNDO_STATUS 1 个端点
+ * - 2026-06-22 v2.0：Wails 迁移，前端从 `src/renderer/` 迁到 `frontend/src/`；channel 名沿用 `namespace.method` 风格
+ * - 2026-07-01 v0.3.0：注释对齐 v2.0/v2.4/v3.0 实际状态
  *
- * 端点清单（M6 拍板，45 个）：
- * auth ×3 : connect / disconnect / status
- * repos ×3 : list / addProject / removeProject
- * branches ×3 : list / rename / star（create/delete 已移除）
- * commits ×3 : list / get / timeline
- * pulls ×3 : list / get / merge（+ close/updateLabels/updateAssignees/updateReviewers；create 已移除）
- * board.columns ×7 : list / create / update / reorder / delete / mapLabel / unmapLabel
- * issues ×7 : list / get / create / update / addLabel / removeLabel / moveColumn
- * labels ×2 : list / create
- * issues.comment ×2 : list / create（注：在 issues.comment.* 命名空间下；callable via issues.comment.list/create）
- * members ×1 : list（a3 新增：仓库成员 = gitea repo collaborators；前端统一吃 `{items, hasMore}`）
- * user ×5 : prefs.get / prefs.set / undo / redo / undoStatus（M5 +4；M6 undo-by-project +1）
- * preferences ×3 : theme.get / theme.set（v1.1.2 主题切换 —— §16 tech-refine.md 拍板）/ clipboard.write（M6 补：分支/提交号复制）
+ * 端点清单（v0.5.0-m9，44 个 binding；以 Wails 生成的 App.d.ts 为准）：
+ * auth ×5 : connect / status / disconnect / disconnectOne / switchAccount（v2.4 补 disconnectOne/switchAccount）
+ * repos ×3 : list / addProject / removeProject（v2.3 修复 StatusBar 刷新）
+ * branches ×5 : list / star / unstar / listStarredBranches（v2.x 移除 create/rename/delete）
+ * commits ×3 : get / gitgraphCloneRepo / gitgraphIsRepoCloned / gitgraphPull + logGraph（v2.4 补）
+ * pulls ×3 : merge（v1 M11）/ get / list（GitHub 暂不支持）
+ * board.columns ×5 : list / create / update / delete / mapLabel（v1 M4 + v2 hotfix）
+ * issues ×1 : list（其余方法暂未迁移到 Go 端）
+ * user ×4 : prefs.get / prefs.set / undo / redo（v2.4 修复 prefs 死链）
+ * preferences ×2 : theme.get / theme.set（v1.1.2 主题切换）
  *
  * 命名说明（v1.1.2 主题端点）：
  * - channel 字面量 = `'preferences.theme.get'` / `'preferences.theme.set'` / `'preferences.clipboard.write'`
- *   —— 走 `preferences.*` 而非 `theme.*`，理由：v1.1.2 之后还会有更多"应用级偏好"
- *   （如通知规则 / 同步周期 / 自定义快捷键 / 剪贴板等）共享同一个 namespace，主题只是其中之一
- * - 渲染端 API 暴露 = `window.api.preferences.{theme,clipboard}.{get,set,write}`（preload 端在 theme-preload / clipboard task 改）
- *
- * 历史端点计数：M3=32 → M5 fix-3=36（+4 user.prefs）→ a3=37（+1 members）→ theme-ipc=39（+2 preferences.theme）→ clipboard=44（+1 preferences.clipboard.write）→ undo-by-project=45（+1 user.undoStatus）→ destructive-ops-cleanup=42（-3：branches.create/delete, pulls.create）
+ * - 走 `preferences.*` 而非 `theme.*`：v1.1.2 之后还会有更多"应用级偏好"共享同一 namespace
+ * - 渲染端 API 暴露 = `window.api.preferences.{theme,clipboard}.{get,set,write}`（由 `wails-api-shim.ts` 转译）
  */
 
 export const IpcChannel = {

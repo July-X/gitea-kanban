@@ -1,9 +1,21 @@
 # ADR-0001: keychain 存储方案选型（keytar vs @napi-rs/keyring vs Electron safeStorage）
 
-- **Status**: Accepted
+> ## ⚠️ SUPERSEDED by ADR-0005（2026-06-22）
+>
+> **本 ADR 描述的是 v1 时代的 Electron+@napi-rs/keyring 选型；v2.0 已切换为 Go+Wails，凭证存储改用 [`zalando/go-keyring`](https://github.com/zalando/go-keyring) v0.2.6（纯 Go）。**
+>
+> - 取代的迁移决策：[ADR-0005 §决策 4](../adr/0005-electron-to-go-wails-migration.md#决策-4凭证存储--go-keyring纯-go-替代-napi-rskeyring)
+> - 当前生效实现：`app/secret/store.go`（`go-keyring.Set/Get/Delete` + 0600 文件 dev fallback）
+> - 后续不再维护本 ADR 的 @napi-rs/keyring / keytar / Electron safeStorage 内容
+>
+> **保留本文件作为 v1 决策历史参考**（不要按本文件实施）。当前凭证存储铁律仍来自 v2.0 [AGENTS.md §8.1](../../AGENTS.md)。
+>
+> ---
+
+- **Status**: Superseded by ADR-0005（2026-06-22）
 - **Date**: 2026-06-10（第一次提交 ~14:11；retry 修订 ~15:08；本次 attempt 3 ~15:25 全文重测）
 - **Deciders**: backend agent (Coder)、orchestrator (Mavis)、verifier 待 review
-- **Related**: `docs/design/02-architecture.md` §2.3 / §2.6 / §5.4 / §6.1；`AGENTS.md` §8.2 鉴权铁律；M0 路线图 1a 任务
+- **Related**: ~~`docs/design/02-architecture.md` §2.3 / §2.6 / §5.4 / §6.1~~（v2.0 已 DEPRECATED）；`AGENTS.md` §8.1 鉴权铁律；M0 路线图 1a 任务
 - **修订历史**：
   - **第一次提交**（~14:11）：3 个候选 + 12 维评估 + crosstest 互通证据 + 备选触发条件
   - **retry attempt 2**（~15:08）：① 澄清 12 = 库总包、7 = 本项目发布矩阵；② 新增 `src/shared/errors.ts` 需加 2 个 `IpcErrorCode` 常量的下游条目；③ References §6 新增 3 个独立事实复核（npm optionalDependencies 真实数量 / IpcErrorCode 当前 10 个常量 / retry 复跑补测脚本 EXIT=0）

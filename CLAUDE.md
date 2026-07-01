@@ -1,6 +1,8 @@
 # CLAUDE.md — gitea-kanban
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
+>
+> **最后更新**：2026-07-01（v2.0 + v2.4 + v2.5 + v2.6 + v3.0–v3.14 + v0.3.0 + v0.5.0-m9）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -8,9 +10,17 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0）
 
-> **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.2 鉴权铁律）
+> **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
+>
+> **v2.5 增量**：workspace 按账号分层（旧布局自动迁移到 `_pre_v25_workspace` 备份）
+>
+> **v2.6 增量**：StatusBar 同步进度条（go-git sideband → EventsEmit → 前端 UI）
+>
+> **v3.0–v3.14 增量**：Git Graph 严格 1:1 复刻 vscode-git-graph（dot hover / ref badge / lane 几何 / S 曲线 / 列宽拖动 / 表头中文 / blobless clone 修复）
+>
+> **v0.3.0 增量**：UNCOMMITTED lane 1:1 对齐 vscode-git-graph（git status --porcelain 直采）
 
 - 运行时：Go 1.22+ + Wails v2.12（用系统 WebView，非 Chromium）
 - git 客户端：go-git v5（纯 Go，无 CGO，替代旧的 spawn('git')；v2.4 走 NoCheckout 轻量模式）

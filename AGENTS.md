@@ -1,15 +1,28 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0)
+# AGENTS.md — gitea-kanban (v2.0 → v0.5.0-m9)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-06-22（**v2.0 重大迁移** + **v2.4 迭代收尾** + **v2.5 workspace 按账号分层**）
+> 最后更新：2026-07-01（**v2.0 重大迁移** + **v2.4 迭代收尾** + **v2.5 workspace 按账号分层** + **v2.6 同步进度条** + **v3.0–v3.14 Git Graph 严格 1:1 复刻 vscode-git-graph** + **v0.3.0 UNCOMMITTED lane 1:1 对齐** + **v0.5.0-m9 M9 里程碑**）
 >
-> - **v2.0**：Electron+TypeScript+Vue → Go+Wails+Vue 3；单平台 Gitea → 多平台 Gitea+GitHub；前端保留 Vue 3，git 客户端改用 go-git；旧代码归档到 `legacy/electron/`。详见 [ADR-0005](./docs/adr/0005-electron-to-go-wails-migration.md)
-> - **v2.4**：迁移完成后真实用户桌面跑暴露 6 类问题（鉴权铁律 / 业务 binding stub / 数据目录嵌套 / StatusBar localPath 拼错 / prefs 死链 / go-git 拉全 worktree），全部修复并记录在 [ADR-0006](./docs/adr/0006-v24-iteration-fixes.md) + [07-v24-iteration.md](./docs/design/07-v24-iteration.md)。关键：所有 binding 接受 `projectId` / `owner+repo` 业务态概念，Go 端反查 `localPath + token`；go-git 走 `NoCheckout=true` 轻量模式（磁盘 -99%）；prefs 走 IPC + localStorage 双源持久化
-> - **v2.5**：workspace 按账号分层。`${dataDir}/workspace/repos/${owner}__${repo}/` → `${dataDir}/workspace/repos/${username}/${owner}__${repo}/`。多账号场景避免同名 username 在不同平台撞目录；启动期**自动迁移**旧数据，备份保留到 `${dataDir}/workspace/_pre_v25_workspace`。详见 §6.4 + §6.5
+> - **v2.0** (2026-06-22)：Electron+TypeScript+Vue → Go+Wails+Vue 3；单平台 Gitea → 多平台 Gitea+GitHub；前端保留 Vue 3，git 客户端改用 go-git；旧代码归档到 `legacy/electron/`。详见 [ADR-0005](./docs/adr/0005-electron-to-go-wails-migration.md)
+> - **v2.4** (2026-06-22)：迁移完成后真实用户桌面跑暴露 6 类问题（鉴权铁律 / 业务 binding stub / 数据目录嵌套 / StatusBar localPath 拼错 / prefs 死链 / go-git 拉全 worktree），全部修复并记录在 [ADR-0006](./docs/adr/0006-v24-iteration-fixes.md) + [07-v24-iteration.md](./docs/design/07-v24-iteration.md)。关键：所有 binding 接受 `projectId` / `owner+repo` 业务态概念，Go 端反查 `localPath + token`；go-git 走 `NoCheckout=true` 轻量模式（磁盘 -99%）；prefs 走 IPC + localStorage 双源持久化
+> - **v2.5** (2026-06-22)：workspace 按账号分层。`${dataDir}/workspace/repos/${owner}__${repo}/` → `${dataDir}/workspace/repos/${username}/${owner}__${repo}/`。多账号场景避免同名 username 在不同平台撞目录；启动期**自动迁移**旧数据，备份保留到 `${dataDir}/workspace/_pre_v25_workspace`。详见 [ADR-0007](./docs/adr/0007-workspace-account-scoped.md) + §6.4 + §6.5
+> - **v2.6** (2026-06-25)：StatusBar 仓库行同步进度条。`go-git sideband.Progress` → Go 端 `SidebandWriter` → `wailsruntime.EventsEmit("git:sync:progress")` → 前端 `wails-api-shim.on()` → repo store `progressByRepo` → StatusBar 行内 2px 进度条。详见 [memory: gitea-kanban-v26-sync-progress-bar](../../.reasonix/projects/-Users-zhongxingxing-2026-code-gitea-kanban/memory/gitea-kanban-v26-sync-progress-bar.md)
+> - **v3.0–v3.14** (2026-06-26 ~ 2026-06-30)：Git Graph 严格 1:1 复刻 vscode-git-graph，丢弃 v2.x 历史包袱。关键 commit `71a43f3 refactor(gitgraph): v3.0 严格 1:1 复刻 vscode-git-graph，丢弃 v2.x 历史包袱`。包含：v3.1-v3.3 列宽拖动 / [60,715] clamp、v3.10-v3.14 dot hover + ref badge + lane 色软底、SVG S 曲线、SourceTree 风格栅格栏、表头中文、author date 替代 committer date、blobless clone 下 (+N | -N) 0 修复等
+> - **v0.3.0** (2026-07-01)：UNCOMMITTED lane 1:1 对齐 vscode-git-graph，`git status --porcelain` 直采。详见 `git tag v0.3.0` 注释 + commit `24066b5 fix(gitgraph): UNCOMMITTED 检测改用 git status --porcelain, 1:1 复刻 vscode-git-graph`
+> - **v0.5.0-m9** (2026-07-01)：M9 里程碑。TimelineView 防抖 composable 抽离 + schema regression 守 M5 fix-1 + W3 e2e helper 计数语义修正。4 件套全 EXIT=0，W3 known-issue 3→0，vitest 68 tests PASS
 >
 > **历史快照**：v1 时代的 Electron 文档已移入 `legacy/electron/` 仅供参考，**不再构建、不再维护**。
+>
+> **过期文档警示**（避免后续 agent 误信）：
+> - `docs/adr/0001-keychain.md` — SUPERSEDED by ADR-0005（已加横幅）
+> - `docs/adr/0003-local-store-electron-store.md` — SUPERSEDED by ADR-0005（已加横幅）
+> - `docs/design/02-architecture.md` — DEPRECATED（已标注）
+> - `docs/design/03-frontend.md` — DEPRECATED（2026-07-01 加横幅）
+> - `docs/design/00-overview.md` / `01-research.md` / `04-review-report.md` / `05-repair-decisions.md` / `checklist.md` — v1 设计阶段历史档案，**不**作为实施依据
+> - `docs/onboarding/pm-first-run.md` / `docs/review/*.md` — v1 时代 review 文档
+> - `CHANGELOG.md` — 严重过期，停留在 v1.3.1（重写待办）
 
 ---
 

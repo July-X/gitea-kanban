@@ -1,38 +1,38 @@
 /**
  * 统一 IPC 错误格式
  *
- * 契约文档：docs/design/02-architecture.md §5.2
- * 错误码表：docs/design/02-architecture.md §5.4
+> **⚠️ 2026-07-01 注释更新（v0.3.0 梳理）**：本文件早期注释引用的 `docs/design/02-architecture.md §5.2/§5.4`（已 DEPRECATED）和 `src/main/ipc/schema.ts`（v2.0 已删除）和 `@napi-rs/keyring`（v2.0 改 zalando/go-keyring）和 `ipcMain.handle`（v2.0 是 Wails binding）已不再适用。当前实现：
+> - 错误定义：`app/platform/errors.go`（Go 端 `PlatformError` 类型）+ `app/store/errors.go`（业务错误）
+> - 前后端共享：本文件（TypeScript 端）+ Go 端 `app/shared/errors.go`（v2.0 重写）
+> - 错误码语义保持不变（unauthenticated / token_invalid / permission_denied / not_found / conflict / rate_limited / network_offline / validation_failed / internal / platform_error 等）
  *
- * 本文件是 IPC 契约的 single source of truth 之一（与 src/main/ipc/schema.ts 配合）。
- * 前后端都从这里 import 类型；前端只读不改。
- *
- * 关键约束（来自 AGENTS.md §8.2 鉴权铁律）：
+ * 关键约束（来自 AGENTS.md §8.1 鉴权铁律）：
  * - 错误码始终 snake_case 英文，**不做** i18n
  * - message 用 i18n key 占位（zh-Hans / en 由前端按 locale 翻译）
- * - 业务错误 throw IpcError；底层 gitea 错误码由 gitea 集成层映射成 IpcError
+ * - 业务错误 throw PlatformError；底层 Gitea/GitHub 错误码由平台 Adapter `mapHTTPError` 映射
  *
- * 增加/修改错误码 = IPC schema 变更，按 AGENTS §7.1 第 3 条需用户拍板。
+ * 增加/修改错误码 = IPC schema 变更，按 AGENTS.md §13 不决事项需用户拍板。
  */
 
 /**
  * 业务错误码（snake_case 字符串值）
  *
- * 来自 02-architecture.md §5.4 的 10 个原始常量：
+ * 历史来源（v1 时代）：
+ * - 02-architecture.md §5.4 的 10 个原始常量：
  *   unauthenticated / token_invalid / permission_denied / not_found /
  *   conflict / rate_limited / network_offline / gitea_error /
  *   validation_failed / internal
- *
- * 来自 docs/adr/0001-keychain.md §"需更新的下游文件" 的 2 个新增常量：
+ * - docs/adr/0001-keychain.md §"需更新的下游文件" 的 2 个新增常量（v1 候选，v2.0 改 zalando/go-keyring 后由 Go 端自己处理 keychain 错误）：
  *   keychain_unavailable / keychain_access_denied
- *   —— 触发于 @napi-rs/keyring 在 Linux 无 dbus+无 kwallet/libsecret 时，
- *      或 Windows Credential Vault ACL 拒绝时。
- *
- * 来自 v1.1.2 主题切换（plan_96625ed5 theme-ipc，2026-06-12）的 4 个新增常量：
+ * - v1.1.2 主题切换（plan_96625ed5 theme-ipc，2026-06-12）的 4 个新增常量：
  *   theme_not_found / invalid_theme / database_unavailable / database_write_failed
- *   —— 用于 preferences.theme.{get,set} IPC 端点
- *   —— 拍板来源：design-system/pages/tech-refine.md §16.1-§16.3（user 已拍板）+ 本次 plan 任务 prompt
- *   —— AGENTS §8.8 教训对齐：plan 收口时由 orchestrator 在 AGENTS §8 加条目登记
+ *   —— v2.0 起主题 IPC 直接走 preferences.* 命名空间；'database_unavailable' 改为 'storage_unavailable'
+ *
+ * v2.0 起实际生效错误码（以 Wails 生成的类型 + Go 端 `app/shared/errors.go` 为准）：
+ * - unauthenticated / token_invalid / permission_denied / not_found / conflict / rate_limited
+ * - network_offline / platform_error（原 gitea_error，v2.0 多平台抽象后改名）/ validation_failed / internal
+ * - keychain_error（v2.0 统一 Go 端 keychain 错误，代替 v1 的 2 个细分常量）
+ * - storage_unavailable / storage_write_failed（v2.0 JSON 文件存储错误，代替 v1 database_*）
  */
 export const IpcErrorCode = {
   // === 业务错误（02-architecture.md §5.4 原始 10 个）===
