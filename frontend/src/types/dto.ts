@@ -102,7 +102,8 @@ export interface RepoDto {
   owner: string;
   name: string;
   fullName: string;
-  description: string;
+  /** 后端 JSON 对空字符串使用 omitempty，可能缺失 */
+  description?: string;
   defaultBranch: string;
   archived: boolean;
   private: boolean;
