@@ -67,3 +67,4 @@ node_modules/
 # （例如 tools/vscode-recheck/debug 是独立的 HTML 调试工具，不能 commit 它的 build 产物）
 /debug
 /tools/*/debug
+.qoder/
