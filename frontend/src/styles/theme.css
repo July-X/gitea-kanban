@@ -510,8 +510,11 @@ body,
   font-family: var(--font-sans);
   font-size: var(--font-md);
   line-height: var(--line-base);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* 字体平滑：不设置 -webkit-font-smoothing / -moz-osx-font-smoothing
+   * 原因：WebKit WebView (WKWebView) 上 antialiased 强制灰度抗锯齿，
+   *   禁用了子像素抗锯齿，导致 2K 非 Retina 屏文字发虚。
+   *   不设置时 macOS 会自动选择最佳方式（Retina→灰度，非 Retina→子像素）。
+   *   同时不设置 text-rendering，让浏览器自行优化。 */
 }
 
 body {
