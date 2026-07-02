@@ -447,10 +447,14 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
           - 点 fullName 文字区域 → 切到该仓库上下文
           - 点行末按钮 → 只触发按钮 action（不切换仓库）
 
-          v0.4.0 调整顺序：api URL 上移到 dropdown 之前，
-          dropdown 下移到挨着 refresh 按钮。
-          最终顺序：chip → url → picker（仓库）→ refresh → theme
+          v0.4.0-2 fixup：api URL `<span>` 在 commit dc004ad 只加了注释，
+          没真移动 DOM。后续 commit 411f2a7 才真正把 <span class="statusbar__url">
+          从 picker 后（line 555）移到 picker 前。现状已正确（line ~454 一行紧邻）。
         -->
+        <span v-if="auth.currentGiteaUrl" class="statusbar__url mono" :title="auth.currentGiteaUrl">
+          {{ auth.currentGiteaUrl }}
+        </span>
+
         <div
           v-if="auth.isConnected"
           ref="pickerEl"
@@ -545,16 +549,6 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
             <EmptyState v-else title="没有匹配的仓库" description="试试别的搜索词" />
           </div>
         </div>
-
-        <!--
-          v0.4.0 顺序调整：api URL 上移到仓库 dropdown 之前，
-          让仓库 dropdown 紧挨着 refresh 按钮（pickRepo 选完后紧接可触发刷新）。
-          原顺序：chip → picker → url → refresh → theme
-          新顺序：chip → url → picker → refresh → theme
-        -->
-        <span v-if="auth.currentGiteaUrl" class="statusbar__url mono" :title="auth.currentGiteaUrl">
-          {{ auth.currentGiteaUrl }}
-        </span>
 
         <button
           v-if="auth.isConnected"
