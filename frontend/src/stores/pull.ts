@@ -27,6 +27,7 @@ import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListPullsResp, PullDto, PullState, MergeMethod } from '@renderer/types/dto';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
+import { useRepoStore } from '@renderer/stores/repo';
 
 /** 视图层 tab 维度 */
 export type PullFilter = 'all' | 'open' | 'merged' | 'closed';
@@ -183,6 +184,20 @@ export const usePullStore = defineStore('pull', () => {
       } catch {
         // 刷新失败不影响合并结果
       }
+      // v0.6+：合并成功后自动同步 Git Graph
+      //   - 远端已产生新 merge commit，本地 refs 不刷新的话 graph 上看不到
+      //   - 复用 PullRepoByProjectId 链路（自带进度回调 → StatusBar 行末自动亮）
+      //   - 派发 app:refresh 事件 → TimelineNewView.vue 监听后重 loadGraph
+      try {
+        await useRepoStore().pullRepoByProjectId({ projectId: currentProjectId.value });
+      } catch {
+        // pull 失败不影响合并结果（前端可在 StatusBar 手动重试）
+      }
+      try {
+        window.dispatchEvent(new CustomEvent('app:refresh'));
+      } catch {
+        /* 静默 */
+      }
     }
     return result;
   }
@@ -205,6 +220,13 @@ export const usePullStore = defineStore('pull', () => {
         await list(currentProjectId.value, true);
       } catch {
         // 刷新失败不影响关闭结果
+      }
+      // v0.6+：关闭后也派发 app:refresh，让 TimelineNewView 在用户切到 Git Graph 时
+      // 能看到关闭事件带来的潜在 DAG 变化（虽然 PR 不直接产 commit，但侧链 fetch 可能更新）
+      try {
+        window.dispatchEvent(new CustomEvent('app:refresh'));
+      } catch {
+        /* 静默 */
       }
     }
     return result;
