@@ -39,7 +39,6 @@ import {
 import {
   testGitBinary,
   openGitBinaryPicker,
-  stripGitBinaryQuarantine,
   type TestGitBinaryResult,
 } from '@renderer/lib/ipc-client';
 import {
@@ -74,8 +73,6 @@ const router = useRouter();
 //
 // 表单直接绑 settings.gitBinaryPath（Pinia ref），未保存时 store 已 dirty 但未持久化；
 // 后端 setGitBinaryPath 在用户点「保存」时落盘，watch 不需要（store 自管）。
-const gitBinaryPicking = ref(false);
-const gitBinaryStripping = ref(false);
 const gitBinaryTestResult = ref<TestGitBinaryResult | null>(null);
 
 /**
@@ -101,84 +98,52 @@ const gitBinaryTestResult = ref<TestGitBinaryResult | null>(null);
  */
 const EMBEDDED_MODE_MARKER = '$EMBEDDED$'
 
-const gitBinaryMode = ref<'embedded' | 'system' | 'custom'>('system');
+/**
+ * v0.5-mid2 精简状态：mode 只保留 2 个选项
+ *   'embedded' → sentinel=EMBEDDED_MODE_MARKER → 走 Init 释放的 binary
+ *   'custom'   → userOverride=文件选择对话框选的 path → 走用户选的 git
+ *
+ * v0.5-original 的 'system' 分支已删除（语义上等价于 custom 但交互更隐晦）。
+ * 默认 'custom' 是兼容老 user state.json（prefs["app.gitBinaryPath"] 非空路径）；
+ * 如果 state.json 是空 / sentinel，启动期 GitHub 设定仍未跑过时本 UI 默认空。
+ */
+const gitBinaryMode = ref<'embedded' | 'custom'>('custom');
 const gitBinaryModeLoading = ref(false);
 
-/** 当前实际生效路径（从后端 GetGitBinaryConfig 拿） */
-const gitBinaryEffectivePath = computed(
-  () => settings.gitBinary?.effectivePath ?? settings.gitBinaryPath ?? '',
-);
-/** 内嵌二进制实际释放路径（dev 期空字符串 = 0 字节占位） */
-const gitBinaryDefaultPath = computed(
-  () => settings.gitBinary?.defaultPath ?? '',
-);
-/** 内嵌版本号 */
-const gitBinaryEmbeddedVersion = computed(
-  () => settings.gitBinary?.embeddedVersion ?? '2.55.0',
-);
-/** macOS 检测到 quarantine 时显示「解除隔离」按钮 */
-const gitBinaryQuarantined = computed(() => {
-  const r = gitBinaryTestResult.value;
-  if (!r) return false;
-  return r.ok && /quarantine|隔离|Gatekeeper|身份不明/i.test(r.message + r.hint);
-});
+/** 默认版本号：仅 UI 陪字节用，有 TestGitBinaryResult 时会被实际覆盖 */
+const gitBinaryEmbeddedVersion = computed(() => settings.gitBinary?.embeddedVersion ?? '2.55.0');
 
-/** 平台提示（macOS / Windows / Linux 平台特定说明） */
-const gitBinaryPlatformHint = computed(() => {
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  if (/Mac/i.test(ua)) {
-    return 'macOS 默认内嵌 git 2.55.0。系统 git 常见路径：\n' +
-      '  • Apple Silicon Homebrew: /opt/homebrew/bin/git\n' +
-      '  • Intel Homebrew: /usr/local/bin/git\n' +
-      '  • Xcode CLT: /Library/Developer/CommandLineTools/usr/bin/git';
-  }
-  if (/Windows/i.test(ua)) {
-    return 'Windows 默认内嵌 git 2.55.0 (cmd/git.exe)。系统 git 常见路径：\n' +
-      '  • Git for Windows: C:\\Program Files\\Git\\cmd\\git.exe\n' +
-      '  • Scoop: C:\\Users\\<用户>\\scoop\\apps\\git\\current\\bin\\git.exe';
-  }
-  return 'Linux 平台不内嵌 git（发行版自带 / 系统包管理安装）。常见路径：\n' +
-    '  • Debian/Ubuntu: /usr/bin/git\n' +
-    '  • 源码编译: /usr/local/bin/git';
-});
-
-/**
- * v0.5：当前生效 git 版本号（从后端 GetGitBinaryConfig 或 test result 取）
- * 注意：只在嵌入式走通时才有 2.55.0；走 PATH 时拿不到精确版本（testGitBinary 调 --version）
- */
+/** v0.5-mid2 状态行：TestGitBinaryResult 有值优先使用其版 */
 const gitBinaryEffectiveVersion = computed(
   () => gitBinaryTestResult.value?.version || gitBinaryEmbeddedVersion.value,
 );
 
-/** 路径截断显示（默认保留 60 字符宽度） */
-function shortPath(path: string, max = 60): string {
-  if (!path) return '';
-  if (path.length <= max) return path;
-  // 中间用省略号：保留前半 + 后半
-  const head = Math.floor((max - 1) / 2);
-  const tail = max - 1 - head;
-  return `${path.slice(0, head)}…${path.slice(-tail)}`;
-}
-
-/** v0.5：2-button 模式切换主入口 */
-async function onSelectMode(mode: 'embedded' | 'system' | 'custom'): Promise<void> {
+/**
+ * v0.5-mid2：点「使用内嵌 Git」按钮 → sentinel + test
+ * 不需要走 dialog（已是默认 fallback / 已释放）。
+ */
+async function onSelectEmbedded(): Promise<void> {
   if (gitBinaryModeLoading.value) return;
-  let target: string;
-  if (mode === 'embedded') target = EMBEDDED_MODE_MARKER;
-  else if (mode === 'system') target = '';
-  else target = settings.gitBinaryPath.trim(); // custom：保留当前 input 值
-
   gitBinaryModeLoading.value = true;
   try {
-    const cfg = await settings.saveGitBinaryPath(target);
-    gitBinaryMode.value = mode;
+    const cfg = await settings.saveGitBinaryPath(EMBEDDED_MODE_MARKER);
+    gitBinaryMode.value = 'embedded';
     gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
-    showToast({
-      type: 'success',
-      message: `已切换到「${modeLabel(mode)}」`,
-      description: cfg.effectivePath || '无路径',
-      duration: 2500,
-    });
+    if (gitBinaryTestResult.value?.ok) {
+      showToast({
+        type: 'success',
+        message: '已切换到内嵌 Git',
+        description: `git ${gitBinaryEffectiveVersion.value} · v0.4.0 内嵌`,
+        duration: 2200,
+      });
+    } else {
+      showToast({
+        type: 'warn',
+        message: '内嵌 git 未能跑通',
+        description: '将临时 fallback 到 PATH git；建议选「使用系统装的 Git」',
+        duration: 4000,
+      });
+    }
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     showToast({
@@ -191,40 +156,16 @@ async function onSelectMode(mode: 'embedded' | 'system' | 'custom'): Promise<voi
   }
 }
 
-function modeLabel(m: 'embedded' | 'system' | 'custom'): string {
-  return m === 'embedded' ? '使用内嵌 Git' : m === 'system' ? '使用系统安装的 Git' : '自定义路径';
-}
-
-/** v0.5：advanced 输入框 blur 自动保存（切到 custom 模式） */
-async function onCustomPathBlur(): Promise<void> {
-  const target = settings.gitBinaryPath.trim();
-  // 清空 → 跳「系统」
-  if (target === '' && gitBinaryMode.value !== 'system') {
-    return onSelectMode('system');
-  }
-  // 不等于当前 path → 切 custom
-  if (target && target !== EMBEDDED_MODE_MARKER && gitBinaryMode.value !== 'custom') {
-    return onSelectMode('custom');
-  }
-  // 路径一致且 mode 一致 → 不动
-  if (target === gitBinaryTestResult.value?.path) return;
-  // 模式已对，但 path 变了 → 重新保存以刷新
-  return onSelectMode(gitBinaryMode.value === 'embedded' ? 'embedded' : 'custom');
-}
-
-/** 「选择…」按钮让 custom 路径自动 save + test */
-async function onPickGitBinaryPickPath(path: string): Promise<void> {
-  settings.gitBinaryPath = path;
-  await onSelectMode('custom');
-}
-
-/** 选文件按钮：调后端平台特定对话框 */
-async function onPickGitBinary(): Promise<void> {
+/**
+ * v0.5-mid2：点「使用系统安装的 Git」按钮 → 弹文件选择对话框
+ * 用户选完后走 user-custom path + test。
+ * 弹窗是平台特定（macOS *  / Windows *.exe / Linux *）。
+ */
+async function onPickAndUseSystemGit(): Promise<void> {
+  if (gitBinaryModeLoading.value) return;
+  let picked = '';
   try {
-    const path = await openGitBinaryPicker();
-    if (path) {
-      await onPickGitBinaryPickPath(path);
-    }
+    picked = await openGitBinaryPicker();
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     showToast({
@@ -232,45 +173,43 @@ async function onPickGitBinary(): Promise<void> {
       message: '打开文件选择器失败',
       description: err.messageText ?? err.message ?? '请稍后重试',
     });
-  }
-}
-
-/**
- * v0.5：老 onTestGitBinary / onSaveGitBinary 函数体删。
- * 2-button toggle onSelectMode() 取代：保存 + test 都内嵌了。
- * 搜 git blame 本函数可查历史。
- *
- * onStripQuarantine() 中"剩完重新测试"改为内联 await testGitBinary(target)
- * 避免依赖 stub 函数。
- */
-/** 解除隔离按钮：macOS xattr -d com.apple.quarantine */
-async function onStripQuarantine(): Promise<void> {
-  const target = (gitBinaryTestResult.value?.path ?? settings.gitBinaryPath).trim();
-  if (!target) {
-    showToast({ type: 'info', message: '请先填写路径' });
     return;
   }
-  gitBinaryStripping.value = true;
+  if (!picked) return; // 用户取消
+  gitBinaryModeLoading.value = true;
   try {
-    await stripGitBinaryQuarantine(target);
-    // 剥完重新测一次（内联，避开 v0.5 removed 函数）
-    gitBinaryTestResult.value = await testGitBinary(target);
-    showToast({
-      type: 'success',
-      message: '已解除隔离',
-      description: 'quarantine 属性已剥离，请重新启动应用以让 macOS Gatekeeper 重新评估',
-    });
+    const cfg = await settings.saveGitBinaryPath(picked);
+    gitBinaryMode.value = 'custom';
+    gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
+    if (gitBinaryTestResult.value?.ok) {
+      showToast({
+        type: 'success',
+        message: '已使用选中的 git',
+        description: `git ${gitBinaryEffectiveVersion.value} · ${cfg.effectivePath}`,
+        duration: 2500,
+      });
+    } else {
+      showToast({
+        type: 'error',
+        message: '选中的 git 二进制不能跑',
+        description: `${gitBinaryTestResult.value?.message}\n${gitBinaryTestResult.value?.hint ?? ''}`,
+      });
+    }
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     showToast({
       type: 'error',
-      message: '解除隔离失败',
-      description: err.messageText ?? err.message ?? '请手动允许：右键 → 打开 → 仍要打开',
+      message: '保存失败',
+      description: err.messageText ?? err.message ?? '请稍后重试',
     });
   } finally {
-    gitBinaryStripping.value = false;
+    gitBinaryModeLoading.value = false;
   }
 }
+
+/* v0.5-mid2 删除：onStripQuarantine / onPickGitBinary / onSelectMode / onCustomPathBlur /
+   shortPath / gitBinaryQuarantined / gitBinaryPlatformHint / gitBinaryStripping / gitBinaryPicking
+   —— API 仍保留在 ipc-client.ts 与后端，后续有需求可重读 commit 97aa7f9 加回。*/
 
 // ============================================================
 // 应用数据目录分组（v2.x · 数据根目录 = 全局路径）
@@ -547,18 +486,15 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
           （只用 1 句，连 room 都不报 path 问题；详细状态 details 里看）
         -->
         <p class="settings__hint settings__hint--mono">
-          <span v-if="gitBinaryEffectivePath">
+          <span v-if="gitBinaryEffectiveVersion">
             <span v-if="gitBinaryTestResult?.ok === false">⚠</span>
             <span v-else>✓</span>
-            git {{ gitBinaryEffectiveVersion || gitBinaryEmbeddedVersion }}
-            <span class="settings__hint--muted">·
-              <span :title="gitBinaryEffectivePath">{{ shortPath(gitBinaryEffectivePath) }}</span>
-            </span>
+            git {{ gitBinaryEffectiveVersion }}
+            <template v-if="gitBinaryMode === 'embedded'"> · 使用内嵌</template>
+            <template v-else-if="gitBinaryMode === 'custom'"> · 自选路径</template>
           </span>
           <span v-else-if="gitBinaryModeLoading">加载中…</span>
-          <span v-else>⚠ 未找到 git<br />
-            <span class="settings__hint--muted">请选「使用系统」模式，或检查 PATH 是否安装 git</span>
-          </span>
+          <span v-else>请选择一个 git 来源</span>
         </p>
 
         <!--
@@ -572,74 +508,20 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
             class="settings__mode-btn"
             :class="{ 'settings__mode-btn--active': gitBinaryMode === 'embedded' }"
             :disabled="gitBinaryModeLoading"
-            @click="onSelectMode('embedded')"
+            @click="onSelectEmbedded"
           >
             使用内嵌 Git
-            <small class="settings__mode-meta" :title="`嵌入路径：${gitBinaryDefaultPath}`">
-              {{ gitBinaryDefaultPath ? '(已释放)' : '(不可用)' }}
-            </small>
           </button>
           <button
             type="button"
             class="settings__mode-btn"
-            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'system' }"
+            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'custom' }"
             :disabled="gitBinaryModeLoading"
-            @click="onSelectMode('system')"
+            @click="onPickAndUseSystemGit"
           >
             使用系统安装的 Git
-            <small class="settings__mode-meta" :title="gitBinaryEffectivePath && gitBinaryMode === 'system' ? gitBinaryEffectivePath : '走 PATH git'">
-              <template v-if="gitBinaryEffectivePath && gitBinaryMode === 'system'">
-                ({{ shortPath(gitBinaryEffectivePath, 40) }})
-              </template>
-              <template v-else>
-                <span v-if="!gitBinaryDefaultPath">← 默认</span>
-                <span v-else-if="gitBinaryMode === 'system'">← 默认推荐（稳）</span>
-              </template>
-            </small>
           </button>
         </div>
-
-        <!--
-          Advanced details：手动 path / platform 提示 / macOS quarantine 修复
-          默认隐藏，主 UI 不被高频干扰
-        -->
-        <details class="settings__hint settings__hint--compact">
-          <summary>高级设置</summary>
-          <p class="settings__hint--compact">手动指定 git 二进制路径：</p>
-          <div class="settings__row">
-            <input
-              v-model="settings.gitBinaryPath"
-              type="text"
-              class="settings__input settings__input--wide"
-              placeholder="如 /usr/bin/git；留空走默认"
-              spellcheck="false"
-              autocomplete="off"
-              @blur="onCustomPathBlur"
-            />
-            <button
-              type="button"
-              class="settings__reset"
-              :disabled="gitBinaryPicking"
-              title="选择 git 二进制文件"
-              @click="onPickGitBinary"
-            >
-              选择…
-            </button>
-          </div>
-          <p class="settings__hint--compact">
-            {{ gitBinaryPlatformHint }}
-          </p>
-          <div v-if="gitBinaryTestResult && !gitBinaryTestResult.ok" class="settings__status settings__status--warn">
-            ⚠ {{ gitBinaryTestResult.message }}
-            <div v-if="gitBinaryTestResult.hint" class="settings__hint--compact">{{ gitBinaryTestResult.hint }}</div>
-          </div>
-          <div v-if="gitBinaryQuarantined" class="settings__action-row">
-            <span class="settings__status settings__status--warn">macOS Gatekeeper 拦截该二进制</span>
-            <button type="button" class="settings__reset" :disabled="gitBinaryStripping" @click="onStripQuarantine">
-              {{ gitBinaryStripping ? '解除中…' : '解除隔离' }}
-            </button>
-          </div>
-        </details>
       </section>
 
       <!-- 外观 -->
