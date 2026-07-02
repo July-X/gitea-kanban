@@ -176,7 +176,7 @@ html[data-theme='dark'] {
    *  - text-muted: #b4c6d4 (~7.5:1)  ✅ 二级文字（作者/时间/SHA）
    *  - text-dim:   #94a4b2 (~5.5:1)  ✅ 三级文字（装饰/弱化）
    *  - text-inverse: #ffffff  CTA 白字 */
-  --color-text: #e2ecf2; /* 12.0:1 ✅ */
+  --color-text: #ffffff; /* 纯白 */
   --color-text-muted: #b4c6d4; /* 7.5:1 ✅ */
   --color-text-dim: #94a4b2; /* 5.5:1 ✅ */
   --color-text-inverse: #ffffff; /* 主色 CTA 上配白字 */
@@ -295,10 +295,10 @@ html[data-theme='light'] {
   --color-hover: #f1f6f9;
   --color-active: #dde7ec;
 
-  /* === 文字（冷调深蓝灰 · 对偶 dark #C5D4DD · vs #E8F1F5 验证过 AA） === */
-  --color-text: #0f1a24; /* 12.7:1 ✅ */
+  /* === 文字（纯黑 + 灰度梯度） === */
+  --color-text: #000000; /* 纯黑 */
   --color-text-muted: #475461; /* 6.39:1 ✅ */
-  --color-text-dim: #5a6b7a; /* 4.50:1 ✅ 边缘 · dim 文字谨慎用 */
+  --color-text-dim: #5a6b7a; /* 4.50:1 ✅ */
   --color-text-inverse: #ffffff; /* 白底按钮配白字 */
 
   /* === label 文字兜底（v1.2 a11y 修复 · task #7） ===
