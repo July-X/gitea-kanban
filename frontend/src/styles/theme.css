@@ -170,17 +170,16 @@ html[data-theme='dark'] {
   /* --color-elevated 在 [data-theme="dark"] 单独块提档（v1.6.1） */
   /* --color-hover / --color-active 在 [data-theme="dark"] 单独块提档（v1.6.1） */
 
-  /* === 文字（vs #0F1115 验证过 AA 4.5:1）
-   * v3.0：暗色文字提档一档（user 反馈 #c5d4dd 偏暗），同时给 --color-text-muted 也提亮
-   *  - text:      #c5d4dd (7.37:1) → #d8e3eb (~8.55:1) ✅ 主正文亮度更足
-   *  - text-muted:#9aaab6 (5.29:1) → #aabcc9 (~6.40:1) ✅ 二级文字（commit 作者 / 时间等）不再发灰
-   *  - text-dim:  #74818e (3.93:1) → #8696a3 (~4.80:1) ✅ 三级文字（装饰/弱化）首次过 AA 4.5:1
-   * PR 合并提交（commit-row--merge）改用 --color-text-muted 替代 opacity 0.5，
-   * 在暗色底上不再"消失半边"，同时保留"普通 commit vs merge commit"视觉层级 */
-  --color-text: #d8e3eb; /* 8.55:1 ✅ */
-  --color-text-muted: #aabcc9; /* 6.40:1 ✅ */
-  --color-text-dim: #8696a3; /* 4.80:1 ✅ */
-  --color-text-inverse: #ffffff; /* 主色 CTA 上配白字（dark 主色已提亮到 #74B830） */
+  /* === 文字（vs #0F1115） ===
+   * 主文字接近纯白（~93% L），确保 2K 屏上清晰可读
+   *  - text:       #e2ecf2 (~12.0:1) ✅ 主正文，高亮度
+   *  - text-muted: #b4c6d4 (~7.5:1)  ✅ 二级文字（作者/时间/SHA）
+   *  - text-dim:   #94a4b2 (~5.5:1)  ✅ 三级文字（装饰/弱化）
+   *  - text-inverse: #ffffff  CTA 白字 */
+  --color-text: #e2ecf2; /* 12.0:1 ✅ */
+  --color-text-muted: #b4c6d4; /* 7.5:1 ✅ */
+  --color-text-dim: #94a4b2; /* 5.5:1 ✅ */
+  --color-text-inverse: #ffffff; /* 主色 CTA 上配白字 */
 
   /* === 主色（提亮到 #74B830 过 AA 4.5:1；hover 进一步提亮；active 压暗） === */
   --color-primary: #74b830; /* vs #0F1115 4.74:1 ✅ */
