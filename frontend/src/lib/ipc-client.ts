@@ -598,33 +598,6 @@ export function commitsGitgraphPull(args: {
 }
 
 /**
- * v2.10：增量拉取更多历史记录（用于"加载更多"功能）
- *
- * 使用场景：用户在 Git Graph 底部点击「加载更多」
- * 技术实现：git fetch --deepen=N --filter=blob:none
- *
- * 注意：这个函数直接调用 Wails 绑定，不走 IPC 客户端
- * 因为 DeepenRepo 是新增的 API，使用新的调用方式
- *
- * @param args.projectId 项目 ID
- * @param args.deepenBy 增加的深度（默认 200）
- */
-export async function deepenRepo(args: {
-  projectId: string;
-  deepenBy?: number;
-}): Promise<{
-  success: boolean;
-  message: string;
-}> {
-  // 动态导入 Wails 绑定（路径相对于 frontend 目录）
-  const { DeepenRepo } = await import('../../wailsjs/wailsjs/go/main/App');
-  return DeepenRepo({
-    projectId: args.projectId,
-    deepenBy: args.deepenBy ?? 200,
-  });
-}
-
-/**
  * v2.x 应用数据目录：读数据根目录 + 内部 workspace 子目录
  *
  * 数据根目录 = 用户可感知的"全局路径"，默认 ~/.gitea-kanban (macOS/Linux)

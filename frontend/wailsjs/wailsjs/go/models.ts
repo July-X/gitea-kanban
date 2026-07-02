@@ -508,34 +508,6 @@ export namespace main {
 	        this.position = source["position"];
 	    }
 	}
-	export class DeepenRepoArgs {
-	    projectId: string;
-	    deepenBy: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new DeepenRepoArgs(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.projectId = source["projectId"];
-	        this.deepenBy = source["deepenBy"];
-	    }
-	}
-	export class DeepenRepoResult {
-	    success: boolean;
-	    message: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DeepenRepoResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.success = source["success"];
-	        this.message = source["message"];
-	    }
-	}
 	export class DeleteColumnArgs {
 	    columnId: string;
 	

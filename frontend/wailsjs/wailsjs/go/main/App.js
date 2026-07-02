@@ -34,10 +34,6 @@ export function CreateColumn(arg1) {
   return window['go']['main']['App']['CreateColumn'](arg1);
 }
 
-export function DeepenRepo(arg1) {
-  return window['go']['main']['App']['DeepenRepo'](arg1);
-}
-
 export function DeleteColumn(arg1) {
   return window['go']['main']['App']['DeleteColumn'](arg1);
 }
