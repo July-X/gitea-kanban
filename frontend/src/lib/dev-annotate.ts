@@ -100,8 +100,7 @@ function normalize(value: DevAnnotationValue | undefined): DevAnnotation | null 
  *
  * 关键点：
  *   - 元素 position 不是 relative/absolute 时强设为 relative（让 ! 能绝对定位）
- *     —— 用 inline style 写，不污染外部 CSS
- *   - ! 按钮用 absolute 定位在元素右上角（top: -4px, right: -4px），不破坏父布局
+ *   - ! 按钮用 absolute 定位在元素内部右上角（top: 2px, right: 2px），避免被父容器裁剪
  *   - 已有 position 时不覆盖
  */
 function attachTrigger(el: HTMLElement, value: DevAnnotationValue): void {
@@ -164,15 +163,15 @@ const STYLE_ID = 'dev-annotate-styles';
 const TRIGGER_CSS = `
 .dev-annotate__trigger {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 16px;
-  height: 16px;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
   padding: 0;
   border-radius: 50%;
   background: var(--color-warning, #f59e0b);
   color: #1a1a1a;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   font-family: var(--font-mono-stack, monospace);
   line-height: 1;
@@ -180,7 +179,7 @@ const TRIGGER_CSS = `
   align-items: center;
   justify-content: center;
   cursor: help;
-  z-index: 1000;
+  z-index: 10;
   opacity: 0.85;
   border: 1px solid var(--color-bg-elevated, #fff);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
