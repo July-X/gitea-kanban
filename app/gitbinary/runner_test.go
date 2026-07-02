@@ -272,3 +272,34 @@ func TestTestGitBinary_QuarantineHint(t *testing.T) {
 		t.Errorf("Message %q 应包含版本号 %q", res.Message, res.Version)
 	}
 }
+
+// TestResolveBinaryPath_EmbeddedSentinel 验证 v0.5 sentinel magic string
+// userOverride == EMBEDDED_SENTINEL → 强制走 defaultBinaryPath（不 fallback PATH）
+func TestResolveBinaryPath_EmbeddedSentinel(t *testing.T) {
+	resetInitFlag(t)
+	// Init 释放 embedded binary
+	if err := Init(t.TempDir(), nil); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	if DefaultBinaryPath() == "" {
+		t.Skip("无 embedded binary（0 字节 placeholder）")
+	}
+
+	embeddedPath := DefaultBinaryPath()
+
+	// sentinel 命中 → 返 embedded binary（不是 PATH git）
+	resolved, err := ResolveGitBinaryPath(EMBEDDED_SENTINEL)
+	if err != nil {
+		t.Fatalf("ResolveGitBinaryPath(SENTINEL) failed: %v", err)
+	}
+	if resolved != embeddedPath {
+		t.Errorf("sentinel 应该走 embedded：\n  want %q\n  got  %q", embeddedPath, resolved)
+	}
+
+	// 非 sentinel 空字符串 → 走 PATH git（v0.4.0 fix-1 fallback）
+	resolvedPath, _ := ResolveGitBinaryPath("")
+	if resolvedPath == "" {
+		t.Error("empty callerOverride 应 fallback PATH git")
+	}
+	t.Logf("OK: embedded=%s, PATH git=%s", resolved, resolvedPath)
+}

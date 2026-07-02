@@ -74,10 +74,35 @@ const router = useRouter();
 //
 // 表单直接绑 settings.gitBinaryPath（Pinia ref），未保存时 store 已 dirty 但未持久化；
 // 后端 setGitBinaryPath 在用户点「保存」时落盘，watch 不需要（store 自管）。
-const gitBinaryTesting = ref(false);
-const gitBinarySaving = ref(false);
+const gitBinaryPicking = ref(false);
 const gitBinaryStripping = ref(false);
 const gitBinaryTestResult = ref<TestGitBinaryResult | null>(null);
+
+/**
+ * v0.5：2-button mode picker（user-mid-turn steer）
+ *
+ *   'embedded' / 'system' / 'custom'
+ *
+ * - 'embedded' → backend userOverride = SentinelEmbedded → 强制走内嵌 binary（init
+ *   后 smoke test 已验证可运行才生效；否则报错让用户选 system）
+ * - 'system'   → backend userOverride = "" → 强制走 PATH git（用户 OS 自带）
+ * - 'custom'   → backend userOverride = 绝对路径 → 走用户填的具体路径
+ *
+ * 默认值：'system'（v0.4.0 fix-1 经验：PATH git 跨平台稳定优先）
+ *
+ * 变更历史：v0.4.0 时期用 input 让用户填 userOverride 路径，UI 信息密度高；
+ * v0.5 采取 segmented control 只显示两个主选项 + advanced details 折叠 custom。
+ */
+/**
+ * backend gitbinary sentinel magic string，v0.5 引入。
+ * 后端 gitbinary.ResolveGitBinaryPath 看到 userOverride == EMBEDDED_MODE_MARKER
+ *   → 强制走 Init 释放的 embedded binary（不再 fallback PATH）。
+ * 同步：app/gitbinary/runner.go 同名常量；任一变动需两边同改。
+ */
+const EMBEDDED_MODE_MARKER = '$EMBEDDED$'
+
+const gitBinaryMode = ref<'embedded' | 'system' | 'custom'>('system');
+const gitBinaryModeLoading = ref(false);
 
 /** 当前实际生效路径（从后端 GetGitBinaryConfig 拿） */
 const gitBinaryEffectivePath = computed(
@@ -90,10 +115,6 @@ const gitBinaryDefaultPath = computed(
 /** 内嵌版本号 */
 const gitBinaryEmbeddedVersion = computed(
   () => settings.gitBinary?.embeddedVersion ?? '2.55.0',
-);
-/** 当前平台是否真嵌入二进制（linux 永远 false） */
-const gitBinaryEmbeddedAvailable = computed(
-  () => settings.gitBinary?.embeddedAvailable ?? false,
 );
 /** macOS 检测到 quarantine 时显示「解除隔离」按钮 */
 const gitBinaryQuarantined = computed(() => {
@@ -121,14 +142,88 @@ const gitBinaryPlatformHint = computed(() => {
     '  • 源码编译: /usr/local/bin/git';
 });
 
+/**
+ * v0.5：当前生效 git 版本号（从后端 GetGitBinaryConfig 或 test result 取）
+ * 注意：只在嵌入式走通时才有 2.55.0；走 PATH 时拿不到精确版本（testGitBinary 调 --version）
+ */
+const gitBinaryEffectiveVersion = computed(
+  () => gitBinaryTestResult.value?.version || gitBinaryEmbeddedVersion.value,
+);
+
+/** 路径截断显示（默认保留 60 字符宽度） */
+function shortPath(path: string, max = 60): string {
+  if (!path) return '';
+  if (path.length <= max) return path;
+  // 中间用省略号：保留前半 + 后半
+  const head = Math.floor((max - 1) / 2);
+  const tail = max - 1 - head;
+  return `${path.slice(0, head)}…${path.slice(-tail)}`;
+}
+
+/** v0.5：2-button 模式切换主入口 */
+async function onSelectMode(mode: 'embedded' | 'system' | 'custom'): Promise<void> {
+  if (gitBinaryModeLoading.value) return;
+  let target: string;
+  if (mode === 'embedded') target = EMBEDDED_MODE_MARKER;
+  else if (mode === 'system') target = '';
+  else target = settings.gitBinaryPath.trim(); // custom：保留当前 input 值
+
+  gitBinaryModeLoading.value = true;
+  try {
+    const cfg = await settings.saveGitBinaryPath(target);
+    gitBinaryMode.value = mode;
+    gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
+    showToast({
+      type: 'success',
+      message: `已切换到「${modeLabel(mode)}」`,
+      description: cfg.effectivePath || '无路径',
+      duration: 2500,
+    });
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    showToast({
+      type: 'error',
+      message: '切换失败',
+      description: err.messageText ?? err.message ?? '请稍后重试',
+    });
+  } finally {
+    gitBinaryModeLoading.value = false;
+  }
+}
+
+function modeLabel(m: 'embedded' | 'system' | 'custom'): string {
+  return m === 'embedded' ? '使用内嵌 Git' : m === 'system' ? '使用系统安装的 Git' : '自定义路径';
+}
+
+/** v0.5：advanced 输入框 blur 自动保存（切到 custom 模式） */
+async function onCustomPathBlur(): Promise<void> {
+  const target = settings.gitBinaryPath.trim();
+  // 清空 → 跳「系统」
+  if (target === '' && gitBinaryMode.value !== 'system') {
+    return onSelectMode('system');
+  }
+  // 不等于当前 path → 切 custom
+  if (target && target !== EMBEDDED_MODE_MARKER && gitBinaryMode.value !== 'custom') {
+    return onSelectMode('custom');
+  }
+  // 路径一致且 mode 一致 → 不动
+  if (target === gitBinaryTestResult.value?.path) return;
+  // 模式已对，但 path 变了 → 重新保存以刷新
+  return onSelectMode(gitBinaryMode.value === 'embedded' ? 'embedded' : 'custom');
+}
+
+/** 「选择…」按钮让 custom 路径自动 save + test */
+async function onPickGitBinaryPickPath(path: string): Promise<void> {
+  settings.gitBinaryPath = path;
+  await onSelectMode('custom');
+}
+
 /** 选文件按钮：调后端平台特定对话框 */
 async function onPickGitBinary(): Promise<void> {
   try {
     const path = await openGitBinaryPicker();
     if (path) {
-      settings.gitBinaryPath = path;
-      // 选完文件顺手测一次，让用户立即看到结果
-      await onTestGitBinary();
+      await onPickGitBinaryPickPath(path);
     }
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
@@ -140,72 +235,14 @@ async function onPickGitBinary(): Promise<void> {
   }
 }
 
-/** 测试按钮：调 <path> --version 验证；macOS 检测 quarantine */
-async function onTestGitBinary(): Promise<void> {
-  const target = settings.gitBinaryPath.trim();
-  if (!target) {
-    showToast({ type: 'info', message: '请先填写 git 二进制路径' });
-    return;
-  }
-  gitBinaryTesting.value = true;
-  try {
-    const result = await testGitBinary(target);
-    gitBinaryTestResult.value = result;
-    if (result.ok) {
-      const okDesc = result.hint ? `\n${result.hint}` : '';
-      showToast({ type: 'success', message: '验证通过', description: `${result.message}${okDesc}` });
-    } else {
-      showToast({
-        type: 'error',
-        message: '验证失败',
-        description: `${result.message}\n${result.hint}`,
-      });
-    }
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    showToast({
-      type: 'error',
-      message: '验证失败',
-      description: err.messageText ?? err.message ?? '请稍后重试',
-    });
-  } finally {
-    gitBinaryTesting.value = false;
-  }
-}
-
-/** 保存按钮：调后端 setGitBinaryPath 持久化 + 立即生效 */
-async function onSaveGitBinary(): Promise<void> {
-  const target = settings.gitBinaryPath.trim();
-  gitBinarySaving.value = true;
-  try {
-    const cfg = await settings.saveGitBinaryPath(target);
-    // 用后端返的 effectivePath 重新测一次，让用户看到最终生效路径
-    gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
-    if (target === '') {
-      showToast({
-        type: 'success',
-        message: '已清空用户配置',
-        description: `后续 git 调用将走默认（内嵌或 PATH git）：${cfg.effectivePath || 'PATH git'}`,
-      });
-    } else {
-      showToast({
-        type: 'success',
-        message: '已保存',
-        description: `git 二进制路径已设为：${cfg.effectivePath}`,
-      });
-    }
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    showToast({
-      type: 'error',
-      message: '保存失败',
-      description: err.messageText ?? err.message ?? '请稍后重试',
-    });
-  } finally {
-    gitBinarySaving.value = false;
-  }
-}
-
+/**
+ * v0.5：老 onTestGitBinary / onSaveGitBinary 函数体删。
+ * 2-button toggle onSelectMode() 取代：保存 + test 都内嵌了。
+ * 搜 git blame 本函数可查历史。
+ *
+ * onStripQuarantine() 中"剩完重新测试"改为内联 await testGitBinary(target)
+ * 避免依赖 stub 函数。
+ */
 /** 解除隔离按钮：macOS xattr -d com.apple.quarantine */
 async function onStripQuarantine(): Promise<void> {
   const target = (gitBinaryTestResult.value?.path ?? settings.gitBinaryPath).trim();
@@ -216,8 +253,8 @@ async function onStripQuarantine(): Promise<void> {
   gitBinaryStripping.value = true;
   try {
     await stripGitBinaryQuarantine(target);
-    // 剥完重新测一次
-    await onTestGitBinary();
+    // 剥完重新测一次（内联，避开 v0.5 removed 函数）
+    gitBinaryTestResult.value = await testGitBinary(target);
     showToast({
       type: 'success',
       message: '已解除隔离',
@@ -493,87 +530,116 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
         </button>
       </section>
 
-      <!-- v0.4.0：Git 二进制（独立卡片，让用户感知"应用内嵌 git"和"可改路径"两个核心点） -->
+      <!--
+        v0.5 「Git 二进制」卡片（2-button 模式选择 + advanced details）
+        user-mid-turn steer：只显示两个主选项
+          - 「使用内嵌 Git」—— 显式强制走嵌入 v2 git 2.55.0（适合 amd64 mac/win build 场景）
+          - 「使用系统安装的 Git」—— 走 PATH git（arm64 mac / Linux 默认，跨 arch 稳定）
+        高级选项（手动填 path / platform 路径提示 / macOS quarantine 修复）折叠 details。
+        状态行 1 句点出当前 path + 版本号。
+        路径 tooltip only on hover（避免 1 行变两行）。
+      -->
       <section class="settings__card">
         <h2>Git 二进制</h2>
-        <p class="settings__hint">
-          应用默认内嵌 git {{ gitBinaryEmbeddedVersion }}
-          <span v-if="gitBinaryEmbeddedAvailable">（已释放到 <code class="mono">{{ gitBinaryDefaultPath }}</code>）</span>
-          <span v-else>（当前平台不内嵌，走系统 <code>git</code> 命令）</span>
+
+        <!--
+          顶部状态行：当前生效路径 + git 版本号 + 状态图标
+          （只用 1 句，连 room 都不报 path 问题；详细状态 details 里看）
+        -->
+        <p class="settings__hint settings__hint--mono">
+          <span v-if="gitBinaryEffectivePath">
+            <span v-if="gitBinaryTestResult?.ok === false">⚠</span>
+            <span v-else>✓</span>
+            git {{ gitBinaryEffectiveVersion || gitBinaryEmbeddedVersion }}
+            <span class="settings__hint--muted">·
+              <span :title="gitBinaryEffectivePath">{{ shortPath(gitBinaryEffectivePath) }}</span>
+            </span>
+          </span>
+          <span v-else-if="gitBinaryModeLoading">加载中…</span>
+          <span v-else>⚠ 未找到 git<br />
+            <span class="settings__hint--muted">请选「使用系统」模式，或检查 PATH 是否安装 git</span>
+          </span>
         </p>
-        <div class="settings__field">
-          <label class="settings__label" for="git-binary-path">git 二进制路径</label>
+
+        <!--
+          v0.5 主交互区：仅两个 toggle button
+          - 互斥：只有选中态高亮
+          - 简单明了的 segmented control
+        -->
+        <div class="settings__mode-toggle" role="group" aria-label="Git 二进制来源">
+          <button
+            type="button"
+            class="settings__mode-btn"
+            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'embedded' }"
+            :disabled="gitBinaryModeLoading"
+            @click="onSelectMode('embedded')"
+          >
+            使用内嵌 Git
+            <small class="settings__mode-meta" :title="`嵌入路径：${gitBinaryDefaultPath}`">
+              {{ gitBinaryDefaultPath ? '(已释放)' : '(不可用)' }}
+            </small>
+          </button>
+          <button
+            type="button"
+            class="settings__mode-btn"
+            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'system' }"
+            :disabled="gitBinaryModeLoading"
+            @click="onSelectMode('system')"
+          >
+            使用系统安装的 Git
+            <small class="settings__mode-meta" :title="gitBinaryEffectivePath && gitBinaryMode === 'system' ? gitBinaryEffectivePath : '走 PATH git'">
+              <template v-if="gitBinaryEffectivePath && gitBinaryMode === 'system'">
+                ({{ shortPath(gitBinaryEffectivePath, 40) }})
+              </template>
+              <template v-else>
+                <span v-if="!gitBinaryDefaultPath">← 默认</span>
+                <span v-else-if="gitBinaryMode === 'system'">← 默认推荐（稳）</span>
+              </template>
+            </small>
+          </button>
+        </div>
+
+        <!--
+          Advanced details：手动 path / platform 提示 / macOS quarantine 修复
+          默认隐藏，主 UI 不被高频干扰
+        -->
+        <details class="settings__hint settings__hint--compact">
+          <summary>高级设置</summary>
+          <p class="settings__hint--compact">手动指定 git 二进制路径：</p>
           <div class="settings__row">
             <input
-              id="git-binary-path"
               v-model="settings.gitBinaryPath"
               type="text"
               class="settings__input settings__input--wide"
-              placeholder="留空使用默认；填入自定义路径"
+              placeholder="如 /usr/bin/git；留空走默认"
               spellcheck="false"
               autocomplete="off"
+              @blur="onCustomPathBlur"
             />
             <button
               type="button"
               class="settings__reset"
-              :disabled="gitBinaryTesting"
-              :title="gitBinaryTesting ? '验证中…' : '选择文件'"
+              :disabled="gitBinaryPicking"
+              title="选择 git 二进制文件"
               @click="onPickGitBinary"
             >
-              选择文件
-            </button>
-            <button
-              type="button"
-              class="settings__reset"
-              :disabled="gitBinaryTesting"
-              :title="gitBinaryTesting ? '验证中…' : '调用 <path> --version 测试'"
-              @click="onTestGitBinary"
-            >
-              {{ gitBinaryTesting ? '测试中…' : '测试' }}
+              选择…
             </button>
           </div>
-        </div>
-        <div v-if="gitBinaryTestResult" class="settings__info-row" data-test="git-binary-test-result">
-          <span class="settings__info-label">测试结果</span>
-          <span
-            class="settings__info-value"
-            :class="{ 'settings__status--ok': gitBinaryTestResult.ok, 'settings__status--warn': !gitBinaryTestResult.ok }"
-          >
-            <span v-if="gitBinaryTestResult.ok">✓ {{ gitBinaryTestResult.message }}</span>
-            <span v-else>⚠ {{ gitBinaryTestResult.message }}</span>
-            <small v-if="gitBinaryTestResult.hint" class="settings__hint settings__hint--compact"> {{ gitBinaryTestResult.hint }}</small>
-          </span>
-        </div>
-        <div v-if="gitBinaryEffectivePath" class="settings__info-row">
-          <span class="settings__info-label">当前生效</span>
-          <span class="settings__info-value mono" :title="gitBinaryEffectivePath">
-            {{ gitBinaryEffectivePath }}
-          </span>
-        </div>
-        <p class="settings__hint">
-          {{ gitBinaryPlatformHint }}
-        </p>
-        <div class="settings__row">
-          <button
-            type="button"
-            class="settings__save"
-            :disabled="gitBinarySaving"
-            :title="gitBinarySaving ? '保存中…' : '保存路径（持久化到本地，立即生效）'"
-            @click="onSaveGitBinary"
-          >
-            {{ gitBinarySaving ? '保存中…' : '保存' }}
-          </button>
-          <button
-            v-if="gitBinaryQuarantined"
-            type="button"
-            class="settings__reset"
-            :disabled="gitBinaryStripping"
-            :title="gitBinaryStripping ? '解除中…' : 'macOS 主动剥离 quarantine 属性'"
-            @click="onStripQuarantine"
-          >
-            {{ gitBinaryStripping ? '解除中…' : '解除隔离' }}
-          </button>
-        </div>
+          <p class="settings__hint--compact">
+            {{ gitBinaryPlatformHint }}
+          </p>
+          <div v-if="gitBinaryTestResult && !gitBinaryTestResult.ok" class="settings__status settings__status--warn">
+            ⚠ {{ gitBinaryTestResult.message }}
+            <div v-if="gitBinaryTestResult.hint" class="settings__hint--compact">{{ gitBinaryTestResult.hint }}</div>
+          </div>
+          <div v-if="gitBinaryQuarantined" class="settings__action-row">
+            <span class="settings__status settings__status--warn">macOS Gatekeeper 拦截该二进制</span>
+            <button type="button" class="settings__reset" :disabled="gitBinaryStripping" @click="onStripQuarantine">
+              {{ gitBinaryStripping ? '解除中…' : '解除隔离' }}
+            </button>
+          </div>
+        </details>
       </section>
 
       <!-- 外观 -->
@@ -878,6 +944,68 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
   font-size: 10px;
   color: var(--color-text-muted);
   margin: 0;
+}
+/**
+ * v0.5：单调一行状态（多用于 git binary 路径行）
+ *   - monospace 字体让路径、版本号展示更对齐
+ *   - --muted 变体让插入点（• 分隔符 + 路径部分）色调较柔，让主信息突出
+ */
+.settings__hint--mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.settings__hint--muted {
+  color: var(--color-text-disabled, var(--color-text-muted));
+}
+
+/**
+ * v0.5：seg-toggle 风格的 2-button 模式选择器
+ *   - flex-row 容器，子按钮平分宽度
+ *   - --active 高亮态走 primary bg，inactive 透明背景
+ *   - 鼠标 hover 状态切换 animation
+ *   - --meta 子元素用 secondary 色，让 2 个 button 主体看起来平衡
+ */
+.settings__mode-toggle {
+  display: flex;
+  gap: var(--space-2, 8px);
+  margin: var(--space-3, 12px) 0;
+}
+.settings__mode-btn {
+  flex: 1 1 0;
+  padding: 10px 16px;
+  background: var(--color-bg-elevated, var(--color-bg-secondary, rgba(255, 255, 255, 0.04)));
+  color: var(--color-text);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.15));
+  border-radius: 8px;
+  font-size: var(--font-md, 13px);
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: background 120ms var(--ease, ease), border-color 120ms var(--ease, ease), color 120ms var(--ease, ease);
+  line-height: 1.2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.settings__mode-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover, rgba(128, 128, 128, 0.08));
+  border-color: var(--color-border-hover, var(--color-primary, #74b830));
+}
+.settings__mode-btn--active {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.18));
+  border-color: var(--color-primary, #74b830);
+  color: var(--color-primary, #74b830);
+}
+.settings__mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.settings__mode-meta {
+  font-size: var(--font-xs, 10px);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  letter-spacing: 0;
 }
 
 /* 按钮 */

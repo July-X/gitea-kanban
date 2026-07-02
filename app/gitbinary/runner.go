@@ -233,21 +233,28 @@ func truncateForLog(s string, max int) string {
 
 // ResolveGitBinaryPath 按优先级返回当前 RunGit 应使用的 git 二进制绝对路径：
 //
-//	v0.4.0 优先级（按兼容性递增，避免 cross-arch 失败让整个 git graph 瘫）：
-//	1. callerOverride 非空 → 验证文件存在，存在即用（用户填的，如 `/usr/bin/git`）
-//	2. userBinaryOverride（app.SetGitBinaryPath 设的）非空 → 用
-//	3. exec.LookPath("git") → 兜底用系统 PATH 的 git（用户 OS 自带，稳定）
-//	4. defaultBinaryPath（Init 释放的内嵌）非空且 smoke test 通过 → 用
-//	5. 全部失败 → 返 (空, error)
+//	v0.5 优先级（user-mid-turn steer：2-button 模式区分）：
+//	1. callerOverride 非空 + 非 sentinel：
+//	   - 验证文件存在，存在即用（用户填的具体 custom path）
+//	2. callerOverride == EMBEDDED_SENTINEL（="$EMBEDDED$"，2-button UI 选的「使用内嵌」）：
+//	   - 强制走 Init 释放的 embedded binary（不 fallback PATH）
+//	   - 失败 → 返 error，让 SettingsView 提示用户换 system
+//	3. userBinaryOverride（app.SetGitBinaryPath 设的）→ 同 1/2
+//	4. callerOverride == "" + SetUserOverride 已设 → 同 1/2
+//	5. callerOverride 全空：
+//	   - exec.LookPath("git") → PATH git（v0.4.0 fix-1 兜底）
+//	   - defaultBinaryPath（Init 释放的内嵌）→ 兜底
+//	   - 都失败 → error
 //
-// v0.4.0 修订说明：
-//   - 旧版 defaultBinaryPath 放 PATH git 之前，但 sandbox/发布跨 arch 时
-//     内嵌二进制会在 arm64 Mac 上触发 Rosetta 未装回退到 sh 解释 argv0 的 bug
-//     （shell 报「无法作为内置命令处理 2.55.0-macos-amd64」，exit 128）
-//   - 把 PATH git 提到 defaultBinaryPath 之前：默认走用户 OS 自带的 git，
-//     在没装 git 装机罕见场景才 fallback 到内嵌
-//   - Init() 还会跑 smoke test `git --version` 校验释放成功的 binary，
-//     失败时清空 defaultBinaryPath 让 ResolveGitBinaryPath 自动降级
+// v0.5 修订说明：
+//   - v0.4.0 fix-1 让 PATH git 提到 embedded 之前：默认走用户 OS 自带 git；
+//     兼容性最好但「嵌 vs 系」UX 无差异（都走 PATH）。
+//   - v0.5 加 EMBEDDED_SENTINEL magic string，让 SettingsView「使用内嵌」按钮
+//     能真强制走 embedded binary（override PATH fallback）。
+//   - sentinel 同步：app/gitbinary/runner.go 与 frontend/src/views/SettingsView.vue
+//     各 hard-code '$EMBEDDED$'，改任一要两边同步。
+const EMBEDDED_SENTINEL = "$EMBEDDED$"
+
 func ResolveGitBinaryPath(callerOverride string) (string, error) {
 	effective := strings.TrimSpace(callerOverride)
 	if effective == "" {
@@ -255,16 +262,25 @@ func ResolveGitBinaryPath(callerOverride string) (string, error) {
 			effective = strings.TrimSpace(g)
 		}
 	}
+	// v0.5：「使用内嵌」按钮的 sentinel：跳过 PATH/USER 路径，强制走 Init 释放的 binary
+	//   注意：callerOverride 全空分支（mode=system）会先 fallback PATH，已被 Init smoke test 覆盖
+	if effective == EMBEDDED_SENTINEL {
+		if def, ok := defaultBinaryPath.Load().(string); ok && def != "" {
+			if _, err := os.Stat(def); err == nil {
+				return def, nil
+			}
+		}
+		return "", fmt.Errorf("「使用内嵌」模式下内嵌 git 二进制不可用；请切换到「使用系统安装的 git」或重装应用")
+	}
 	if effective != "" {
-		// user override：stat 校验失败仍返该值，让 RunGit 时报「No such file」错误给用户
+		// user custom path：stat 校验失败仍返该值
 		if _, err := os.Stat(effective); err == nil {
 			return effective, nil
 		}
 		return effective, nil
 	}
 
-	// PATH 优先：用户 OS 自带 git 通常稳定（macOS Apple Git、Linux distro、自编译 git）
-	// 避免 cross-arch / 未签名未公证问题
+	// PATH 优先：用户 OS 自带 git 通常稳定
 	if path, err := exec.LookPath("git"); err == nil {
 		return path, nil
 	}
