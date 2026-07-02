@@ -63,5 +63,7 @@ node_modules/
 .tools/
 
 # Local build artifacts (防止 wails build / go build 产物误提交)
+# `/debug` 是仓库根的 Go 二进制，`/tools/*/debug` 是 tools/ 下各子命令的 Go build 产物
+# （例如 tools/vscode-recheck/debug 是独立的 HTML 调试工具，不能 commit 它的 build 产物）
 /debug
 /tools/*/debug
