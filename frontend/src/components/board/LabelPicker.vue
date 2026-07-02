@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * LabelPicker —— 绑 label 子弹窗（plan_25cc4562 Task D · BoardView 重构）
+ * LabelPicker —— 绑 label 子弹窗（v1.3 BoardView 重构（拆 7 子组件））
  *
  * 设计（v1.1）：
  * - 列出 gitea 仓库里所有 label（boardStore.labelsByProject）

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * ColumnMenu —— 列设置弹窗（plan_25cc4562 Task D · BoardView 重构）
+ * ColumnMenu —— 列设置弹窗（v1.3 BoardView 重构（拆 7 子组件））
  *
  * 设计（v1.1 + v1.3 · Task B）：
  * - 改名 + 设 WIP 上限（合一个"保存"按钮，title/wip 各自独立 dirty 判断）
  * - 显示已绑 label 列表（chip 形式）+ 解绑 + "+ 绑定 gitea 标签"入口
  * - 删列按钮（独立操作 → 触发 confirm dialog）
  *
- * v1.4 增强（P0-2 列 = label UI 标注落地 · plan_25cc4562 Task C）：
+ * v1.4 增强（P0-2 列 = label UI 标注落地 · v1.4 智能化）：
  * - 加 `unmatchedCount: number` props（v1.4 默认 0；v1.5 接 autoInit 升级版后传真实值）
  * - "未归类" banner 区：v1.4 提示文案占位，v1.5 接两个 CTA（"再建几列" / "塞进待办"）
  * - 边界：v1.4 **不**碰 board store，**不**新增 IPC，**不**加 wireframe 里说的"批量建列向导"
@@ -101,7 +101,7 @@ function close(): void {
             @input="(e) => emit('update:editingTitle', (e.target as HTMLInputElement).value)"
             @keydown.enter="emit('save')"
           />
-          <!-- v1.3（plan_25cc4562 · Task B）：WIP 上限输入
+          <!-- v1.3（v1.3 WIP 上限）：WIP 上限输入
             *  - 留空 = 无限
             *  - 正整数 = 上限；超限只警告不拦截
             *  - 0 / 负数 / 浮点 → 输入框红色 + 保存按钮 disabled（避免无效值落到后端） -->

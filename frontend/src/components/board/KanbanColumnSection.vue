@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * KanbanColumnSection —— 看板单列内容（plan_25cc4562 Task D · BoardView 重构 · 第 7 拆分）
+ * KanbanColumnSection —— 看板单列内容（v1.3 BoardView 重构（拆 7 子组件） · 第 7 拆分）
  *
  * 设计：
  * - 单列的"列头 + 卡片列表 + 新建议题输入"打包成一个组件
@@ -140,7 +140,7 @@ const displayIssues = computed<IssueCardDto[]>(() => {
       （卡片全拖走 / 新建空列），VueDraggable 就不渲染 → 空列没有 drop zone → 拖不回来。
       现改为只看 labels.length > 0：绑了 label 的列即使 0 卡片也渲染 VueDraggable
       （min-height: 60px 撑出 drop zone），空状态文案移到 VueDraggable 内部当占位 li。
-      v-if 而非 v-else：跟下面的 VueDraggable 异 tag，走独立 v-if 绕开 v-else 折叠坑（AGENTS §10.11）。
+      v-if 而非 v-else：跟下面的 VueDraggable 异 tag，走独立 v-if 绕开 v-else 折叠坑（Vue 3 SFC 模板规则）。
 
       v1.4 修复（2026-06-17 · 拖拽光晕失效 + 释放不记录 bug · 真因）：
       vue-draggable-plus 0.6.1 的 useDraggable 参数解析有坑：当**不传 modelValue** 时，

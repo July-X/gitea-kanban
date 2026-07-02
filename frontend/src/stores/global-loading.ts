@@ -1,5 +1,5 @@
 /**
- * globalLoading store —— 全局加载态聚合（v1.4 · plan_25cc4562 Dolphin Loading）
+ * globalLoading store —— 全局加载态聚合
  *
  * 设计动机：
  *   - 原本每个 view 都有自己的 *.loading 态 + 局部"加载中…"占位（BoardView / MembersView /
@@ -19,12 +19,6 @@
  *   - 这两个值在 design system §OVERRIDE 没规定，给定依据：
  *     · 1500ms = 人眼能感知的"持续活动"阈值（UX 文献）
  *     · 400ms = 远端 IPC 正常耗时下限（Gitea 局域网 < 100ms 不算"快闪"也算"已展示"）
- *
- * 边界（AGENTS §5.2 frontend agent）：
- *   - ✅ 不碰 src/main/**
- *   - ✅ 不改 src/shared/ipc-types.ts
- *   - ✅ 不动 src/preload/**
- *   - ✅ 调用方 store 通过 import useGlobalLoadingStore().show(ns) / .hide(ns) 接入
  *
  * 与各 view 局部占位的关系：
  *   - 拍板"替换模式"：删 view 内部"加载中…"占位文字 + RefreshCw spin

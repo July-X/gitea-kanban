@@ -1,7 +1,7 @@
 /**
  * board store ——看板列 + issue卡片（ADR-0002 reset）
  *
- * 设计（AGENTS §5.2 + ADR-0002 +03-frontend §4.5）：
+ * 设计（AGENTS §5.2 + ADR-0002 +ADR-0002（Board 数据模型））：
  * -看板列走 `board.columns.*`（本地 sqlite实体）
  * -卡片走 `issues.*`（gitea issue，column_label_mapping派生）
  * -拖拽换列 = `issues.moveColumn`（后端原子换绑 label）
@@ -49,7 +49,7 @@ const CANONICAL_COLUMN_LABEL_ALIASES: Record<(typeof CANONICAL_COLUMN_TITLES)[nu
   已完成: ['已完成', 'Done'],
 };
 
-/** loadBoard 出参契约（plan_25cc4562 Task C · autoInit 透明化 + v1.4 智能化）
+/** loadBoard 出参契约（v1.4 智能化：autoInit 透明化）
  *
  * - `columns`         : 当前 project 实际生效的列（autoInit 触发后含新建列）
  * - `autoInitCreatedCount` : autoInit 帮建的列数（>0 时 UI 应弹 toast 透明化提示）
@@ -188,7 +188,7 @@ export const useBoardStore = defineStore('board', () => {
    * - 匹配规则：gitea label 名精确匹配预设列名（新建/进行中/待办/已完成/Backlog/In Progress/To Do/Done）
    * - 只在首次（0 列）时触发，用户已手动创建列后不再自动干预
    *
-   * 出参 `LoadBoardResult`（plan_25cc4562 Task C · autoInit 透明化）：
+   * 出参 `LoadBoardResult`（v1.4 智能化：autoInit 透明化）：
    * - `columns` 跟 store.columns 同步——autoInit 触发后含新建列
    * - `autoInitCreatedCount` = 本次 autoInit 帮建的列数
    *   · 0 列 + gitea 无 label → 0（**不**弹 toast，避免"啥都没干"误报）
@@ -311,7 +311,7 @@ export const useBoardStore = defineStore('board', () => {
   /**
    * 自动初始化看板列：当项目没有任何列时，根据 gitea label 自动创建并绑定
    *
-   * **v1.4 智能化（plan_25cc4562 Task C · user 拍板 2026-06-16）**：
+   * **v1.4 智能化（user 拍板 2026-06-16）**：
    * 原本只精确匹配 12 个预设字面量。v1.4 改走 `clusterLabels()` 智能聚类：
    *   - L1 精确匹配（'待办' / '进行中' 等 10 个去重字面量）
    *   - L2 prefix 聚类（'m10a-version1', 'm10a-version2' → 'm10a-version1-*'）
@@ -684,7 +684,7 @@ export const useBoardStore = defineStore('board', () => {
   }
 
   /**
-   * 把"未分类 issue"归到指定列（plan_25cc4562 Task C · 未分类快捷归类）
+   * 把"未分类 issue"归到指定列（v1.4 智能化（未分类快捷归类））
    *
    * 业务语义：
    * - 未分类 issue = 不带任何"列绑 label"的 gitea issue（`unassignedIssues`）
@@ -804,7 +804,7 @@ export const useBoardStore = defineStore('board', () => {
    *
    * 用例：BoardView 列设置弹窗保存时调，可只传 title / 只传 wipLimit / 一起传
    * - reorder 走 v2 拖拽（**不**走此函数）
-   * - wipLimit 语义（plan_25cc4562 · Task B）：正整数 = 上限，null = 无限
+   * - wipLimit 语义（v1.3 WIP 上限）：正整数 = 上限，null = 无限
    *
    * 失败抛 UserFacingError，UI 层 toast 展示
    */

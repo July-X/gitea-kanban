@@ -164,7 +164,8 @@ func (v *vsVertex) getColour() int {
 //
 // 标记该 vertex 是「未完成」虚拟 commit（对齐 vscode-git-graph 的
 // Vertex.setNotCommitted()）。触发条件：commit.SHA == UNCOMMITTED_HASH
-// （由 LogCommitsVscode 在探测到「local 落后 origin」时插入）。
+// （由 LogCommitsVscode 在探测到「worktree dirty」（v0.3.0 起；
+// v0.3.0 之前是「local HEAD 落后 origin/<defaultBranch>」）时插入）。
 //
 // 后续在 determinePath 里通过 addLine(isCommitted=false) 让
 // 该 vertex 关联的 branch 段前 N 行走 #808080 + dasharray 渲染。
@@ -356,8 +357,9 @@ func (g *graphVscode) loadCommits(commits []git.CommitInfo, head string) {
 			connections: make(map[int]*vsUnavailablePoint),
 		}
 		// 对齐 vscode graph.ts:422-430：commits[0] 是 UNCOMMITTED 时调 setNotCommitted()。
-		// 我们的 UNCOMMITTED 触发语义是「local 落后 origin」而不是 worktree uncommitted，
-		// 但 vertex 标记逻辑完全一致 —— 只要 SHA == UNCOMMITTED_HASH 即可。
+		// 我们的 UNCOMMITTED 触发语义（v0.3.0 起） = worktree dirty（`git status --porcelain`）；
+		// v0.3.0 之前是 "local HEAD 落后 origin/<defaultBranch>"，已经废弃。
+		// vertex 标记逻辑只看 SHA == UNCOMMITTED_HASH，触发语义对它透明。
 		if c.SHA == git.UNCOMMITTED_HASH {
 			v.setNotCommitted()
 		}

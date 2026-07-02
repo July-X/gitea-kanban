@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * MoveColumnPicker —— 换列目标菜单（plan_25cc4562 Task D · BoardView 重构）
+ * MoveColumnPicker —— 换列目标菜单（v1.3 BoardView 重构（拆 7 子组件））
  *
  * 设计（v1 按钮式换列兜底）：
  * - 顶部：标题"把 #X 挪到…" / "把 #X 归到…"

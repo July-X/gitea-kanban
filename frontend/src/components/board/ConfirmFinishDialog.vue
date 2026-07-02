@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * ConfirmFinishDialog —— 拖到"已完成"列二次确认（plan_25cc4562 Task D · BoardView 重构）
+ * ConfirmFinishDialog —— 拖到"已完成"列二次确认（v1.3 BoardView 重构（拆 7 子组件））
  *
  * 设计（v1 二次确认铁律）：
  * - 复用全局 ConfirmDialog，加 keyword="完成"防误触

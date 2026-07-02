@@ -2,7 +2,7 @@
 /**
  * NavRail —— 左侧导航栏
  *
- * 设计（03-frontend.md §2.1 / §4.1）：
+ * 设计（AppShell layout 设计（v1 沿用））：
  *   - 默认宽度 224px（var(--navrail-width)），折叠态 56px（--navrail-collapsed-width）
  *   - 6 个 NavItem：看板 / 时间轴 / 合并请求 / 我的卡片 / 成员 / 设置
  *   - 选中项 = 主色背景 + 主色微光
@@ -117,7 +117,7 @@ const items: NavItem[] = [
 
 const currentPath = computed(() => route.path);
 
-/** 折叠 / 展开按钮文案（i18n 占位 · cycle 2 接到 src/shared/i18n 文案表） */
+/** 折叠 / 展开按钮文案（i18n 占位 · i18n 占位，文案集中后由 i18n 替换） */
 const toggleLabel = computed(() =>
   uiStore.navCollapsed ? '展开侧栏' : '折叠侧栏',
 );

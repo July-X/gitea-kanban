@@ -11,7 +11,7 @@
  *
  * autoInit token 防陈旧响应：用户切 project 后旧 loadBoard 不应弹旧 toast。
  *
- * v1.4 增强（P0-1 autoInit 透明化落地 · plan_25cc4562 Task C）：
+ * v1.4 增强（P0-1 autoInit 透明化落地）：
  *   - 加 onAutoInit 回调 props —— BoardView 注入"autoInit 触发时该做什么"
  *   - 不再 composable 内部直接调 openColumnMenu（属于 useColumnManager 私有，跨边界）
  *   - localStorage dismissed 标记：避免重复弹"我帮你建了 N 列"
@@ -122,7 +122,7 @@ export function useBoardBootstrap(
           const firstCol = board.columns[0];
           if (!firstCol) return;
           const count = loadResult.autoInitCreatedCount;
-          // v1.4 智能化（plan_25cc4562 Task C）：按 breakdown 动态生成文案
+          // v1.4 智能化：按 breakdown 动态生成文案
           //  - literal-only：原文案（纯字面量匹配）
           //  - literal + prefixGroup：列 N 列（含 L2 聚类）
           //  - literal + prefixGroup + compound：列 N 列（含 L3 复合）

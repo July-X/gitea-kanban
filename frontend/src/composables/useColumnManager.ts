@@ -1,5 +1,5 @@
 /**
- * useColumnManager —— BoardView 列管理 state + IPC handlers（plan_25cc4562 Task D 重构）
+ * useColumnManager —— BoardView 列管理 state + IPC handlers（v1.3 BoardView 重构阶段）
  *
  * 抽出动机：原 BoardView.vue 单文件 700+ 行 script，列管理相关 state + handler 占约 200 行；
  * 拆成 composable 后 BoardView 只剩"调用 + 串接"。

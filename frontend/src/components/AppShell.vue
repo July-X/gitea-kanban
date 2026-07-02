@@ -2,7 +2,7 @@
 /**
  * AppShell —— 渲染进程应用外壳
  *
- * 设计（03-frontend.md §2.1 + §4.1）：
+ * 设计（AppShell layout 设计（v1 沿用））：
  *   - 固定布局：左侧 NavRail + 中部主区（router-view）+ 底部 StatusBar
  *   - 主区内部各 view 自己管滚动（StatusBar 高度固定不滚动）
  *   - 顶栏暂不做（M1 补——现在侧栏已经够用，路由切换足以区分页面）

@@ -2,7 +2,7 @@
 /**
  * App.vue —— 根 SFC
  *
- * 设计（AGENTS §5.2 + 03-frontend §3）：
+ * 设计（AGENTS §5.2 + AGENTS §5.2 frontend agent）：
  *   - 单根 <AppShell>（NavRail + 主区 + StatusBar 三件套）
  *   - 全局 <Toast /> 挂在 body 层（Teleport 出去）
  *   - 不在 App 层做业务（业务在 view + store 里）

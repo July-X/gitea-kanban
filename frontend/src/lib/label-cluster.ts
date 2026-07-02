@@ -1,5 +1,5 @@
 /**
- * label-cluster —— gitea label 智能聚类（v1.4 P0-1 wireframe 增量 · plan_25cc4562 Task C · 落地）
+ * label-cluster —— gitea label 智能聚类（v1.4 P0-1 wireframe 增量 · v1.4 智能化 · 落地）
  *
  * 拍板 2026-06-16（user）：
  *   "autoInit 这个很好，但是需要自动判断识别一类 label，比如

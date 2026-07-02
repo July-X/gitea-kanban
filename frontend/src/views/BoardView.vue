@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * BoardView —— 仓库选择 + 看板（plan_25cc4562 Task D 重构版 · slim）
+ * BoardView —— 仓库选择 + 看板（v1.3 BoardView 重构版 · slim）
  *
  * 重构目标：把 v1.1 + v1.3 累加的 2072 行巨型 SFC 拆到子组件 + composable：
  *   - 子组件（src/renderer/components/board/）：
@@ -517,7 +517,7 @@ const {
   performFinishMove,
 } = useBoardCardActions();
 
-// ===== 拖拽（v1.3 · plan_25cc4562 Task A · v1.3.1 撤回键盘双模） =====
+// ===== 拖拽（v1.3 · v1.3 拖拽链路 · v1.3.1 撤回键盘双模） =====
 // 鼠标拖拽（vue-draggable-plus）：保留为唯一拖拽路径
 // v1.4 增量：列内"显示已关闭" toggle（每列独立，key = columnId）
 const showClosedByColumn = reactive<Record<string, boolean>>({});

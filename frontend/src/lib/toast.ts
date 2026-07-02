@@ -7,7 +7,7 @@
  *     所有顶层变量只在组件实例上,无法被外部 import）
  *   - Toast.vue 用 import { toast, showToast, dismissToast } from './toast' 订阅
  *
- * v1.4 增强（P0-1 autoInit 透明化落地 · plan_25cc4562 Task C）：
+ * v1.4 增强（P0-1 autoInit 透明化落地 · v1.4 智能化）：
  *   - ToastState 加 `actions?: ToastAction[]` 字段，Toast.vue 渲染成按钮
  *   - 按钮点击后调 onClick，可选传 `dismissAfter: false` 不关闭 toast
  *   - body 部分不再 @click 关闭（避免误触），只 × 按钮 + action 按钮关闭

@@ -1,7 +1,7 @@
 /**
  * branch store —— 当前 project 的分支列表（gitea branches）
  *
- * 设计（AGENTS §5.2 + plan_32018da5 c-frontend-4-views-4-stores）：
+ * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出（与 my-card/member/pull 同源）
  *   - 数据源：branches.list IPC（main 端包 listGiteaBranches + 本地 starred JOIN）
  *   - setup store 风格（与 board.ts / useRepoStore / auth.ts 一致）
  *   - **不**持久化（v1 不存；star/unstar 走 branches.star IPC，**不**本地乐观更新）

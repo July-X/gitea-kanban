@@ -1,7 +1,7 @@
 /**
  * repo store —— 当前仓库上下文 + 仓库列表
  *
- * 设计（AGENTS §5.2 + 03-frontend §6.2）：
+ * 设计（AGENTS §5.2 + AGENTS §5.2 frontend agent（Pinia store））：
  *   - 仓库列表从 main 端拉（gitea API + 本机 project 标记聚合）
  *   - "当前仓库"是仓库视图的上下文（看板/时间轴都基于它）
  *   - **不**做仓库分类（starred/archived/owned 等等的过滤放 UI 层）

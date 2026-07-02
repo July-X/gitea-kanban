@@ -1,7 +1,7 @@
 /**
  * settings store —— 用户偏好设置（polling interval / UI 偏好）
  *
- * 设计（AGENTS §5.2 + 03-frontend §6）：
+ * 设计（AGENTS §5.2）：
  *   - **临时**用 localStorage 存（prefs IPC 端点未注册，要 §7.1 拍板才加）
  *   - 未来迁移路径：localStorage key 'gitea-kanban.prefs' → main 端 prefs 表
  *   - 默认值：pollingInterval = 300_000ms（5 min）

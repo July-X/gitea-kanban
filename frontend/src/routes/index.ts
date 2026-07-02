@@ -1,17 +1,17 @@
 /**
  * 路由表（Vue Router 4）
  *
- * 设计（03-frontend.md §7 + AGENTS §5.5）：
+ * v2.0 沿用 v1 设计 + Wails hash router：
  *   - 7 个一级路由：/、/auth、/board、/timeline、/merges、/my-cards、/members、/settings
  *   - v1.4 拍板：加 /team 占位路由（v2 团队视图落地前，**不**挂 NavRail 入口）
  *     · 详见 ADR-0004（docs/adr/0004-single-repository-focus.md）
  *     · view 走 TeamView.vue 占位，仅保留路由，**不**进 store / IPC
  *   - 根路径 / 重定向到 /auth（未连接时合理入口）
- *   - 用 createWebHashHistory 适配 Electron file:// 协议
+ *   - 用 createWebHashHistory 适配 Wails file:// 协议
  *   - 懒加载（动态 import）减小首屏 bundle
  *   - 全局守卫：未连接 + 进 requiresAuth 路由 → 跳 /auth
  *
- * 命名空间提醒（AGENTS §5.5 + §6）：
+ * 命名空间提醒（AGENTS §6.2 Wails Binding 模式）：
  *   channel 命名 = `<namespace>.<method>`（如 repos.list / board.columns.list），
  *   **不**用资源:动作风格
  */

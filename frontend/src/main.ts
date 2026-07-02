@@ -1,7 +1,7 @@
 /**
  * 渲染端入口（Vue 3 + Pinia + Vue Router 4）
  *
- * 技术栈定型（AGENTS §2.2 + 03-frontend §6.1）：
+ * 技术栈定型（AGENTS §2.2 + AGENTS §5.2 frontend agent（Vue 3 + Pinia + Vue Router））：
  *   - Vue 3 + Composition API + <script setup>
  *   - Pinia 状态管理（不用 Vuex / Redux）
  *   - Vue Router 4（createWebHashHistory 适配 Electron file://）

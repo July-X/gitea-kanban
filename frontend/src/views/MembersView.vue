@@ -2,7 +2,7 @@
 /**
  * MembersView —— 仓库成员列表（= gitea repo collaborators）
  *
- * 设计（AGENTS §5.2 + plan_32018da5）：
+ * 设计（AGENTS §5.2 + v1 末 4-view 4-store 重构）：
  *   - 顶栏：仓库名 + 总成员数 + 权限 tab 切换（全部 / 管理员 / 可写 / 只读）+ 搜索
  *   - 主体：成员列表（卡片化：头像 / 用户名 / 权限级别 / 卡片数）
  *   - 卡片数：v1 简化 = 在 issues.list 全量基础上本地按 author.username 聚合（**不**调额外 IPC）

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * BoardTopbar —— 看板顶栏（plan_25cc4562 Task D · BoardView 重构 · 第 7 拆分）
+ * BoardTopbar —— 看板顶栏（v1.3 BoardView 重构（拆 7 子组件） · 第 7 拆分）
  *
  * 设计（v1.4 · 任务 #statusbar-picker 重构）：
  * - v1.4 之前：仓库下拉触发器 + 撤销 / 重做 / 仓库计数 / loading

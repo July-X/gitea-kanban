@@ -59,14 +59,14 @@ export const THEME_CYCLE_ORDER: readonly Theme[] = ['dark', 'light'] as const;
 /** localStorage 缓存 key（§15.5 启动期 0 闪烁；与 settings.ts 的 'gitea-kanban.prefs' 分开） */
 export const THEME_STORAGE_KEY = 'gitea-kanban.theme';
 
-/** 主题显示名（i18n 占位 · cycle 2 接到 src/shared/i18n 文案表） */
+/** 主题显示名（i18n 占位；当前写死中文，文案集中后由 i18n 替换） */
 export const THEME_DISPLAY_NAME: Record<Theme, string> = {
   dark: '暗色 · 中性近黑',
   light: '浅色 · 浅苍蓝',
 };
 
 // ============================================================================
-// 纯 helper（不依赖 IPC / DOM / store · cycle 2 立即可用）
+// 纯 helper（不依赖 IPC / DOM / store，可独立单测）
 // ============================================================================
 
 /**

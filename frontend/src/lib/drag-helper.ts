@@ -1,7 +1,7 @@
 /**
  * drag-helper —— 看板鼠标拖拽（vue-draggable-plus）的纯函数适配层
  *
- * 用途（plan_25cc4562 Task A + v1.3.1 撤回键盘双模后）：
+ * 用途（v1.3 拖拽链路 + v1.3.1 撤回键盘双模后）：
  * - 封装 `vue-draggable-plus` onEnd 事件 → board.moveIssue 入参
  * - 提供 `isFinishColumnByTitle`（拖到"已完成"列 = 二次确认 + 关闭 gitea issue）
  *

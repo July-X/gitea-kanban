@@ -1,7 +1,7 @@
 /**
  * my-card store —— "我的卡片"列表（gitea issues where assignee == me）
  *
- * 设计（AGENTS §5.2 + plan_32018da5 c-frontend-4-views-4-stores）：
+ * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出（与 branch/member/pull 同源）
  *   - 数据源：issues.list({ assignee: <currentUser.login> }) IPC
  *     A3 拍板 issues.list 支持 assignee 过滤（gitea /issues?assignee=username）
  *   - 跨 project 聚合：

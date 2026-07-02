@@ -2,7 +2,7 @@
 /**
  * GlobalLoadingOverlay —— 全局加载动画（v1.4 · 海豚吉祥物 · emoji 版 · 第六轮）
  *
- * 设计（plan_25cc4562 Dolphin Loading · 拍板 2026-06-15 → 第六轮 2026-06-16）：
+ * 设计（v1.4 Dolphin Loading（海豚吉祥物） · 拍板 2026-06-15 → 第六轮 2026-06-16）：
  *   - 位置（v1.4 第六轮 user 拍板）：position: absolute 居中在 .shell__content 内
  *     · 父级 = AppShell.vue 主区容器
  *     · 跟 router-view 平级（不浮在内容之上，是主区 DOM 的兄弟节点）

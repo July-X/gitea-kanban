@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * ColumnHeader —— 列头 + WIP 计数显示（plan_25cc4562 Task D · BoardView 重构）
+ * ColumnHeader —— 列头 + WIP 计数显示（v1.3 BoardView 重构（拆 7 子组件））
  *
  * 设计（v1.3 · Task B · kanban-wip-limit）：
  * - 列名（h3）+ 计数 chip
@@ -131,7 +131,7 @@ function handleSettings(): void {
   font-feature-settings: 'tnum';
   white-space: nowrap;
 }
-/* v1.3（plan_25cc4562 · Task B）：WIP 上限视觉
+/* v1.3（v1.3 WIP 上限）：WIP 上限视觉
  *  - .column__count--over  : 列头计数器超限变红（最直接提示）
  *  - 父选择器让标题色跟着走，a11y 友好（不靠颜色单一编码）
  */

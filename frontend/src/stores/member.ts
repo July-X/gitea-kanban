@@ -1,7 +1,7 @@
 /**
  * member store —— 当前 project 的成员列表（gitea repo collaborators）
  *
- * 设计（AGENTS §5.2 + plan_32018da5 c-frontend-4-views-4-stores）：
+ * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出（与 my-card/branch/pull 同源）
  *   - 数据源：members.list IPC（main 端包 listRepoCollaborators，gitea /repos/{owner}/{repo}/collaborators）
  *   - setup store 风格
  *   - **不**持久化

@@ -557,7 +557,9 @@ export interface GraphNodeDto {
    * 该节点是否「已提交」。
    * - true：常规 commit 节点（默认值，前端不传时按已提交渲染）
    * - false：UNCOMMITTED 虚拟节点（Go 端 LogCommits / LogCommitsVscode 在
-   *          local 落后 origin 时 unshift 的 SHA="*" 节点），dot stroke 走 #808080 灰色
+   *          worktree dirty 时（v0.3.0 起；v0.3.0 之前是 local HEAD 落后
+   *          origin/<defaultBranch>）unshift 的 SHA="*" 节点），
+   *          dot stroke 走 #808080 灰色
    *
    * 对齐 vscode graph.ts Vertex.draw:269-273。
    */

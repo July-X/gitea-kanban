@@ -1,7 +1,7 @@
 /**
  * pull store —— 当前 project 的合并请求列表（gitea /pulls）
  *
- * 设计（AGENTS §5.2 + plan_32018da5 c-frontend-4-views-4-stores）：
+ * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出（与 my-card/branch/member 同源）
  *   - 数据源：pulls.list IPC（main 端包 listGiteaPulls + 30s 缓存 + linkedCards JOIN）
  *   - setup store 风格（与 board.ts / branch.ts 一致）
  *   - **不**持久化

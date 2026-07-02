@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * UnassignedSection —— 未分类列 + 拖拽归类（plan_25cc4562 Task C + Task D 重构 + v1.4 拍板"拖拽归类"）
+ * UnassignedSection —— 未分类列 + 拖拽归类（v1.3 BoardView 重构 + v1.4 智能化 + v1.4 拍板"拖拽归类"）
  *
  * 设计（v1.4）：
  * - 列形态 = 与普通列一致（section.column.column--unassigned）

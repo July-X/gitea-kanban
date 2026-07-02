@@ -6,7 +6,7 @@
  *   - **不**直接调 gitea API（必须走 window.api → preload → main → keychain）
  *   - token 在 authConnect 一次性传入后立刻进 main 内存 + keychain，本 store **不**留引用
  *
- * setup store 风格（Pinia + Composition API + 03-frontend §6.1）：
+ * setup store 风格（Pinia + Composition API + AGENTS §5.2 frontend agent（Vue 3 + Pinia + Vue Router））：
  *   直接 ref + computed + 函数，return 暴露给组件用
  */
 
@@ -15,9 +15,9 @@ import { computed, ref } from 'vue';
 import { authConnect, authDisconnect, authDisconnectOne, authStatus, authSwitchAccount } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
-// 渲染端通过 @main/ipc/schema 拿到 IPC 类型（AGENTS §5.5 拍板的"IPC 单一信息源"）；
-// src/shared/ipc-types.ts 文件尚未由 backend 创建，frontend 任务**只读** schema.ts,
-// 不在 shared 目录新增 re-export 文件以避免改 shared 边界。
+// v2.0 起渲染端通过 Wails 自动生成的 `frontend/wailsjs/wailsjs/go/main/App.d.ts`
+// 拿 IPC 类型（AGENTS §6.2 Wails Binding 模式）；v1 时代的 `@main/ipc/schema`
+// （Zod schema + z.infer 派生类型）已不再使用。
 import type { GiteaAccountDto, UserDto } from '@renderer/types/dto';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 

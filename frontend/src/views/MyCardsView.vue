@@ -267,7 +267,7 @@ function formatDate(iso: string | undefined): string {
               {{ i.author.fullName || i.author.username }}
             </span>
             <span class="card-row__date muted">更新于 {{ formatDate(i.updatedAt) }}</span>
-            <span class="card-row__due muted" :title="'截止日期（gitea issue.due_date 字段，v1 暂未拉取'">
+            <span class="card-row__due muted" :title="'截止日期（gitea issue.due_date 字段，TODO：等 Go 端 ListIssues 暴露该字段）'">
               截止：暂无
             </span>
           </div>

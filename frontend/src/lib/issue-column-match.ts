@@ -4,7 +4,7 @@
  * 语义：OR —— issue 拥有列绑的任意一个 label 即匹配该列
  * 优先：按列的 position 升序（store.columns 已是 position 序）
  *
- * 来源：plan_25cc4562 拍板（v1.2 P0-1 透明化）
+ * 来源：v1.4 拍板（v1.2 P0-1 透明化）
  * v1.4 重构：原在 board.ts 私有，BoardView.closedIssuesOf 也要用 → 抽到 lib
  */
 import type { ColumnDto, IssueCardDto } from '@renderer/types/dto';
