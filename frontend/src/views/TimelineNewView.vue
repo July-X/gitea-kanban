@@ -2341,7 +2341,7 @@ function refBadgeClass(refType?: string): string {
   border-bottom: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   border-top: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -2375,7 +2375,7 @@ function refBadgeClass(refType?: string): string {
   background: var(--color-shell-main-bg);
 }
 .git-graph-header__col--graph .git-graph-header__col-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-disabled);
   letter-spacing: 0.05em;
@@ -2807,7 +2807,7 @@ function refBadgeClass(refType?: string): string {
   /* VSCode Git Graph .gitRef 默认样式：灰底 + 灰边框 + 圆角 5px */
   border-radius: 5px;
   border: 1px solid rgba(128, 128, 128, 0.75);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   flex-shrink: 0;
   white-space: nowrap;
