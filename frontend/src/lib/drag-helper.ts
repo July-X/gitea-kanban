@@ -83,7 +83,7 @@ export function isFinishColumnByTitle(title: string): boolean {
  * sortablejs options（来自 sortabljs Options + vue-draggable-plus UseDraggableOptions）：
  * - group：跨列拖动必须同 group 名
  * - animation：150ms 平滑过渡
- * - ghost/chosen/dragging class：跟 src/renderer/styles/board-drag.css 联动
+ * - ghost/chosen/dragging class：跟 frontend/src/styles/board-drag.css 联动
  * - forceFallback=false + fallbackOnBody=true：桌面 v1.3 不必支持触屏拖拽，但保持不依赖鼠标事件名硬编码
  *   （forceFallback=true 会强制 Sortable 自己的 pointer event 模拟，对触屏友好；v1.3 桌面不需要）
  * - scrollSensitivity：列边缘自动滚动灵敏度（20px，sortablejs 默认 30）

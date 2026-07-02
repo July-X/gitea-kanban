@@ -1,9 +1,9 @@
 /**
- * Wails API Shim —— 把 Wails 的 Go bindings 适配成旧前端 window.api 接口
+ * Wails API Shim —— 把 Wails 的 Go bindings 适配成 v1 时代的 window.api 接口
  *
- * 背景：旧 Electron 前端通过 window.api.<namespace>.<method>(args) 调 IPC。
- * Wails 架构下 Go 后端方法暴露在 window.go.main.App.<Method>()。
- * 本 shim 在应用启动时注入 window.api，让旧前端代码不改就能跑。
+ * 背景：v1 时代前端通过 window.api.<namespace>.<method>(args) 调 IPC。
+ * v2.0 起 Wails 架构下 Go 后端方法暴露在 window.go.main.App.<Method>()。
+ * 本 shim 在应用启动时注入 window.api，让 v1 时代前端代码不改就能跑。
  *
  * 迁移策略：
  *   - auth.* 已经接入 Wails bindings（v2.0 修复 token 接通链路 bug）

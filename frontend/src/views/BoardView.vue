@@ -3,11 +3,11 @@
  * BoardView —— 仓库选择 + 看板（v1.3 BoardView 重构版 · slim）
  *
  * 重构目标：把 v1.1 + v1.3 累加的 2072 行巨型 SFC 拆到子组件 + composable：
- *   - 子组件（src/renderer/components/board/）：
+ *   - 子组件（frontend/src/components/board/）：
  *     BoardTopbar / KanbanColumnSection / ColumnHeader / ColumnMenu /
  *     LabelPicker / MoveColumnPicker / ConfirmFinishDialog / UnassignedSection
  *   - 全局样式：board-modals.css（Teleport 到 body 后 .modal-overlay / .move-menu 等）
- *   - 业务 composable（src/renderer/composables/）：
+ *   - 业务 composable（frontend/src/composables/）：
  *     useColumnManager（列设置 / WIP / 绑 label / 删列）
  *     useBoardCardActions（换列 / 归类 / 删除 / 标记完成）
  *

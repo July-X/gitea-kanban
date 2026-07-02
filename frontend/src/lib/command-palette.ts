@@ -26,15 +26,15 @@
  *   - 样式用内联字符串注入到 <head>，**不**污染 theme.css
  *
  * 边界（AGENTS §5.2 frontend agent · task spec 强约束）：
- *   - ✅ 不碰 src/main/**
- *   - ✅ 不改 src/shared/ipc-types.ts
- *   - ✅ 不动 src/preload/**
- *   - ✅ 不动 src/renderer/styles/theme.css
- *   - ✅ 不动其他 src/renderer/lib/*（toast.ts / confirm.ts / ipc-client.ts）
+ *   - ✅ 不碰 app/**
+ *   - ✅ 不改 frontend/wailsjs/wailsjs/go/main/App.d.ts
+ *   - ✅ 不动 frontend/src/styles/theme.css
+ *   - ✅ 不动其他 frontend/src/lib/*（toast.ts / confirm.ts / ipc-client.ts）
  *   - ✅ 只 import 现有 useUiStore / THEME_DISPLAY_NAME，**不**改 store
  *   - ✅ 只 import toast 用来"命令执行失败"提示（lazy import，run 失败兜底用）
  *   - ✅ main.ts 改：import + 调 mountCommandPalette()（task spec §4 明确算本任务范畴）
- */
+ *
+ * v0.3.0 注：v1 Electron 时代的 src/main/ / src/preload/ / src/renderer/ 边界已废弃。
 
 import { useUiStore, THEME_DISPLAY_NAME, type Theme } from '@renderer/stores/ui';
 import { showToast } from '@renderer/lib/toast';

@@ -1,11 +1,15 @@
 /**
- * dto.ts —— 从旧 Electron schema.ts 提取的纯 TypeScript 类型定义
+ * dto.ts —— 前后端共享的 DTO 类型契约
  *
- * 来源：legacy/electron/src/main/ipc/schema.ts（Zod schema + z.infer 派生类型）
- * 用途：Wails 前端（Go 后端）的 IPC DTO 类型契约。
+ * 历史来源（v1 时代，2026-06-10）：
+ *   - v1 Electron 时代：Zod schema + z.infer 派生类型，原文件 legacy/electron/src/main/ipc/schema.ts
+ *   - v2.0 Wails 迁移：删 Zod 运行时校验，本文件保留纯 TS interface 作为 IPC DTO 契约
+ *   - 同步 Wails 自动生成的 frontend/wailsjs/wailsjs/go/main/models.ts
+ *
+ * 用途：v0.3.0 渲染端 + Go 后端共享 IPC DTO 类型契约。
  *       本文件只包含 type/interface，不含 Zod 运行时校验。
  *
- * 转换规则：
+ * 转换规则（v1 → v2.0）：
  *   - `z.infer<typeof XxxDtoSchema>`  → `export interface XxxDto { ... }`
  *   - `z.enum([...])`                 → union 字面量类型（如 `type PullState = 'open' | 'closed' | 'all'`）
  *   - `.optional()`                   → `?:` 语法

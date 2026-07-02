@@ -82,7 +82,7 @@ const routes: RouteRecordRaw[] = [
 ];
 
 export const router = createRouter({
-  history: createWebHashHistory(), // hash 模式适配 Electron file://
+  history: createWebHashHistory(), // hash 模式适配 Wails file://
   routes,
 });
 

@@ -32,12 +32,12 @@
  *     静态替换 + rollup DCE，生产包零侵入
  *
  * 边界（AGENTS §5.2 frontend agent）：
- *   - ✅ 不碰 src/main/**
- *   - ✅ 不改 src/shared/ipc-types.ts
- *   - ✅ 不动 src/preload/**
- *   - ✅ 不动 src/renderer/styles/theme.css（popover 样式走 DevAnnotatePopover.vue scoped）
+ *   - ✅ 不碰 app/**
+ *   - ✅ 不改 frontend/wailsjs/wailsjs/go/main/App.d.ts
+ *   - ✅ 不动 frontend/src/styles/theme.css（popover 样式走 DevAnnotatePopover.vue scoped）
  *   - ✅ 不引第三方库（用原生 alert/console 都不需要，popover 自渲染）
- */
+ *
+ * v0.3.0 注：v1 Electron 时代的 src/main/ / src/preload/ / src/renderer/ 边界已废弃。
 
 import type { App, DirectiveBinding } from 'vue';
 import { ref, type Ref } from 'vue';

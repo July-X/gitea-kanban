@@ -32,7 +32,7 @@
 import type { IssueLabelDto } from '@renderer/types/dto';
 
 /**
- * v1.4 预设列名（跟 src/renderer/stores/board.ts presetColumns 完全一致）
+ * v1.4 预设列名（跟 frontend/src/stores/board.ts presetColumns 完全一致）
  * - 10 个去重后字面量
  */
 const LITERAL_PRESETS: readonly string[] = [

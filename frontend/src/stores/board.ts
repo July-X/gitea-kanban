@@ -7,7 +7,8 @@
  * -拖拽换列 = `issues.moveColumn`（后端原子换绑 label）
  * - **v1 不**做真拖拽（用按钮式换列，避免 vuedraggable越权）
  * -撤销栈 =纯前端 UI 层 ref（最近 N 次换列记录 + 反向调 moveColumn）
- * 后端 src/main/board/undo.ts已被 reset 删除；sqlite undo_entries 表保留但暂未接 IPC
+ * 后端 app/store/store.go 是业务态唯一权威（state.json + 原子写）；undo 栈
+ * 当前走前端内存栈（M6 undo-by-project 落地），重启丢失。
  *
  *边界：
  * - **不**做跨 project看板切换缓存（每次切 project重新拉）
@@ -69,10 +70,10 @@ export interface LoadBoardResult {
   autoInitBreakdown: ClusterPlan | null;
 }
 
-/** undo / redo 栈深度 —— 状态走 src/renderer/composables/useUndoStack（M6 undo-by-project）
+/** undo / redo 栈深度 —— 状态走 frontend/src/composables/useUndoStack（M6 undo-by-project）
  *
- * main 端 src/main/board/undo.ts 是 single source of truth（内存栈，重启丢）；
- * 渲染端只持有"栈深度"两个数字供 UI 灰化按钮用。
+ * v0.3.0 注：Go 端**不**实现 undo 栈（app/store/store.go 只有业务态 JSON 存储），
+ * undo 栈纯前端内存实现，重启丢失。渲染端持有"栈深度"两个数字供 UI 灰化按钮用。
  *
  * 实现在 useUndoStack composable 里（纯 IPC + ref，store 端 thin wrap）：
  * - 切 project 时 loadUndoStatus(projectId) 重新拉
@@ -108,7 +109,7 @@ export const useBoardStore = defineStore('board', () => {
   const error = ref<UserFacingError | null>(null);
   /**记录上一次加载的 projectId，避免切 project残留旧数据 */
   const currentProjectId = ref<string | null>(null);
-  /**换列撤销栈（M6 undo-by-project：main 端为 single source of truth）
+  /**换列撤销栈（v0.3.0 注：纯前端内存栈，无 Go 端实现）
    *  保留占位以避免改动其他位置；UI 通过 undoSize / redoSize 显示状态 */
   // ===== undo / redo 栈（useUndoStack composable 薄包装） =====
   const undo = useUndoStack();
@@ -503,7 +504,7 @@ export const useBoardStore = defineStore('board', () => {
     //    1) 卡片上的 label chip 仍显示 fromColumn 绑的 label（视觉错位）
     //    2) 用户感受"释放不更新"（位置改了但数据没变）
     //  修后立即一致：issue.labels = 原 labels - fromColumn 绑的 ∪ toColumn 绑的
-    //  与 main 端 moveIssueColumn (src/main/board/move-card.ts) 行为对齐：
+    //  与 main 端 moveIssueColumn (app/git/move-card.go) 行为对齐：
     //    addLabel(toLabels) 跳过已带的 + removeLabel(fromLabels) 全部
     //  失败回滚用原 issue 对象（labels 未变）保证回滚干净
     const fromCol = columns.value.find((c) => c.id === args.fromColumnId);
@@ -535,7 +536,7 @@ export const useBoardStore = defineStore('board', () => {
     };
     try {
       await issuesMoveColumn(args);
-      // M6 undo-by-project：main 端会自己 pushUndo（src/main/board/move-card.ts:184）
+      // M6 undo-by-project：main 端会自己 pushUndo（app/git/move-card.go:184）
       // 渲染端只刷新按钮状态
       await undo.loadUndoStatus(args.projectId);
     } catch (e) {

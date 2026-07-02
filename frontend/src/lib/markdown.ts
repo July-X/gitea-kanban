@@ -17,7 +17,7 @@
  *
  * 测试策略：
  *   - 本文件 vitest 单测覆盖：`<script>`、`javascript:`、onclick、data: html、链接 rel
- *   - 见 src/renderer/lib/__tests__/markdown.test.ts
+ *   - 见 frontend/src/lib/__tests__/markdown.test.ts
  */
 
 // markdown-it 14 dual package（CJS + ESM index.mjs）。
@@ -160,8 +160,8 @@ export function renderMarkdown(source: string | null | undefined): string {
   if (!source) return '';
   try {
     const html = md.render(source);
-    // DOMPurify 在浏览器环境直接用 window DOM；node 环境会回退到 jsdom（v1 没装）
-    // 我们的使用场景只在 renderer（Electron Chromium）→ 一定有 window
+    // DOMPurify 在浏览器环境直接用 window DOM；node 环境会回退到 jsdom（v0.3.0 仍没装）
+    // 我们的使用场景只在 renderer（Wails WebView / Chromium）→ 一定有 window
     const clean = DOMPurify.sanitize(html, {
       ALLOWED_TAGS,
       ALLOWED_ATTR,

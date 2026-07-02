@@ -22,21 +22,22 @@
  *   - state.json 中持久化为 prefs.theme = 'dark' | 'light'（与 v1 时代 sqlite prefs 表平铺形式一致）
  *
  * 边界（AGENTS §5.2 frontend agent）：
- *   - ✅ 不碰 src/main/**
- *   - ✅ 不改 src/shared/ipc-types.ts（只 import 类型 if 必要）
- *   - ✅ 不动 src/preload/**
- *   - ✅ 不动 src/renderer/styles/theme.css
+ *   - ✅ 不碰 app/**
+ *   - ✅ 不改 frontend/wailsjs/wailsjs/go/main/App.d.ts（只 import 类型 if 必要）
+ *   - ✅ 不动 frontend/src/styles/theme.css
  *   - ✅ 调用 IPC 通过 @renderer/lib/ipc-client 的 getIpcClient().invokeNested 通用入口
  *     （不新增 userPrefsGet/Set 具名 helper —— 与 board.columns.list 等
  *      嵌套 namespace 一致用 invokeNested；navCollapsed 同样模式）
- */
+ *
+ * v0.3.0 注：v1 Electron 时代的 src/main/ / src/preload/ / src/renderer/ 边界已废弃，
+ * 当前边界 = app/ (Go 后端) + frontend/src/ (渲染端) + frontend/wailsjs/ (Wails 生成)。
 
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { getIpcClient } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
 
-/** 主题枚举（与 src/main/ipc/schema.ts ThemeEnumSchema 同步 · single source of truth）
+/** 主题枚举（与 frontend/wailsjs/wailsjs/go/main/App.d.ts ThemeEnumSchema 同步 · single source of truth）
  *
  * v2.4 落地：
  *   - 持久化通道从 v1 时代的 `preferences.theme.{get,set}` 迁移到通用 `user.prefs.{get,set}`
@@ -227,9 +228,8 @@ export const useUiStore = defineStore('ui', () => {
   //   - 启动期 reconcile 跟 theme 同模式（localStorage 同步 → IPC async reconcile）
   //
   // 边界（AGENTS §5.2 frontend agent）：
-  //   - ✅ 不碰 src/main/**（复用 user.prefs 现有端点）
-  //   - ✅ 不改 src/shared/ipc-types.ts（只 invoke 不增 schema）
-  //   - ✅ 不动 src/preload/**（user.prefs 已暴露）
+  //   - ✅ 不碰 app/**（复用 user.prefs 现有端点）
+  //   - ✅ 不改 frontend/wailsjs/wailsjs/go/main/App.d.ts（只 invoke 不增 schema）
 
   /** NavRail 折叠状态 localStorage cache key（启动期 0 闪烁） */
   const NAV_COLLAPSED_STORAGE_KEY = 'gitea-kanban.navCollapsed';

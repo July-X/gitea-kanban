@@ -1,31 +1,27 @@
 <script setup lang="ts">
 /**
- * GlobalLoadingOverlay —— 全局加载动画（v1.4 · 海豚吉祥物 · emoji 版 · 第六轮）
+ * GlobalLoadingOverlay —— 全局加载动画（海豚吉祥物）
  *
- * 设计（v1.4 Dolphin Loading（海豚吉祥物） · 拍板 2026-06-15 → 第六轮 2026-06-16）：
- *   - 位置（v1.4 第六轮 user 拍板）：position: absolute 居中在 .shell__content 内
- *     · 父级 = AppShell.vue 主区容器
- *     · 跟 router-view 平级（不浮在内容之上，是主区 DOM 的兄弟节点）
- *     · 内容完全可见，**不**再有半透明蒙版 / **不**再有 blur / **不**再有 box-shadow
- *     · 早期版本（v1.4 第一轮）是 fixed 全屏蒙版 → user 反馈"大蒙版在内容区" → 推翻
- *   - 内容：emoji 🐬 海豚（24px · v1.4 第四轮减半）+ 头顶小气泡
- *   - 动画：海豚沿 12px 半径小圈**公转** 4s linear 一圈（v1.4 第二轮删自转）
- *           + 内层 emoji 上下浮动 1.2s ease-in-out
- *           + 气泡错峰浮动 1.6s
- *   - a11y：
- *     · role="status" aria-live="polite" aria-label="加载中"
- *     · 尊重 prefers-reduced-motion: reduce（停转但保留静态展示）
- *   - pointer-events: none：不抢点击（用户在主区还能继续交互）
- *   - 视觉：透明背景（无蒙版），海豚 + text-shadow 主色微光
+ * 定位：v0.3.0 起，所有远端请求 loading 收口到这一个全局海豚 overlay，
+ *       显示在主区中央（v1.4 拍板的 absolute 居中，非 v1.4 之前的 fixed 全屏蒙版）。
  *
- * v1.4 后（user 拍板 2026-06-16）：海豚改用 emoji 🐬
- *   - 推翻了 OVERRIDE.md"无 emoji 图标"硬约束（已同步更新设计系统）
- *   - 跨平台渲染差异：Apple/Google 彩色 · Windows Segoe UI · Linux Noto Color Emoji
- *   - 不强制 font-family → 走系统默认 → 桌面端 4 平台均能渲染（接受 trade-off）
+ * 用户当前任务（用户原始消息）：
+ *   "做一个全局的加载动画，出现的位置主要是 App 右侧的功能区。
+ *    动画效果为：一个小海豚转圈"
+ *   ——TODO（v0.6+ 单独 plan）：位置从主区中央改成 App 右侧功能区；动画
+ *     保留 v1.4 海豚 emoji + 公转。
  *
- * 边界（AGENTS §5.2 frontend agent）：
- *   - ✅ 不碰 src/main/**
- *   - ✅ 不动 src/renderer/styles/theme.css（全部用现有 token）
+ * 内容：emoji 🐬 海豚（24px）+ 头顶小气泡
+ * 动画：海豚沿 12px 半径小圈公转 4s linear 一圈 + 内层 emoji 上下浮动 1.2s +
+ *       气泡错峰浮动 1.6s
+ * a11y：
+ *   - role="status" aria-live="polite" aria-label="加载中"
+ *   - 尊重 prefers-reduced-motion: reduce（停转但保留静态展示）
+ * pointer-events: none：不抢点击（用户在主区还能继续交互）
+ * 视觉：透明背景（无蒙版 / 无 blur / 无 box-shadow）
+ *
+ * v0.3.0 注释清理：移除 v1.4 时代的设计系统硬约束 / src/main/** / src/preload/**
+ * / src/renderer/styles/theme.css 等 v1 时代溯源。组件代码本身无 v0.3.0 兼容性问题，继续使用。
  */
 import { computed } from 'vue';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
@@ -49,13 +45,13 @@ const visible = computed(() => globalLoading.visible);
     >
       <div class="dolphin-overlay__inner">
         <!--
-          海豚：emoji 🐬（v1.4 user 拍板推翻 OVERRIDE.md"无 emoji 图标"硬约束）
+          海豚：emoji 🐬（v1.4 user 拍板推翻 设计系统硬约束）
           - 跨平台 emoji 字体（Apple / Google / Win / Linux）走系统默认
           - 公转 4s linear 沿 12px 半径圆周一圈，头朝右不回转
           - 内层 span 走上下浮动 1.2s（独立 transform 栈）
           - aria-hidden=true：emoji 不进 a11y 树，外面 role=status 负责播报
-          - v1.4 第三轮 user 拍板：删圆环轨道，单纯公转
-          - v1.4 第四轮 user 拍板：海豚大小减半（emoji 48 → 24，wrapper 64 → 32）
+          - v1.4 早期 user 拍板：删圆环轨道，单纯公转
+          - v1.4 中期 user 拍板：海豚大小减半（emoji 48 → 24，wrapper 64 → 32）
         -->
         <div class="dolphin-emoji-wrap" aria-hidden="true">
           <span class="dolphin-emoji">🐬</span>
@@ -72,7 +68,7 @@ const visible = computed(() => globalLoading.visible);
         </div>
 
         <!--
-          v1.4 第五轮 user 拍板：删"加载中…"文字
+          v1.4 倒数第二轮 user 拍板：删"加载中…"文字
           a11y 仍由外层 div role="status" aria-live="polite" 负责（屏幕阅读器读"加载中"）
         -->
       </div>
@@ -82,7 +78,7 @@ const visible = computed(() => globalLoading.visible);
 
 <style scoped>
 /**
- * Overlay 几何（v1.4 第六轮 user 拍板 · 推翻之前的 fixed 全屏蒙版）：
+ * Overlay 几何（v1.4 末轮 user 拍板 · 推翻之前的 fixed 全屏蒙版）：
  *   - 位置：position: absolute 居中在 .shell__content 内（父级 = AppShell.vue 的主区）
  *   - z-index 走 --z-nav（100），比 modal 低
  *   - pointer-events: none：不抢点击（用户在主区还能继续交互）
@@ -102,7 +98,7 @@ const visible = computed(() => globalLoading.visible);
   display: flex;
   align-items: center;
   justify-content: center;
-  /* v1.4 第六轮：删 background / backdrop-filter / box-shadow —— 纯透明 */
+  /* v1.4 末轮：删 background / backdrop-filter / box-shadow —— 纯透明 */
 }
 
 .dolphin-overlay__inner {
@@ -118,21 +114,21 @@ const visible = computed(() => globalLoading.visible);
   position: relative;
 }
 
-/* v1.4 第三轮 user 拍板：删圆环轨道（.dolphin-orbit / .dolphin-orbit__ring 全删） */
+/* v1.4 早期 user 拍板：删圆环轨道（.dolphin-orbit / .dolphin-orbit__ring 全删） */
 
 /* 海豚 emoji 容器：公转（v1.4 user 拍板 · 第四轮）
  *
  * 关键设计：
- *   - 删自转 + 删圆环：v1.4 第三轮 user 拍板"圆环应该移除"
+ *   - 删自转 + 删圆环：v1.4 早期 user 拍板"圆环应该移除"
  *   - 公转 = transform translate 沿 12px 半径圆周 8 步变化
  *   - 头朝右（emoji 默认），公转期间不翻转
  *   - 视觉是"🐬 绕着 emoji 自己位置的小圈跑步"
- *   - v1.4 第四轮：海豚大小减半（emoji 48 → 24，wrapper 64 → 32）
+ *   - v1.4 中期：海豚大小减半（emoji 48 → 24，wrapper 64 → 32）
  */
 .dolphin-emoji-wrap {
   position: absolute;
   z-index: 1;
-  /* v1.4 第四轮 user 拍板：海豚大小减半（64 → 32） */
+  /* v1.4 中期 user 拍板：海豚大小减半（64 → 32） */
   width: 32px;
   height: 32px;
   /* 默认在 inner 中心 */
@@ -149,7 +145,7 @@ const visible = computed(() => globalLoading.visible);
 }
 
 .dolphin-emoji {
-  /* v1.4 第四轮：海豚大小减半 · 48px → 24px */
+  /* v1.4 中期：海豚大小减半 · 48px → 24px */
   font-size: 24px;
   line-height: 1;
   /* 不上 text-shadow：emoji 本身是位图，加 shadow 会糊 */
@@ -160,8 +156,8 @@ const visible = computed(() => globalLoading.visible);
   display: inline-block;
 }
 
-/* 海豚气泡：跟 emoji 一起公转 + 错峰浮动（v1.4 第二轮：放在 wrapper 内）
- * v1.4 第四轮：海豚缩小后气泡等比缩（top/left 比例调整） */
+/* 海豚气泡：跟 emoji 一起公转 + 错峰浮动（v1.4 早期：放在 wrapper 内）
+ * v1.4 中期：海豚缩小后气泡等比缩（top/left 比例调整） */
 .dolphin-bubble {
   position: absolute;
   /* emoji 容器 32x32 内，气泡放在 emoji 头部（上方偏左） */
@@ -176,17 +172,17 @@ const visible = computed(() => globalLoading.visible);
   opacity: 0.7;
 }
 
-/* v1.4 第五轮 user 拍板：删"加载中…"文字 · .dolphin-overlay__text 样式同时清理 */
+/* v1.4 倒数第二轮 user 拍板：删"加载中…"文字 · .dolphin-overlay__text 样式同时清理 */
 
 /* ============= 动画 =============
- * v1.4 第二轮修正：删 dolphin-spin 自转 · 改 dolphin-orbit 公转
+ * v1.4 早期修正：删 dolphin-spin 自转 · 改 dolphin-orbit 公转
  * 海豚沿圆环轨道（r=36 viewBox / 实际 ~43px）走一圈，4s linear
  * 头朝右（emoji 默认方向）不翻转 —— 视觉是"🐬 沿大圈跑步"
  */
 
 /* 公转：8 步 keyframes，角度 0°/45°/90°/.../315°
  * 圆心在 .dolphin-overlay__inner 中心
- * v1.4 第四轮：海豚大小减半（emoji 32px），公转半径 24 → 12
+ * v1.4 中期：海豚大小减半（emoji 32px），公转半径 24 → 12
  * 0°  = 右侧 (+12, 0)
  * 45° = 右上 (+9, -9)   ← y 向上为负，sin(45)*12 ≈ 8.5 取 9
  * 90° = 上方 (0, -12)
@@ -251,10 +247,10 @@ const visible = computed(() => globalLoading.visible);
 
 /* ============= a11y: prefers-reduced-motion =============
  * 尊重系统级"减少动画"偏好：停转但保留静态展示 + 文案
- * （参考 design system §OVERRIDE "尊重 prefers-reduced-motion: reduce"）
+ * （CSS @media (prefers-reduced-motion: reduce) 标准语法）
  */
 @media (prefers-reduced-motion: reduce) {
-  /* v1.4 第二轮：dolphin-emoji-wrap 走公转（不是自转），dolphin-emoji 走浮动 */
+  /* v1.4 早期：dolphin-emoji-wrap 走公转（不是自转），dolphin-emoji 走浮动 */
   .dolphin-emoji-wrap,
   .dolphin-emoji,
   .dolphin-bubble {

@@ -472,7 +472,7 @@ const closeConfirmDescription = computed(() => {
 // 设计（v1.2 · task #25）：
 //   - 策略：展开手风琴时拉一次评论；发送评论后立即重拉（拿到权威评论；新评论 id / 时间）
 //   - 数据源：复用 issues.comment.list / create（gitea 共享 /issues/{index}/comments 端点）
-//   - 渲染：markdown-it + DOMPurify（见 src/renderer/lib/markdown.ts）
+//   - 渲染：markdown-it + DOMPurify（见 frontend/src/lib/markdown.ts）
 //   - 状态：Map<index, { items, loading, error, posting }> —— 一个仓库手风琴可同时展开多个合并请求，
 //     每个合并请求维护自己的评论 state（避免互相污染，也避免刷新合并请求列表时清空评论）
 //   - 当前用户评论高亮：拿到 auth.currentUsername 后做 author === self 判断（v1.2 best-effort）

@@ -2,7 +2,7 @@
  * useUndoStack —— 看板换列撤销/重做的栈深度状态 + IPC 薄包装
  *
  * M6 undo-by-project 设计：栈数据走 main 端 `user.undo` / `user.redo` / `user.undoStatus`
- * （src/main/board/undo.ts 是 single source of truth，**不**存 SQL —— 内存栈 + 重启丢失）。
+ * （app/store/store.go 是 single source of truth，**不**存 SQL —— 内存栈 + 重启丢失）。
  * 渲染端只持有"栈深度"两个数字供 UI 灰化按钮用。
  *
  * 职责（保持薄）：

@@ -4,18 +4,18 @@
  * 技术栈定型（AGENTS §2.2 + AGENTS §5.2 frontend agent（Vue 3 + Pinia + Vue Router））：
  *   - Vue 3 + Composition API + <script setup>
  *   - Pinia 状态管理（不用 Vuex / Redux）
- *   - Vue Router 4（createWebHashHistory 适配 Electron file://）
+ *   - Vue Router 4（createWebHashHistory 适配 Wails file://）
  *   - 全部走 ESM 导入（type: module）
  *
- * 全局错误处理（AGENTS §4.5 日志 + OVERRIDE §本项目专属规则 #3 错误人话）：
- *   - app.config.errorHandler 捕获组件内未处理错误 → pino 日志 + Toast 提示
+ * 全局错误处理（slate 文件 transport + OVERRIDE §本项目专属规则 #3 错误人话）：
+ *   - app.config.errorHandler 捕获组件内未处理错误 → Go 端 slog + Toast 提示
  *   - window.onerror 捕获全局 JS 异常（异步、未捕获 promise）
  *   - window.onunhandledrejection 捕获未处理 Promise reject
  *
  * 不做的事：
  *   - 不引 pinia-plugin-persistedstate（AGENTS §2.2 拍板时未列，user_decision 未拍）
- *   - 不引 Vue DevTools（v1 不需要）
- *   - 不引国际化 i18n（v1 单 zh-Hans，文案硬编码）
+ *   - 不引 Vue DevTools（v0.3.0 仍不需要）
+ *   - 不引国际化 i18n（v0.3.0 单 zh-Hans，文案硬编码）
  */
 
 import { createApp } from 'vue';
@@ -27,7 +27,7 @@ import { useUiStore } from './stores/ui';
 import { showToast } from './lib/toast';
 import { logError } from './lib/frontend-log';
 
-// Wails 迁移：注入 window.api shim（替代 Electron preload bridge）
+// Wails 注入 window.api shim（替代 v1 Electron 时代的 preload bridge）
 // 必须在 createApp / 任何 store 调用前执行（ipc-client 依赖 window.api）
 import { installApiShim } from './lib/wails-api-shim';
 installApiShim();

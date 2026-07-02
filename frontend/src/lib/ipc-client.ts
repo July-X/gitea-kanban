@@ -186,10 +186,11 @@ export function normalizeError(err: unknown): UserFacingError {
     };
   }
   if (err instanceof Error) {
-    // 2026-06-12 修复：Electron IPC 把 main process throw 的 plain object
+    // v1 时代踩坑（2026-06-12 修复）：v1 Electron IPC 把 main process throw 的 plain object
     // (IpcError.toJSON()) 包装成 Error, message = "Error invoking remote method 'xxx': [object Object]"
     // code/hint 等自定义属性丢失——解析 message
     // 2026-06-14 增强：兼容 [object Object] / [object Response] / 任何 [object XXX]
+    // v2.0 Wails 架构下不再有这个问题（Wails 自动序列化自定义类型）
     const ipcMatch = err.message.match(/Error invoking remote method '([^']+)': \[object \w+\]/);
     if (ipcMatch) {
       return {
@@ -722,7 +723,7 @@ export function onWorkspaceMigrateProgress(
 /** 写系统剪贴板（v1.1.3）—— 走主进程 electron.clipboard.writeText
  *
  * 选 IPC 而非 navigator.clipboard.writeText 的原因（task #20）：
- * 1) Electron renderer 窗口无 focus / 非用户激活时 navigator.clipboard.writeText
+ * 1) v1 时代 renderer 窗口无 focus / 非用户激活时 navigator.clipboard.writeText
  *    promise reject，v1.1.2 主题切换踩过 → 主进程永远可靠
  * 2) 主进程走 system clipboard API，与 webview focus 解耦
  * 3) 沙箱合规：renderer 不直接调系统 API
@@ -734,7 +735,7 @@ export function clipboardWrite(text: string): Promise<void> {
 }
 
 // ============================================================
-// ===== system.* （Electron 系统级能力）=====
+// ===== system.* （Wails 系统级能力，v1 时代是 Electron 系统能力）=====
 // ============================================================
 
 /** 系统目录选择器（v1.5.3 SettingsView 用，v2.2 已移除选择目录功能，保留 stub） */
@@ -758,7 +759,7 @@ export function systemOpenPath(args: { path: string }): Promise<void> {
 // ===== pulls.* （A3 补：前端 wrapper，让 MergesView 能调） =====
 // ============================================================
 
-/** 合并请求 state（与 src/main/ipc/schema.ts PullStateSchema 同步）
+/** 合并请求 state（与 frontend/wailsjs/wailsjs/go/main/App.d.ts PullStateSchema 同步）
  *
  * a3 拍板加 'all'：前端"合并请求"页要拉全量，然后按 merged 二次过滤拆"全部 / 待合并 /
  * 已合并 / 已关闭"4 个 tab。gitea 端 /pulls?state=closed 同时含 merged，'all' 是
@@ -937,7 +938,8 @@ export function boardColumnsUnmapLabel(args: {
  * 后端 schema 已加 `assignee?: string` 字段（透传到 gitea /issues?assignee=）。
  *
  * v1 简化：assignee 用 gitea username 字符串（不是 userId）—— main 端调
- * gitea api.repos.repoListIssues(..., { assignee }) 时 gitea-js 自己处理。
+ * Gitea REST API `/repos/{owner}/{repo}/issues?assignee=username`（v2.0 改 Go net/http 手写，
+ * 替代 v1 的 gitea-js swagger 客户端）。
  */
 export function issuesList(args: {
   projectId: string;
@@ -1073,7 +1075,8 @@ export function labelsCreate(args: {
 
 /** 列出某 project 的成员（= gitea repo collaborators）
  *
- * A3 拍板：channel = `members.list`，后端 src/main/gitea/repos.ts listRepoCollaborators 包装。
+ * A3 拍板：channel = `members.list`，后端 app/platform/gitea/adapter.go ListMembers
+ * 包装（v2.0 改 Go net/http 手写，替代 v1 的 gitea-js swagger 客户端 + src/main/gitea/）。
  *
  * 兼容层：
  * - 旧实现可能直接返数组
