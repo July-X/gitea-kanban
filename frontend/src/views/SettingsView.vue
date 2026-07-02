@@ -447,26 +447,24 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
     <!-- 三栏网格布局（紧凑，避免滚动条） -->
     <div class="settings__grid">
       <!-- 数据同步 -->
-      <section class="settings__card">
+      <section class="settings__card settings__card--compact">
         <h2>数据同步</h2>
-        <div class="settings__field">
+        <div class="settings__inline-row">
           <label class="settings__label" for="polling-min">自动刷新间隔</label>
-          <div class="settings__row">
-            <input
-              id="polling-min"
-              type="number"
-              class="settings__input"
-              :value="minutesLabel"
-              min="1"
-              :max="Math.round(SETTINGS_LIMITS.MAX_POLLING_INTERVAL_MS / 60000)"
-              @change="onMinutesChange"
-            />
-            <span class="settings__unit">分钟</span>
-          </div>
+          <input
+            id="polling-min"
+            type="number"
+            class="settings__input"
+            :value="minutesLabel"
+            min="1"
+            :max="Math.round(SETTINGS_LIMITS.MAX_POLLING_INTERVAL_MS / 60000)"
+            @change="onMinutesChange"
+          />
+          <span class="settings__unit">分钟</span>
+          <button type="button" class="settings__save settings__save--inline" :disabled="saving" @click="onSave">
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
         </div>
-        <button type="button" class="settings__save" :disabled="saving" @click="onSave">
-          {{ saving ? '保存中…' : '保存' }}
-        </button>
       </section>
 
       <!--
@@ -478,7 +476,7 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
         状态行 1 句点出当前 path + 版本号。
         路径 tooltip only on hover（避免 1 行变两行）。
       -->
-      <section class="settings__card">
+      <section class="settings__card settings__card--compact">
         <h2>Git 二进制</h2>
 
         <!--
@@ -525,25 +523,27 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
       </section>
 
       <!-- 外观 -->
-      <section class="settings__card">
-        <h2>外观</h2>
-        <div class="settings__theme-options" role="radiogroup" aria-label="主题">
-          <label
-            v-for="opt in themeOptions"
-            :key="opt.value"
-            class="settings__theme-opt"
-            :class="{ 'settings__theme-opt--active': ui.currentTheme === opt.value }"
-          >
-            <input
-              type="radio"
-              name="theme"
-              :value="opt.value"
-              :checked="ui.currentTheme === opt.value"
-              class="settings__theme-radio"
-              @change="onThemeChange(opt.value)"
-            />
-            <span class="settings__theme-label">{{ opt.label }}</span>
-          </label>
+      <section class="settings__card settings__card--compact">
+        <div class="settings__inline-row">
+          <h2>外观</h2>
+          <div class="settings__theme-options" role="radiogroup" aria-label="主题">
+            <label
+              v-for="opt in themeOptions"
+              :key="opt.value"
+              class="settings__theme-opt"
+              :class="{ 'settings__theme-opt--active': ui.currentTheme === opt.value }"
+            >
+              <input
+                type="radio"
+                name="theme"
+                :value="opt.value"
+                :checked="ui.currentTheme === opt.value"
+                class="settings__theme-radio"
+                @change="onThemeChange(opt.value)"
+              />
+              <span class="settings__theme-label">{{ opt.label }}</span>
+            </label>
+          </div>
         </div>
       </section>
 
@@ -766,12 +766,24 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
   flex-direction: column;
   gap: var(--space-3);
 }
+.settings__card--compact {
+  padding: var(--space-3) var(--space-4);
+  gap: var(--space-2);
+}
 .settings__card h2 {
   font-size: var(--font-md);
   font-weight: 600;
   color: var(--color-text);
   margin: 0;
   flex-shrink: 0;
+}
+
+/* 内联行（数据同步 label+input+unit+save 同行；外观 h2+主题 同行） */
+.settings__inline-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 /* 字段 / 行 / 提示 */
@@ -849,16 +861,15 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
 .settings__mode-toggle {
   display: flex;
   gap: var(--space-2, 8px);
-  margin: var(--space-3, 12px) 0;
 }
 .settings__mode-btn {
   flex: 1 1 0;
-  padding: 10px 16px;
+  padding: 7px 12px;
   background: var(--color-bg-elevated, var(--color-bg-secondary, rgba(255, 255, 255, 0.04)));
   color: var(--color-text);
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.15));
-  border-radius: 8px;
-  font-size: var(--font-md, 13px);
+  border-radius: 6px;
+  font-size: var(--font-sm, 12px);
   font-weight: 500;
   cursor: pointer;
   text-align: center;
@@ -905,6 +916,10 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
 }
 .settings__save:hover:not(:disabled) {
   background: var(--color-primary-hover);
+}
+.settings__save--inline {
+  padding: 4px 12px;
+  font-size: var(--font-xs);
 }
 .settings__save:disabled {
   opacity: 0.6;
