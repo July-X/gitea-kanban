@@ -167,6 +167,34 @@ type WailsApp = {
     headBefore: string;
     headAfter: string;
   }>;
+  /**
+   * v0.4.0：Git 二进制设置（SettingsView "Git 二进制" 卡片）。
+   *
+   * - GetGitBinaryConfig: 读当前 userOverride + defaultPath + effectivePath + version
+   * - SetGitBinaryPath: 持久化 prefs["app.gitBinaryPath"] + 进程内立刻 SetUserOverride
+   * - TestGitBinary: 验证路径是否可执行（macOS quarantine 检测）
+   * - StripGitBinaryQuarantine: macOS 主动 xattr -d 剥离
+   * - OpenGitBinaryPicker: 平台特定 wailsruntime.OpenFileDialog
+   *
+   * 任何 binding 缺失都让 shim 返「Wails 未启动」/「重新构建」错误，不静默成功。
+   */
+  GetGitBinaryConfig?: () => Promise<{
+    userOverride: string;
+    defaultPath: string;
+    embeddedVersion: string;
+    effectivePath: string;
+    embeddedAvailable: boolean;
+  }>;
+  SetGitBinaryPath?: (args: { path: string }) => Promise<void>;
+  TestGitBinary?: (args: { path: string }) => Promise<{
+    ok: boolean;
+    version: string;
+    path: string;
+    message: string;
+    hint: string;
+  }>;
+  StripGitBinaryQuarantine?: (args: { path: string }) => Promise<void>;
+  OpenGitBinaryPicker?: () => Promise<string>;
 };
 
 /** 拿到 window.go.main.App（Wails 在启动期注入） */
@@ -667,6 +695,116 @@ const apiShim = {
         return Promise.resolve();
       },
     },
+  },
+
+  /**
+   * v0.4.0：git binary 子 namespace（"settings.gitBinary"）
+   *
+   *   - getConfig(): 读当前 userOverride + defaultPath + effectivePath
+   *   - setPath({path}): 持久化 + 立即生效
+   *   - test({path}): 验证 path 是否合法 git binary
+   *   - stripQuarantine({path}): macOS 主动 xattr -d com.apple.quarantine
+   *   - pickFile(): 弹平台特定文件选择对话框
+   */
+  gitBinary: {
+    getConfig: (): Promise<{
+      userOverride: string;
+      defaultPath: string;
+      embeddedVersion: string;
+      effectivePath: string;
+      embeddedAvailable: boolean;
+    }> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'gitBinary.getConfig 尚未连接到 Go 后端（Wails 未启动）',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.GetGitBinaryConfig) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 GetGitBinaryConfig',
+              hint: '请重新构建应用（wails build）',
+            });
+          }
+          return app.GetGitBinaryConfig();
+        },
+      ),
+    setPath: (args: { path: string }): Promise<void> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'gitBinary.setPath 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.SetGitBinaryPath) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 SetGitBinaryPath',
+              hint: '请重新构建应用（wails build）',
+            });
+          }
+          return app.SetGitBinaryPath(args);
+        },
+      ),
+    test: (args: { path: string }): Promise<{
+      ok: boolean;
+      version: string;
+      path: string;
+      message: string;
+      hint: string;
+    }> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'gitBinary.test 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.TestGitBinary) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 TestGitBinary',
+              hint: '请重新构建应用（wails build）',
+            });
+          }
+          return app.TestGitBinary(args);
+        },
+      ),
+    stripQuarantine: (args: { path: string }): Promise<void> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'gitBinary.stripQuarantine 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.StripGitBinaryQuarantine) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 StripGitBinaryQuarantine',
+              hint: '请重新构建应用（wails build）',
+            });
+          }
+          return app.StripGitBinaryQuarantine(args);
+        },
+      ),
+    pickFile: (): Promise<string> =>
+      forwardToWails(
+        () => Promise.resolve(''),
+        (app) => {
+          if (!app.OpenGitBinaryPicker) {
+            return Promise.resolve('');
+          }
+          return app.OpenGitBinaryPicker();
+        },
+      ),
   },
 
   system: {

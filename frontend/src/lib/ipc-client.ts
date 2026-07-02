@@ -1078,3 +1078,54 @@ export function milestonesList(args: {
 }): Promise<ListMilestonesResp> {
   return getIpcClient().invoke('milestones', 'list', args);
 }
+
+/**
+ * v0.4.0：git 二进制设置（SettingsView "Git 二进制" 卡片）
+ *
+ * - getGitBinaryConfig: 读 userOverride / defaultPath / effectivePath
+ * - setGitBinaryPath: 持久化 prefs["app.gitBinaryPath"] + 进程内立即生效
+ * - testGitBinary: 验证 path 是否可执行（macOS quarantine 检测）
+ * - stripGitBinaryQuarantine: macOS 主动 xattr -d 剥离
+ * - openGitBinaryPicker: 平台特定文件选择对话框
+ */
+export interface GitBinaryConfig {
+  /** 用户填的路径；空字符串 = 用默认（内嵌或 PATH） */
+  userOverride: string;
+  /** 内嵌二进制实际释放路径（dev 期可能为空字符串：0 字节 placeholder） */
+  defaultPath: string;
+  /** 内嵌版本号（当前固定 "2.55.0"） */
+  embeddedVersion: string;
+  /** 当前进程实际用的 git 路径（= ResolveGitBinaryPath 解析结果） */
+  effectivePath: string;
+  /** 当前平台是否真嵌入二进制（linux 永远 false） */
+  embeddedAvailable: boolean;
+}
+
+export interface TestGitBinaryResult {
+  ok: boolean;
+  version: string;
+  path: string;
+  message: string;
+  hint: string;
+}
+
+export function getGitBinaryConfig(): Promise<GitBinaryConfig> {
+  return getIpcClient().invoke('gitBinary', 'getConfig', {});
+}
+
+export function setGitBinaryPath(path: string): Promise<void> {
+  return getIpcClient().invoke('gitBinary', 'setPath', { path });
+}
+
+export function testGitBinary(path: string): Promise<TestGitBinaryResult> {
+  return getIpcClient().invoke('gitBinary', 'test', { path });
+}
+
+export function stripGitBinaryQuarantine(path: string): Promise<void> {
+  return getIpcClient().invoke('gitBinary', 'stripQuarantine', { path });
+}
+
+/** 平台特定文件选择对话框；用户取消返空字符串 */
+export function openGitBinaryPicker(): Promise<string> {
+  return getIpcClient().invoke('gitBinary', 'pickFile', {});
+}
