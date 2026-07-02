@@ -320,12 +320,30 @@ func TestPickInitialDirForGitBinary(t *testing.T) {
 
 	tmp := t.TempDir()
 
-	// case 1 stub：findSystemGit 返路径 → 返 dirname（验证优先级）
-	findSystemGit = func(_ string) (string, error) {
-		return "/usr/local/bin/git", nil
+	// case 1 stub：findSystemGit 返路径 → 返 dirname（已 EvalSymlinks）
+	//
+	//	v0.5-mid4 预期：起的是 symlink 时，返实体 dir（Cellar 下的 bin）。
+	//	本次用 symlink-stub 验证该行为。
+	linkDir := filepath.Join(tmp, "fake-usr-local-bin")
+	entityDir1 := filepath.Join(tmp, "fake-Cellar", "git", "2.55.0", "bin")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll linkDir: %v", err)
 	}
-	if got := PickInitialDir(tmp); got != "/usr/local/bin" {
-		t.Errorf("case 1 PATH git: want /usr/local/bin, got %q", got)
+	if err := os.MkdirAll(entityDir1, 0o755); err != nil {
+		t.Fatalf("MkdirAll entityDir1: %v", err)
+	}
+	entityBin1 := filepath.Join(entityDir1, "git")
+	if err := os.WriteFile(entityBin1, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	linkBin1 := filepath.Join(linkDir, "git")
+	if err := os.Symlink(entityBin1, linkBin1); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	findSystemGit = func(_ string) (string, error) { return linkBin1, nil }
+	wantDir, _ := filepath.EvalSymlinks(entityDir1)
+	if got := PickInitialDir(tmp); got != wantDir {
+		t.Errorf("case 1 symlink PATH git: want entity dir %q, got %q", wantDir, got)
 	}
 
 	// case 2 stub: PATH git 不在 → 落到 toolsGitDir（须非空）
@@ -348,5 +366,79 @@ func TestPickInitialDirForGitBinary(t *testing.T) {
 	}
 	if got := PickInitialDir(emptyTmp); got != emptyTmp {
 		t.Errorf("case 3 fallback dataDir: want %q, got %q", emptyTmp, got)
+	}
+}
+
+// TestSystemGitDir 验证 v0.5-mid4 symlink 解析逻辑。
+//
+//	场景：
+//	  - symlink 存在指向实体 → 返实体 dir（如 /opt/homebrew/Cellar/.../bin）
+//	  - path 是实体文件 → 返其 dir
+//	  - EvalSymlinks 报错（死链/消失）→ fallback 到 path 自己的 dir
+func TestSystemGitDir(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 场景 1：symlink → 实体
+	entityDir := filepath.Join(tmp, "Cellar", "git", "2.55.0", "bin")
+	if err := os.MkdirAll(entityDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	entityBin := filepath.Join(entityDir, "git")
+	if err := os.WriteFile(entityBin, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("WriteFile entity: %v", err)
+	}
+	linkPath := filepath.Join(tmp, "bin", "git")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll link dir: %v", err)
+	}
+	if err := os.Symlink(entityBin, linkPath); err != nil {
+		t.Skipf("symlink unavailable on this filesystem: %v", err)
+	}
+	// 解决 macOS /var/folders → /private/var/folders symlink 问题：用 EvalSymlinks 达一致
+	entityDirResolved, _ := filepath.EvalSymlinks(entityDir)
+	if got := systemGitDir(linkPath); got != entityDirResolved {
+		t.Errorf("symlink case: want %q, got %q", entityDirResolved, got)
+	}
+
+	// 场景 2：实体路径本身（无 symlink） → 返其 dir
+	if got := systemGitDir(entityBin); got != entityDirResolved {
+		t.Errorf("entity case: want %q, got %q", entityDirResolved, got)
+	}
+
+	// 场景 3：EvalSymlinks 报错（path 不存在，symlink 死链） → fallback 到 path Dir
+	deadPath := filepath.Join(tmp, "does", "not", "exist", "git")
+	if got := systemGitDir(deadPath); got != filepath.Dir(deadPath) {
+		t.Errorf("dead path fallback: want %q, got %q", filepath.Dir(deadPath), got)
+	}
+}
+
+// TestPickInitialDirForGitBinary_Symlink 验证 v0.5-mid4 integration：
+//
+//	 findSystemGit 返 symlink path → PickInitialDir 应解析到实体 dir
+func TestPickInitialDirForGitBinary_Symlink(t *testing.T) {
+	orig := findSystemGit
+	defer func() { findSystemGit = orig }()
+
+	tmp := t.TempDir()
+	entityDir := filepath.Join(tmp, "Cellar", "git", "2.55.0", "bin")
+	if err := os.MkdirAll(entityDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	entityBin := filepath.Join(entityDir, "git")
+	if err := os.WriteFile(entityBin, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	linkPath := filepath.Join(tmp, "bin", "git")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(entityBin, linkPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	findSystemGit = func(_ string) (string, error) { return linkPath, nil }
+	entityDirResolved2, _ := filepath.EvalSymlinks(entityDir)
+	if got := PickInitialDir(tmp); got != entityDirResolved2 {
+		t.Errorf("symlink integration: want entity dir %q, got %q", entityDirResolved2, got)
 	}
 }

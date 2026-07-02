@@ -31,11 +31,18 @@ var findSystemGit = exec.LookPath
 // 已被选"的重复场景。
 func PickInitialDir(dataDir string) string {
 	// 1. PATH git（如 /usr/bin、/opt/homebrew/bin、/Library/Developer/CommandLineTools/usr/bin）
+	//
+	//	v0.5-mid4 重点：symlink 解析
+	//	  exec.LookPath() 返回 PATH 上第一个匹配（可能是 symlink，如 Homebrew 的
+	//	  /opt/homebrew/bin/git → /opt/homebrew/Cellar/git/2.55.0/bin/git）。
+	//	  用 filepath.EvalSymlinks() 解到实体路径，再取 dir =
+	//	  "/opt/homebrew/Cellar/git/2.55.0/bin/" 这样的真实安装 bin 目录，
+	//	  而不是 /opt/homebrew/bin/ (symlink 所在 bin)。用户能直接看到该版本
+	//	  的 git binary，而不必 navigate 进 Cellar/{version}/bin/。
 	if path, err := findSystemGit("git"); err == nil {
-		if dir := filepath.Dir(path); dir != "" {
-			if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
-				return dir
-			}
+		dir := systemGitDir(path)
+		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
+			return dir
 		}
 	}
 
@@ -50,4 +57,23 @@ func PickInitialDir(dataDir string) string {
 
 	// 3. fallback：dataDir 本身（用户仍可手动 navigate）
 	return dataDir
+}
+
+// systemGitDir 解析 git binary 的 symlink，返回其 bin 目录。
+//
+// 场景与 fallback：
+//   - path 是 symlink（如 Homebrew /opt/homebrew/bin/git）
+//     → EvalSymlinks 拿实体 /opt/homebrew/Cellar/git/2.55.0/bin/git
+//     → Dir /opt/homebrew/Cellar/git/2.55.0/bin/
+//   - path 是非 symlink（如 /usr/bin/git、/Library/Developer/.../git）
+//     → EvalSymlinks 返同路径，Dir 即为真实 bin 目录
+//   - EvalSymlinks 报错（文件已删除 / 权限 / 死链）
+//     → 静默 fallback 到原始 path 的 Dir（symlink 所在 dir 通常仍能 navigate）
+//
+// 提取为 package-level 函数便于 unit test 复用 stub。
+func systemGitDir(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Dir(real)
+	}
+	return filepath.Dir(path)
 }
