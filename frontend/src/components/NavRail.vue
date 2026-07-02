@@ -32,8 +32,6 @@ import {
 } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stores/ui';
-import { useRepoStore } from '@renderer/stores/repo';
-import { useBoardActions } from '@renderer/composables/useBoardActions';
 import { showToast } from '@renderer/lib/toast';
 import type { DevAnnotation } from '@renderer/lib/dev-annotate';
 
@@ -53,7 +51,6 @@ interface NavItem {
 const route = useRoute();
 const uiStore = useUiStore();
 const auth = useAuthStore();
-const repo = useRepoStore();
 
 const currentThemeName = computed(() => THEME_DISPLAY_NAME[uiStore.currentTheme] ?? uiStore.currentTheme);
 const unreadCount = computed(() => 0); // TODO: 后续接入通知系统
