@@ -22,7 +22,7 @@
  *   - state.json 中持久化为 prefs.theme = 'dark' | 'light'（与 v1 时代 sqlite prefs 表平铺形式一致）
  *
  * 边界（AGENTS §5.2 frontend agent）：
- *   - ✅ 不碰 app/**
+ *   - ✅ 不碰 app 目录
  *   - ✅ 不改 frontend/wailsjs/wailsjs/go/main/App.d.ts（只 import 类型 if 必要）
  *   - ✅ 不动 frontend/src/styles/theme.css
  *   - ✅ 调用 IPC 通过 @renderer/lib/ipc-client 的 getIpcClient().invokeNested 通用入口
@@ -31,6 +31,7 @@
  *
  * v0.3.0 注：v1 Electron 时代的 src/main/ / src/preload/ / src/renderer/ 边界已废弃，
  * 当前边界 = app/ (Go 后端) + frontend/src/ (渲染端) + frontend/wailsjs/ (Wails 生成)。
+ */
 
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
@@ -228,7 +229,7 @@ export const useUiStore = defineStore('ui', () => {
   //   - 启动期 reconcile 跟 theme 同模式（localStorage 同步 → IPC async reconcile）
   //
   // 边界（AGENTS §5.2 frontend agent）：
-  //   - ✅ 不碰 app/**（复用 user.prefs 现有端点）
+  //   - ✅ 不碰 app 目录（复用 user.prefs 现有端点）
   //   - ✅ 不改 frontend/wailsjs/wailsjs/go/main/App.d.ts（只 invoke 不增 schema）
 
   /** NavRail 折叠状态 localStorage cache key（启动期 0 闪烁） */
