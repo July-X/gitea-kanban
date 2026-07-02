@@ -74,7 +74,7 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
   z-index: 1;
   height: 100%;
   flex-shrink: 0;
-  width: var(--navrail-width);
+  width: 70px;
   /* NavRail 内部已经包含实色背景和右边框，这里只做定位 */
 }
 
