@@ -71,15 +71,15 @@
   /* === 字号 === */
   --font-xs: 11px;
   --font-sm: 13px;
-  --font-md: 14px;
+  --font-md: 15px;
   --font-lg: 16px;
   --font-xl: 20px;
   --font-2xl: 24px;
   --font-h1: 24px;
   --font-h2: 18px;
   --font-h3: 14px;
-  --font-body: 13px;
-  --font-body-sm: 12px;
+  --font-body: 14px;
+  --font-body-sm: 13px;
   --font-caption: 11px;
   --font-mono: 12px;
   --font-mono-sm: 11px;
@@ -92,7 +92,8 @@
 
   /* === 字体栈 === */
   --font-sans:
-    'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+    'Inter', 'Noto Sans SC',
+    'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text',
     system-ui, sans-serif;
   --font-mono-stack:
     'JetBrains Mono', Consolas, 'MesloLGS NF', monospace;
