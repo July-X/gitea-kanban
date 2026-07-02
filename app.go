@@ -1625,32 +1625,49 @@ func (a *App) OpenGitBinaryPicker() (string, error) {
 	if a.logger != nil {
 		a.logger.Info("OpenGitBinaryPicker")
 	}
-	switch runtime.GOOS {
-	case "windows":
+
+	// v0.5-mid3 优先让文件对话框初始目录落在系统 git 所在目录（开箱体验）
+	//
+	// 优先级：
+	//   1. exec.LookPath("git") 找到的路径取 dir（如 /usr/bin、/opt/homebrew/bin）
+	//   2. ${dataDir}/tools/git/    释放的嵌入式 binary 所在目录
+	//   3. dataDir 本身             隐含 fallback，让用户可手动导航
+	//
+	// 为什么不直接固定 home：很多 mac git 装在 /opt/homebrew/bin，不在 $HOME
+	// 为什么不依赖环境变量 GITHUB_PATH：易被 .zshrc 覆盖，绕开更鲁棒
+	initialDir := a.pickInitialDirForGitBinary()
+
+	options := func(title string, filters []wailsruntime.FileFilter) (string, error) {
 		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-			Title: "选择 git.exe 路径",
-			Filters: []wailsruntime.FileFilter{
-				{DisplayName: "Git 可执行文件 (*.exe)", Pattern: "*.exe;*.EXE"},
-			},
-		})
-	case "darwin":
-		// macOS 上 git 通常装在 /opt/homebrew/bin/git、/usr/local/bin/git 等
-		// 单文件即可；显示包内容是 Finder 操作不是文件选择对话框
-		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-			Title: "选择 git 二进制路径",
-			Filters: []wailsruntime.FileFilter{
-				{DisplayName: "可执行文件", Pattern: "*"},
-			},
-		})
-	default:
-		// Linux / 其他 unix：git 通常无扩展名
-		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-			Title: "选择 git 二进制路径",
-			Filters: []wailsruntime.FileFilter{
-				{DisplayName: "可执行文件", Pattern: "*"},
-			},
+			Title:           title,
+			Filters:         filters,
+			DefaultDirectory: initialDir,
 		})
 	}
+
+	switch runtime.GOOS {
+	case "windows":
+		return options("选择 git.exe 路径",
+			[]wailsruntime.FileFilter{
+				{DisplayName: "Git 可执行文件 (*.exe)", Pattern: "*.exe;*.EXE"},
+			})
+	case "darwin":
+		return options("选择 git 二进制路径",
+			[]wailsruntime.FileFilter{
+				{DisplayName: "可执行文件", Pattern: "*"},
+			})
+	default:
+		return options("选择 git 二进制路径",
+			[]wailsruntime.FileFilter{
+				{DisplayName: "可执行文件", Pattern: "*"},
+			})
+	}
+}
+
+// pickInitialDirForGitBinary 决策 git binary 文件选择对话框的初始目录。
+// 实现位于 app/gitbinary/picker_init_dir.go（包级导出 PickInitialDir）。
+func (a *App) pickInitialDirForGitBinary() string {
+	return gitbinary.PickInitialDir(a.dataDir)
 }
 
 // resolveTokenByLocalPath 从本地仓库路径反查 keychain 里的 token

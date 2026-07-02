@@ -2,6 +2,7 @@ package gitbinary
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -302,4 +303,50 @@ func TestResolveBinaryPath_EmbeddedSentinel(t *testing.T) {
 		t.Error("empty callerOverride 应 fallback PATH git")
 	}
 	t.Logf("OK: embedded=%s, PATH git=%s", resolved, resolvedPath)
+}
+
+// TestPickInitialDirForGitBinary 验证 v0.5-mid3 优先级：
+//
+//	1. PATH git dirname（最高优先）
+//	2. Init() 释放的 embedded binary 所在目录
+//	3. userOverride 落定的路径 dirname
+//	4. dataDir 本身（兜底）
+//
+// findSystemGit 是包级变量可重写，本测试用 stub 避 sandbox PATH git 干扰。
+func TestPickInitialDirForGitBinary(t *testing.T) {
+	// stub 覆盖 PATH git 查找，接 dev 后 restore
+	orig := findSystemGit
+	defer func() { findSystemGit = orig }()
+
+	tmp := t.TempDir()
+
+	// case 1 stub：findSystemGit 返路径 → 返 dirname（验证优先级）
+	findSystemGit = func(_ string) (string, error) {
+		return "/usr/local/bin/git", nil
+	}
+	if got := PickInitialDir(tmp); got != "/usr/local/bin" {
+		t.Errorf("case 1 PATH git: want /usr/local/bin, got %q", got)
+	}
+
+	// case 2 stub: PATH git 不在 → 落到 toolsGitDir（须非空）
+	findSystemGit = func(_ string) (string, error) { return "", fmt.Errorf("not in PATH") }
+	toolsGitDir := filepath.Join(tmp, "tools", "git")
+	if err := os.MkdirAll(toolsGitDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsGitDir, "dummy-git"), []byte("stub"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if got := PickInitialDir(tmp); got != toolsGitDir {
+		t.Errorf("case 2 tools/git/: want %q, got %q", toolsGitDir, got)
+	}
+
+	// case 3: PATH 不在 + tools/git/ 空 → fallback dataDir
+	emptyTmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(emptyTmp, "tools", "git"), 0o755); err != nil {
+		t.Fatalf("MkdirAll empty: %v", err)
+	}
+	if got := PickInitialDir(emptyTmp); got != emptyTmp {
+		t.Errorf("case 3 fallback dataDir: want %q, got %q", emptyTmp, got)
+	}
 }

@@ -253,7 +253,7 @@ func truncateForLog(s string, max int) string {
 //     能真强制走 embedded binary（override PATH fallback）。
 //   - sentinel 同步：app/gitbinary/runner.go 与 frontend/src/views/SettingsView.vue
 //     各 hard-code '$EMBEDDED$'，改任一要两边同步。
-const EMBEDDED_SENTINEL = "$EMBEDDED$"
+const EMBEDDED_SENTINEL = "$EMBEDDED$" // 跨包需 export（大写首）
 
 func ResolveGitBinaryPath(callerOverride string) (string, error) {
 	effective := strings.TrimSpace(callerOverride)
