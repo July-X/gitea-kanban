@@ -1,22 +1,19 @@
 <script setup lang="ts">
 /**
- * NavRail —— 左侧导航栏
+ * NavRail —— 左侧垂直导航栏（参考图风格：图标在上 / 文字在下）
  *
- * 设计（AppShell layout 设计（v1 沿用））：
- *   - 默认宽度 224px（var(--navrail-width)），折叠态 56px（--navrail-collapsed-width）
+ * 新版布局：
+ *   - 中间主菜单：每个菜单项上下排列（图标上方，文字下方）
+ *   - 底部功能区：用户头像 / 上传 / 消息 / 主题 / 退出
+ *   - 顶部不显示返回箭头（按用户要求）
  *   - 当前有效 NavItem：Git Graph、合并请求、设置（v0.6+ 废弃看板 / 我的卡片 / 成员）
- *   - 选中项 = 主色背景 + 主色微光
  *   - 文字用术语翻译表（OVERRIDE §本项目专属规则 #1）—— **不**出现合并请求/合并/分支/派生 等原词
  *
  * v0.6+ 废弃看板 / 我的卡片 / 成员：
- *   - 从 items 数组移除导航入口
+ *   - 从导航 items 数组移除入口
  *   - 路由保留并加 deprecated 标记，访问时重定向到 Git Graph
  *   - 相关视图文件、stores、composables 标记 @deprecated，待后续彻底清理
- *   - 保留 devAnnotation 相关类型/常量以便回滚
- *
- * v1.1.3 · task #42 · dev 注解
- *   - 每个 nav item 挂 v-dev-annotate，注明对应 gitea 网页 / API / 本地 IPC
- *   - dev 启动时显示 ! 按钮，点击看数据来源；生产构建整段消失
+ *   - 保留三个原始 DevAnnotation 常量（DEPRECATED_NAV_ANNOTATIONS）以便回滚
  */
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
@@ -26,8 +23,18 @@ import {
   Timer,
   PanelLeftClose,
   PanelLeftOpen,
+  Upload,
+  Bell,
+  Sun,
+  Moon,
+  User,
+  LogOut,
 } from 'lucide-vue-next';
-import { useUiStore } from '@renderer/stores/ui';
+import { useAuthStore } from '@renderer/stores/auth';
+import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stores/ui';
+import { useRepoStore } from '@renderer/stores/repo';
+import { useBoardActions } from '@renderer/composables/useBoardActions';
+import { showToast } from '@renderer/lib/toast';
 import type { DevAnnotation } from '@renderer/lib/dev-annotate';
 
 interface NavItem {
@@ -39,10 +46,18 @@ interface NavItem {
   to: string;
   /** dev 模式注解：点击 ! 看本条目对应 gitea 网页 / API / IPC 数据来源 */
   devAnnotation: DevAnnotation;
+  /** 是否只在用户已登录时显示 */
+  requiresAuth?: boolean;
 }
 
 const route = useRoute();
 const uiStore = useUiStore();
+const auth = useAuthStore();
+const repo = useRepoStore();
+
+const currentThemeName = computed(() => THEME_DISPLAY_NAME[uiStore.currentTheme] ?? uiStore.currentTheme);
+const unreadCount = computed(() => 0); // TODO: 后续接入通知系统
+const themeIcon = computed(() => (uiStore.currentTheme === 'dark' ? Sun : Moon));
 
 // v0.6+ 软废弃看板/我的卡片/成员：
 //   - 从导航 items 中移除入口
@@ -87,6 +102,7 @@ const items: NavItem[] = [
     label: '合并请求',
     icon: GitMerge,
     to: '/merges',
+    requiresAuth: true,
     devAnnotation: {
       web: '/<owner>/<repo>/pulls',
       api: 'GET /api/v1/repos/<owner>/<repo>/pulls?state=open',
@@ -111,10 +127,36 @@ void DEPRECATED_NAV_ANNOTATIONS;
 
 const currentPath = computed(() => route.path);
 
-/** 折叠 / 展开按钮文案（i18n 占位 · i18n 占位，文案集中后由 i18n 替换） */
+const visibleItems = computed(() =>
+  items.filter((item) => !item.requiresAuth || auth.isConnected),
+);
+
+/** 折叠 / 展开按钮文案（i18n 占位） */
 const toggleLabel = computed(() =>
   uiStore.navCollapsed ? '展开侧栏' : '折叠侧栏',
 );
+
+/** 切换主题 */
+async function onThemeClick(): Promise<void> {
+  const next = nextThemeInCycle(uiStore.currentTheme);
+  await uiStore.applyTheme(next);
+}
+
+/** 退出登录 */
+async function onLogout(): Promise<void> {
+  if (!auth.isConnected) return;
+  try {
+    await auth.disconnect(auth.currentGiteaUrl);
+    showToast({ type: 'success', message: '已退出登录' });
+  } catch (err) {
+    const e = err as { messageText?: string; message?: string };
+    showToast({ type: 'error', message: '退出失败', description: e.messageText ?? e.message ?? '请重试' });
+  }
+}
+
+function onUploadClick(): void {
+  showToast({ type: 'info', message: '上传功能暂未接入' });
+}
 </script>
 
 <template>
@@ -123,8 +165,13 @@ const toggleLabel = computed(() =>
     :class="{ 'navrail--collapsed': uiStore.navCollapsed }"
     aria-label="主导航"
   >
+    <!-- 中间主菜单：图标在上，文字在下 -->
     <ul class="navrail__list">
-      <li v-for="item in items" :key="item.id" class="navrail__item-wrap">
+      <li
+        v-for="item in visibleItems"
+        :key="item.id"
+        class="navrail__item-wrap"
+      >
         <router-link
           :to="item.to"
           class="navrail__item"
@@ -134,16 +181,76 @@ const toggleLabel = computed(() =>
           v-dev-annotate="item.devAnnotation"
         >
           <span class="navrail__icon" aria-hidden="true">
-            <component :is="item.icon" :size="20" :stroke-width="1.75" />
+            <component :is="item.icon" :size="22" :stroke-width="1.75" />
           </span>
           <span class="navrail__label">{{ item.label }}</span>
         </router-link>
       </li>
     </ul>
+
+    <!-- 底部功能区：头像、上传、消息、主题、折叠/展开 -->
     <div class="navrail__footer">
+      <!-- 用户头像 -->
+      <button
+        v-if="auth.currentUser"
+        type="button"
+        class="navrail__foot-btn navrail__foot-btn--avatar"
+        :title="`当前用户：${auth.currentUser.login}`"
+      >
+        <img
+          v-if="auth.currentUser.avatarUrl"
+          :src="auth.currentUser.avatarUrl"
+          :alt="`${auth.currentUser.login} 头像`"
+          class="navrail__avatar"
+        />
+        <User v-else :size="18" :stroke-width="1.75" />
+      </button>
+
+      <!-- 上传 -->
       <button
         type="button"
-        class="navrail__toggle"
+        class="navrail__foot-btn"
+        title="上传"
+        @click="onUploadClick"
+      >
+        <Upload :size="18" :stroke-width="1.75" />
+      </button>
+
+      <!-- 消息 -->
+      <button
+        type="button"
+        class="navrail__foot-btn navrail__foot-btn--badge-wrap"
+        title="消息通知"
+      >
+        <Bell :size="18" :stroke-width="1.75" />
+        <span v-if="unreadCount > 0" class="navrail__badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+      </button>
+
+      <!-- 主题切换 -->
+      <button
+        type="button"
+        class="navrail__foot-btn"
+        :title="`切换主题（当前：${currentThemeName}）`"
+        @click="onThemeClick"
+      >
+        <component :is="themeIcon" :size="18" :stroke-width="1.75" />
+      </button>
+
+      <!-- 退出登录 -->
+      <button
+        v-if="auth.isConnected"
+        type="button"
+        class="navrail__foot-btn navrail__foot-btn--danger"
+        title="退出登录"
+        @click="onLogout"
+      >
+        <LogOut :size="18" :stroke-width="1.75" />
+      </button>
+
+      <!-- 折叠/展开 -->
+      <button
+        type="button"
+        class="navrail__foot-btn navrail__foot-btn--toggle"
         :aria-label="toggleLabel"
         :title="toggleLabel"
         :aria-expanded="!uiStore.navCollapsed"
@@ -151,7 +258,7 @@ const toggleLabel = computed(() =>
       >
         <component
           :is="uiStore.navCollapsed ? PanelLeftOpen : PanelLeftClose"
-          :size="20"
+          :size="18"
           :stroke-width="1.75"
         />
       </button>
@@ -165,11 +272,10 @@ const toggleLabel = computed(() =>
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  /* v1.1.2 半透明由 AppShell .shell__nav 容器提供；v1.1.3 折叠/展开用 width 过渡 */
   background: transparent;
   padding: var(--space-3) var(--space-2);
   overflow-y: auto;
-  overflow-x: hidden; /* 折叠态 label 渐隐时不要撑出横向滚动条 */
+  overflow-x: hidden;
   transition: width var(--t-slow) var(--ease-out);
 }
 
@@ -180,34 +286,33 @@ const toggleLabel = computed(() =>
 .navrail__list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  /* flex: 1 让 list 占满剩余高度，把 footer 推到底部 */
+  align-items: center;
+  gap: 6px;
   flex: 1;
   min-height: 0;
+  padding-top: var(--space-2);
 }
 
+.navrail__item-wrap {
+  width: 100%;
+}
+
+/* 中间菜单：图标在上，文字在下，垂直居中 */
 .navrail__item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-3);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 8px;
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
-  font-size: var(--font-md);
+  font-size: var(--font-xs);
   text-decoration: none;
   cursor: pointer;
   transition:
     background var(--t-fast) var(--ease),
-    color var(--t-fast) var(--ease),
-    padding var(--t-slow) var(--ease-out),
-    justify-content var(--t-slow) var(--ease-out);
-}
-
-.navrail--collapsed .navrail__item {
-  /* 折叠态：icon 居中 + 去掉左右 padding 让 icon 真正在 56px 内居中 */
-  justify-content: center;
-  padding: 8px 0;
-  gap: 0;
+    color var(--t-fast) var(--ease);
 }
 
 .navrail__item:hover {
@@ -235,16 +340,18 @@ const toggleLabel = computed(() =>
 }
 
 .navrail__label {
-  flex: 1;
-  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* label 渐隐 + 宽度收 0 —— 让 icon 居中时不会出现 "看板" 半截字 */
+  max-width: 100%;
   transition:
     opacity var(--t-base) var(--ease-out),
     max-width var(--t-slow) var(--ease-out);
-  max-width: 160px; /* 约等于"合并请求"4 字宽度 · 防溢出 */
+}
+
+/* 折叠态：只显示图标 */
+.navrail--collapsed .navrail__item {
+  padding: 12px 0;
 }
 
 .navrail--collapsed .navrail__label {
@@ -253,23 +360,23 @@ const toggleLabel = computed(() =>
   pointer-events: none;
 }
 
-/* footer · 折叠按钮 · 始终显示（折叠态下也用来"展开回来"） */
-
+/* 底部功能区：图标排成一行，折叠态也保持垂直堆叠 */
 .navrail__footer {
   margin-top: var(--space-3);
   padding: var(--space-2) 0;
   border-top: 1px solid color-mix(in srgb, var(--color-divider) 50%, transparent);
   display: flex;
-  justify-content: center;
-  /* footer 本身也走过渡：折叠态 padding 收紧让按钮居中更紧凑 */
-  transition: padding var(--t-slow) var(--ease-out);
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
 .navrail--collapsed .navrail__footer {
   padding: var(--space-2) 0;
 }
 
-.navrail__toggle {
+.navrail__foot-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -285,13 +392,56 @@ const toggleLabel = computed(() =>
     color var(--t-fast) var(--ease);
 }
 
-.navrail__toggle:hover {
+.navrail__foot-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
 }
 
-.navrail__toggle:focus-visible {
-  /* 沿用全局 button focus-visible 风格（theme.css §2.1 已配 --shadow-focus） */
+.navrail__foot-btn--danger:hover {
+  color: var(--color-danger);
+  background: rgba(225, 70, 70, 0.12);
+}
+
+.navrail__foot-btn--toggle {
+  margin-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--color-divider) 50%, transparent);
+  border-radius: 0;
+  width: 100%;
+  padding: 8px 0 0;
+}
+
+.navrail__foot-btn--avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  padding: 0;
+  background: var(--color-bg-hover);
+}
+
+.navrail__avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.navrail__foot-btn--badge-wrap .navrail__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
+.navrail__foot-btn:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
   border-radius: var(--radius-sm);
