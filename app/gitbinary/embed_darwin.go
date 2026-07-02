@@ -21,8 +21,8 @@ import _ "embed"
 //   - Linux 发行版自带 git / 系统包管理安装，不需要嵌入避免体积膨胀
 //   - 用户在「Git 二进制」设置 UI 里仍可手动指定系统 git 路径
 
-//go:embed binaries/git/git-2.55.0-macos-amd64
+//go:embed binaries/git/gk-git-2.55.0-macos-amd64
 var embeddedGitDarwinAmd64 []byte
 
-//go:embed binaries/git/git-2.55.0-macos-arm64
+//go:embed binaries/git/gk-git-2.55.0-macos-arm64
 var embeddedGitDarwinArm64 []byte

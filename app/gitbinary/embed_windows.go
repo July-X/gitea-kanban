@@ -13,5 +13,5 @@ import _ "embed"
 // 当前为 0 字节 placeholder，Init() 检测 size==0 时跳过释放 + WARNING 日志。
 // Init() 释放后路径：${dataDir}/tools/git/git-2.55.0-windows-amd64.exe
 
-//go:embed binaries/git/git-2.55.0-windows-amd64.exe
+//go:embed binaries/git/gk-git-2.55.0-windows-amd64.exe
 var embeddedGitWindowsAmd64 []byte

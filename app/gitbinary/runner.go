@@ -36,6 +36,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"log/slog"
 )
@@ -63,16 +64,25 @@ func embeddedGitBytes() []byte {
 }
 
 // embeddedGitFileName 按平台生成嵌入二进制在 ${dataDir}/tools/git/ 下的文件名：
-//   - macos：git-<ver>-macos-<arch>（无 .exe 后缀）
-//   - windows：git-<ver>-windows-<arch>.exe
+//
+//	v0.4.0 fix-2 关键命名约束：文件名不能以 "git-" 开头。
+//	macOS shell（bash/zsh/sh）有 hardcoded 行为：argv0 若以 "git-" 开头会被自动
+//	tokenize 成 "git <args>"，PATH 找 git 跑，<args> 当 git 子命令，导致
+//	「致命错误：无法作为内置命令处理 2.55.0-macos-amd64」exit 128。
+//	实测确认（test/embedded 文件名 = "git-2.55" / "git-bin" / "git-2" 都触发，
+//	"git_2.55" / "x-2.55-x" 不触发）。
+//
+//	命名方案：gk-git-<ver>-<os>-<arch>[.exe]（gk = gitea-kanban 前缀，避免 git- 开头）
+//   - macos：gk-git-<ver>-macos-<arch>（无后缀）
+//   - windows：gk-git-<ver>-windows-<arch>.exe
 func embeddedGitFileName() string {
 	os := runtime.GOOS
 	arch := runtime.GOARCH
 	switch os {
 	case "windows":
-		return fmt.Sprintf("git-%s-windows-%s.exe", gitVersion, arch)
+		return fmt.Sprintf("gk-git-%s-windows-%s.exe", gitVersion, arch)
 	default:
-		return fmt.Sprintf("git-%s-macos-%s", gitVersion, arch)
+		return fmt.Sprintf("gk-git-%s-macos-%s", gitVersion, arch)
 	}
 }
 
@@ -187,18 +197,57 @@ func Init(dataDir string, logger *slog.Logger) error {
 			"arch", runtime.GOARCH,
 			"target", target)
 	}
+
+	// v0.4.0 fix-1：smoke test <bin> --version
+	// 场景：cross-arch 释放（如在 x86_64 build 而 arm64 Mac 跑），bypass Rosetta 时 shell 路径解析失败
+	//   → 静默降级：smoke test 失败 → 清空 defaultBinaryPath + WARN 日志
+	//   → 上层 ResolveGitBinaryPath 自动 fallback 到 PATH git
+	// 用户真机若 arm64 Mac 但 wails binary 是 x86_64 build，smoke test 会失败，
+	//   自动走 `/usr/bin/git`（Apple Git）而不是奔溃。
+	smokeCtx, smokeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer smokeCancel()
+	smokeCmd := exec.CommandContext(smokeCtx, target, "--version")
+	smokeCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if smokeOutput, smokeErr := smokeCmd.CombinedOutput(); smokeErr != nil {
+		if logger != nil {
+			logger.Warn("gitbinary: 释放后 smoke test 失败，清空 defaultBinaryPath 让上层 fallback PATH git",
+				"target", target,
+				"err", smokeErr.Error(),
+				"output-truncated", truncateForLog(string(smokeOutput), 200),
+			)
+		}
+		// 清空让 ResolveGitBinaryPath 走 PATH git（用户 OS 自带）
+		defaultBinaryPath.Store("")
+		// Init 本身不报错：跨 arch 是部署问题，不阻断应用启动
+	}
 	return nil
 }
 
+// truncateForLog 截断过长 stderr 输出到日志（跨 arch 错误可填满 5KB）
+func truncateForLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
 // ResolveGitBinaryPath 按优先级返回当前 RunGit 应使用的 git 二进制绝对路径：
-//   1. callerOverride 非空 → 验证文件存在，存在即用
-//   2. userBinaryOverride（SetUserOverride 设的）非空 → 用
-//   3. defaultBinaryPath（Init 释放的内嵌）非空且存在 → 用
-//   4. exec.LookPath("git") 兜底（找到 PATH git）
-//   5. 全部失败 → 返 (空, error)，调用方决定如何降级
 //
-// callerOverride == "" 时走全局 userBinaryOverride，让 app.SetGitBinaryPath 改完后
-// 后续所有 git 调用无需重启即生效。
+//	v0.4.0 优先级（按兼容性递增，避免 cross-arch 失败让整个 git graph 瘫）：
+//	1. callerOverride 非空 → 验证文件存在，存在即用（用户填的，如 `/usr/bin/git`）
+//	2. userBinaryOverride（app.SetGitBinaryPath 设的）非空 → 用
+//	3. exec.LookPath("git") → 兜底用系统 PATH 的 git（用户 OS 自带，稳定）
+//	4. defaultBinaryPath（Init 释放的内嵌）非空且 smoke test 通过 → 用
+//	5. 全部失败 → 返 (空, error)
+//
+// v0.4.0 修订说明：
+//   - 旧版 defaultBinaryPath 放 PATH git 之前，但 sandbox/发布跨 arch 时
+//     内嵌二进制会在 arm64 Mac 上触发 Rosetta 未装回退到 sh 解释 argv0 的 bug
+//     （shell 报「无法作为内置命令处理 2.55.0-macos-amd64」，exit 128）
+//   - 把 PATH git 提到 defaultBinaryPath 之前：默认走用户 OS 自带的 git，
+//     在没装 git 装机罕见场景才 fallback 到内嵌
+//   - Init() 还会跑 smoke test `git --version` 校验释放成功的 binary，
+//     失败时清空 defaultBinaryPath 让 ResolveGitBinaryPath 自动降级
 func ResolveGitBinaryPath(callerOverride string) (string, error) {
 	effective := strings.TrimSpace(callerOverride)
 	if effective == "" {
@@ -207,22 +256,24 @@ func ResolveGitBinaryPath(callerOverride string) (string, error) {
 		}
 	}
 	if effective != "" {
-		// stat 校验失败仍返该值，让 RunGit 报「No such file」错误给用户
-		// 这样改完设置立刻见效，避免「路径不存在时静默 fallback 误导用户」
+		// user override：stat 校验失败仍返该值，让 RunGit 时报「No such file」错误给用户
 		if _, err := os.Stat(effective); err == nil {
 			return effective, nil
 		}
 		return effective, nil
 	}
 
+	// PATH 优先：用户 OS 自带 git 通常稳定（macOS Apple Git、Linux distro、自编译 git）
+	// 避免 cross-arch / 未签名未公证问题
+	if path, err := exec.LookPath("git"); err == nil {
+		return path, nil
+	}
+
+	// 内嵌二进制 fallback：无系统 git 装机罕见场景靠这个
 	if def, ok := defaultBinaryPath.Load().(string); ok && def != "" {
 		if _, err := os.Stat(def); err == nil {
 			return def, nil
 		}
-	}
-
-	if path, err := exec.LookPath("git"); err == nil {
-		return path, nil
 	}
 
 	return "", fmt.Errorf("未找到 git 二进制：请在「设置 → Git 二进制」选择路径，或安装系统 git (PATH 中需有 'git')")

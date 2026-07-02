@@ -150,6 +150,31 @@ export namespace git {
 
 }
 
+export namespace gitbinary {
+	
+	export class TestGitResult {
+	    ok: boolean;
+	    version: string;
+	    path: string;
+	    message: string;
+	    hint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TestGitResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.version = source["version"];
+	        this.path = source["path"];
+	        this.message = source["message"];
+	        this.hint = source["hint"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class UserInfo {
@@ -649,6 +674,26 @@ export namespace main {
 	        this.keys = source["keys"];
 	    }
 	}
+	export class GitBinaryConfig {
+	    userOverride: string;
+	    defaultPath: string;
+	    embeddedVersion: string;
+	    effectivePath: string;
+	    embeddedAvailable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitBinaryConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.userOverride = source["userOverride"];
+	        this.defaultPath = source["defaultPath"];
+	        this.embeddedVersion = source["embeddedVersion"];
+	        this.effectivePath = source["effectivePath"];
+	        this.embeddedAvailable = source["embeddedAvailable"];
+	    }
+	}
 	export class GraphBranchLineDTO {
 	    x1: number;
 	    y1: number;
@@ -1088,6 +1133,18 @@ export namespace main {
 	        this.message = source["message"];
 	    }
 	}
+	export class SetGitBinaryPathArgs {
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SetGitBinaryPathArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	    }
+	}
 	export class SetUserPrefsArgs {
 	    entries: Record<string, any>;
 	
@@ -1157,6 +1214,18 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class StripGitBinaryQuarantineArgs {
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StripGitBinaryQuarantineArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	    }
 	}
 	export class SwitchAccountArgs {
 	    accountId: string;

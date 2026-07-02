@@ -50,6 +50,10 @@ export function GetCommitDetail(arg1) {
   return window['go']['main']['App']['GetCommitDetail'](arg1);
 }
 
+export function GetGitBinaryConfig() {
+  return window['go']['main']['App']['GetGitBinaryConfig']();
+}
+
 export function GetGitGraph(arg1) {
   return window['go']['main']['App']['GetGitGraph'](arg1);
 }
@@ -110,6 +114,10 @@ export function OpenDataDir() {
   return window['go']['main']['App']['OpenDataDir']();
 }
 
+export function OpenGitBinaryPicker() {
+  return window['go']['main']['App']['OpenGitBinaryPicker']();
+}
+
 export function PullRepo(arg1) {
   return window['go']['main']['App']['PullRepo'](arg1);
 }
@@ -126,6 +134,10 @@ export function RemoveWorkspaceRepos(arg1) {
   return window['go']['main']['App']['RemoveWorkspaceRepos'](arg1);
 }
 
+export function SetGitBinaryPath(arg1) {
+  return window['go']['main']['App']['SetGitBinaryPath'](arg1);
+}
+
 export function SetUserPrefs(arg1) {
   return window['go']['main']['App']['SetUserPrefs'](arg1);
 }
@@ -136,6 +148,14 @@ export function SetWorkspace(arg1) {
 
 export function StarBranch(arg1) {
   return window['go']['main']['App']['StarBranch'](arg1);
+}
+
+export function StripGitBinaryQuarantine(arg1) {
+  return window['go']['main']['App']['StripGitBinaryQuarantine'](arg1);
+}
+
+export function TestGitBinary(arg1) {
+  return window['go']['main']['App']['TestGitBinary'](arg1);
 }
 
 export function UnstarBranch(arg1) {
