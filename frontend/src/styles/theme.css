@@ -95,7 +95,7 @@
     'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
     system-ui, sans-serif;
   --font-mono-stack:
-    'JetBrains Mono', Consolas, 'MesloLGL Nerd Font', monospace;
+    'JetBrains Mono', Consolas, 'MesloLGS NF', monospace;
 
   /* === 动效（120-240ms 紧凑现代） === */
   --t-fast: 120ms;
