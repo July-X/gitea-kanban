@@ -1652,15 +1652,14 @@ func (a *App) OpenGitBinaryPicker() (string, error) {
 				{DisplayName: "Git 可执行文件 (*.exe)", Pattern: "*.exe;*.EXE"},
 			})
 	case "darwin":
-		return options("选择 git 二进制路径",
-			[]wailsruntime.FileFilter{
-				{DisplayName: "可执行文件", Pattern: "*"},
-			})
+		// macOS NSOpenPanel bug: Pattern: "*" 只匹配有扩展名的文件 + alias，
+		// Unix executable（如 /usr/bin/git, /opt/homebrew/Cellar/git/2.55.0/bin/git）
+		// 无扩展名，被 Pattern:"*" 过滤掉。
+		// 修复:传 nil filters → NSOpenPanel 显示所有文件（含 extensionless Unix exec）。
+		return options("选择 git 二进制路径", nil)
 	default:
-		return options("选择 git 二进制路径",
-			[]wailsruntime.FileFilter{
-				{DisplayName: "可执行文件", Pattern: "*"},
-			})
+		// Linux: git 通常无扩展名，不设过滤器
+		return options("选择 git 二进制路径", nil)
 	}
 }
 
