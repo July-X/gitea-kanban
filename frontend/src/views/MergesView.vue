@@ -1680,6 +1680,8 @@ function formatRelative(iso: string | undefined): string {
   margin: 0;
   padding: var(--space-4);
   overflow-y: auto;
+  /* v0.6+ bugfix：防止 PR row 内部内容撑出整页横向滚动条 */
+  overflow-x: hidden;
   & > li + li {
     margin-top: 2px;
   }
@@ -2359,6 +2361,8 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
   min-height: 0;
   flex: 1 1 0;
+  /* v0.6+ bugfix：保证评论体长文本不越出面板边缘，避免出现整页横向滚动条 */
+  overflow-x: hidden;
 }
 
 /* ===== 顶部 header：左标题 + 右刷新按钮 ===== */
@@ -2662,10 +2666,10 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-body {
   font-size: var(--font-sm);
   color: var(--color-text);
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  /* v0.6+ bugfix：长文本换行（含 Gitea console log 类无空格长字符串） */
+  word-break: break-all;       /* 在任意字符换行，fallback for 无空格长字符串 */
+  overflow-wrap: anywhere;     /* 优先在可换行点换行；都不行时退到 break-all */
   line-height: 1.5;
-  /* v0.6+ bugfix：长文本换行 + 最高高度限制 + 纵向滚动条（不许横向） */
   max-width: 100%;
   min-width: 0;
 }
@@ -2801,10 +2805,13 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--color-text);
-  /* v0.6+ bugfix：长 url / 长单词换行。避免出现横向滚动条 / 越出边框。 */
+  /* v0.6+ bugfix：长 url / 长单词 / 无空格长字符串（console log）都换行。
+   * word-break: break-all 是在任意字符处换行（最高优先级）
+   * overflow-wrap: break-word 是仅在不可分隔点换行（次优先）
+   * 两者同时使用，break-all 覆盖所有场景，避免出现横向滚动条。
+   */
+  word-break: break-all;
   overflow-wrap: break-word;
-  word-wrap: break-word;
-  word-break: break-word;
   max-width: 100%;
   min-width: 0;
 }
@@ -2843,6 +2850,9 @@ function formatRelative(iso: string | undefined): string {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.9em;
   color: var(--color-accent);
+  /* v0.6+ bugfix：长 inline code（如 console log）需换行 */
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .md-body pre {
   margin: 4px 0;
