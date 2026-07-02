@@ -1,4 +1,8 @@
 /**
+ * @deprecated v0.6+ 软废弃：my-card store 仍保留以便回滚。
+ * 导航栏已移除"我的卡片"入口，路由 /my-cards 重定向到 /timeline。
+ * 后续彻底清理时，连同 MyCardsView.vue 一并删除。
+ *
  * my-card store —— "我的卡片"列表（gitea issues where assignee == me）
  *
  * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出（与 branch/member/pull 同源）

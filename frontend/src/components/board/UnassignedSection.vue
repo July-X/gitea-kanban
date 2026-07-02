@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ */
+/**
  * UnassignedSection —— 未分类列 + 拖拽归类（v1.3 BoardView 重构 + v1.4 智能化 + v1.4 拍板"拖拽归类"）
  *
  * 设计（v1.4）：

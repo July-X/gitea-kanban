@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ */
+/**
  * KanbanColumnSection —— 看板单列内容（v1.3 BoardView 重构（拆 7 子组件） · 第 7 拆分）
  *
  * 设计：

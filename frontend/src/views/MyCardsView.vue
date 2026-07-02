@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：导航栏已移除入口，路由 /my-cards 重定向到 /timeline。
+ * 视图文件、stores、composables 暂保留以便回滚，待后续彻底清理。
+ *
  * MyCardsView —— "我的卡片"列表（= 当前用户作为 assignee 的 gitea issues）
  *
  * 设计（v1.4 · 任务 #statusbar-picker 重构）：

@@ -1,4 +1,6 @@
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ *
  * useUndoStack —— 看板换列撤销/重做的栈深度状态 + IPC 薄包装
  *
  * M6 undo-by-project 设计：栈数据走 main 端 `user.undo` / `user.redo` / `user.undoStatus`

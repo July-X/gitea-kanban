@@ -1,4 +1,6 @@
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ *
  * useKanbanMouseDrag —— BoardView 鼠标拖拽（vue-draggable-plus）配置 + drag-end 转 move
  *
  * 抽出动机：原 BoardView.vue 内 columnDragOptions + onColumnDragEnd 共 23 行；

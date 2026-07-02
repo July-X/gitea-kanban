@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ */
+/**
  * MoveColumnPicker —— 换列目标菜单（v1.3 BoardView 重构（拆 7 子组件））
  *
  * 设计（v1 按钮式换列兜底）：

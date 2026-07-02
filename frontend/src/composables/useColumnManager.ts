@@ -1,4 +1,6 @@
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ *
  * useColumnManager —— BoardView 列管理 state + IPC handlers（v1.3 BoardView 重构阶段）
  *
  * 抽出动机：原 BoardView.vue 单文件 700+ 行 script，列管理相关 state + handler 占约 200 行；

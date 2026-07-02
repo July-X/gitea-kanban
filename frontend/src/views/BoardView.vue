@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：导航栏已移除入口，路由 /board 重定向到 /timeline。
+ * 视图文件、stores、composables 暂保留以便回滚，待后续彻底清理。
+ *
  * BoardView —— 仓库选择 + 看板（v1.3 BoardView 重构版 · slim）
  *
  * 重构目标：把 v1.1 + v1.3 累加的 2072 行巨型 SFC 拆到子组件 + composable：

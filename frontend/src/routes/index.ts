@@ -6,18 +6,20 @@
  *   - v1.4 拍板：加 /team 占位路由（v2 团队视图落地前，**不**挂 NavRail 入口）
  *     · 详见 ADR-0004（docs/adr/0004-single-repository-focus.md）
  *     · view 走 TeamView.vue 占位，仅保留路由，**不**进 store / IPC
- *   - TODO(v0.6+): 废弃 /board、/my-cards、/members 三个入口
- *     · 导航栏移除入口，但路由保留做兼容/重定向
- *     · 相关视图文件、stores、composables 标记 @deprecated，待后续清理
  *
- * TODO(v0.6+): 废弃 /board、/my-cards、/members 三个入口
- *   - 导航栏移除入口，但路由保留做兼容/重定向
- *   - 相关视图文件、stores、composables 标记 @deprecated，待后续清理
- */
+ * v0.6+ 软废弃 /board、/my-cards、/members 三个入口：
+ *   - 路由仍保留（向后兼容 + 文档/书签外链）
+ *   - 访问这些路径时强制重定向到 /timeline（Git Graph）
+ *   - 相关视图文件、stores、composables 标记 @deprecated，待后续彻底清理
+ *   - 路由 meta.deprecated: true 标识已废弃入口
+ *
+ * 守卫规则：
  *   - 根路径 / 重定向到 /auth（未连接时合理入口）
  *   - 用 createWebHashHistory 适配 Wails file:// 协议
  *   - 懒加载（动态 import）减小首屏 bundle
- *   - 全局守卫：未连接 + 进 requiresAuth 路由 → 跳 /auth
+ *   - 全局守卫：
+ *     1. 未连接 + 进 requiresAuth 路由 → 跳 /auth
+ *     2. 进入 meta.deprecated 路由 → 重定向到 /timeline（v0.6+ 软废弃）
  *
  * 命名空间提醒（AGENTS §6.2 Wails Binding 模式）：
  *   channel 命名 = `<namespace>.<method>`（如 repos.list / board.columns.list），
@@ -38,10 +40,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '连接 gitea' },
   },
   {
+    // v0.6+ 软废弃：导航栏移除入口，访问 URL 时重定向到 /timeline
+    // 视图文件 / stores / composables 保留并加 @deprecated 标记，待后续彻底清理
     path: '/board',
     name: 'board',
-    component: () => import('@renderer/views/BoardView.vue'),
-    meta: { title: '看板', requiresAuth: true, deprecated: true },
+    redirect: '/timeline',
+    meta: { title: '看板', requiresAuth: true, deprecated: true, deprecatedReason: 'v0.6+ 软废弃' },
   },
   {
     path: '/timeline',
@@ -56,16 +60,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '合并请求', requiresAuth: true },
   },
   {
+    // v0.6+ 软废弃
     path: '/my-cards',
     name: 'my-cards',
-    component: () => import('@renderer/views/MyCardsView.vue'),
-    meta: { title: '我的卡片', requiresAuth: true, deprecated: true },
+    redirect: '/timeline',
+    meta: { title: '我的卡片', requiresAuth: true, deprecated: true, deprecatedReason: 'v0.6+ 软废弃' },
   },
   {
+    // v0.6+ 软废弃
     path: '/members',
     name: 'members',
-    component: () => import('@renderer/views/MembersView.vue'),
-    meta: { title: '成员', requiresAuth: true, deprecated: true },
+    redirect: '/timeline',
+    meta: { title: '成员', requiresAuth: true, deprecated: true, deprecatedReason: 'v0.6+ 软废弃' },
   },
   {
     path: '/settings',
@@ -95,10 +101,16 @@ export const router = createRouter({
 });
 
 /**
- * 全局守卫：未连接时强制进 /auth
- * 已经在 /auth 时不重定向（避免死循环）
+ * 全局守卫：
+ * 1. 未连接时强制进 /auth（避免死循环：已在 /auth 时不重定向）
+ * 2. v0.6+ 软废弃路由（/board、/my-cards、/members）：强制重定向到 /timeline
  */
 router.beforeEach(async (to) => {
+  // v0.6+ 软废弃路由访问保护：进入 deprecated 路由直接跳到 Git Graph
+  if (to.meta.deprecated === true) {
+    return { name: 'timeline' };
+  }
+
   if (to.meta.requiresAuth) {
     const auth = useAuthStore();
     if (!auth.isConnected) {

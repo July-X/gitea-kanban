@@ -1,4 +1,6 @@
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ *
  * useBoardBootstrap —— BoardView mount 时序串接 + watch + autoInit toast
  *
  * 抽出动机：原 BoardView.vue 内 3 个 onMounted + 2 个 watch + autoInit token

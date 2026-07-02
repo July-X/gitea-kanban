@@ -1,4 +1,6 @@
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ *
  * useBoardCardActions —— BoardView 卡片级操作（换列 / 归类 / 删除 / 标记完成）state + handlers
  *
  * 抽出动机：把 BoardView 内的"换列 / 归类 / 删除 / 标记完成"四组弹窗 + handler

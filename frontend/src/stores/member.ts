@@ -1,4 +1,8 @@
 /**
+ * @deprecated v0.6+ 软废弃：member store 仍保留以便回滚。
+ * 导航栏已移除"成员"入口，路由 /members 重定向到 /timeline。
+ * 后续彻底清理时，连同 MembersView.vue 一并删除。
+ *
  * member store —— 当前 project 的成员列表（gitea repo collaborators）
  *
  * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出（与 my-card/branch/pull 同源）

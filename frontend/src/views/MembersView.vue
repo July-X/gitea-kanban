@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：导航栏已移除入口，路由 /members 重定向到 /timeline。
+ * 视图文件、stores、composables 暂保留以便回滚，待后续彻底清理。
+ *
  * MembersView —— 仓库成员列表（= gitea repo collaborators）
  *
  * 设计（AGENTS §5.2 + v1 末 4-view 4-store 重构）：

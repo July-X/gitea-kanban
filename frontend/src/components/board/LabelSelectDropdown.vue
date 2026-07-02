@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ */
+/**
  * LabelSelectDropdown —— 带搜索过滤的标签多选下拉框（v1.4 · 2026-06-19）
  *
  * 用于 CreateIssueDialog（新建议题选标签）+ IssueDetailDialog（二次修改标签）。

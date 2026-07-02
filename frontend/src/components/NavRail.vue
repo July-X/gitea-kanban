@@ -21,10 +21,7 @@
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import {
-  KanbanSquare,
   Settings,
-  ListChecks,
-  Users2,
   GitMerge,
   Timer,
   PanelLeftClose,
@@ -37,7 +34,7 @@ interface NavItem {
   id: string;
   label: string;
   /** lucide 图标组件 */
-  icon: typeof KanbanSquare;
+  icon: typeof Timer;
   /** 路由名或路径 */
   to: string;
   /** dev 模式注解：点击 ! 看本条目对应 gitea 网页 / API / IPC 数据来源 */
@@ -47,19 +44,32 @@ interface NavItem {
 const route = useRoute();
 const uiStore = useUiStore();
 
-const items: NavItem[] = [
-  {
-    id: 'board',
-    label: '看板',
-    icon: KanbanSquare,
-    to: '/board',
-    devAnnotation: {
-      web: '/<owner>/<repo>/issues',
-      api: 'GET /api/v1/repos/<owner>/<repo>/issues?state=open',
-      ipc: 'board.columns.list（列）· issues.list（卡片，按 label 过滤映射）',
-      notes: '看板列 = 本地 localStore 文件（ADR-0003 Phase 3 删 SQLite 双写）；卡片 = gitea issue（按 gitea label 映射列，gitea 是 label 源）',
-    },
+// v0.6+ 软废弃看板/我的卡片/成员：
+//   - 从导航 items 中移除入口
+//   - 路由仍保留（访问时重定向到 /timeline），store/view 文件加 @deprecated
+//   - 保留三个原始 DevAnnotation 常量（DEPRECATED_NAV_NAV_ANNOTATIONS）以便回滚
+const DEPRECATED_NAV_ANNOTATIONS = {
+  board: {
+    web: '/<owner>/<repo>/issues',
+    api: 'GET /api/v1/repos/<owner>/<repo>/issues?state=open',
+    ipc: 'board.columns.list（列）· issues.list（卡片，按 label 过滤映射）',
+    notes: 'v0.6+ 已软废弃：导航栏移除入口，路由重定向到 /timeline',
   },
+  myCards: {
+    web: '/<owner>/<repo>/issues?q=assignee:@me&state=open',
+    api: 'GET /api/v1/repos/<owner>/<repo>/issues?assignee=<me>&state=open',
+    ipc: 'issues.list（带 assignee 过滤，per active project）',
+    notes: 'v0.6+ 已软废弃：导航栏移除入口，路由重定向到 /timeline',
+  },
+  members: {
+    web: '/<owner>/<repo>/collaborators',
+    api: 'GET /api/v1/repos/<owner>/<repo>/collaborators',
+    ipc: 'members.list',
+    notes: 'v0.6+ 已软废弃：导航栏移除入口，路由重定向到 /timeline',
+  },
+} as const;
+
+const items: NavItem[] = [
   {
     id: 'timeline',
     label: 'Git Graph',
@@ -84,28 +94,6 @@ const items: NavItem[] = [
     },
   },
   {
-    id: 'my-cards',
-    label: '我的卡片',
-    icon: ListChecks,
-    to: '/my-cards',
-    devAnnotation: {
-      web: '/<owner>/<repo>/issues?q=assignee:@me&state=open',
-      api: 'GET /api/v1/repos/<owner>/<repo>/issues?assignee=<me>&state=open',
-      ipc: 'issues.list（带 assignee 过滤，per active project）',
-    },
-  },
-  {
-    id: 'members',
-    label: '成员',
-    icon: Users2,
-    to: '/members',
-    devAnnotation: {
-      web: '/<owner>/<repo>/collaborators',
-      api: 'GET /api/v1/repos/<owner>/<repo>/collaborators',
-      ipc: 'members.list',
-    },
-  },
-  {
     id: 'settings',
     label: '设置',
     icon: Settings,
@@ -117,6 +105,9 @@ const items: NavItem[] = [
     },
   },
 ];
+
+// v0.6+ 引用 DEPRECATED_NAV_ANNOTATIONS 防 TS unused 警告
+void DEPRECATED_NAV_ANNOTATIONS;
 
 const currentPath = computed(() => route.path);
 
