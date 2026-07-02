@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
@@ -490,7 +491,82 @@ func (a *GitHubAdapter) ListPulls(ctx context.Context, hostURL, username, token,
 	for i := range raw {
 		pulls = append(pulls, githubPullToDetail(raw[i]))
 	}
+
+	// v0.6+ bugfix：GitHub 列表 API 响应不返 comments 字段
+	// （只有 comments_url 与单 PR 详情返 comments）。
+	// 为让 MergesView row 展示 💬 N 与 Gitea 对齐，并发 5 调
+	// GET /repos/{owner}/{repo}/issues/{index} 拿 comments 字段补全。
+	//
+	// 选择 issues 端点而非 pulls 端点原因：
+	//   - PR 在 GitHub 是 issue 的一种
+	//   - issues 端点只返 issue-style comments 数（与 Gitea `comments` 语义一致）
+	//   - pulls 端点多返 review_comments / additions 等额外字段（本项目只需要 comments）
+	a.fillGitHubCommentsCount(ctx, hostURL, token, owner, repo, pulls)
+
 	return pulls, nil
+}
+
+// fillGitHubCommentsCount 并发为每个 PR 补 comments 字段
+//
+// v0.6+ bugfix：GitHub 列表 API 不带 comments 字段。这里并发 5 调
+// GET /repos/{owner}/{repo}/issues/{index} 拿 comments 字段补上。
+//
+// 重要：失败不中断主流程，单个 PR 拉不到评论数保持 0 即可。
+//
+// 为什么用 issues 端点而不是 pulls 端点：
+//   - GitHub docs 明说 "every pull request is an issue"
+//   - issues 端点只返 issue-style comments 数，与 Gitea `comments` 语义一致
+//   - pulls 端点多返 review_comments （代码行上 review）与 review 总结评论数
+//     —— 这两类不是 MergesView row 上的对话气泡计数所需。
+func (a *GitHubAdapter) fillGitHubCommentsCount(
+	ctx context.Context, hostURL, token, owner, repo string, pulls []platform.PullDetailDTO,
+) {
+	if len(pulls) == 0 {
+		return
+	}
+	const concurrency = 5
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i := range pulls {
+		// context 取消就跳过剩余
+		if ctx.Err() != nil {
+			return
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			count, err := a.fetchGitHubIssueCommentCount(ctx, hostURL, token, owner, repo, pulls[idx].Number)
+			if err != nil {
+				// 单个 PR 拉不到不中断流程（可能是临时网络问题 / issue 不存在）
+				if slog.Default() != nil {
+					slog.Default().Warn("GitHub fillGitHubCommentsCount failed",
+						"owner", owner, "repo", repo, "index", pulls[idx].Number, "err", err.Error())
+				}
+				return
+			}
+			pulls[idx].CommentsCount = count
+		}(i)
+	}
+	wg.Wait()
+}
+
+// fetchGitHubIssueCommentCount 调 GET /repos/{owner}/{repo}/issues/{index} 拿 comments 字段
+//
+// GitHub docs："every pull request is an issue"，
+// issue 端点返的 comments 字段 == PR 的 issue-style 评论数。
+func (a *GitHubAdapter) fetchGitHubIssueCommentCount(
+	ctx context.Context, hostURL, token, owner, repo string, index int,
+) (int, error) {
+	var raw struct {
+		Comments int `json:"comments"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return 0, err
+	}
+	return raw.Comments, nil
 }
 
 // GetPull 获取单个合并请求详情（GET /repos/{owner}/{repo}/pulls/{index}）

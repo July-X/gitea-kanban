@@ -136,6 +136,11 @@ func TestGitHubIntegration_ListPulls(t *testing.T) {
 			if p.Base.Ref == "" {
 				t.Errorf("PR #%d base.ref is empty", pr)
 			}
+			// v0.6+ bugfix：GitHub 列表不返 comments，fillGitHubCommentsCount 补全
+			// 新创建的 fixture PR 没评论，CommentsCount 应为 0
+			if p.CommentsCount < 0 {
+				t.Errorf("PR #%d CommentsCount = %d, want >= 0", pr, p.CommentsCount)
+			}
 			break
 		}
 	}

@@ -750,33 +750,50 @@ func TestGraphResultToDTO_PropagatesIsCommitted(t *testing.T) {
 
 // TestGitHubAdapter_ListPulls_Basic 验证路径 + state + 字段映射
 func TestGitHubAdapter_ListPulls_Basic(t *testing.T) {
-	var capturedPath, capturedQuery, capturedMethod string
+	var capturedListPath, capturedListQuery, capturedListMethod string
+	var hitsIssuesEndpoint bool
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedMethod = r.Method
-		capturedPath = r.URL.Path
-		capturedQuery = r.URL.RawQuery
 		if auth := r.Header.Get("Authorization"); auth != "Bearer ghp-test-token" {
 			t.Errorf("Authorization = %q, want 'Bearer ghp-test-token'", auth)
 		}
 
-		json.NewEncoder(w).Encode([]map[string]interface{}{
-			{
-				"number":     42,
-				"title":      "feat: add dolphin loader",
-				"state":      "open",
-				"draft":      false,
-				"merged":     false,
-				"head":       map[string]string{"ref": "feature/dolphin", "sha": "abc1234"},
-				"base":       map[string]string{"ref": "main", "sha": "def5678"},
-				"user":       map[string]string{"login": "alice", "avatar_url": "https://github.com/alice.png"},
-				"mergeable":  true,
-				"comments":   3,
-				"created_at": "2024-06-01T00:00:00Z",
-				"updated_at": "2024-06-02T00:00:00Z",
-				"body":       "adds the spinning dolphin loader",
-			},
-		})
+		// v0.6+ bugfix：GitHub 列表 API 实际响应不带 comments 字段
+		// （仅在 GetPull 单 PR 详情或 GET /issues/{N} 有）。
+		// 模拟真实行为：列表响应去掉 comments 字段。
+		if r.URL.Path == "/repos/alice/dolphin/pulls" {
+			capturedListPath = r.URL.Path
+			capturedListMethod = r.Method
+			capturedListQuery = r.URL.RawQuery
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"number":     42,
+					"title":      "feat: add dolphin loader",
+					"state":      "open",
+					"draft":      false,
+					"merged":     false,
+					"head":       map[string]string{"ref": "feature/dolphin", "sha": "abc1234"},
+					"base":       map[string]string{"ref": "main", "sha": "def5678"},
+					"user":       map[string]string{"login": "alice", "avatar_url": "https://github.com/alice.png"},
+					"mergeable":  true,
+					"created_at": "2024-06-01T00:00:00Z",
+					"updated_at": "2024-06-02T00:00:00Z",
+					"body":       "adds the spinning dolphin loader",
+				},
+			})
+			return
+		}
+
+		// v0.6+ 补全流程：fillGitHubCommentsCount 调 GET /issues/{N} 拿 comments
+		if r.URL.Path == "/repos/alice/dolphin/issues/42" {
+			hitsIssuesEndpoint = true
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"comments": 3})
+			return
+		}
+
+		t.Errorf("unexpected path: %q", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
 
@@ -789,14 +806,14 @@ func TestGitHubAdapter_ListPulls_Basic(t *testing.T) {
 		t.Fatalf("ListPulls failed: %v", err)
 	}
 
-	if capturedMethod != "GET" {
-		t.Errorf("method = %q, want GET", capturedMethod)
+	if capturedListMethod != "GET" {
+		t.Errorf("list method = %q, want GET", capturedListMethod)
 	}
-	if capturedPath != "/repos/alice/dolphin/pulls" {
-		t.Errorf("path = %q, want /repos/alice/dolphin/pulls", capturedPath)
+	if capturedListPath != "/repos/alice/dolphin/pulls" {
+		t.Errorf("list path = %q, want /repos/alice/dolphin/pulls", capturedListPath)
 	}
-	if !strings.Contains(capturedQuery, "state=open") {
-		t.Errorf("query = %q, want contains state=open", capturedQuery)
+	if !strings.Contains(capturedListQuery, "state=open") {
+		t.Errorf("list query = %q, want contains state=open", capturedListQuery)
 	}
 
 	if len(pulls) != 1 {
@@ -821,11 +838,53 @@ func TestGitHubAdapter_ListPulls_Basic(t *testing.T) {
 	if !p.Mergeable || p.HasConflicts {
 		t.Errorf("Mergeable/HasConflicts = %v/%v, want true/false", p.Mergeable, p.HasConflicts)
 	}
+	// v0.6+ bugfix：CommentsCount 来自 fillGitHubCommentsCount（GET /issues/{N}），
+	// 不是直接来自列表响应
+	if !hitsIssuesEndpoint {
+		t.Error("fillGitHubCommentsCount 未调 GET /issues/42 拿 comments")
+	}
 	if p.CommentsCount != 3 {
 		t.Errorf("CommentsCount = %d, want 3", p.CommentsCount)
 	}
 	if p.Body != "adds the spinning dolphin loader" {
 		t.Errorf("Body = %q", p.Body)
+	}
+}
+
+// TestGitHubAdapter_ListPulls_FillCommentsFailure 验证 issues 端点 500 时不中断主流程
+func TestGitHubAdapter_ListPulls_FillCommentsFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/alice/dolphin/pulls" {
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"number": 42,
+					"state":  "open",
+					"head":   map[string]string{"ref": "f", "sha": "a"},
+					"base":   map[string]string{"ref": "main", "sha": "b"},
+				},
+			})
+			return
+		}
+		// issues 端点返 500
+		if r.URL.Path == "/repos/alice/dolphin/issues/42" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		t.Errorf("unexpected: %q", r.URL.Path)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	pulls, err := adapter.ListPulls(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", platform.ListPullsOpts{State: "open"})
+	if err != nil {
+		t.Fatalf("ListPulls 不应被 issues 端点 500 中断: %v", err)
+	}
+	if len(pulls) != 1 {
+		t.Fatalf("len(pulls) = %d, want 1", len(pulls))
+	}
+	// comments 补全失败，保留 0
+	if pulls[0].CommentsCount != 0 {
+		t.Errorf("CommentsCount = %d, want 0 （issues 端点 500）", pulls[0].CommentsCount)
 	}
 }
 
