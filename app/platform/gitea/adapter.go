@@ -644,6 +644,79 @@ func (a *GiteaAdapter) ListMembers(ctx context.Context, hostURL, username, token
 	return members, nil
 }
 
+// ===== 合并请求评论（v0.6+） =====
+//
+// Gitea 端点：/repos/{owner}/{repo}/issues/{index}/comments
+// 重要：Gitea 上 PR 和 issue 共享同一编号空间，所以 PR 评论走 issue comments 端点
+// （与 GitHub 习惯一致 —— GitHub 上 PR 就是 issue）。
+
+// ListPullComments 列合并请求评论（GET /repos/{owner}/{repo}/issues/{index}/comments）
+func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.CommentDTO, error) {
+	var raw []giteaCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.CommentDTO, 0, len(raw))
+	for _, c := range raw {
+		out = append(out, giteaCommentToDTO(c))
+	}
+	return out, nil
+}
+
+// CreatePullComment 发合并请求评论（POST /repos/{owner}/{repo}/issues/{index}/comments）
+//
+// body: {body: "..."} —— Gitea API 限制 body 必填且非空。
+// 返回服务端创建的评论（含 id / author / createdAt ），前端以此刷列表。
+func (a *GiteaAdapter) CreatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string) (*platform.CommentDTO, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{"body": body}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaCommentToDTO(raw)
+	return &dto, nil
+}
+
+// giteaCommentRaw Gitea /repos/.../issues/{index}/comments 原始响应
+//
+// swagger: https://try.gitea.io/swagger#/issueissueComment
+// 字段只取必要项：id / body / user / created / updated。
+//
+// 复用上面已定义的 giteaUserRaw（line 338），不在这里重复定义。
+type giteaCommentRaw struct {
+	ID      int64         `json:"id"`
+	Body    string        `json:"body"`
+	User    *giteaUserRaw `json:"user"`
+	Created string        `json:"created"`
+	Updated string        `json:"updated"`
+}
+
+// giteaCommentToDTO 映射为平台中性 CommentDTO
+func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
+	out := platform.CommentDTO{
+		ID:        c.ID,
+		Body:      c.Body,
+		CreatedAt: c.Created,
+		UpdatedAt: c.Updated,
+	}
+	if c.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  c.User.Login,
+			AvatarURL: c.User.AvatarURL,
+		}
+	}
+	return out
+}
+
 // ===== HTTP 请求封装 =====
 
 // encodeJSONBody 把任意对象序列化为 io.Reader

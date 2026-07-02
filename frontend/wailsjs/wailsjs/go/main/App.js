@@ -38,6 +38,10 @@ export function CreateColumn(arg1) {
   return window['go']['main']['App']['CreateColumn'](arg1);
 }
 
+export function CreatePullComment(arg1) {
+  return window['go']['main']['App']['CreatePullComment'](arg1);
+}
+
 export function DeleteColumn(arg1) {
   return window['go']['main']['App']['DeleteColumn'](arg1);
 }
@@ -96,6 +100,10 @@ export function ListColumns(arg1) {
 
 export function ListIssues(arg1) {
   return window['go']['main']['App']['ListIssues'](arg1);
+}
+
+export function ListPullComments(arg1) {
+  return window['go']['main']['App']['ListPullComments'](arg1);
 }
 
 export function ListPulls(arg1) {

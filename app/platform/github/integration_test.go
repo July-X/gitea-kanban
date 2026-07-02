@@ -23,6 +23,7 @@
 //   - TestGitHubIntegration_UpdatePullAssignee  验证 diff + DELETE+POST 增量替换
 //   - TestGitHubIntegration_UpdatePullReviewers  验证 diff + DELETE+POST 增量替换
 //   - TestGitHubIntegration_ClosePull  验证 PATCH state=closed 生效
+//   - TestGitHubIntegration_PullComments  验证 PR 评论端到端（list + create + 字段映射）
 //
 // 安全：
 //   - token 绝不进源码（环境变量读）
@@ -358,6 +359,74 @@ func TestGitHubIntegration_ClosePull(t *testing.T) {
 	}
 	if dGet.State != "closed" {
 		t.Errorf("真上 State = %q, want closed", dGet.State)
+	}
+}
+
+// TestGitHubIntegration_PullComments 验证 PR 评论端到端（list + create + 真上可见）
+func TestGitHubIntegration_PullComments(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	pr, cleanup := createFixturePR(t, ctx, token)
+	defer cleanup()
+
+	// 1. 初始评论列表应该为空
+	list, err := adapter.ListPullComments(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr)
+	if err != nil {
+		t.Fatalf("ListPullComments(初始) failed: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("初始评论列表 len = %d, want 0", len(list))
+	}
+
+	// 2. 发 3 条评论
+	bodies := []string{"first", "second", "third"}
+	for i, body := range bodies {
+		created, err := adapter.CreatePullComment(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, body)
+		if err != nil {
+			t.Fatalf("CreatePullComment[%d] failed: %v", i, err)
+		}
+		if created.ID == 0 {
+			t.Errorf("CreatePullComment[%d] 返回 ID = 0", i)
+		}
+		if created.Body != body {
+			t.Errorf("CreatePullComment[%d] 返回 Body = %q, want %q", i, created.Body, body)
+		}
+		if created.Author == nil || created.Author.Username == "" {
+			t.Errorf("CreatePullComment[%d] Author 为空或 Username 为空", i)
+		}
+	}
+
+	// 3. 二次拉取验证
+	list2, err := adapter.ListPullComments(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr)
+	if err != nil {
+		t.Fatalf("ListPullComments(发后) failed: %v", err)
+	}
+	if len(list2) < 3 {
+		t.Errorf("发 3 条后评论列表 len = %d, want >= 3", len(list2))
+	}
+
+	// 4. 验证 author 与返回一致
+	found := 0
+	for _, c := range list2 {
+		for _, b := range bodies {
+			if c.Body == b {
+				found++
+				if c.Author == nil || c.Author.Username == "" {
+					t.Errorf("评论 %q 的 Author 为空", b)
+				}
+			}
+		}
+	}
+	if found < 3 {
+		t.Errorf("在列表中找到 %d 条评论，want >= 3", found)
+	}
+
+	// 5. 空 body short-circuit 验证
+	_, err = adapter.CreatePullComment(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, "   ")
+	if err == nil {
+		t.Error("expected validation error for whitespace-only body, got nil")
 	}
 }
 

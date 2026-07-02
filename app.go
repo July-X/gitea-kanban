@@ -2784,6 +2784,83 @@ func (a *App) UpdatePullReviewers(args UpdatePullReviewersArgs) (PullDetailAppDT
 	return *d, nil
 }
 
+// ===== PR 评论（v0.6+）=====
+//
+// 范围限定：只做 PR 上下文（issue 评论另起 issue）。
+// Gitea 与 GitHub 都走 /repos/{owner}/{repo}/issues/{index}/comments 端点
+// （PR 与 issue 共享同一编号空间）。
+
+// PullCommentDTO 是 frontend IssueCommentDto 的 Wails 边界类型别名
+//
+// v0.6+ 复用了 IssueCommentDto，是因为它的字段（id / body / author / createdAt / updatedAt）
+// 与评论场景 1:1 对齐。若后续需要 PR review / inline review comment，可以拆出独立类型。
+type PullCommentDTO = platformAdapter.CommentDTO
+
+// ListPullCommentsArgs 列 PR 评论参数
+type ListPullCommentsArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullComments 列 PR 评论
+//
+// 错误码：
+//   - 401/403 → token_invalid / permission_denied
+//   - 404 → not_found（项目/仓库不存在）
+func (a *App) ListPullComments(args ListPullCommentsArgs) ([]PullCommentDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := adapter.ListPullComments(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// CreatePullCommentArgs 发 PR 评论参数
+type CreatePullCommentArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Body      string `json:"body"`
+}
+
+// CreatePullComment 发 PR 评论
+//
+// body 校验（两端都已走）：
+//   - 空 → ipc.NewValidationFailed("评论内容不能为空", "")
+//   - 两端实现都会在 trim 为空时 short-circuit返回，
+//     不会进平台 API（防御设计）
+//
+// 返回创建的评论（含服务端 id / createdAt），前端拿这个刷列表以避免
+// “前端猜时间戳与实际服务端时间不一致”问题。
+func (a *App) CreatePullComment(args CreatePullCommentArgs) (PullCommentDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullCommentDTO{}, err
+	}
+
+	if a.logger != nil {
+		a.logger.Info("CreatePullComment", "projectId", args.ProjectID, "index", args.Index)
+	}
+	d, err := adapter.CreatePullComment(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Body)
+	if err != nil {
+		return PullCommentDTO{}, err
+	}
+	if d == nil {
+		return PullCommentDTO{}, nil
+	}
+	return *d, nil
+}
+
 // ColumnDTO 看板列（暴露给前端，与 store.BoardColumn 对齐）
 type ColumnDTO struct {
 	ID        string `json:"id"`

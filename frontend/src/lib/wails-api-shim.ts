@@ -221,6 +221,9 @@ type WailsApp = {
   UpdatePullLabels?: (args: { projectId: string; index: number; labels: string[] }) => Promise<unknown>;
   UpdatePullAssignee?: (args: { projectId: string; index: number; assignee: string }) => Promise<unknown>;
   UpdatePullReviewers?: (args: { projectId: string; index: number; reviewers: string[] }) => Promise<unknown>;
+  // v0.6+ PR 评论（issue 评论另起 v0.7）
+  ListPullComments?: (args: { projectId: string; index: number }) => Promise<unknown>;
+  CreatePullComment?: (args: { projectId: string; index: number; body: string }) => Promise<unknown>;
 };
 
 /** 拿到 window.go.main.App（Wails 在启动期注入） */
@@ -754,6 +757,48 @@ const apiShim = {
           });
         },
       );
+    },
+    /**
+     * pulls.comment.list —— 独立于 issues.comment.list，单独提供给合并请求场景
+     *
+     * 背景：v0.6+ 修复 issues.comment.create → notImplemented bug。
+     * 评论是 issue / PR 共享同一端点，但 Wails binding 需分开（issue 评论待 v0.7）。
+     * 转发到 window.go.main.App.ListPullComments({projectId, index})
+     */
+    comment: {
+      list: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number };
+        return forwardToWails(
+          () => stubEmpty([]),
+          (app) => {
+            if (!app.ListPullComments) {
+              return stubEmpty([]);
+            }
+            return app.ListPullComments({ projectId: a.projectId, index: a.index });
+          },
+        );
+      },
+      /**
+       * pulls.comment.create —— 发合并请求评论
+       *
+       * 关键：body 要在 UI 层 trim，后端还会再走 trim short-circuit（防御设计）。
+       */
+      create: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number; body: string };
+        return forwardToWails(
+          () => notImplemented('pulls.comment', 'create'),
+          (app) => {
+            if (!app.CreatePullComment) {
+              return notImplemented('pulls.comment', 'create');
+            }
+            return app.CreatePullComment({
+              projectId: a.projectId,
+              index: a.index,
+              body: a.body,
+            });
+          },
+        );
+      },
     },
   },
 

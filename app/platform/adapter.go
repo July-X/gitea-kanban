@@ -126,6 +126,20 @@ type PlatformAdapter interface {
 	// UpdatePullReviewers 替换合并请求的审查者（空切片 = 清空；Gitea 走 requested_reviewers，GitHub 等价）
 	UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*PullDetailDTO, error)
 
+	// ListPullComments 列合并请求评论（v0.6+ PR 评论，按 createdAt 升序）
+	//
+	// Gitea 与 GitHub 都把 PR 评论 / issue 评论放在同一端点
+	// （/repos/{owner}/{repo}/issues/{index}/comments —— GitHub 上 PR 是 issue 的一种），
+	// 所以 issue 评论和 PR 评论其实是同一份数据。这里走 PR 接口纯粹是为了命名清晰，
+	// 避免上层业务方混用。
+	ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]CommentDTO, error)
+
+	// CreatePullComment 在合并请求下发评论（v0.6+ PR 评论）
+	//
+	// 返回创建的评论（含服务端分配的 id / createdAt / author），前端用此
+	// 拿到权威时间戳去更新 UI（避免"前端猜时间戳 + 实际服务端时间"不一致）。
+	CreatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string) (*CommentDTO, error)
+
 	// ListLabels 列出仓库标签
 	ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]LabelDTO, error)
 
@@ -317,6 +331,21 @@ type PullLabelDTO struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Color string `json:"color"`
+}
+
+// CommentDTO 合并请求 / 议题评论（v0.6+ 共享）
+//
+// 字段对齐 Gitea Comment + GitHub Issue Comment，两端字段命名一致：
+//   - id / body / author / createdAt / updatedAt
+//
+// v0.6+ 不引入"评论系统评论"（PR review / inline review comment）——
+// 只支持顶层 issue-style 评论，等需要 review 评论时再加新 DTO。
+type CommentDTO struct {
+	ID        int64         `json:"id"`
+	Body      string        `json:"body"`
+	Author    *PullUserDTO  `json:"author,omitempty"`
+	CreatedAt string        `json:"createdAt"`
+	UpdatedAt string        `json:"updatedAt,omitempty"`
 }
 
 // LabelDTO 标签信息

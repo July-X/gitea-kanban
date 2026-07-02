@@ -705,7 +705,74 @@ func (a *GitHubAdapter) UpdatePullReviewers(ctx context.Context, hostURL, userna
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
-// mapMergeMethodToGitHub 把前端 MergeMethod 转换为 GitHub merge_method
+// ===== PR 评论（v0.6+）=====
+//
+// GitHub 端点与 Gitea 一致：/repos/{owner}/{repo}/issues/{index}/comments
+// PR 在 GitHub 平台上本来就是 issue 的一种，所以 PR 评论走 issue comments 端点。
+
+// ListPullComments 列 PR 评论（GET /repos/{owner}/{repo}/issues/{index}/comments）
+func (a *GitHubAdapter) ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.CommentDTO, error) {
+	var raw []githubCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.CommentDTO, 0, len(raw))
+	for _, c := range raw {
+		out = append(out, githubCommentToDTO(c))
+	}
+	return out, nil
+}
+
+// CreatePullComment 发 PR 评论（POST /repos/{owner}/{repo}/issues/{index}/comments）
+//
+// body: {body: "..."}
+// 返回创建的评论（含 id / user / created_at），前端拿到权威时间戳。
+func (a *GitHubAdapter) CreatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string) (*platform.CommentDTO, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{"body": body}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubCommentToDTO(raw)
+	return &dto, nil
+}
+
+// githubCommentRaw GitHub /repos/.../issues/{index}/comments 原始响应
+//
+// 字段与上面 githubPullRaw 里的 user 部分对齐，复用不上不是问题但为可读性独立定义。
+type githubCommentRaw struct {
+	ID        int64          `json:"id"`
+	Body      string         `json:"body"`
+	User      *githubUserRaw `json:"user"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+}
+
+// githubCommentToDTO 映射为平台中性 CommentDTO
+func githubCommentToDTO(c githubCommentRaw) platform.CommentDTO {
+	out := platform.CommentDTO{
+		ID:        c.ID,
+		Body:      c.Body,
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+	}
+	if c.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  c.User.Login,
+			AvatarURL: c.User.AvatarURL,
+		}
+	}
+	return out
+}
 //
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'
 // GitHub: 'merge' | 'rebase' | (无 'rebase-merge'，映射为 'rebase') | 'squash'

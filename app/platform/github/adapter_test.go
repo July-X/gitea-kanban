@@ -1038,3 +1038,121 @@ func TestMapMergeMethodToGitHub(t *testing.T) {
 		}
 	}
 }
+
+// ===== PR 评论测试（v0.6+）=====
+//
+// 覆盖：ListPullComments / CreatePullComment / 空 body short-circuit / Bearer 鉴权
+
+// TestGitHubAdapter_ListPullComments 验证路径 + Bearer + 字段映射
+func TestGitHubAdapter_ListPullComments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/alice/dolphin/issues/42/comments" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.Method != "GET" {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer ghp-test-token" {
+			t.Errorf("Authorization = %q, want 'Bearer ghp-test-token'", auth)
+		}
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"id":         101,
+				"body":       "lgtm",
+				"user":       map[string]string{"login": "bob", "avatar_url": "https://github.com/bob.png"},
+				"created_at": "2024-06-01T10:00:00Z",
+				"updated_at": "2024-06-01T10:00:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullComments(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullComments failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].ID != 101 {
+		t.Errorf("ID = %d, want 101", items[0].ID)
+	}
+	if items[0].Body != "lgtm" {
+		t.Errorf("Body = %q", items[0].Body)
+	}
+	if items[0].Author == nil || items[0].Author.Username != "bob" {
+		t.Errorf("Author = %+v", items[0].Author)
+	}
+	if items[0].CreatedAt != "2024-06-01T10:00:00Z" {
+		t.Errorf("CreatedAt = %q", items[0].CreatedAt)
+	}
+}
+
+// TestGitHubAdapter_CreatePullComment 验证 POST body + Bearer 鉴权
+func TestGitHubAdapter_CreatePullComment(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		if auth := r.Header.Get("Authorization"); auth != "Bearer ghp" {
+			t.Errorf("Authorization = %q", auth)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":         201,
+			"body":       capturedBody["body"],
+			"user":       map[string]string{"login": "alice"},
+			"created_at": "2024-06-02T12:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	d, err := adapter.CreatePullComment(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, "+1")
+	if err != nil {
+		t.Fatalf("CreatePullComment failed: %v", err)
+	}
+	if capturedMethod != "POST" {
+		t.Errorf("method = %q, want POST", capturedMethod)
+	}
+	if capturedPath != "/repos/alice/dolphin/issues/42/comments" {
+		t.Errorf("path = %q", capturedPath)
+	}
+	if capturedBody["body"] != "+1" {
+		t.Errorf("body = %v, want '+1'", capturedBody["body"])
+	}
+	if d.ID != 201 || d.Body != "+1" {
+		t.Errorf("d = %+v", d)
+	}
+}
+
+// TestGitHubAdapter_CreatePullComment_EmptyBody 验证 short-circuit
+func TestGitHubAdapter_CreatePullComment_EmptyBody(t *testing.T) {
+	serverHit := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.CreatePullComment(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, " \t\n ")
+	if err == nil {
+		t.Fatal("expected validation error for whitespace-only body")
+	}
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeValidationFailed {
+		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeValidationFailed)
+	}
+	if serverHit {
+		t.Error("server should not be hit for empty body (short-circuit)")
+	}
+}

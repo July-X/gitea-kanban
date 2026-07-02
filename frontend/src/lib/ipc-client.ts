@@ -1020,6 +1020,35 @@ export function issuesCommentCreate(args: {
 }
 
 // ============================================================
+// ===== pulls.comment.* （v0.6+ PR 评论 —— 修复 issues.comment.create stub bug） =====
+// ============================================================
+//
+// 背景：MergesView 调用 issuesCommentList / issuesCommentCreate 发 PR 评论，
+// 这两个函数还路由到 issues.comment.* ，但后端 issues.comment.* 是 stub，
+// 返 "尚未实现（Wails 迁移中）" error → toast "应用出错了"。
+//
+// v0.6+ 修复方案：PR 上下文走独立的 pulls.comment.* 命名空间（Issue 评论待 v0.7）。
+// Gitea 与 GitHub 都支持。
+// 端点：/repos/{owner}/{repo}/issues/{index}/comments（PR 与 issue 共享编号空间）。
+
+/** 列合并请求评论 */
+export function pullsCommentList(args: {
+  projectId: string;
+  index: number;
+}): Promise<IssueCommentDto[]> {
+  return getIpcClient().invokeNested('pulls', 'comment', 'list', args);
+}
+
+/** 发合并请求评论。body 会在 UI 层 trim；后端还会走防御性 short-circuit */
+export function pullsCommentCreate(args: {
+  projectId: string;
+  index: number;
+  body: string;
+}): Promise<IssueCommentDto> {
+  return getIpcClient().invokeNested('pulls', 'comment', 'create', args);
+}
+
+// ============================================================
 // ===== labels.* （ADR-0002：看板列绑 gitea label 用） =====
 // ============================================================
 

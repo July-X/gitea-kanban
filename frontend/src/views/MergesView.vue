@@ -32,8 +32,8 @@ import { renderMarkdown } from '@renderer/lib/markdown';
 // （v2 是 Wails WebView，<a target="_blank"> / window.open 在这里不可靠）。
 import { BrowserOpenURL } from '../../wailsjs/wailsjs/runtime/runtime';
 import {
-  issuesCommentCreate,
-  issuesCommentList,
+  pullsCommentCreate,
+  pullsCommentList,
   labelsCreate,
   labelsList,
   membersList,
@@ -652,9 +652,9 @@ async function fetchComments(p: PullDto): Promise<void> {
   // 评论加载也接 globalLoading（panel 二级加载，多 pr 并发 active 时合并）
   useGlobalLoadingStore().show('merges');
   try {
-    const list = (await issuesCommentList({
+    const list = (await pullsCommentList({
       projectId: String(activeProjectId.value),
-      issueIndex: p.index,
+      index: p.index,
     })) as IssueCommentDto[];
     panel.items = Array.isArray(list) ? list : [];
     panel.lastLoadedAt = Date.now();
@@ -684,9 +684,9 @@ async function postComment(p: PullDto): Promise<void> {
   panel.posting = true;
   panel.error = null;
   try {
-    await issuesCommentCreate({
+    await pullsCommentCreate({
       projectId: String(activeProjectId.value),
-      issueIndex: p.index,
+      index: p.index,
       body,
     });
     setDraft(p.index, '');

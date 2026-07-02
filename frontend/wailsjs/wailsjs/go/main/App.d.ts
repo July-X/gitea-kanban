@@ -23,6 +23,8 @@ export function ClosePull(arg1:main.ClosePullArgs):Promise<platform.PullDetailDT
 
 export function CreateColumn(arg1:main.CreateColumnArgs):Promise<main.ColumnDTO>;
 
+export function CreatePullComment(arg1:main.CreatePullCommentArgs):Promise<platform.CommentDTO>;
+
 export function DeleteColumn(arg1:main.DeleteColumnArgs):Promise<void>;
 
 export function FetchRepo(arg1:main.PullRepoArgs):Promise<main.FetchRepoResultDTO>;
@@ -52,6 +54,8 @@ export function ListBranches(arg1:main.ListBranchesArgs):Promise<Array<main.Bran
 export function ListColumns(arg1:main.ListColumnsArgs):Promise<Array<main.ColumnDTO>>;
 
 export function ListIssues(arg1:main.ListIssuesArgs):Promise<Array<main.IssueDTO>>;
+
+export function ListPullComments(arg1:main.ListPullCommentsArgs):Promise<Array<platform.CommentDTO>>;
 
 export function ListPulls(arg1:main.ListPullsArgs):Promise<main.PullListAppResp>;
 
