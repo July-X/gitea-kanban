@@ -34,6 +34,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,7 @@ import (
 	"testing"
 	"time"
 
+	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/platform"
 )
 
@@ -285,9 +287,12 @@ func TestGitHubIntegration_UpdatePullAssignee(t *testing.T) {
 
 // TestGitHubIntegration_UpdatePullReviewers 验证 requested_reviewers 端到端
 //
-// 注意：GitHub 上 review requests 只能发给 collaborator（仓库成员）；
-// 用户自己默认是 admin / collaborator，所以能测；如果失败说明 token
-// 对应的 user 不是 repo collaborator。
+// 已知 GitHub 限制：PR author 不能请求自己 review（"Review cannot be requested
+// from pull request author"）。fixture PR 由 token owner 创建 → PR author = token owner
+// → 无法触发"空→1"的 happy path。集成测试遇到这种情况自动 t.Skip。
+//
+// 想覆盖更多场景需要：另找 repo collaborator 作为 reviewer（fixture 复杂度↑），
+// 或改用非 token owner 的 PAT。本测试优先验证"清空"路径（不依赖具体 reviewer）。
 func TestGitHubIntegration_UpdatePullReviewers(t *testing.T) {
 	ctx := context.Background()
 	token := mustToken(t)
@@ -605,14 +610,35 @@ func cleanupFixturePRs(ctx context.Context, token string) error {
 	return nil
 }
 
-// isNotCollaboratorErr 判断 GitHub API 错误是否为"非 collaborator"
+// isNotCollaboratorErr 判断 GitHub API 错误是否为"非 collaborator"或"环境约束"
 //
-// GitHub 422 响应体里通常含 "Could not resolve to a node" 或 "is not a collaborator"
-// 这个 helper 用于 UpdatePullReviewers 等需要 collaborator 权限的端点
+// GitHub 422 响应体里通常含以下模式，集成测试遇到都按 t.Skip 处理：
+//   - "Could not resolve to a node" —— user 不存在 / 非仓库成员
+//   - "is not a collaborator" —— user 不是 collaborator
+//   - "Review cannot be requested from pull request author" —— PR author 不能 review 自己
+//
+// 实现要点（v0.6+ integration test 验证）：
+//   - 错误走 ipc.NewValidationFailed → Message 是中文占位（"请求参数不被服务端接受"）
+//   - 原始 GitHub message 在 Cause 字段里，Error() 不返回
+//   - 必须 unwrap *ipc.IpcError 才能拿到 Cause
+//
+// 用于 UpdatePullReviewers 等需要 collaborator 权限的端点
 func isNotCollaboratorErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	// 优先从 *ipc.IpcError.Cause 字段里找（adapter mapHTTPError 把原始 body 塞这里）
+	var ipcErr *ipc.IpcError
+	if errors.As(err, &ipcErr) {
+		cause := ipcErr.Cause
+		if cause == "" {
+			return false
+		}
+		return strings.Contains(cause, "Could not resolve to a node") ||
+			strings.Contains(cause, "is not a collaborator") ||
+			strings.Contains(cause, "Review cannot be requested from")
+	}
+	// 兜底：直接扫 err.Error()（覆盖非 IpcError 路径，如网络层错误）
 	msg := err.Error()
 	return strings.Contains(msg, "Could not resolve to a node") ||
 		strings.Contains(msg, "is not a collaborator") ||

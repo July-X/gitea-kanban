@@ -564,20 +564,23 @@ func (a *GitHubAdapter) ClosePull(ctx context.Context, hostURL, username, token,
 //
 // GitHub 端点有趣：PR 的 labels 走 /issues/{index}/labels（PR 也是 issue 的一种）。
 // body: {labels: ["bug", "feature"]}（按 name 字符串数组）
+//
+// 真实响应（v0.6+ integration test 验证）：
+//   PUT /repos/{owner}/{repo}/issues/{index}/labels
+//   → 200 OK + body = [{id, name, color, default, description}, ...]
+//   **不是** issue object，所以不要尝试解码成 PullRaw
 func (a *GitHubAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*platform.PullDetailDTO, error) {
 	body := map[string]any{"labels": labelNames}
 	reader, err := encodeJSONBody(body)
 	if err != nil {
 		return nil, err
 	}
-	// PUT /repos/{owner}/{repo}/issues/{index}/labels 返回新的 issue 包含 labels
-	var raw githubPullRaw
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/labels", owner, repo, index)
-	if err := a.doRequest(ctx, hostURL, token, "PUT", path, reader, &raw); err != nil {
+	// 端点返回 label 数组，**不**解码（响应字段不参与业务，只用副作用：labels 已替换）
+	if err := a.doRequest(ctx, hostURL, token, "PUT", path, reader, nil); err != nil {
 		return nil, err
 	}
-	// PUT /issues/{index}/labels 返回的是 issue 视图，labels 已包含；head/base 等其他字段可能为空
-	// 为保证返回 PullDetailDTO 字段完整，再 GET 一次 PR 详情
+	// 为保证返回 PullDetailDTO 字段完整，再 GET 一次 PR 详情（顺手拉最新 labels/assignees/reviewers）
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
