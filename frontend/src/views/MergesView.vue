@@ -20,7 +20,7 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -53,6 +53,12 @@ const auth = useAuthStore();
 const router = useRouter();
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
+
+// v0.6+ 滚动到底自动加载分页：哨兵 + IntersectionObserver
+// - loadMoreSentinel: <div ref="loadMoreSentinel"> 在 ul 之后
+// - loadMoreObserver: onMounted 时建，onUnmounted 时 disconnect 防内存泄露
+const loadMoreSentinel = ref<HTMLElement | null>(null);
+let loadMoreObserver: IntersectionObserver | null = null;
 
 const activeRepo = computed<RepoDto | null>(() => {
   const fn = repo.currentProject ? `${repo.currentProject.owner}/${repo.currentProject.name}` : null;
@@ -119,6 +125,30 @@ onMounted(async () => {
   // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
   if (activeProjectId.value) {
     await loadPulls();
+  }
+  // v0.6+ bugfix：滚动到底自动加载下一页
+  // - rootMargin: 200px 预加载（用户还没滚到底就开始拉，体验更顺）
+  // - threshold: 0 不需要可见，仅进入 rootMargin 范围即触发
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      const e = entries[0];
+      if (!e || !e.isIntersecting) return;
+      // 不在拉中 + 还有更多 才调
+      if (pull.loadingMore || !pull.hasMore) return;
+      void pull.loadMore();
+    },
+    { rootMargin: '200px 0px', threshold: 0 },
+  );
+  if (loadMoreSentinel.value) {
+    loadMoreObserver.observe(loadMoreSentinel.value);
+  }
+});
+
+onUnmounted(() => {
+  // v0.6+：避免 component 卸载后 observer 继续触发回调（内存泄露）
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
   }
 });
 
@@ -1370,6 +1400,18 @@ function formatRelative(iso: string | undefined): string {
       </li>
     </ul>
 
+    <!-- v0.6+ 滚动到底自动加载哨兵 + 状态反馈 -->
+    <div
+      v-if="activeRepo && pull.filteredItems.length"
+      ref="loadMoreSentinel"
+      class="merges__load-more"
+      aria-live="polite"
+    >
+      <span v-if="pull.loadingMore" class="merges__load-more-loading">正在加载更多合并请求…</span>
+      <span v-else-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">已到全部合并请求的末尾</span>
+      <!-- hasMore=true && loadingMore=false：哨兵进入视口后自动调 loadMore() -->
+    </div>
+
     <!-- ============== 合并二次确认弹窗 ============== -->
     <ConfirmDialog
       :open="confirmMergeOpen"
@@ -1685,6 +1727,39 @@ function formatRelative(iso: string | undefined): string {
   & > li + li {
     margin-top: 2px;
   }
+}
+
+/* v0.6+ 滚动到底自动加载分页：哨兵 + 状态文案 */
+.merges__load-more {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-4) 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-height: 40px;        /* 保证有足够高度被 IntersectionObserver 检测到 */
+}
+.merges__load-more-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.merges__load-more-loading::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-divider);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: merges-spin 0.7s linear infinite;
+}
+.merges__load-more-end {
+  font-style: italic;
+  opacity: 0.7;
+}
+@keyframes merges-spin {
+  to { transform: rotate(360deg); }
 }
 
 .merge-item {

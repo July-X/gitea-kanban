@@ -46,6 +46,12 @@ export const usePullStore = defineStore('pull', () => {
   // ===== selection state =====
   const currentSelectedItem = ref<PullDto | null>(null);
 
+  // ===== 分页状态（v0.6+ 用户拍板滚动到底自动加载） =====
+  const currentPage = ref(0);          // 0 = 未加载过
+  const hasMore = ref(false);          // 后端返 hasMore
+  const loadingMore = ref(false);      // 防重入：loadMore() 在飞中禁止重复调
+  const PAGE_SIZE = 30;                // 与 StatusBar / v0.4.0 Gitea/GitHub 默认一致
+
   // ===== getters =====
   const total = computed(() => items.value.length);
 
@@ -93,9 +99,16 @@ export const usePullStore = defineStore('pull', () => {
   // ===== actions =====
 
   /**
-   * 加载某 project 的合并请求列表
-   * @param projectId uuid
-   * @param reset 强制刷新（默认 true；v1 不翻页）
+   * 加载某 project 的合并请求列表（v0.6+ 分页版）
+   *
+   * v0.6+：取消 v1.6 「一次拉 100」硬编码。改成分页 + 滚动到底自动加载。
+   *   - reset=true：清 items / 分页状态 / 从第 1 页重新拉（默认 true）
+   *   - reset=false：保留 items / 递增 currentPage
+   *
+   * 状态：
+   *   - loading=true 适用于 list(projectId)（初始 / refresh）
+   *   - loadingMore=true 适用于 loadMore()（增量）
+   *   - 两者互斥：loadMore 不会同时触发 GlobalLoading
    */
   async function list(projectId: string, reset = true): Promise<void> {
     loading.value = true;
@@ -104,23 +117,74 @@ export const usePullStore = defineStore('pull', () => {
     if (reset) {
       items.value = [];
       currentSelectedItem.value = null;
+      currentPage.value = 0;
+      hasMore.value = false;
     }
     try {
       // A3 拍板 pulls.list 支持 state 过滤；v1 拉全量，UI 层按 merged/closed 拆
       const resp = (await pullsList({
         projectId,
         state: 'all' as PullState | undefined, // gitea /pulls?state=closed 同时含 merged；'all' = 不过滤
-        limit: 100,
+        limit: PAGE_SIZE,
         page: 1,
       })) as ListPullsResp;
       items.value = resp.items;
       currentProjectId.value = projectId;
+      currentPage.value = 1;
+      hasMore.value = resp.hasMore;
     } catch (e) {
       error.value = normalizeError(e);
       throw e;
     } finally {
       loading.value = false;
       useGlobalLoadingStore().hide('pull');
+    }
+  }
+
+  /**
+   * 加载下一页（滚动到底自动调）
+   *
+   * v0.6+ 用户拍板：滚动到底自动加载下一页（与 vscode-git-graph 同体验）。
+   *   - loadingMore 防重入
+   *   - 拉取后追加 items（**不**覆盖）
+   *   - hasMore=false 则不调
+   *   - currentProjectId 必须有
+   *
+   * 设计：
+   *   - 追加同 index 的去重（后端可能返重复，跨页边缘常见）
+   *   - 失败时不动 items，仅 error.value = e（用户可滚动再试）
+   */
+  async function loadMore(): Promise<void> {
+    if (loadingMore.value) return;
+    if (!hasMore.value) return;
+    if (!currentProjectId.value) return;
+    loadingMore.value = true;
+    error.value = null;
+    try {
+      const nextPage = currentPage.value + 1;
+      const resp = (await pullsList({
+        projectId: currentProjectId.value,
+        state: 'all' as PullState | undefined,
+        limit: PAGE_SIZE,
+        page: nextPage,
+      })) as ListPullsResp;
+      // v0.6+ 增点：去重。GitHub /pulls 在状态转换边缘可能重复返同 index。
+      const seen = new Set(items.value.map((p) => p.index));
+      const fresh: PullDto[] = [];
+      for (const p of resp.items) {
+        if (!seen.has(p.index)) {
+          fresh.push(p);
+          seen.add(p.index);
+        }
+      }
+      items.value = items.value.concat(fresh);
+      currentPage.value = nextPage;
+      hasMore.value = resp.hasMore;
+    } catch (e) {
+      error.value = normalizeError(e);
+      // 失败保留旧 items，不抛出（避免静默丢列表）
+    } finally {
+      loadingMore.value = false;
     }
   }
 
@@ -240,8 +304,12 @@ export const usePullStore = defineStore('pull', () => {
     // state
     items,
     loading,
+    loadingMore,
     error,
     currentProjectId,
+    currentPage,
+    hasMore,
+    PAGE_SIZE,
     // filter
     filter,
     search,
@@ -254,6 +322,7 @@ export const usePullStore = defineStore('pull', () => {
     getByIndex,
     // actions
     list,
+    loadMore,
     refresh,
     setFilter,
     select,
