@@ -2482,6 +2482,308 @@ func (a *App) ListIssues(args ListIssuesArgs) ([]IssueDTO, error) {
 	return result, nil
 }
 
+// ===== 合并请求（Pull Request）Wails bindings =====
+//
+// v0.6+ 用户拍板：合并请求与 Git Graph 一样适配用户当前绑定账号的 git 服务器类型
+// （Gitea/GitHub），前端 store 拿 platform 中性 DTO，UI 不关心底层平台。
+//
+// 鉴权铁律（AGENTS §8.1）：
+//   - 前端只传 projectId（业务态概念）
+//   - Go 端反查 localStore.Projects → Accounts → secretStore 拿 token
+//   - token 绝不离开主进程内存，不写日志，不返前端
+//
+// 设计：
+//   - 每个 binding 共用 resolvePullContext helper 拿 project/account/token/adapter
+//   - PullDetailDTO 直接透传给前端（结构对齐 frontend/src/types/dto.ts PullDto）
+//   - 写操作（MergePull/ClosePull/Update*）走 slog.Info 记审计日志
+
+// PullDetailAppDTO 暴露给前端的合并请求完整详情 DTO
+//
+// 字段对齐 frontend/src/types/dto.ts PullDto；前端 store 直接复用
+type PullDetailAppDTO = platformAdapter.PullDetailDTO
+
+// PullListAppResp 列合并请求的响应（items + hasMore，给前端"加载更多"用）
+type PullListAppResp struct {
+	Items   []PullDetailAppDTO `json:"items"`
+	Total   int                `json:"total"`   // 当前 state 下 gitea 给的总数；GitHub 没有总数则 = len(items)
+	HasMore bool               `json:"hasMore"` // hasMore = len(items) == limit 且还有潜在下一页
+}
+
+// resolvePullContext 合并请求 Wails bindings 的共享 helper
+//
+// 返回：project + account + token + adapter，调用方拿到后直接调 adapter 方法。
+// 失败时返 IpcError，前端 ErrorFormatter 会结构化序列化。
+//
+// 注意：args 接受 projectId，**不**接受 hostUrl/token；AGENTS §8.1 铁律。
+func (a *App) resolvePullContext(args struct {
+	ProjectID string `json:"projectId"`
+}) (*store.RepoProject, *store.GiteaAccount, string, platformAdapter.PlatformAdapter, error) {
+	if strings.TrimSpace(args.ProjectID) == "" {
+		return nil, nil, "", nil, ipc.NewValidationFailed("projectId 不能为空", "")
+	}
+	project, account, err := a.findProjectAndAccount(args.ProjectID)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
+	if err != nil {
+		return nil, nil, "", nil, classifyKeychainError(err)
+	}
+	if token == "" {
+		return nil, nil, "", nil, ipc.NewInternal("token 为空（keychain 里有记录但 token 字符串为空）")
+	}
+	adapter := a.getAdapter(account.Platform)
+	if adapter == nil {
+		return nil, nil, "", nil, ipc.NewUnsupportedPlatform(account.Platform)
+	}
+	return project, account, token, adapter, nil
+}
+
+// ===== ListPulls =====
+
+// ListPullsArgs 列表合并请求参数
+type ListPullsArgs struct {
+	ProjectID string `json:"projectId"`
+	State     string `json:"state"` // "open" | "closed" | "all"
+	Head      string `json:"head,omitempty"`
+	Base      string `json:"base,omitempty"`
+	Page      int    `json:"page"`
+	Limit     int    `json:"limit"`
+}
+
+// ListPulls 列出某项目的合并请求（Gitea + GitHub 都支持，v0.6+ 拍板）
+//
+// 鉴权铁律（AGENTS §8.1）：前端只传 projectId。
+// 平台选择走 findProjectAndAccount → account.Platform → giteaAdapter / githubAdapter。
+func (a *App) ListPulls(args ListPullsArgs) (PullListAppResp, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullListAppResp{}, err
+	}
+
+	items, err := adapter.ListPulls(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, platformAdapter.ListPullsOpts{
+		State: args.State,
+		Head:  args.Head,
+		Base:  args.Base,
+		Page:  args.Page,
+		Limit: args.Limit,
+	})
+	if err != nil {
+		return PullListAppResp{}, err
+	}
+
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 30
+	}
+	hasMore := len(items) >= limit
+	if a.logger != nil {
+		a.logger.Info("ListPulls",
+			"projectId", args.ProjectID, "platform", account.Platform,
+			"state", args.State, "count", len(items), "hasMore", hasMore)
+	}
+	return PullListAppResp{
+		Items:   items,
+		Total:   len(items), // GitHub 不返总数；前端按 hasMore 触发加载更多
+		HasMore: hasMore,
+	}, nil
+}
+
+// ===== GetPull =====
+
+// GetPullArgs 获取单个合并请求参数
+type GetPullArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// GetPull 获取单个合并请求详情（Gitea + GitHub 都支持）
+func (a *App) GetPull(args GetPullArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.GetPull(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== MergePull =====
+
+// MergePullArgs 合并合并请求参数
+type MergePullArgs struct {
+	ProjectID         string `json:"projectId"`
+	Index             int    `json:"index"`
+	Method            string `json:"method"` // "merge" | "rebase" | "rebase-merge" | "squash"
+	DeleteBranchAfter bool   `json:"deleteBranchAfter"`
+	CommitMessage     string `json:"commitMessage,omitempty"`
+}
+
+// MergePull 合并合并请求（**危险操作**，UI 层必须二次确认）
+//
+// 合并方式：
+//   - "merge"        普通合并（保留所有提交历史）
+//   - "rebase"       变基后快进（重写历史，单一线性）
+//   - "rebase-merge" 变基后 merge commit（仅 Gitea 支持）
+//   - "squash"       压缩为单提交
+//
+// method="squash" 时 CommitMessage 建议非空（部分平台要求）。
+// 合并到主线分支（如 main）时 UI 层额外二次确认。
+func (a *App) MergePull(args MergePullArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	if a.logger != nil {
+		// 审计日志：合并动作记 method + deleteBranchAfter，方便事后追溯
+		a.logger.Info("MergePull",
+			"projectId", args.ProjectID, "platform", account.Platform,
+			"index", args.Index, "method", args.Method, "deleteBranchAfter", args.DeleteBranchAfter)
+	}
+
+	d, err := adapter.MergePull(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, platformAdapter.MergePullOpts{
+		Method:            args.Method,
+		DeleteBranchAfter: args.DeleteBranchAfter,
+		CommitMessage:     args.CommitMessage,
+	})
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== ClosePull =====
+
+// ClosePullArgs 关闭合并请求参数
+type ClosePullArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ClosePull 关闭合并请求（不合并，直接关闭）—— UI 层应二次确认
+//
+// 对应 gitea PATCH /pulls/{index} {state: 'closed'}；GitHub 等价。
+// 关闭后合并请求状态变为 closed，不可再合并（除非 reopen，本期不实现 reopen）。
+func (a *App) ClosePull(args ClosePullArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	if a.logger != nil {
+		a.logger.Info("ClosePull", "projectId", args.ProjectID, "platform", account.Platform, "index", args.Index)
+	}
+
+	d, err := adapter.ClosePull(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== UpdatePullLabels =====
+
+// UpdatePullLabelsArgs 替换合并请求标签参数
+type UpdatePullLabelsArgs struct {
+	ProjectID  string   `json:"projectId"`
+	Index      int      `json:"index"`
+	LabelNames []string `json:"labels"` // 按 label 名替换（Gitea 自动解析为 id；GitHub 直接传 name）
+}
+
+// UpdatePullLabels 替换合并请求所有标签（替换语义）
+//
+// Gitea: PUT /repos/{owner}/{repo}/pulls/{index}/labels
+// GitHub: PUT /repos/{owner}/{repo}/issues/{index}/labels
+func (a *App) UpdatePullLabels(args UpdatePullLabelsArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullLabels(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.LabelNames)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== UpdatePullAssignee =====
+
+// UpdatePullAssigneeArgs 替换合并请求指派人参数
+type UpdatePullAssigneeArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	// Assignee 空字符串 = 清空；非空 = 设置为该 username
+	Assignee string `json:"assignee"`
+}
+
+// UpdatePullAssignee 替换合并请求指派人（空 = 清空）
+//
+// 本期简化为单 assignee；多 assignees 后续迭代再加。
+func (a *App) UpdatePullAssignee(args UpdatePullAssigneeArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullAssignee(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Assignee)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== UpdatePullReviewers =====
+
+// UpdatePullReviewersArgs 替换合并请求审查者参数
+type UpdatePullReviewersArgs struct {
+	ProjectID string   `json:"projectId"`
+	Index     int      `json:"index"`
+	Reviewers []string `json:"reviewers"` // 空切片 = 清空
+}
+
+// UpdatePullReviewers 替换合并请求审查者（空 = 清空）
+//
+// Gitea: POST/DELETE /pulls/{index}/requested_reviewers
+// GitHub: POST/DELETE /pulls/{index}/requested_reviewers（同名端点，语义一致）
+func (a *App) UpdatePullReviewers(args UpdatePullReviewersArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullReviewers(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Reviewers)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
 // ColumnDTO 看板列（暴露给前端，与 store.BoardColumn 对齐）
 type ColumnDTO struct {
 	ID        string `json:"id"`

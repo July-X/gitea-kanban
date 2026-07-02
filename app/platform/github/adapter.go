@@ -1,11 +1,13 @@
 // Package github 实现 PlatformAdapter 的 GitHub 版本。
 //
-// 支持范围（v2.x）：
+// 支持范围（v2.x，v0.6+ 拓展）：
 //   - VerifyToken：GET /user，Authorization: Bearer <token>
 //   - ListRepos：GET /user/repos，列当前登录用户可访问的仓库（含 collaborator）
 //   - CloneRepo：gh repo clone + partial clone（避免超大仓库下载 blob）
 //   - LogGraph：vscode-git-graph 同款 git log 输入 + 自研 VSCode lane 布局
-//   - 其余方法返回 ErrNotSupported
+//   - ListPulls / GetPull / MergePull / ClosePull / UpdatePullLabels / UpdatePullAssignee / UpdatePullReviewers
+//     v0.6+ 全量实现，对齐 Gitea adapter 业务语义
+//   - ListIssues / ListLabels / ListMembers 仍返回 ErrNotSupported
 //
 // GitHub PAT scope 要求：
 //   - ListRepos：classic PAT 勾选 repo（public_repo 不够拉 private 仓库）
@@ -338,15 +340,388 @@ func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts pla
 	return graphResultToDTO(graphResult), nil
 }
 
+// ===== Pull Request 完整字段映射（v0.6+） =====
+
+// githubPullRaw GitHub /pulls 列表 + /pulls/{index} 详情 共享的原始结构
+//
+// GitHub REST API: https://docs.github.com/en/rest/pulls/pulls
+// Gitea 与 GitHub 的 PR 字段大致一致，差异：
+//   - GitHub head.sha 在 head 字段内（与 Gitea 相同），base 同理
+//   - GitHub user 是嵌套对象（含 login / avatar_url）
+//   - GitHub requested_reviewers 直接是嵌套数组
+//   - GitHub labels 走 /issues/{index}/labels（PR 也是 issue 的一种），结构一致
+type githubPullRaw struct {
+	Number             int                  `json:"number"`
+	Title              string               `json:"title"`
+	State              string               `json:"state"`
+	Draft              bool                 `json:"draft"`
+	Merged             bool                 `json:"merged"`
+	Head               githubPullRefRaw     `json:"head"`
+	Base               githubPullRefRaw     `json:"base"`
+	User               *githubUserRaw       `json:"user"`
+	Assignees          []githubUserRaw      `json:"assignees"`
+	RequestedReviewers []githubUserRaw      `json:"requested_reviewers"`
+	Labels             []githubPullLabelRaw `json:"labels"`
+	Mergeable          *bool                `json:"mergeable"`
+	Comments           int                  `json:"comments"`
+	Body               string               `json:"body"`
+	MergedBy           *githubUserRaw       `json:"merged_by"`
+	CreatedAt          string               `json:"created_at"`
+	UpdatedAt          string               `json:"updated_at"`
+}
+
+type githubPullRefRaw struct {
+	Ref string `json:"ref"`
+	SHA string `json:"sha"`
+}
+
+type githubUserRaw struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+type githubPullLabelRaw struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// githubPullToDetail 把 GitHub 原始响应映射到平台中性 PullDetailDTO
+//
+// GitHub Mergeable 是 *bool（可空），HasConflicts 取反；
+// Gitea Mergeable 是 bool（不可空）。两侧统一为 PullDetailDTO 的非指针字段，
+// 不可合并时取 !Mergeable 处理（与 Gitea 行为一致）。
+func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
+	mergeable := false
+	if p.Mergeable != nil {
+		mergeable = *p.Mergeable
+	}
+	out := platform.PullDetailDTO{
+		Index:         p.Number,
+		Number:        p.Number,
+		Title:         p.Title,
+		State:         p.State,
+		Draft:         p.Draft,
+		Merged:        p.Merged,
+		Head:          platform.PullRefDTO{Ref: p.Head.Ref, SHA: p.Head.SHA},
+		Base:          platform.PullRefDTO{Ref: p.Base.Ref, SHA: p.Base.SHA},
+		Mergeable:     mergeable,
+		HasConflicts:  !mergeable,
+		Body:          p.Body,
+		CommentsCount: p.Comments,
+		CreatedAt:     p.CreatedAt,
+		UpdatedAt:     p.UpdatedAt,
+	}
+	if p.User != nil {
+		out.Author = &platform.PullUserDTO{Username: p.User.Login, AvatarURL: p.User.AvatarURL}
+	}
+	if p.MergedBy != nil {
+		out.MergedBy = &platform.PullUserDTO{Username: p.MergedBy.Login, AvatarURL: p.MergedBy.AvatarURL}
+	}
+	if len(p.Assignees) > 0 {
+		out.Assignees = make([]platform.PullUserDTO, 0, len(p.Assignees))
+		for _, u := range p.Assignees {
+			out.Assignees = append(out.Assignees, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+		}
+	}
+	if len(p.RequestedReviewers) > 0 {
+		out.Reviewers = make([]platform.PullUserDTO, 0, len(p.RequestedReviewers))
+		for _, u := range p.RequestedReviewers {
+			out.Reviewers = append(out.Reviewers, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+		}
+	}
+	if len(p.Labels) > 0 {
+		out.Labels = make([]platform.PullLabelDTO, 0, len(p.Labels))
+		for _, l := range p.Labels {
+			out.Labels = append(out.Labels, platform.PullLabelDTO{ID: l.ID, Name: l.Name, Color: l.Color})
+		}
+	}
+	return out
+}
+
+// encodeJSONBody 把任意 struct 序列化成 io.Reader，给 doRequest 当 body 用。
+//
+// GitHub adapter 现有方法都是 GET，v0.6+ PR 写入接口需要 POST/PUT/PATCH/DELETE。
+// 直接复用 doRequest 但需要 io.Reader 参数，故加这个 helper。
+func encodeJSONBody(v any) (io.Reader, error) {
+	if v == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 JSON body 失败: %w", err)
+	}
+	return strings.NewReader(string(b)), nil
+}
+
+// ===== 以下首期不支持 =====
+
+// ListPulls 列出仓库合并请求（GET /repos/{owner}/{repo}/pulls）
+//
+// GitHub PR 字段对齐 platform.PullDetailDTO（owner/repo 走 path 参数）。
+// state 可取 "open" | "closed" | "all"（与 Gitea 一致）。
+// GitHub 把 merged PR 视为 state=closed + merged=true；通过 GraphQL 区分成本太高，列表阶段
+// 只把 state/draft 等基础字段对齐，详细 merged 字段前端按需二次 GET。
+func (a *GitHubAdapter) ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts platform.ListPullsOpts) ([]platform.PullDetailDTO, error) {
+	params := url.Values{}
+	state := opts.State
+	if state == "" {
+		state = "open"
+	}
+	params.Set("state", state)
+	if opts.Limit > 0 {
+		params.Set("per_page", fmt.Sprintf("%d", opts.Limit))
+	}
+	if opts.Page > 0 {
+		params.Set("page", fmt.Sprintf("%d", opts.Page))
+	}
+	if opts.Base != "" {
+		params.Set("base", opts.Base)
+	}
+	// opts.Head 在 GitHub 是 branch 名，不一定与 Gitea head SHA 语义一致；不传避免歧义。
+
+	var raw []githubPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls?%s", owner, repo, params.Encode())
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+
+	pulls := make([]platform.PullDetailDTO, 0, len(raw))
+	for i := range raw {
+		pulls = append(pulls, githubPullToDetail(raw[i]))
+	}
+	return pulls, nil
+}
+
+// GetPull 获取单个合并请求详情（GET /repos/{owner}/{repo}/pulls/{index}）
+func (a *GitHubAdapter) GetPull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*platform.PullDetailDTO, error) {
+	var raw githubPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	d := githubPullToDetail(raw)
+	return &d, nil
+}
+
+// MergePull 合并合并请求（PUT /repos/{owner}/{repo}/pulls/{index}/merge）
+//
+// GitHub 端点 body：{commit_title?, commit_message?, sha?, merge_method: "merge"|"squash"|"rebase"}
+// 与 Gitea 区别：GitHub 不支持 "rebase-merge"（Gitea 专属），调用方需把 "rebase-merge" 映射成 "rebase"。
+// 合并成功后返回的响应里有 sha 字段，直接回填到 PullDetailDTO.MergeCommitSHA（不再二次 GET）。
+func (a *GitHubAdapter) MergePull(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.MergePullOpts) (*platform.PullDetailDTO, error) {
+	method := mapMergeMethodToGitHub(opts.Method)
+	body := map[string]any{"merge_method": method}
+	if opts.CommitMessage != "" {
+		body["commit_message"] = opts.CommitMessage
+	}
+	// deleteBranchAfter 在 GitHub REST API 没有这个字段，合并后由调用方单独调 DELETE /branches 实现
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		SHA    string `json:"sha"`
+		Merged bool   `json:"merged"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PUT", path, reader, &resp); err != nil {
+		return nil, err
+	}
+	if opts.DeleteBranchAfter && resp.Merged {
+		// GitHub 没有 merge 时删除 head 分支的语义；合并成功后单独 DELETE /git/refs/heads/<head.ref>
+		detail, gerr := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+		if gerr == nil && detail.Head.Ref != "" {
+			delRef := fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, detail.Head.Ref)
+			_ = a.doRequest(ctx, hostURL, token, "DELETE", delRef, nil, nil)
+		}
+	}
+	d, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		return nil, err
+	}
+	d.MergeCommitSHA = resp.SHA
+	return d, nil
+}
+
+// ClosePull 关闭合并请求（PATCH /repos/{owner}/{repo}/pulls/{index} state=closed）
+func (a *GitHubAdapter) ClosePull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*platform.PullDetailDTO, error) {
+	body := map[string]any{"state": "closed"}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	d := githubPullToDetail(raw)
+	return &d, nil
+}
+
+// UpdatePullLabels 替换合并请求标签（PUT /repos/{owner}/{repo}/issues/{index}/labels）
+//
+// GitHub 端点有趣：PR 的 labels 走 /issues/{index}/labels（PR 也是 issue 的一种）。
+// body: {labels: ["bug", "feature"]}（按 name 字符串数组）
+func (a *GitHubAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*platform.PullDetailDTO, error) {
+	body := map[string]any{"labels": labelNames}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	// PUT /repos/{owner}/{repo}/issues/{index}/labels 返回新的 issue 包含 labels
+	var raw githubPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/labels", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PUT", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	// PUT /issues/{index}/labels 返回的是 issue 视图，labels 已包含；head/base 等其他字段可能为空
+	// 为保证返回 PullDetailDTO 字段完整，再 GET 一次 PR 详情
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
+// UpdatePullAssignee 替换合并请求指派人（POST /repos/{owner}/{repo}/issues/{index}/assignees）
+//
+// GitHub 端点接受 JSON 对象 {"assignees": ["alice"]} 或 {"assignees": ["alice", "bob"]}（追加语义）。
+// 为与前端契约（"替换所有"）一致：先 GET 现状，diff 后做 DELETE + POST。
+// 同样 PR 走 /issues/{index}/assignees 端点。
+func (a *GitHubAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignee string) (*platform.PullDetailDTO, error) {
+	cur, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		return nil, err
+	}
+	existing := make([]string, 0, len(cur.Assignees))
+	for _, u := range cur.Assignees {
+		existing = append(existing, u.Username)
+	}
+	toRemove := []string{}
+	for _, u := range existing {
+		if u != assignee {
+			toRemove = append(toRemove, u)
+		}
+	}
+	toAdd := []string{}
+	if assignee != "" {
+		found := false
+		for _, u := range existing {
+			if u == assignee {
+				found = true
+				break
+			}
+		}
+		if !found {
+			toAdd = append(toAdd, assignee)
+		}
+	}
+	if len(toRemove) > 0 {
+		body := map[string]any{"assignees": toRemove}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		path := fmt.Sprintf("/repos/%s/%s/issues/%d/assignees", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "DELETE", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	if len(toAdd) > 0 {
+		body := map[string]any{"assignees": toAdd}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		path := fmt.Sprintf("/repos/%s/%s/issues/%d/assignees", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
+// UpdatePullReviewers 替换合并请求审查者（POST /repos/{owner}/{repo}/pulls/{index}/requested_reviewers）
+//
+// GitHub 端点 body：{reviewers: ["alice"], team_reviewers: ["team1"]}（追加语义）。
+// 同样：先 GET 现状，diff 后做 DELETE + POST。
+func (a *GitHubAdapter) UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*platform.PullDetailDTO, error) {
+	cur, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		return nil, err
+	}
+	desired := make(map[string]struct{}, len(reviewers))
+	for _, r := range reviewers {
+		desired[r] = struct{}{}
+	}
+	existing := make([]string, 0, len(cur.Reviewers))
+	for _, u := range cur.Reviewers {
+		existing = append(existing, u.Username)
+	}
+	toRemove := []string{}
+	for _, u := range existing {
+		if _, ok := desired[u]; !ok {
+			toRemove = append(toRemove, u)
+		}
+	}
+	toAdd := []string{}
+	for r := range desired {
+		found := false
+		for _, u := range existing {
+			if u == r {
+				found = true
+				break
+			}
+		}
+		if !found {
+			toAdd = append(toAdd, r)
+		}
+	}
+	if len(toRemove) > 0 {
+		body := map[string]any{"reviewers": toRemove}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		// DELETE /repos/{owner}/{repo}/pulls/{index}/requested_reviewers
+		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "DELETE", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	if len(toAdd) > 0 {
+		body := map[string]any{"reviewers": toAdd}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		// POST /repos/{owner}/{repo}/pulls/{index}/requested_reviewers
+		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
+// mapMergeMethodToGitHub 把前端 MergeMethod 转换为 GitHub merge_method
+//
+// 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'
+// GitHub: 'merge' | 'rebase' | (无 'rebase-merge'，映射为 'rebase') | 'squash'
+func mapMergeMethodToGitHub(method string) string {
+	switch method {
+	case "rebase-merge":
+		// GitHub 没区分 rebase / rebase-merge，统一映射为 rebase
+		return "rebase"
+	case "", "merge":
+		return "merge"
+	default:
+		return method
+	}
+}
+
 // ===== 以下首期不支持 =====
 
 // ListIssues 首期不支持
 func (a *GitHubAdapter) ListIssues(ctx context.Context, hostURL, username, token, owner, repo string, opts platform.ListIssuesOpts) ([]platform.IssueDTO, error) {
-	return nil, platform.ErrNotSupported
-}
-
-// ListPulls 首期不支持
-func (a *GitHubAdapter) ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts platform.ListPullsOpts) ([]platform.PullDTO, error) {
 	return nil, platform.ErrNotSupported
 }
 

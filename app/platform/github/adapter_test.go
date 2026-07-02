@@ -89,11 +89,8 @@ func TestGitHubAdapter_NotSupported(t *testing.T) {
 		t.Errorf("ListIssues error = %v, want ErrNotSupported", err)
 	}
 
-	// ListPulls
-	_, err = adapter.ListPulls(ctx, "", "", "", "", "", platform.ListPullsOpts{})
-	if err != platform.ErrNotSupported {
-		t.Errorf("ListPulls error = %v, want ErrNotSupported", err)
-	}
+	// ListPulls v0.6+ 已实现（GET /repos/{owner}/{repo}/pulls），不在 NotSupported 范围
+	// 真实测试见 TestGitHubAdapter_ListPulls_Basic
 
 	// ListLabels
 	_, err = adapter.ListLabels(ctx, "", "", "", "", "")
@@ -739,5 +736,305 @@ func TestGraphResultToDTO_PropagatesIsCommitted(t *testing.T) {
 	}
 	if !dto.Branches[0].Lines[1].IsCommitted {
 		t.Errorf("HEAD→parent 边 IsCommitted 应该透传为 true，实际 false")
+	}
+}
+
+// ===== Pull Request 测试（v0.6+ 完整功能）=====
+//
+// 覆盖：ListPulls / GetPull / MergePull / ClosePull / UpdatePullLabels /
+//       mapMergeMethodToGitHub
+//
+// 设计原则（与 ListRepos 测试一致）：
+//   - 用 httptest.NewServer 模拟 GitHub API
+//   - 验证：路径、查询参数、鉴权头、HTTP method、请求 body、响应字段映射
+
+// TestGitHubAdapter_ListPulls_Basic 验证路径 + state + 字段映射
+func TestGitHubAdapter_ListPulls_Basic(t *testing.T) {
+	var capturedPath, capturedQuery, capturedMethod string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedQuery = r.URL.RawQuery
+		if auth := r.Header.Get("Authorization"); auth != "Bearer ghp-test-token" {
+			t.Errorf("Authorization = %q, want 'Bearer ghp-test-token'", auth)
+		}
+
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"number":     42,
+				"title":      "feat: add dolphin loader",
+				"state":      "open",
+				"draft":      false,
+				"merged":     false,
+				"head":       map[string]string{"ref": "feature/dolphin", "sha": "abc1234"},
+				"base":       map[string]string{"ref": "main", "sha": "def5678"},
+				"user":       map[string]string{"login": "alice", "avatar_url": "https://github.com/alice.png"},
+				"mergeable":  true,
+				"comments":   3,
+				"created_at": "2024-06-01T00:00:00Z",
+				"updated_at": "2024-06-02T00:00:00Z",
+				"body":       "adds the spinning dolphin loader",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	pulls, err := adapter.ListPulls(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", platform.ListPullsOpts{
+		State: "open",
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListPulls failed: %v", err)
+	}
+
+	if capturedMethod != "GET" {
+		t.Errorf("method = %q, want GET", capturedMethod)
+	}
+	if capturedPath != "/repos/alice/dolphin/pulls" {
+		t.Errorf("path = %q, want /repos/alice/dolphin/pulls", capturedPath)
+	}
+	if !strings.Contains(capturedQuery, "state=open") {
+		t.Errorf("query = %q, want contains state=open", capturedQuery)
+	}
+
+	if len(pulls) != 1 {
+		t.Fatalf("len(pulls) = %d, want 1", len(pulls))
+	}
+	p := pulls[0]
+	if p.Number != 42 || p.Index != 42 {
+		t.Errorf("Number/Index = %d/%d, want 42/42", p.Number, p.Index)
+	}
+	if p.Title != "feat: add dolphin loader" {
+		t.Errorf("Title = %q", p.Title)
+	}
+	if p.Head.Ref != "feature/dolphin" || p.Head.SHA != "abc1234" {
+		t.Errorf("Head = %+v", p.Head)
+	}
+	if p.Base.Ref != "main" {
+		t.Errorf("Base.Ref = %q", p.Base.Ref)
+	}
+	if p.Author == nil || p.Author.Username != "alice" {
+		t.Errorf("Author = %+v", p.Author)
+	}
+	if !p.Mergeable || p.HasConflicts {
+		t.Errorf("Mergeable/HasConflicts = %v/%v, want true/false", p.Mergeable, p.HasConflicts)
+	}
+	if p.CommentsCount != 3 {
+		t.Errorf("CommentsCount = %d, want 3", p.CommentsCount)
+	}
+	if p.Body != "adds the spinning dolphin loader" {
+		t.Errorf("Body = %q", p.Body)
+	}
+}
+
+// TestGitHubAdapter_GetPull_Basic 验证单 PR 拉取
+func TestGitHubAdapter_GetPull_Basic(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/alice/dolphin/pulls/42" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number":    42,
+			"title":     "feat: dolphin",
+			"state":     "open",
+			"draft":     true,
+			"head":      map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+			"base":      map[string]string{"ref": "main", "sha": "def"},
+			"user":      map[string]string{"login": "alice"},
+			"mergeable": false,
+			"comments":  0,
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	p, err := adapter.GetPull(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if p.Number != 42 || !p.Draft {
+		t.Errorf("Number/Draft = %d/%v", p.Number, p.Draft)
+	}
+	if p.Mergeable || !p.HasConflicts {
+		t.Errorf("Mergeable/HasConflicts = %v/%v, want false/true", p.Mergeable, p.HasConflicts)
+	}
+}
+
+// TestGitHubAdapter_MergePull_Basic 验证 PUT /pulls/{index}/merge + merge_method
+func TestGitHubAdapter_MergePull_Basic(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/merge") && r.Method == "PUT":
+			capturedMethod = r.Method
+			capturedPath = r.URL.Path
+			if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			// 合并成功后返回 sha + merged
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `{"sha":"deadbeef00000000","merged":true,"message":"PR merged"}`)
+		case strings.HasSuffix(r.URL.Path, "/pulls/42") && r.Method == "GET":
+			// 后续 GetPull 拉详情
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"number": 42,
+				"title":  "feat: dolphin",
+				"state":  "closed",
+				"merged": true,
+				"head":   map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+				"base":   map[string]string{"ref": "main", "sha": "def"},
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	d, err := adapter.MergePull(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.MergePullOpts{
+		Method:        "rebase-merge", // 应被映射成 "rebase"
+		CommitMessage: "manual merge",
+	})
+	if err != nil {
+		t.Fatalf("MergePull failed: %v", err)
+	}
+	if capturedMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", capturedMethod)
+	}
+	if capturedPath != "/repos/alice/dolphin/pulls/42/merge" {
+		t.Errorf("path = %q", capturedPath)
+	}
+	if capturedBody["merge_method"] != "rebase" {
+		t.Errorf("merge_method = %v, want rebase (rebase-merge 被映射)", capturedBody["merge_method"])
+	}
+	if capturedBody["commit_message"] != "manual merge" {
+		t.Errorf("commit_message = %v", capturedBody["commit_message"])
+	}
+	if !d.Merged {
+		t.Errorf("Merged = false, want true")
+	}
+	if d.MergeCommitSHA != "deadbeef00000000" {
+		t.Errorf("MergeCommitSHA = %q, want deadbeef00000000", d.MergeCommitSHA)
+	}
+}
+
+// TestGitHubAdapter_ClosePull_Basic 验证 PATCH /pulls/{index} state=closed
+func TestGitHubAdapter_ClosePull_Basic(t *testing.T) {
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("method = %q, want PATCH", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number": 42,
+			"state":  "closed",
+			"merged": false,
+			"head":   map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+			"base":   map[string]string{"ref": "main", "sha": "def"},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	d, err := adapter.ClosePull(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ClosePull failed: %v", err)
+	}
+	if capturedBody["state"] != "closed" {
+		t.Errorf("state = %v, want closed", capturedBody["state"])
+	}
+	if d.State != "closed" {
+		t.Errorf("returned State = %q, want closed", d.State)
+	}
+}
+
+// TestGitHubAdapter_UpdatePullLabels_Basic 验证 PUT /issues/{index}/labels
+func TestGitHubAdapter_UpdatePullLabels_Basic(t *testing.T) {
+	var capturedPath, capturedMethod string
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/alice/dolphin/issues/42/labels" && r.Method == "PUT" {
+			capturedPath = r.URL.Path
+			capturedMethod = r.Method
+			if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			// 模拟 GitHub 返回的 PUT 响应（issue 视图）
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"number": 42,
+				"head":   map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+				"base":   map[string]string{"ref": "main", "sha": "def"},
+				"labels": []map[string]interface{}{
+					{"id": 1, "name": "bug", "color": "f29513"},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/repos/alice/dolphin/pulls/42" && r.Method == "GET" {
+			// 后续 GetPull 拉完整 PR 详情
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"number": 42,
+				"title":  "feat: dolphin",
+				"state":  "open",
+				"head":   map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+				"base":   map[string]string{"ref": "main", "sha": "def"},
+				"labels": []map[string]interface{}{
+					{"id": 1, "name": "bug", "color": "f29513"},
+				},
+			})
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	d, err := adapter.UpdatePullLabels(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, []string{"bug"})
+	if err != nil {
+		t.Fatalf("UpdatePullLabels failed: %v", err)
+	}
+	if capturedMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", capturedMethod)
+	}
+	if capturedPath != "/repos/alice/dolphin/issues/42/labels" {
+		t.Errorf("path = %q", capturedPath)
+	}
+	labels, ok := capturedBody["labels"].([]interface{})
+	if !ok || len(labels) != 1 || labels[0] != "bug" {
+		t.Errorf("labels = %+v, want [bug]", capturedBody["labels"])
+	}
+	if len(d.Labels) != 1 || d.Labels[0].Name != "bug" {
+		t.Errorf("returned Labels = %+v", d.Labels)
+	}
+}
+
+// TestMapMergeMethodToGitHub 验证前端 MergeMethod → GitHub merge_method 映射
+func TestMapMergeMethodToGitHub(t *testing.T) {
+	cases := []struct {
+		input, want string
+	}{
+		{"merge", "merge"},
+		{"rebase", "rebase"},
+		{"rebase-merge", "rebase"}, // GitHub 没区分，统一映射为 rebase
+		{"squash", "squash"},
+		{"", "merge"},              // 空 = 默认 merge
+		{"unknown", "unknown"},     // 未知透传（让 GitHub API 返 422 给前端友好提示）
+	}
+	for _, c := range cases {
+		got := mapMergeMethodToGitHub(c.input)
+		if got != c.want {
+			t.Errorf("mapMergeMethodToGitHub(%q) = %q, want %q", c.input, got, c.want)
+		}
 	}
 }

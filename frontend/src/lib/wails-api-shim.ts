@@ -195,6 +195,32 @@ type WailsApp = {
   }>;
   StripGitBinaryQuarantine?: (args: { path: string }) => Promise<void>;
   OpenGitBinaryPicker?: () => Promise<string>;
+
+  // ===== v0.6+ Pull Request 合并请求（Wails bindings）=====
+  //
+  // 平台选择由 Go 端按 projectId → account.Platform 自动派发，
+  // 前端不需要区分 Gitea / GitHub，统一调这些 binding。
+  // DTO 字段对齐 frontend/src/types/dto.ts PullDto。
+  ListPulls?: (args: {
+    projectId: string;
+    state?: 'open' | 'closed' | 'all';
+    head?: string;
+    base?: string;
+    page?: number;
+    limit?: number;
+  }) => Promise<{ items: unknown[]; total: number; hasMore: boolean }>;
+  GetPull?: (args: { projectId: string; index: number }) => Promise<unknown>;
+  MergePull?: (args: {
+    projectId: string;
+    index: number;
+    method: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
+    deleteBranchAfter?: boolean;
+    commitMessage?: string;
+  }) => Promise<unknown>;
+  ClosePull?: (args: { projectId: string; index: number }) => Promise<unknown>;
+  UpdatePullLabels?: (args: { projectId: string; index: number; labels: string[] }) => Promise<unknown>;
+  UpdatePullAssignee?: (args: { projectId: string; index: number; assignee: string }) => Promise<unknown>;
+  UpdatePullReviewers?: (args: { projectId: string; index: number; reviewers: string[] }) => Promise<unknown>;
 };
 
 /** 拿到 window.go.main.App（Wails 在启动期注入） */
@@ -579,14 +605,156 @@ const apiShim = {
   },
 
   pulls: {
-    list: (_args: unknown): Promise<unknown> => stubEmpty({ items: [], hasMore: false }),
-    get: (_args: unknown): Promise<unknown> => notImplemented('pulls', 'get'),
-    merge: (_args: unknown): Promise<unknown> => notImplemented('pulls', 'merge'),
-    close: (_args: unknown): Promise<unknown> => notImplemented('pulls', 'close'),
-    updateLabels: (_args: unknown): Promise<unknown> => notImplemented('pulls', 'updateLabels'),
-    updateAssignee: (_args: unknown): Promise<unknown> => notImplemented('pulls', 'updateAssignee'),
-    updateReviewers: (_args: unknown): Promise<unknown> =>
-      notImplemented('pulls', 'updateReviewers'),
+    /**
+     * pulls.list —— v0.6+ 用户拍板：合并请求与 Git Graph 一样适配账号的 git 服务器类型
+     *
+     * 转发到 window.go.main.App.ListPulls({projectId, state, head, base, page, limit})
+     * Go 端按 projectId → account.Platform 自动派发 Gitea/GitHub adapter
+     */
+    list: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as {
+        projectId: string;
+        state?: 'open' | 'closed' | 'all';
+        head?: string;
+        base?: string;
+        page?: number;
+        limit?: number;
+      };
+      return forwardToWails(
+        () => stubEmpty({ items: [], total: 0, hasMore: false }),
+        (app) => {
+          if (!app.ListPulls) {
+            return stubEmpty({ items: [], total: 0, hasMore: false });
+          }
+          return app.ListPulls({
+            projectId: a.projectId,
+            state: a.state,
+            head: a.head,
+            base: a.base,
+            page: a.page,
+            limit: a.limit,
+          });
+        },
+      );
+    },
+    /**
+     * pulls.get —— 单 PR 详情（labels / assignees / reviewers / comments 完整字段）
+     */
+    get: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number };
+      return forwardToWails(
+        () => notImplemented('pulls', 'get'),
+        (app) => {
+          if (!app.GetPull) {
+            return notImplemented('pulls', 'get');
+          }
+          return app.GetPull({ projectId: a.projectId, index: a.index });
+        },
+      );
+    },
+    /**
+     * pulls.merge —— **危险操作**，UI 层必须二次确认
+     *
+     * 合并方式与 frontend MergeMethod 对齐：
+     *   - merge / rebase / rebase-merge / squash
+     * GitHub 不支持 rebase-merge（Go 端 mapMergeMethodToGitHub 自动映射为 rebase）
+     */
+    merge: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as {
+        projectId: string;
+        index: number;
+        method: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
+        deleteBranchAfter?: boolean;
+        commitMessage?: string;
+      };
+      return forwardToWails(
+        () => notImplemented('pulls', 'merge'),
+        (app) => {
+          if (!app.MergePull) {
+            return notImplemented('pulls', 'merge');
+          }
+          return app.MergePull({
+            projectId: a.projectId,
+            index: a.index,
+            method: a.method,
+            deleteBranchAfter: a.deleteBranchAfter,
+            commitMessage: a.commitMessage,
+          });
+        },
+      );
+    },
+    /**
+     * pulls.close —— 关闭（不合并），UI 层应二次确认
+     */
+    close: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number };
+      return forwardToWails(
+        () => notImplemented('pulls', 'close'),
+        (app) => {
+          if (!app.ClosePull) {
+            return notImplemented('pulls', 'close');
+          }
+          return app.ClosePull({ projectId: a.projectId, index: a.index });
+        },
+      );
+    },
+    /**
+     * pulls.updateLabels —— 替换 PR 标签（按 label name 数组）
+     */
+    updateLabels: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; labels: string[] };
+      return forwardToWails(
+        () => notImplemented('pulls', 'updateLabels'),
+        (app) => {
+          if (!app.UpdatePullLabels) {
+            return notImplemented('pulls', 'updateLabels');
+          }
+          return app.UpdatePullLabels({
+            projectId: a.projectId,
+            index: a.index,
+            labels: a.labels,
+          });
+        },
+      );
+    },
+    /**
+     * pulls.updateAssignee —— 替换 PR 指派人（空 = 清空）
+     */
+    updateAssignee: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; assignee: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'updateAssignee'),
+        (app) => {
+          if (!app.UpdatePullAssignee) {
+            return notImplemented('pulls', 'updateAssignee');
+          }
+          return app.UpdatePullAssignee({
+            projectId: a.projectId,
+            index: a.index,
+            assignee: a.assignee,
+          });
+        },
+      );
+    },
+    /**
+     * pulls.updateReviewers —— 替换 PR 审查者（空数组 = 清空）
+     */
+    updateReviewers: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; reviewers: string[] };
+      return forwardToWails(
+        () => notImplemented('pulls', 'updateReviewers'),
+        (app) => {
+          if (!app.UpdatePullReviewers) {
+            return notImplemented('pulls', 'updateReviewers');
+          }
+          return app.UpdatePullReviewers({
+            projectId: a.projectId,
+            index: a.index,
+            reviewers: a.reviewers,
+          });
+        },
+      );
+    },
   },
 
   board: {

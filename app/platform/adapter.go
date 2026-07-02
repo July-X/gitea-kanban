@@ -106,7 +106,25 @@ type PlatformAdapter interface {
 	ListIssues(ctx context.Context, hostURL, username, token, owner, repo string, opts ListIssuesOpts) ([]IssueDTO, error)
 
 	// ListPulls 列出仓库合并请求
-	ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts ListPullsOpts) ([]PullDTO, error)
+	ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts ListPullsOpts) ([]PullDetailDTO, error)
+
+	// GetPull 获取单个合并请求详情
+	GetPull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*PullDetailDTO, error)
+
+	// MergePull 合并合并请求（按指定 merge method）
+	MergePull(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts MergePullOpts) (*PullDetailDTO, error)
+
+	// ClosePull 关闭合并请求（不合并）
+	ClosePull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*PullDetailDTO, error)
+
+	// UpdatePullLabels 替换合并请求的标签
+	UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*PullDetailDTO, error)
+
+	// UpdatePullAssignee 替换合并请求的指派人（空字符串 = 清空）
+	UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignee string) (*PullDetailDTO, error)
+
+	// UpdatePullReviewers 替换合并请求的审查者（空切片 = 清空；Gitea 走 requested_reviewers，GitHub 等价）
+	UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*PullDetailDTO, error)
 
 	// ListLabels 列出仓库标签
 	ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]LabelDTO, error)
@@ -134,8 +152,25 @@ type ListIssuesOpts struct {
 // ListPullsOpts 列合并请求参数
 type ListPullsOpts struct {
 	State string // "open" | "closed" | "all"
+	Head  string // 可选：head 分支过滤
+	Base  string // 可选：base 分支过滤
 	Page  int
 	Limit int
+}
+
+// MergePullOpts 合并合并请求参数
+//
+// MergeMethod 与前端 MergeMethod 对齐（Gitea / GitHub 共有值）：
+//   - "merge"        → 普通合并（保留所有提交历史）
+//   - "rebase"       → 变基后快进（重写历史，单一线性，GitHub 把它叫 "rebase"）
+//   - "rebase-merge" → 变基后 merge commit（Gitea 专属）
+//   - "squash"       → 压缩为单提交
+//
+// GitHub 不支持 "rebase-merge"，调用方需按平台分支处理（详见 GitHubAdapter.MergePull）
+type MergePullOpts struct {
+	Method            string // 见 MergeMethod
+	DeleteBranchAfter bool   // 合并后是否删除源分支
+	CommitMessage     string // 可选；method="squash" 时部分平台要求非空
 }
 
 // LogGraphOpts log graph 参数
@@ -236,6 +271,52 @@ type PullDTO struct {
 	Head   string `json:"head"`
 	Base   string `json:"base"`
 	Merged bool   `json:"merged"`
+}
+
+// PullDetailDTO 合并请求完整详情（GetPull / MergePull / ClosePull / UpdatePull* 返回值）
+//
+// 与 PullDTO 区分：列表接口轻量，详情接口完整。
+// 字段对齐前端 PullDto（frontend/src/types/dto.ts），前端 store 直接复用。
+type PullDetailDTO struct {
+	Index         int               `json:"index"`
+	Number        int               `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
+	Title         string            `json:"title"`
+	State         string            `json:"state"` // "open" | "closed"
+	Draft         bool              `json:"draft"`
+	Merged        bool              `json:"merged"`
+	Head          PullRefDTO        `json:"head"`
+	Base          PullRefDTO        `json:"base"`
+	Author        *PullUserDTO      `json:"author,omitempty"`
+	CreatedAt     string            `json:"createdAt"`     // ISO 8601
+	UpdatedAt     string            `json:"updatedAt"`     // ISO 8601
+	Mergeable     bool              `json:"mergeable"`     // false=有冲突/不可合并
+	HasConflicts  bool              `json:"hasConflicts"`  // = !Mergeable（前端视图字段对齐）
+	Body          string            `json:"body,omitempty"`
+	CommentsCount int               `json:"commentsCount"`
+	Labels        []PullLabelDTO    `json:"labels,omitempty"`
+	Assignees     []PullUserDTO     `json:"assignees,omitempty"`
+	Reviewers     []PullUserDTO     `json:"reviewers,omitempty"`
+	MergedBy      *PullUserDTO      `json:"mergedBy,omitempty"`
+	MergeCommitSHA string           `json:"mergeCommitSha,omitempty"` // 合并成功后回填
+}
+
+// PullRefDTO head / base 引用信息
+type PullRefDTO struct {
+	Ref string `json:"ref"`  // 分支名
+	SHA string `json:"sha"`  // 分支顶端 commit hash
+}
+
+// PullUserDTO 嵌套用户信息（author / assignees / reviewers / mergedBy）
+type PullUserDTO struct {
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+}
+
+// PullLabelDTO 嵌套标签信息
+type PullLabelDTO struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
 }
 
 // LabelDTO 标签信息
