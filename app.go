@@ -18,6 +18,7 @@ import (
 
 	"gitea-kanban/app/config"
 	"gitea-kanban/app/git"
+	"gitea-kanban/app/gitbinary"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/platform/gitea"
@@ -121,6 +122,25 @@ func (a *App) OnStartup(ctx context.Context) {
 	//   - 启动同步，失败时把整个旧 repos 目录 mv 到 _pre_v25_workspace 保留
 	//   - 旧布局一旦迁完就标记完成，新代码不再回退到旧路径
 	a.runLegacyWorkspaceMigration()
+
+	// 8. v0.4.0 · 释放嵌入 git 2.55.0 二进制 + 把 prefs["app.gitBinaryPath"] 推给 gitbinary 全局
+	//
+	// 必须放在 runLegacyWorkspaceMigration 之后（不冲突），放在业务方法前
+	// （Git Graph 第一次加载就会调 git.RunGit，没有 Init 会回退到 PATH git，行为 OK 但
+	// 跳过 macOS 自动脱 quarantine 这一步）。
+	//
+	// 自动脱 quarantine 失败仅记 WARN 日志，不阻断启动（用户后续手动允许）。
+	if err := gitbinary.Init(a.dataDir, a.logger); err != nil {
+		a.logger.Warn("gitbinary.Init 失败，仍可启动；后续 git 调用回退到 PATH git", "err", err.Error())
+	}
+	gitbinary.SetUserOverride(store.GetGitBinaryPath(a.localStore))
+
+	if a.logger != nil {
+		a.logger.Info("git binary 配置就绪",
+			"userOverride", gitbinary.UserOverride(),
+			"defaultBin", gitbinary.DefaultBinaryPath(),
+		)
+	}
 }
 
 // runLegacyWorkspaceMigration 执行一次性的 v2.4 → v2.5 旧布局迁移
@@ -1498,7 +1518,140 @@ func (a *App) SetWorkspace(args SetWorkspaceArgs) error {
 	)
 }
 
-// ===== v2.3 内部 helper：localPath → (token, username) =====
+// ===== v0.4.0 Git 二进制设置（v2.0 拍板「默认内嵌 git 2.55.0」）=====
+//
+// 流程：
+//   1. OnStartup 调 gitbinary.Init → 释放嵌入二进制到 ${dataDir}/tools/git/
+//   2. OnStartup 调 gitbinary.SetUserOverride(store.GetGitBinaryPath(a.localStore))
+//      让之前保存的用户配置立即生效
+//   3. 用户在 SettingsView 改路径：App.SetGitBinaryPath → store.SetGitBinaryPath
+//      + gitbinary.SetUserOverride → 本次进程后续所有 git CLI 立即走新路径
+//   4. 用户点「测试」：App.TestGitBinary 调 gitbinary.TestGitBinary 验证
+//   5. macOS 上二进制被 Gatekeeper 拦截：TestGitBinary 返 quarantine 提示，
+//      用户点「解除隔离」调 App.StripGitBinaryQuarantine → 调 xattr -d
+//   6. 用户点「选择文件」：App.OpenGitBinaryPicker 调 wailsruntime.OpenFileDialog
+//      （平台特定 filter，macOS / Windows / Linux 区分）
+
+// GitBinaryConfig 暴露给前端的 git 二进制配置（SettingsView 卡片用）
+type GitBinaryConfig struct {
+	// UserOverride 用户在 UI 填的路径；空字符串 = 用默认（内嵌或 PATH）
+	UserOverride string `json:"userOverride"`
+	// DefaultPath 内嵌二进制实际释放路径（dev 期可能为 "" 因 0 字节占位）
+	DefaultPath string `json:"defaultPath"`
+	// EmbeddedVersion 内嵌版本号（当前固定 "2.55.0"）
+	EmbeddedVersion string `json:"embeddedVersion"`
+	// EffectivePath 当前进程实际用的 git 路径（= ResolveGitBinaryPath 解析结果）
+	EffectivePath string `json:"effectivePath"`
+	// EmbeddedAvailable 当前平台是否真嵌入二进制（linux 永远 false）
+	EmbeddedAvailable bool `json:"embeddedAvailable"`
+}
+
+// GetGitBinaryConfig 读取当前 git binary 配置 + 当前实际生效路径
+func (a *App) GetGitBinaryConfig() GitBinaryConfig {
+	userOverride := store.GetGitBinaryPath(a.localStore)
+	effective, _ := gitbinary.ResolveGitBinaryPath(userOverride)
+	// 把 userOverride 也存到全局，让后续 ResolveGitBinaryPath("") 也走它
+	gitbinary.SetUserOverride(userOverride)
+	return GitBinaryConfig{
+		UserOverride:      userOverride,
+		DefaultPath:       gitbinary.DefaultBinaryPath(),
+		EmbeddedVersion:   "2.55.0",
+		EffectivePath:     effective,
+		EmbeddedAvailable: gitbinary.DefaultBinaryPath() != "",
+	}
+}
+
+// SetGitBinaryPathArgs 写入参数
+type SetGitBinaryPathArgs struct {
+	Path string `json:"path"` // "" = 清空用户覆盖
+}
+
+// SetGitBinaryPath 持久化用户填的 git binary 路径，并立刻让本次进程生效。
+//
+// 空字符串 = 删 prefs["app.gitBinaryPath"]，回退到内嵌 / PATH git。
+// 非空字符串 = 写 prefs + gitbinary.SetUserOverride。
+func (a *App) SetGitBinaryPath(args SetGitBinaryPathArgs) error {
+	if a.logger != nil {
+		a.logger.Info("SetGitBinaryPath", "path", args.Path)
+	}
+	if err := store.SetGitBinaryPath(a.localStore, args.Path); err != nil {
+		return ipc.NewInternal("保存 git 二进制路径失败: " + err.Error())
+	}
+	gitbinary.SetUserOverride(args.Path)
+	return nil
+}
+
+// TestGitBinary 验证给定 git 二进制路径是否可执行（用户填完路径点「测试」时调）。
+//
+// 直接调 gitbinary.TestGitBinary，返结构化结果含 ok/version/path/message/hint。
+// 失败 hint 给出 macOS Gatekeeper / 路径不存在 / 非 git 二进制 等具体建议。
+func (a *App) TestGitBinary(args SetGitBinaryPathArgs) gitbinary.TestGitResult {
+	if a.logger != nil {
+		a.logger.Info("TestGitBinary", "path", args.Path)
+	}
+	return gitbinary.TestGitBinary(args.Path)
+}
+
+// StripGitBinaryQuarantineArgs 主动剥离 macOS quarantine 参数
+type StripGitBinaryQuarantineArgs struct {
+	Path string `json:"path"`
+}
+
+// StripGitBinaryQuarantine 主动剥离 macOS quarantine 属性（用户点「解除隔离」按钮调）。
+//
+// 仅 macOS 有效；其它平台返 nil 即可。失败时返 error 让 UI 提示用户手动允许。
+func (a *App) StripGitBinaryQuarantine(args StripGitBinaryQuarantineArgs) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	if a.logger != nil {
+		a.logger.Info("StripGitBinaryQuarantine", "path", args.Path)
+	}
+	if err := gitbinary.StripQuarantine(args.Path); err != nil {
+		return ipc.NewInternal("剥离 quarantine 失败: " + err.Error() +
+			"；如需手动允许：右键 → 打开 → 仍要打开")
+	}
+	return nil
+}
+
+// OpenGitBinaryPicker 平台特定文件选择对话框（用户在 SettingsView 选 git 二进制）。
+//
+//   - macOS: 允许选 .app/Contents/MacOS/git（显示包内容）也允许选单文件
+//   - Windows: 过滤器限定 .exe
+//   - Linux: 不限定后缀（git 通常无扩展名）
+//
+// 取消返空字符串，错误时返 error。
+func (a *App) OpenGitBinaryPicker() (string, error) {
+	if a.logger != nil {
+		a.logger.Info("OpenGitBinaryPicker")
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+			Title: "选择 git.exe 路径",
+			Filters: []wailsruntime.FileFilter{
+				{DisplayName: "Git 可执行文件 (*.exe)", Pattern: "*.exe;*.EXE"},
+			},
+		})
+	case "darwin":
+		// macOS 上 git 通常装在 /opt/homebrew/bin/git、/usr/local/bin/git 等
+		// 单文件即可；显示包内容是 Finder 操作不是文件选择对话框
+		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+			Title: "选择 git 二进制路径",
+			Filters: []wailsruntime.FileFilter{
+				{DisplayName: "可执行文件", Pattern: "*"},
+			},
+		})
+	default:
+		// Linux / 其他 unix：git 通常无扩展名
+		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+			Title: "选择 git 二进制路径",
+			Filters: []wailsruntime.FileFilter{
+				{DisplayName: "可执行文件", Pattern: "*"},
+			},
+		})
+	}
+}
 
 // resolveTokenByLocalPath 从本地仓库路径反查 keychain 里的 token
 //

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -102,6 +103,15 @@ type LocalState struct {
 
 // WorkspacePathPrefKey prefs 中 workspace 路径的 key
 const WorkspacePathPrefKey = "app.workspacePath"
+
+// GitBinaryPathPrefKey prefs 中 git 二进制路径的 key（v0.4.0 新增）
+//
+//   - 空字符串或不在 prefs：使用 app/gitbinary 释放的内嵌二进制（或 PATH 兜底）
+//   - 非空字符串：用户填的 git 二进制绝对路径（macOS / Windows / Linux 都允许）
+//
+// 写入入口：app.SetGitBinaryPath（SettingsView "Git 二进制"卡片 调用）
+// 读取入口：app.GetGitBinaryPath / app.gitbinary.ResolveGitBinaryPath
+const GitBinaryPathPrefKey = "app.gitBinaryPath"
 
 // LocalStore 业务态存储（原子写 + 并发安全）
 type LocalStore struct {
@@ -229,4 +239,39 @@ func GetWorkspacePath(s *LocalStore) string {
 		return v
 	}
 	return ""
+}
+
+// GetGitBinaryPath 从 localStore 读用户在「设置 → Git 二进制」填的路径。
+//
+// 不存在 / 空 / 非 string 类型时返空字符串（= 走 app/gitbinary.ResolveGitBinaryPath 默认）。
+func GetGitBinaryPath(s *LocalStore) string {
+	if s == nil {
+		return ""
+	}
+	state := s.Get()
+	if state == nil || state.Prefs == nil {
+		return ""
+	}
+	if v, ok := state.Prefs[GitBinaryPathPrefKey].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// SetGitBinaryPath 把用户填的 git 二进制路径写到 prefs。
+//
+// 空字符串 = 清空用户配置（运行时回退到内嵌 / PATH git）。
+// 非空字符串 = 强校验 stat 存在且非目录（失败的 err 让 SettingsView "保存"按钮提示）。
+func SetGitBinaryPath(s *LocalStore, path string) error {
+	return s.Mutate(func(state *LocalState) {
+		if state.Prefs == nil {
+			state.Prefs = map[string]any{}
+		}
+		path = strings.TrimSpace(path)
+		if path == "" {
+			delete(state.Prefs, GitBinaryPathPrefKey)
+		} else {
+			state.Prefs[GitBinaryPathPrefKey] = path
+		}
+	})
 }

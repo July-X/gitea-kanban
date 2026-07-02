@@ -5,8 +5,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"gitea-kanban/app/gitbinary"
 )
 
 // GitRef 是 git log --decorate 输出里的引用装饰。
@@ -75,7 +76,7 @@ func RunGraphLog(localPath string, opts RunGraphLogOptions) (*GraphLinesResult, 
 	if localPath == "" {
 		return nil, fmt.Errorf("localPath 不能为空")
 	}
-	if _, err := exec.LookPath("git"); err != nil {
+	if _, err := gitbinary.ResolveGitBinaryPath(""); err != nil {
 		return nil, fmt.Errorf("系统未安装 git 命令: %w", err)
 	}
 	// 兼容两种仓库布局（与 clone.go RepoExists 对齐）：
@@ -163,8 +164,11 @@ func runGraphLogOnce(localPath string, opts RunGraphLogOptions, firstParent bool
 
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	output, err := cmd.CombinedOutput()
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return GraphLinesResult{}, fmt.Errorf("gitbinary: %w", err)
+	}
+	output, err := gitbinary.RunGit(ctx, bin, localPath, args...)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return GraphLinesResult{}, fmt.Errorf("git log --graph 超时（%s）：%w", nativeGitTimeout, ctx.Err())
@@ -264,17 +268,17 @@ func enrichGraphRefs(localPath string, result *GraphLinesResult) {
 func listRefsByCommit(localPath string) (map[string][]GitRef, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(
-		ctx,
-		"git",
-		"-C", localPath,
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return nil, fmt.Errorf("gitbinary: %w", err)
+	}
+	output, err := gitbinary.RunGit(ctx, bin, localPath,
 		"for-each-ref",
 		"--format=%(refname)%00%(objectname)%00%(*objectname)",
 		"refs/heads",
 		"refs/remotes",
 		"refs/tags",
 	)
-	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}

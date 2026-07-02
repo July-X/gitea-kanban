@@ -5,13 +5,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"gitea-kanban/app/gitbinary"
 )
 
 // Repo 封装 go-git Repository，提供便捷查询方法
@@ -94,10 +95,14 @@ func (r *Repo) getCommitFileStatsGit(sha string) (map[string][2]int, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	output, err := cmd.CombinedOutput()
+	bin, err := gitbinary.ResolveGitBinaryPath("")
 	if err != nil {
-		// git diff-tree 失败时返回空 map，让调用方 fallback 到 go-git Stats
+		// 与 v2.7 旧 fallback 行为一致：git diff-tree 失败时返空 map
+		return map[string][2]int{}, nil
+	}
+	subArgs := args[2:] // 去掉 "-C", r.localPath 前缀，RunGit 会重新拼
+	output, err := gitbinary.RunGit(ctx, bin, r.localPath, subArgs...)
+	if err != nil {
 		return map[string][2]int{}, nil
 	}
 
