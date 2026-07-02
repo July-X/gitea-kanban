@@ -135,11 +135,38 @@ watch(
 
 async function loadPulls(): Promise<void> {
   if (!activeProjectId.value) return;
+  // v0.6+ bugfix：预加载仓库成员，让评论 @ 唤出成员名（之前只在打开属性编辑器才加载）
+  await loadMembers();
   try {
     await pull.list(activeProjectId.value, true);
   } catch (e) {
     const err = e as { messageText?: string };
     showToast({ type: 'error', message: err.messageText ?? '加载失败', persistent: true });
+  }
+}
+
+/**
+ * 加载仓库成员，填充 availableMembers（评论 @ 候选）
+ *
+ * v0.6+ bugfix：之前 availableMembers 只在 openAttrEditor 里加载，
+ * 评论 @ 不会触发那个函数 → 候选始终空。
+ * 现在在 loadPulls / openAttrEditor 两处都加载，互不干扰。
+ */
+async function loadMembers(): Promise<void> {
+  if (!activeProjectId.value) return;
+  try {
+    const membersResp = await membersList({ projectId: String(activeProjectId.value) });
+    const members = (membersResp.items ?? []) as (CollaboratorDto & { login_type?: string })[];
+    availableMembers.value = members.map((m) => m.username);
+    nonReviewableMembers.value = new Set(
+      members
+        .filter(
+          (m) => m.login_type === 'Organization' || m.login_type === 'organization',
+        )
+        .map((m) => m.username),
+    );
+  } catch {
+    // 失败不报 toast（评论 @ 是 nice-to-have，不应中断 PR 列表加载）
   }
 }
 
@@ -186,17 +213,22 @@ function onJumpToTimeline(p: PullDto): void {
   void router.push('/timeline');
 }
 
-/** 生成 gitea web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
+/** 生成 gitea / github web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
  *
- * 不用 RepoDto.url 字段——schema 里没这个字段，
- * 硬拼会得到 "https://kanban demo/m4java-test" 这种带空格的非法 URL。
- * 用 useAuthStore.currentGiteaUrl + 当前 activeRepo.owner/name 拼接。
+ * v0.6+ bugfix：原代码走 auth.currentGiteaUrl，对 GitHub 账号会拼出
+ *   https://api.github.com/{owner}/{repo}/pulls/{N}
+ * —— api.github.com 是 API endpoint，不是网页，浏览器看到 JSON。
+ *
+ * 现在走 auth.getAccountUrlByPlatform(currentProject.platform)，
+ * 与 CommitDetailPanel 「在 GitHub 中打开」 同逻辑（见 auth.ts 注释）。
  */
 function giteaPullUrl(p: PullDto): string {
   if (!activeRepo.value) return '#';
-  const giteaUrl = (auth.currentGiteaUrl || '').replace(/\/+$/, '');
-  if (!giteaUrl) return '#';
-  return `${giteaUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/pulls/${p.index}`;
+  const platform = (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github';
+  // v0.6+ bugfix：GitHub 账号走专用 helper，自动把 api.github.com → github.com
+  const baseUrl = (auth.getAccountUrlByPlatform(platform) || '').replace(/\/+$/, '');
+  if (!baseUrl) return '#';
+  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/pulls/${p.index}`;
 }
 
 /** 在系统浏览器打开合并请求页面（Wails BrowserOpenURL，window.open / <a target=_blank>
@@ -303,20 +335,8 @@ async function openAttrEditor(p: PullDto): Promise<void> {
       const labelsResp = await labelsList({ projectId: String(activeProjectId.value) });
       availableLabels.value = labelsResp.items ?? [];
     } catch { /* 忽略 */ }
-    try {
-      const membersResp = await membersList({ projectId: String(activeProjectId.value) });
-      const members = membersResp.items ?? [];
-      availableMembers.value = members.map((m) => m.username);
-      // 识别组织账号（gitea 1.x 限制：组织不能作评审人，但可以作指派人）
-      nonReviewableMembers.value = new Set(
-        members
-          .filter(
-            (m: CollaboratorDto & { login_type?: string }) =>
-              m.login_type === 'Organization' || m.login_type === 'organization',
-          )
-          .map((m) => m.username),
-      );
-    } catch { /* 忽略 */ }
+    // v0.6+ bugfix：复用 loadMembers，避免重复代码
+    await loadMembers();
   }
 }
 

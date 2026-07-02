@@ -751,6 +751,17 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 	req.Header.Set("Authorization", "token "+token)
 	req.Header.Set("Accept", "application/json")
 
+	// v0.6+ bugfix：POST/PUT/PATCH 带 JSON body 时必须显式设 Content-Type。
+	// Go http.NewRequest 在 body != nil 且未显式设 Content-Type 时，
+	// 会默认 "Content-Type: application/x-www-form-urlencoded"
+	// —— Gitea swagger 在 POST /comments 上检测 Content-Type 为 form-urlencoded，
+	//   错报 422 "Empty Content-Type" （实际意思是"Gitea 期望 application/json"）。
+	// GitHub adapter 同 bug 但 GitHub 后端对 form-urlencoded 宽客（自动检测 JSON），
+	// Gitea 严格 → 在这里补一下。
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）

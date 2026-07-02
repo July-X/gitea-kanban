@@ -843,6 +843,13 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 	// 钉死 API 版本：避免 GitHub 升级后默认行为变更触发 406 / 415
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
+	// v0.6+ bugfix：POST/PUT/PATCH 带 JSON body 时显式设 Content-Type，
+	// 避免 Go http.NewRequest 默认成 application/x-www-form-urlencoded。
+	// Gitea adapter 同修复（见 gitea/adapter.go）。
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）

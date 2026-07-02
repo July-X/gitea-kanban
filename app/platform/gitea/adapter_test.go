@@ -304,6 +304,12 @@ func TestGiteaAdapter_CreatePullComment(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedMethod = r.Method
 		capturedPath = r.URL.Path
+		// v0.6+ bugfix regression：验证 Content-Type 是 application/json
+		// （修复前 Go 默认设 application/x-www-form-urlencoded，
+		//  Gitea swagger 返 422 "Empty Content-Type"）
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}

@@ -1100,6 +1100,10 @@ func TestGitHubAdapter_CreatePullComment(t *testing.T) {
 		if auth := r.Header.Get("Authorization"); auth != "Bearer ghp" {
 			t.Errorf("Authorization = %q", auth)
 		}
+		// v0.6+ bugfix regression：验证 Content-Type 是 application/json
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
