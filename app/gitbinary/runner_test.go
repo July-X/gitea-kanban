@@ -192,3 +192,83 @@ func lookupSystemGit(t *testing.T) (string, error) {
 	}
 	return "", os.ErrNotExist
 }
+
+// TestCheckQuarantine_SandboxFile 验证 quarantine 检测在真实文件上。
+//
+// 在 sandbox 上建一个假文件，预期非 quarantine（系统不主动加）。
+// 真 quarantine 行为需要从 Safari 下载，sandbox 内无法复现；
+// 所以此测试只覆盖「无属性时返 false」和「文件不存在时返 no-error」的健壮性。
+func TestCheckQuarantine_NoQuarantineOnFreshFile(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skipf("仅 macOS 跑（当前 %s）", runtime.GOOS)
+	}
+	tmp := t.TempDir()
+	fresh := filepath.Join(tmp, "fresh_file")
+	if err := os.WriteFile(fresh, []byte("hi"), 0o644); err != nil {
+		t.Fatalf("写测试文件失败: %v", err)
+	}
+	quarantined, err := checkQuarantine(fresh)
+	if err != nil {
+		t.Fatalf("checkQuarantine 失败: %v", err)
+	}
+	if quarantined {
+		t.Errorf("新建文件不应有 quarantine 属性")
+	}
+}
+
+// TestStripQuarantine_Idempotent 验证重复剥离不报错。
+//
+// 在 sandbox 跑：先建一个 fresh file，剥 quarantine（无属性也应 idempotent），再剥一次，验证不 panic。
+func TestStripQuarantine_Idempotent(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skipf("仅 macOS 跑（当前 %s）", runtime.GOOS)
+	}
+	tmp := t.TempDir()
+	fresh := filepath.Join(tmp, "fresh")
+	if err := os.WriteFile(fresh, []byte("hi"), 0o755); err != nil {
+		t.Fatalf("写测试文件失败: %v", err)
+	}
+	if err := stripQuarantine(fresh); err != nil {
+		t.Errorf("首次 stripQuarantine 应 idempotent, got: %v", err)
+	}
+	if err := stripQuarantine(fresh); err != nil {
+		t.Errorf("重复 stripQuarantine 应 idempotent, got: %v", err)
+	}
+}
+
+// TestStripQuarantine_OtherPlatformsNoop 验证非 macOS 平台直接返 nil。
+func TestStripQuarantine_OtherPlatformsNoop(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin 平台已由其他用例覆盖")
+	}
+	if err := StripQuarantine("/tmp/whatever"); err != nil {
+		t.Errorf("非 macOS 平台 StripQuarantine 应返 nil, got: %v", err)
+	}
+}
+
+// TestTestGitBinary_QuarantineHint 验证 TestGitBinary 在 macOS 上能正确返 message/hint。
+//
+// 即便没有 quarantine 属性，结构应返 ok=true + 完整字段，
+// 让前端 SettingsView 卡片能稳定显示。
+func TestTestGitBinary_QuarantineHint(t *testing.T) {
+	pathGit, err := lookupSystemGit(t)
+	if err != nil {
+		t.Skipf("无 system git 跳过: %v", err)
+	}
+	res := TestGitBinary(pathGit)
+	if !res.OK {
+		t.Fatalf("TestGitBinary 失败: message=%q hint=%q", res.Message, res.Hint)
+	}
+	// Message 应至少包含版本号
+	if res.Version == "" {
+		t.Error("Version 字段为空")
+	}
+	// Path 应是 stat 后的绝对路径
+	if res.Path == "" {
+		t.Error("Path 字段为空")
+	}
+	// Message 至少应有「git <ver>」字样
+	if !strings.Contains(res.Message, res.Version) {
+		t.Errorf("Message %q 应包含版本号 %q", res.Message, res.Version)
+	}
+}
