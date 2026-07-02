@@ -446,6 +446,10 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
           - 已同步 → 按钮"更新"（调 gitgraphPull）
           - 点 fullName 文字区域 → 切到该仓库上下文
           - 点行末按钮 → 只触发按钮 action（不切换仓库）
+
+          v0.4.0 调整顺序：api URL 上移到 dropdown 之前，
+          dropdown 下移到挨着 refresh 按钮。
+          最终顺序：chip → url → picker（仓库）→ refresh → theme
         -->
         <div
           v-if="auth.isConnected"
@@ -542,6 +546,12 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
           </div>
         </div>
 
+        <!--
+          v0.4.0 顺序调整：api URL 上移到仓库 dropdown 之前，
+          让仓库 dropdown 紧挨着 refresh 按钮（pickRepo 选完后紧接可触发刷新）。
+          原顺序：chip → picker → url → refresh → theme
+          新顺序：chip → url → picker → refresh → theme
+        -->
         <span v-if="auth.currentGiteaUrl" class="statusbar__url mono" :title="auth.currentGiteaUrl">
           {{ auth.currentGiteaUrl }}
         </span>
