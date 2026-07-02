@@ -129,7 +129,9 @@ const filteredRepos = computed(() => {
   const q = pickerSearch.value.trim().toLowerCase();
   if (!q) return repo.repos;
   return repo.repos.filter(
-    (r) => r.fullName.toLowerCase().includes(q) || r.description.toLowerCase().includes(q),
+    (r) =>
+      (r.fullName ?? '').toLowerCase().includes(q) ||
+      (r.description ?? '').toLowerCase().includes(q),
   );
 });
 
