@@ -1,13 +1,16 @@
 /**
- * 结构化 Git Graph 渲染 —— 消费 Go 后端 BuildGraph 输出的 GraphNode + GraphEdge
+ * 结构化 Git Graph DTO 类型 —— 消费 Go 后端 BuildGraph 输出的 GraphNode + GraphEdge
  *
- * 背景（迁移步骤 4.6）：
- * 旧版前端用 parser.ts 解析 `git log --graph` 的 ASCII 字形（移植 Gitea parser.go）。
- * 新版 Go 后端用 go-git + 自研 lane 布局算法直接输出结构化 GraphNode + GraphEdge，
+ * 背景（v2.0 迁移 + v3.0 refactor）：
+ * v1 时代前端用 parser.ts 解析 `git log --graph` 的 ASCII 字形（移植 Gitea parser.go）。
+ * v2.0 起 Go 后端用 go-git + 自研 lane 布局算法直接输出结构化 GraphNode + GraphEdge，
  * 前端无需字形解析，直接消费结构化数据生成 SVG。
  *
- * 本模块是新的渲染入口，替代旧的 parser.ts + 部分 svg.ts 逻辑。
- * 旧 parser.ts 保留在 lib/gitgraph/ 供参考，但不再被调用。
+ * v3.0 refactor (commit `71a43f3`) 进一步丢弃 v2.x 历史包袱：
+ *   - 删除 parser.ts / svg.ts / index.ts / models.ts / types.ts 等老 ASCII parser 链路
+ *   - 新增 vscode-render.ts 1:1 复刻 vscode-git-graph 几何（GRID 16x24、C 贝塞尔、12 色）
+ *   - structured.ts 保留作为 DTO 类型 + 旧 Gitea 风格 path 渲染
+ * 当前渲染入口 = vscode-render.ts；本文件只消费 DTO 类型和旧 structured 风格 path 渲染。
  */
 
 // ===== Go 后端 BuildGraph 输出的类型（与 app/git/graph/layout.go 对齐）=====
@@ -47,7 +50,11 @@ export interface GraphNodeDto {
   /**
    * 是否已提交 (true) 还是未提交的 worktree 变更 (false)
    * 对齐 vscode graph.ts Vertex.draw：uncommitted 时 dot stroke = #808080
-   * 目前 NoCheckout:true 模式工作区永远为空，此字段始终为 true
+   *
+   * v0.3.0 之前注释写"NoCheckout:true 模式工作区永远为空，此字段始终为 true"
+   * ——错误。v0.3.0 起 detectUncommittedChanges 走 `git status --porcelain`，
+   * 在 NoCheckout 模式下 worktree 仍空但 index 有全部文件 → status 报告所有
+   * 文件为 D → dirtyCount > 0 → IsCommitted 字段可以正确返回 false。
    */
   isCommitted?: boolean;
 }
@@ -92,8 +99,13 @@ export interface GraphBranchLineDto {
    *   - true / undefined: 走 lane 颜色
    *   - false:           走 #808080 + stroke-dasharray: 2px（灰色虚线）
    * UNCOMMITTED 虚拟 commit 触发的 line 段 (UNCOMMITTED → HEAD) 会传 false。
-   * v3.x 加：trigger 是「local 落后 origin」时，row 0 的 UNCOMMITTED → row 1 HEAD
-   * 这一段会标 false；row ≥ 1 全部为 true。
+   *
+   * v0.3.0 之前 trigger 是「local HEAD 落后 origin/<defaultBranch>」（实现是
+   * `detectUnpulledCommits` 跑 `git rev-list --count HEAD..origin/<branch>`）。
+   * v0.3.0 起 trigger 改成「worktree dirty」（`detectUncommittedChanges` 跑
+   * `git status --porcelain`），1:1 对齐 vscode-git-graph dataSource.ts 的
+   * `git status --porcelain` UNCOMMITTED 检测路径。
+   * row 0 (UNCOMMITTED) → row 1 (HEAD) 这一段会标 false；row ≥ 1 全部为 true。
    */
   isCommitted?: boolean;
 }

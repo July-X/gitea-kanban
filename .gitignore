@@ -58,6 +58,8 @@ reasonix.toml
 node_modules/
 .playwright-mcp/
 .github/
+# .tools/ 是 v3.0 早期 vscode-git-graph 对比工具（已被 tools/vscode-recheck/ 取代）。
+# 当前无物理目录、无 git 引用、无代码引用；保留规则防止未来误引入。
 .tools/
 
 # Local build artifacts (防止 wails build / go build 产物误提交)

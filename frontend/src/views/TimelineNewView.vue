@@ -3047,8 +3047,9 @@ function refBadgeClass(refType?: string): string {
   font-size: inherit;
 }
 
-/* v3.x：UNCOMMITTED 行的 subject ("N commits from origin ahead") 加大加粗，
-   让用户一眼能识别这是未拉取的虚拟节点。颜色用 #808080 对齐 lane 灰色。 */
+/* v0.3.0：UNCOMMITTED 行的 subject ("Uncommitted changes (N files)")
+   是 worktree dirty 触发的虚拟节点（git status --porcelain 检测），
+   加大加粗让用户一眼识别。颜色用 #808080 对齐 lane 灰色。 */
 .commit-subject--uncommitted {
    font-size: 1.15em;
    font-weight: 600;
