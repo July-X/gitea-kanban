@@ -6,6 +6,14 @@
  *   - v1.4 拍板：加 /team 占位路由（v2 团队视图落地前，**不**挂 NavRail 入口）
  *     · 详见 ADR-0004（docs/adr/0004-single-repository-focus.md）
  *     · view 走 TeamView.vue 占位，仅保留路由，**不**进 store / IPC
+ *   - TODO(v0.6+): 废弃 /board、/my-cards、/members 三个入口
+ *     · 导航栏移除入口，但路由保留做兼容/重定向
+ *     · 相关视图文件、stores、composables 标记 @deprecated，待后续清理
+ *
+ * TODO(v0.6+): 废弃 /board、/my-cards、/members 三个入口
+ *   - 导航栏移除入口，但路由保留做兼容/重定向
+ *   - 相关视图文件、stores、composables 标记 @deprecated，待后续清理
+ */
  *   - 根路径 / 重定向到 /auth（未连接时合理入口）
  *   - 用 createWebHashHistory 适配 Wails file:// 协议
  *   - 懒加载（动态 import）减小首屏 bundle
@@ -33,7 +41,7 @@ const routes: RouteRecordRaw[] = [
     path: '/board',
     name: 'board',
     component: () => import('@renderer/views/BoardView.vue'),
-    meta: { title: '看板', requiresAuth: true },
+    meta: { title: '看板', requiresAuth: true, deprecated: true },
   },
   {
     path: '/timeline',
@@ -51,13 +59,13 @@ const routes: RouteRecordRaw[] = [
     path: '/my-cards',
     name: 'my-cards',
     component: () => import('@renderer/views/MyCardsView.vue'),
-    meta: { title: '我的卡片', requiresAuth: true },
+    meta: { title: '我的卡片', requiresAuth: true, deprecated: true },
   },
   {
     path: '/members',
     name: 'members',
     component: () => import('@renderer/views/MembersView.vue'),
-    meta: { title: '成员', requiresAuth: true },
+    meta: { title: '成员', requiresAuth: true, deprecated: true },
   },
   {
     path: '/settings',
@@ -77,7 +85,7 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/board',
+    redirect: '/timeline',
   },
 ];
 

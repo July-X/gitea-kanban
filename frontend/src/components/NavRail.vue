@@ -4,12 +4,15 @@
  *
  * 设计（AppShell layout 设计（v1 沿用））：
  *   - 默认宽度 224px（var(--navrail-width)），折叠态 56px（--navrail-collapsed-width）
- *   - 6 个 NavItem：看板 / 时间轴 / 合并请求 / 我的卡片 / 成员 / 设置
+ *   - 当前有效 NavItem：Git Graph、合并请求、设置（v0.6+ 废弃看板 / 我的卡片 / 成员）
  *   - 选中项 = 主色背景 + 主色微光
  *   - 文字用术语翻译表（OVERRIDE §本项目专属规则 #1）—— **不**出现合并请求/合并/分支/派生 等原词
  *
- * v1 实现：6 个入口全部启用
- * v1.1.3 polish：底部加折叠按钮（PanelLeftClose/Open）—— 折叠态只保留 icon + active 高亮
+ * v0.6+ 废弃看板 / 我的卡片 / 成员：
+ *   - 从 items 数组移除导航入口
+ *   - 路由保留并加 deprecated 标记，访问时重定向到 Git Graph
+ *   - 相关视图文件、stores、composables 标记 @deprecated，待后续彻底清理
+ *   - 保留 devAnnotation 相关类型/常量以便回滚
  *
  * v1.1.3 · task #42 · dev 注解
  *   - 每个 nav item 挂 v-dev-annotate，注明对应 gitea 网页 / API / 本地 IPC
