@@ -228,7 +228,12 @@ function giteaPullUrl(p: PullDto): string {
   // v0.6+ bugfix：GitHub 账号走专用 helper，自动把 api.github.com → github.com
   const baseUrl = (auth.getAccountUrlByPlatform(platform) || '').replace(/\/+$/, '');
   if (!baseUrl) return '#';
-  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/pulls/${p.index}`;
+  // v0.6+ bugfix：GitHub web URL 用单数 /pull/N，Gitea web URL 用复数 /pulls/N
+  //   https://github.com/{owner}/{repo}/pull/{N}     ← GitHub
+  //   https://gitea.example.com/{owner}/{repo}/pulls/{N}  ← Gitea
+  // 上次错拼 GitHub 为 /pulls/N → GitHub 返 404
+  const pathSegment = platform === 'github' ? 'pull' : 'pulls';
+  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/${pathSegment}/${p.index}`;
 }
 
 /** 在系统浏览器打开合并请求页面（Wails BrowserOpenURL，window.open / <a target=_blank>
