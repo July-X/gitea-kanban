@@ -72,19 +72,17 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
 .shell__nav {
   position: relative;
   z-index: 1;
-  /* v1.4 任务 #statusbar-picker：高度让出底部状态栏 33px，避免左下角折叠按钮被遮
-   * 旧值 height: 100%（状态栏 28px 时已经盖住 28px，33px 之后更明显） */
-  height: calc(100% - var(--statusbar-height));
-  /* v1.5：移除半透明 + backdrop-filter（已经无网格透出） → 走实色 elevated 背景 */
-  background: var(--color-bg-elevated);
-  /* v1.5：HUD 三件套 box-shadow 移除 → 改为 1px 右边描边作为区域边界
-   * --color-divider-region 是区域边界专用 token（dark 10% / light 12%） */
-  border-right: 1px solid var(--color-divider-region);
+  height: 100%;
+  flex-shrink: 0;
+  width: var(--navrail-width);
+  /* NavRail 内部已经包含实色背景和右边框，这里只做定位 */
 }
 
 /* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的实色背景 */
 .shell__nav :deep(.navrail) {
   background: transparent;
+  border-right-color: transparent;
+  height: 100%;
 }
 
 .shell__main {

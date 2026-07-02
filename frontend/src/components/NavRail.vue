@@ -269,11 +269,12 @@ function onUploadClick(): void {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: transparent;
+  background: var(--color-bg-elevated);
   padding: var(--space-3) var(--space-2);
   overflow-y: auto;
   overflow-x: hidden;
   transition: width var(--t-slow) var(--ease-out);
+  border-right: 1px solid var(--color-divider-region);
 }
 
 .navrail--collapsed {
