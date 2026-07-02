@@ -98,6 +98,8 @@ const showAdvancedMethods = ref(false);
 const mergingPull = ref<PullDto | null>(null);
 const merging = ref(false);
 const squashMessage = ref('');
+/** v0.6+ 用户拍板：合并后顺手删源分支（默认 false，PM 选 merge 时最容易忘） */
+const deleteBranchAfter = ref(false);
 
 /** 当前正在关闭的合并请求（null = 没在关闭） */
 const closingPull = ref<PullDto | null>(null);
@@ -221,6 +223,7 @@ function requestMerge(p: PullDto): void {
   mergingPull.value = p;
   selectedMethod.value = 'merge';
   squashMessage.value = '';
+  deleteBranchAfter.value = false;
   confirmMergeOpen.value = true;
 }
 
@@ -236,6 +239,7 @@ async function performMerge(): Promise<void> {
       index: p.index,
       method: selectedMethod.value,
       commitMessage: needsCommitMessage(selectedMethod.value) ? squashMessage.value : undefined,
+      deleteBranchAfter: deleteBranchAfter.value || undefined,
     });
     if (result.merged) {
       showToast({ type: 'success', message: `#${p.index} 合并成功` });
@@ -1404,6 +1408,21 @@ function formatRelative(iso: string | undefined): string {
             autocomplete="off"
           />
         </div>
+        <!-- v0.6+：合并后顺手删除源分支（PM 选 merge 时最容易忘的清理） -->
+        <div v-if="mergingPull" class="merge-confirm__delete-branch">
+          <label class="merge-confirm__delete-branch-label">
+            <input
+              v-model="deleteBranchAfter"
+              type="checkbox"
+              class="merge-confirm__delete-branch-checkbox"
+            />
+            <span>合并后删除源分支 <code>{{ mergingPull.head.ref }}</code></span>
+          </label>
+          <p class="merge-confirm__delete-branch-hint">
+            勾选后：合并成功时删除 <code>{{ mergingPull.head.ref }}</code>。
+            GitHub 合并成功后会调 DELETE /git/refs/heads/&lt;ref&gt;；Gitea 直接走 /pulls/{index}/merge 内置参数。
+          </p>
+        </div>
       </div>
     </ConfirmDialog>
 
@@ -2209,6 +2228,54 @@ function formatRelative(iso: string | undefined): string {
 .merge-confirm__message-input:focus {
   outline: 2px solid var(--color-primary);
   outline-offset: -1px;
+}
+
+/* v0.6+：合并后顺手删除源分支 checkbox */
+.merge-confirm__delete-branch {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--color-divider) 70%, transparent);
+}
+
+.merge-confirm__delete-branch-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
+.merge-confirm__delete-branch-label code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+  color: var(--color-primary);
+}
+
+.merge-confirm__delete-branch-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.merge-confirm__delete-branch-hint {
+  margin: 6px 0 0 22px;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.merge-confirm__delete-branch-hint code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  padding: 0 4px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
 }
 
 .spin {
