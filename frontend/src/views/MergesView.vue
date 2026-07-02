@@ -2547,12 +2547,16 @@ function formatRelative(iso: string | undefined): string {
 /* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
 .merge-item__comment-bubble {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 0;          /* v0.6+ bugfix：flex 子项不设 min-width: 0 会按内容撑大 → 长文本不换行出横向滚动条 */
+  max-width: 100%;       /* v0.6+ bugfix：保护 bubble 不越过父容器（避免 grid 70% 布局下被撑超） */
   padding: 5px 8px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: 8px;
   position: relative;
+  /* v0.6+ bugfix：长 url / 长单词换行（gitea 经常发超长 URL） */
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 /* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
  * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
@@ -2661,6 +2665,9 @@ function formatRelative(iso: string | undefined): string {
   word-break: break-word;
   overflow-wrap: anywhere;
   line-height: 1.5;
+  /* v0.6+ bugfix：长文本换行 + 最高高度限制 + 纵向滚动条（不许横向） */
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* 发评论输入区（v1.5.8 紧凑 5px 留白） */
@@ -2794,6 +2801,12 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--color-text);
+  /* v0.6+ bugfix：长 url / 长单词换行。避免出现横向滚动条 / 越出边框。 */
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
 }
 .md-body p {
   margin: 0 0 4px 0;
@@ -2836,7 +2849,9 @@ function formatRelative(iso: string | undefined): string {
   padding: var(--space-2);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
-  overflow-x: auto;
+  overflow-x: auto;        /* code 块代码长还是要水平 scroll 保持可读 */
+  max-width: 100%;          /* v0.6+ bugfix：不能撑出 bubble */
+  min-width: 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: var(--font-xs);
   line-height: 1.5;
