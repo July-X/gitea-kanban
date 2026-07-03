@@ -211,9 +211,8 @@ async function onRefresh(): Promise<void> {
 }
 
 function toggleExpand(idx: number): void {
-  const next = new Set(expanded.value);
-  if (next.has(idx)) next.delete(idx);
-  else next.add(idx);
+  const next = new Set<number>();
+  if (!expanded.value.has(idx)) next.add(idx);
   expanded.value = next;
 }
 
@@ -2122,18 +2121,14 @@ function formatRelative(iso: string | undefined): string {
 
 .merge-item__detail {
   grid-column: 1 / -1;
-  /* v1.5.8：紧凑留白 5px，评论区尽可能饱满
-   *  - detail 自身 padding 5px（你要求）
-   *  - min-height 440 → 380px（少空白）
-   *  - 内部各子块 padding/gap 同步收紧 */
   padding: 5px var(--space-4) var(--space-4);
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
-  /* v1.5.7：min-height 兜底（评论区至少 380 - 60 meta - 40 header ≈ 280px 可见） */
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-height: 380px;
+  /* PR row 高度再增加 80px */
+  min-height: 460px;
   max-height: min(90vh, 900px);
   overflow: hidden;
 }
@@ -2626,16 +2621,17 @@ function formatRelative(iso: string | undefined): string {
 /* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
 .merge-item__comment-bubble {
   flex: 1 1 0;
-  min-width: 0;          /* v0.6+ bugfix：flex 子项不设 min-width: 0 会按内容撑大 → 长文本不换行出横向滚动条 */
-  max-width: 100%;       /* v0.6+ bugfix：保护 bubble 不越过父容器（避免 grid 70% 布局下被撑超） */
+  min-width: 0;
+  max-width: 100%;
   padding: 5px 8px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: 8px;
   position: relative;
-  /* v0.6+ bugfix：长 url / 长单词换行（gitea 经常发超长 URL） */
   overflow-wrap: break-word;
   word-wrap: break-word;
+  word-break: break-word;
+  overflow: hidden;
 }
 /* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
  * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
@@ -2741,12 +2737,15 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-body {
   font-size: var(--font-sm);
   color: var(--color-text);
-  /* v0.6+ bugfix：长文本换行（含 Gitea console log 类无空格长字符串） */
-  word-break: break-all;       /* 在任意字符换行，fallback for 无空格长字符串 */
-  overflow-wrap: anywhere;     /* 优先在可换行点换行；都不行时退到 break-all */
+  /* 强制长文本自动换行，避免气泡横向溢出 */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
   line-height: 1.5;
   max-width: 100%;
   min-width: 0;
+  /* 防止 markdown 内 pre/code 溢出 */
+  overflow-x: hidden;
 }
 
 /* 发评论输入区（v1.5.8 紧凑 5px 留白） */
