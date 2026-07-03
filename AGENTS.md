@@ -144,7 +144,7 @@ gitea-kanban/
 │   │   └── 0005-electron-to-go-wails-migration.md  # **v2.0 重大决策（新增）**
 │   └── dev/
 │       └── cdp-performance-testing.md  # CDP 调试（**Electron 专用，v2 不适用**）
-└── scripts/                     # 工具脚本（check-no-jargon / 各类验证）— v1 遗留
+└── scripts/                     # Reasonix agent hooks（post-edit.sh：format / build / test / commit）
 ```
 
 ---
