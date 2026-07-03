@@ -2677,20 +2677,22 @@ function formatRelative(iso: string | undefined): string {
 /* v1.5.11：复刻 gitea 颜色——"我"的气泡用主色实色 + 白字（强对比），
  * 他人保持 elevated 浅色 + 默认字（弱对比） */
 .merge-item__comment--self .merge-item__comment-bubble {
-  background: var(--color-primary);
+  /* v0.6.20：去掉背景色，改用主色边框线表达"我发的评论" */
+  background: transparent;
   border-color: var(--color-primary);
-  color: var(--color-text-inverse);
+  border-width: 1.5px;
+  color: var(--color-text);
 }
-/* "我"的气泡里所有文字反色 */
+/* "我"的气泡里所有文字保持默认色（背景已透明） */
 .merge-item__comment--self .merge-item__comment-author,
 .merge-item__comment--self .merge-item__comment-time,
 .merge-item__comment--self .merge-item__comment-self-tag,
 .merge-item__comment--self .merge-item__comment-body {
-  color: var(--color-text-inverse);
+  color: var(--color-text);
 }
-/* "我"的气泡里 markdown body 内元素也反色（链接/代码） */
+/* "我"的气泡里 markdown body 内链接保持默认主色 */
 .merge-item__comment--self .merge-item__comment-body a {
-  color: var(--color-text-inverse);
+  color: var(--color-primary);
   text-decoration: underline;
 }
 
