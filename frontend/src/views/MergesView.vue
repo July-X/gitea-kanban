@@ -2563,6 +2563,8 @@ function formatRelative(iso: string | undefined): string {
   max-height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  /* 独立响应：滚动到顶部/底部时不冒泡到外层 .merges__list */
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--color-divider) transparent;
   background: var(--color-bg);
@@ -2813,7 +2815,8 @@ function formatRelative(iso: string | undefined): string {
   font-family: inherit;
   padding: 0;                       /* v1.5.4：padding 跟 textarea 自带默认（行高 1.5 × 8 rows ≈ 200px） */
   line-height: 1.5;
-  overflow-y: auto;                 /* v1.5.4：内容超过 max-height 出现滚动条（你要求） */
+  overflow-y: auto;
+  overscroll-behavior: contain;     /* 输入框内滚动独立，不穿透到评论区 / 外层 PR 列表 */
 }
 
 /* v1.4 @ 提及下拉（绝对定位，浮在 textarea 上方） */
