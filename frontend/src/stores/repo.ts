@@ -18,6 +18,7 @@ import {
   reposRemoveProject,
   getIpcClient,
 } from '@renderer/lib/ipc-client';
+import { logWarn } from '@renderer/lib/frontend-log';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListReposResp, RepoDto, RepoProjectDto } from '@renderer/types/dto';
@@ -318,9 +319,8 @@ export const useRepoStore = defineStore('repo', () => {
       await getIpcClient().invokeNested('user', 'prefs', 'set', { entries });
     } catch (err) {
       // 静默失败 —— localStorage 已写/已删,下次启动仍能恢复/失效
-      // console.warn 留痕（dev 调试用）
-      // eslint-disable-next-line no-console
-      console.warn('[repo] repo.last.selected persistence failed:', err);
+      // logWarn 留痕（走 frontend-log 写文件）
+      logWarn('repo.prefs', 'repo.last.selected persistence failed', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
     }
   }
 

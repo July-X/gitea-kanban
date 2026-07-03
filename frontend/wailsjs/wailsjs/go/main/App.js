@@ -6,6 +6,10 @@ export function AddProject(arg1) {
   return window['go']['main']['App']['AddProject'](arg1);
 }
 
+export function AddPullCommentReaction(arg1) {
+  return window['go']['main']['App']['AddPullCommentReaction'](arg1);
+}
+
 export function AuthConnect(arg1) {
   return window['go']['main']['App']['AuthConnect'](arg1);
 }
@@ -34,6 +38,10 @@ export function ClosePull(arg1) {
   return window['go']['main']['App']['ClosePull'](arg1);
 }
 
+export function CopyRecentLogs(arg1) {
+  return window['go']['main']['App']['CopyRecentLogs'](arg1);
+}
+
 export function CreateColumn(arg1) {
   return window['go']['main']['App']['CreateColumn'](arg1);
 }
@@ -42,8 +50,20 @@ export function CreatePullComment(arg1) {
   return window['go']['main']['App']['CreatePullComment'](arg1);
 }
 
+export function CreatePullReview(arg1) {
+  return window['go']['main']['App']['CreatePullReview'](arg1);
+}
+
 export function DeleteColumn(arg1) {
   return window['go']['main']['App']['DeleteColumn'](arg1);
+}
+
+export function DeletePullComment(arg1) {
+  return window['go']['main']['App']['DeletePullComment'](arg1);
+}
+
+export function ExportLogs(arg1) {
+  return window['go']['main']['App']['ExportLogs'](arg1);
 }
 
 export function FetchRepo(arg1) {
@@ -102,8 +122,16 @@ export function ListIssues(arg1) {
   return window['go']['main']['App']['ListIssues'](arg1);
 }
 
+export function ListPullCommentReactions(arg1) {
+  return window['go']['main']['App']['ListPullCommentReactions'](arg1);
+}
+
 export function ListPullComments(arg1) {
   return window['go']['main']['App']['ListPullComments'](arg1);
+}
+
+export function ListPullReviews(arg1) {
+  return window['go']['main']['App']['ListPullReviews'](arg1);
 }
 
 export function ListPulls(arg1) {
@@ -154,6 +182,10 @@ export function RemoveProject(arg1) {
   return window['go']['main']['App']['RemoveProject'](arg1);
 }
 
+export function RemovePullCommentReaction(arg1) {
+  return window['go']['main']['App']['RemovePullCommentReaction'](arg1);
+}
+
 export function RemoveWorkspaceRepos(arg1) {
   return window['go']['main']['App']['RemoveWorkspaceRepos'](arg1);
 }
@@ -188,6 +220,10 @@ export function UnstarBranch(arg1) {
 
 export function UpdatePullAssignee(arg1) {
   return window['go']['main']['App']['UpdatePullAssignee'](arg1);
+}
+
+export function UpdatePullComment(arg1) {
+  return window['go']['main']['App']['UpdatePullComment'](arg1);
 }
 
 export function UpdatePullLabels(arg1) {

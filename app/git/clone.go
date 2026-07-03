@@ -18,9 +18,11 @@ package git
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -230,7 +232,13 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// go-git 的 PlainClone 第 2 个参数是 isBare，固定 false
 	// （我们走 NoCheckout 模式不是 Bare 模式 —— NoCheckout 保留 worktree 概念但空，
 	//  Bare 完全无 worktree）
+	slog.Default().Info("git clone 开始",
+		"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+		"depth", opts.Depth, "singleBranch", opts.SingleBranch, "noTags", opts.NoTags,
+	)
+	start := time.Now()
 	_, err = git.PlainClone(localPath, false, cloneOpts)
+	duration := time.Since(start)
 	if err != nil {
 		// v2.8：SSH 失败时自动回退到 HTTPS
 		if authMethod == AuthMethodSSH {
@@ -245,14 +253,46 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 			}
 			cloneOpts.URL = cloneURL
 			cloneOpts.Auth = httpAuth
+			slog.Default().Warn("git clone SSH 失败，回退 HTTPS",
+				"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+			)
+			httpsStart := time.Now()
 			_, err = git.PlainClone(localPath, false, cloneOpts)
-		}
-
-		if err != nil {
+			httpsDuration := time.Since(httpsStart)
+			if err != nil {
+				slog.Default().Error("git clone HTTPS 回退也失败",
+					"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+					"ms", httpsDuration.Milliseconds(),
+					"err", err.Error(),
+				)
+				// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
+				os.RemoveAll(localPath)
+				return nil, fmt.Errorf("go-git clone 失败: %w", err)
+			}
+		} else {
+			slog.Default().Error("git clone 失败",
+				"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+				"ms", duration.Milliseconds(),
+				"auth", authMethod,
+				"err", err.Error(),
+			)
 			// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
 			os.RemoveAll(localPath)
 			return nil, fmt.Errorf("go-git clone 失败: %w", err)
 		}
+	}
+
+	// SSH 回退成功 / 正常成功都记完成日志
+	if authMethod == AuthMethodSSH {
+		slog.Default().Info("git clone 完成（SSH→HTTPS 回退）",
+			"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+			"ms", duration.Milliseconds(),
+		)
+	} else {
+		slog.Default().Info("git clone 完成",
+			"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+			"ms", duration.Milliseconds(),
+		)
 	}
 
 	return &CloneResult{LocalPath: localPath}, nil

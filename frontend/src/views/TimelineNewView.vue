@@ -18,6 +18,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
+import { logError } from '@renderer/lib/frontend-log';
 import {
   commitsGitgraphLines,
   commitsGitgraphCloneRepo,
@@ -699,7 +700,6 @@ async function loadGraph(offset = 0): Promise<void> {
     allLoaded.value = !dto?.truncated;
     expandedSha.value = null;
   } catch (e: unknown) {
-    console.error('[TimelineNewView] loadGraph failed:', e);
     const err = e as {
       code?: string;
       messageText?: string;
@@ -707,6 +707,7 @@ async function loadGraph(offset = 0): Promise<void> {
       hint?: string;
     };
     const msg = err.messageText ?? err.message ?? String(e) ?? '加载失败';
+    logError('TimelineNewView.loadGraph', msg, e instanceof Error ? e.stack : undefined);
 
     const looksLikeDisabled =
       err.code === 'internal' &&
@@ -796,7 +797,7 @@ async function syncRepo(): Promise<void> {
   } catch (e: unknown) {
     const err = e as { messageText?: string; message?: string; hint?: string };
     const msg = err.messageText ?? err.message ?? String(e) ?? '同步失败';
-    console.error('[TimelineNewView] syncRepo failed:', e);
+    logError('TimelineNewView.syncRepo', msg, e instanceof Error ? e.stack : undefined);
     showToast({ type: 'error', message: msg });
   } finally {
     pulling.value = false;
@@ -838,7 +839,7 @@ async function enableGitGraph(): Promise<void> {
     const err = e as { messageText?: string; message?: string; hint?: string };
     const msg = err.messageText ?? err.message ?? String(e) ?? '启用失败';
     cloneProgress.value = `启用失败：${msg}`;
-    console.error('[TimelineNewView] enableGitGraph failed:', e);
+    logError('TimelineNewView.enableGitGraph', '启用 Git Graph 失败', e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e));
   } finally {
     cloning.value = false;
     useGlobalLoadingStore().hide('timeline');

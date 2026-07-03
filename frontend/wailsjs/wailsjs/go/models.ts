@@ -287,6 +287,22 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class AddPullCommentReactionArgs {
+	    projectId: string;
+	    commentId: number;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AddPullCommentReactionArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.commentId = source["commentId"];
+	        this.content = source["content"];
+	    }
+	}
 	export class AppInfo {
 	    version: string;
 	    dataDir: string;
@@ -531,6 +547,32 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class CopyRecentLogsArgs {
+	    maxBytes?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CopyRecentLogsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.maxBytes = source["maxBytes"];
+	    }
+	}
+	export class CopyRecentLogsResult {
+	    content: string;
+	    bytes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CopyRecentLogsResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.bytes = source["bytes"];
+	    }
+	}
 	export class CreateColumnArgs {
 	    projectId: string;
 	    title: string;
@@ -563,6 +605,26 @@ export namespace main {
 	        this.body = source["body"];
 	    }
 	}
+	export class CreatePullReviewArgs {
+	    projectId: string;
+	    index: number;
+	    commitId: string;
+	    body: string;
+	    event: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreatePullReviewArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.commitId = source["commitId"];
+	        this.body = source["body"];
+	        this.event = source["event"];
+	    }
+	}
 	export class DeleteColumnArgs {
 	    columnId: string;
 	
@@ -573,6 +635,20 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.columnId = source["columnId"];
+	    }
+	}
+	export class DeletePullCommentArgs {
+	    projectId: string;
+	    commentId: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletePullCommentArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.commentId = source["commentId"];
 	    }
 	}
 	export class DisconnectArgs {
@@ -599,6 +675,40 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.giteaUrl = source["giteaUrl"];
 	        this.username = source["username"];
+	    }
+	}
+	export class ExportLogsArgs {
+	    maxLogs?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportLogsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.maxLogs = source["maxLogs"];
+	    }
+	}
+	export class ExportLogsResult {
+	    zipPath: string;
+	    logCount: number;
+	    logBytes: number;
+	    stateBytes: number;
+	    generatedAt: string;
+	    logFiles: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportLogsResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.zipPath = source["zipPath"];
+	        this.logCount = source["logCount"];
+	        this.logBytes = source["logBytes"];
+	        this.stateBytes = source["stateBytes"];
+	        this.generatedAt = source["generatedAt"];
+	        this.logFiles = source["logFiles"];
 	    }
 	}
 	export class FetchRepoResultDTO {
@@ -993,12 +1103,40 @@ export namespace main {
 	        this.state = source["state"];
 	    }
 	}
+	export class ListPullCommentReactionsArgs {
+	    projectId: string;
+	    commentId: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListPullCommentReactionsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.commentId = source["commentId"];
+	    }
+	}
 	export class ListPullCommentsArgs {
 	    projectId: string;
 	    index: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ListPullCommentsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	    }
+	}
+	export class ListPullReviewsArgs {
+	    projectId: string;
+	    index: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListPullReviewsArgs(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -1100,6 +1238,9 @@ export namespace main {
 	    message: string;
 	    description?: string;
 	    source?: string;
+	    reqID?: string;
+	    accountID?: string;
+	    projectID?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new LogFrontendArgs(source);
@@ -1111,6 +1252,9 @@ export namespace main {
 	        this.message = source["message"];
 	        this.description = source["description"];
 	        this.source = source["source"];
+	        this.reqID = source["reqID"];
+	        this.accountID = source["accountID"];
+	        this.projectID = source["projectID"];
 	    }
 	}
 	export class LogGraphArgs {
@@ -1241,6 +1385,22 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
+	    }
+	}
+	export class RemovePullCommentReactionArgs {
+	    projectId: string;
+	    commentId: number;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemovePullCommentReactionArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.commentId = source["commentId"];
+	        this.content = source["content"];
 	    }
 	}
 	export class RemoveWorkspaceReposArgs {
@@ -1405,6 +1565,22 @@ export namespace main {
 	        this.assignee = source["assignee"];
 	    }
 	}
+	export class UpdatePullCommentArgs {
+	    projectId: string;
+	    commentId: number;
+	    body: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdatePullCommentArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.commentId = source["commentId"];
+	        this.body = source["body"];
+	    }
+	}
 	export class UpdatePullLabelsArgs {
 	    projectId: string;
 	    index: number;
@@ -1482,6 +1658,7 @@ export namespace platform {
 	    author?: PullUserDTO;
 	    createdAt: string;
 	    updatedAt?: string;
+	    userId?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CommentDTO(source);
@@ -1494,6 +1671,7 @@ export namespace platform {
 	        this.author = this.convertValues(source["author"], PullUserDTO);
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
+	        this.userId = source["userId"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1614,7 +1792,81 @@ export namespace platform {
 	}
 	
 	
+	export class PullReviewDTO {
+	    id: number;
+	    state: string;
+	    body: string;
+	    author?: PullUserDTO;
+	    commitId: string;
+	    submittedAt: string;
 	
+	    static createFrom(source: any = {}) {
+	        return new PullReviewDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.state = source["state"];
+	        this.body = source["body"];
+	        this.author = this.convertValues(source["author"], PullUserDTO);
+	        this.commitId = source["commitId"];
+	        this.submittedAt = source["submittedAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class ReactionDTO {
+	    id: number;
+	    content: string;
+	    user?: PullUserDTO;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReactionDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.content = source["content"];
+	        this.user = this.convertValues(source["user"], PullUserDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class RepoPermissions {
 	    pull: boolean;
 	    push: boolean;

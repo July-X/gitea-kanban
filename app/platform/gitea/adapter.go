@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
@@ -951,13 +952,20 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// v0.6.1 log enhancement: 记录 HTTP 耗时、状态码（Bug 上报时 grep "HTTP" 一链可见）
+	start := time.Now()
 	resp, err := a.httpClient.Do(req)
+	duration := time.Since(start)
 	if err != nil {
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）
 		// 包成 IpcError，code=network_offline，前端能识别为"网络问题"而非"未知错误"
+		platform.LogHTTP(ctx, method, path, 0, duration, err)
 		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea %s %s: %s", method, fullURL, err.Error()))
 	}
 	defer resp.Body.Close()
+
+	// 成功/失败都写 HTTP 日志（区分级别：成功 INFO/Debug，失败 WARN）
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)

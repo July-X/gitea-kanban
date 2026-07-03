@@ -34,6 +34,7 @@
  */
 
 import { defineStore } from 'pinia';
+import { logWarn } from '@renderer/lib/frontend-log';
 import { ref } from 'vue';
 import { getIpcClient } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
@@ -271,9 +272,8 @@ export const useUiStore = defineStore('ui', () => {
       })
       .catch((err) => {
         // 静默失败 —— localStorage 已写，下次启动能恢复
-        // 只 console.warn 留痕（dev 调试用）
-        // eslint-disable-next-line no-console
-        console.warn('[ui] navCollapsed persistence failed:', err);
+        // logWarn 留痕（走 frontend-log 写文件）
+        logWarn('ui.navCollapsed', 'persistence failed', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
       });
   }
 

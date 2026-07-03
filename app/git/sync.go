@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -154,20 +155,27 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 	}
 
 	// v2.7：添加 2 分钟超时保护（超大仓库如 UnrealEngine 可能卡很久）
+	slog.Default().Info("git fetch 开始", "localPath", opts.LocalPath, "remote", remoteName, "depth", opts.Depth)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	start := time.Now()
 	err = remote.FetchContext(ctx, fetchOpts)
+	duration := time.Since(start)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
+			slog.Default().Warn("git fetch 超时", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds())
 			return nil, fmt.Errorf("同步超时（2分钟）：此仓库可能过大，建议减少 Depth 或使用在线版本查看")
 		}
 		if err == git.NoErrAlreadyUpToDate {
+			slog.Default().Info("git fetch 已是最新", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds())
 			return &FetchResult{Updated: false}, nil
 		}
+		slog.Default().Error("git fetch 失败", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds(), "err", err.Error())
 		return nil, fmt.Errorf("fetch 失败: %w", err)
 	}
 
+	slog.Default().Info("git fetch 完成", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds())
 	return &FetchResult{Updated: true}, nil
 }
 
@@ -243,9 +251,11 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 	}
 
 	// 2. fetch
+	slog.Default().Info("git pull 开始", "localPath", opts.LocalPath)
 	if _, err := FetchRepo(opts); err != nil {
 		return nil, err
 	}
+	slog.Default().Info("git pull fetch 阶段完成", "localPath", opts.LocalPath)
 
 	// 3. 重新打开 + 找 origin 的 default branch
 	//    注：repo2.Storer 才是 fetch 后的新状态（PlainOpen 有缓存）
@@ -281,6 +291,7 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 		return nil, fmt.Errorf("统计 commit 数失败: %w", err)
 	}
 
+	slog.Default().Info("git pull 完成", "localPath", opts.LocalPath, "addedCommits", afterCount - beforeCount, "headChanged", headBefore != headAfter)
 	return &PullResult{
 		BeforeCount:  beforeCount,
 		AfterCount:   afterCount,

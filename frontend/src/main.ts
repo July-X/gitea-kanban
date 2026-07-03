@@ -25,7 +25,7 @@ import { router } from './routes';
 import { mountCommandPalette } from './lib/command-palette';
 import { useUiStore } from './stores/ui';
 import { showToast } from './lib/toast';
-import { logError } from './lib/frontend-log';
+import { logError, logWarn } from './lib/frontend-log';
 
 // Wails 注入 window.api shim（替代 v1 Electron 时代的 preload bridge）
 // 必须在 createApp / 任何 store 调用前执行（ipc-client 依赖 window.api）
@@ -173,6 +173,28 @@ console.error = (...args: unknown[]) => {
       })
       .join(' ');
     logError('console.error', msg);
+  } catch {
+    // 静默:拦截器本身不能抛
+  }
+};
+
+// console.warn 拦截 —— 与 console.error 完全对称（level=warn, source='console.warn'）
+// 触发场景:库代码 / 第三库组件 / 业务代码自己 console.warn（"deprecated"、"fallback to X"等）
+console.warn = (...args: unknown[]) => {
+  originalConsoleWarn(...args);
+  try {
+    const msg = args
+      .map((a) => {
+        if (a instanceof Error) return a.message;
+        if (typeof a === 'string') return a;
+        try {
+          return JSON.stringify(a);
+        } catch {
+          return String(a);
+        }
+      })
+      .join(' ');
+    logWarn('console.warn', msg);
   } catch {
     // 静默:拦截器本身不能抛
   }
