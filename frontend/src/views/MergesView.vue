@@ -1241,7 +1241,7 @@ function formatRelative(iso: string | undefined): string {
                   </ul>
                 </div>
 
-                <!-- 下：发评论输入区（v2.62 · 改为布局在历史对话下方，固定 100px） -->
+                <!-- 下：发评论输入区（v2.62 · 改为布局在历史对话下方，固定 120px，发送按钮在输入框内右上角） -->
                 <div class="merge-item__comment-compose">
                   <div class="merge-item__comment-input-wrap">
                     <textarea
@@ -1256,6 +1256,16 @@ function formatRelative(iso: string | undefined): string {
                       maxlength="65535"
                       spellcheck="false"
                     ></textarea>
+                    <!-- 发送按钮：绝对定位到输入框右上角 -->
+                    <button
+                      type="button"
+                      class="merge-item__comment-send-absolute"
+                      :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
+                      :title="'发送评论（Enter 也可发送）'"
+                      @click.stop="postComment(p)"
+                    >
+                      <Send :size="14" :stroke-width="2" aria-hidden="true" />
+                    </button>
                     <div
                       v-if="isMentionOpen(p.index) && mentionCandidates(p.index).length > 0"
                       class="merge-item__mention-dropdown"
@@ -1274,16 +1284,6 @@ function formatRelative(iso: string | undefined): string {
                     <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
                       {{ getDraft(p.index).length }} / 65535
                     </span>
-                    <button
-                      type="button"
-                      class="merge-item__comment-send"
-                      :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
-                      :title="'发送评论'"
-                      @click.stop="postComment(p)"
-                    >
-                      <Send :size="12" :stroke-width="2" aria-hidden="true" />
-                      <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
-                    </button>
                   </div>
                 </div>
               </div>
@@ -2774,27 +2774,62 @@ function formatRelative(iso: string | undefined): string {
   white-space: pre-wrap;
 }
 
-/* 发评论输入区（v1.5.8 紧凑 5px 留白 · v2.62 改到历史对话下方，固定 100px） */
+/* 发评论输入区（v2.62 · 改到历史对话下方，固定 120px，发送按钮在输入框内右上角） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
-  gap: 5px;                     /* v1.5.8：8 → 5 */
-  padding: 5px;                 /* v1.5.8：12 → 5 */
+  gap: 4px;
+  padding: 5px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   min-width: 0;
-  height: 100px;                /* v2.62：固定 100px */
+  height: 120px;                /* v2.62：100 → 120 */
   flex-shrink: 0;
   overflow: hidden;
 }
 
-/* textarea + @ 候选下拉的相对定位容器 */
+/* textarea + @ 候选下拉的相对定位容器（v2.62：内部右上角放发送按钮） */
 .merge-item__comment-input-wrap {
   position: relative;
   display: flex;
   flex: 1 1 0;
   min-height: 0;
+}
+
+/* v2.62：发送按钮定位在输入框内右上角（圆形主色实色 + 阴影，复刻参考图） */
+.merge-item__comment-send-absolute {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.merge-item__comment-send-absolute:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  transform: scale(1.05);
+}
+.merge-item__comment-send-absolute:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.merge-item__comment-send-absolute:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 
 /* v1.5.4：去掉 min-height，按你要求只保留 max-height 兜底
@@ -2803,9 +2838,9 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-input {
   width: 100%;
   flex: 1 1 auto;
-  min-height: 0;                    /* v1.5.4：去掉 120px 强制高度 */
+  min-height: 0;
   max-height: 100%;
-  resize: none;                     /* 左右布局下禁止手拽改高，避免破坏等高 */
+  resize: none;
   background: transparent;
   border: none;
   outline: none;
@@ -2813,7 +2848,8 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   color: var(--color-text);
   font-family: inherit;
-  padding: 0;
+  /* v2.62：右侧留 40px 给绝对定位的发送按钮，避免文本压在按钮下 */
+  padding: 6px 40px 6px 8px;
   line-height: 1.5;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2865,37 +2901,13 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;                     /* v1.5.8：8 → 5 */
-  padding-top: 5px;             /* v1.5.8：6 → 5 */
-  border-top: 1px solid var(--color-divider-soft);
+  padding-top: 2px;
+  flex-shrink: 0;
 }
 .merge-item__comment-counter {
   margin-right: auto;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
-}
-.merge-item__comment-send {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 14px;            /* v1.5：4 12 → 6 14，触控更舒服（44px 命中区） */
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-xs);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--t-fast) var(--ease);
-  min-height: 32px;             /* v1.5：明确最小高度，触控目标 ≥ 32 */
-}
-.merge-item__comment-send:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-  border-color: var(--color-primary-hover);
-}
-.merge-item__comment-send:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* ===== markdown 正文全局样式（v1.2）=====
