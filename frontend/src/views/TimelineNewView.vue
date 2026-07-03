@@ -81,6 +81,22 @@ const allLoaded = ref(false);
 /** 本地错误信息 */
 const localError = ref<string | null>(null);
 
+/**
+ * Git Graph 加载更多文字显示控制（与 StatusBarPulse 动效同步）：
+ * - loadingMore=true：显示"正在加载更多提交记录…"（与 StatusBarPulse 呼吸灯同步）
+ * - allLoaded=true：显示"已到全部提交记录的末尾"
+ * - 其他情况：不显示文字
+ */
+const showLoadMoreStatus = computed(() => {
+  return graphDto.value !== null && (loadingMore.value || allLoaded.value);
+});
+
+const gitGraphLoadMoreClass = computed(() => {
+  return loadingMore.value
+    ? 'git-graph-load-more-loading'
+    : 'git-graph-load-more-end';
+});
+
 /** v1.5 功能未启用提示（main handler 返 disabled=true 时设置） */
 const featureDisabled = ref(false);
 /** v1.5 启用流程：是否正在 git clone */
@@ -2227,13 +2243,31 @@ function refBadgeClass(refType?: string): string {
             </template>
             </div><!-- /.git-graph-rows -->
 
-            <!-- v0.6.1+ Git Graph 滚动加载更多哨兵 -->
+            <!-- v0.6.1+ Git Graph 滚动加载更多哨兵（idle 时占位保持高度让 IntersectionObserver 可检测） -->
             <div
               v-if="!allLoaded && graphDto"
               ref="loadMoreSentinel"
               class="git-graph-load-more-sentinel"
               aria-hidden="true"
             ></div>
+            <!-- 加载中文字（与 StatusBarPulse 动效同步显示/隐藏，由 globalLoading 控制） -->
+            <div
+              v-if="showLoadMoreStatus"
+              class="git-graph-load-more"
+              :class="gitGraphLoadMoreClass"
+              role="status"
+              aria-live="polite"
+            >
+              <template v-if="gitGraphLoadMoreClass === 'git-graph-load-more-loading'">
+                <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
+                <span>正在加载更多提交记录…</span>
+              </template>
+              <template v-else>
+                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+                <span>已到全部提交记录的末尾</span>
+                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+              </template>
+            </div>
           </div>
         </div>
        </template>
@@ -2249,11 +2283,72 @@ function refBadgeClass(refType?: string): string {
   overflow: hidden;
 }
 
-/* v0.6.1+ Git Graph 滚动加载更多哨兵（保持高度让 IntersectionObserver 可检测） */
-.git-graph-load-more-sentinel {
-  height: 4px;
-  width: 100%;
+/* v0.6.1+ Git Graph 滚动加载更多（与 MergesView 风格统一） */
+.git-graph-load-more {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-4) 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-height: 56px;
+  list-style: none;
   flex-shrink: 0;
+  width: 100%;
+  text-align: center;
+  transition: opacity var(--t-base) var(--ease);
+}
+.git-graph-load-more-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.git-graph-load-more-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2.5px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: git-graph-load-more-spin 0.7s linear infinite;
+}
+.git-graph-load-more-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  animation: git-graph-load-more-idle-breath 2s ease-in-out infinite;
+}
+.git-graph-load-more-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--color-divider);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.git-graph-load-more-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-style: normal;
+  font-size: var(--font-xs);
+}
+.git-graph-load-more-divider {
+  flex: 0 0 24px;
+  height: 1px;
+  background: var(--color-divider);
+}
+@keyframes git-graph-load-more-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes git-graph-load-more-idle-breath {
+  0%, 100% { opacity: 0.55; transform: translateY(0); }
+  50% { opacity: 0.9; transform: translateY(2px); }
 }
 
 /* ===== 顶部栏 ===== */

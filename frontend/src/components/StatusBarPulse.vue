@@ -151,17 +151,19 @@ const showWaveform = computed(() => phase.value === 'pulsing' || phase.value ===
  * - 整条 footer 显示主色背景
  * - 透明度在 0.2 ↔ 0.5 之间周期性变化（呼吸节奏）
  * - 仅在 pulsing 阶段显示，加载结束瞬间立即消失
+ *
+ * 主题适配：
+ * - dark 主题：opacity 直接控制亮度（无 mix-blend-mode）
+ * - light 主题：用 color-mix 降低饱和度，避免 multiply 蒙版效果
  */
 .statusbar-pulse__layer--pulsing {
   background: var(--color-primary);
   animation: statusbar-breath 2s ease-in-out infinite;
-  mix-blend-mode: screen;
 }
 
-/* light 主题：避免过亮 */
+/* light 主题：使用浅色主色，避免 multiply 蒙版 */
 :global([data-theme='light']) .statusbar-pulse__layer--pulsing {
-  opacity: 0.5;
-  mix-blend-mode: multiply;
+  background: color-mix(in srgb, var(--color-primary) 50%, var(--color-bg-elevated));
 }
 
 /*
