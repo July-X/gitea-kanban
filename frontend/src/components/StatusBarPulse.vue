@@ -2,16 +2,18 @@
 /**
  * StatusBarPulse —— 底部状态栏加载动画
  *
- * 设计（v0.6.8 更新）：
- *   - 加载中：周期性从左侧产生一个波形脉冲，从左到右运动，到达右端后消失，然后重新从左侧产生
- *   - 加载完成：过渡到 MiniMax 声纹波形（5 段），5 秒后消散
+ * 设计（v0.6.16 更新）：
+ *   - 加载中：footer 背景色呼吸灯效果（透明度周期变化）
+ *   - 加载结束：
+ *     1. 呼吸灯立即消失
+ *     2. 声纹波形显示，延后 2 秒消散
  *
  * 状态机：
  *   - idle：不可见
- *   - pulsing：周期性波形脉冲从左到右运动
- *   - finishing：MiniMax 波形消散
+ *   - pulsing：footer 背景呼吸灯
+ *   - finishing：呼吸灯立即消散 → 声纹波形显示 2 秒后消散
  */
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 
 const globalLoading = useGlobalLoadingStore();
@@ -19,66 +21,57 @@ const globalLoading = useGlobalLoadingStore();
 type Phase = 'idle' | 'pulsing' | 'finishing';
 const phase = ref<Phase>('idle');
 
-let finishTimer: ReturnType<typeof setTimeout> | null = null;
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
-const pulseKey = ref(0);
-
-/** 启动周期性脉冲 */
-function startPulses(): void {
-  // 清除现有定时器
-  if (pulseTimer) {
-    clearTimeout(pulseTimer);
-    pulseTimer = null;
-  }
-
-  // 立即触发第一个脉冲
-  triggerPulse();
-
-  // 每 4 秒触发一个新脉冲
-  pulseTimer = setInterval(() => {
-    triggerPulse();
-  }, 4000);
-}
-
-/** 触发单个脉冲 */
-function triggerPulse(): void {
-  pulseKey.value++;
-}
-
-/** 停止脉冲 */
-function stopPulses(): void {
-  if (pulseTimer) {
-    clearInterval(pulseTimer);
-    pulseTimer = null;
-  }
-}
+let waveformTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
   () => globalLoading.visible,
   (visible) => {
     if (visible) {
-      if (finishTimer) {
-        clearTimeout(finishTimer);
-        finishTimer = null;
+      // 清除所有定时器
+      if (pulseTimer) {
+        clearTimeout(pulseTimer);
+        pulseTimer = null;
+      }
+      if (waveformTimer) {
+        clearTimeout(waveformTimer);
+        waveformTimer = null;
       }
       phase.value = 'pulsing';
-      startPulses();
     } else if (phase.value === 'pulsing') {
       phase.value = 'finishing';
-      stopPulses();
-      if (finishTimer) clearTimeout(finishTimer);
-      finishTimer = setTimeout(() => {
-        phase.value = 'idle';
-        finishTimer = null;
-      }, 5000);
+
+      // 加载逻辑完成 → 等所有 namespace 完成后启动消散流程
+      if (globalLoading.active.size === 0) {
+        startDisperse();
+      } else {
+        const stop = watch(
+          () => globalLoading.active.size,
+          (size) => {
+            if (size === 0) {
+              stop();
+              startDisperse();
+            }
+          },
+        );
+      }
     }
   },
 );
 
-onUnmounted(() => {
-  stopPulses();
-  if (finishTimer) clearTimeout(finishTimer);
-});
+/**
+ * 启动消散流程：
+ * 1. 呼吸灯立即消失（finishing 阶段立即移除 background 层）
+ * 2. 声纹波形继续显示 2 秒后消失
+ */
+function startDisperse(): void {
+  // 1. 呼吸灯立即消失：phase 切到 finishing 后不再渲染背景层
+  // 2. 声纹波形延后 2 秒消散
+  waveformTimer = setTimeout(() => {
+    phase.value = 'idle';
+    waveformTimer = null;
+  }, 2000);
+}
 
 /** 当前活跃的 namespace 列表（tooltip 用） */
 const activeNamespaces = computed(() => {
@@ -101,130 +94,93 @@ const nsLabel: Record<string, string> = {
 const activeLabel = computed(() => {
   return activeNamespaces.value.map((ns) => nsLabel[ns] ?? ns).join(' / ');
 });
+
+/** 是否显示呼吸灯背景层：仅 pulsing 显示，finishing 不显示（立即消失） */
+const showPulseLayer = computed(() => phase.value === 'pulsing');
+
+/** 是否显示声纹波形：pulsing 和 finishing 都显示 */
+const showWaveform = computed(() => phase.value === 'pulsing' || phase.value === 'finishing');
 </script>
 
 <template>
-  <Transition name="statusbar-pulse-fade">
-    <div
-      v-if="phase !== 'idle'"
-      class="statusbar-pulse"
-      :class="{
-        'statusbar-pulse--pulsing': phase === 'pulsing',
-        'statusbar-pulse--finishing': phase === 'finishing',
-      }"
-      :title="phase === 'pulsing' ? `加载中：${activeLabel}` : '加载完成'"
-      role="status"
-      :aria-label="phase === 'pulsing' ? `加载中：${activeLabel}` : '加载完成'"
-    >
-      <!-- 加载中：周期性波形脉冲 -->
-      <div v-if="phase === 'pulsing'" class="statusbar-pulse__heartbeat" aria-hidden="true">
-        <!-- 静态底线 -->
-        <div class="statusbar-pulse__baseline"></div>
-        <!-- 单个脉冲波形 -->
-        <svg
-          :key="pulseKey"
-          class="statusbar-pulse__pulse"
-          viewBox="0 0 100 40"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <defs>
-            <filter id="pulseGlow">
-              <feGaussianBlur stdDeviation="1.5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          <!-- 单个脉冲：从基线向上尖刺 -->
-          <path
-            d="M50,20 L50,2 L55,20 L60,20"
-            fill="none"
-            stroke="var(--color-primary)"
-            stroke-width="3"
-            stroke-linejoin="miter"
-            filter="url(#pulseGlow)"
-          />
-        </svg>
-      </div>
+  <!--
+    呼吸灯背景层：仅在 pulsing 阶段显示
+    - 加载中：纯主色背景 + opacity 周期变化（呼吸节奏）
+    - 加载结束瞬间：立即消失
+  -->
+  <div
+    v-if="showPulseLayer"
+    class="statusbar-pulse__layer statusbar-pulse__layer--pulsing"
+    :title="`加载中：${activeLabel}`"
+    role="status"
+    :aria-label="`加载中：${activeLabel}`"
+  ></div>
 
-      <!-- 加载完成：MiniMax 波形消散 -->
-      <div v-else class="statusbar-pulse__waveform" aria-hidden="true">
-        <span class="statusbar-pulse__bar"></span>
-        <span class="statusbar-pulse__bar"></span>
-        <span class="statusbar-pulse__bar"></span>
-        <span class="statusbar-pulse__bar"></span>
-        <span class="statusbar-pulse__bar"></span>
-      </div>
-    </div>
-  </Transition>
+  <!--
+    声纹波形层：pulsing 和 finishing 都显示
+    - 加载中：与呼吸灯一起显示
+    - 加载结束：呼吸灯消失后声纹波形继续显示，延后 2 秒消散
+  -->
+  <div
+    v-if="showWaveform"
+    class="statusbar-pulse__waveform"
+    :class="{ 'statusbar-pulse__waveform--finishing': phase === 'finishing' }"
+    aria-hidden="true"
+  >
+    <span class="statusbar-pulse__bar"></span>
+    <span class="statusbar-pulse__bar"></span>
+    <span class="statusbar-pulse__bar"></span>
+    <span class="statusbar-pulse__bar"></span>
+    <span class="statusbar-pulse__bar"></span>
+  </div>
 </template>
 
 <style scoped>
-/* ===== 容器 ===== */
-.statusbar-pulse {
-  position: absolute;
-  top: -8px;
-  left: 0;
-  right: 0;
-  height: 8px;
-  z-index: 1;
-  pointer-events: auto;
-  cursor: default;
-}
-
-/* ===== 加载中：波形脉冲 ===== */
-.statusbar-pulse--pulsing {
-  overflow: hidden;
-}
-
-.statusbar-pulse__heartbeat {
+/* ===== 加载动画层 ===== */
+.statusbar-pulse__layer {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
 }
 
 /*
- * 静态底线：始终显示，不被滚动波形覆盖
+ * 呼吸灯效果（pulsing）：纯主色背景 + opacity 周期变化
+ * - 整条 footer 显示主色背景
+ * - 透明度在 0.2 ↔ 0.5 之间周期性变化（呼吸节奏）
+ * - 仅在 pulsing 阶段显示，加载结束瞬间立即消失
  */
-.statusbar-pulse__baseline {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 1px;
+.statusbar-pulse__layer--pulsing {
   background: var(--color-primary);
-  opacity: 0.4;
+  animation: statusbar-breath 2s ease-in-out infinite;
+  mix-blend-mode: screen;
+}
+
+/* light 主题：避免过亮 */
+:global([data-theme='light']) .statusbar-pulse__layer--pulsing {
+  opacity: 0.5;
+  mix-blend-mode: multiply;
 }
 
 /*
- * 单个脉冲波形：从左侧产生，向右运动
- * 使用 CSS 动画实现从左到右的匀速运动
+ * 呼吸灯动画：opacity 周期变化（类似呼吸节奏）
+ * 0%   → 最低透明度（吸气）
+ * 50%  → 最高透明度（呼气峰值）
+ * 100% → 最低透明度（吸气结束）
  */
-.statusbar-pulse__pulse {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  animation: statusbar-pulse-move 4s linear forwards;
-}
-
-/*
- * 脉冲运动动画：从左侧移动到右侧
- * 0%   → 脉冲在左边缘（x=0）
- * 100% → 脉冲到达右边缘（x=100%）
- */
-@keyframes statusbar-pulse-move {
-  0% {
-    transform: translateX(-100%);
-  }
+@keyframes statusbar-breath {
+  0%,
   100% {
-    transform: translateX(100vw);
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.5;
   }
 }
 
-/* ===== MiniMax 波形消散（加载完成） ===== */
+/* ===== 声纹波形（pulsing + finishing 都显示） ===== */
 .statusbar-pulse__waveform {
   position: absolute;
   inset: 0;
@@ -232,9 +188,16 @@ const activeLabel = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  height: 24px;
-  margin-top: -10px;
-  animation: statusbar-waveform-disperse 5s ease-out forwards;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/*
+ * finishing 阶段：声纹波形单独显示在背景层之上
+ * 2 秒后随 phase 切到 idle 一起消失（v-if 控制）
+ */
+.statusbar-pulse__waveform--finishing {
+  /* 单独显示时的样式可以微调，比如更亮 */
 }
 
 .statusbar-pulse__bar {
@@ -275,33 +238,5 @@ const activeLabel = computed(() => {
   100% {
     transform: scaleY(1);
   }
-}
-
-/* 整体消散：opacity 1→0 + 高度收缩到底线 */
-@keyframes statusbar-waveform-disperse {
-  0% {
-    opacity: 1;
-    transform: scaleY(1);
-  }
-  70% {
-    opacity: 0.6;
-    transform: scaleY(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scaleY(0);
-  }
-}
-
-/* ===== 进入/退出过渡 ===== */
-.statusbar-pulse-fade-enter-active {
-  transition: opacity 0.2s ease-out;
-}
-.statusbar-pulse-fade-leave-active {
-  transition: opacity 0.3s ease-in;
-}
-.statusbar-pulse-fade-enter-from,
-.statusbar-pulse-fade-leave-to {
-  opacity: 0;
 }
 </style>
