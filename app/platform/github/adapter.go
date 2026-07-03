@@ -31,6 +31,7 @@ import (
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
+	"gitea-kanban/app/logx"
 	"gitea-kanban/app/platform"
 )
 
@@ -1150,22 +1151,20 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）
 		// 必须包成 IpcError，否则前端 normalizeError 落到 "未知错误" 占位文案
 		// 用户根本看不到真实原因（TLS handshake timeout / DNS 解析失败 / 502 等）
-		platform.LogHTTP(ctx, method, path, 0, duration, err)
+		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
 		return ipc.NewNetworkOffline(fmt.Sprintf("GitHub %s %s: %s", method, fullURL, err.Error()))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		bodyStr := ipc.TruncateCause(string(bodyBytes))
 		// 关键诊断：每次非 2xx 都写一条 slog,这样用户报错时
 		// ${dataDir}/logs/main/main.log 里有完整 status + url + body
-		platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil)
-		_ = bodyStr // bodyStr kept for backwards-compat call below
+		platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 		return mapHTTPError(resp.StatusCode, string(bodyBytes))
 	}
 
-	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil)
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 
 	if resp.StatusCode == http.StatusNoContent {
 		return nil
