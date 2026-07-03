@@ -1213,14 +1213,16 @@ function formatRelative(iso: string | undefined): string {
                       class="merge-item__comment"
                       :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
                     >
-                      <div
-                        class="merge-item__comment-avatar"
-                        :title="c.author.username"
-                        aria-hidden="true"
-                      >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
+                      <div class="merge-item__comment-side">
+                        <div
+                          class="merge-item__comment-avatar"
+                          :title="c.author.username"
+                          aria-hidden="true"
+                        >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
+                        <div class="merge-item__comment-name">{{ c.author.username }}</div>
+                      </div>
                       <div class="merge-item__comment-bubble">
                         <div class="merge-item__comment-meta">
-                          <span class="merge-item__comment-author">{{ c.author.username }}</span>
                           <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
                           <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
                         </div>
@@ -1794,7 +1796,8 @@ function formatRelative(iso: string | undefined): string {
 }
 
 .merge-item {
-  background: var(--color-bg-elevated);
+  /* v0.6.24：去掉浅苍蓝背景色，使用透明背景，让整页背景色统一 */
+  background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   transition: background var(--t-fast) var(--ease);
@@ -2463,6 +2466,8 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
   min-height: 0;
   flex: 1 1 0;
+  /* v0.6.25：强制透明背景，去掉浅苍蓝强调色 */
+  background: transparent;
   /* v0.6+ bugfix：保证评论体长文本不越出面板边缘，避免出现整页横向滚动条 */
   overflow-x: hidden;
 }
@@ -2532,6 +2537,8 @@ function formatRelative(iso: string | undefined): string {
   min-height: 0;
   width: 100%;
   margin-bottom: 5px;
+  /* v0.6.25：强制透明背景 */
+  background: transparent;
 }
 
 /* 上：历史评论 + 各种态（loading/error/empty） */
@@ -2627,14 +2634,19 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
 }
 
-/* v1.5.11：复刻 gitea 合并请求评论聊天布局——"我"的消息头像+气泡都贴右（对称显示） */
-.merge-item__comment--self {
-  flex-direction: row-reverse;
+/* v0.6.21：评论侧栏（头像 + 用户名垂直排列） */
+.merge-item__comment-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 60px;
+  max-width: 80px;
 }
 
 /* 头像圈（首字母） */
 .merge-item__comment-avatar {
-  flex-shrink: 0;
   width: 26px;
   height: 26px;
   border-radius: 50%;
@@ -2652,13 +2664,28 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text-inverse);
 }
 
+/* 头像下方的用户名 */
+.merge-item__comment-name {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.merge-item__comment--self .merge-item__comment-name {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
 /* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
 .merge-item__comment-bubble {
   flex: 1 1 0;
   min-width: 0;
   max-width: 100%;
   padding: 5px 8px;
-  background: var(--color-bg-elevated);
+  /* v0.6.23：取消背景色，用边框线表达 */
+  background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: 8px;
   position: relative;
@@ -2666,13 +2693,50 @@ function formatRelative(iso: string | undefined): string {
   word-wrap: break-word;
   word-break: break-word;
 }
+/* v0.6.22：评论区宽度撑满，padding 只控制左右留白 */
+.merge-item__comment-list {
+  padding: 4px 50px;
+  display: flex;
+  flex-direction: column;
+}
 /* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
  * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
 .merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
   padding-right: 56px;
 }
+/* v0.6.22：评论自适应宽度，他人靠左，"我"靠右 */
+.merge-item__comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 12px;
+  max-width: 70%;
+}
+/* v0.6.22："我"的评论靠右 */
+.merge-item__comment--self {
+  margin-left: auto;
+  flex-direction: row-reverse;
+}
+/* 气泡小箭头（指向头像）—— 用 CSS border 画三角形 */
 .merge-item__comment-bubble::before {
-  display: none;
+  content: '';
+  position: absolute;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  border: 1px solid var(--color-divider);
+  /* 默认（他人，左侧）：箭头指向左 */
+  left: -5px;
+  border-right: 1px solid var(--color-divider);
+  border-top: none;
+  border-bottom: none;
+  transform: rotate(45deg);
+}
+.merge-item__comment-bubble {
+  /* 让他人箭头也跟随气泡背景色 */
+  background-clip: padding-box;
 }
 /* v1.5.11：复刻 gitea 颜色——"我"的气泡用主色实色 + 白字（强对比），
  * 他人保持 elevated 浅色 + 默认字（弱对比） */
@@ -2736,11 +2800,14 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment--self .merge-item__comment-bubble::before {
   left: auto;
   right: -5px;
-  background: var(--color-primary-soft, var(--color-bg-elevated));
+  /* v0.6.20：背景透明，箭头跟随边框颜色 */
+  background: transparent;
   border-left: none;
   border-bottom: none;
-  border-right: 1px solid var(--color-primary);
-  border-top: 1px solid var(--color-primary);
+  border-right: 1.5px solid var(--color-primary);
+  border-top: 1.5px solid var(--color-primary);
+  /* 旋转 45° 让两个边形成指向右的三角箭头 */
+  transform: rotate(45deg);
 }
 
 .merge-item__comment-meta {
@@ -2814,7 +2881,8 @@ function formatRelative(iso: string | undefined): string {
   flex-direction: column;
   gap: 4px;
   padding: 5px;
-  background: var(--color-bg-elevated);
+  /* v0.6.25：去掉浅苍蓝背景色，与整页背景统一 */
+  background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   min-width: 0;
