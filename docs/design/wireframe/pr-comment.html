@@ -3,91 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Gitea Kanban · PR 评论模块（还原稿）</title>
+  <title>Gitea Kanban · PR 评论模块（还原稿 v4）</title>
   <style>
     /* ====== 主题 token（对齐 theme.css v1.6.1） ====== */
-:root {
-
-  /* === 边角（v1.6 中等柔化 · Linear / Notion / GitHub 主流 6-8px 范围） === */
-  --radius-xs: 4px;        /* 标签 / chip · 极小 */
-  --radius-sm: 6px;        /* 按钮 / 输入框 / 小型 chip */
-  --radius-md: 8px;        /* 卡片 / 弹窗 / 抽屉 */
-  --radius-lg: 12px;       /* 大型弹窗 / 浮层 */
-  --radius-pill: 999px;    /* 状态点 / 圆角 chip */
-  --radius-card: 8px;      /* 卡片统一 */
-  --radius-btn: 6px;       /* 按钮统一 */
-  --radius-input: 6px;     /* 输入框统一 */
-  --radius-chip: 4px;      /* chip / 标签 */
-  --radius-modal: 8px;     /* 弹窗 */
-  --radius-tag: 4px;       /* 标签 */
-
-  /* === 间距 === */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-
-  /* === 字号 === */
-  --font-xs: 11px;
-  --font-sm: 13px;
-  --font-md: 15px;
-  --font-lg: 16px;
-  --font-xl: 20px;
-  --font-2xl: 24px;
-  --font-h1: 24px;
-  --font-h2: 18px;
-  --font-h3: 14px;
-  --font-body: 14px;
-  --font-body-sm: 13px;
-  --font-caption: 11px;
-  --font-mono: 12px;
-  --font-mono-sm: 11px;
-  --font-kpi: 28px; /* v1.6 从 36px 降到 28px · 取消"强发光"超大数字 */
-
-  /* === 行高 === */
-  --line-tight: 1.3;
-  --line-base: 1.5;
-  --line-relaxed: 1.7;
-
-  /* === 字体栈 === */
-  --font-sans:
-    'Inter', 'Noto Sans SC',
-    'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text',
-    system-ui, sans-serif;
-  --font-mono-stack:
-    'JetBrains Mono', Consolas, 'MesloLGS NF', monospace;
-
-  /* === 动效（120-240ms 紧凑现代） === */
-  --t-fast: 120ms;
-  --t-base: 180ms;
-  --t-slow: 240ms;
-  --t-theme: 150ms; /* 主题切换专用过渡 */
-  --ease: cubic-bezier(0.2, 0, 0, 1);
-  --ease-out: cubic-bezier(0.2, 0, 0.2, 1);
-  --ease-theme: ease-out;
-
-  /* === 布局 === */
-  --navrail-width: 224px;
-  --navrail-collapsed-width: 56px;
-  --statusbar-height: 33px; /* v1.4 · 任务 #statusbar-picker：留出下拉空间放仓库触发器 */
-  --topbar-height: 48px;
-
-  /* === z-index === */
-  --z-base: 1;
-  --z-nav: 100;
-  --z-toast: 1000;
-  --z-modal: 2000;
-  --z-modal-overlay: 1999;
-
-  /* === 进度条（v1.6 弱化：去 glow / 去渐变 · 走主色实色 + 8% 底） === */
-  --progress-track-bg: rgba(96, 153, 38, 0.08);
-  --progress-track-border: 1px solid rgba(96, 153, 38, 0.2);
-  --progress-fill-bg: #609926; /* 去渐变 · 走主色实色 */
-}
-
 html[data-theme='dark'] {
 
   /* === 背景梯度（v1.6.1 暗色提档 · 左导航 elevated 跟主区 canvas 拉开 14 阶） ===
@@ -117,14 +35,156 @@ html[data-theme='dark'] {
   --color-shell-main-bg: var(--color-bg);
 }
 
+html[data-theme='dark'] {
+  /* === 背景梯度（v1.6.1 暗色提档 · 左导航 elevated 跟主区 canvas 拉开 14 阶） ===
+   * 旧值 #1E222A vs #0F1115 = 9 阶（亮度差 4%）肉眼几乎看不出
+   * 新值 #181C24 vs #0F1115 = 14 阶（亮度差 7%）有可见但克制的层次 */
+  --color-elevated: #181c24; /* v1.6.1 提档（原 #1E222A 跟 canvas 差太小） */
+  --color-hover: #262b34; /* v1.6.1 同步提档 */
+  --color-active: #353b46;
 
+  /* === 描边 / 分隔（v1.6.1 提档 · 暗色下"克制 = 看不见"的修复） === */
+  --color-divider: rgba(220, 233, 240, 0.1);              /* 8% → 10% */
+  --color-divider-strong: rgba(220, 233, 240, 0.2);      /* 16% → 20% · 区域边界 */
+  --color-divider-region: rgba(220, 233, 240, 0.16);     /* 12% → 16% · 区域边界 */
 
-    /* ====== 应用全局追加规则 ====== */
+  /* === 阴影（v1.6.1 暗色专属提档） ===
+   * v1.6 共用 4 档在暗色下太弱（0.06-0.10 alpha 黑 vs #0F1115 几乎不可见）
+   * 暗色提档到 0.16-0.30，亮色保持 0.06-0.10（不糊） */
+  --shadow-xs: 0 1px 2px rgba(var(--shadow-rgb), 0.16);
+  --shadow-sm: 0 1px 3px rgba(var(--shadow-rgb), 0.2), 0 1px 2px rgba(var(--shadow-rgb), 0.12);
+  --shadow-md: 0 4px 8px rgba(var(--shadow-rgb), 0.24), 0 2px 4px rgba(var(--shadow-rgb), 0.16);
+  --shadow-lg: 0 12px 24px rgba(var(--shadow-rgb), 0.32), 0 4px 8px rgba(var(--shadow-rgb), 0.2);
+
+  /* === 右侧主区背景色（v1.6.1 新增）===
+   * 暗色走 --color-bg（最深画布）—— 跟 elevated (#181C24) 形成 9 阶亮度差
+   * 卡片 (elevated) 浮在主区 (canvas) 上，符合 elevation 逻辑
+   * 亮色走专属 #F8FAFC（极浅灰白）见 light 主题块 */
+  --color-shell-main-bg: var(--color-bg);
+}
+
+:root,
+[data-theme='dark'] {
+  /* === 背景梯度（暗色基底 · :root 默认 + [data-theme='dark'] 应用） === */
+  --color-canvas: #0f1115; /* H220° S17% L7% */
+  /* --color-elevated 在 [data-theme="dark"] 单独块提档（v1.6.1） */
+  /* --color-hover / --color-active 在 [data-theme="dark"] 单独块提档（v1.6.1） */
+
+  /* === 文字（vs #0F1115） ===
+   * 主文字接近纯白（~93% L），确保 2K 屏上清晰可读
+   *  - text:       #e2ecf2 (~12.0:1) ✅ 主正文，高亮度
+   *  - text-muted: #b4c6d4 (~7.5:1)  ✅ 二级文字（作者/时间/SHA）
+   *  - text-dim:   #94a4b2 (~5.5:1)  ✅ 三级文字（装饰/弱化）
+   *  - text-inverse: #ffffff  CTA 白字 */
+  --color-text: #ffffff; /* 纯白 */
+  --color-text-muted: #b4c6d4; /* 7.5:1 ✅ */
+  --color-text-dim: #94a4b2; /* 5.5:1 ✅ */
+  --color-text-inverse: #ffffff; /* 主色 CTA 上配白字 */
+
+  /* === 主色（提亮到 #74B830 过 AA 4.5:1；hover 进一步提亮；active 压暗） === */
+  --color-primary: #74b830; /* vs #0F1115 4.74:1 ✅ */
+  --color-primary-hover: #8ac544; /* vs #0F1115 5.83:1 ✅ */
+  --color-primary-active: #5c9622; /* vs #0F1115 3.50:1 ⚠️ 装饰态用 */
+  --color-primary-soft: rgba(116, 184, 48, 0.18);
+  --color-primary-glow: rgba(116, 184, 48, 0.32);
+  /* === 主色 alpha 分档（C-3 硬约束 #4/#7 修法 · 2026-06-14）===
+   * 旧硬编码 rgba(116,184,48,0.45) / 0.7 改 token 化；
+   * 让 light 主题能自动切到 #466B16 系列，避免主题切换失效 */
+  --color-primary-alpha-22: rgba(116, 184, 48, 0.22);
+  --color-primary-alpha-45: rgba(116, 184, 48, 0.45);
+  --color-primary-alpha-70: rgba(116, 184, 48, 0.7);
+
+  /* === 状态色（warning / error / info / pending / offline） === */
+  --color-warning: #ff8534; /* gitea 橙提亮 · 暗底清晰 */
+  --color-error: #e14646;
+  --color-info: #4fc4d6;
+  --color-pending: #94a3b8;
+  --color-offline: #64748b;
+
+  /* === 强调 / 状态 派生（hover / active / soft） === */
+  --color-accent: #ff8534; /* 旧名 → 强调色（提亮版） */
+  --color-accent-hover: #ffa361;
+  --color-accent-soft: rgba(255, 133, 52, 0.18);
+
+  --color-success: #74b830; /* 旧名 → 主色（green = success = primary） */
+  --color-success-soft: rgba(116, 184, 48, 0.16);
+
+  --color-warning-soft: rgba(255, 133, 52, 0.16);
+  --color-warning-active: #c25800;
+
+  --color-danger: #e14646;
+  --color-danger-soft: rgba(225, 70, 70, 0.16);
+
+  /* === Git Graph 16 色（对齐 Gitea --color-series-16-*）===
+   * 来源：gitea/web_src/css/themes/theme-gitea-dark.css:145-160
+   * 用于 gitgraph 视图 flow-color-16-N 着色，每条分支线独立颜色。
+   * Gitea dark/light 主题用相同 16 色值；本项目 dark 主题直接复用。
+   */
+  --color-series-16-0: #7db233;
+  --color-series-16-1: #499a37;
+  --color-series-16-2: #ce4751;
+  --color-series-16-3: #8f9121;
+  --color-series-16-4: #ac32a6;
+  --color-series-16-5: #7445e9;
+  --color-series-16-6: #c67d28;
+  --color-series-16-7: #4db392;
+  --color-series-16-8: #aa4d30;
+  --color-series-16-9: #2a6f84;
+  --color-series-16-10: #c45327;
+  --color-series-16-11: #3d965c;
+  --color-series-16-12: #792a93;
+  --color-series-16-13: #439d73;
+  --color-series-16-14: #103aad;
+  --color-series-16-15: #982e85;
+
+  /* Git Graph lane canvas: dark theme uses a VSCode-like track, not hardcoded in the view. */
+  --color-graph-bg: #1e1e1e;
+
+  --color-info-soft: rgba(79, 196, 214, 0.16);
+
+  /* === 时间轴分支色（8 lane · 8 颜色，对应 5 种分支类型 + 主色/强调/info）===
+   * - main:       primary
+   * - feature/*:  accent
+   * - hotfix/*:   info
+   * - *exp:       purple（用户实验）
+   * - chore/*:    teal
+   * - refactor/*: amber
+   * - docs/*:     pink
+   * - spike/*:    lime
+   * 暗色过 AA 4.5:1 验证：purple 8.4:1 / teal 7.1:1 / amber 8.9:1 / pink 5.8:1 / lime 9.2:1
+   * 亮色过 AA 4.5:1 验证：purple 6.1:1 / teal 5.3:1 / amber 5.4:1 / pink 6.0:1 / lime 5.7:1
+   */
+  --color-purple: #b294e2;
+  --color-purple-soft: rgba(178, 148, 226, 0.18);
+  --color-teal: #3fb8af;
+  --color-teal-soft: rgba(63, 184, 175, 0.18);
+  --color-amber: #e8b954;
+  --color-amber-soft: rgba(232, 185, 84, 0.18);
+  --color-pink: #ec5baa;
+  --color-pink-soft: rgba(236, 91, 170, 0.18);
+  --color-lime: #b8d946;
+  --color-lime-soft: rgba(184, 217, 70, 0.18);
+
+  /* === 描边 / 分隔（暗色基底 · v1.6.1 提档值在 [data-theme="dark"] 单独块） === */
+  --color-border: transparent;
+
+  /* === 阴影 RGB 起点（暗色中性黑） === */
+  --shadow-rgb: 0, 0, 0;
+  /* --shadow-xs/sm/md/lg 在 [data-theme="dark"] 单独块提档（v1.6.1） */
+
+  /* === 滚动条（v1.6 弱化 · 去 glow · 走主色软底 + hover 实色） === */
+  --scrollbar-thumb: rgba(116, 184, 48, 0.22);
+  --scrollbar-thumb-hover: rgba(116, 184, 48, 0.5);
+  --scrollbar-thumb-active: #74b830; /* thumb active 态 = 主色实色 */
+}
+
+    /* ====== 应用全局 ====== */
     :root {
       --font-xs: 11px;
       --font-sm: 13px;
       --font-md: 15px;
       --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+      --shadow-rgb: 0, 0, 0;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -133,10 +193,13 @@ html[data-theme='dark'] {
       color: var(--color-text);
       font-size: var(--font-md);
       -webkit-font-smoothing: antialiased;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
     }
-    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 
-    /* ====== 合并请求模块完整 CSS（来自 MergesView.vue） ====== */
+    /* ====== 完整 CSS（来自 MergesView.vue） ====== */
 
 .merges {
   flex: 1;
@@ -2145,274 +2208,384 @@ html[data-theme='dark'] {
 
 
 
-    /* ====== wireframe 辅助样式 ====== */
-    body { padding: 24px; }
-    .wf-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--color-text); }
-    .wf-subtitle { font-size: 12px; color: var(--color-text-muted); margin-bottom: 24px; }
+    /* ====== wireframe 布局 ====== */
+    .wf-shell { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+    .wf-sidebar { width: 200px; background: var(--color-bg-elevated); border-right: 1px solid var(--color-divider); padding: 16px 8px; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+    .wf-nav-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--color-text-muted); cursor: pointer; }
+    .wf-nav-item:hover { background: var(--color-bg-hover); color: var(--color-text); }
+    .wf-nav-item--active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 500; }
+    .wf-nav-icon { width: 16px; text-align: center; }
+    .wf-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .wf-titlebar { display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid var(--color-divider); flex-shrink: 0; }
+    .wf-titlebar h1 { font-size: 16px; font-weight: 600; }
+    .wf-titlebar__repo { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; background: var(--color-bg-elevated); font-size: 13px; }
+    .wf-titlebar__spacer { flex: 1; }
+    .wf-content { flex: 1; overflow-y: auto; padding: 16px 24px; display: flex; flex-direction: column; gap: 8px; }
+
+    /* addon */
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+    .badge--open { background: var(--color-success-soft); color: var(--color-success); }
+    .badge--merged { background: var(--color-accent-soft); color: var(--color-accent); }
+    .badge--closed { background: var(--color-bg-active); color: var(--color-text-secondary); }
+    .badge--draft { background: var(--color-warning-soft); color: var(--color-warning); border: 1px solid var(--color-warning); }
+    .text-muted { color: var(--color-text-muted); }
+    .text-secondary { color: var(--color-text-secondary); }
+    .text-primary { color: var(--color-primary); }
   </style>
 </head>
 <body>
 
-<div class="wf-title">PR 评论模块 — 1:1 还原稿</div>
-<div class="wf-subtitle">使用真实 MergesView.vue 的 class 名和 CSS 规则，非独立设计稿</div>
+<div class="wf-shell">
+  <!-- 侧栏 -->
+  <nav class="wf-sidebar">
+    <div class="wf-nav-item"><span class="wf-nav-icon">📊</span> 看板</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">📈</span> Git Graph</div>
+    <div class="wf-nav-item wf-nav-item--active"><span class="wf-nav-icon">🔀</span> 合并请求</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">📋</span> 议题</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">👥</span> 成员</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">🏷</span> 标签</div>
+  </nav>
 
-<!-- ===== PR 列表容器 ===== -->
-<div class="merges__list" style="display:flex; flex-direction:column; gap:8px; max-width:960px;">
-
-<!-- ========== PR #128 待合并（展开状态） ========== -->
-<div class="merge-item merge-item--open" data-pr-idx="128">
-  <!-- leading: 状态色条 -->
-  <div class="merge-item__leading">
-    <span class="merge-item__icon merge-item__icon--open">●</span>
-  </div>
-
-  <!-- main: 标题 + meta -->
-  <div class="merge-item__main">
-    <div class="merge-item__header">
-      <span class="merge-item__title">feat: 用户登录增加 OAuth 支持</span>
-      <span class="merge-item__badge merge-badge--open">待合并</span>
-      <button class="merge-item__timeline-btn" title="跳转到时间轴">🕐</button>
-    </div>
-    <div class="merge-item__body">
-      <a class="merge-item__index mono" href="#">#128</a>
-      <span class="merge-item__meta-line">
-        <span class="merge-item__meta-text">打开于 2 小时前</span>
-        <span class="merge-item__meta-text">由</span>
-        <span class="merge-item__author">alice</span>
-      </span>
-      <div class="merge-item__branches">
-        <span class="merge-item__branch">main</span>
-        <span class="merge-item__branch-arrow">←</span>
-        <span class="merge-item__branch">feat/oauth-login</span>
-      </div>
-      <div class="merge-item__attrs">
-        <span class="merge-item__label" style="--label-color:#5bc76a; --label-bg:rgba(91,199,106,0.15)">enhancement</span>
-        <span class="merge-item__label" style="--label-color:#4fc4d6; --label-bg:rgba(79,196,214,0.15)">auth</span>
-        <span class="merge-item__milestone">🎯 v2.0</span>
-        <span class="merge-item__assignee">👤 bob</span>
-        <span class="merge-item__reviewer">👁 carol</span>
-        <span class="merge-item__comments">💬 5</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- trailing: 操作按钮 -->
-  <div class="merge-item__trailing">
-    <button class="merge-item__btn merge-item__btn--merge">合并</button>
-    <button class="merge-item__btn merge-item__btn--close">关闭</button>
-    <button class="merge-item__btn merge-item__btn--approve">✓ 批准</button>
-    <button class="merge-item__btn merge-item__btn--request-changes">✗ 请求修改</button>
-    <button class="merge-item__btn merge-item__btn--review-comment">💬 评论</button>
-    <a class="merge-item__ext-link" href="#" title="在浏览器中打开">↗</a>
-  </div>
-
-  <!-- 展开区 -->
-  <div class="merge-item__detail">
-    <!-- meta grid -->
-    <div class="merge-item__detail-meta-row">
-      <dl class="merge-item__meta-inline">
-        <div class="merge-item__meta-chip"><dt>作者</dt><dd>alice</dd></div>
-        <div class="merge-item__meta-chip"><dt>创建</dt><dd>2024-07-02 14:30</dd></div>
-        <div class="merge-item__meta-chip"><dt>更新</dt><dd>2024-07-02 16:45</dd></div>
-        <div class="merge-item__meta-chip"><dt>冲突</dt><dd>无冲突</dd></div>
-        <div class="merge-item__meta-chip"><dt>可合并</dt><dd>是</dd></div>
-      </dl>
+  <!-- 主区 -->
+  <div class="wf-main">
+    <!-- 顶栏 -->
+    <div class="wf-titlebar">
+      <h1>合并请求</h1>
+      <div class="wf-titlebar__repo">📦 my-org/project-alpha</div>
+      <div class="wf-titlebar__spacer"></div>
+      <span style="font-size:12px; color:var(--color-text-muted);">● 已同步</span>
     </div>
 
-    <!-- ===== 评审区（M3） ===== -->
-    <div class="merge-item__reviews">
-      <div class="merge-item__reviews-list">
-        <div class="merge-item__review-item merge-item__review-item--approved">
-          <span class="merge-item__review-state-badge">已批准</span>
-          <span class="merge-item__review-author">bob</span>
-          <span class="merge-item__review-body">代码整洁，测试覆盖充分，LGTM！</span>
-          <span class="merge-item__review-time">1 小时前</span>
-        </div>
-        <div class="merge-item__review-item merge-item__review-item--changes_requested">
-          <span class="merge-item__review-state-badge">请求修改</span>
-          <span class="merge-item__review-author">carol</span>
-          <span class="merge-item__review-body">第 42 行建议用 const 替代 let</span>
-          <span class="merge-item__review-time">30 分钟前</span>
-        </div>
-      </div>
-      <!-- 评审编辑器 -->
-      <div class="merge-item__review-editor">
-        <div class="merge-item__review-editor-header">
-          <span class="merge-item__review-editor-label">批准此合并请求</span>
-        </div>
-        <textarea class="merge-item__review-editor-input" rows="3" placeholder="评审总结（可选）"></textarea>
-        <div class="merge-item__review-editor-actions">
-          <button class="merge-item__review-submit">提交评审</button>
-          <button class="merge-item__review-cancel">取消</button>
-        </div>
-      </div>
-    </div>
+    <!-- PR 列表 -->
+    <div class="wf-content">
 
-    <!-- 分隔线 -->
-    <div style="height:1px; background: var(--color-divider); margin: 8px 0;"></div>
-
-    <!-- ===== 评论区（M1+M2） ===== -->
-    <div class="merge-item__comments">
-      <div class="merge-item__comments-header">
-        <div class="merge-item__comments-header-left">
-          <span class="merge-item__comments-title">💬 对话 <span class="merge-item__comments-count">5</span></span>
+      <!-- 标签过滤 + 搜索 -->
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+        <div style="display:flex; gap:2px; background:var(--color-bg-elevated); padding:3px; border-radius:8px;">
+          <span style="padding:5px 14px; border-radius:6px; font-size:13px; color:var(--color-text-muted); cursor:pointer;">全部 <code style="background:var(--color-bg);padding:0 5px;border-radius:8px;">12</code></span>
+          <span style="padding:5px 14px; border-radius:6px; font-size:13px; background:var(--color-bg);color:var(--color-primary);font-weight:500;">待合并 <code style="background:var(--color-primary-soft);padding:0 5px;border-radius:8px;">5</code></span>
+          <span style="padding:5px 14px; border-radius:6px; font-size:13px; color:var(--color-text-muted); cursor:pointer;">已合并 <code style="background:var(--color-bg);padding:0 5px;border-radius:8px;">4</code></span>
+          <span style="padding:5px 14px; border-radius:6px; font-size:13px; color:var(--color-text-muted); cursor:pointer;">已关闭 <code style="background:var(--color-bg);padding:0 5px;border-radius:8px;">3</code></span>
         </div>
-        <button class="merge-item__comments-refresh">↻ 刷新</button>
+        <div style="flex:1;"></div>
+        <input placeholder="🔍 搜索标题、分支..." style="width:240px; padding:6px 10px; border:1px solid var(--color-divider); border-radius:6px; background:var(--color-bg-elevated); color:var(--color-text); font-size:13px;" />
       </div>
 
-      <div class="merge-item__comments-body">
-        <div class="merge-item__comments-history">
-          <ul class="merge-item__comment-list">
+      <!-- ========== PR #128 待合并（展开，完整评论模块） ========== -->
+      <div class="merge-item merge-item--open" data-pr-idx="128">
+        <!-- main row -->
+        <div class="merge-item__main">
+          <div class="merge-item__header">
+            <span class="merge-item__title">feat: 用户登录增加 OAuth 支持</span>
+            <span class="badge badge--open">待合并</span>
+            <button class="merge-item__timeline-btn">🕐</button>
+          </div>
+          <div class="merge-item__body">
+            <a class="merge-item__index mono" href="#">#128</a>
+            <span class="merge-item__meta-line">
+              <span>打开于 2 小时前</span>
+              <span>由 <span class="text-primary" style="font-weight:500;">alice</span></span>
+            </span>
+            <div class="merge-item__branches">
+              <span class="merge-item__branch">main</span>
+              <span class="merge-item__branch-arrow">←</span>
+              <span class="merge-item__branch">feat/oauth-login</span>
+            </div>
+            <div class="merge-item__attrs">
+              <span class="merge-item__label" style="--label-color:#5bc76a;--label-bg:rgba(91,199,106,0.15)">enhancement</span>
+              <span class="merge-item__label" style="--label-color:#4fc4d6;--label-bg:rgba(79,196,214,0.15)">auth</span>
+              <span class="merge-item__milestone">🎯 v2.0</span>
+              <span class="merge-item__assignee">👤 bob</span>
+              <span class="merge-item__comments">💬 5</span>
+            </div>
+          </div>
+        </div>
 
-            <!-- 评论 1: 他人 -->
-            <li class="merge-item__comment">
-              <div class="merge-item__comment-side">
-                <div class="merge-item__comment-avatar">张</div>
-                <div class="merge-item__comment-name">张三</div>
-              </div>
-              <div class="merge-item__comment-bubble">
-                <div class="merge-item__comment-meta">
-                  <span class="merge-item__comment-time">1 小时前</span>
-                </div>
-                <div class="merge-item__comment-body md-body">
-                  <p>这个 OAuth 实现看起来不错，不过建议增加 token 刷新机制。</p>
-                </div>
-                <!-- 表情反应条（M2） -->
-                <div class="reaction-bar" style="display:flex; gap:4px; margin-top:4px;">
-                  <span class="reaction-chip reaction-chip--active" style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border:1px solid var(--color-primary); border-radius:11px; background:var(--color-primary-soft); font-size:11px;">👍 3</span>
-                  <span class="reaction-chip" style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border:1px solid var(--color-divider); border-radius:11px; font-size:11px;">🎉 1</span>
-                </div>
-                <button class="merge-item__comment-quote">📎 引用</button>
-              </div>
-            </li>
+        <!-- trailing -->
+        <div class="merge-item__trailing">
+          <button class="merge-item__btn merge-item__btn--merge">合并</button>
+          <button class="merge-item__btn merge-item__btn--close">关闭</button>
+          <button class="merge-item__btn merge-item__btn--approve">✓ 批准</button>
+          <button class="merge-item__btn merge-item__btn--request-changes">✗ 请求修改</button>
+          <a class="merge-item__ext-link" href="#">↗</a>
+        </div>
 
-            <!-- 评论 2: 自己 + 已编辑 + 反应 -->
-            <li class="merge-item__comment merge-item__comment--self">
-              <div class="merge-item__comment-side">
-                <div class="merge-item__comment-avatar">李</div>
-                <div class="merge-item__comment-name">李四</div>
-              </div>
-              <div class="merge-item__comment-bubble">
-                <div class="merge-item__comment-meta">
-                  <span class="merge-item__comment-author">李四</span>
-                  <span class="merge-item__comment-self-tag">我</span>
-                  <span class="merge-item__comment-time">45 分钟前</span>
-                  <span class="merge-item__comment-edited-mark">（已编辑）</span>
-                </div>
-                <div class="merge-item__comment-body md-body">
-                  <p>好的，我加上 <code style="background:var(--color-bg);padding:1px 5px;border-radius:4px;">refreshToken</code> 逻辑。</p>
-                </div>
-                <!-- 表情反应条 -->
-                <div class="reaction-bar" style="display:flex; gap:4px; margin-top:4px;">
-                  <span class="reaction-chip reaction-chip--active" style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border:1px solid var(--color-primary); border-radius:11px; background:var(--color-primary-soft); font-size:11px;">👍 2</span>
-                  <span class="reaction-chip reaction-chip--active" style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border:1px solid var(--color-primary); border-radius:11px; background:var(--color-primary-soft); font-size:11px;">❤️ 1</span>
-                </div>
-                <!-- 编辑/删除按钮（M1） -->
-                <div class="merge-item__comment-actions" style="display:flex; gap:4px; margin-top:4px;">
-                  <button class="merge-item__comment-edit-btn" style="display:inline-flex; align-items:center; gap:3px; padding:2px 6px; border:none; background:transparent; color:var(--color-text-muted); font-size:11px; cursor:pointer;">✏ 编辑</button>
-                  <button class="merge-item__comment-delete-btn" style="display:inline-flex; align-items:center; gap:3px; padding:2px 6px; border:none; background:transparent; color:var(--color-text-muted); font-size:11px; cursor:pointer;">🗑 删除</button>
-                </div>
-              </div>
-            </li>
+        <!-- ===== 展开区 ===== -->
+        <div class="merge-item__detail">
+          <!-- 1. 活动/概览 -->
+          <div class="wf-section-title">概览</div>
+          <div class="merge-item__detail-meta-row">
+            <dl class="merge-item__meta-inline">
+              <div class="merge-item__meta-chip"><dt>作者</dt><dd>alice</dd></div>
+              <div class="merge-item__meta-chip"><dt>创建</dt><dd>2024-07-02 14:30</dd></div>
+              <div class="merge-item__meta-chip"><dt>更新</dt><dd>2024-07-02 16:45</dd></div>
+              <div class="merge-item__meta-chip"><dt>冲突</dt><dd>无冲突</dd></div>
+              <div class="merge-item__meta-chip"><dt>可合并</dt><dd>是</dd></div>
+            </dl>
+          </div>
 
-            <!-- 评论 3: 编辑中状态 -->
-            <li class="merge-item__comment merge-item__comment--self">
-              <div class="merge-item__comment-side">
-                <div class="merge-item__comment-avatar">李</div>
-                <div class="merge-item__comment-name">李四</div>
+          <!-- 2. 评审列表（M3 整体评审） -->
+          <div class="wf-section-title">审查</div>
+          <div class="merge-item__reviews">
+            <div class="merge-item__reviews-list">
+              <div class="merge-item__review-item merge-item__review-item--approved">
+                <span class="merge-item__review-state-badge">已批准</span>
+                <span class="merge-item__review-author">bob</span>
+                <span class="merge-item__review-body">代码整洁，测试覆盖充分，LGTM！</span>
+                <span class="merge-item__review-time">1 小时前</span>
               </div>
-              <div class="merge-item__comment-bubble">
-                <div class="merge-item__comment-meta">
-                  <span class="merge-item__comment-author">李四</span>
-                  <span class="merge-item__comment-self-tag">我</span>
-                  <span class="merge-item__comment-time">正在编辑...</span>
-                </div>
-                <div class="comment-edit">
-                  <textarea class="merge-item__comment-edit-input" rows="3" style="width:100%; min-height:56px; padding:8px; border:1px solid var(--color-primary); border-radius:6px; background:var(--color-bg); color:var(--color-text); font-size:13px; resize:vertical;">好的，我加上 refreshToken 逻辑。另外发现一个小问题：回调 URL 需要校验白名单。</textarea>
-                  <div class="merge-item__comment-edit-actions" style="display:flex; gap:6px; margin-top:4px;">
-                    <button class="merge-item__comment-edit-save" style="padding:4px 12px; border:1px solid var(--color-primary); border-radius:6px; background:var(--color-primary); color:#fff; font-size:11px; cursor:pointer;">保存</button>
-                    <button class="merge-item__comment-edit-cancel" style="padding:4px 12px; border:1px solid var(--color-divider); border-radius:6px; background:transparent; color:var(--color-text-muted); font-size:11px; cursor:pointer;">取消</button>
+              <div class="merge-item__review-item merge-item__review-item--changes_requested">
+                <span class="merge-item__review-state-badge">请求修改</span>
+                <span class="merge-item__review-author">carol</span>
+                <span class="merge-item__review-body">第 42 行建议用 const 替代 let</span>
+                <span class="merge-item__review-time">30 分钟前</span>
+              </div>
+            </div>
+            <!-- 评审编辑器 -->
+            <div class="merge-item__review-editor">
+              <div class="merge-item__review-editor-header">
+                <span class="merge-item__review-editor-label">批准此合并请求</span>
+              </div>
+              <textarea class="merge-item__review-editor-input" rows="3" placeholder="评审总结（可选）"></textarea>
+              <div class="merge-item__review-editor-actions">
+                <button class="merge-item__review-submit">提交评审</button>
+                <button class="merge-item__review-cancel">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="height:1px; background:var(--color-divider); margin:8px 0;"></div>
+
+          <!-- 3. 行内评审（对齐 Gitea /pulls/<built-in function id>/comments + GitHub /pulls/<built-in function id>/comments） -->
+          <div class="wf-section-title">文件评论 (3)</div>
+          <div class="wf-inline-comments" style="border:1px solid var(--color-divider); border-radius:8px; overflow: hidden; margin-bottom: 8px;">
+            <!-- 文件 1 -->
+            <div style="border-bottom:1px solid var(--color-divider);">
+              <div style="padding:6px 12px; background:var(--color-bg-elevated); font-size:12px; display:flex; align-items:center; gap:6px;">
+                <code>src/auth/oauth.ts</code>
+                <span class="text-muted">+45 / -12</span>
+                <div style="flex:1;"></div>
+                <span class="text-muted">2 条评论</span>
+              </div>
+              <!-- inline comment 1 -->
+              <div style="display:flex; gap:8px; padding:8px 12px; background:var(--color-bg); border-left:3px solid var(--color-info);">
+                <div style="width:26px; height:26px; border-radius:50%; background:var(--color-divider); display:grid; place-items:center; font-size:11px; font-weight:600; flex-shrink:0;">王</div>
+                <div style="flex:1; min-width:0;">
+                  <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                    <span style="font-size:13px; font-weight:500;">王五</span>
+                    <code style="background:var(--color-bg-elevated); padding:1px 6px; border-radius:4px;">第 42 行</code>
+                    <span class="text-muted" style="font-size:11px;">1 小时前</span>
+                  </div>
+                  <div style="font-size:13px; line-height:1.5;">
+                    这里建议用 <code style="background:var(--color-bg-elevated);padding:1px 5px;border-radius:4px;">const</code> 替代 <code style="background:var(--color-bg-elevated);padding:1px 5px;border-radius:4px;">let</code>，因为 token 变量不会重新赋值。
+                  </div>
+                  <!-- inline reactions -->
+                  <div style="display:flex; gap:4px; margin-top:4px;">
+                    <span style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border:1px solid var(--color-primary); border-radius:11px; background:var(--color-primary-soft); font-size:11px;">👍 2</span>
+                    <span style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border:1px solid var(--color-divider); border-radius:11px; font-size:11px;">👀 1</span>
                   </div>
                 </div>
               </div>
-            </li>
+              <!-- inline comment 2 (own) -->
+              <div style="display:flex; gap:8px; padding:8px 12px; background:var(--color-bg); border-left:3px solid var(--color-primary);">
+                <div style="width:26px; height:26px; border-radius:50%; background:var(--color-primary); color:#fff; display:grid; place-items:center; font-size:11px; font-weight:600; flex-shrink:0;">李</div>
+                <div style="flex:1; min-width:0;">
+                  <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                    <span style="font-size:13px; font-weight:500;">李四</span>
+                    <span style="font-size:11px; color:var(--color-primary); background:var(--color-primary-soft); padding:0 5px; border-radius:6px;">我</span>
+                    <code style="background:var(--color-bg-elevated); padding:1px 6px; border-radius:4px;">第 42 行</code>
+                    <span class="text-muted" style="font-size:11px;">30 分钟前</span>
+                  </div>
+                  <div style="font-size:13px; line-height:1.5;">
+                    好建议，已修改。
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 文件 2 -->
+            <div>
+              <div style="padding:6px 12px; background:var(--color-bg-elevated); font-size:12px; display:flex; align-items:center; gap:6px;">
+                <code>src/auth/refresh.ts</code>
+                <span class="text-muted">+89 / -0</span>
+                <div style="flex:1;"></div>
+                <span class="text-muted">1 条评论</span>
+              </div>
+              <!-- add inline comment preview -->
+              <div style="padding:8px 12px; text-align:center;">
+                <span style="font-size:12px; color:var(--color-text-muted);">+ 在第 89 行添加评论...</span>
+              </div>
+            </div>
+          </div>
 
-          </ul>
-        </div>
+          <div style="height:1px; background:var(--color-divider); margin:8px 0;"></div>
 
-        <!-- 评论输入区 -->
-        <div class="merge-item__comment-compose">
-          <div class="merge-item__comment-input-wrap">
-            <textarea class="merge-item__comment-input" rows="3" placeholder="发条评论给 #128&#10;@ 提及成员，Enter 发送"></textarea>
-            <button class="merge-item__comment-send-absolute" title="发送">➤</button>
+          <!-- 4. Conversation 评论列表（M1+M2 issue-style comments） -->
+          <div class="wf-section-title">对话 (5)</div>
+          <div class="merge-item__comments">
+            <div class="merge-item__comments-header">
+              <div class="merge-item__comments-header-left" style="gap:6px;">
+                💬 评论
+                <span class="merge-item__comments-count">5</span>
+              </div>
+              <button class="merge-item__comments-refresh">↻ 刷新</button>
+            </div>
+
+            <div class="merge-item__comments-body">
+              <div class="merge-item__comments-history">
+                <ul class="merge-item__comment-list">
+
+                  <!-- comment 1 -->
+                  <li class="merge-item__comment">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar">张</div>
+                      <div class="merge-item__comment-name">张三</div>
+                    </div>
+                    <div class="merge-item__comment-bubble">
+                      <div class="merge-item__comment-meta">
+                        <span class="merge-item__comment-time">1 小时前</span>
+                      </div>
+                      <div class="merge-item__comment-body md-body">
+                        <p>这个 OAuth 实现看起来不错，不过建议增加 token 刷新机制。</p>
+                      </div>
+                      <button class="merge-item__comment-quote">📎 引用</button>
+                    </div>
+                  </li>
+
+                  <!-- comment 2 (self + edited + reactions) -->
+                  <li class="merge-item__comment merge-item__comment--self">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar">李</div>
+                      <div class="merge-item__comment-name">李四</div>
+                    </div>
+                    <div class="merge-item__comment-bubble">
+                      <div class="merge-item__comment-meta">
+                        <span class="merge-item__comment-author">李四</span>
+                        <span class="merge-item__comment-self-tag">我</span>
+                        <span class="merge-item__comment-time">45 分钟前</span>
+                        <span class="merge-item__comment-edited-mark">（已编辑）</span>
+                      </div>
+                      <div class="merge-item__comment-body md-body">
+                        <p>好的，我加上 <code>refreshToken</code> 逻辑。另外发现一个小问题：回调 URL 需要校验。</p>
+                      </div>
+                    </div>
+                  </li>
+
+                  <!-- comment 3 (editing state) -->
+                  <li class="merge-item__comment merge-item__comment--self">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar">李</div>
+                      <div class="merge-item__comment-name">李四</div>
+                    </div>
+                    <div class="merge-item__comment-bubble">
+                      <div class="merge-item__comment-meta">
+                        <span class="merge-item__comment-author">李四</span>
+                        <span class="merge-item__comment-self-tag">我</span>
+                        <span style="font-size:11px; color:var(--color-warning);">正在编辑...</span>
+                      </div>
+                      <div class="merge-item__comment-edit-input" style="width:100%; min-height:56px; padding:8px; border:1px solid var(--color-primary); border-radius:6px; background:var(--color-bg); color:var(--color-text); font-size:13px; resize:vertical;">好的，我加上 refreshToken 逻辑。另外发现一个小问题：回调 URL 需要校验白名单。</div>
+                      <div class="merge-item__comment-edit-actions" style="display:flex; gap:6px; margin-top:4px;">
+                        <button class="merge-item__comment-edit-save">保存</button>
+                        <button class="merge-item__comment-edit-cancel">取消</button>
+                      </div>
+                    </div>
+                  </li>
+
+                  <!-- comment 4 (markdown) -->
+                  <li class="merge-item__comment">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar" style="background:var(--color-info);color:#fff;">王</div>
+                      <div class="merge-item__comment-name">王五</div>
+                    </div>
+                    <div class="merge-item__comment-bubble">
+                      <div class="merge-item__comment-meta">
+                        <span class="merge-item__comment-time">20 分钟前</span>
+                      </div>
+                      <div class="merge-item__comment-body md-body">
+                        <p>测试用例建议补充：</p>
+                        <p>1. token 过期场景</p>
+                        <p>2. 并发刷新场景</p>
+                      </div>
+                      <button class="merge-item__comment-quote">📎 引用</button>
+                    </div>
+                  </li>
+
+                  <!-- review event in conversation (混合展示) -->
+                  <li class="merge-item__comment" style="opacity:0.7;">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar" style="background:var(--color-success);color:#fff;">✓</div>
+                      <div class="merge-item__comment-name text-muted">系统</div>
+                    </div>
+                    <div class="merge-item__comment-bubble" style="border-style:dashed;">
+                      <div class="merge-item__comment-meta">
+                        <span class="merge-item__comment-time">15 分钟前</span>
+                      </div>
+                      <div class="merge-item__comment-body">
+                        <span style="color:var(--color-success);font-weight:600;">bob 批准了此合并请求</span>
+                      </div>
+                    </div>
+                  </li>
+
+                </ul>
+              </div>
+
+              <!-- composer -->
+              <div class="merge-item__comment-compose" style="border-top:1px solid var(--color-divider); padding:8px;">
+                <div style="position:relative;">
+                  <textarea class="merge-item__comment-input" rows="3" style="width:100%; padding:8px 36px 8px 8px; border:1px solid var(--color-divider); border-radius:6px; background:var(--color-bg-elevated); color:var(--color-text); font-size:13px; resize:vertical;">发条评论...</textarea>
+                  <button class="merge-item__comment-send-absolute" style="position:absolute; bottom:6px; right:6px; width:28px; height:28px; border:none; border-radius:6px; background:var(--color-primary); color:#fff; cursor:pointer;">➤</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- ========== PR #127 已合并 ========== -->
+      <div class="merge-item merge-item--merged" data-pr-idx="127">
+        <div class="merge-item__main">
+          <div class="merge-item__header">
+            <span class="merge-item__title">fix: 修复 token 过期后无限重定向</span>
+            <span class="badge badge--merged">已合并</span>
+            <button class="merge-item__timeline-btn">🕐</button>
+          </div>
+          <div class="merge-item__body">
+            <a class="merge-item__index mono">#127</a>
+            <span>昨天打开 由 <span class="text-primary" style="font-weight:500;">bob</span></span>
+            <div class="merge-item__branches">
+              <span class="merge-item__branch">main</span>
+              <span class="merge-item__branch-arrow">←</span>
+              <span class="merge-item__branch">fix/token-redirect</span>
+            </div>
+            <span class="merge-item__comments">💬 3</span>
+          </div>
+        </div>
+        <div class="merge-item__trailing">
+          <button class="merge-item__btn" disabled style="opacity:0.5;">已合并</button>
+        </div>
+      </div>
+
+      <!-- ========== PR #126 草稿 ========== -->
+      <div class="merge-item merge-item--open" data-pr-idx="126" style="border-left-color:var(--color-warning);">
+        <div class="merge-item__main">
+          <div class="merge-item__header">
+            <span class="merge-item__title">docs: 更新 API 文档</span>
+            <span class="badge badge--draft">草稿</span>
+            <button class="merge-item__timeline-btn">🕐</button>
+          </div>
+          <div class="merge-item__body">
+            <a class="merge-item__index mono">#126</a>
+            <span>3 天前打开 由 <span class="text-primary" style="font-weight:500;">carol</span></span>
+            <span class="merge-item__comments">💬 0</span>
+          </div>
+        </div>
+        <div class="merge-item__trailing">
+          <button class="merge-item__btn" disabled style="opacity:0.5;">合并</button>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
 
-<!-- ========== PR #127 已合并 ========== -->
-<div class="merge-item merge-item--merged" data-pr-idx="127">
-  <div class="merge-item__leading">
-    <span class="merge-item__icon merge-item__icon--merged">●</span>
-  </div>
-  <div class="merge-item__main">
-    <div class="merge-item__header">
-      <span class="merge-item__title">fix: 修复 token 过期后无限重定向</span>
-      <span class="merge-item__badge merge-badge--merged">已合并</span>
-      <button class="merge-item__timeline-btn">🕐</button>
-    </div>
-    <div class="merge-item__body">
-      <a class="merge-item__index mono" href="#">#127</a>
-      <span class="merge-item__meta-line">
-        <span class="merge-item__meta-text">昨天打开</span>
-        <span class="merge-item__meta-text">由</span>
-        <span class="merge-item__author">bob</span>
-      </span>
-      <div class="merge-item__branches">
-        <span class="merge-item__branch">main</span>
-        <span class="merge-item__branch-arrow">←</span>
-        <span class="merge-item__branch">fix/token-redirect</span>
-      </div>
-      <div class="merge-item__attrs">
-        <span class="merge-item__comments">💬 3</span>
-      </div>
-    </div>
-  </div>
-  <div class="merge-item__trailing">
-    <button class="merge-item__btn merge-item__btn--merge" disabled>已合并</button>
-  </div>
-</div>
-
-<!-- ========== PR #126 草稿 ========== -->
-<div class="merge-item merge-item--open" data-pr-idx="126" style="border-left:3px solid var(--color-warning);">
-  <div class="merge-item__leading">
-    <span class="merge-item__icon merge-item__icon--draft">●</span>
-  </div>
-  <div class="merge-item__main">
-    <div class="merge-item__header">
-      <span class="merge-item__title">docs: 更新 API 文档</span>
-      <span class="merge-item__badge merge-badge--draft">草稿</span>
-      <button class="merge-item__timeline-btn">🕐</button>
-    </div>
-    <div class="merge-item__body">
-      <a class="merge-item__index mono" href="#">#126</a>
-      <span class="merge-item__meta-line">
-        <span class="merge-item__meta-text">3 天前打开</span>
-        <span class="merge-item__meta-text">由</span>
-        <span class="merge-item__author">carol</span>
-      </span>
-      <div class="merge-item__attrs">
-        <span class="merge-item__comments">💬 0</span>
-      </div>
-    </div>
-  </div>
-  <div class="merge-item__trailing">
-    <button class="merge-item__btn merge-item__btn--merge" disabled>合并</button>
-  </div>
-</div>
-
-</div><!-- /merges__list -->
 </body>
 </html>
