@@ -815,6 +815,7 @@ type GetGitGraphArgs struct {
 	ProjectID string   `json:"projectId"`
 	Branches  []string `json:"branches,omitempty"`
 	MaxCount  int      `json:"maxCount,omitempty"`
+	Offset    int      `json:"offset,omitempty"`
 }
 
 // GetGitGraph 获取项目的 commit DAG（用 projectId 反查 localPath + token）
@@ -871,6 +872,7 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 		Branches: args.Branches,
 		MaxCount: args.MaxCount,
 		Head:     head,
+		Offset:   args.Offset,
 	})
 	if err != nil {
 		return GraphResultDTO{}, err

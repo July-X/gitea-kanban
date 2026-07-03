@@ -332,6 +332,7 @@ func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts pla
 	logResult, err := git.LogCommitsVscode(ctx, git.LogOptions{
 		LocalPath: localPath,
 		MaxCount:  opts.MaxCount,
+		Offset:    opts.Offset,
 	})
 	if err != nil {
 		return nil, err

@@ -947,8 +947,8 @@ function formatRelative(iso: string | undefined): string {
       <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看合并请求' />
     </div>
     <!--
-      v1.4 拍板"替换模式"：删 v-else-if="pull.loading && ..." 的"加载中…"占位
-      全局海豚 overlay 接管请求级 loading
+      v0.6.1+ 拍板"替换模式"：删 v-else-if="pull.loading && ..." 的"加载中…"占位
+      全局 StatusBarPulse 接管请求级 loading
     -->
     <div v-else-if="!pull.items.length" class="merges__placeholder">
       <EmptyState

@@ -196,6 +196,7 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		LocalPath: localPath,
 		Branches:  opts.Branches,
 		MaxCount:  opts.MaxCount,
+		Offset:    opts.Offset,
 	})
 	if err != nil {
 		return nil, err

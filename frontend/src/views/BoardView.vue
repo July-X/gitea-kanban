@@ -639,8 +639,8 @@ async function onUnassignedDragEnd(evt: unknown): Promise<void> {
       />
     </div>
     <!--
-      v1.4 拍板"替换模式"：删 v-else-if="board.loading && ..." 的"正在加载看板…"占位
-      全局海豚 overlay 接管请求级 loading
+      v0.6.1+ 拍板"替换模式"：删 v-else-if="board.loading && ..." 的"正在加载看板…"占位
+      全局 StatusBarPulse 接管请求级 loading
     -->
     <div v-else-if="board.columns.length === 0" class="board__placeholder">
       <EmptyState

@@ -176,8 +176,8 @@ function formatDate(iso: string | undefined): string {
       <EmptyState title="未获取到当前用户" description="请确认 gitea 连接" />
     </div>
     <!--
-      v1.4 拍板"替换模式"：删 v-else-if="myCard.loading && ..." 的"加载中…"占位
-      全局海豚 overlay 接管请求级 loading
+      v0.6.1+ 拍板"替换模式"：删 v-else-if="myCard.loading && ..." 的"加载中…"占位
+      全局 StatusBarPulse 接管请求级 loading
     -->
 
     <template v-else>

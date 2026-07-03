@@ -74,6 +74,10 @@ const activeRepo = computed(() => {
 const graphDto = ref<GraphResultDto | null>(null);
 /** 加载态 */
 const loading = ref(false);
+/** 加载更多态（分页） */
+const loadingMore = ref(false);
+/** 是否已加载全部 */
+const allLoaded = ref(false);
 /** 本地错误信息 */
 const localError = ref<string | null>(null);
 
@@ -85,6 +89,10 @@ const cloning = ref(false);
 const cloneProgress = ref<string | null>(null);
 /** 是否正在 pull */
 const pulling = ref(false);
+
+// v0.6.1+ Git Graph 滚动加载更多：哨兵 + IntersectionObserver
+const loadMoreSentinel = ref<HTMLElement | null>(null);
+let loadMoreObserver: IntersectionObserver | null = null;
 
 // ============================================================
 // v2.9 commit 详情：行下手风琴（inline 展开）
@@ -537,6 +545,30 @@ onMounted(async () => {
   document.addEventListener('app:refresh', onAppRefresh);
   // v3.4：动态行高对齐——数据加载后测量 + 监听尺寸变化
   setupRowHeightObserver();
+  // v0.6.1+ Git Graph 滚动加载更多
+  setupLoadMoreObserver();
+});
+
+/** 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver */
+function setupLoadMoreObserver(): void {
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      const e = entries[0];
+      if (!e || !e.isIntersecting) return;
+      void loadMoreGraph();
+    },
+    { rootMargin: '200px 0px', threshold: 0 },
+  );
+  if (loadMoreSentinel.value) {
+    loadMoreObserver.observe(loadMoreSentinel.value);
+  }
+}
+
+// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 observe
+watch(loadMoreSentinel, (el) => {
+  if (el && loadMoreObserver) {
+    loadMoreObserver.observe(el);
+  }
 });
 
 watch(
@@ -589,6 +621,11 @@ onUnmounted(() => {
   document.removeEventListener('mousemove', onColDragMove);
   document.removeEventListener('mouseup', onColDragEnd);
   document.removeEventListener('app:refresh', onAppRefresh);
+  // v0.6.1+ Git Graph 滚动加载更多：清理 IntersectionObserver
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
+  }
   if (colDragRafId !== 0) {
     cancelAnimationFrame(colDragRafId);
     colDragRafId = 0;
@@ -596,44 +633,54 @@ onUnmounted(() => {
 });
 
 /**
- * 加载 Git Graph 数据（v0.4.0 简化版：固定走 INITIAL_GRAPH_LIMIT，取消分页机制）
+ * 加载 Git Graph 数据（支持分页）
  *
- * 取舍：
- *   - 旧版 v2.10 引入 v3.6 简化：客户端 graphLimit 字段 + 「加载更多」按钮 + 底部 footer 滚动监听
- *     → GitHub 仓库 shallow clone + truncated=true 时永远可点，导致 GitHub 仓库 UI 跟 Gitea 不一致
- *   - 用户拍板（v0.4.0 2026-07-02）：删掉整套分页机制，固定 300 条上限，GitHub 跟 Gitea UI 对齐
- *   - GraphResultDto.truncated 字段后端仍可保留（保留兼容性，未使用），前端不再读取
+ * @param offset 跳过前 N 条 commit（0 = 首次加载）
  */
-async function loadGraph(): Promise<void> {
+async function loadGraph(offset = 0): Promise<void> {
   if (!activeProjectId.value) {
     return;
   }
-  loading.value = true;
-  localError.value = null;
-  featureDisabled.value = false;
+  const isFirstLoad = offset === 0;
+  if (isFirstLoad) {
+    loading.value = true;
+    localError.value = null;
+    featureDisabled.value = false;
+    allLoaded.value = false;
+  } else {
+    loadingMore.value = true;
+  }
   useGlobalLoadingStore().show('timeline');
   try {
-    // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
-    // v2.68：GitHub 与 Gitea 统一走这条 structured/vscode 链路，
-    // 不再按平台切回 ASCII parser。
-    // v0.4.0：固定 INITIAL_GRAPH_LIMIT（不再 client 自适应 graphLimit）
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
       limit: INITIAL_GRAPH_LIMIT,
+      offset,
     });
 
-    // 兼容 disabled 提示（main handler 可能返 disabled）
     const nodes = dto?.nodes ?? [];
-    if (nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
+    if (isFirstLoad && nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
       featureDisabled.value = true;
       graphDto.value = null;
-      // 不要在这里 return，让 finally 块清理状态
-    } else {
+    } else if (isFirstLoad) {
       graphDto.value = dto;
-      // v3.4：数据变化后重新测量行高（commit 数变化导致 gridY 变化）
       nextTick(() => measureRowHeights());
+    } else {
+      // 分页加载：追加新 nodes 和 edges（去重）
+      if (graphDto.value) {
+        const existingSha = new Set(graphDto.value.nodes.map((n) => n.sha));
+        const newNodes = nodes.filter((n) => !existingSha.has(n.sha));
+        graphDto.value = {
+          ...graphDto.value,
+          nodes: [...graphDto.value.nodes, ...newNodes],
+          edges: [...graphDto.value.edges, ...(dto?.edges ?? [])],
+        };
+      } else {
+        graphDto.value = dto;
+      }
     }
-    // v2.9：新数据加载完收起展开（防 SHA 失效）
+    // truncated = false 表示已加载全部
+    allLoaded.value = !dto?.truncated;
     expandedSha.value = null;
   } catch (e: unknown) {
     console.error('[TimelineNewView] loadGraph failed:', e);
@@ -648,18 +695,30 @@ async function loadGraph(): Promise<void> {
     const looksLikeDisabled =
       err.code === 'internal' &&
       (msg.includes('v1.5') || msg.includes('Git Graph'));
-    if (looksLikeDisabled) {
+    if (looksLikeDisabled && isFirstLoad) {
       featureDisabled.value = true;
       graphDto.value = null;
-      // 不要在这里 return，让 finally 块清理状态
-    } else {
+    } else if (isFirstLoad) {
       localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
       graphDto.value = null;
     }
   } finally {
-    loading.value = false;
+    if (isFirstLoad) {
+      loading.value = false;
+    } else {
+      loadingMore.value = false;
+    }
     useGlobalLoadingStore().hide('timeline');
   }
+}
+
+/**
+ * 加载更多 Git Graph 数据（滚动到底自动调）
+ */
+async function loadMoreGraph(): Promise<void> {
+  if (loadingMore.value || allLoaded.value || !graphDto.value) return;
+  const offset = graphDto.value.nodes.length;
+  await loadGraph(offset);
 }
 
 /**
@@ -2167,6 +2226,14 @@ function refBadgeClass(refType?: string): string {
               </div>
             </template>
             </div><!-- /.git-graph-rows -->
+
+            <!-- v0.6.1+ Git Graph 滚动加载更多哨兵 -->
+            <div
+              v-if="!allLoaded && graphDto"
+              ref="loadMoreSentinel"
+              class="git-graph-load-more-sentinel"
+              aria-hidden="true"
+            ></div>
           </div>
         </div>
        </template>
@@ -2180,6 +2247,13 @@ function refBadgeClass(refType?: string): string {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+}
+
+/* v0.6.1+ Git Graph 滚动加载更多哨兵（保持高度让 IntersectionObserver 可检测） */
+.git-graph-load-more-sentinel {
+  height: 4px;
+  width: 100%;
+  flex-shrink: 0;
 }
 
 /* ===== 顶部栏 ===== */

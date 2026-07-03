@@ -632,6 +632,7 @@ export namespace main {
 	    projectId: string;
 	    branches?: string[];
 	    maxCount?: number;
+	    offset?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new GetGitGraphArgs(source);
@@ -642,6 +643,7 @@ export namespace main {
 	        this.projectId = source["projectId"];
 	        this.branches = source["branches"];
 	        this.maxCount = source["maxCount"];
+	        this.offset = source["offset"];
 	    }
 	}
 	export class GetPullArgs {

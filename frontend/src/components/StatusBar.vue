@@ -1340,7 +1340,7 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 }
 
 /* ===== v2.6 同步进度条 =====
- * 位置：仓库行内、按钮下方（不在 dropdown 底部，独立于全局海豚 overlay）
+ * 位置：仓库行内、按钮下方（不在 dropdown 底部，独立于全局 StatusBarPulse）
  * 高度 2px（极细），避免 dropdown 内容膨胀
  * 三种状态：
  *   - 普通（蓝）：进行中

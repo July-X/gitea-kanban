@@ -58,6 +58,8 @@ type LogOptions struct {
 	Branches []string
 	// MaxCount 最大 commit 数（0 = 不限）
 	MaxCount int
+	// Offset 跳过前 N 条 commit（分页用，0 = 不跳过）
+	Offset int
 }
 
 // LogResult log 遍历结果
@@ -213,6 +215,13 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		return commits[i].SHA < commits[j].SHA
 	})
 
+	// offset 分页：跳过前 N 条（在排序后、截断前执行，保证稳定分页）
+	if opts.Offset > 0 && opts.Offset < len(commits) {
+		commits = commits[opts.Offset:]
+	} else if opts.Offset >= len(commits) {
+		commits = nil
+	}
+
 	truncated := false
 	if opts.MaxCount > 0 && len(commits) > opts.MaxCount {
 		commits = commits[:opts.MaxCount]
@@ -223,7 +232,8 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 	// commits[0].hash === UNCOMMITTED 模式（数据源: git status --porcelain）。
 	// 插入位置对齐 vscode dataSource.ts:191 `commits.unshift(...)`：
 	// UNCOMMITTED 永远在 commits[0]（lane 布局 row 0）。
-	if len(commits) > 0 {
+	// 注意：offset 分页时不插入 UNCOMMITTED（只在第一页显示）
+	if len(commits) > 0 && opts.Offset == 0 {
 		if headSHA, dirtyCount, found, _ := detectUncommittedChanges(opts.LocalPath); found {
 			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, dirtyCount)}, commits...)
 		}

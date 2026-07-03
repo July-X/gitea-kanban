@@ -508,6 +508,7 @@ export function commitsGitgraphLines(args: {
   projectId: string;
   branches?: string[];
   limit?: number;
+  offset?: number;
   hidePRRefs?: boolean;
 }): Promise<GraphResultDto> {
   return getIpcClient().invoke('commits', 'gitgraphLines', args);

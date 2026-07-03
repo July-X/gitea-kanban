@@ -60,7 +60,8 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 	if maxCount <= 0 {
 		maxCount = defaultVscodeInitialLoadCommits
 	}
-	logCount := maxCount + 1
+	// 分页：请求 offset + maxCount + 1 条，+1 用于判断是否还有更多
+	logCount := opts.Offset + maxCount + 1
 
 	args := []string{
 		"-C", opts.LocalPath,
@@ -93,6 +94,14 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 
 	refDataByHash := collectRefDataByHashNative(opts.LocalPath)
 	commits := parseVscodeLogOutput(output, refDataByHash)
+
+	// offset 分页：跳过前 N 条（在截断前执行，保证稳定分页）
+	if opts.Offset > 0 && opts.Offset < len(commits) {
+		commits = commits[opts.Offset:]
+	} else if opts.Offset >= len(commits) {
+		commits = nil
+	}
+
 	truncated := false
 	if maxCount > 0 && len(commits) > maxCount {
 		commits = commits[:maxCount]
@@ -106,7 +115,8 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 	// 插入位置对齐 vscode dataSource.ts:191 `commits.unshift(...)`：
 	// UNCOMMITTED 永远在 commits[0]（lane 布局 row 0），让 lane 流从顶部显示
 	// 「未提交」区段，而不是塞在 local HEAD 之前（all-branches 视图下会跑到中间）。
-	if len(commits) > 0 {
+	// 注意：offset 分页时不插入 UNCOMMITTED（只在第一页显示）
+	if len(commits) > 0 && opts.Offset == 0 {
 		if headSHA, dirtyCount, found, _ := detectUncommittedChanges(opts.LocalPath); found {
 			commits = append([]CommitInfo{buildUncommittedCommit(headSHA, dirtyCount)}, commits...)
 		}

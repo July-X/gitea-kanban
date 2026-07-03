@@ -12,13 +12,6 @@
  *   - 顶栏 = 当前 view 内部自带（避免全局顶栏过度复杂）
  *   - 错误捕获：app-level errorHandler 已经在 main.ts 注册；这里只管 layout
  *
- * v1.4 第六轮（plan 调整）：
- *   - GlobalLoadingOverlay 从 App.vue 移到 .shell__content 内（v1.4 第六轮 user 拍板）
- *   - 原因：之前 overlay 走 fixed + 半透明蒙版 → 整个主区被"蒙版盖住"
- *   - 现在 overlay 是主区的兄弟节点，position: absolute 居中在 .shell__content
- *   - 不挡内容、不蒙版、不模糊 —— 跟 view 内容同框渲染
- *   - 路由切换 fade 过渡时 overlay 跟 router-view 平级，位置稳定
- *
  * v1.5（2026-06-22 · user 拍板）：
  *   - 移除全屏 HUD 背景网格（v1.1.2 引入的 .canvas-grid）—— 网格装饰被砍
  *   - 改为"区域边界线"分区视觉：
@@ -29,7 +22,6 @@
  */
 import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
-import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
 </script>
 
 <template>
@@ -44,13 +36,6 @@ import GlobalLoadingOverlay from './GlobalLoadingOverlay.vue';
         <router-view v-slot="{ Component }">
           <component :is="Component" />
         </router-view>
-        <!--
-          v1.4 第六轮：overlay 挂在 .shell__content 内，跟 router-view 平级
-          - 不浮在内容之上（无蒙版 / 无 blur / 无 box-shadow）
-          - 跟内容同框，pointer-events: none 不抢点击
-          - 路由切换时 router-view fade 180ms 期间 overlay 位置稳定
-        -->
-        <GlobalLoadingOverlay />
       </div>
     </main>
     <StatusBar class="shell__status" />
