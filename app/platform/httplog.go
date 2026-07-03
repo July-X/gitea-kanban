@@ -34,23 +34,28 @@ import (
 //   - status: HTTP status code（200/401 等）
 //   - duration: 请求耗时
 //   - err: 网络层错误（a.httpClient.Do 抛的，非业务错误）
-func LogHTTP(ctx context.Context, method, path string, status int, duration time.Duration, err error) {
+//   - attrs: 额外 attr（如 reqID），由调用方传入（调用 logx.ReqID(ctx) 透传）
+func LogHTTP(ctx context.Context, method, path string, status int, duration time.Duration, err error, attrs ...slog.Attr) {
 	if err != nil {
 		slog.Default().ErrorContext(ctx, "HTTP",
-			"method", method,
-			"path", path,
-			"ms", duration.Milliseconds(),
-			"err", err.Error(),
+			append([]any{
+				"method", method,
+				"path", path,
+				"ms", duration.Milliseconds(),
+				"err", err.Error(),
+			}, attrsToAnySlice(attrs)...)...,
 		)
 		return
 	}
 
 	if status < 200 || status >= 300 {
 		slog.Default().WarnContext(ctx, "HTTP",
-			"method", method,
-			"path", path,
-			"status", status,
-			"ms", duration.Milliseconds(),
+			append([]any{
+				"method", method,
+				"path", path,
+				"status", status,
+				"ms", duration.Milliseconds(),
+			}, attrsToAnySlice(attrs)...)...,
 		)
 		return
 	}
@@ -58,18 +63,34 @@ func LogHTTP(ctx context.Context, method, path string, status int, duration time
 	// 成功请求：慢请求（>500ms）走 Info，其余走 Debug
 	if duration > 500*time.Millisecond {
 		slog.Default().InfoContext(ctx, "HTTP slow",
-			"method", method,
-			"path", path,
-			"status", status,
-			"ms", duration.Milliseconds(),
+			append([]any{
+				"method", method,
+				"path", path,
+				"status", status,
+				"ms", duration.Milliseconds(),
+			}, attrsToAnySlice(attrs)...)...,
 		)
 		return
 	}
 
 	slog.Default().Log(ctx, slog.LevelDebug, "HTTP",
-		"method", method,
-		"path", path,
-		"status", status,
-		"ms", duration.Milliseconds(),
+		append([]any{
+			"method", method,
+			"path", path,
+			"status", status,
+			"ms", duration.Milliseconds(),
+		}, attrsToAnySlice(attrs)...)...,
 	)
+}
+
+// attrsToAnySlice converte []slog.Attr para []any na ordem esperada pelo slog (key, value, key, value...)
+func attrsToAnySlice(attrs []slog.Attr) []any {
+	if len(attrs) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(attrs)*2)
+	for _, a := range attrs {
+		out = append(out, a.Key, a.Value)
+	}
+	return out
 }

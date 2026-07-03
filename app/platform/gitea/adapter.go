@@ -19,6 +19,7 @@ import (
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
+	"gitea-kanban/app/logx"
 	"gitea-kanban/app/platform"
 )
 
@@ -959,13 +960,13 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 	if err != nil {
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）
 		// 包成 IpcError，code=network_offline，前端能识别为"网络问题"而非"未知错误"
-		platform.LogHTTP(ctx, method, path, 0, duration, err)
+		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
 		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea %s %s: %s", method, fullURL, err.Error()))
 	}
 	defer resp.Body.Close()
 
 	// 成功/失败都写 HTTP 日志（区分级别：成功 INFO/Debug，失败 WARN）
-	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil)
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)  
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
