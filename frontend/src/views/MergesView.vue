@@ -2933,8 +2933,12 @@ function formatRelative(iso: string | undefined): string {
   padding: var(--space-2);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
-  overflow-x: auto;        /* code 块代码长还是要水平 scroll 保持可读 */
-  max-width: 100%;          /* v0.6+ bugfix：不能撑出 bubble */
+  /* 强制代码块自动换行，避免对话面板出现横向滚动条 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  overflow-x: hidden;
+  max-width: 100%;
   min-width: 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: var(--font-xs);
@@ -2945,6 +2949,9 @@ function formatRelative(iso: string | undefined): string {
   background: transparent;
   color: var(--color-text);
   font-size: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .md-body a {
   color: var(--color-primary);
