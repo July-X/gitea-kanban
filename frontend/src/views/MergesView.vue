@@ -2936,6 +2936,18 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text-secondary);
   background: var(--color-bg);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  /* 强制引用块超长文本自动换行 */
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  max-width: 100%;
+  min-width: 0;
+}
+.md-body blockquote > * {
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
 }
 .md-body code {
   padding: 1px 6px;
