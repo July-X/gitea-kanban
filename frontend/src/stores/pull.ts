@@ -153,12 +153,14 @@ export const usePullStore = defineStore('pull', () => {
    * 设计：
    *   - 追加同 index 的去重（后端可能返重复，跨页边缘常见）
    *   - 失败时不动 items，仅 error.value = e（用户可滚动再试）
+   *   - v0.6.1+：触发全局 loading → StatusBarPulse 心跳脉冲动画
    */
   async function loadMore(): Promise<void> {
     if (loadingMore.value) return;
     if (!hasMore.value) return;
     if (!currentProjectId.value) return;
     loadingMore.value = true;
+    useGlobalLoadingStore().show('pull');
     error.value = null;
     try {
       const nextPage = currentPage.value + 1;
@@ -185,6 +187,7 @@ export const usePullStore = defineStore('pull', () => {
       // 失败保留旧 items，不抛出（避免静默丢列表）
     } finally {
       loadingMore.value = false;
+      useGlobalLoadingStore().hide('pull');
     }
   }
 

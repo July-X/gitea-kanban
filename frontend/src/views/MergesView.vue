@@ -1399,24 +1399,20 @@ function formatRelative(iso: string | undefined): string {
       </li>
 
       <!-- v2.62 滚动到底自动加载哨兵（在 ul 内部，ul 滚动时随之一超超一上滑，能重复触发 observer） -->
+      <!-- v0.6.1+：加载中动画已统一到 StatusBarPulse（底部状态栏心跳脉冲），这里只展示末尾状态 -->
       <li
         ref="loadMoreSentinel"
         class="merges__load-more"
-        :data-state="pull.loadingMore ? 'loading' : (!pull.hasMore && pull.currentPage >= 1) ? 'end' : 'idle'"
+        :data-state="(!pull.hasMore && pull.currentPage >= 1) ? 'end' : 'idle'"
         aria-live="polite"
       >
-        <!-- 加载中：旋转动画 + 文字 -->
-        <div v-if="pull.loadingMore" class="merges__load-more-loading" role="status">
-          <span class="merges__load-more-spinner" aria-hidden="true"></span>
-          <span>正在加载更多合并请求…</span>
-        </div>
-        <!-- 末尾：下一句说明 -->
-        <div v-else-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">
+        <!-- 末尾：已加载全部 -->
+        <div v-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">
           <span class="merges__load-more-divider" aria-hidden="true"></span>
           <span>已到全部合并请求的末尾</span>
           <span class="merges__load-more-divider" aria-hidden="true"></span>
         </div>
-        <!-- idle：还好有更多，点击或滚动以加载 -->
+        <!-- idle：占位保持哨兵高度，IntersectionObserver 可检测 -->
         <div v-else class="merges__load-more-idle">
           <span class="merges__load-more-arrow" aria-hidden="true">↓</span>
           <span>继续滚动加载更多…</span>
@@ -1742,6 +1738,7 @@ function formatRelative(iso: string | undefined): string {
 }
 
 /* v2.62 滚动到底自动加载分页：哨兵 + 三状态视觉反馈 */
+/* v0.6.1+：加载中动画已统一到 StatusBarPulse（底部状态栏心跳脉冲），merges__load-more-loading 和 merges__load-more-spinner 已移除 */
 .merges__load-more {
   display: flex;
   justify-content: center;
@@ -1759,27 +1756,8 @@ function formatRelative(iso: string | undefined): string {
 .merges__load-more[data-state='idle'] {
   opacity: 0.6;
 }
-.merges__load-more[data-state='loading'] {
-  opacity: 1;
-  color: var(--color-primary);
-}
 .merges__load-more[data-state='end'] {
   opacity: 0.5;
-}
-.merges__load-more-loading {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-}
-.merges__load-more-spinner {
-  display: inline-block;
-  width: 16px;                     /* v2.62：12 → 16 加粗圈 */
-  height: 16px;
-  border: 2.5px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: merges-spin 0.7s linear infinite;
 }
 .merges__load-more-idle {
   display: inline-flex;
@@ -1809,9 +1787,6 @@ function formatRelative(iso: string | undefined): string {
   flex: 0 0 24px;
   height: 1px;
   background: var(--color-divider);
-}
-@keyframes merges-spin {
-  to { transform: rotate(360deg); }
 }
 @keyframes merges-load-idle-breath {
   0%, 100% { opacity: 0.55; transform: translateY(0); }

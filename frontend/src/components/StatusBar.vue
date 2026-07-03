@@ -56,6 +56,7 @@ import { formatLastUpdated } from '@renderer/lib/last-updated';
 import type { SyncProgress } from '@renderer/types/sync-progress';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import AccountManagerDialog from '@renderer/components/AccountManagerDialog.vue';
+import StatusBarPulse from '@renderer/components/StatusBarPulse.vue';
 import type { RepoDto } from '@renderer/types/dto';
 
 const auth = useAuthStore();
@@ -435,6 +436,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 
 <template>
   <div class="statusbar-wrap">
+    <!-- 心跳脉冲加载动画（紧贴 StatusBar 顶边） -->
+    <StatusBarPulse />
     <footer class="statusbar" :data-state="connState" role="status" aria-live="polite">
       <div class="statusbar__left">
         <span class="statusbar__chip" :class="`statusbar__chip--${connState}`">
@@ -692,6 +695,11 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 </template>
 
 <style scoped>
+/* 状态栏包装层：提供定位上下文给 StatusBarPulse */
+.statusbar-wrap {
+  position: relative;
+}
+
 .statusbar {
   display: flex;
   align-items: center;
