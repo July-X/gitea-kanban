@@ -2509,8 +2509,8 @@ function formatRelative(iso: string | undefined): string {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  /* grid item stretch；list flex 1 撑满 history */
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .merge-item__comments-loading,
@@ -2744,6 +2744,34 @@ function formatRelative(iso: string | undefined): string {
   max-width: 100%;
   min-width: 0;
 }
+/* 强制 .merge-item__comment-body 内的所有 markdown 节点都限制在气泡里 */
+.merge-item__comment-body > *,
+.merge-item__comment-body p,
+.merge-item__comment-body pre,
+.merge-item__comment-body code,
+.merge-item__comment-body ul,
+.merge-item__comment-body ol,
+.merge-item__comment-body li,
+.merge-item__comment-body blockquote,
+.merge-item__comment-body h1,
+.merge-item__comment-body h2,
+.merge-item__comment-body h3,
+.merge-item__comment-body h4,
+.merge-item__comment-body h5,
+.merge-item__comment-body h6,
+.merge-item__comment-body table {
+  max-width: 100%;
+  min-width: 0;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+.merge-item__comment-body pre,
+.merge-item__comment-body pre code {
+  white-space: pre-wrap;
+}
+.merge-item__comment-body code {
+  white-space: pre-wrap;
+}
 
 /* 发评论输入区（v1.5.8 紧凑 5px 留白） */
 .merge-item__comment-compose {
@@ -2916,9 +2944,10 @@ function formatRelative(iso: string | undefined): string {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.9em;
   color: var(--color-accent);
-  /* v0.6+ bugfix：长 inline code（如 console log）需换行 */
   word-break: break-all;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-width: 100%;
 }
 .md-body pre {
   margin: 4px 0;
