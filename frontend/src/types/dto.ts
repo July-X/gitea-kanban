@@ -2,7 +2,7 @@
  * dto.ts —— 前后端共享的 DTO 类型契约
  *
  * 历史来源（v1 时代，2026-06-10）：
- *   - v1 Electron 时代：Zod schema + z.infer 派生类型，原文件 legacy/electron/src/main/ipc/schema.ts
+ *   - v1 Electron 时代：Zod schema + z.infer 派生类型，原文件已随 v1 Electron 迁出本仓
  *   - v2.0 Wails 迁移：删 Zod 运行时校验，本文件保留纯 TS interface 作为 IPC DTO 契约
  *   - 同步 Wails 自动生成的 frontend/wailsjs/wailsjs/go/main/models.ts
  *

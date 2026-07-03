@@ -20,7 +20,7 @@
 > - **多平台支持**：单 Gitea → **Gitea（完整）+ GitHub（仅 Git Graph）**
 > - **Gitea 集成**：`gitea-js`（TS 客户端）→ **Go `net/http` 手写 + PlatformAdapter 抽象**
 > - **前端** Vue 3 / Pinia / Vue Router / lucide 保留不变
-> - **旧代码**已归档到 `legacy/electron/`
+> - **旧代码**已迁出本仓
 >
 > **v2.4 迭代（2026-06-22 同日）**：v2.0 迁移完成后真实用户桌面跑暴露 6 类问题（鉴权铁律 / 业务 binding stub / 数据目录嵌套 / StatusBar localPath 拼错 / prefs 死链 / go-git 拉全 worktree），全部修复并记录在 [07-v24-iteration.md](./07-v24-iteration.md) + [ADR-0006](../adr/0006-v24-iteration-fixes.md)。
 >

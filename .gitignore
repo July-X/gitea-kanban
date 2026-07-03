@@ -5,14 +5,6 @@
 .opencode/
 .claude/
 
-# === legacy Electron 项目（归档参考，不再构建）===
-legacy/electron/node_modules/
-legacy/electron/.pnpm-store/
-legacy/electron/out/
-legacy/electron/dist/
-legacy/electron/coverage/
-legacy/electron/release/
-
 # === Go / Wails 构建产物 ===
 build/
 !build/
