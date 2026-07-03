@@ -163,11 +163,6 @@ onBeforeUnmount(() => {
   <AppShell />
   <Toast />
   <!--
-    全局加载海豚 v1.4 第六轮改：移到 AppShell.vue 的 .shell__content 内
-    （v1.4 之前在 App.vue 走 fixed 全屏蒙版 → 整个主区被"蒙版盖住"，
-     user 反馈不符合预期：希望海豚直接显示在内容区 DOM 上，不浮在内容之上）
-  -->
-  <!--
     Dev 模式注解 popover（v1.1.3 · task #42）
     - 仅 dev 显示（Vite 把 isDev 编译成 false，生产 v-if 消除）
     - 内部订阅 lib/dev-annotate 的 annotation ref，无注解时啥也不渲染

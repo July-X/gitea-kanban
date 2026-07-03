@@ -1,0 +1,27 @@
+/* ==========================================================================
+ * Gitea Kanban — 内嵌字体声明
+ *
+ * 字体文件放在 frontend/public/fonts/，Vite 构建时原样复制到 dist/fonts/。
+ * @font-face 用 url() 引用（路径相对于 CSS 文件，构建后为 /fonts/xxx.ttf）。
+ *
+ * 内嵌原因：防止用户硬件上没有 JetBrains Mono / MesloLGS Nerd Font。
+ * Consolas 是 Microsoft 专有字体，不能内嵌，走 fallback 链。
+ * ========================================================================== */
+
+/* === JetBrains Mono（等宽字体 · 主选） === */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap; /* 先用 fallback 渲染，字体加载后替换 */
+}
+
+/* === MesloLGS Nerd Font（等宽字体 · 备选，含 Nerd Font 图标字形） === */
+@font-face {
+  font-family: 'MesloLGS NF';
+  src: url('/fonts/MesloLGS-NF-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}

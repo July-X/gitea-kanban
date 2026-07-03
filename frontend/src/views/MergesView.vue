@@ -20,7 +20,7 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -32,8 +32,8 @@ import { renderMarkdown } from '@renderer/lib/markdown';
 // （v2 是 Wails WebView，<a target="_blank"> / window.open 在这里不可靠）。
 import { BrowserOpenURL } from '../../wailsjs/wailsjs/runtime/runtime';
 import {
-  issuesCommentCreate,
-  issuesCommentList,
+  pullsCommentCreate,
+  pullsCommentList,
   labelsCreate,
   labelsList,
   membersList,
@@ -53,6 +53,12 @@ const auth = useAuthStore();
 const router = useRouter();
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
+
+// v0.6+ 滚动到底自动加载分页：哨兵 + IntersectionObserver
+// - loadMoreSentinel: <div ref="loadMoreSentinel"> 在 ul 之后
+// - loadMoreObserver: onMounted 时建，onUnmounted 时 disconnect 防内存泄露
+const loadMoreSentinel = ref<HTMLElement | null>(null);
+let loadMoreObserver: IntersectionObserver | null = null;
 
 const activeRepo = computed<RepoDto | null>(() => {
   const fn = repo.currentProject ? `${repo.currentProject.owner}/${repo.currentProject.name}` : null;
@@ -98,6 +104,8 @@ const showAdvancedMethods = ref(false);
 const mergingPull = ref<PullDto | null>(null);
 const merging = ref(false);
 const squashMessage = ref('');
+/** v0.6+ 用户拍板：合并后顺手删源分支（默认 false，PM 选 merge 时最容易忘） */
+const deleteBranchAfter = ref(false);
 
 /** 当前正在关闭的合并请求（null = 没在关闭） */
 const closingPull = ref<PullDto | null>(null);
@@ -118,6 +126,30 @@ onMounted(async () => {
   if (activeProjectId.value) {
     await loadPulls();
   }
+  // v0.6+ bugfix：滚动到底自动加载下一页
+  // - rootMargin: 200px 预加载（用户还没滚到底就开始拉，体验更顺）
+  // - threshold: 0 不需要可见，仅进入 rootMargin 范围即触发
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      const e = entries[0];
+      if (!e || !e.isIntersecting) return;
+      // 不在拉中 + 还有更多 才调
+      if (pull.loadingMore || !pull.hasMore) return;
+      void pull.loadMore();
+    },
+    { rootMargin: '200px 0px', threshold: 0 },
+  );
+  if (loadMoreSentinel.value) {
+    loadMoreObserver.observe(loadMoreSentinel.value);
+  }
+});
+
+onUnmounted(() => {
+  // v0.6+：避免 component 卸载后 observer 继续触发回调（内存泄露）
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
+  }
 });
 
 watch(
@@ -133,11 +165,38 @@ watch(
 
 async function loadPulls(): Promise<void> {
   if (!activeProjectId.value) return;
+  // v0.6+ bugfix：预加载仓库成员，让评论 @ 唤出成员名（之前只在打开属性编辑器才加载）
+  await loadMembers();
   try {
     await pull.list(activeProjectId.value, true);
   } catch (e) {
     const err = e as { messageText?: string };
     showToast({ type: 'error', message: err.messageText ?? '加载失败', persistent: true });
+  }
+}
+
+/**
+ * 加载仓库成员，填充 availableMembers（评论 @ 候选）
+ *
+ * v0.6+ bugfix：之前 availableMembers 只在 openAttrEditor 里加载，
+ * 评论 @ 不会触发那个函数 → 候选始终空。
+ * 现在在 loadPulls / openAttrEditor 两处都加载，互不干扰。
+ */
+async function loadMembers(): Promise<void> {
+  if (!activeProjectId.value) return;
+  try {
+    const membersResp = await membersList({ projectId: String(activeProjectId.value) });
+    const members = (membersResp.items ?? []) as (CollaboratorDto & { login_type?: string })[];
+    availableMembers.value = members.map((m) => m.username);
+    nonReviewableMembers.value = new Set(
+      members
+        .filter(
+          (m) => m.login_type === 'Organization' || m.login_type === 'organization',
+        )
+        .map((m) => m.username),
+    );
+  } catch {
+    // 失败不报 toast（评论 @ 是 nice-to-have，不应中断 PR 列表加载）
   }
 }
 
@@ -152,9 +211,8 @@ async function onRefresh(): Promise<void> {
 }
 
 function toggleExpand(idx: number): void {
-  const next = new Set(expanded.value);
-  if (next.has(idx)) next.delete(idx);
-  else next.add(idx);
+  const next = new Set<number>();
+  if (!expanded.value.has(idx)) next.add(idx);
   expanded.value = next;
 }
 
@@ -184,17 +242,27 @@ function onJumpToTimeline(p: PullDto): void {
   void router.push('/timeline');
 }
 
-/** 生成 gitea web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
+/** 生成 gitea / github web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
  *
- * 不用 RepoDto.url 字段——schema 里没这个字段，
- * 硬拼会得到 "https://kanban demo/m4java-test" 这种带空格的非法 URL。
- * 用 useAuthStore.currentGiteaUrl + 当前 activeRepo.owner/name 拼接。
+ * v0.6+ bugfix：原代码走 auth.currentGiteaUrl，对 GitHub 账号会拼出
+ *   https://api.github.com/{owner}/{repo}/pulls/{N}
+ * —— api.github.com 是 API endpoint，不是网页，浏览器看到 JSON。
+ *
+ * 现在走 auth.getAccountUrlByPlatform(currentProject.platform)，
+ * 与 CommitDetailPanel 「在 GitHub 中打开」 同逻辑（见 auth.ts 注释）。
  */
 function giteaPullUrl(p: PullDto): string {
   if (!activeRepo.value) return '#';
-  const giteaUrl = (auth.currentGiteaUrl || '').replace(/\/+$/, '');
-  if (!giteaUrl) return '#';
-  return `${giteaUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/pulls/${p.index}`;
+  const platform = (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github';
+  // v0.6+ bugfix：GitHub 账号走专用 helper，自动把 api.github.com → github.com
+  const baseUrl = (auth.getAccountUrlByPlatform(platform) || '').replace(/\/+$/, '');
+  if (!baseUrl) return '#';
+  // v0.6+ bugfix：GitHub web URL 用单数 /pull/N，Gitea web URL 用复数 /pulls/N
+  //   https://github.com/{owner}/{repo}/pull/{N}     ← GitHub
+  //   https://gitea.example.com/{owner}/{repo}/pulls/{N}  ← Gitea
+  // 上次错拼 GitHub 为 /pulls/N → GitHub 返 404
+  const pathSegment = platform === 'github' ? 'pull' : 'pulls';
+  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/${pathSegment}/${p.index}`;
 }
 
 /** 在系统浏览器打开合并请求页面（Wails BrowserOpenURL，window.open / <a target=_blank>
@@ -221,6 +289,7 @@ function requestMerge(p: PullDto): void {
   mergingPull.value = p;
   selectedMethod.value = 'merge';
   squashMessage.value = '';
+  deleteBranchAfter.value = false;
   confirmMergeOpen.value = true;
 }
 
@@ -236,6 +305,7 @@ async function performMerge(): Promise<void> {
       index: p.index,
       method: selectedMethod.value,
       commitMessage: needsCommitMessage(selectedMethod.value) ? squashMessage.value : undefined,
+      deleteBranchAfter: deleteBranchAfter.value || undefined,
     });
     if (result.merged) {
       showToast({ type: 'success', message: `#${p.index} 合并成功` });
@@ -299,20 +369,8 @@ async function openAttrEditor(p: PullDto): Promise<void> {
       const labelsResp = await labelsList({ projectId: String(activeProjectId.value) });
       availableLabels.value = labelsResp.items ?? [];
     } catch { /* 忽略 */ }
-    try {
-      const membersResp = await membersList({ projectId: String(activeProjectId.value) });
-      const members = membersResp.items ?? [];
-      availableMembers.value = members.map((m) => m.username);
-      // 识别组织账号（gitea 1.x 限制：组织不能作评审人，但可以作指派人）
-      nonReviewableMembers.value = new Set(
-        members
-          .filter(
-            (m: CollaboratorDto & { login_type?: string }) =>
-              m.login_type === 'Organization' || m.login_type === 'organization',
-          )
-          .map((m) => m.username),
-      );
-    } catch { /* 忽略 */ }
+    // v0.6+ bugfix：复用 loadMembers，避免重复代码
+    await loadMembers();
   }
 }
 
@@ -648,9 +706,9 @@ async function fetchComments(p: PullDto): Promise<void> {
   // 评论加载也接 globalLoading（panel 二级加载，多 pr 并发 active 时合并）
   useGlobalLoadingStore().show('merges');
   try {
-    const list = (await issuesCommentList({
+    const list = (await pullsCommentList({
       projectId: String(activeProjectId.value),
-      issueIndex: p.index,
+      index: p.index,
     })) as IssueCommentDto[];
     panel.items = Array.isArray(list) ? list : [];
     panel.lastLoadedAt = Date.now();
@@ -680,9 +738,9 @@ async function postComment(p: PullDto): Promise<void> {
   panel.posting = true;
   panel.error = null;
   try {
-    await issuesCommentCreate({
+    await pullsCommentCreate({
       projectId: String(activeProjectId.value),
-      issueIndex: p.index,
+      index: p.index,
       body,
     });
     setDraft(p.index, '');
@@ -889,8 +947,8 @@ function formatRelative(iso: string | undefined): string {
       <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看合并请求' />
     </div>
     <!--
-      v1.4 拍板"替换模式"：删 v-else-if="pull.loading && ..." 的"加载中…"占位
-      全局海豚 overlay 接管请求级 loading
+      v0.6.1+ 拍板"替换模式"：删 v-else-if="pull.loading && ..." 的"加载中…"占位
+      全局 StatusBarPulse 接管请求级 loading
     -->
     <div v-else-if="!pull.items.length" class="merges__placeholder">
       <EmptyState
@@ -1129,9 +1187,9 @@ function formatRelative(iso: string | undefined): string {
                 </button>
               </div>
 
-              <!-- 主体：左 50% 历史评论 + 右 50% 输入框 -->
+              <!-- 主体：历史对话 + 发送评论（上下布局，发送区固定 100px） -->
               <div class="merge-item__comments-body">
-                <!-- 左列：加载态 / 错误态 / 空态 / 评论列表 -->
+                <!-- 上：加载态 / 错误态 / 空态 / 评论列表 -->
                 <div class="merge-item__comments-history">
                   <!-- 加载态 -->
                   <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
@@ -1155,14 +1213,16 @@ function formatRelative(iso: string | undefined): string {
                       class="merge-item__comment"
                       :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
                     >
-                      <div
-                        class="merge-item__comment-avatar"
-                        :title="c.author.username"
-                        aria-hidden="true"
-                      >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
+                      <div class="merge-item__comment-side">
+                        <div
+                          class="merge-item__comment-avatar"
+                          :title="c.author.username"
+                          aria-hidden="true"
+                        >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
+                        <div class="merge-item__comment-name">{{ c.author.username }}</div>
+                      </div>
                       <div class="merge-item__comment-bubble">
                         <div class="merge-item__comment-meta">
-                          <span class="merge-item__comment-author">{{ c.author.username }}</span>
                           <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
                           <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
                         </div>
@@ -1183,7 +1243,7 @@ function formatRelative(iso: string | undefined): string {
                   </ul>
                 </div>
 
-                <!-- 右列：发评论输入区（v1.4 加大 + @ 提及自动补全） -->
+                <!-- 下：发评论输入区（v2.62 · 改为布局在历史对话下方，固定 120px，发送按钮在输入框内右上角） -->
                 <div class="merge-item__comment-compose">
                   <div class="merge-item__comment-input-wrap">
                     <textarea
@@ -1194,10 +1254,20 @@ function formatRelative(iso: string | undefined): string {
                       @keydown="onCommentKeydown(p, $event)"
                       :placeholder="'发条评论给 #' + p.index + '\n@ 提及成员，Enter 发送，⌘/Ctrl+Enter 也行'"
                       :disabled="getPanel(p.index).posting"
-                      rows="8"
+                      rows="3"
                       maxlength="65535"
                       spellcheck="false"
                     ></textarea>
+                    <!-- 发送按钮：绝对定位到输入框右上角 -->
+                    <button
+                      type="button"
+                      class="merge-item__comment-send-absolute"
+                      :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
+                      :title="'发送评论（Enter 也可发送）'"
+                      @click.stop="postComment(p)"
+                    >
+                      <Send :size="14" :stroke-width="2" aria-hidden="true" />
+                    </button>
                     <div
                       v-if="isMentionOpen(p.index) && mentionCandidates(p.index).length > 0"
                       class="merge-item__mention-dropdown"
@@ -1216,18 +1286,8 @@ function formatRelative(iso: string | undefined): string {
                     <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
                       {{ getDraft(p.index).length }} / 65535
                     </span>
-                    <button
-                      type="button"
-                      class="merge-item__comment-send"
-                      :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
-                      :title="'发送评论'"
-                      @click.stop="postComment(p)"
-                    >
-                      <Send :size="12" :stroke-width="2" aria-hidden="true" />
-                      <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
-                    </button>
+                  </div>
                 </div>
-              </div>
               </div>
             </div>
           </div>
@@ -1339,6 +1399,27 @@ function formatRelative(iso: string | undefined): string {
           </div>
         </ConfirmDialog>
       </li>
+
+      <!-- v2.62 滚动到底自动加载哨兵（在 ul 内部，ul 滚动时随之一超超一上滑，能重复触发 observer） -->
+      <!-- v0.6.1+：加载中动画已统一到 StatusBarPulse（底部状态栏心跳脉冲），这里只展示末尾状态 -->
+      <li
+        ref="loadMoreSentinel"
+        class="merges__load-more"
+        :data-state="(!pull.hasMore && pull.currentPage >= 1) ? 'end' : 'idle'"
+        aria-live="polite"
+      >
+        <!-- 末尾：已加载全部 -->
+        <div v-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">
+          <span class="merges__load-more-divider" aria-hidden="true"></span>
+          <span>已到全部合并请求的末尾</span>
+          <span class="merges__load-more-divider" aria-hidden="true"></span>
+        </div>
+        <!-- idle：占位保持哨兵高度，IntersectionObserver 可检测 -->
+        <div v-else class="merges__load-more-idle">
+          <span class="merges__load-more-arrow" aria-hidden="true">↓</span>
+          <span>继续滚动加载更多…</span>
+        </div>
+      </li>
     </ul>
 
     <!-- ============== 合并二次确认弹窗 ============== -->
@@ -1403,6 +1484,21 @@ function formatRelative(iso: string | undefined): string {
             placeholder="请输入合并提交信息"
             autocomplete="off"
           />
+        </div>
+        <!-- v0.6+：合并后顺手删除源分支（PM 选 merge 时最容易忘的清理） -->
+        <div v-if="mergingPull" class="merge-confirm__delete-branch">
+          <label class="merge-confirm__delete-branch-label">
+            <input
+              v-model="deleteBranchAfter"
+              type="checkbox"
+              class="merge-confirm__delete-branch-checkbox"
+            />
+            <span>合并后删除源分支 <code>{{ mergingPull.head.ref }}</code></span>
+          </label>
+          <p class="merge-confirm__delete-branch-hint">
+            勾选后：合并成功时删除 <code>{{ mergingPull.head.ref }}</code>。
+            GitHub 合并成功后会调 DELETE /git/refs/heads/&lt;ref&gt;；Gitea 直接走 /pulls/{index}/merge 内置参数。
+          </p>
         </div>
       </div>
     </ConfirmDialog>
@@ -1636,13 +1732,72 @@ function formatRelative(iso: string | undefined): string {
   margin: 0;
   padding: var(--space-4);
   overflow-y: auto;
+  /* v0.6+ bugfix：防止 PR row 内部内容撑出整页横向滚动条 */
+  overflow-x: hidden;
   & > li + li {
     margin-top: 2px;
   }
 }
 
+/* v2.62 滚动到底自动加载分页：哨兵 + 三状态视觉反馈 */
+/* v0.6.1+：加载中动画已统一到 StatusBarPulse（底部状态栏心跳脉冲），merges__load-more-loading 和 merges__load-more-spinner 已移除 */
+.merges__load-more {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-4) 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-height: 56px;                /* v2.62：加大保证 IntersectionObserver 能可靠检测 */
+  list-style: none;                /* li 默认有 disc bullet，去掉 */
+  /* v2.62：idle 状态走脉冲呼吸动画提示用户可加载 */
+  transition: opacity var(--t-base) var(--ease);
+}
+/* 不同状态的边框/背景提示 */
+.merges__load-more[data-state='idle'] {
+  opacity: 0.6;
+}
+.merges__load-more[data-state='end'] {
+  opacity: 0.5;
+}
+.merges__load-more-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  animation: merges-load-idle-breath 2s ease-in-out infinite;
+}
+.merges__load-more-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--color-divider);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.merges__load-more-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-style: normal;
+  font-size: var(--font-xs);
+}
+.merges__load-more-divider {
+  flex: 0 0 24px;
+  height: 1px;
+  background: var(--color-divider);
+}
+@keyframes merges-load-idle-breath {
+  0%, 100% { opacity: 0.55; transform: translateY(0); }
+  50% { opacity: 0.9; transform: translateY(2px); }
+}
+
 .merge-item {
-  background: var(--color-bg-elevated);
+  /* v0.6.24：去掉浅苍蓝背景色，使用透明背景，让整页背景色统一 */
+  background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   transition: background var(--t-fast) var(--ease);
@@ -2001,18 +2156,14 @@ function formatRelative(iso: string | undefined): string {
 
 .merge-item__detail {
   grid-column: 1 / -1;
-  /* v1.5.8：紧凑留白 5px，评论区尽可能饱满
-   *  - detail 自身 padding 5px（你要求）
-   *  - min-height 440 → 380px（少空白）
-   *  - 内部各子块 padding/gap 同步收紧 */
   padding: 5px var(--space-4) var(--space-4);
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-3);
-  /* v1.5.7：min-height 兜底（评论区至少 380 - 60 meta - 40 header ≈ 280px 可见） */
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-height: 380px;
+  /* PR row 高度再增加 80px */
+  min-height: 460px;
   max-height: min(90vh, 900px);
   overflow: hidden;
 }
@@ -2211,6 +2362,54 @@ function formatRelative(iso: string | undefined): string {
   outline-offset: -1px;
 }
 
+/* v0.6+：合并后顺手删除源分支 checkbox */
+.merge-confirm__delete-branch {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--color-divider) 70%, transparent);
+}
+
+.merge-confirm__delete-branch-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
+.merge-confirm__delete-branch-label code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+  color: var(--color-primary);
+}
+
+.merge-confirm__delete-branch-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.merge-confirm__delete-branch-hint {
+  margin: 6px 0 0 22px;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.merge-confirm__delete-branch-hint code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  padding: 0 4px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -2267,6 +2466,10 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
   min-height: 0;
   flex: 1 1 0;
+  /* v0.6.25：强制透明背景，去掉浅苍蓝强调色 */
+  background: transparent;
+  /* v0.6+ bugfix：保证评论体长文本不越出面板边缘，避免出现整页横向滚动条 */
+  overflow-x: hidden;
 }
 
 /* ===== 顶部 header：左标题 + 右刷新按钮 ===== */
@@ -2324,27 +2527,27 @@ function formatRelative(iso: string | undefined): string {
   cursor: not-allowed;
 }
 
-/* ===== v1.5 主体：左 70% 历史 / 右 30% 输入框 ===== */
+/* ===== v2.62 主体：历史对话 + 发送评论（上下布局，发送评论固定 100px） ===== */
 .merge-item__comments-body {
-  display: grid;
-  /* v1.5.9：消息列表 70% + 回复区 30%（gitea web 的 "discussion + reply" 布局） */
-  grid-template-columns: 7fr 3fr;
-  grid-template-rows: 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
-  /* v1.5.10：左右填满父 .merge-item__comments（block 元素默认 stretch，width:100% 兜底） */
   width: 100%;
-  margin-bottom: 5px;          /* v1.5.10：底部 5px 留白（你要求） */
+  margin-bottom: 5px;
+  /* v0.6.25：强制透明背景 */
+  background: transparent;
 }
 
-/* 左列：历史评论 + 各种态（loading/error/empty） */
+/* 上：历史评论 + 各种态（loading/error/empty） */
 .merge-item__comments-history {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  /* grid item stretch；list flex 1 撑满 history */
+  flex: 1 1 0;
   overflow: hidden;
 }
 
@@ -2388,14 +2591,18 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: 5px;                 /* v1.5.8：12 → 5，5px 留白 */
+  padding: 5px;
   display: flex;
   flex-direction: column;
-  gap: 5px;                     /* v1.5.8：12 → 5 */
+  gap: 5px;
   flex: 1 1 0;
   min-height: 0;
+  min-width: 0;
   max-height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
+  /* 独立响应：滚动到顶部/底部时不冒泡到外层 .merges__list */
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--color-divider) transparent;
   background: var(--color-bg);
@@ -2427,14 +2634,19 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
 }
 
-/* v1.5.11：复刻 gitea 合并请求评论聊天布局——"我"的消息头像+气泡都贴右（对称显示） */
-.merge-item__comment--self {
-  flex-direction: row-reverse;
+/* v0.6.21：评论侧栏（头像 + 用户名垂直排列） */
+.merge-item__comment-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 60px;
+  max-width: 80px;
 }
 
 /* 头像圈（首字母） */
 .merge-item__comment-avatar {
-  flex-shrink: 0;
   width: 26px;
   height: 26px;
   border-radius: 50%;
@@ -2452,41 +2664,99 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text-inverse);
 }
 
+/* 头像下方的用户名 */
+.merge-item__comment-name {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.merge-item__comment--self .merge-item__comment-name {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
 /* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
 .merge-item__comment-bubble {
   flex: 1 1 0;
   min-width: 0;
+  max-width: 100%;
   padding: 5px 8px;
-  background: var(--color-bg-elevated);
+  /* v0.6.23：取消背景色，用边框线表达 */
+  background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: 8px;
   position: relative;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+/* v0.6.22：评论区宽度撑满，padding 只控制左右留白 */
+.merge-item__comment-list {
+  padding: 4px 50px;
+  display: flex;
+  flex-direction: column;
 }
 /* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
  * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
 .merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
   padding-right: 56px;
 }
+/* v0.6.22：评论自适应宽度，他人靠左，"我"靠右 */
+.merge-item__comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 12px;
+  max-width: 70%;
+}
+/* v0.6.22："我"的评论靠右 */
+.merge-item__comment--self {
+  margin-left: auto;
+  flex-direction: row-reverse;
+}
+/* 气泡小箭头（指向头像）—— 用 CSS border 画三角形 */
 .merge-item__comment-bubble::before {
-  display: none;
+  content: '';
+  position: absolute;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  border: 1px solid var(--color-divider);
+  /* 默认（他人，左侧）：箭头指向左 */
+  left: -5px;
+  border-right: 1px solid var(--color-divider);
+  border-top: none;
+  border-bottom: none;
+  transform: rotate(45deg);
+}
+.merge-item__comment-bubble {
+  /* 让他人箭头也跟随气泡背景色 */
+  background-clip: padding-box;
 }
 /* v1.5.11：复刻 gitea 颜色——"我"的气泡用主色实色 + 白字（强对比），
  * 他人保持 elevated 浅色 + 默认字（弱对比） */
 .merge-item__comment--self .merge-item__comment-bubble {
-  background: var(--color-primary);
+  /* v0.6.20：去掉背景色，改用主色边框线表达"我发的评论" */
+  background: transparent;
   border-color: var(--color-primary);
-  color: var(--color-text-inverse);
+  border-width: 1.5px;
+  color: var(--color-text);
 }
-/* "我"的气泡里所有文字反色 */
+/* "我"的气泡里所有文字保持默认色（背景已透明） */
 .merge-item__comment--self .merge-item__comment-author,
 .merge-item__comment--self .merge-item__comment-time,
 .merge-item__comment--self .merge-item__comment-self-tag,
 .merge-item__comment--self .merge-item__comment-body {
-  color: var(--color-text-inverse);
+  color: var(--color-text);
 }
-/* "我"的气泡里 markdown body 内元素也反色（链接/代码） */
+/* "我"的气泡里 markdown body 内链接保持默认主色 */
 .merge-item__comment--self .merge-item__comment-body a {
-  color: var(--color-text-inverse);
+  color: var(--color-primary);
   text-decoration: underline;
 }
 
@@ -2530,11 +2800,14 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment--self .merge-item__comment-bubble::before {
   left: auto;
   right: -5px;
-  background: var(--color-primary-soft, var(--color-bg-elevated));
+  /* v0.6.20：背景透明，箭头跟随边框颜色 */
+  background: transparent;
   border-left: none;
   border-bottom: none;
-  border-right: 1px solid var(--color-primary);
-  border-top: 1px solid var(--color-primary);
+  border-right: 1.5px solid var(--color-primary);
+  border-top: 1.5px solid var(--color-primary);
+  /* 旋转 45° 让两个边形成指向右的三角箭头 */
+  transform: rotate(45deg);
 }
 
 .merge-item__comment-meta {
@@ -2566,31 +2839,99 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-body {
   font-size: var(--font-sm);
   color: var(--color-text);
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: normal;
   line-height: 1.5;
+  max-width: 100%;
+  min-width: 0;
+}
+/* 强制 .merge-item__comment-body 内的所有 markdown 节点都限制在气泡里 */
+.merge-item__comment-body > *,
+.merge-item__comment-body p,
+.merge-item__comment-body pre,
+.merge-item__comment-body code,
+.merge-item__comment-body ul,
+.merge-item__comment-body ol,
+.merge-item__comment-body li,
+.merge-item__comment-body blockquote,
+.merge-item__comment-body h1,
+.merge-item__comment-body h2,
+.merge-item__comment-body h3,
+.merge-item__comment-body h4,
+.merge-item__comment-body h5,
+.merge-item__comment-body h6,
+.merge-item__comment-body table {
+  max-width: 100%;
+  min-width: 0;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+.merge-item__comment-body pre,
+.merge-item__comment-body pre code {
+  white-space: pre-wrap;
+}
+.merge-item__comment-body code {
+  white-space: pre-wrap;
 }
 
-/* 发评论输入区（v1.5.8 紧凑 5px 留白） */
+/* 发评论输入区（v2.62 · 改到历史对话下方，固定 120px，发送按钮在输入框内右上角） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
-  gap: 5px;                     /* v1.5.8：8 → 5 */
-  padding: 5px;                 /* v1.5.8：12 → 5 */
-  background: var(--color-bg-elevated);
+  gap: 4px;
+  padding: 5px;
+  /* v0.6.25：去掉浅苍蓝背景色，与整页背景统一 */
+  background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   min-width: 0;
-  min-height: 0;
+  height: 120px;                /* v2.62：100 → 120 */
+  flex-shrink: 0;
   overflow: hidden;
 }
 
-/* textarea + @ 候选下拉的相对定位容器（v1.5 撑满 compose 剩余高度） */
+/* textarea + @ 候选下拉的相对定位容器（v2.62：内部右上角放发送按钮） */
 .merge-item__comment-input-wrap {
   position: relative;
   display: flex;
   flex: 1 1 0;
   min-height: 0;
+}
+
+/* v2.62：发送按钮定位在输入框内右上角（圆形主色实色 + 阴影，复刻参考图） */
+.merge-item__comment-send-absolute {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.merge-item__comment-send-absolute:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  transform: scale(1.05);
+}
+.merge-item__comment-send-absolute:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.merge-item__comment-send-absolute:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 
 /* v1.5.4：去掉 min-height，按你要求只保留 max-height 兜底
@@ -2599,9 +2940,9 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-input {
   width: 100%;
   flex: 1 1 auto;
-  min-height: 0;                    /* v1.5.4：去掉 120px 强制高度 */
+  min-height: 0;
   max-height: 100%;
-  resize: none;                     /* 左右布局下禁止手拽改高，避免破坏等高 */
+  resize: none;
   background: transparent;
   border: none;
   outline: none;
@@ -2609,9 +2950,11 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   color: var(--color-text);
   font-family: inherit;
-  padding: 0;                       /* v1.5.4：padding 跟 textarea 自带默认（行高 1.5 × 8 rows ≈ 200px） */
+  /* v2.62：右侧留 40px 给绝对定位的发送按钮，避免文本压在按钮下 */
+  padding: 6px 40px 6px 8px;
   line-height: 1.5;
-  overflow-y: auto;                 /* v1.5.4：内容超过 max-height 出现滚动条（你要求） */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* v1.4 @ 提及下拉（绝对定位，浮在 textarea 上方） */
@@ -2660,37 +3003,13 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;                     /* v1.5.8：8 → 5 */
-  padding-top: 5px;             /* v1.5.8：6 → 5 */
-  border-top: 1px solid var(--color-divider-soft);
+  padding-top: 2px;
+  flex-shrink: 0;
 }
 .merge-item__comment-counter {
   margin-right: auto;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
-}
-.merge-item__comment-send {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 14px;            /* v1.5：4 12 → 6 14，触控更舒服（44px 命中区） */
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-xs);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--t-fast) var(--ease);
-  min-height: 32px;             /* v1.5：明确最小高度，触控目标 ≥ 32 */
-}
-.merge-item__comment-send:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-  border-color: var(--color-primary-hover);
-}
-.merge-item__comment-send:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* ===== markdown 正文全局样式（v1.2）=====
@@ -2702,6 +3021,10 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--color-text);
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
 }
 .md-body p {
   margin: 0 0 4px 0;
@@ -2730,6 +3053,18 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text-secondary);
   background: var(--color-bg);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  /* 强制引用块超长文本自动换行 */
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  max-width: 100%;
+  min-width: 0;
+}
+.md-body blockquote > * {
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
 }
 .md-body code {
   padding: 1px 6px;
@@ -2738,13 +3073,21 @@ function formatRelative(iso: string | undefined): string {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.9em;
   color: var(--color-accent);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-width: 100%;
 }
 .md-body pre {
   margin: 4px 0;
   padding: var(--space-2);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: var(--font-xs);
   line-height: 1.5;
@@ -2754,6 +3097,9 @@ function formatRelative(iso: string | undefined): string {
   background: transparent;
   color: var(--color-text);
   font-size: inherit;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 .md-body a {
   color: var(--color-primary);

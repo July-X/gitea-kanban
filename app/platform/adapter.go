@@ -106,7 +106,39 @@ type PlatformAdapter interface {
 	ListIssues(ctx context.Context, hostURL, username, token, owner, repo string, opts ListIssuesOpts) ([]IssueDTO, error)
 
 	// ListPulls 列出仓库合并请求
-	ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts ListPullsOpts) ([]PullDTO, error)
+	ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts ListPullsOpts) ([]PullDetailDTO, error)
+
+	// GetPull 获取单个合并请求详情
+	GetPull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*PullDetailDTO, error)
+
+	// MergePull 合并合并请求（按指定 merge method）
+	MergePull(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts MergePullOpts) (*PullDetailDTO, error)
+
+	// ClosePull 关闭合并请求（不合并）
+	ClosePull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*PullDetailDTO, error)
+
+	// UpdatePullLabels 替换合并请求的标签
+	UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*PullDetailDTO, error)
+
+	// UpdatePullAssignee 替换合并请求的指派人（空字符串 = 清空）
+	UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignee string) (*PullDetailDTO, error)
+
+	// UpdatePullReviewers 替换合并请求的审查者（空切片 = 清空；Gitea 走 requested_reviewers，GitHub 等价）
+	UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*PullDetailDTO, error)
+
+	// ListPullComments 列合并请求评论（v0.6+ PR 评论，按 createdAt 升序）
+	//
+	// Gitea 与 GitHub 都把 PR 评论 / issue 评论放在同一端点
+	// （/repos/{owner}/{repo}/issues/{index}/comments —— GitHub 上 PR 是 issue 的一种），
+	// 所以 issue 评论和 PR 评论其实是同一份数据。这里走 PR 接口纯粹是为了命名清晰，
+	// 避免上层业务方混用。
+	ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]CommentDTO, error)
+
+	// CreatePullComment 在合并请求下发评论（v0.6+ PR 评论）
+	//
+	// 返回创建的评论（含服务端分配的 id / createdAt / author），前端用此
+	// 拿到权威时间戳去更新 UI（避免"前端猜时间戳 + 实际服务端时间"不一致）。
+	CreatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string) (*CommentDTO, error)
 
 	// ListLabels 列出仓库标签
 	ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]LabelDTO, error)
@@ -134,8 +166,25 @@ type ListIssuesOpts struct {
 // ListPullsOpts 列合并请求参数
 type ListPullsOpts struct {
 	State string // "open" | "closed" | "all"
+	Head  string // 可选：head 分支过滤
+	Base  string // 可选：base 分支过滤
 	Page  int
 	Limit int
+}
+
+// MergePullOpts 合并合并请求参数
+//
+// MergeMethod 与前端 MergeMethod 对齐（Gitea / GitHub 共有值）：
+//   - "merge"        → 普通合并（保留所有提交历史）
+//   - "rebase"       → 变基后快进（重写历史，单一线性，GitHub 把它叫 "rebase"）
+//   - "rebase-merge" → 变基后 merge commit（Gitea 专属）
+//   - "squash"       → 压缩为单提交
+//
+// GitHub 不支持 "rebase-merge"，调用方需按平台分支处理（详见 GitHubAdapter.MergePull）
+type MergePullOpts struct {
+	Method            string // 见 MergeMethod
+	DeleteBranchAfter bool   // 合并后是否删除源分支
+	CommitMessage     string // 可选；method="squash" 时部分平台要求非空
 }
 
 // LogGraphOpts log graph 参数
@@ -145,6 +194,8 @@ type LogGraphOpts struct {
 	// Head 当前 checkout 的 commit hash, 用于标记 isCurrent (vscode HEAD 高亮).
 	// 空字符串则全部 isCurrent=false (HEAD 由 vscode 自身显示 uncommitted dot)
 	Head string
+	// Offset 跳过前 N 条 commit（分页用，0 = 不跳过）
+	Offset int
 }
 
 // GraphResult Graph 布局结果（与 app/git/graph.GraphResult 对齐，但作为 DTO 不含内部类型）
@@ -236,6 +287,67 @@ type PullDTO struct {
 	Head   string `json:"head"`
 	Base   string `json:"base"`
 	Merged bool   `json:"merged"`
+}
+
+// PullDetailDTO 合并请求完整详情（GetPull / MergePull / ClosePull / UpdatePull* 返回值）
+//
+// 与 PullDTO 区分：列表接口轻量，详情接口完整。
+// 字段对齐前端 PullDto（frontend/src/types/dto.ts），前端 store 直接复用。
+type PullDetailDTO struct {
+	Index         int               `json:"index"`
+	Number        int               `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
+	Title         string            `json:"title"`
+	State         string            `json:"state"` // "open" | "closed"
+	Draft         bool              `json:"draft"`
+	Merged        bool              `json:"merged"`
+	Head          PullRefDTO        `json:"head"`
+	Base          PullRefDTO        `json:"base"`
+	Author        *PullUserDTO      `json:"author,omitempty"`
+	CreatedAt     string            `json:"createdAt"`     // ISO 8601
+	UpdatedAt     string            `json:"updatedAt"`     // ISO 8601
+	Mergeable     bool              `json:"mergeable"`     // false=有冲突/不可合并
+	HasConflicts  bool              `json:"hasConflicts"`  // = !Mergeable（前端视图字段对齐）
+	Body          string            `json:"body,omitempty"`
+	CommentsCount int               `json:"commentsCount"`
+	Labels        []PullLabelDTO    `json:"labels,omitempty"`
+	Assignees     []PullUserDTO     `json:"assignees,omitempty"`
+	Reviewers     []PullUserDTO     `json:"reviewers,omitempty"`
+	MergedBy      *PullUserDTO      `json:"mergedBy,omitempty"`
+	MergeCommitSHA string           `json:"mergeCommitSha,omitempty"` // 合并成功后回填
+}
+
+// PullRefDTO head / base 引用信息
+type PullRefDTO struct {
+	Ref string `json:"ref"`  // 分支名
+	SHA string `json:"sha"`  // 分支顶端 commit hash
+}
+
+// PullUserDTO 嵌套用户信息（author / assignees / reviewers / mergedBy）
+type PullUserDTO struct {
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+}
+
+// PullLabelDTO 嵌套标签信息
+type PullLabelDTO struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// CommentDTO 合并请求 / 议题评论（v0.6+ 共享）
+//
+// 字段对齐 Gitea Comment + GitHub Issue Comment，两端字段命名一致：
+//   - id / body / author / createdAt / updatedAt
+//
+// v0.6+ 不引入"评论系统评论"（PR review / inline review comment）——
+// 只支持顶层 issue-style 评论，等需要 review 评论时再加新 DTO。
+type CommentDTO struct {
+	ID        int64         `json:"id"`
+	Body      string        `json:"body"`
+	Author    *PullUserDTO  `json:"author,omitempty"`
+	CreatedAt string        `json:"createdAt"`
+	UpdatedAt string        `json:"updatedAt,omitempty"`
 }
 
 // LabelDTO 标签信息

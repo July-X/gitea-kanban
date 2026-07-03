@@ -56,6 +56,7 @@ import { formatLastUpdated } from '@renderer/lib/last-updated';
 import type { SyncProgress } from '@renderer/types/sync-progress';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import AccountManagerDialog from '@renderer/components/AccountManagerDialog.vue';
+import StatusBarPulse from '@renderer/components/StatusBarPulse.vue';
 import type { RepoDto } from '@renderer/types/dto';
 
 const auth = useAuthStore();
@@ -129,7 +130,9 @@ const filteredRepos = computed(() => {
   const q = pickerSearch.value.trim().toLowerCase();
   if (!q) return repo.repos;
   return repo.repos.filter(
-    (r) => r.fullName.toLowerCase().includes(q) || r.description.toLowerCase().includes(q),
+    (r) =>
+      (r.fullName ?? '').toLowerCase().includes(q) ||
+      (r.description ?? '').toLowerCase().includes(q),
   );
 });
 
@@ -433,6 +436,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 
 <template>
   <div class="statusbar-wrap">
+    <!-- 心跳脉冲加载动画（紧贴 StatusBar 顶边） -->
+    <StatusBarPulse />
     <footer class="statusbar" :data-state="connState" role="status" aria-live="polite">
       <div class="statusbar__left">
         <span class="statusbar__chip" :class="`statusbar__chip--${connState}`">
@@ -446,7 +451,15 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
           - 已同步 → 按钮"更新"（调 gitgraphPull）
           - 点 fullName 文字区域 → 切到该仓库上下文
           - 点行末按钮 → 只触发按钮 action（不切换仓库）
+
+          v0.4.0-2 fixup：api URL `<span>` 在 commit dc004ad 只加了注释，
+          没真移动 DOM。后续 commit 411f2a7 才真正把 <span class="statusbar__url">
+          从 picker 后（line 555）移到 picker 前。现状已正确（line ~454 一行紧邻）。
         -->
+        <span v-if="auth.currentGiteaUrl" class="statusbar__url mono" :title="auth.currentGiteaUrl">
+          {{ auth.currentGiteaUrl }}
+        </span>
+
         <div
           v-if="auth.isConnected"
           ref="pickerEl"
@@ -541,10 +554,6 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
             <EmptyState v-else title="没有匹配的仓库" description="试试别的搜索词" />
           </div>
         </div>
-
-        <span v-if="auth.currentGiteaUrl" class="statusbar__url mono" :title="auth.currentGiteaUrl">
-          {{ auth.currentGiteaUrl }}
-        </span>
 
         <button
           v-if="auth.isConnected"
@@ -686,6 +695,11 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 </template>
 
 <style scoped>
+/* 状态栏包装层：提供定位上下文给 StatusBarPulse */
+.statusbar-wrap {
+  position: relative;
+}
+
 .statusbar {
   display: flex;
   align-items: center;
@@ -1326,7 +1340,7 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 }
 
 /* ===== v2.6 同步进度条 =====
- * 位置：仓库行内、按钮下方（不在 dropdown 底部，独立于全局海豚 overlay）
+ * 位置：仓库行内、按钮下方（不在 dropdown 底部，独立于全局 StatusBarPulse）
  * 高度 2px（极细），避免 dropdown 内容膨胀
  * 三种状态：
  *   - 普通（蓝）：进行中

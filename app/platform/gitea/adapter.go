@@ -196,6 +196,7 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		LocalPath: localPath,
 		Branches:  opts.Branches,
 		MaxCount:  opts.MaxCount,
+		Offset:    opts.Offset,
 	})
 	if err != nil {
 		return nil, err
@@ -272,7 +273,11 @@ func (a *GiteaAdapter) ListIssues(ctx context.Context, hostURL, username, token,
 }
 
 // ListPulls 列出仓库合并请求（GET /api/v1/repos/{owner}/{repo}/pulls）
-func (a *GiteaAdapter) ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts platform.ListPullsOpts) ([]platform.PullDTO, error) {
+//
+// v0.6+ 返回值升级为 *PullDetailDTO（之前是 *PullDTO 轻量版）。
+// Gitea /pulls 列表接口本身返回完整字段（head.sha / user / mergeable / labels / assignees / reviewers），
+// 没必要列表/详情拆两次请求。轻量字段需求由前端 store 端按需 pick。
+func (a *GiteaAdapter) ListPulls(ctx context.Context, hostURL, username, token, owner, repo string, opts platform.ListPullsOpts) ([]platform.PullDetailDTO, error) {
 	params := url.Values{}
 	if opts.State != "" {
 		params.Set("state", opts.State)
@@ -286,37 +291,310 @@ func (a *GiteaAdapter) ListPulls(ctx context.Context, hostURL, username, token, 
 		params.Set("page", fmt.Sprintf("%d", opts.Page))
 	}
 
-	var raw []struct {
-		Index int    `json:"number"`
-		Title string `json:"title"`
-		State string `json:"state"`
-		Head  struct {
-			Ref string `json:"ref"`
-		} `json:"head"`
-		Base struct {
-			Ref string `json:"ref"`
-		} `json:"base"`
-		Merged bool `json:"merged"`
-	}
-
+	var raw []giteaPullRaw
 	path := fmt.Sprintf("/repos/%s/%s/pulls?%s", owner, repo, params.Encode())
 	err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw)
 	if err != nil {
 		return nil, err
 	}
 
-	pulls := make([]platform.PullDTO, 0, len(raw))
-	for _, p := range raw {
-		pulls = append(pulls, platform.PullDTO{
-			Index:  p.Index,
-			Title:  p.Title,
-			State:  p.State,
-			Head:   p.Head.Ref,
-			Base:   p.Base.Ref,
-			Merged: p.Merged,
-		})
+	pulls := make([]platform.PullDetailDTO, 0, len(raw))
+	for i := range raw {
+		pulls = append(pulls, giteaPullToDetail(raw[i]))
 	}
 	return pulls, nil
+}
+
+// ===== Pull Request 完整详情字段映射（v0.6+） =====
+
+// giteaPullRaw Gitea /pulls 列表 + /pulls/{index} 详情 共享的原始结构
+//
+// Gitea 1.21+ swagger：https://try.gitea.io/swagger#/repository/repoGetPullRequest
+// 仅保留本应用需要的字段，详见 PullRequest 端点定义。
+type giteaPullRaw struct {
+	Number             int                 `json:"number"`
+	Title              string              `json:"title"`
+	State              string              `json:"state"`
+	Draft              bool                `json:"draft"`
+	Merged             bool                `json:"merged"`
+	Head               giteaPullRefRaw     `json:"head"`
+	Base               giteaPullRefRaw     `json:"base"`
+	User               *giteaUserRaw       `json:"user"`
+	Assignees          []giteaUserRaw      `json:"assignees"`
+	RequestedReviewers []giteaUserRaw      `json:"requested_reviewers"`
+	Labels             []giteaPullLabelRaw `json:"labels"`
+	Mergeable          bool                `json:"mergeable"`
+	Comments           int                 `json:"comments"`
+	Body               string              `json:"body"`
+	MergedBy           *giteaUserRaw       `json:"merged_by"`
+	CreatedAt          string              `json:"created_at"`
+	UpdatedAt          string              `json:"updated_at"`
+}
+
+type giteaPullRefRaw struct {
+	Ref string `json:"ref"`
+	SHA string `json:"sha"`
+}
+
+type giteaUserRaw struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+type giteaPullLabelRaw struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// giteaPullToDetail 把 Gitea 原始响应映射到平台中性 PullDetailDTO
+func giteaPullToDetail(p giteaPullRaw) platform.PullDetailDTO {
+	out := platform.PullDetailDTO{
+		Index:         p.Number,
+		Number:        p.Number,
+		Title:         p.Title,
+		State:         p.State,
+		Draft:         p.Draft,
+		Merged:        p.Merged,
+		Head:          platform.PullRefDTO{Ref: p.Head.Ref, SHA: p.Head.SHA},
+		Base:          platform.PullRefDTO{Ref: p.Base.Ref, SHA: p.Base.SHA},
+		Mergeable:     p.Mergeable,
+		HasConflicts:  !p.Mergeable,
+		Body:          p.Body,
+		CommentsCount: p.Comments,
+		CreatedAt:     p.CreatedAt,
+		UpdatedAt:     p.UpdatedAt,
+	}
+	if p.User != nil {
+		out.Author = &platform.PullUserDTO{Username: p.User.Login, AvatarURL: p.User.AvatarURL}
+	}
+	if p.MergedBy != nil {
+		out.MergedBy = &platform.PullUserDTO{Username: p.MergedBy.Login, AvatarURL: p.MergedBy.AvatarURL}
+	}
+	if len(p.Assignees) > 0 {
+		out.Assignees = make([]platform.PullUserDTO, 0, len(p.Assignees))
+		for _, u := range p.Assignees {
+			out.Assignees = append(out.Assignees, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+		}
+	}
+	if len(p.RequestedReviewers) > 0 {
+		out.Reviewers = make([]platform.PullUserDTO, 0, len(p.RequestedReviewers))
+		for _, u := range p.RequestedReviewers {
+			out.Reviewers = append(out.Reviewers, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+		}
+	}
+	if len(p.Labels) > 0 {
+		out.Labels = make([]platform.PullLabelDTO, 0, len(p.Labels))
+		for _, l := range p.Labels {
+			out.Labels = append(out.Labels, platform.PullLabelDTO{ID: l.ID, Name: l.Name, Color: l.Color})
+		}
+	}
+	return out
+}
+
+// GetPull 获取单个合并请求详情（GET /api/v1/repos/{owner}/{repo}/pulls/{index}）
+func (a *GiteaAdapter) GetPull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*platform.PullDetailDTO, error) {
+	var raw giteaPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	d := giteaPullToDetail(raw)
+	return &d, nil
+}
+
+// MergePull 合并合并请求（POST /api/v1/repos/{owner}/{repo}/pulls/{index}/merge）
+//
+// Gitea body: { Do: { merge_style_field, title?, message?, delete_branch_after_merge? } }
+// merge_style_field: "merge" | "rebase" | "rebase_merge" | "squash"
+func (a *GiteaAdapter) MergePull(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.MergePullOpts) (*platform.PullDetailDTO, error) {
+	style := mapMergeMethodToGitea(opts.Method)
+	do := map[string]any{
+		"merge_style_field":        style,
+		"delete_branch_after_merge": opts.DeleteBranchAfter,
+	}
+	if opts.CommitMessage != "" {
+		do["message"] = opts.CommitMessage
+	}
+	body := map[string]any{"Do": do}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, nil); err != nil {
+		return nil, err
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
+// ClosePull 关闭合并请求（PATCH /api/v1/repos/{owner}/{repo}/pulls/{index} state=closed）
+func (a *GiteaAdapter) ClosePull(ctx context.Context, hostURL, username, token, owner, repo string, index int) (*platform.PullDetailDTO, error) {
+	body := map[string]any{"state": "closed"}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	d := giteaPullToDetail(raw)
+	return &d, nil
+}
+
+// UpdatePullLabels 替换合并请求标签（PUT /api/v1/repos/{owner}/{repo}/pulls/{index}/labels）
+//
+// gitea 端点 PUT body: {labels: [{name: "..."}]}（替换语义）。
+// 为简化，前端传 label 名称数组；gitea 会按 name 自动解析为 id。
+func (a *GiteaAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*platform.PullDetailDTO, error) {
+	labels := make([]map[string]any, 0, len(labelNames))
+	for _, n := range labelNames {
+		labels = append(labels, map[string]any{"name": n})
+	}
+	body := map[string]any{"labels": labels}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/labels", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PUT", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	d := giteaPullToDetail(raw)
+	return &d, nil
+}
+
+// UpdatePullAssignee 替换合并请求指派人（Gitea 端点为 POST/DELETE /pulls/{index}/assignees 追加/移除）
+//
+// 为与前端契约（"替换所有"）一致：先 GET 现状，diff 后做 1 次 DELETE + 1 次 POST。
+// 简化：当前仅支持单 assignee；assignee="" 表示清空。
+func (a *GiteaAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignee string) (*platform.PullDetailDTO, error) {
+	cur, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		return nil, err
+	}
+	existing := make([]string, 0, len(cur.Assignees))
+	for _, u := range cur.Assignees {
+		existing = append(existing, u.Username)
+	}
+	toRemove := []string{}
+	for _, u := range existing {
+		if u != assignee {
+			toRemove = append(toRemove, u)
+		}
+	}
+	toAdd := []string{}
+	if assignee != "" {
+		found := false
+		for _, u := range existing {
+			if u == assignee {
+				found = true
+				break
+			}
+		}
+		if !found {
+			toAdd = append(toAdd, assignee)
+		}
+	}
+	if len(toRemove) > 0 {
+		body := map[string]any{"assignees": toRemove}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/assignees", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "DELETE", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	if len(toAdd) > 0 {
+		body := map[string]any{"assignees": toAdd}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/assignees", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
+// UpdatePullReviewers 替换合并请求审查者（POST/DELETE /api/v1/repos/{owner}/{repo}/pulls/{index}/requested_reviewers）
+func (a *GiteaAdapter) UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*platform.PullDetailDTO, error) {
+	cur, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		return nil, err
+	}
+	desired := make(map[string]struct{}, len(reviewers))
+	for _, r := range reviewers {
+		desired[r] = struct{}{}
+	}
+	existing := make([]string, 0, len(cur.Reviewers))
+	for _, u := range cur.Reviewers {
+		existing = append(existing, u.Username)
+	}
+	toRemove := []string{}
+	for _, u := range existing {
+		if _, ok := desired[u]; !ok {
+			toRemove = append(toRemove, u)
+		}
+	}
+	toAdd := []string{}
+	for r := range desired {
+		found := false
+		for _, u := range existing {
+			if u == r {
+				found = true
+				break
+			}
+		}
+		if !found {
+			toAdd = append(toAdd, r)
+		}
+	}
+	if len(toRemove) > 0 {
+		body := map[string]any{"reviewers": toRemove}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "DELETE", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	if len(toAdd) > 0 {
+		body := map[string]any{"reviewers": toAdd}
+		reader, err := encodeJSONBody(body)
+		if err != nil {
+			return nil, err
+		}
+		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, index)
+		if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, nil); err != nil {
+			return nil, err
+		}
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
+// mapMergeMethodToGitea 把前端 MergeMethod 转换为 gitea merge_style_field
+//
+// 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'
+// gitea: 'merge'  | 'rebase' | 'rebase_merge'  | 'squash'
+func mapMergeMethodToGitea(method string) string {
+	switch method {
+	case "rebase-merge":
+		return "rebase_merge"
+	case "", "merge":
+		return "merge"
+	default:
+		return method
+	}
 }
 
 // ListLabels 列出仓库标签（GET /api/v1/repos/{owner}/{repo}/labels）
@@ -367,7 +645,95 @@ func (a *GiteaAdapter) ListMembers(ctx context.Context, hostURL, username, token
 	return members, nil
 }
 
+// ===== 合并请求评论（v0.6+） =====
+//
+// Gitea 端点：/repos/{owner}/{repo}/issues/{index}/comments
+// 重要：Gitea 上 PR 和 issue 共享同一编号空间，所以 PR 评论走 issue comments 端点
+// （与 GitHub 习惯一致 —— GitHub 上 PR 就是 issue）。
+
+// ListPullComments 列合并请求评论（GET /repos/{owner}/{repo}/issues/{index}/comments）
+func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.CommentDTO, error) {
+	var raw []giteaCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.CommentDTO, 0, len(raw))
+	for _, c := range raw {
+		out = append(out, giteaCommentToDTO(c))
+	}
+	return out, nil
+}
+
+// CreatePullComment 发合并请求评论（POST /repos/{owner}/{repo}/issues/{index}/comments）
+//
+// body: {body: "..."} —— Gitea API 限制 body 必填且非空。
+// 返回服务端创建的评论（含 id / author / createdAt ），前端以此刷列表。
+func (a *GiteaAdapter) CreatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string) (*platform.CommentDTO, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{"body": body}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaCommentToDTO(raw)
+	return &dto, nil
+}
+
+// giteaCommentRaw Gitea /repos/.../issues/{index}/comments 原始响应
+//
+// swagger: https://try.gitea.io/swagger#/issueissueComment
+// 字段只取必要项：id / body / user / created / updated。
+//
+// 复用上面已定义的 giteaUserRaw（line 338），不在这里重复定义。
+type giteaCommentRaw struct {
+	ID      int64         `json:"id"`
+	Body    string        `json:"body"`
+	User    *giteaUserRaw `json:"user"`
+	Created string        `json:"created"`
+	Updated string        `json:"updated"`
+}
+
+// giteaCommentToDTO 映射为平台中性 CommentDTO
+func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
+	out := platform.CommentDTO{
+		ID:        c.ID,
+		Body:      c.Body,
+		CreatedAt: c.Created,
+		UpdatedAt: c.Updated,
+	}
+	if c.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  c.User.Login,
+			AvatarURL: c.User.AvatarURL,
+		}
+	}
+	return out
+}
+
 // ===== HTTP 请求封装 =====
+
+// encodeJSONBody 把任意对象序列化为 io.Reader
+//
+// GiteaAdapter 现有方法都是 GET，v0.6+ PR 写入接口需要 POST/PATCH/PUT。
+// 直接复用 doRequest 但需要 io.Reader 参数，故加这个 helper。
+func encodeJSONBody(v any) (io.Reader, error) {
+	if v == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 JSON body 失败: %w", err)
+	}
+	return strings.NewReader(string(b)), nil
+}
 
 // doRequest 发送 Gitea API 请求
 //
@@ -385,6 +751,17 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 
 	req.Header.Set("Authorization", "token "+token)
 	req.Header.Set("Accept", "application/json")
+
+	// v0.6+ bugfix：POST/PUT/PATCH 带 JSON body 时必须显式设 Content-Type。
+	// Go http.NewRequest 在 body != nil 且未显式设 Content-Type 时，
+	// 会默认 "Content-Type: application/x-www-form-urlencoded"
+	// —— Gitea swagger 在 POST /comments 上检测 Content-Type 为 form-urlencoded，
+	//   错报 422 "Empty Content-Type" （实际意思是"Gitea 期望 application/json"）。
+	// GitHub adapter 同 bug 但 GitHub 后端对 form-urlencoded 宽客（自动检测 JSON），
+	// Gitea 严格 → 在这里补一下。
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {

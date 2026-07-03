@@ -1,4 +1,8 @@
 /**
+ * @deprecated v0.6+ 软废弃：board store 仍保留以便回滚。
+ * 导航栏已移除"看板"入口，路由 /board 重定向到 /timeline。
+ * 后续彻底清理时，连同 BoardView.vue / useBoardActions.ts / useBoardBootstrap.ts 等一并删除。
+ *
  * board store ——看板列 + issue卡片（ADR-0002 reset）
  *
  * 设计（AGENTS §5.2 + ADR-0002 +ADR-0002（Board 数据模型））：

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gitea-kanban/app/gitbinary"
 )
 
 const nativeGitTimeout = 5 * time.Minute
@@ -61,7 +63,8 @@ func CloneWithFilter(url, localPath string, depth int, token string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
-	configureGitHubCLIEnv(cmd, token)
+	// v0.4.0：gh 调用同样需要 GH_TOKEN env；抽 helper（与 gitbinary.RunGitWithEnv 同样的 env 注入模式）
+	configureGHCommandEnv(cmd, token)
 
 	// 捕获输出和错误
 	output, err := cmd.CombinedOutput()
@@ -96,7 +99,7 @@ func FetchWithFilter(localPath string, depth int, token string) error {
 	defer unlock()
 
 	// 检查 git 命令是否可用
-	if _, err := exec.LookPath("git"); err != nil {
+	if _, err := gitbinary.ResolveGitBinaryPath(""); err != nil {
 		return fmt.Errorf("系统未安装 git 命令: %w", err)
 	}
 	if _, err := exec.LookPath("gh"); err != nil {
@@ -144,21 +147,26 @@ func EnsureRemote(localPath, name, remoteURL string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
 	defer cancel()
-	getCmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote", "get-url", name)
-	if output, err := getCmd.Output(); err == nil {
-		if strings.TrimSpace(string(output)) == remoteURL {
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return fmt.Errorf("gitbinary: %w", err)
+	}
+
+	getOut, err := gitbinary.RunGit(ctx, bin, localPath, "remote", "get-url", name)
+	if err == nil {
+		if strings.TrimSpace(string(getOut)) == remoteURL {
 			return nil
 		}
-		setCmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote", "set-url", name, remoteURL)
-		if out, err := setCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("更新 remote %s 失败: %w\n输出: %s", name, err, string(out))
+		setOut, setErr := gitbinary.RunGit(ctx, bin, localPath, "remote", "set-url", name, remoteURL)
+		if setErr != nil {
+			return fmt.Errorf("更新 remote %s 失败: %w\n输出: %s", name, setErr, string(setOut))
 		}
 		return nil
 	}
 
-	addCmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote", "add", name, remoteURL)
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("添加 remote %s 失败: %w\n输出: %s", name, err, string(out))
+	addOut, addErr := gitbinary.RunGit(ctx, bin, localPath, "remote", "add", name, remoteURL)
+	if addErr != nil {
+		return fmt.Errorf("添加 remote %s 失败: %w\n输出: %s", name, addErr, string(addOut))
 	}
 	return nil
 }
@@ -166,17 +174,19 @@ func EnsureRemote(localPath, name, remoteURL string) error {
 func listGitRemotes(localPath string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "remote")
-	output, err := cmd.Output()
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return nil, fmt.Errorf("gitbinary: %w", err)
+	}
+	out, err := gitbinary.RunGit(ctx, bin, localPath, "remote")
 	if err != nil {
 		return nil, fmt.Errorf("读取 remote 列表失败: %w", err)
 	}
-	return strings.Fields(string(output)), nil
+	return strings.Fields(string(out)), nil
 }
 
 func fetchRemoteWithFilter(localPath, remote string, depth int, token string) error {
 	args := []string{
-		"-C", localPath, // 在指定目录执行
 		"-c", "credential.helper=!gh auth git-credential",
 		"fetch",
 		"--filter=blob:none", // 不下载 blob
@@ -195,10 +205,15 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 	// 执行命令
 	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	configureGitHubCLIEnv(cmd, token)
-
-	output, err := cmd.CombinedOutput()
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return fmt.Errorf("gitbinary: %w", err)
+	}
+	envVars := map[string]string{}
+	if token != "" {
+		envVars["GH_TOKEN"] = token
+	}
+	output, err := gitbinary.RunGitWithEnv(ctx, bin, localPath, envVars, args...)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("git fetch 超时（%s）：%w", nativeGitTimeout, ctx.Err())
@@ -209,7 +224,12 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 	return nil
 }
 
-func configureGitHubCLIEnv(cmd *exec.Cmd, token string) {
+
+// configureGHCommandEnv 给 gh 命令注入 env（GH_TOKEN + 防认证锁）。
+//
+// v0.4.0：原名 configureGitHubCLIEnv（2.10 引入），重命名后语义更明确（与
+// gitbinary.RunGitWithEnv 同等职能，但仅用于 gh CLI 调用；gh 不在 v0.4.0 内嵌范围）。
+func configureGHCommandEnv(cmd *exec.Cmd, token string) {
 	env := os.Environ()
 	if token != "" {
 		env = append(env, "GH_TOKEN="+token)

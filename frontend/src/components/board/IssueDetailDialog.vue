@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ */
+/**
  * IssueDetailDialog —— 议题详情弹窗（v1.4 · 2026-06-18）
  *
  * 点击看板 card → 弹窗显示 issue 完整信息：

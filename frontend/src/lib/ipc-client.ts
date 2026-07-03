@@ -508,6 +508,7 @@ export function commitsGitgraphLines(args: {
   projectId: string;
   branches?: string[];
   limit?: number;
+  offset?: number;
   hidePRRefs?: boolean;
 }): Promise<GraphResultDto> {
   return getIpcClient().invoke('commits', 'gitgraphLines', args);
@@ -595,33 +596,6 @@ export function commitsGitgraphPull(args: {
   headAfter: string;
 }> {
   return getIpcClient().invoke('commits', 'gitgraphPull', args);
-}
-
-/**
- * v2.10：增量拉取更多历史记录（用于"加载更多"功能）
- *
- * 使用场景：用户在 Git Graph 底部点击「加载更多」
- * 技术实现：git fetch --deepen=N --filter=blob:none
- *
- * 注意：这个函数直接调用 Wails 绑定，不走 IPC 客户端
- * 因为 DeepenRepo 是新增的 API，使用新的调用方式
- *
- * @param args.projectId 项目 ID
- * @param args.deepenBy 增加的深度（默认 200）
- */
-export async function deepenRepo(args: {
-  projectId: string;
-  deepenBy?: number;
-}): Promise<{
-  success: boolean;
-  message: string;
-}> {
-  // 动态导入 Wails 绑定（路径相对于 frontend 目录）
-  const { DeepenRepo } = await import('../../wailsjs/wailsjs/go/main/App');
-  return DeepenRepo({
-    projectId: args.projectId,
-    deepenBy: args.deepenBy ?? 200,
-  });
 }
 
 /**
@@ -1047,6 +1021,35 @@ export function issuesCommentCreate(args: {
 }
 
 // ============================================================
+// ===== pulls.comment.* （v0.6+ PR 评论 —— 修复 issues.comment.create stub bug） =====
+// ============================================================
+//
+// 背景：MergesView 调用 issuesCommentList / issuesCommentCreate 发 PR 评论，
+// 这两个函数还路由到 issues.comment.* ，但后端 issues.comment.* 是 stub，
+// 返 "尚未实现（Wails 迁移中）" error → toast "应用出错了"。
+//
+// v0.6+ 修复方案：PR 上下文走独立的 pulls.comment.* 命名空间（Issue 评论待 v0.7）。
+// Gitea 与 GitHub 都支持。
+// 端点：/repos/{owner}/{repo}/issues/{index}/comments（PR 与 issue 共享编号空间）。
+
+/** 列合并请求评论 */
+export function pullsCommentList(args: {
+  projectId: string;
+  index: number;
+}): Promise<IssueCommentDto[]> {
+  return getIpcClient().invokeNested('pulls', 'comment', 'list', args);
+}
+
+/** 发合并请求评论。body 会在 UI 层 trim；后端还会走防御性 short-circuit */
+export function pullsCommentCreate(args: {
+  projectId: string;
+  index: number;
+  body: string;
+}): Promise<IssueCommentDto> {
+  return getIpcClient().invokeNested('pulls', 'comment', 'create', args);
+}
+
+// ============================================================
 // ===== labels.* （ADR-0002：看板列绑 gitea label 用） =====
 // ============================================================
 
@@ -1104,4 +1107,55 @@ export function milestonesList(args: {
   limit?: number;
 }): Promise<ListMilestonesResp> {
   return getIpcClient().invoke('milestones', 'list', args);
+}
+
+/**
+ * v0.4.0：git 二进制设置（SettingsView "Git 二进制" 卡片）
+ *
+ * - getGitBinaryConfig: 读 userOverride / defaultPath / effectivePath
+ * - setGitBinaryPath: 持久化 prefs["app.gitBinaryPath"] + 进程内立即生效
+ * - testGitBinary: 验证 path 是否可执行（macOS quarantine 检测）
+ * - stripGitBinaryQuarantine: macOS 主动 xattr -d 剥离
+ * - openGitBinaryPicker: 平台特定文件选择对话框
+ */
+export interface GitBinaryConfig {
+  /** 用户填的路径；空字符串 = 用默认（内嵌或 PATH） */
+  userOverride: string;
+  /** 内嵌二进制实际释放路径（dev 期可能为空字符串：0 字节 placeholder） */
+  defaultPath: string;
+  /** 内嵌版本号（当前固定 "2.55.0"） */
+  embeddedVersion: string;
+  /** 当前进程实际用的 git 路径（= ResolveGitBinaryPath 解析结果） */
+  effectivePath: string;
+  /** 当前平台是否真嵌入二进制（linux 永远 false） */
+  embeddedAvailable: boolean;
+}
+
+export interface TestGitBinaryResult {
+  ok: boolean;
+  version: string;
+  path: string;
+  message: string;
+  hint: string;
+}
+
+export function getGitBinaryConfig(): Promise<GitBinaryConfig> {
+  return getIpcClient().invoke('gitBinary', 'getConfig', {});
+}
+
+export function setGitBinaryPath(path: string): Promise<void> {
+  return getIpcClient().invoke('gitBinary', 'setPath', { path });
+}
+
+export function testGitBinary(path: string): Promise<TestGitBinaryResult> {
+  return getIpcClient().invoke('gitBinary', 'test', { path });
+}
+
+export function stripGitBinaryQuarantine(path: string): Promise<void> {
+  return getIpcClient().invoke('gitBinary', 'stripQuarantine', { path });
+}
+
+/** 平台特定文件选择对话框；用户取消返空字符串 */
+export function openGitBinaryPicker(): Promise<string> {
+  return getIpcClient().invoke('gitBinary', 'pickFile', {});
 }

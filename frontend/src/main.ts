@@ -32,7 +32,8 @@ import { logError } from './lib/frontend-log';
 import { installApiShim } from './lib/wails-api-shim';
 installApiShim();
 
-// 全局样式（reset + 主题变量）
+// 全局样式（字体声明 + reset + 主题变量）
+import './styles/fonts.css';
 import './styles/reset.css';
 import './styles/theme.css';
 

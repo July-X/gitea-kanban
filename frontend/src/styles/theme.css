@@ -71,15 +71,15 @@
   /* === 字号 === */
   --font-xs: 11px;
   --font-sm: 13px;
-  --font-md: 14px;
+  --font-md: 15px;
   --font-lg: 16px;
   --font-xl: 20px;
   --font-2xl: 24px;
   --font-h1: 24px;
   --font-h2: 18px;
   --font-h3: 14px;
-  --font-body: 13px;
-  --font-body-sm: 12px;
+  --font-body: 14px;
+  --font-body-sm: 13px;
   --font-caption: 11px;
   --font-mono: 12px;
   --font-mono-sm: 11px;
@@ -92,10 +92,11 @@
 
   /* === 字体栈 === */
   --font-sans:
-    'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+    'Inter', 'Noto Sans SC',
+    'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text',
     system-ui, sans-serif;
   --font-mono-stack:
-    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    'JetBrains Mono', Consolas, 'MesloLGS NF', monospace;
 
   /* === 动效（120-240ms 紧凑现代） === */
   --t-fast: 120ms;
@@ -169,17 +170,16 @@ html[data-theme='dark'] {
   /* --color-elevated 在 [data-theme="dark"] 单独块提档（v1.6.1） */
   /* --color-hover / --color-active 在 [data-theme="dark"] 单独块提档（v1.6.1） */
 
-  /* === 文字（vs #0F1115 验证过 AA 4.5:1）
-   * v3.0：暗色文字提档一档（user 反馈 #c5d4dd 偏暗），同时给 --color-text-muted 也提亮
-   *  - text:      #c5d4dd (7.37:1) → #d8e3eb (~8.55:1) ✅ 主正文亮度更足
-   *  - text-muted:#9aaab6 (5.29:1) → #aabcc9 (~6.40:1) ✅ 二级文字（commit 作者 / 时间等）不再发灰
-   *  - text-dim:  #74818e (3.93:1) → #8696a3 (~4.80:1) ✅ 三级文字（装饰/弱化）首次过 AA 4.5:1
-   * PR 合并提交（commit-row--merge）改用 --color-text-muted 替代 opacity 0.5，
-   * 在暗色底上不再"消失半边"，同时保留"普通 commit vs merge commit"视觉层级 */
-  --color-text: #d8e3eb; /* 8.55:1 ✅ */
-  --color-text-muted: #aabcc9; /* 6.40:1 ✅ */
-  --color-text-dim: #8696a3; /* 4.80:1 ✅ */
-  --color-text-inverse: #ffffff; /* 主色 CTA 上配白字（dark 主色已提亮到 #74B830） */
+  /* === 文字（vs #0F1115） ===
+   * 主文字接近纯白（~93% L），确保 2K 屏上清晰可读
+   *  - text:       #e2ecf2 (~12.0:1) ✅ 主正文，高亮度
+   *  - text-muted: #b4c6d4 (~7.5:1)  ✅ 二级文字（作者/时间/SHA）
+   *  - text-dim:   #94a4b2 (~5.5:1)  ✅ 三级文字（装饰/弱化）
+   *  - text-inverse: #ffffff  CTA 白字 */
+  --color-text: #ffffff; /* 纯白 */
+  --color-text-muted: #b4c6d4; /* 7.5:1 ✅ */
+  --color-text-dim: #94a4b2; /* 5.5:1 ✅ */
+  --color-text-inverse: #ffffff; /* 主色 CTA 上配白字 */
 
   /* === 主色（提亮到 #74B830 过 AA 4.5:1；hover 进一步提亮；active 压暗） === */
   --color-primary: #74b830; /* vs #0F1115 4.74:1 ✅ */
@@ -295,10 +295,10 @@ html[data-theme='light'] {
   --color-hover: #f1f6f9;
   --color-active: #dde7ec;
 
-  /* === 文字（冷调深蓝灰 · 对偶 dark #C5D4DD · vs #E8F1F5 验证过 AA） === */
-  --color-text: #0f1a24; /* 12.7:1 ✅ */
+  /* === 文字（纯黑 + 灰度梯度） === */
+  --color-text: #000000; /* 纯黑 */
   --color-text-muted: #475461; /* 6.39:1 ✅ */
-  --color-text-dim: #5a6b7a; /* 4.50:1 ✅ 边缘 · dim 文字谨慎用 */
+  --color-text-dim: #5a6b7a; /* 4.50:1 ✅ */
   --color-text-inverse: #ffffff; /* 白底按钮配白字 */
 
   /* === label 文字兜底（v1.2 a11y 修复 · task #7） ===
@@ -510,8 +510,11 @@ body,
   font-family: var(--font-sans);
   font-size: var(--font-md);
   line-height: var(--line-base);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* 字体平滑：不设置 -webkit-font-smoothing / -moz-osx-font-smoothing
+   * 原因：WebKit WebView (WKWebView) 上 antialiased 强制灰度抗锯齿，
+   *   禁用了子像素抗锯齿，导致 2K 非 Retina 屏文字发虚。
+   *   不设置时 macOS 会自动选择最佳方式（Retina→灰度，非 Retina→子像素）。
+   *   同时不设置 text-rendering，让浏览器自行优化。 */
 }
 
 body {

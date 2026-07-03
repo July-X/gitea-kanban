@@ -18,6 +18,7 @@ import (
 
 	"gitea-kanban/app/config"
 	"gitea-kanban/app/git"
+	"gitea-kanban/app/gitbinary"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/platform/gitea"
@@ -121,6 +122,25 @@ func (a *App) OnStartup(ctx context.Context) {
 	//   - 启动同步，失败时把整个旧 repos 目录 mv 到 _pre_v25_workspace 保留
 	//   - 旧布局一旦迁完就标记完成，新代码不再回退到旧路径
 	a.runLegacyWorkspaceMigration()
+
+	// 8. v0.4.0 · 释放嵌入 git 2.55.0 二进制 + 把 prefs["app.gitBinaryPath"] 推给 gitbinary 全局
+	//
+	// 必须放在 runLegacyWorkspaceMigration 之后（不冲突），放在业务方法前
+	// （Git Graph 第一次加载就会调 git.RunGit，没有 Init 会回退到 PATH git，行为 OK 但
+	// 跳过 macOS 自动脱 quarantine 这一步）。
+	//
+	// 自动脱 quarantine 失败仅记 WARN 日志，不阻断启动（用户后续手动允许）。
+	if err := gitbinary.Init(a.dataDir, a.logger); err != nil {
+		a.logger.Warn("gitbinary.Init 失败，仍可启动；后续 git 调用回退到 PATH git", "err", err.Error())
+	}
+	gitbinary.SetUserOverride(store.GetGitBinaryPath(a.localStore))
+
+	if a.logger != nil {
+		a.logger.Info("git binary 配置就绪",
+			"userOverride", gitbinary.UserOverride(),
+			"defaultBin", gitbinary.DefaultBinaryPath(),
+		)
+	}
 }
 
 // runLegacyWorkspaceMigration 执行一次性的 v2.4 → v2.5 旧布局迁移
@@ -795,6 +815,7 @@ type GetGitGraphArgs struct {
 	ProjectID string   `json:"projectId"`
 	Branches  []string `json:"branches,omitempty"`
 	MaxCount  int      `json:"maxCount,omitempty"`
+	Offset    int      `json:"offset,omitempty"`
 }
 
 // GetGitGraph 获取项目的 commit DAG（用 projectId 反查 localPath + token）
@@ -851,6 +872,7 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 		Branches: args.Branches,
 		MaxCount: args.MaxCount,
 		Head:     head,
+		Offset:   args.Offset,
 	})
 	if err != nil {
 		return GraphResultDTO{}, err
@@ -1498,7 +1520,156 @@ func (a *App) SetWorkspace(args SetWorkspaceArgs) error {
 	)
 }
 
-// ===== v2.3 内部 helper：localPath → (token, username) =====
+// ===== v0.4.0 Git 二进制设置（v2.0 拍板「默认内嵌 git 2.55.0」）=====
+//
+// 流程：
+//   1. OnStartup 调 gitbinary.Init → 释放嵌入二进制到 ${dataDir}/tools/git/
+//   2. OnStartup 调 gitbinary.SetUserOverride(store.GetGitBinaryPath(a.localStore))
+//      让之前保存的用户配置立即生效
+//   3. 用户在 SettingsView 改路径：App.SetGitBinaryPath → store.SetGitBinaryPath
+//      + gitbinary.SetUserOverride → 本次进程后续所有 git CLI 立即走新路径
+//   4. 用户点「测试」：App.TestGitBinary 调 gitbinary.TestGitBinary 验证
+//   5. macOS 上二进制被 Gatekeeper 拦截：TestGitBinary 返 quarantine 提示，
+//      用户点「解除隔离」调 App.StripGitBinaryQuarantine → 调 xattr -d
+//   6. 用户点「选择文件」：App.OpenGitBinaryPicker 调 wailsruntime.OpenFileDialog
+//      （平台特定 filter，macOS / Windows / Linux 区分）
+
+// GitBinaryConfig 暴露给前端的 git 二进制配置（SettingsView 卡片用）
+type GitBinaryConfig struct {
+	// UserOverride 用户在 UI 填的路径；空字符串 = 用默认（内嵌或 PATH）
+	UserOverride string `json:"userOverride"`
+	// DefaultPath 内嵌二进制实际释放路径（dev 期可能为 "" 因 0 字节占位）
+	DefaultPath string `json:"defaultPath"`
+	// EmbeddedVersion 内嵌版本号（当前固定 "2.55.0"）
+	EmbeddedVersion string `json:"embeddedVersion"`
+	// EffectivePath 当前进程实际用的 git 路径（= ResolveGitBinaryPath 解析结果）
+	EffectivePath string `json:"effectivePath"`
+	// EmbeddedAvailable 当前平台是否真嵌入二进制（linux 永远 false）
+	EmbeddedAvailable bool `json:"embeddedAvailable"`
+}
+
+// GetGitBinaryConfig 读取当前 git binary 配置 + 当前实际生效路径
+func (a *App) GetGitBinaryConfig() GitBinaryConfig {
+	userOverride := store.GetGitBinaryPath(a.localStore)
+	effective, _ := gitbinary.ResolveGitBinaryPath(userOverride)
+	// 把 userOverride 也存到全局，让后续 ResolveGitBinaryPath("") 也走它
+	gitbinary.SetUserOverride(userOverride)
+	return GitBinaryConfig{
+		UserOverride:      userOverride,
+		DefaultPath:       gitbinary.DefaultBinaryPath(),
+		EmbeddedVersion:   "2.55.0",
+		EffectivePath:     effective,
+		EmbeddedAvailable: gitbinary.DefaultBinaryPath() != "",
+	}
+}
+
+// SetGitBinaryPathArgs 写入参数
+type SetGitBinaryPathArgs struct {
+	Path string `json:"path"` // "" = 清空用户覆盖
+}
+
+// SetGitBinaryPath 持久化用户填的 git binary 路径，并立刻让本次进程生效。
+//
+// 空字符串 = 删 prefs["app.gitBinaryPath"]，回退到内嵌 / PATH git。
+// 非空字符串 = 写 prefs + gitbinary.SetUserOverride。
+func (a *App) SetGitBinaryPath(args SetGitBinaryPathArgs) error {
+	if a.logger != nil {
+		a.logger.Info("SetGitBinaryPath", "path", args.Path)
+	}
+	if err := store.SetGitBinaryPath(a.localStore, args.Path); err != nil {
+		return ipc.NewInternal("保存 git 二进制路径失败: " + err.Error())
+	}
+	gitbinary.SetUserOverride(args.Path)
+	return nil
+}
+
+// TestGitBinary 验证给定 git 二进制路径是否可执行（用户填完路径点「测试」时调）。
+//
+// 直接调 gitbinary.TestGitBinary，返结构化结果含 ok/version/path/message/hint。
+// 失败 hint 给出 macOS Gatekeeper / 路径不存在 / 非 git 二进制 等具体建议。
+func (a *App) TestGitBinary(args SetGitBinaryPathArgs) gitbinary.TestGitResult {
+	if a.logger != nil {
+		a.logger.Info("TestGitBinary", "path", args.Path)
+	}
+	return gitbinary.TestGitBinary(args.Path)
+}
+
+// StripGitBinaryQuarantineArgs 主动剥离 macOS quarantine 参数
+type StripGitBinaryQuarantineArgs struct {
+	Path string `json:"path"`
+}
+
+// StripGitBinaryQuarantine 主动剥离 macOS quarantine 属性（用户点「解除隔离」按钮调）。
+//
+// 仅 macOS 有效；其它平台返 nil 即可。失败时返 error 让 UI 提示用户手动允许。
+func (a *App) StripGitBinaryQuarantine(args StripGitBinaryQuarantineArgs) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	if a.logger != nil {
+		a.logger.Info("StripGitBinaryQuarantine", "path", args.Path)
+	}
+	if err := gitbinary.StripQuarantine(args.Path); err != nil {
+		return ipc.NewInternal("剥离 quarantine 失败: " + err.Error() +
+			"；如需手动允许：右键 → 打开 → 仍要打开")
+	}
+	return nil
+}
+
+// OpenGitBinaryPicker 平台特定文件选择对话框（用户在 SettingsView 选 git 二进制）。
+//
+//   - macOS: 允许选 .app/Contents/MacOS/git（显示包内容）也允许选单文件
+//   - Windows: 过滤器限定 .exe
+//   - Linux: 不限定后缀（git 通常无扩展名）
+//
+// 取消返空字符串，错误时返 error。
+func (a *App) OpenGitBinaryPicker() (string, error) {
+	if a.logger != nil {
+		a.logger.Info("OpenGitBinaryPicker")
+	}
+
+	// v0.5-mid3 优先让文件对话框初始目录落在系统 git 所在目录（开箱体验）
+	//
+	// 优先级：
+	//   1. exec.LookPath("git") 找到的路径取 dir（如 /usr/bin、/opt/homebrew/bin）
+	//   2. ${dataDir}/tools/git/    释放的嵌入式 binary 所在目录
+	//   3. dataDir 本身             隐含 fallback，让用户可手动导航
+	//
+	// 为什么不直接固定 home：很多 mac git 装在 /opt/homebrew/bin，不在 $HOME
+	// 为什么不依赖环境变量 GITHUB_PATH：易被 .zshrc 覆盖，绕开更鲁棒
+	initialDir := a.pickInitialDirForGitBinary()
+
+	options := func(title string, filters []wailsruntime.FileFilter) (string, error) {
+		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+			Title:           title,
+			Filters:         filters,
+			DefaultDirectory: initialDir,
+		})
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		return options("选择 git.exe 路径",
+			[]wailsruntime.FileFilter{
+				{DisplayName: "Git 可执行文件 (*.exe)", Pattern: "*.exe;*.EXE"},
+			})
+	case "darwin":
+		// macOS NSOpenPanel bug: Pattern: "*" 只匹配有扩展名的文件 + alias，
+		// Unix executable（如 /usr/bin/git, /opt/homebrew/Cellar/git/2.55.0/bin/git）
+		// 无扩展名，被 Pattern:"*" 过滤掉。
+		// 修复:传 nil filters → NSOpenPanel 显示所有文件（含 extensionless Unix exec）。
+		return options("选择 git 二进制路径", nil)
+	default:
+		// Linux: git 通常无扩展名，不设过滤器
+		return options("选择 git 二进制路径", nil)
+	}
+}
+
+// pickInitialDirForGitBinary 决策 git binary 文件选择对话框的初始目录。
+// 实现位于 app/gitbinary/picker_init_dir.go（包级导出 PickInitialDir）。
+func (a *App) pickInitialDirForGitBinary() string {
+	return gitbinary.PickInitialDir(a.dataDir)
+}
 
 // resolveTokenByLocalPath 从本地仓库路径反查 keychain 里的 token
 //
@@ -2263,101 +2434,6 @@ func (a *App) FetchRepo(args PullRepoArgs) (FetchRepoResultDTO, error) {
 	return FetchRepoResultDTO{Updated: result.Updated}, nil
 }
 
-// DeepenRepoArgs 加深仓库历史参数
-type DeepenRepoArgs struct {
-	ProjectID string `json:"projectId"`
-	DeepenBy  int    `json:"deepenBy"` // 增加的深度（默认 200）
-}
-
-// DeepenRepoResult 加深结果
-type DeepenRepoResult struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
-
-// DeepenRepo 增量拉取更多历史记录（用于"加载更多"功能）
-//
-// v2.10：按需加载机制
-//
-// 使用场景：用户在 Git Graph 底部点击"加载更多"
-func (a *App) DeepenRepo(args DeepenRepoArgs) (DeepenRepoResult, error) {
-	if a.logger != nil {
-		a.logger.Info("DeepenRepo", "projectId", args.ProjectID, "deepenBy", args.DeepenBy)
-	}
-
-	if args.ProjectID == "" {
-		return DeepenRepoResult{}, ipc.NewValidationFailed("projectId 不能为空", "")
-	}
-
-	// 默认增加 200 层
-	deepenBy := args.DeepenBy
-	if deepenBy <= 0 {
-		deepenBy = 200
-	}
-
-	// 1-2. 找 project + account
-	project, account, err := a.findProjectAndAccount(args.ProjectID)
-	if err != nil {
-		return DeepenRepoResult{}, err
-	}
-
-	// 3. 计算 localPath
-	workspacePath := a.workspacePath
-	if workspacePath == "" {
-		return DeepenRepoResult{}, ipc.NewInternal("workspacePath 未初始化")
-	}
-
-	// 找到关联的账号
-	state := a.localStore.Get()
-	var accountUsername string
-	for i := range state.Accounts {
-		if state.Accounts[i].ID == project.AccountID {
-			accountUsername = state.Accounts[i].Username
-			break
-		}
-	}
-	if accountUsername == "" {
-		return DeepenRepoResult{}, ipc.NewInternal("找不到关联的账号")
-	}
-
-	localPath := git.RepoLocalPathForAccount(workspacePath, accountUsername, project.Owner, project.Name)
-
-	var token string
-	if account.Platform == "github" {
-		token, err = a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
-		if err != nil {
-			return DeepenRepoResult{}, classifyKeychainError(err)
-		}
-		if token == "" {
-			return DeepenRepoResult{}, ipc.NewInternal("token 为空")
-		}
-	}
-
-	// 4. 调用 git.DeepenRepo
-	result, err := git.DeepenRepo(git.DeepenRepoOptions{
-		LocalPath:    localPath,
-		DeepenBy:     deepenBy,
-		Token:        token,
-		UseGitHubCLI: account.Platform == "github",
-		Progress:     a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
-	})
-	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("DeepenRepo failed",
-				"owner", project.Owner,
-				"repo", project.Name,
-				"localPath", localPath,
-				"err", err.Error(),
-			)
-		}
-		return DeepenRepoResult{}, err
-	}
-
-	return DeepenRepoResult{
-		Success: result.Success,
-		Message: result.Message,
-	}, nil
-}
 
 // ===== 看板（issue + label 映射，仅 Gitea）（步骤 3.5）=====
 
@@ -2406,6 +2482,385 @@ func (a *App) ListIssues(args ListIssuesArgs) ([]IssueDTO, error) {
 		})
 	}
 	return result, nil
+}
+
+// ===== 合并请求（Pull Request）Wails bindings =====
+//
+// v0.6+ 用户拍板：合并请求与 Git Graph 一样适配用户当前绑定账号的 git 服务器类型
+// （Gitea/GitHub），前端 store 拿 platform 中性 DTO，UI 不关心底层平台。
+//
+// 鉴权铁律（AGENTS §8.1）：
+//   - 前端只传 projectId（业务态概念）
+//   - Go 端反查 localStore.Projects → Accounts → secretStore 拿 token
+//   - token 绝不离开主进程内存，不写日志，不返前端
+//
+// 设计：
+//   - 每个 binding 共用 resolvePullContext helper 拿 project/account/token/adapter
+//   - PullDetailDTO 直接透传给前端（结构对齐 frontend/src/types/dto.ts PullDto）
+//   - 写操作（MergePull/ClosePull/Update*）走 slog.Info 记审计日志
+
+// PullDetailAppDTO 暴露给前端的合并请求完整详情 DTO
+//
+// 字段对齐 frontend/src/types/dto.ts PullDto；前端 store 直接复用
+type PullDetailAppDTO = platformAdapter.PullDetailDTO
+
+// PullListAppResp 列合并请求的响应（items + hasMore，给前端"加载更多"用）
+type PullListAppResp struct {
+	Items   []PullDetailAppDTO `json:"items"`
+	Total   int                `json:"total"`   // 当前 state 下 gitea 给的总数；GitHub 没有总数则 = len(items)
+	HasMore bool               `json:"hasMore"` // hasMore = len(items) == limit 且还有潜在下一页
+}
+
+// resolvePullContext 合并请求 Wails bindings 的共享 helper
+//
+// 返回：project + account + token + adapter，调用方拿到后直接调 adapter 方法。
+// 失败时返 IpcError，前端 ErrorFormatter 会结构化序列化。
+//
+// 注意：args 接受 projectId，**不**接受 hostUrl/token；AGENTS §8.1 铁律。
+func (a *App) resolvePullContext(args struct {
+	ProjectID string `json:"projectId"`
+}) (*store.RepoProject, *store.GiteaAccount, string, platformAdapter.PlatformAdapter, error) {
+	if strings.TrimSpace(args.ProjectID) == "" {
+		return nil, nil, "", nil, ipc.NewValidationFailed("projectId 不能为空", "")
+	}
+	project, account, err := a.findProjectAndAccount(args.ProjectID)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
+	if err != nil {
+		return nil, nil, "", nil, classifyKeychainError(err)
+	}
+	if token == "" {
+		return nil, nil, "", nil, ipc.NewInternal("token 为空（keychain 里有记录但 token 字符串为空）")
+	}
+	adapter := a.getAdapter(account.Platform)
+	if adapter == nil {
+		return nil, nil, "", nil, ipc.NewUnsupportedPlatform(account.Platform)
+	}
+	return project, account, token, adapter, nil
+}
+
+// ===== ListPulls =====
+
+// ListPullsArgs 列表合并请求参数
+type ListPullsArgs struct {
+	ProjectID string `json:"projectId"`
+	State     string `json:"state"` // "open" | "closed" | "all"
+	Head      string `json:"head,omitempty"`
+	Base      string `json:"base,omitempty"`
+	Page      int    `json:"page"`
+	Limit     int    `json:"limit"`
+}
+
+// ListPulls 列出某项目的合并请求（Gitea + GitHub 都支持，v0.6+ 拍板）
+//
+// 鉴权铁律（AGENTS §8.1）：前端只传 projectId。
+// 平台选择走 findProjectAndAccount → account.Platform → giteaAdapter / githubAdapter。
+func (a *App) ListPulls(args ListPullsArgs) (PullListAppResp, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullListAppResp{}, err
+	}
+
+	items, err := adapter.ListPulls(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, platformAdapter.ListPullsOpts{
+		State: args.State,
+		Head:  args.Head,
+		Base:  args.Base,
+		Page:  args.Page,
+		Limit: args.Limit,
+	})
+	if err != nil {
+		return PullListAppResp{}, err
+	}
+
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 30
+	}
+	hasMore := len(items) >= limit
+	if a.logger != nil {
+		a.logger.Info("ListPulls",
+			"projectId", args.ProjectID, "platform", account.Platform,
+			"state", args.State, "count", len(items), "hasMore", hasMore)
+	}
+	return PullListAppResp{
+		Items:   items,
+		Total:   len(items), // GitHub 不返总数；前端按 hasMore 触发加载更多
+		HasMore: hasMore,
+	}, nil
+}
+
+// ===== GetPull =====
+
+// GetPullArgs 获取单个合并请求参数
+type GetPullArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// GetPull 获取单个合并请求详情（Gitea + GitHub 都支持）
+func (a *App) GetPull(args GetPullArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.GetPull(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== MergePull =====
+
+// MergePullArgs 合并合并请求参数
+type MergePullArgs struct {
+	ProjectID         string `json:"projectId"`
+	Index             int    `json:"index"`
+	Method            string `json:"method"` // "merge" | "rebase" | "rebase-merge" | "squash"
+	DeleteBranchAfter bool   `json:"deleteBranchAfter"`
+	CommitMessage     string `json:"commitMessage,omitempty"`
+}
+
+// MergePull 合并合并请求（**危险操作**，UI 层必须二次确认）
+//
+// 合并方式：
+//   - "merge"        普通合并（保留所有提交历史）
+//   - "rebase"       变基后快进（重写历史，单一线性）
+//   - "rebase-merge" 变基后 merge commit（仅 Gitea 支持）
+//   - "squash"       压缩为单提交
+//
+// method="squash" 时 CommitMessage 建议非空（部分平台要求）。
+// 合并到主线分支（如 main）时 UI 层额外二次确认。
+func (a *App) MergePull(args MergePullArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	if a.logger != nil {
+		// 审计日志：合并动作记 method + deleteBranchAfter，方便事后追溯
+		a.logger.Info("MergePull",
+			"projectId", args.ProjectID, "platform", account.Platform,
+			"index", args.Index, "method", args.Method, "deleteBranchAfter", args.DeleteBranchAfter)
+	}
+
+	d, err := adapter.MergePull(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, platformAdapter.MergePullOpts{
+		Method:            args.Method,
+		DeleteBranchAfter: args.DeleteBranchAfter,
+		CommitMessage:     args.CommitMessage,
+	})
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== ClosePull =====
+
+// ClosePullArgs 关闭合并请求参数
+type ClosePullArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ClosePull 关闭合并请求（不合并，直接关闭）—— UI 层应二次确认
+//
+// 对应 gitea PATCH /pulls/{index} {state: 'closed'}；GitHub 等价。
+// 关闭后合并请求状态变为 closed，不可再合并（除非 reopen，本期不实现 reopen）。
+func (a *App) ClosePull(args ClosePullArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	if a.logger != nil {
+		a.logger.Info("ClosePull", "projectId", args.ProjectID, "platform", account.Platform, "index", args.Index)
+	}
+
+	d, err := adapter.ClosePull(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== UpdatePullLabels =====
+
+// UpdatePullLabelsArgs 替换合并请求标签参数
+type UpdatePullLabelsArgs struct {
+	ProjectID  string   `json:"projectId"`
+	Index      int      `json:"index"`
+	LabelNames []string `json:"labels"` // 按 label 名替换（Gitea 自动解析为 id；GitHub 直接传 name）
+}
+
+// UpdatePullLabels 替换合并请求所有标签（替换语义）
+//
+// Gitea: PUT /repos/{owner}/{repo}/pulls/{index}/labels
+// GitHub: PUT /repos/{owner}/{repo}/issues/{index}/labels
+func (a *App) UpdatePullLabels(args UpdatePullLabelsArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullLabels(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.LabelNames)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== UpdatePullAssignee =====
+
+// UpdatePullAssigneeArgs 替换合并请求指派人参数
+type UpdatePullAssigneeArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	// Assignee 空字符串 = 清空；非空 = 设置为该 username
+	Assignee string `json:"assignee"`
+}
+
+// UpdatePullAssignee 替换合并请求指派人（空 = 清空）
+//
+// 本期简化为单 assignee；多 assignees 后续迭代再加。
+func (a *App) UpdatePullAssignee(args UpdatePullAssigneeArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullAssignee(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Assignee)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== UpdatePullReviewers =====
+
+// UpdatePullReviewersArgs 替换合并请求审查者参数
+type UpdatePullReviewersArgs struct {
+	ProjectID string   `json:"projectId"`
+	Index     int      `json:"index"`
+	Reviewers []string `json:"reviewers"` // 空切片 = 清空
+}
+
+// UpdatePullReviewers 替换合并请求审查者（空 = 清空）
+//
+// Gitea: POST/DELETE /pulls/{index}/requested_reviewers
+// GitHub: POST/DELETE /pulls/{index}/requested_reviewers（同名端点，语义一致）
+func (a *App) UpdatePullReviewers(args UpdatePullReviewersArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullReviewers(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Reviewers)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
+// ===== PR 评论（v0.6+）=====
+//
+// 范围限定：只做 PR 上下文（issue 评论另起 issue）。
+// Gitea 与 GitHub 都走 /repos/{owner}/{repo}/issues/{index}/comments 端点
+// （PR 与 issue 共享同一编号空间）。
+
+// PullCommentDTO 是 frontend IssueCommentDto 的 Wails 边界类型别名
+//
+// v0.6+ 复用了 IssueCommentDto，是因为它的字段（id / body / author / createdAt / updatedAt）
+// 与评论场景 1:1 对齐。若后续需要 PR review / inline review comment，可以拆出独立类型。
+type PullCommentDTO = platformAdapter.CommentDTO
+
+// ListPullCommentsArgs 列 PR 评论参数
+type ListPullCommentsArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullComments 列 PR 评论
+//
+// 错误码：
+//   - 401/403 → token_invalid / permission_denied
+//   - 404 → not_found（项目/仓库不存在）
+func (a *App) ListPullComments(args ListPullCommentsArgs) ([]PullCommentDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := adapter.ListPullComments(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// CreatePullCommentArgs 发 PR 评论参数
+type CreatePullCommentArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Body      string `json:"body"`
+}
+
+// CreatePullComment 发 PR 评论
+//
+// body 校验（两端都已走）：
+//   - 空 → ipc.NewValidationFailed("评论内容不能为空", "")
+//   - 两端实现都会在 trim 为空时 short-circuit返回，
+//     不会进平台 API（防御设计）
+//
+// 返回创建的评论（含服务端 id / createdAt），前端拿这个刷列表以避免
+// “前端猜时间戳与实际服务端时间不一致”问题。
+func (a *App) CreatePullComment(args CreatePullCommentArgs) (PullCommentDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullCommentDTO{}, err
+	}
+
+	if a.logger != nil {
+		a.logger.Info("CreatePullComment", "projectId", args.ProjectID, "index", args.Index)
+	}
+	d, err := adapter.CreatePullComment(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Body)
+	if err != nil {
+		return PullCommentDTO{}, err
+	}
+	if d == nil {
+		return PullCommentDTO{}, nil
+	}
+	return *d, nil
 }
 
 // ColumnDTO 看板列（暴露给前端，与 store.BoardColumn 对齐）

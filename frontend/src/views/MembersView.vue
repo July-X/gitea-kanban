@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：导航栏已移除入口，路由 /members 重定向到 /timeline。
+ * 视图文件、stores、composables 暂保留以便回滚，待后续彻底清理。
+ *
  * MembersView —— 仓库成员列表（= gitea repo collaborators）
  *
  * 设计（AGENTS §5.2 + v1 末 4-view 4-store 重构）：
@@ -214,8 +217,8 @@ function permissionClass(m: MemberDto): string {
       <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看成员' />
     </div>
     <!--
-      v1.4 拍板"替换模式"：删 v-else-if="member.loading && ..." 的"加载中…"占位
-      全局海豚 overlay（GlobalLoadingOverlay）接管请求级 loading 指示
+      v0.6.1+ 拍板"替换模式"：删 v-else-if="member.loading && ..." 的"加载中…"占位
+      全局 StatusBarPulse 接管请求级 loading 指示
     -->
     <div
       v-else-if="!member.filteredItems.length && member.items.length > 0"

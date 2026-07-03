@@ -110,7 +110,7 @@ pnpm install
 cd ..
 ```
 
-> **注意**：v2 不再需要 `pnpm install` 安装根目录依赖（v1 的 `package.json` 已归档到 `legacy/electron/`）。前端依赖是**唯一**的 pnpm 步骤。
+> **注意**：v2 不再需要 `pnpm install` 安装根目录依赖（v1 时代依赖已随 Electron 迁出）。前端依赖是**唯一**的 pnpm 步骤。
 
 ### 验证环境
 
@@ -358,7 +358,6 @@ GITEA_KANBAN_DATA_DIR="$GITEA_KANBAN_DATA_DIR" wails dev
 - 前端设计：[`docs/design/03-frontend.md`](docs/design/03-frontend.md)
 - **v2.0 架构迁移决策**：[`docs/adr/0005-electron-to-go-wails-migration.md`](docs/adr/0005-electron-to-go-wails-migration.md)
 - 旧架构（**DEPRECATED**）：[`docs/design/02-architecture.md`](docs/design/02-architecture.md)
-- 旧 v1 源码归档（**仅参考**）：[`legacy/electron/`](legacy/electron/)
 - 设计系统（颜色、字体、术语翻译表）：[`design-system/gitea-kanban/OVERRIDE.md`](design-system/gitea-kanban/OVERRIDE.md)
 - **给所有 AI / 人类协作者的入口规范（v2.0）**：[`AGENTS.md`](AGENTS.md)
 - Claude 工作摘要：[`CLAUDE.md`](CLAUDE.md)

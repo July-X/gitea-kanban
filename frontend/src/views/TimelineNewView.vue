@@ -22,8 +22,9 @@ import {
   commitsGitgraphLines,
   commitsGitgraphCloneRepo,
   commitsGitgraphPull,
-  deepenRepo,
 } from '@renderer/lib/ipc-client';
+// v0.4.0：删除 deepenRepo 「加载更多」 import + 调用（GitHub 仓库 UI 与 Gitea 对齐，
+//         「加载更多」按钮 + 滚动监听整段移除；commit ba0b41c 一次性收口）
 import EmptyState from '@renderer/components/EmptyState.vue';
 import CommitDetailPanel from '@renderer/components/CommitDetailPanel.vue';
 import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
@@ -54,10 +55,9 @@ const repo = useRepoStore();
 // v2.x 修复 July-X/UnrealEngine 渲染卡死：UnrealEngine release 分支中段有一段超宽 merge
 // 历史（单行 1407 lane / 963 flow），-n 5000 会把这段拉进来，前端 6836 div + 963 超长 path
 // 直接卡死主线程（用户看到"只有圆点、列表空白"的卡顿中间态）。
-// 对齐 vscode-git-graph 默认分页：initialLoad=300，loadMore=100；
-// 更早历史交给「加载更多」按需拉，避免首屏一次性处理超宽历史。
+// 对齐 vscode-git-graph 默认分页：initialLoad=300。
+// v0.4.0：移除「加载更多」分页机制（GitHub 仓库 UI 与 Gitea 对齐），固定用 INITIAL_GRAPH_LIMIT。
 const INITIAL_GRAPH_LIMIT = 300;
-const LOAD_MORE_DEEPEN_BY = 100;
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const activeRepo = computed(() => {
   const fn = repo.currentProject
@@ -74,25 +74,29 @@ const activeRepo = computed(() => {
 const graphDto = ref<GraphResultDto | null>(null);
 /** 加载态 */
 const loading = ref(false);
+/** 加载更多态（分页） */
+const loadingMore = ref(false);
+/** 是否已加载全部 */
+const allLoaded = ref(false);
 /** 本地错误信息 */
 const localError = ref<string | null>(null);
 
-/** v2.10：加载更多状态 */
-const loadingMore = ref(false);
-/** v2.10：是否已加载完整历史 */
-const hasCompleteHistory = ref(false);
-/** 当前 Git Graph 显示上限；初始同步窗口更大，加载更多后继续放宽 */
-const graphLimit = ref(INITIAL_GRAPH_LIMIT);
-
-/** v3.6：是否显示「加载更多」footer（对齐 vscode main.ts:876 moreCommitsAvailable）
- *  - graphDto.truncated=true：还有更早历史，显示 footer + 支持点击/滚动加载
- *  - truncated=false 或 hasCompleteHistory=true：不显示
+/**
+ * Git Graph 加载更多文字显示控制（与 StatusBarPulse 动效同步）：
+ * - loadingMore=true：显示"正在加载更多提交记录…"（与 StatusBarPulse 呼吸灯同步）
+ * - allLoaded=true：显示"已到全部提交记录的末尾"
+ * - 其他情况：不显示文字
  */
-const canLoadMore = computed(() => {
-  if (!activeProjectId.value || activeCommitCount.value <= 0) return false;
-  if (hasCompleteHistory.value) return false;
-  return graphDto.value?.truncated ?? false;
+const showLoadMoreStatus = computed(() => {
+  return graphDto.value !== null && (loadingMore.value || allLoaded.value);
 });
+
+const gitGraphLoadMoreClass = computed(() => {
+  return loadingMore.value
+    ? 'git-graph-load-more-loading'
+    : 'git-graph-load-more-end';
+});
+
 /** v1.5 功能未启用提示（main handler 返 disabled=true 时设置） */
 const featureDisabled = ref(false);
 /** v1.5 启用流程：是否正在 git clone */
@@ -101,6 +105,10 @@ const cloning = ref(false);
 const cloneProgress = ref<string | null>(null);
 /** 是否正在 pull */
 const pulling = ref(false);
+
+// v0.6.1+ Git Graph 滚动加载更多：哨兵 + IntersectionObserver
+const loadMoreSentinel = ref<HTMLElement | null>(null);
+let loadMoreObserver: IntersectionObserver | null = null;
 
 // ============================================================
 // v2.9 commit 详情：行下手风琴（inline 展开）
@@ -429,11 +437,6 @@ onUnmounted(() => {
     rowHeightResizeObserver.disconnect();
     rowHeightResizeObserver = null;
   }
-  // v3.6：清理自动加载 rAF
-  if (autoLoadScrollRaf) {
-    cancelAnimationFrame(autoLoadScrollRaf);
-    autoLoadScrollRaf = 0;
-  }
 });
 
 /** 仓库 web URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
@@ -558,8 +561,30 @@ onMounted(async () => {
   document.addEventListener('app:refresh', onAppRefresh);
   // v3.4：动态行高对齐——数据加载后测量 + 监听尺寸变化
   setupRowHeightObserver();
-  // v3.6：滚动到底部自动加载更多（对齐 vscode main.ts:2008 observeWindowSizeChanges）
-  setupAutoLoadMore();
+  // v0.6.1+ Git Graph 滚动加载更多
+  setupLoadMoreObserver();
+});
+
+/** 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver */
+function setupLoadMoreObserver(): void {
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      const e = entries[0];
+      if (!e || !e.isIntersecting) return;
+      void loadMoreGraph();
+    },
+    { rootMargin: '200px 0px', threshold: 0 },
+  );
+  if (loadMoreSentinel.value) {
+    loadMoreObserver.observe(loadMoreSentinel.value);
+  }
+}
+
+// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 observe
+watch(loadMoreSentinel, (el) => {
+  if (el && loadMoreObserver) {
+    loadMoreObserver.observe(el);
+  }
 });
 
 watch(
@@ -612,6 +637,11 @@ onUnmounted(() => {
   document.removeEventListener('mousemove', onColDragMove);
   document.removeEventListener('mouseup', onColDragEnd);
   document.removeEventListener('app:refresh', onAppRefresh);
+  // v0.6.1+ Git Graph 滚动加载更多：清理 IntersectionObserver
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
+  }
   if (colDragRafId !== 0) {
     cancelAnimationFrame(colDragRafId);
     colDragRafId = 0;
@@ -619,107 +649,54 @@ onUnmounted(() => {
 });
 
 /**
- * v2.10：加载更多提交记录（增量拉取历史）
+ * 加载 Git Graph 数据（支持分页）
  *
- * 使用场景：用户滚动到 Git Graph 底部，点击「加载更多」按钮
- *
- * 技术实现：
- * 1. 调用 DeepenRepo API（增量拉取 200 层历史）
- * 2. 重新调用 loadGraph 刷新图形
- * 3. 显示成功/失败提示
+ * @param offset 跳过前 N 条 commit（0 = 首次加载）
  */
-/**
- * v3.6：处理「加载更多」（对齐 vscode main.ts:1934 loadMoreCommits + 881 footer click）
- *  - 实时窗口放宽：graphLimit += LOAD_MORE_DEEPEN_BY
- *  - 重新拉取 Git Graph，后端用 graphLimit 控制 MaxCount
- *  - 后端返回 truncated 标志，下次组件渲染 canLoadMore 自动决定是否继续显示
- *  - 不再调 deepenRepo（这是远端 fetch，对超大仓库太慢）
- *    —— vscode 的 maxCommits 只调整前端窗口，不是 fetch
- */
-async function handleLoadMore() {
-  if (!activeProjectId.value || loadingMore.value) return;
-  if (!graphDto.value?.truncated) return; // 已经被识别为完整历史，不重复触发
-  loadingMore.value = true;
-  try {
-    // 1. 加深前端窗口（对齐 vscode maxCommits += loadMoreCommits）
-    graphLimit.value += LOAD_MORE_DEEPEN_BY;
-    // 2. 重新加载（loadGraph 会自动根据 dto.truncated 更新 hasCompleteHistory）
-    await loadGraph();
-  } catch (error) {
-    console.error('[TimelineNewView] handleLoadMore failed:', error);
-    showToast({ type: 'error', message: '加载失败，请重试' });
-    // 恢复 limit（避免无限累积失败次数）
-    graphLimit.value = Math.max(INITIAL_GRAPH_LIMIT, graphLimit.value - LOAD_MORE_DEEPEN_BY);
-  } finally {
-    loadingMore.value = false;
-  }
-}
-
-/**
- * v3.6：滚动监听 + 自动加载（对齐 vscode main.ts:2008 observeWindowSizeChanges）
- *  - 监听 .timeline-new__main 的 scroll 事件
- *  - 当 scrollTop + clientHeight >= scrollHeight - 25 且 truncated=true 时自动加载
- *  - 用 rAF 节流避免高频触发
- */
-let autoLoadScrollRaf = 0;
-function setupAutoLoadMore(): void {
-  if (autoLoadScrollRaf) return; // 已注册
-  const scrollContainer = document.querySelector('.timeline-new__main');
-  if (!scrollContainer) return;
-  scrollContainer.addEventListener('scroll', () => {
-    if (autoLoadScrollRaf) return;
-    autoLoadScrollRaf = requestAnimationFrame(() => {
-      autoLoadScrollRaf = 0;
-      // 已在加载中跳过
-      if (loadingMore.value || loading.value) return;
-      // 必须有 truncated 数据
-      if (!graphDto.value?.truncated) return;
-      // 底部 25px 触发自动加载（对齐 vscode main.ts:2008）
-      const scrollTop = scrollContainer.scrollTop;
-      const viewHeight = scrollContainer.clientHeight;
-      const contentHeight = scrollContainer.scrollHeight;
-      if (scrollTop > 0 && viewHeight > 0 && contentHeight > 0 &&
-          (scrollTop + viewHeight) >= contentHeight - 25) {
-        void handleLoadMore();
-      }
-    });
-  });
-}
-
-
-async function loadGraph(): Promise<void> {
+async function loadGraph(offset = 0): Promise<void> {
   if (!activeProjectId.value) {
     return;
   }
-  loading.value = true;
-  localError.value = null;
-  featureDisabled.value = false;
+  const isFirstLoad = offset === 0;
+  if (isFirstLoad) {
+    loading.value = true;
+    localError.value = null;
+    featureDisabled.value = false;
+    allLoaded.value = false;
+  } else {
+    loadingMore.value = true;
+  }
   useGlobalLoadingStore().show('timeline');
   try {
-    // v2.6：直接消费 Go 端 GraphResultDto（nodes + edges + 16 色字段）
-    // v2.68：GitHub 与 Gitea 统一走这条 structured/vscode 链路，
-    // 不再按平台切回 ASCII parser。
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
-      limit: graphLimit.value,
+      limit: INITIAL_GRAPH_LIMIT,
+      offset,
     });
 
-    // 兼容 disabled 提示（main handler 可能返 disabled）
     const nodes = dto?.nodes ?? [];
-    if (nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
+    if (isFirstLoad && nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
       featureDisabled.value = true;
       graphDto.value = null;
-      // 不要在这里 return，让 finally 块清理状态
-    } else {
+    } else if (isFirstLoad) {
       graphDto.value = dto;
-      // v3.6：truncated 标志驱动 hasCompleteHistory（对齐 vscode git-graph main.ts:343 moreAvailable）
-      //   - truncated=true：还有更早历史，可"加载更多"或自动滚动加载
-      //   - truncated=false：已加载全部，不再触发加载
-      hasCompleteHistory.value = !(dto?.truncated ?? false);
-      // v3.4：数据变化后重新测量行高（commit 数变化导致 gridY 变化）
       nextTick(() => measureRowHeights());
+    } else {
+      // 分页加载：追加新 nodes 和 edges（去重）
+      if (graphDto.value) {
+        const existingSha = new Set(graphDto.value.nodes.map((n) => n.sha));
+        const newNodes = nodes.filter((n) => !existingSha.has(n.sha));
+        graphDto.value = {
+          ...graphDto.value,
+          nodes: [...graphDto.value.nodes, ...newNodes],
+          edges: [...graphDto.value.edges, ...(dto?.edges ?? [])],
+        };
+      } else {
+        graphDto.value = dto;
+      }
     }
-    // v2.9：新数据加载完收起展开（防 SHA 失效）
+    // truncated = false 表示已加载全部
+    allLoaded.value = !dto?.truncated;
     expandedSha.value = null;
   } catch (e: unknown) {
     console.error('[TimelineNewView] loadGraph failed:', e);
@@ -734,18 +711,30 @@ async function loadGraph(): Promise<void> {
     const looksLikeDisabled =
       err.code === 'internal' &&
       (msg.includes('v1.5') || msg.includes('Git Graph'));
-    if (looksLikeDisabled) {
+    if (looksLikeDisabled && isFirstLoad) {
       featureDisabled.value = true;
       graphDto.value = null;
-      // 不要在这里 return，让 finally 块清理状态
-    } else {
+    } else if (isFirstLoad) {
       localError.value = err.hint ? `${msg}（${err.hint}）` : msg;
       graphDto.value = null;
     }
   } finally {
-    loading.value = false;
+    if (isFirstLoad) {
+      loading.value = false;
+    } else {
+      loadingMore.value = false;
+    }
     useGlobalLoadingStore().hide('timeline');
   }
+}
+
+/**
+ * 加载更多 Git Graph 数据（滚动到底自动调）
+ */
+async function loadMoreGraph(): Promise<void> {
+  if (loadingMore.value || allLoaded.value || !graphDto.value) return;
+  const offset = graphDto.value.nodes.length;
+  await loadGraph(offset);
 }
 
 /**
@@ -1783,18 +1772,8 @@ function refBadgeClass(refType?: string): string {
           <RotateCw :size="15" :class="{ spinning: pulling }" />
           <span class="sync-btn__label">{{ syncButtonLabel }}</span>
         </button>
-
-        <!-- v2.10：加载更多按钮（放在同步按钮旁边） -->
-        <button
-          v-if="canLoadMore"
-          class="load-more-header-btn"
-          :disabled="loadingMore"
-          :title="`当前显示 ${activeCommitCount} 个提交，点击加载更多`"
-          @click="handleLoadMore"
-        >
-          <span v-if="loadingMore">加载中...</span>
-          <span v-else>加载更多</span>
-        </button>
+        <!-- v0.4.0：删除「加载更多」按钮 + 「滚动到底部自动加载」footer
+             （GitHub 仓库 UI 与 Gitea 对齐，统一固定 300 条初始上限）-->
       </div>
     </header>
 
@@ -2262,32 +2241,33 @@ function refBadgeClass(refType?: string): string {
                 </div>
               </div>
             </template>
-            <!-- v3.6：加载更多 footer（对齐 vscode git-graph main.ts:876 footerElem）
-                 滚动到底部时自动加载；点击 footer 也可手动触发。
-                 这里跟 commit-row 同样的 grid 列结构，保证列宽对齐。-->
-            <div
-              v-if="canLoadMore"
-              class="git-graph-loadmore"
-              data-col="0"
-              @click="handleLoadMore"
-            >
-              <div class="git-graph-loadmore__col git-graph-loadmore__col--graph"></div>
-              <div class="git-graph-loadmore__col git-graph-loadmore__col--desc">
-                <div class="git-graph-loadmore__content">
-                  <template v-if="loadingMore">
-                    <span class="git-graph-loadmore__spinner" aria-hidden="true"></span>
-                    <span>正在加载更多提交…</span>
-                  </template>
-                  <template v-else>
-                    <span>滚动到底部加载更多（共显示 {{ activeCommitCount }} 个提交，还有更早的历史）</span>
-                  </template>
-                </div>
-              </div>
-              <div v-if="isColVisible(2)" class="git-graph-loadmore__col git-graph-loadmore__col--date"></div>
-              <div v-if="isColVisible(3)" class="git-graph-loadmore__col git-graph-loadmore__col--author"></div>
-              <div v-if="isColVisible(4)" class="git-graph-loadmore__col git-graph-loadmore__col--sha"></div>
-            </div>
             </div><!-- /.git-graph-rows -->
+
+            <!-- v0.6.1+ Git Graph 滚动加载更多哨兵（idle 时占位保持高度让 IntersectionObserver 可检测） -->
+            <div
+              v-if="!allLoaded && graphDto"
+              ref="loadMoreSentinel"
+              class="git-graph-load-more-sentinel"
+              aria-hidden="true"
+            ></div>
+            <!-- 加载中文字（与 StatusBarPulse 动效同步显示/隐藏，由 globalLoading 控制） -->
+            <div
+              v-if="showLoadMoreStatus"
+              class="git-graph-load-more"
+              :class="gitGraphLoadMoreClass"
+              role="status"
+              aria-live="polite"
+            >
+              <template v-if="gitGraphLoadMoreClass === 'git-graph-load-more-loading'">
+                <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
+                <span>正在加载更多提交记录…</span>
+              </template>
+              <template v-else>
+                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+                <span>已到全部提交记录的末尾</span>
+                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+              </template>
+            </div>
           </div>
         </div>
        </template>
@@ -2301,6 +2281,74 @@ function refBadgeClass(refType?: string): string {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+}
+
+/* v0.6.1+ Git Graph 滚动加载更多（与 MergesView 风格统一） */
+.git-graph-load-more {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-4) 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-height: 56px;
+  list-style: none;
+  flex-shrink: 0;
+  width: 100%;
+  text-align: center;
+  transition: opacity var(--t-base) var(--ease);
+}
+.git-graph-load-more-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.git-graph-load-more-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2.5px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: git-graph-load-more-spin 0.7s linear infinite;
+}
+.git-graph-load-more-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  animation: git-graph-load-more-idle-breath 2s ease-in-out infinite;
+}
+.git-graph-load-more-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--color-divider);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.git-graph-load-more-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-style: normal;
+  font-size: var(--font-xs);
+}
+.git-graph-load-more-divider {
+  flex: 0 0 24px;
+  height: 1px;
+  background: var(--color-divider);
+}
+@keyframes git-graph-load-more-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes git-graph-load-more-idle-breath {
+  0%, 100% { opacity: 0.55; transform: translateY(0); }
+  50% { opacity: 0.9; transform: translateY(2px); }
 }
 
 /* ===== 顶部栏 ===== */
@@ -2462,7 +2510,7 @@ function refBadgeClass(refType?: string): string {
   border-bottom: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   border-top: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -2496,7 +2544,7 @@ function refBadgeClass(refType?: string): string {
   background: var(--color-shell-main-bg);
 }
 .git-graph-header__col--graph .git-graph-header__col-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-disabled);
   letter-spacing: 0.05em;
@@ -2764,71 +2812,6 @@ function refBadgeClass(refType?: string): string {
   z-index: 1;
 }
 
-/* v3.6：加载更多 footer（对齐 vscode main.ts:876 .roundedBtn footerElem）
- *   - grid-template-columns 跟 commit-row 一致（5 列），保证列宽对齐
- *   - hover 状态高亮 + clickable 触发 handleLoadMore
- *   - 加载中显示 spinner + 文字（对齐 vscode #loadingHeader）
- */
-.git-graph-loadmore {
-  display: grid;
-  grid-template-columns: var(--grid-template-columns, 96px 1fr 128px 128px 80px);
-  align-items: center;
-  gap: 0;
-  height: 36px;
-  cursor: pointer;
-  padding: 0 var(--space-3, 12px) 0 0;
-  font-family: var(--font-sans);
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  background: rgba(128, 128, 128, 0.04);
-  border-top: 1px dashed var(--color-divider, rgba(0, 0, 0, 0.15));
-  user-select: none;
-  box-sizing: border-box;
-  transition: background 0.12s;
-}
-.git-graph-loadmore:hover {
-  background: var(--color-primary-soft, rgba(116, 184, 48, 0.12));
-}
-.git-graph-loadmore__col {
-  box-sizing: border-box;
-}
-.git-graph-loadmore__col--graph {
-  background: transparent;
-  pointer-events: none;
-}
-.git-graph-loadmore__col--desc {
-  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.15));
-  padding: 0 var(--space-3, 12px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.git-graph-loadmore__col--date,
-.git-graph-loadmore__col--author,
-.git-graph-loadmore__col--sha {
-  border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.15));
-}
-.git-graph-loadmore__col--sha {
-  border-right: none;
-}
-.git-graph-loadmore__content {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2, 8px);
-  line-height: 1;
-}
-.git-graph-loadmore__spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--color-primary-soft, rgba(116, 184, 48, 0.3));
-  border-top-color: var(--color-primary, #74b830);
-  border-radius: 50%;
-  animation: git-graph-spin 0.8s linear infinite;
-}
-@keyframes git-graph-spin {
-  to { transform: rotate(360deg); }
-}
 
 /* Commit 列表（v2.16 SourceTree 风格：浮在 SVG 上方盖板）
  * - position: sticky top:0（跟 SVG area 一起 sticky 跟随垂直滚动，保持圆点和 commit 文字对齐）
@@ -2993,7 +2976,7 @@ function refBadgeClass(refType?: string): string {
   /* VSCode Git Graph .gitRef 默认样式：灰底 + 灰边框 + 圆角 5px */
   border-radius: 5px;
   border: 1px solid rgba(128, 128, 128, 0.75);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   flex-shrink: 0;
   white-space: nowrap;
@@ -3456,26 +3439,4 @@ function refBadgeClass(refType?: string): string {
 .commit-avatar-fallback.flow-color-16-14 { background-color: var(--color-series-16-14); }
 .commit-avatar-fallback.flow-color-16-15 { background-color: var(--color-series-16-15); }
 
-/* ===== v2.10: 加载更多按钮（顶部操作区） ===== */
-.load-more-header-btn {
-  padding: 6px 12px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.load-more-header-btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-hover);
-}
-
-.load-more-header-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 </style>

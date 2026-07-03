@@ -1,4 +1,6 @@
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ *
  * useBoardActions —— BoardView 顶栏 + 列内创建 wrapper（selectProject / createIssue / undo / redo）
  *
  * 抽出动机：原 BoardView.vue 内 4 个 wrapper 函数共约 50 行，全部调 store + showToast；

@@ -37,6 +37,11 @@ import {
   systemOpenPath,
 } from '@renderer/lib/ipc-client';
 import {
+  testGitBinary,
+  openGitBinaryPicker,
+  type TestGitBinaryResult,
+} from '@renderer/lib/ipc-client';
+import {
   GITHUB_CLI_INSTALL_LABEL,
   GITHUB_CLI_INSTALL_URL,
   GITHUB_CLI_REQUIRED_HINT,
@@ -50,6 +55,161 @@ const auth = useAuthStore();
 const repo = useRepoStore();
 const branch = useBranchStore();
 const router = useRouter();
+
+// ============================================================
+// v0.4.0：Git 二进制设置（独立卡片「Git 二进制」）
+// ============================================================
+//
+// 设计：
+//   - 默认内嵌 git 2.55.0（macos + windows），Linux 走系统 PATH
+//   - 用户可改路径（macOS / Windows / Linux 都允许）：
+//     macOS 通常 /opt/homebrew/bin/git、/usr/local/bin/git、.app/Contents/MacOS/git
+//     Windows 通常 C:\Program Files\Git\cmd\git.exe
+//     Linux 通常 /usr/bin/git
+//   - 「选择文件」走平台特定对话框（macOS 允许所有文件，Windows 限定 .exe）
+//   - 「测试」调用 <path> --version 验证；macOS 检测 quarantine 属性
+//   - 「解除隔离」macOS 主动 xattr -d com.apple.quarantine
+//   - 改完「保存」调后端 setGitBinaryPath 写 prefs + 进程内立即 SetUserOverride
+//
+// 表单直接绑 settings.gitBinaryPath（Pinia ref），未保存时 store 已 dirty 但未持久化；
+// 后端 setGitBinaryPath 在用户点「保存」时落盘，watch 不需要（store 自管）。
+const gitBinaryTestResult = ref<TestGitBinaryResult | null>(null);
+
+/**
+ * v0.5：2-button mode picker（user-mid-turn steer）
+ *
+ *   'embedded' / 'system' / 'custom'
+ *
+ * - 'embedded' → backend userOverride = SentinelEmbedded → 强制走内嵌 binary（init
+ *   后 smoke test 已验证可运行才生效；否则报错让用户选 system）
+ * - 'system'   → backend userOverride = "" → 强制走 PATH git（用户 OS 自带）
+ * - 'custom'   → backend userOverride = 绝对路径 → 走用户填的具体路径
+ *
+ * 默认值：'system'（v0.4.0 fix-1 经验：PATH git 跨平台稳定优先）
+ *
+ * 变更历史：v0.4.0 时期用 input 让用户填 userOverride 路径，UI 信息密度高；
+ * v0.5 采取 segmented control 只显示两个主选项 + advanced details 折叠 custom。
+ */
+/**
+ * backend gitbinary sentinel magic string，v0.5 引入。
+ * 后端 gitbinary.ResolveGitBinaryPath 看到 userOverride == EMBEDDED_MODE_MARKER
+ *   → 强制走 Init 释放的 embedded binary（不再 fallback PATH）。
+ * 同步：app/gitbinary/runner.go 同名常量；任一变动需两边同改。
+ */
+const EMBEDDED_MODE_MARKER = '$EMBEDDED$'
+
+/**
+ * v0.5-mid2 精简状态：mode 只保留 2 个选项
+ *   'embedded' → sentinel=EMBEDDED_MODE_MARKER → 走 Init 释放的 binary
+ *   'custom'   → userOverride=文件选择对话框选的 path → 走用户选的 git
+ *
+ * v0.5-original 的 'system' 分支已删除（语义上等价于 custom 但交互更隐晦）。
+ * 默认 'custom' 是兼容老 user state.json（prefs["app.gitBinaryPath"] 非空路径）；
+ * 如果 state.json 是空 / sentinel，启动期 GitHub 设定仍未跑过时本 UI 默认空。
+ */
+const gitBinaryMode = ref<'embedded' | 'custom'>('custom');
+const gitBinaryModeLoading = ref(false);
+
+/** 默认版本号：仅 UI 陪字节用，有 TestGitBinaryResult 时会被实际覆盖 */
+const gitBinaryEmbeddedVersion = computed(() => settings.gitBinary?.embeddedVersion ?? '2.55.0');
+
+/** v0.5-mid2 状态行：TestGitBinaryResult 有值优先使用其版 */
+const gitBinaryEffectiveVersion = computed(
+  () => gitBinaryTestResult.value?.version || gitBinaryEmbeddedVersion.value,
+);
+
+/**
+ * v0.5-mid2：点「使用内嵌 Git」按钮 → sentinel + test
+ * 不需要走 dialog（已是默认 fallback / 已释放）。
+ */
+async function onSelectEmbedded(): Promise<void> {
+  if (gitBinaryModeLoading.value) return;
+  gitBinaryModeLoading.value = true;
+  try {
+    const cfg = await settings.saveGitBinaryPath(EMBEDDED_MODE_MARKER);
+    gitBinaryMode.value = 'embedded';
+    gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
+    if (gitBinaryTestResult.value?.ok) {
+      showToast({
+        type: 'success',
+        message: '已切换到内嵌 Git',
+        description: `git ${gitBinaryEffectiveVersion.value} · v0.4.0 内嵌`,
+        duration: 2200,
+      });
+    } else {
+      showToast({
+        type: 'warn',
+        message: '内嵌 git 未能跑通',
+        description: '将临时 fallback 到 PATH git；建议选「使用系统装的 Git」',
+        duration: 4000,
+      });
+    }
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    showToast({
+      type: 'error',
+      message: '切换失败',
+      description: err.messageText ?? err.message ?? '请稍后重试',
+    });
+  } finally {
+    gitBinaryModeLoading.value = false;
+  }
+}
+
+/**
+ * v0.5-mid2：点「使用系统安装的 Git」按钮 → 弹文件选择对话框
+ * 用户选完后走 user-custom path + test。
+ * 弹窗是平台特定（macOS *  / Windows *.exe / Linux *）。
+ */
+async function onPickAndUseSystemGit(): Promise<void> {
+  if (gitBinaryModeLoading.value) return;
+  let picked = '';
+  try {
+    picked = await openGitBinaryPicker();
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    showToast({
+      type: 'error',
+      message: '打开文件选择器失败',
+      description: err.messageText ?? err.message ?? '请稍后重试',
+    });
+    return;
+  }
+  if (!picked) return; // 用户取消
+  gitBinaryModeLoading.value = true;
+  try {
+    const cfg = await settings.saveGitBinaryPath(picked);
+    gitBinaryMode.value = 'custom';
+    gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
+    if (gitBinaryTestResult.value?.ok) {
+      showToast({
+        type: 'success',
+        message: '已使用选中的 git',
+        description: `git ${gitBinaryEffectiveVersion.value} · ${cfg.effectivePath}`,
+        duration: 2500,
+      });
+    } else {
+      showToast({
+        type: 'error',
+        message: '选中的 git 二进制不能跑',
+        description: `${gitBinaryTestResult.value?.message}\n${gitBinaryTestResult.value?.hint ?? ''}`,
+      });
+    }
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    showToast({
+      type: 'error',
+      message: '保存失败',
+      description: err.messageText ?? err.message ?? '请稍后重试',
+    });
+  } finally {
+    gitBinaryModeLoading.value = false;
+  }
+}
+
+/* v0.5-mid2 删除：onStripQuarantine / onPickGitBinary / onSelectMode / onCustomPathBlur /
+   shortPath / gitBinaryQuarantined / gitBinaryPlatformHint / gitBinaryStripping / gitBinaryPicking
+   —— API 仍保留在 ipc-client.ts 与后端，后续有需求可重读 commit 97aa7f9 加回。*/
 
 // ============================================================
 // 应用数据目录分组（v2.x · 数据根目录 = 全局路径）
@@ -287,48 +447,103 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
     <!-- 三栏网格布局（紧凑，避免滚动条） -->
     <div class="settings__grid">
       <!-- 数据同步 -->
-      <section class="settings__card">
+      <section class="settings__card settings__card--compact">
         <h2>数据同步</h2>
-        <div class="settings__field">
+        <div class="settings__inline-row">
           <label class="settings__label" for="polling-min">自动刷新间隔</label>
-          <div class="settings__row">
-            <input
-              id="polling-min"
-              type="number"
-              class="settings__input"
-              :value="minutesLabel"
-              min="1"
-              :max="Math.round(SETTINGS_LIMITS.MAX_POLLING_INTERVAL_MS / 60000)"
-              @change="onMinutesChange"
-            />
-            <span class="settings__unit">分钟</span>
-          </div>
+          <input
+            id="polling-min"
+            type="number"
+            class="settings__input"
+            :value="minutesLabel"
+            min="1"
+            :max="Math.round(SETTINGS_LIMITS.MAX_POLLING_INTERVAL_MS / 60000)"
+            @change="onMinutesChange"
+          />
+          <span class="settings__unit">分钟</span>
+          <button type="button" class="settings__save settings__save--inline" :disabled="saving" @click="onSave">
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
         </div>
-        <button type="button" class="settings__save" :disabled="saving" @click="onSave">
-          {{ saving ? '保存中…' : '保存' }}
-        </button>
+      </section>
+
+      <!--
+        v0.5 「Git 二进制」卡片（2-button 模式选择 + advanced details）
+        user-mid-turn steer：只显示两个主选项
+          - 「使用内嵌 Git」—— 显式强制走嵌入 v2 git 2.55.0（适合 amd64 mac/win build 场景）
+          - 「使用系统安装的 Git」—— 走 PATH git（arm64 mac / Linux 默认，跨 arch 稳定）
+        高级选项（手动填 path / platform 路径提示 / macOS quarantine 修复）折叠 details。
+        状态行 1 句点出当前 path + 版本号。
+        路径 tooltip only on hover（避免 1 行变两行）。
+      -->
+      <section class="settings__card settings__card--compact">
+        <h2>Git 二进制</h2>
+
+        <!--
+          顶部状态行：当前生效路径 + git 版本号 + 状态图标
+          （只用 1 句，连 room 都不报 path 问题；详细状态 details 里看）
+        -->
+        <p class="settings__hint settings__hint--mono">
+          <span v-if="gitBinaryEffectiveVersion">
+            <span v-if="gitBinaryTestResult?.ok === false">⚠</span>
+            <span v-else>✓</span>
+            git {{ gitBinaryEffectiveVersion }}
+            <template v-if="gitBinaryMode === 'embedded'"> · 使用内嵌</template>
+            <template v-else-if="gitBinaryMode === 'custom'"> · 自选路径</template>
+          </span>
+          <span v-else-if="gitBinaryModeLoading">加载中…</span>
+          <span v-else>请选择一个 git 来源</span>
+        </p>
+
+        <!--
+          v0.5 主交互区：仅两个 toggle button
+          - 互斥：只有选中态高亮
+          - 简单明了的 segmented control
+        -->
+        <div class="settings__mode-toggle" role="group" aria-label="Git 二进制来源">
+          <button
+            type="button"
+            class="settings__mode-btn"
+            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'embedded' }"
+            :disabled="gitBinaryModeLoading"
+            @click="onSelectEmbedded"
+          >
+            使用内嵌 Git
+          </button>
+          <button
+            type="button"
+            class="settings__mode-btn"
+            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'custom' }"
+            :disabled="gitBinaryModeLoading"
+            @click="onPickAndUseSystemGit"
+          >
+            使用系统安装的 Git
+          </button>
+        </div>
       </section>
 
       <!-- 外观 -->
-      <section class="settings__card">
-        <h2>外观</h2>
-        <div class="settings__theme-options" role="radiogroup" aria-label="主题">
-          <label
-            v-for="opt in themeOptions"
-            :key="opt.value"
-            class="settings__theme-opt"
-            :class="{ 'settings__theme-opt--active': ui.currentTheme === opt.value }"
-          >
-            <input
-              type="radio"
-              name="theme"
-              :value="opt.value"
-              :checked="ui.currentTheme === opt.value"
-              class="settings__theme-radio"
-              @change="onThemeChange(opt.value)"
-            />
-            <span class="settings__theme-label">{{ opt.label }}</span>
-          </label>
+      <section class="settings__card settings__card--compact">
+        <div class="settings__inline-row">
+          <h2>外观</h2>
+          <div class="settings__theme-options" role="radiogroup" aria-label="主题">
+            <label
+              v-for="opt in themeOptions"
+              :key="opt.value"
+              class="settings__theme-opt"
+              :class="{ 'settings__theme-opt--active': ui.currentTheme === opt.value }"
+            >
+              <input
+                type="radio"
+                name="theme"
+                :value="opt.value"
+                :checked="ui.currentTheme === opt.value"
+                class="settings__theme-radio"
+                @change="onThemeChange(opt.value)"
+              />
+              <span class="settings__theme-label">{{ opt.label }}</span>
+            </label>
+          </div>
         </div>
       </section>
 
@@ -551,12 +766,24 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
   flex-direction: column;
   gap: var(--space-3);
 }
+.settings__card--compact {
+  padding: var(--space-3) var(--space-4);
+  gap: var(--space-2);
+}
 .settings__card h2 {
   font-size: var(--font-md);
   font-weight: 600;
   color: var(--color-text);
   margin: 0;
   flex-shrink: 0;
+}
+
+/* 内联行（数据同步 label+input+unit+save 同行；外观 h2+主题 同行） */
+.settings__inline-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 /* 字段 / 行 / 提示 */
@@ -584,6 +811,19 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
   border-radius: var(--radius-sm);
   font-size: var(--font-md);
 }
+/**
+ * v0.4.0：Git 二进制路径输入框（"Git 二进制" 卡片专用）
+ *  - flex:1 让它占满 .settings__row 剩余空间
+ *  - mono 字体让绝对路径更易读
+ *  - 比 polling interval 输入框（100px）宽
+ */
+.settings__input--wide {
+  flex: 1 1 auto;
+  min-width: 200px;
+  width: auto;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--font-sm);
+}
 .settings__unit {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
@@ -598,6 +838,67 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
   font-size: 10px;
   color: var(--color-text-muted);
   margin: 0;
+}
+/**
+ * v0.5：单调一行状态（多用于 git binary 路径行）
+ *   - monospace 字体让路径、版本号展示更对齐
+ *   - --muted 变体让插入点（• 分隔符 + 路径部分）色调较柔，让主信息突出
+ */
+.settings__hint--mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.settings__hint--muted {
+  color: var(--color-text-disabled, var(--color-text-muted));
+}
+
+/**
+ * v0.5：seg-toggle 风格的 2-button 模式选择器
+ *   - flex-row 容器，子按钮平分宽度
+ *   - --active 高亮态走 primary bg，inactive 透明背景
+ *   - 鼠标 hover 状态切换 animation
+ *   - --meta 子元素用 secondary 色，让 2 个 button 主体看起来平衡
+ */
+.settings__mode-toggle {
+  display: flex;
+  gap: var(--space-2, 8px);
+}
+.settings__mode-btn {
+  flex: 1 1 0;
+  padding: 7px 12px;
+  background: var(--color-bg-elevated, var(--color-bg-secondary, rgba(255, 255, 255, 0.04)));
+  color: var(--color-text);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.15));
+  border-radius: 6px;
+  font-size: var(--font-sm, 12px);
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: background 120ms var(--ease, ease), border-color 120ms var(--ease, ease), color 120ms var(--ease, ease);
+  line-height: 1.2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.settings__mode-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover, rgba(128, 128, 128, 0.08));
+  border-color: var(--color-border-hover, var(--color-primary, #74b830));
+}
+.settings__mode-btn--active {
+  background: var(--color-primary-soft, rgba(116, 184, 48, 0.18));
+  border-color: var(--color-primary, #74b830);
+  color: var(--color-primary, #74b830);
+}
+.settings__mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.settings__mode-meta {
+  font-size: var(--font-xs, 10px);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  letter-spacing: 0;
 }
 
 /* 按钮 */
@@ -615,6 +916,10 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
 }
 .settings__save:hover:not(:disabled) {
   background: var(--color-primary-hover);
+}
+.settings__save--inline {
+  padding: 4px 12px;
+  font-size: var(--font-xs);
 }
 .settings__save:disabled {
   opacity: 0.6;

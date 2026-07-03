@@ -3,12 +3,14 @@ package gitea
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	appgit "gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
+	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/platform"
 )
 
@@ -238,5 +240,132 @@ func TestGraphResultToDTO_PropagatesIsCommitted(t *testing.T) {
 	}
 	if !dto.Branches[0].Lines[1].IsCommitted {
 		t.Errorf("HEAD→parent 边 IsCommitted 应该透传为 true，实际 false")
+	}
+}
+
+// ===== PR 评论测试（v0.6+）=====
+//
+// 覆盖：ListPullComments / CreatePullComments / 空 body short-circuit / 请求参数
+//
+// 设计原则：复用现有的 httptest mock server 模式。
+
+// TestGiteaAdapter_ListPullComments 验证路径 + 字段映射
+func TestGiteaAdapter_ListPullComments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/alice/dolphin/issues/42/comments" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.Method != "GET" {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		auth := r.Header.Get("Authorization")
+		if auth != "token test-token" {
+			t.Errorf("Authorization = %q, want 'token test-token'", auth)
+		}
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"id":      100,
+				"body":    "looks good to me!",
+				"user":    map[string]string{"login": "bob", "avatar_url": "https://gitea/bob.png"},
+				"created": "2024-06-01T10:00:00Z",
+				"updated": "2024-06-01T10:00:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	items, err := adapter.ListPullComments(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullComments failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].ID != 100 {
+		t.Errorf("ID = %d, want 100", items[0].ID)
+	}
+	if items[0].Body != "looks good to me!" {
+		t.Errorf("Body = %q", items[0].Body)
+	}
+	if items[0].Author == nil || items[0].Author.Username != "bob" {
+		t.Errorf("Author = %+v", items[0].Author)
+	}
+	if items[0].CreatedAt != "2024-06-01T10:00:00Z" {
+		t.Errorf("CreatedAt = %q", items[0].CreatedAt)
+	}
+}
+
+// TestGiteaAdapter_CreatePullComment 验证 POST body + 字段映射
+func TestGiteaAdapter_CreatePullComment(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		// v0.6+ bugfix regression：验证 Content-Type 是 application/json
+		// （修复前 Go 默认设 application/x-www-form-urlencoded，
+		//  Gitea swagger 返 422 "Empty Content-Type"）
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":      200,
+			"body":    capturedBody["body"],
+			"user":    map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+			"created": "2024-06-02T12:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	d, err := adapter.CreatePullComment(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42, "approved!")
+	if err != nil {
+		t.Fatalf("CreatePullComment failed: %v", err)
+	}
+	if capturedMethod != "POST" {
+		t.Errorf("method = %q, want POST", capturedMethod)
+	}
+	if capturedPath != "/api/v1/repos/alice/dolphin/issues/42/comments" {
+		t.Errorf("path = %q", capturedPath)
+	}
+	if capturedBody["body"] != "approved!" {
+		t.Errorf("body = %v, want 'approved!'", capturedBody["body"])
+	}
+	if d.ID != 200 || d.Body != "approved!" {
+		t.Errorf("d = %+v", d)
+	}
+	if d.Author == nil || d.Author.Username != "alice" {
+		t.Errorf("d.Author = %+v", d.Author)
+	}
+}
+
+// TestGiteaAdapter_CreatePullComment_EmptyBody 验证 trim 后空 body short-circuit（不发请求）
+func TestGiteaAdapter_CreatePullComment_EmptyBody(t *testing.T) {
+	serverHit := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	_, err := adapter.CreatePullComment(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42, "   ")
+	if err == nil {
+		t.Fatal("expected validation error for whitespace-only body")
+	}
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeValidationFailed {
+		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeValidationFailed)
+	}
+	if serverHit {
+		t.Error("server should not be hit for empty body (short-circuit)")
 	}
 }

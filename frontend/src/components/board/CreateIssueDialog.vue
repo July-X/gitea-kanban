@@ -1,5 +1,8 @@
 <script setup lang="ts">
 /**
+ * @deprecated v0.6+ 软废弃：仍保留以便回滚。导航栏已移除"看板"入口。
+ */
+/**
  * CreateIssueDialog —— 新建议题弹窗（v1.4 · 2026-06-18）
  *
  * 还原 Gitea 新建 issue 方式：标题 + 正文 + 标签 + 里程碑 + 指派人 + 看板列（锁定新建列）。

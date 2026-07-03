@@ -789,7 +789,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   flex-shrink: 0;
 }
 .cd-sha {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-primary);
   font-weight: 600;
   background: var(--color-primary-soft, rgba(116, 184, 48, 0.1));
@@ -798,7 +798,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   flex-shrink: 0;
 }
 .cd-date {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -859,12 +859,12 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-size: var(--font-md, 14px);
 }
 .cd-message__body {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-secondary);
   margin: 4px 0 0;
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.5;
+  line-height: 18px;
   font-family: inherit;
   max-height: 120px;
   overflow-y: auto;
@@ -879,7 +879,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--color-text-muted);
   margin-bottom: 4px;
   line-height: 1.4;
@@ -941,20 +941,20 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 }
 .cd-meta__label {
   flex: 0 0 36px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-muted);
   text-align: right;
   flex-shrink: 0;
 }
 .cd-panel--dialog .cd-meta__label {
   flex: 0 0 48px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .cd-meta__value {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text);
   min-width: 0;
   flex: 1;
@@ -1011,7 +1011,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   gap: 2px;
   color: var(--color-success, #7db233);
   font-weight: 500;
-  font-size: 12px;
+  font-size: 13px;
 }
 .cd-stats__del {
   display: inline-flex;
@@ -1019,14 +1019,14 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   gap: 2px;
   color: var(--color-danger, #dc2626);
   font-weight: 500;
-  font-size: 12px;
+  font-size: 13px;
 }
 .cd-stats__files {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .cd-refs {
@@ -1038,7 +1038,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   align-items: center;
   padding: 1px 6px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   background: var(--color-bg-hover, rgba(255, 255, 255, 0.06));
   color: var(--color-text-secondary);
@@ -1071,7 +1071,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   margin: 0 0 2px;
@@ -1157,7 +1157,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   align-items: center;
   flex: 1;
   padding: 1px 4px;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   transition: background 0.1s;
   gap: 4px;
@@ -1223,7 +1223,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   /* 浅色背景 + 深色文字，保证对比度 */
   padding: 0 3px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   color: #15803d;
   background: rgba(21, 128, 61, 0.12);

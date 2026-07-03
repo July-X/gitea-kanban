@@ -3,7 +3,7 @@
 > **状态**：✅ Accepted（2026-06-22 拍板 + 实施完成）
 > **执行**：commit `9fbb317`（迁移实现）+ `e03d2d1`（review 风险点修复）
 > **影响范围**：客户端技术栈 / git 客户端 / 凭证存储 / 平台支持 / 数据模型 / 部署形态
-> **替代**：v1 时代的 Electron+TypeScript+SQLite 架构（已归档到 `legacy/electron/`）
+> **替代**：v1 时代的 Electron+TypeScript+SQLite 架构
 
 ---
 
@@ -159,7 +159,7 @@ type PlatformAdapter interface {
 
 | 阶段 | 内容 | 关键 commit |
 |---|---|---|
-| **1. 客户端切换** | 旧 Electron 代码归档 `legacy/electron/`；Go+Wails 骨架（main.go + app.go + app/）；Vue 3 前端迁移 + window.api 桩化层；wails build 三端验证 | `9fbb317` |
+| **1. 客户端切换** | Go+Wails 骨架（main.go + app.go + app/）；Vue 3 前端迁移 + window.api 桩化层；wails build 三端验证 | `9fbb317` |
 | **4. go-git 集成** | clone 封装（token 鉴权，不落盘）+ commit DAG 遍历 + **自研 lane 布局算法** + workspace 管理 + fetch/pull + 前端 Graph 渲染适配（消费结构化 GraphResult） | `9fbb317` |
 | **2. 多平台** | 账号模型加 Platform 字段（迁移默认 gitea）；`PlatformAdapter` interface（9 类方法 + ErrNotSupported）；`GiteaAdapter`（Go net/http + token <pat>）；`GitHubAdapter`（仅 Git Graph，Bearer 鉴权）；`go-keyring` 凭证存储（含 dev fallback）；AuthView 扩展平台选择器 | `9fbb317` |
 | **3. Git Graph 主视图 + 衍生** | Git Graph 主视图：CloneRepo/LogGraph/GetWorkspace/ListWorkspaceRepos 暴露为 Wails bindings；衍生：ListBranches/StarBranch、GetCommitDetail、PullRepo/FetchRepo、ListIssues/ListColumns（仅 Gitea）、同步队列（append-only + 崩恢复 + 30 天 GC） | `9fbb317` |
@@ -228,9 +228,7 @@ $ wails build -platform darwin/universal
 
 ### 5.3 旧代码归档
 
-- `legacy/electron/`：完整 v1 代码，**不构建、不维护**
 - 任何 v1 文档（`docs/design/01-research.md`、`02-architecture.md`）标注 deprecated
-- 旧测试（`legacy/electron/src/main/ipc/__tests__/*`）保留供参考，不运行
 
 ### 5.4 增量迁移（v2.0 → v2.1 计划）
 
