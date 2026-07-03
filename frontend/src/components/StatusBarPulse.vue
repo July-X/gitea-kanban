@@ -109,10 +109,10 @@ const activeLabel = computed(() => {
 /* ===== 容器 ===== */
 .statusbar-pulse {
   position: absolute;
-  top: -2px; /* 紧贴 StatusBar 顶边上方 2px */
+  top: -4px; /* 紧贴 StatusBar 顶边上方 4px（加粗后需要更多空间） */
   left: 0;
   right: 0;
-  height: 2px;
+  height: 4px; /* 从 2px 加粗到 4px */
   z-index: 1;
   pointer-events: auto; /* 允许 tooltip */
   cursor: default;
@@ -133,6 +133,7 @@ const activeLabel = computed(() => {
  * 心跳脉冲线：一条 Gitea 绿光带从左到右扫描
  * 用 linear-gradient 画一个"尖峰"形状，通过 background-position 动画实现平移
  * 颜色：dark=#74B830 / light=#466B16（与 --color-primary 一致）
+ * v0.6.2：加粗脉冲带宽度（从 30% 到 40%），让脉冲更醒目
  */
 .statusbar-pulse__heartbeat-line {
   position: absolute;
@@ -143,34 +144,35 @@ const activeLabel = computed(() => {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    transparent 70%,
-    var(--color-primary) 85%,
-    #fff 90%, /* 峰值高亮（白点） */
+    transparent 60%,
+    var(--color-primary) 75%,
+    #fff 85%, /* 峰值高亮（白点） */
     var(--color-primary) 95%,
     transparent 100%
   );
   background-size: 200% 100%;
-  animation: statusbar-heartbeat-scan 1.2s ease-in-out infinite;
+  animation: statusbar-heartbeat-scan 2s ease-in-out infinite; /* 从 1.2s 减慢到 2s */
 }
 
 /*
  * 心跳光晕：在脉冲线后方提供柔和的辉光
  * 用 box-shadow 模拟 ECG 峰值的光晕扩散
+ * v0.6.2：加粗光晕高度（从 4px 到 10px），增强视觉效果
  */
 .statusbar-pulse__heartbeat-glow {
   position: absolute;
-  top: -1px;
+  top: -3px;
   left: 0;
-  height: 4px;
+  height: 10px;
   width: 100%;
   background: radial-gradient(
-    ellipse 30% 100% at 50% 50%,
-    color-mix(in srgb, var(--color-primary) 40%, transparent),
+    ellipse 40% 100% at 50% 50%,
+    color-mix(in srgb, var(--color-primary) 50%, transparent),
     transparent
   );
   background-size: 200% 100%;
-  animation: statusbar-heartbeat-glow 1.2s ease-in-out infinite;
-  filter: blur(1px);
+  animation: statusbar-heartbeat-glow 2s ease-in-out infinite; /* 从 1.2s 减慢到 2s */
+  filter: blur(2px); /* 从 1px 加粗到 2px */
 }
 
 /*
@@ -181,11 +183,12 @@ const activeLabel = computed(() => {
  * 100% → 光带离开右侧，准备下一周期
  *
  * 速度曲线用 ease-in-out 模拟心跳的"快升慢落"
+ * v0.6.2：减慢速度，让脉冲更明显
  */
 @keyframes statusbar-heartbeat-scan {
   0% {
     background-position: 200% 0;
-    opacity: 0.6;
+    opacity: 0.5;
   }
   40% {
     background-position: 50% 0;
@@ -197,26 +200,26 @@ const activeLabel = computed(() => {
   }
   100% {
     background-position: -100% 0;
-    opacity: 0.6;
+    opacity: 0.5;
   }
 }
 
 @keyframes statusbar-heartbeat-glow {
   0% {
     background-position: 200% 0;
-    opacity: 0.3;
+    opacity: 0.2;
   }
   40% {
     background-position: 50% 0;
-    opacity: 0.8;
+    opacity: 0.9;
   }
   60% {
     background-position: 50% 0;
-    opacity: 0.8;
+    opacity: 0.9;
   }
   100% {
     background-position: -100% 0;
-    opacity: 0.3;
+    opacity: 0.2;
   }
 }
 
@@ -227,46 +230,46 @@ const activeLabel = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  height: 16px;
-  margin-top: -7px; /* 居中对齐到 StatusBar 顶边 */
+  gap: 3px; /* 从 2px 加宽到 3px */
+  height: 24px; /* 从 16px 加高到 24px */
+  margin-top: -10px; /* 居中对齐到 StatusBar 顶边 */
   animation: statusbar-waveform-disperse 5s ease-out forwards;
 }
 
 .statusbar-pulse__bar {
   display: block;
-  width: 2px;
+  width: 3px; /* 从 2px 加粗到 3px */
   background: var(--color-primary);
-  border-radius: 1px;
+  border-radius: 1.5px; /* 从 1px 加粗到 1.5px */
   animation: statusbar-waveform-bar 0.6s ease-in-out infinite alternate;
 }
 
-/* 5 段声纹条，不同高度 + 错峰浮动 */
+/* 5 段声纹条，不同高度 + 错峰浮动（v0.6.2：整体加大） */
 .statusbar-pulse__bar:nth-child(1) {
-  height: 6px;
+  height: 10px; /* 从 6px 加大到 10px */
   animation-delay: 0s;
 }
 .statusbar-pulse__bar:nth-child(2) {
-  height: 12px;
+  height: 18px; /* 从 12px 加大到 18px */
   animation-delay: 0.1s;
 }
 .statusbar-pulse__bar:nth-child(3) {
-  height: 16px;
+  height: 24px; /* 从 16px 加大到 24px */
   animation-delay: 0.2s;
 }
 .statusbar-pulse__bar:nth-child(4) {
-  height: 10px;
+  height: 16px; /* 从 10px 加大到 16px */
   animation-delay: 0.15s;
 }
 .statusbar-pulse__bar:nth-child(5) {
-  height: 8px;
+  height: 12px; /* 从 8px 加大到 12px */
   animation-delay: 0.05s;
 }
 
 /* 波形条上下浮动 */
 @keyframes statusbar-waveform-bar {
   0% {
-    transform: scaleY(0.5);
+    transform: scaleY(0.4);
   }
   100% {
     transform: scaleY(1);
