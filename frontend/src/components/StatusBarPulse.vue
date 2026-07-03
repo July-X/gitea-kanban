@@ -1,23 +1,15 @@
 <script setup lang="ts">
 /**
- * StatusBarPulse —— 底部状态栏心跳脉冲加载动画
+ * StatusBarPulse —— 底部状态栏加载动画
  *
- * 设计（user 拍板 2026-07-03）：
- *   - 位置：底部 StatusBar 上方（紧贴 StatusBar 顶边）
- *   - 加载中：心跳脉冲线从左到右发射，Gitea 绿色（#74B830 dark / #466B16 light）
- *       模拟心电图 / 心跳节律：快速上升 → 峰值 → 回落 → 短暂间歇 → 重复
- *       一条光带沿水平方向扫描，留下渐隐的拖尾
- *   - 加载完成：展示 MiniMax 波形 icon（4 段声纹条），5 秒后消散（opacity 1→0 + 高度收缩）
+ * 设计（v0.6.5 更新）：
+ *   - 加载中：单峰尖刺 ^ 从左到右运动，到达右端后重新从左开始，循环往复
+ *   - 加载完成：过渡到 MiniMax 声纹波形（5 段），5 秒后消散
  *
  * 状态机：
  *   - idle：不可见
- *   - pulsing：心跳脉冲动画（受 globalLoading.visible 驱动）
- *   - finishing：波形消散动画（5s，从 pulsing 结束触发）
- *
- * 与 global-loading store 的关系：
- *   - 订阅 globalLoading.visible
- *   - visible: false→true → 进入 pulsing
- *   - visible: true→false → 进入 finishing，5s 后回 idle
+ *   - pulsing：单峰尖刺从左到右循环
+ *   - finishing：MiniMax 波形消散
  */
 import { computed, ref, watch } from 'vue';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
@@ -33,14 +25,12 @@ watch(
   () => globalLoading.visible,
   (visible) => {
     if (visible) {
-      // 清除 finishing 定时器（如果还在 finishing 阶段又触发新加载）
       if (finishTimer) {
         clearTimeout(finishTimer);
         finishTimer = null;
       }
       phase.value = 'pulsing';
     } else if (phase.value === 'pulsing') {
-      // 从 pulsing 切换到 finishing
       phase.value = 'finishing';
       if (finishTimer) clearTimeout(finishTimer);
       finishTimer = setTimeout(() => {
@@ -87,13 +77,12 @@ const activeLabel = computed(() => {
       role="status"
       :aria-label="phase === 'pulsing' ? `加载中：${activeLabel}` : '加载完成'"
     >
-      <!-- 心跳脉冲层：loading 时显示 -->
+      <!-- 加载中：单峰尖刺从左到右运动 -->
       <div v-if="phase === 'pulsing'" class="statusbar-pulse__heartbeat" aria-hidden="true">
-        <div class="statusbar-pulse__heartbeat-line"></div>
-        <div class="statusbar-pulse__heartbeat-glow"></div>
+        <div class="statusbar-pulse__spike"></div>
       </div>
 
-      <!-- 波形消散层：finishing 时显示 -->
+      <!-- 加载完成：MiniMax 波形消散 -->
       <div v-else class="statusbar-pulse__waveform" aria-hidden="true">
         <span class="statusbar-pulse__bar"></span>
         <span class="statusbar-pulse__bar"></span>
@@ -109,16 +98,16 @@ const activeLabel = computed(() => {
 /* ===== 容器 ===== */
 .statusbar-pulse {
   position: absolute;
-  top: -4px; /* 紧贴 StatusBar 顶边上方 4px（加粗后需要更多空间） */
+  top: -4px;
   left: 0;
   right: 0;
-  height: 4px; /* 从 2px 加粗到 4px */
+  height: 4px;
   z-index: 1;
-  pointer-events: auto; /* 允许 tooltip */
+  pointer-events: auto;
   cursor: default;
 }
 
-/* ===== 心跳脉冲（加载中） ===== */
+/* ===== 加载中：单峰尖刺 ===== */
 .statusbar-pulse--pulsing {
   overflow: hidden;
 }
@@ -130,96 +119,48 @@ const activeLabel = computed(() => {
 }
 
 /*
- * 心跳脉冲线：一条 Gitea 绿光带从左到右扫描
- * 用 linear-gradient 画一个"尖峰"形状，通过 background-position 动画实现平移
- * 颜色：dark=#74B830 / light=#466B16（与 --color-primary 一致）
- * v0.6.2：加粗脉冲带宽度（从 30% 到 40%），让脉冲更醒目
+ * 单峰尖刺：CSS 三角形 ^ 从左到右运动
+ * 使用 border 技巧绘制三角形，通过 left 百分比定位
  */
-.statusbar-pulse__heartbeat-line {
+.statusbar-pulse__spike {
   position: absolute;
-  top: 0;
+  top: 50%;
   left: 0;
-  height: 100%;
-  width: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    transparent 60%,
-    var(--color-primary) 75%,
-    #fff 85%, /* 峰值高亮（白点） */
-    var(--color-primary) 95%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: statusbar-heartbeat-scan 2s ease-in-out infinite; /* 从 1.2s 减慢到 2s */
+  width: 0;
+  height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-bottom: 15px solid var(--color-primary);
+  transform: translate(-50%, -50%);
+  animation: statusbar-spike-move 3s ease-in-out infinite;
 }
 
 /*
- * 心跳光晕：在脉冲线后方提供柔和的辉光
- * 用 box-shadow 模拟 ECG 峰值的光晕扩散
- * v0.6.2：加粗光晕高度（从 4px 到 10px），增强视觉效果
+ * 单峰尖刺运动动画：
+ * 0%   → 尖刺在左边缘外（不可见）
+ * 5%   → 尖刺进入左边缘
+ * 50%  → 尖刺到达中心
+ * 95%  → 尖刺到达右边缘
+ * 100% → 尖刺离开右边缘，瞬间回到左边缘（循环）
  */
-.statusbar-pulse__heartbeat-glow {
-  position: absolute;
-  top: -3px;
-  left: 0;
-  height: 10px;
-  width: 100%;
-  background: radial-gradient(
-    ellipse 40% 100% at 50% 50%,
-    color-mix(in srgb, var(--color-primary) 50%, transparent),
-    transparent
-  );
-  background-size: 200% 100%;
-  animation: statusbar-heartbeat-glow 2s ease-in-out infinite; /* 从 1.2s 减慢到 2s */
-  filter: blur(2px); /* 从 1px 加粗到 2px */
-}
-
-/*
- * 心跳扫描动画：
- * 0%   → 光带在左侧（未进入）
- * 40%  → 光带到达中心（峰值）—— 模拟心跳 R 波
- * 60%  → 光带继续右行（回落）
- * 100% → 光带离开右侧，准备下一周期
- *
- * 速度曲线用 ease-in-out 模拟心跳的"快升慢落"
- * v0.6.2：减慢速度，让脉冲更明显
- */
-@keyframes statusbar-heartbeat-scan {
+@keyframes statusbar-spike-move {
   0% {
-    background-position: 200% 0;
-    opacity: 0.5;
+    left: -10px;
+    opacity: 0;
   }
-  40% {
-    background-position: 50% 0;
+  5% {
     opacity: 1;
   }
-  60% {
-    background-position: 50% 0;
+  50% {
+    left: 50%;
+    opacity: 1;
+  }
+  95% {
     opacity: 1;
   }
   100% {
-    background-position: -100% 0;
-    opacity: 0.5;
-  }
-}
-
-@keyframes statusbar-heartbeat-glow {
-  0% {
-    background-position: 200% 0;
-    opacity: 0.2;
-  }
-  40% {
-    background-position: 50% 0;
-    opacity: 0.9;
-  }
-  60% {
-    background-position: 50% 0;
-    opacity: 0.9;
-  }
-  100% {
-    background-position: -100% 0;
-    opacity: 0.2;
+    left: calc(100% + 10px);
+    opacity: 0;
   }
 }
 
@@ -230,39 +171,39 @@ const activeLabel = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px; /* 从 2px 加宽到 3px */
-  height: 24px; /* 从 16px 加高到 24px */
-  margin-top: -10px; /* 居中对齐到 StatusBar 顶边 */
+  gap: 3px;
+  height: 24px;
+  margin-top: -10px;
   animation: statusbar-waveform-disperse 5s ease-out forwards;
 }
 
 .statusbar-pulse__bar {
   display: block;
-  width: 3px; /* 从 2px 加粗到 3px */
+  width: 3px;
   background: var(--color-primary);
-  border-radius: 1.5px; /* 从 1px 加粗到 1.5px */
+  border-radius: 1.5px;
   animation: statusbar-waveform-bar 0.6s ease-in-out infinite alternate;
 }
 
-/* 5 段声纹条，不同高度 + 错峰浮动（v0.6.2：整体加大） */
+/* 5 段声纹条，不同高度 + 错峰浮动 */
 .statusbar-pulse__bar:nth-child(1) {
-  height: 10px; /* 从 6px 加大到 10px */
+  height: 10px;
   animation-delay: 0s;
 }
 .statusbar-pulse__bar:nth-child(2) {
-  height: 18px; /* 从 12px 加大到 18px */
+  height: 18px;
   animation-delay: 0.1s;
 }
 .statusbar-pulse__bar:nth-child(3) {
-  height: 24px; /* 从 16px 加大到 24px */
+  height: 24px;
   animation-delay: 0.2s;
 }
 .statusbar-pulse__bar:nth-child(4) {
-  height: 16px; /* 从 10px 加大到 16px */
+  height: 16px;
   animation-delay: 0.15s;
 }
 .statusbar-pulse__bar:nth-child(5) {
-  height: 12px; /* 从 8px 加大到 12px */
+  height: 12px;
   animation-delay: 0.05s;
 }
 
