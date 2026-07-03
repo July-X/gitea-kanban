@@ -337,6 +337,7 @@ type giteaPullRefRaw struct {
 }
 
 type giteaUserRaw struct {
+	ID        int64  `json:"id"`
 	Login     string `json:"login"`
 	AvatarURL string `json:"avatar_url"`
 }
@@ -687,6 +688,192 @@ func (a *GiteaAdapter) CreatePullComment(ctx context.Context, hostURL, username,
 	return &dto, nil
 }
 
+// UpdatePullComment 编辑合并请求评论（PATCH /repos/{owner}/{repo}/issues/comments/{id}）
+//
+// body: {body: "..."} —— 服务端会更新 updatedAt。
+// 返回更新后的评论（含新 updatedAt），前端以此判断"已编辑"状态。
+func (a *GiteaAdapter) UpdatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, body string) (*platform.CommentDTO, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{"body": body}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaCommentToDTO(raw)
+	return &dto, nil
+}
+
+// DeletePullComment 删除合并请求评论（DELETE /repos/{owner}/{repo}/issues/comments/{id}）
+//
+// 成功 → 服务端返 204 No Content；对已删除评论重复删除也返 2xx（幂等）。
+func (a *GiteaAdapter) DeletePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+}
+
+// ===== 评论表情反应（v0.5.0 M2） =====
+//
+// Gitea 端点：/repos/{owner}/{repo}/issues/comments/{id}/reactions
+// Gitea 字段：reaction 字段名（不是 content）; DELETE 必须带 body: {content: "..."}
+
+// giteaReactionRaw Gitea reactions 端点原始响应
+type giteaReactionRaw struct {
+	ID       int64         `json:"id"`
+	User     *giteaUserRaw `json:"user"`
+	Reaction string        `json:"reaction"` // Gitea 字段名（非 content）
+}
+
+// giteaReactionToDTO 映射为平台中性 ReactionDTO
+func giteaReactionToDTO(r giteaReactionRaw) platform.ReactionDTO {
+	out := platform.ReactionDTO{
+		ID:      r.ID,
+		Content: r.Reaction,
+	}
+	if r.User != nil {
+		out.User = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// ListPullCommentReactions 列评论表情反应（GET /repos/{owner}/{repo}/issues/comments/{id}/reactions）
+func (a *GiteaAdapter) ListPullCommentReactions(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) ([]platform.ReactionDTO, error) {
+	var raw []giteaReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.ReactionDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, giteaReactionToDTO(r))
+	}
+	return out, nil
+}
+
+// AddPullCommentReaction 添加表情反应（POST /repos/{owner}/{repo}/issues/comments/{id}/reactions）
+//
+// body: {content: "+1"}。Gitea 已存在的 reaction（同 user 同 content）会已被幂等——
+// 查 API 文档确认 Gitea 会静默返回 201 + 已有 reaction（不返 409）。
+func (a *GiteaAdapter) AddPullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) (*platform.ReactionDTO, error) {
+	payload := map[string]any{"content": content}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaReactionToDTO(raw)
+	return &dto, nil
+}
+
+// RemovePullCommentReaction 移除表情反应（DELETE /repos/{owner}/{repo}/issues/comments/{id}/reactions）
+//
+// ⚠️ Gitea 的 DELETE reactions 必须带 body: {content: "..."}（不是按 reaction id 删，区别于 GitHub）。
+func (a *GiteaAdapter) RemovePullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) error {
+	payload := map[string]any{"content": content}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, reader, nil)
+}
+
+// ===== 合并请求评审（v0.5.0 M3） =====
+//
+// Gitea review API: /repos/{owner}/{repo}/pulls/{index}/reviews
+// event 值: "approve" / "request_changes" / "comment"（小写，与前端统一）
+
+// giteaReviewRaw Gitea /pulls/{index}/reviews 原始响应
+type giteaReviewRaw struct {
+	ID        int64         `json:"id"`
+	State     string        `json:"state"`
+	Body      string        `json:"body"`
+	User      *giteaUserRaw `json:"user"`
+	CommitID  string        `json:"commit_id"`
+	Submitted string        `json:"submitted"`
+}
+
+// giteaReviewToDTO 映射为平台中性 PullReviewDTO
+func giteaReviewToDTO(r giteaReviewRaw) platform.PullReviewDTO {
+	out := platform.PullReviewDTO{
+		ID:          r.ID,
+		State:       r.State,
+		Body:        r.Body,
+		CommitID:    r.CommitID,
+		SubmittedAt: r.Submitted,
+	}
+	if r.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// validateGiteaReviewEvent 校验评审事件值（Gitea 支持 3 种小写）
+func validateGiteaReviewEvent(event string) error {
+	validEvents := map[string]bool{"approve": true, "request_changes": true, "comment": true}
+	if !validEvents[event] {
+		return ipc.NewValidationFailed("非法的评审事件: "+event, "支持的值: approve / request_changes / comment")
+	}
+	return nil
+}
+
+// ListPullReviews 列评审列表（GET /repos/{owner}/{repo}/pulls/{index}/reviews）
+func (a *GiteaAdapter) ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewDTO, error) {
+	var raw []giteaReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullReviewDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, giteaReviewToDTO(r))
+	}
+	return out, nil
+}
+
+// CreatePullReview 创建评审（POST /repos/{owner}/{repo}/pulls/{index}/reviews）
+//
+// body: {commit_id, body, event, comments: []}
+// Gitea event 值: "approve" / "request_changes" / "comment"（小写，与前端统一）
+func (a *GiteaAdapter) CreatePullReview(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.CreateReviewOpts) (*platform.PullReviewDTO, error) {
+	if err := validateGiteaReviewEvent(opts.Event); err != nil {
+		return nil, err
+	}
+	payload := map[string]any{
+		"commit_id": opts.CommitID,
+		"body":      opts.Body,
+		"event":     opts.Event,
+		"comments":  []interface{}{}, // 暂无行内评审（M4+）
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaReviewToDTO(raw)
+	return &dto, nil
+}
+
 // giteaCommentRaw Gitea /repos/.../issues/{index}/comments 原始响应
 //
 // swagger: https://try.gitea.io/swagger#/issueissueComment
@@ -714,6 +901,7 @@ func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
 			Username:  c.User.Login,
 			AvatarURL: c.User.AvatarURL,
 		}
+		out.UserID = c.User.ID
 	}
 	return out
 }

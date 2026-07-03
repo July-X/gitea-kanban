@@ -378,6 +378,7 @@ type githubPullRefRaw struct {
 }
 
 type githubUserRaw struct {
+	ID        int64  `json:"id"`
 	Login     string `json:"login"`
 	AvatarURL string `json:"avatar_url"`
 }
@@ -823,6 +824,219 @@ func (a *GitHubAdapter) CreatePullComment(ctx context.Context, hostURL, username
 	return &dto, nil
 }
 
+// UpdatePullComment 编辑 PR 评论（PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}）
+//
+// body: {body: "..."} —— GitHub 只允许评论作者本人编辑（非作者 403→403 映射 permission_denied）。
+// 返回更新后的评论（含新 updated_at），前端以此判断"已编辑"状态。
+func (a *GitHubAdapter) UpdatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, body string) (*platform.CommentDTO, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{"body": body}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubCommentToDTO(raw)
+	return &dto, nil
+}
+
+// DeletePullComment 删除 PR 评论（DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}）
+//
+// 成功 → 204 No Content；对已删除评论重复删除也返 2xx（幂等）。
+// 非作者 / 非管理员 → 403。
+func (a *GitHubAdapter) DeletePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+}
+
+// ===== PR 评论表情反应（v0.5.0 M2） =====
+//
+// GitHub 端点：/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions
+// 注意：GitHub 按 reaction_id 删（DELETE /reactions/{reaction_id}），与 Gitea 按 content 删不同。
+
+// githubReactionRaw GitHub reactions 端点原始响应
+type githubReactionRaw struct {
+	ID      int64          `json:"id"`
+	User    *githubUserRaw `json:"user"`
+	Content string         `json:"content"` // GitHub 字段名
+}
+
+// githubReactionToDTO 映射为平台中性 ReactionDTO
+func githubReactionToDTO(r githubReactionRaw) platform.ReactionDTO {
+	out := platform.ReactionDTO{
+		ID:      r.ID,
+		Content: r.Content,
+	}
+	if r.User != nil {
+		out.User = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// ListPullCommentReactions 列评论表情反应（GET /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions）
+func (a *GitHubAdapter) ListPullCommentReactions(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) ([]platform.ReactionDTO, error) {
+	var raw []githubReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.ReactionDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, githubReactionToDTO(r))
+	}
+	return out, nil
+}
+
+// AddPullCommentReaction 添加表情反应（POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions）
+//
+// GitHub reactions content 白名单（至少支持 8 种）："+1" / "-1" / "laugh" / "confused" / "heart" / "hooray" / "eyes" / "rocket"。
+// 重复添加同一 reaction 时 GitHub 返 422。
+func (a *GitHubAdapter) AddPullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) (*platform.ReactionDTO, error) {
+	validReactions := map[string]bool{"+1": true, "-1": true, "laugh": true, "confused": true, "heart": true, "hooray": true, "eyes": true, "rocket": true}
+	if !validReactions[content] {
+		return nil, ipc.NewValidationFailed("不支持的表情类型: "+content, "")
+	}
+	payload := map[string]any{"content": content}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubReactionToDTO(raw)
+	return &dto, nil
+}
+
+// RemovePullCommentReaction 移除表情反应（先 list 找 reaction id，再 DELETE /reactions/{reaction_id}）
+//
+// GitHub 按 reaction_id 删（与 Gitea 按 content 删不同）。因为前端只传 content，
+// 这里先 list 找到当前用户 + 指定 content 的 reaction id，再 DELETE。
+func (a *GitHubAdapter) RemovePullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) error {
+	// 1. list reactions to find matching reaction id
+	reactions, err := a.ListPullCommentReactions(ctx, hostURL, username, token, owner, repo, commentID)
+	if err != nil {
+		return err
+	}
+	for _, r := range reactions {
+		if r.Content == content && r.User != nil && r.User.Username == username {
+			path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions/%d", owner, repo, commentID, r.ID)
+			return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+		}
+	}
+	// 没找到匹配的 reaction → 当作已删除（幂等）
+	return nil
+}
+
+// ===== 合并请求评审（v0.5.0 M3） =====
+//
+// GitHub review API: /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+// ⚠️ GitHub event 值是大写：APPROVE / REQUEST_CHANGES / COMMENT
+
+// githubReviewRaw GitHub /pulls/{pull_number}/reviews 原始响应
+type githubReviewRaw struct {
+	ID          int64          `json:"id"`
+	State       string         `json:"state"`
+	Body        string         `json:"body"`
+	User        *githubUserRaw `json:"user"`
+	CommitID    string         `json:"commit_id"`
+	SubmittedAt string         `json:"submitted_at"`
+}
+
+// githubReviewToDTO 映射为平台中性 PullReviewDTO
+func githubReviewToDTO(r githubReviewRaw) platform.PullReviewDTO {
+	out := platform.PullReviewDTO{
+		ID:          r.ID,
+		State:       r.State,
+		Body:        r.Body,
+		CommitID:    r.CommitID,
+		SubmittedAt: r.SubmittedAt,
+	}
+	if r.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// mapReviewEventToGitHub 把前端统一的小写 event 映射到 GitHub 大写
+// 前端: "approve" / "request_changes" / "comment"
+// GitHub: "APPROVE" / "REQUEST_CHANGES" / "COMMENT"
+func mapReviewEventToGitHub(event string) string {
+	switch event {
+	case "approve":
+		return "APPROVE"
+	case "request_changes":
+		return "REQUEST_CHANGES"
+	case "comment":
+		return "COMMENT"
+	default:
+		return event
+	}
+}
+
+// validateGitHubReviewEvent 校验评审事件值
+func validateGitHubReviewEvent(event string) error {
+	validEvents := map[string]bool{"approve": true, "request_changes": true, "comment": true}
+	if !validEvents[event] {
+		return ipc.NewValidationFailed("非法的评审事件: "+event, "支持的值: approve / request_changes / comment")
+	}
+	return nil
+}
+
+// ListPullReviews 列评审（GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews）
+func (a *GitHubAdapter) ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewDTO, error) {
+	var raw []githubReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullReviewDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, githubReviewToDTO(r))
+	}
+	return out, nil
+}
+
+// CreatePullReview 创建评审（POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews）
+//
+// ⚠️ GitHub event 值大写（APPROVE / REQUEST_CHANGES / COMMENT），需要在 adapter 层做映射
+func (a *GitHubAdapter) CreatePullReview(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.CreateReviewOpts) (*platform.PullReviewDTO, error) {
+	if err := validateGitHubReviewEvent(opts.Event); err != nil {
+		return nil, err
+	}
+	payload := map[string]any{
+		"commit_id": opts.CommitID,
+		"body":      opts.Body,
+		"event":     mapReviewEventToGitHub(opts.Event),
+		"comments":  []interface{}{}, // 暂无行内评审（M4+）
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubReviewToDTO(raw)
+	return &dto, nil
+}
+
 // githubCommentRaw GitHub /repos/.../issues/{index}/comments 原始响应
 //
 // 字段与上面 githubPullRaw 里的 user 部分对齐，复用不上不是问题但为可读性独立定义。
@@ -847,10 +1061,10 @@ func githubCommentToDTO(c githubCommentRaw) platform.CommentDTO {
 			Username:  c.User.Login,
 			AvatarURL: c.User.AvatarURL,
 		}
+		out.UserID = c.User.ID
 	}
 	return out
 }
-//
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'
 // GitHub: 'merge' | 'rebase' | (无 'rebase-merge'，映射为 'rebase') | 'squash'
 func mapMergeMethodToGitHub(method string) string {

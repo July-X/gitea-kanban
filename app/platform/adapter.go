@@ -140,7 +140,59 @@ type PlatformAdapter interface {
 	// 拿到权威时间戳去更新 UI（避免"前端猜时间戳 + 实际服务端时间"不一致）。
 	CreatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string) (*CommentDTO, error)
 
-	// ListLabels 列出仓库标签
+	// UpdatePullComment 编辑合并请求评论
+	//
+	// Gitea:  PATCH /repos/{owner}/{repo}/issues/comments/{id}
+	// GitHub: PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}
+	//
+	// 仅评论作者本人能编辑（服务端 403 如果不是作者）。返回更新后的评论 DTO。
+	UpdatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, body string) (*CommentDTO, error)
+
+	// DeletePullComment 删除合并请求评论
+	//
+	// Gitea:  DELETE /repos/{owner}/{repo}/issues/comments/{id}
+	// GitHub: DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}
+	//
+	// 仅评论作者本人 / 仓库管理员能删除。成功时返回 nil error。
+	// 两端对已删除的评论重复删除都返 2xx（幂等）。
+	DeletePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) error
+
+	// ListPullCommentReactions 列评论表情反应（v0.5.0 M2）
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/issues/comments/{id}/reactions
+	// GitHub: GET /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions
+	// 返回反应列表（按 user 维度，每个 user 一个 ReactionDTO）。
+	ListPullCommentReactions(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) ([]ReactionDTO, error)
+
+	// AddPullCommentReaction 添加表情反应（v0.5.0 M2）
+	//
+	// Gitea:  POST /repos/{owner}/{repo}/issues/comments/{id}/reactions {content: "+1"}
+	// GitHub: POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions {content: "+1"}
+	// 返回新增的 ReactionDTO；重复添加同一 reaction 时 GitHub 返 422 / Gitea 静默返回已有 reaction。
+	AddPullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) (*ReactionDTO, error)
+
+	// RemovePullCommentReaction 移除表情反应（v0.5.0 M2）
+	//
+	// Gitea:  DELETE /repos/{owner}/{repo}/issues/comments/{id}/reactions {content: "+1"}（按 content 删，带 body）
+	// GitHub: DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions/{reaction_id}（按 reaction id 删，不带 body）
+	// 成功返回 nil error。
+	RemovePullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) error
+
+	// ListPullReviews 列合并请求评审（v0.5.0 M3）
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/reviews
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+	// 按 createdAt 升序。
+	ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]PullReviewDTO, error)
+
+	// CreatePullReview 创建评审（v0.5.0 M3）
+	//
+	// Gitea:  POST /repos/{owner}/{repo}/pulls/{index}/reviews
+	// GitHub: POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+	// event: "approve" / "request_changes" / "comment"（前端统一英语词，GitHub adapter 做大写映射）
+	// 返回创建评审（含服务端 id / state / submittedAt）。
+	CreatePullReview(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts CreateReviewOpts) (*PullReviewDTO, error)
+
 	ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]LabelDTO, error)
 
 	// ListMembers 列出仓库成员
@@ -348,6 +400,31 @@ type CommentDTO struct {
 	Author    *PullUserDTO  `json:"author,omitempty"`
 	CreatedAt string        `json:"createdAt"`
 	UpdatedAt string        `json:"updatedAt,omitempty"`
+	UserID    int64         `json:"userId,omitempty"`
+}
+
+// ReactionDTO 单条表情反应（v0.5.0 M2）
+type ReactionDTO struct {
+	ID      int64        `json:"id"`
+	Content string       `json:"content"` // "+1" / "-1" / "laugh" / "confused" / "heart" / "hooray" / "eyes" / "rocket"
+	User    *PullUserDTO `json:"user"`
+}
+
+// PullReviewDTO 合并请求评审（v0.5.0 M3）
+type PullReviewDTO struct {
+	ID          int64        `json:"id"`
+	State       string       `json:"state"`       // "approved" / "changes_requested" / "commented"
+	Body        string       `json:"body"`        // 评审总结文
+	Author      *PullUserDTO `json:"author"`
+	CommitID    string       `json:"commitId"`    // 评审针对的 commit SHA
+	SubmittedAt string       `json:"submittedAt"` // 评审时间（Gitea: submitted; GitHub: submitted_at）
+}
+
+// CreatePullReviewOpts 创建评审参数（v0.5.0 M3）
+type CreateReviewOpts struct {
+	CommitID string // 可选：评审针对的 commit SHA（空 = HEAD）
+	Body     string // 评审总结文
+	Event    string // "approve" | "request_changes" | "comment"（前端统一小写）
 }
 
 // LabelDTO 标签信息

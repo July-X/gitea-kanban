@@ -799,6 +799,143 @@ const apiShim = {
           },
         );
       },
+      /**
+       * pulls.comment.update —— 编辑合并请求评论
+       *
+       * 关键：body 要在 UI 层 trim，后端还会再走 trim short-circuit（防御设计）。
+       */
+      update: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; commentId: number; body: string };
+        return forwardToWails(
+          () => notImplemented('pulls.comment', 'update'),
+          (app) => {
+            if (!app.UpdatePullComment) {
+              return notImplemented('pulls.comment', 'update');
+            }
+            return app.UpdatePullComment({
+              projectId: a.projectId,
+              commentId: a.commentId,
+              body: a.body,
+            });
+          },
+        );
+      },
+      /**
+       * pulls.comment.delete —— 删除合并请求评论
+       *
+       * 已删除的评论重复删除也返成功（幂等）。
+       */
+      delete: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; commentId: number };
+        return forwardToWails(
+          () => notImplemented('pulls.comment', 'delete'),
+          (app) => {
+            if (!app.DeletePullComment) {
+              return notImplemented('pulls.comment', 'delete');
+            }
+            return app.DeletePullComment({
+              projectId: a.projectId,
+              commentId: a.commentId,
+            });
+          },
+        );
+      },
+      /**
+       * pulls.comment.reactions —— 评论表情反应子命名空间（v0.5.0 M2）
+       */
+      reactions: {
+        list: (args: unknown): Promise<unknown> => {
+          const a = (args ?? {}) as { projectId: string; commentId: number };
+          return forwardToWails(
+            () => stubEmpty([]),
+            (app) => {
+              if (!app.ListPullCommentReactions) {
+                return stubEmpty([]);
+              }
+              return app.ListPullCommentReactions({
+                projectId: a.projectId,
+                commentId: a.commentId,
+              });
+            },
+          );
+        },
+        add: (args: unknown): Promise<unknown> => {
+          const a = (args ?? {}) as { projectId: string; commentId: number; content: string };
+          return forwardToWails(
+            () => notImplemented('pulls.comment.reactions', 'add'),
+            (app) => {
+              if (!app.AddPullCommentReaction) {
+                return notImplemented('pulls.comment.reactions', 'add');
+              }
+              return app.AddPullCommentReaction({
+                projectId: a.projectId,
+                commentId: a.commentId,
+                content: a.content,
+              });
+            },
+          );
+        },
+        remove: (args: unknown): Promise<unknown> => {
+          const a = (args ?? {}) as { projectId: string; commentId: number; content: string };
+          return forwardToWails(
+            () => notImplemented('pulls.comment.reactions', 'remove'),
+            (app) => {
+              if (!app.RemovePullCommentReaction) {
+                return notImplemented('pulls.comment.reactions', 'remove');
+              }
+              return app.RemovePullCommentReaction({
+                projectId: a.projectId,
+                commentId: a.commentId,
+                content: a.content,
+              });
+            },
+          );
+        },
+      },
+    },
+    /**
+     * pulls.reviews —— 合并请求评审子命名空间（v0.5.0 M3）
+     */
+    reviews: {
+      list: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number };
+        return forwardToWails(
+          () => stubEmpty([]),
+          (app) => {
+            if (!app.ListPullReviews) {
+              return stubEmpty([]);
+            }
+            return app.ListPullReviews({
+              projectId: a.projectId,
+              index: a.index,
+            });
+          },
+        );
+      },
+      create: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as {
+          projectId: string;
+          index: number;
+          commitId?: string;
+          body?: string;
+          event: string;
+        };
+        return forwardToWails(
+          () => notImplemented('pulls.reviews', 'create'),
+          (app) => {
+            if (!app.CreatePullReview) {
+              return notImplemented('pulls.reviews', 'create');
+            }
+            return app.CreatePullReview({
+              projectId: a.projectId,
+              index: a.index,
+              commitId: a.commitId ?? '',
+              body: a.body ?? '',
+              event: a.event,
+            });
+          },
+        );
+      },
     },
   },
 

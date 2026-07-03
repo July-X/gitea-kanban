@@ -418,6 +418,59 @@ export interface IssueCommentDto {
 }
 
 // ============================================================
+// ===== review 命名空间（v0.5.0 M3） =====
+// ============================================================
+
+/** 评审状态：approved / changes_requested / commented */
+export type ReviewState = 'approved' | 'changes_requested' | 'commented';
+
+/** 评审操作事件：approve / request_changes / comment */
+export type ReviewEvent = 'approve' | 'request_changes' | 'comment';
+
+/** 合并请求评审 */
+export interface PullReviewDto {
+  id: number;
+  state: ReviewState;
+  body: string;
+  author: PullAuthorDto;
+  commitId?: string;
+  submittedAt: string;
+}
+
+/** 创建评审参数 */
+export interface CreateReviewArgs {
+  projectId: string;
+  index: number;
+  commitId?: string;
+  body?: string;
+  event: ReviewEvent;
+}
+
+// ============================================================
+// ===== reactions 命名空间（v0.5.0 M2） =====
+// ============================================================
+
+/** 受支持的 8 种表情类型 */
+export type ReactionContent = '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'eyes' | 'rocket';
+
+/** 单条表情反应 */
+export interface ReactionDto {
+  id: number;
+  content: ReactionContent;
+  user: IssueAuthorDto;
+}
+
+/** 按表情类型聚合的展示数据 */
+export interface ReactionGroupDto {
+  content: ReactionContent;
+  emoji: string;
+  label: string;
+  count: number;
+  usernames: string[];
+  viewerReacted: boolean;
+}
+
+// ============================================================
 // ===== labels 命名空间 =====
 // ============================================================
 

@@ -359,6 +359,39 @@ export class IpcClient {
     }
   }
 
+  /**
+   * 深层嵌套 invoke —— 处理 `pulls.comment.reactions.list` 这种 namespace.sub.subMethod.method 四段式
+   *
+   * 用法：await ipc.invokeDeepNested('pulls', 'comment', 'reactions', 'list', { projectId, commentId })
+   */
+  async invokeDeepNested<T = unknown>(
+    namespace: string,
+    sub: string,
+    subMethod: string,
+    method: string,
+    args: Record<string, unknown> = {},
+  ): Promise<T> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ns = (this.api as unknown as Record<string, any>)[namespace];
+    const subNs = ns?.[sub];
+    const deepNs = subNs?.[subMethod];
+    if (!deepNs || typeof deepNs[method] !== 'function') {
+      throw {
+        code: 'internal' as IpcErrorCodeValue,
+        messageText: `IPC端点不存在：${namespace}.${sub}.${subMethod}.${method}`,
+        hint: '请刷新应用或重启',
+        recoverable: false,
+      } satisfies UserFacingError;
+    }
+    try {
+      const r = (await deepNs[method](args)) as T;
+      markUpdated();
+      return r;
+    } catch (err) {
+      throw normalizeError(err);
+    }
+  }
+
   /**通用事件监听（main → renderer推送） */
   on(event: string, cb: (payload: unknown) => void): () => void {
     return this.api.on(event, cb);
@@ -1049,6 +1082,68 @@ export function pullsCommentCreate(args: {
   return getIpcClient().invokeNested('pulls', 'comment', 'create', args);
 }
 
+/** 编辑合并请求评论。body 会在 UI 层 trim；后端还会走防御性 short-circuit */
+export function pullsCommentUpdate(args: {
+  projectId: string;
+  commentId: number;
+  body: string;
+}): Promise<IssueCommentDto> {
+  return getIpcClient().invokeNested('pulls', 'comment', 'update', args);
+}
+
+/** 删除合并请求评论。已删除的评论重复删除也返成功（幂等） */
+export function pullsCommentDelete(args: {
+  projectId: string;
+  commentId: number;
+}): Promise<void> {
+  return getIpcClient().invokeNested('pulls', 'comment', 'delete', args);
+}
+
+/** 列评论表情反应 */
+export function pullsCommentReactionsList(args: {
+  projectId: string;
+  commentId: number;
+}): Promise<ReactionDto[]> {
+  return getIpcClient().invokeDeepNested('pulls', 'comment', 'reactions', 'list', args);
+}
+
+/** 添加评论表情反应 */
+export function pullsCommentReactionAdd(args: {
+  projectId: string;
+  commentId: number;
+  content: string;
+}): Promise<ReactionDto> {
+  return getIpcClient().invokeDeepNested('pulls', 'comment', 'reactions', 'add', args);
+}
+
+/** 移除评论表情反应 */
+export function pullsCommentReactionRemove(args: {
+  projectId: string;
+  commentId: number;
+  content: string;
+}): Promise<void> {
+  return getIpcClient().invokeDeepNested('pulls', 'comment', 'reactions', 'remove', args);
+}
+
+/** 列合并请求评审 */
+export function pullsReviewsList(args: {
+  projectId: string;
+  index: number;
+}): Promise<PullReviewDto[]> {
+  return getIpcClient().invokeNested('pulls', 'reviews', 'list', args);
+}
+
+/** 创建合并请求评审（批准 / 请求修改 / 仅评论） */
+export function pullsReviewCreate(args: {
+  projectId: string;
+  index: number;
+  commitId?: string;
+  body?: string;
+  event: string;
+}): Promise<PullReviewDto> {
+  return getIpcClient().invokeNested('pulls', 'reviews', 'create', args);
+}
+
 // ============================================================
 // ===== labels.* （ADR-0002：看板列绑 gitea label 用） =====
 // ============================================================
@@ -1158,4 +1253,64 @@ export function stripGitBinaryQuarantine(path: string): Promise<void> {
 /** 平台特定文件选择对话框；用户取消返空字符串 */
 export function openGitBinaryPicker(): Promise<string> {
   return getIpcClient().invoke('gitBinary', 'pickFile', {});
+}
+
+// ============================================================
+// ===== v0.6.0 日志导出 / Bug 上报 =====
+// ============================================================
+//
+// 把 app/logexport 包的能力通过 Wails binding 暴露给前端：
+//   - exportLogs: 一键打包 zip 到桌面（logs + state.json 脱敏 + 元信息）
+//   - copyRecentLogs: 读最近 N 条日志到剪贴板（贴 issue 用）
+
+/** 导出日志参数 */
+export interface ExportLogsArgs {
+  /** 最多包含几个日志文件（默认 5，按修改时间倒序） */
+  maxLogs?: number;
+}
+
+/** 导出结果 */
+export interface ExportLogsResult {
+  zipPath: string;
+  logCount: number;
+  logBytes: number;
+  stateBytes: number;
+  generatedAt: string;
+  logFiles: string[];
+}
+
+/** 复制最近日志参数 */
+export interface CopyRecentLogsArgs {
+  /** 字节上限（默认 64KB） */
+  maxBytes?: number;
+}
+
+/** 复制结果 */
+export interface CopyRecentLogsResult {
+  content: string;
+  bytes: number;
+}
+
+/**
+ * 一键导出日志 zip 到桌面
+ *
+ * 打包内容：
+ *   - app.json（版本/平台/数据目录/时间戳等元信息）
+ *   - state.json（token/password/secret 字段自动脱敏）
+ *   - logs/main-YYYY-MM-DD.log（最近 N 天）
+ *
+ * 文件名：gitea-kanban-logs-YYYY-MM-DD-HHMMSS.zip
+ */
+export function exportLogs(args: ExportLogsArgs = {}): Promise<ExportLogsResult> {
+  return getIpcClient().invoke('logs', 'export', args);
+}
+
+/**
+ * 读最近 N 条日志（贴 issue 用）
+ *
+ * 读最近 3 天的 main-*.log，截取尾部 maxBytes 字节。
+ * 前端拿到 content 后调剪贴板 API 复制。
+ */
+export function copyRecentLogs(args: CopyRecentLogsArgs = {}): Promise<CopyRecentLogsResult> {
+  return getIpcClient().invoke('logs', 'copyRecent', args);
 }
