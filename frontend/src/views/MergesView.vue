@@ -1397,19 +1397,32 @@ function formatRelative(iso: string | undefined): string {
           </div>
         </ConfirmDialog>
       </li>
-    </ul>
 
-    <!-- v0.6+ 滚动到底自动加载哨兵 + 状态反馈 -->
-    <div
-      v-if="activeRepo && pull.filteredItems.length"
-      ref="loadMoreSentinel"
-      class="merges__load-more"
-      aria-live="polite"
-    >
-      <span v-if="pull.loadingMore" class="merges__load-more-loading">正在加载更多合并请求…</span>
-      <span v-else-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">已到全部合并请求的末尾</span>
-      <!-- hasMore=true && loadingMore=false：哨兵进入视口后自动调 loadMore() -->
-    </div>
+      <!-- v2.62 滚动到底自动加载哨兵（在 ul 内部，ul 滚动时随之一超超一上滑，能重复触发 observer） -->
+      <li
+        ref="loadMoreSentinel"
+        class="merges__load-more"
+        :data-state="pull.loadingMore ? 'loading' : (!pull.hasMore && pull.currentPage >= 1) ? 'end' : 'idle'"
+        aria-live="polite"
+      >
+        <!-- 加载中：旋转动画 + 文字 -->
+        <div v-if="pull.loadingMore" class="merges__load-more-loading" role="status">
+          <span class="merges__load-more-spinner" aria-hidden="true"></span>
+          <span>正在加载更多合并请求…</span>
+        </div>
+        <!-- 末尾：下一句说明 -->
+        <div v-else-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">
+          <span class="merges__load-more-divider" aria-hidden="true"></span>
+          <span>已到全部合并请求的末尾</span>
+          <span class="merges__load-more-divider" aria-hidden="true"></span>
+        </div>
+        <!-- idle：还好有更多，点击或滚动以加载 -->
+        <div v-else class="merges__load-more-idle">
+          <span class="merges__load-more-arrow" aria-hidden="true">↓</span>
+          <span>继续滚动加载更多…</span>
+        </div>
+      </li>
+    </ul>
 
     <!-- ============== 合并二次确认弹窗 ============== -->
     <ConfirmDialog
@@ -1728,37 +1741,81 @@ function formatRelative(iso: string | undefined): string {
   }
 }
 
-/* v0.6+ 滚动到底自动加载分页：哨兵 + 状态文案 */
+/* v2.62 滚动到底自动加载分页：哨兵 + 三状态视觉反馈 */
 .merges__load-more {
   display: flex;
   justify-content: center;
   align-items: center;
+  gap: 8px;
   padding: var(--space-4) 0;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
-  min-height: 40px;        /* 保证有足够高度被 IntersectionObserver 检测到 */
+  min-height: 56px;                /* v2.62：加大保证 IntersectionObserver 能可靠检测 */
+  list-style: none;                /* li 默认有 disc bullet，去掉 */
+  /* v2.62：idle 状态走脉冲呼吸动画提示用户可加载 */
+  transition: opacity var(--t-base) var(--ease);
+}
+/* 不同状态的边框/背景提示 */
+.merges__load-more[data-state='idle'] {
+  opacity: 0.6;
+}
+.merges__load-more[data-state='loading'] {
+  opacity: 1;
+  color: var(--color-primary);
+}
+.merges__load-more[data-state='end'] {
+  opacity: 0.5;
 }
 .merges__load-more-loading {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  font-weight: 500;
 }
-.merges__load-more-loading::before {
-  content: '';
+.merges__load-more-spinner {
   display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--color-divider);
+  width: 16px;                     /* v2.62：12 → 16 加粗圈 */
+  height: 16px;
+  border: 2.5px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: merges-spin 0.7s linear infinite;
 }
+.merges__load-more-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  animation: merges-load-idle-breath 2s ease-in-out infinite;
+}
+.merges__load-more-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--color-divider);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
 .merges__load-more-end {
-  font-style: italic;
-  opacity: 0.7;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-style: normal;
+  font-size: var(--font-xs);
+}
+.merges__load-more-divider {
+  flex: 0 0 24px;
+  height: 1px;
+  background: var(--color-divider);
 }
 @keyframes merges-spin {
   to { transform: rotate(360deg); }
+}
+@keyframes merges-load-idle-breath {
+  0%, 100% { opacity: 0.55; transform: translateY(0); }
+  50% { opacity: 0.9; transform: translateY(2px); }
 }
 
 .merge-item {
