@@ -2493,15 +2493,14 @@ function formatRelative(iso: string | undefined): string {
 /* ===== v1.5 主体：左 70% 历史 / 右 30% 输入框 ===== */
 .merge-item__comments-body {
   display: grid;
-  /* v1.5.9：消息列表 70% + 回复区 30%（gitea web 的 "discussion + reply" 布局） */
   grid-template-columns: 7fr 3fr;
   grid-template-rows: 1fr;
   gap: 6px;
   flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
-  /* v1.5.10：左右填满父 .merge-item__comments（block 元素默认 stretch，width:100% 兜底） */
   width: 100%;
-  margin-bottom: 5px;          /* v1.5.10：底部 5px 留白（你要求） */
+  margin-bottom: 5px;
 }
 
 /* 左列：历史评论 + 各种态（loading/error/empty） */
@@ -2554,14 +2553,16 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: 5px;                 /* v1.5.8：12 → 5，5px 留白 */
+  padding: 5px;
   display: flex;
   flex-direction: column;
-  gap: 5px;                     /* v1.5.8：12 → 5 */
+  gap: 5px;
   flex: 1 1 0;
   min-height: 0;
+  min-width: 0;
   max-height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--color-divider) transparent;
   background: var(--color-bg);
@@ -2631,7 +2632,6 @@ function formatRelative(iso: string | undefined): string {
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
-  overflow: hidden;
 }
 /* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
  * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
@@ -2737,15 +2737,12 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-body {
   font-size: var(--font-sm);
   color: var(--color-text);
-  /* 强制长文本自动换行，避免气泡横向溢出 */
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  word-break: break-all;
+  overflow-wrap: break-word;
   white-space: normal;
   line-height: 1.5;
   max-width: 100%;
   min-width: 0;
-  /* 防止 markdown 内 pre/code 溢出 */
-  overflow-x: hidden;
 }
 
 /* 发评论输入区（v1.5.8 紧凑 5px 留白） */
@@ -2879,11 +2876,6 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--color-text);
-  /* v0.6+ bugfix：长 url / 长单词 / 无空格长字符串（console log）都换行。
-   * word-break: break-all 是在任意字符处换行（最高优先级）
-   * overflow-wrap: break-word 是仅在不可分隔点换行（次优先）
-   * 两者同时使用，break-all 覆盖所有场景，避免出现横向滚动条。
-   */
   word-break: break-all;
   overflow-wrap: break-word;
   max-width: 100%;
@@ -2933,11 +2925,9 @@ function formatRelative(iso: string | undefined): string {
   padding: var(--space-2);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
-  /* 强制代码块自动换行，避免对话面板出现横向滚动条 */
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
   overflow-wrap: break-word;
-  overflow-x: hidden;
   max-width: 100%;
   min-width: 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -2950,7 +2940,7 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
   font-size: inherit;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
   overflow-wrap: break-word;
 }
 .md-body a {
