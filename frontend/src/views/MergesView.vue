@@ -1187,9 +1187,9 @@ function formatRelative(iso: string | undefined): string {
                 </button>
               </div>
 
-              <!-- 主体：左 50% 历史评论 + 右 50% 输入框 -->
+              <!-- 主体：历史对话 + 发送评论（上下布局，发送区固定 100px） -->
               <div class="merge-item__comments-body">
-                <!-- 左列：加载态 / 错误态 / 空态 / 评论列表 -->
+                <!-- 上：加载态 / 错误态 / 空态 / 评论列表 -->
                 <div class="merge-item__comments-history">
                   <!-- 加载态 -->
                   <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
@@ -1241,7 +1241,7 @@ function formatRelative(iso: string | undefined): string {
                   </ul>
                 </div>
 
-                <!-- 右列：发评论输入区（v1.4 加大 + @ 提及自动补全） -->
+                <!-- 下：发评论输入区（v2.62 · 改为布局在历史对话下方，固定 100px） -->
                 <div class="merge-item__comment-compose">
                   <div class="merge-item__comment-input-wrap">
                     <textarea
@@ -1252,7 +1252,7 @@ function formatRelative(iso: string | undefined): string {
                       @keydown="onCommentKeydown(p, $event)"
                       :placeholder="'发条评论给 #' + p.index + '\n@ 提及成员，Enter 发送，⌘/Ctrl+Enter 也行'"
                       :disabled="getPanel(p.index).posting"
-                      rows="8"
+                      rows="3"
                       maxlength="65535"
                       spellcheck="false"
                     ></textarea>
@@ -1284,8 +1284,8 @@ function formatRelative(iso: string | undefined): string {
                       <Send :size="12" :stroke-width="2" aria-hidden="true" />
                       <span>{{ getPanel(p.index).posting ? '发送中…' : '发送' }}</span>
                     </button>
+                  </div>
                 </div>
-              </div>
               </div>
             </div>
           </div>
@@ -2490,11 +2490,10 @@ function formatRelative(iso: string | undefined): string {
   cursor: not-allowed;
 }
 
-/* ===== v1.5 主体：左 70% 历史 / 右 30% 输入框 ===== */
+/* ===== v2.62 主体：历史对话 + 发送评论（上下布局，发送评论固定 100px） ===== */
 .merge-item__comments-body {
-  display: grid;
-  grid-template-columns: 7fr 3fr;
-  grid-template-rows: 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   flex: 1 1 0;
   min-width: 0;
@@ -2503,14 +2502,14 @@ function formatRelative(iso: string | undefined): string {
   margin-bottom: 5px;
 }
 
-/* 左列：历史评论 + 各种态（loading/error/empty） */
+/* 上：历史评论 + 各种态（loading/error/empty） */
 .merge-item__comments-history {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  flex: 1 1 0;
   overflow: hidden;
-  overflow-wrap: anywhere;
 }
 
 .merge-item__comments-loading,
@@ -2775,7 +2774,7 @@ function formatRelative(iso: string | undefined): string {
   white-space: pre-wrap;
 }
 
-/* 发评论输入区（v1.5.8 紧凑 5px 留白） */
+/* 发评论输入区（v1.5.8 紧凑 5px 留白 · v2.62 改到历史对话下方，固定 100px） */
 .merge-item__comment-compose {
   display: flex;
   flex-direction: column;
@@ -2785,11 +2784,12 @@ function formatRelative(iso: string | undefined): string {
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   min-width: 0;
-  min-height: 0;
+  height: 100px;                /* v2.62：固定 100px */
+  flex-shrink: 0;
   overflow: hidden;
 }
 
-/* textarea + @ 候选下拉的相对定位容器（v1.5 撑满 compose 剩余高度） */
+/* textarea + @ 候选下拉的相对定位容器 */
 .merge-item__comment-input-wrap {
   position: relative;
   display: flex;
@@ -2813,10 +2813,10 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   color: var(--color-text);
   font-family: inherit;
-  padding: 0;                       /* v1.5.4：padding 跟 textarea 自带默认（行高 1.5 × 8 rows ≈ 200px） */
+  padding: 0;
   line-height: 1.5;
   overflow-y: auto;
-  overscroll-behavior: contain;     /* 输入框内滚动独立，不穿透到评论区 / 外层 PR 列表 */
+  overscroll-behavior: contain;
 }
 
 /* v1.4 @ 提及下拉（绝对定位，浮在 textarea 上方） */
