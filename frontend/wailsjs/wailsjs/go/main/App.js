@@ -54,6 +54,10 @@ export function CreatePullReview(arg1) {
   return window['go']['main']['App']['CreatePullReview'](arg1);
 }
 
+export function CreatePullReviewComment(arg1) {
+  return window['go']['main']['App']['CreatePullReviewComment'](arg1);
+}
+
 export function DeleteColumn(arg1) {
   return window['go']['main']['App']['DeleteColumn'](arg1);
 }
@@ -94,6 +98,10 @@ export function GetPull(arg1) {
   return window['go']['main']['App']['GetPull'](arg1);
 }
 
+export function GetPullFileDiff(arg1) {
+  return window['go']['main']['App']['GetPullFileDiff'](arg1);
+}
+
 export function GetRepoById(arg1) {
   return window['go']['main']['App']['GetRepoById'](arg1);
 }
@@ -128,6 +136,14 @@ export function ListPullCommentReactions(arg1) {
 
 export function ListPullComments(arg1) {
   return window['go']['main']['App']['ListPullComments'](arg1);
+}
+
+export function ListPullFiles(arg1) {
+  return window['go']['main']['App']['ListPullFiles'](arg1);
+}
+
+export function ListPullReviewComments(arg1) {
+  return window['go']['main']['App']['ListPullReviewComments'](arg1);
 }
 
 export function ListPullReviews(arg1) {

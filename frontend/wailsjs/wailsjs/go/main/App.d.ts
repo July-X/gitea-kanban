@@ -31,6 +31,8 @@ export function CreatePullComment(arg1:main.CreatePullCommentArgs):Promise<platf
 
 export function CreatePullReview(arg1:main.CreatePullReviewArgs):Promise<platform.PullReviewDTO>;
 
+export function CreatePullReviewComment(arg1:main.CreatePullReviewCommentArgs):Promise<platform.PullReviewCommentDto>;
+
 export function DeleteColumn(arg1:main.DeleteColumnArgs):Promise<void>;
 
 export function DeletePullComment(arg1:main.DeletePullCommentArgs):Promise<void>;
@@ -51,6 +53,8 @@ export function GetGitGraphAscii(arg1:main.GetGitGraphArgs):Promise<git.GraphLin
 
 export function GetPull(arg1:main.GetPullArgs):Promise<platform.PullDetailDTO>;
 
+export function GetPullFileDiff(arg1:main.GetPullFileDiffArgs):Promise<platform.PullFileDiffDTO>;
+
 export function GetRepoById(arg1:main.GetRepoByIdArgs):Promise<main.GetRepoByIdResult>;
 
 export function GetUserPrefs(arg1:main.GetUserPrefsArgs):Promise<Record<string, any>>;
@@ -68,6 +72,10 @@ export function ListIssues(arg1:main.ListIssuesArgs):Promise<Array<main.IssueDTO
 export function ListPullCommentReactions(arg1:main.ListPullCommentReactionsArgs):Promise<Array<platform.ReactionDTO>>;
 
 export function ListPullComments(arg1:main.ListPullCommentsArgs):Promise<Array<platform.CommentDTO>>;
+
+export function ListPullFiles(arg1:main.ListPullFilesArgs):Promise<Array<platform.PullFileDTO>>;
+
+export function ListPullReviewComments(arg1:main.ListPullReviewCommentsArgs):Promise<Array<platform.PullReviewCommentDto>>;
 
 export function ListPullReviews(arg1:main.ListPullReviewsArgs):Promise<Array<platform.PullReviewDTO>>;
 

@@ -625,6 +625,26 @@ export namespace main {
 	        this.event = source["event"];
 	    }
 	}
+	export class CreatePullReviewCommentArgs {
+	    projectId: string;
+	    index: number;
+	    body: string;
+	    path: string;
+	    line: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreatePullReviewCommentArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.body = source["body"];
+	        this.path = source["path"];
+	        this.line = source["line"];
+	    }
+	}
 	export class DeleteColumnArgs {
 	    columnId: string;
 	
@@ -768,6 +788,22 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
 	        this.index = source["index"];
+	    }
+	}
+	export class GetPullFileDiffArgs {
+	    projectId: string;
+	    index: number;
+	    filePath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetPullFileDiffArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.filePath = source["filePath"];
 	    }
 	}
 	export class GetRepoByIdArgs {
@@ -1123,6 +1159,34 @@ export namespace main {
 	
 	    static createFrom(source: any = {}) {
 	        return new ListPullCommentsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	    }
+	}
+	export class ListPullFilesArgs {
+	    projectId: string;
+	    index: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListPullFilesArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	    }
+	}
+	export class ListPullReviewCommentsArgs {
+	    projectId: string;
+	    index: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListPullReviewCommentsArgs(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -1790,8 +1854,130 @@ export namespace platform {
 		    return a;
 		}
 	}
+	export class PullDiffHunk {
+	    oldStart: number;
+	    oldLines: number;
+	    newStart: number;
+	    newLines: number;
+	    header: string;
+	    lines: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PullDiffHunk(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.oldStart = source["oldStart"];
+	        this.oldLines = source["oldLines"];
+	        this.newStart = source["newStart"];
+	        this.newLines = source["newLines"];
+	        this.header = source["header"];
+	        this.lines = source["lines"];
+	    }
+	}
+	export class PullFileDTO {
+	    filename: string;
+	    status: string;
+	    additions: number;
+	    deletions: number;
+	    changes: number;
+	    patch?: string;
+	    previousFilename?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PullFileDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filename = source["filename"];
+	        this.status = source["status"];
+	        this.additions = source["additions"];
+	        this.deletions = source["deletions"];
+	        this.changes = source["changes"];
+	        this.patch = source["patch"];
+	        this.previousFilename = source["previousFilename"];
+	    }
+	}
+	export class PullFileDiffDTO {
+	    filename: string;
+	    rawDiff: string;
+	    hunks: PullDiffHunk[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PullFileDiffDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filename = source["filename"];
+	        this.rawDiff = source["rawDiff"];
+	        this.hunks = this.convertValues(source["hunks"], PullDiffHunk);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	
+	export class PullReviewCommentDto {
+	    id: number;
+	    body: string;
+	    author?: PullUserDTO;
+	    path: string;
+	    line: number;
+	    createdAt: string;
+	    updatedAt?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PullReviewCommentDto(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.body = source["body"];
+	        this.author = this.convertValues(source["author"], PullUserDTO);
+	        this.path = source["path"];
+	        this.line = source["line"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PullReviewDTO {
 	    id: number;
 	    state: string;
