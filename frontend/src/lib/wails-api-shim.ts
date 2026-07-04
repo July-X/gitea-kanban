@@ -1219,6 +1219,48 @@ const apiShim = {
       ),
   },
 
+  // ===== v0.6.0 日志导出 / Bug 上报 =====
+  logs: {
+    export: (args: { maxLogs?: number }): Promise<unknown> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'logs.export 尚未连接到 Go 后端（Wails 未启动）',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.ExportLogs) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 ExportLogs',
+              hint: '请重新构建应用',
+            });
+          }
+          return app.ExportLogs({ maxLogs: args?.maxLogs ?? 5 });
+        },
+      ),
+    copyRecent: (args: { maxBytes?: number }): Promise<unknown> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'logs.copyRecent 尚未连接到 Go 后端（Wails 未启动）',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.CopyRecentLogs) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 CopyRecentLogs',
+              hint: '请重新构建应用',
+            });
+          }
+          return app.CopyRecentLogs({ maxBytes: args?.maxBytes ?? 65536 });
+        },
+      ),
+  },
+
   on: (event: string, cb: (payload: unknown) => void): (() => void) => {
     // v2.6 进度事件订阅：转发到 window.runtime.EventsOn
     // （Wails 启动期由 ipc.js 注入 window.runtime；浏览器独立 dev 模式没 runtime，
