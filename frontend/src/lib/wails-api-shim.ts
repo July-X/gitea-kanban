@@ -157,7 +157,7 @@ type WailsApp = {
     truncated: boolean;
   }>;
   /** v2.x：GitHub/gh 超大仓库使用 git log --graph ASCII fallback */
-  GetGitGraphAscii?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<unknown>;
+  GetGitGraphAscii?: (args: { projectId: string; branches?: string[]; maxCount?: number; offset?: number }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取（避免前端拼错 localPath） */
   PullRepoByProjectId?: (args: { projectId: string }) => Promise<{
     beforeCount: number;
@@ -440,6 +440,10 @@ const apiShim = {
         projectId: string;
         branches?: string[];
         limit?: number;
+        // v0.6.3 修复：offset 之前未透传，导致滚动加载更多每次都拉到首屏数据
+        // （commit d246b33 之前未发现的连锁 bug：allLoaded 永远 false、永远显示
+        // loadingMore spinner、永远看不到「已是末尾」提示）
+        offset?: number;
       };
       return forwardToWails(
         () => stubEmpty({ nodes: [], edges: [], maxLane: 0, truncated: false }),
@@ -451,6 +455,7 @@ const apiShim = {
             projectId: a.projectId ?? '',
             branches: a.branches,
             maxCount: a.limit,
+            offset: a.offset ?? 0,
           });
         },
       );
@@ -460,6 +465,8 @@ const apiShim = {
         projectId: string;
         branches?: string[];
         limit?: number;
+        // v0.6.3 修复：同上，offset 透传避免 ASCII 路径同样的分页失效
+        offset?: number;
       };
       return forwardToWails(
         () => stubEmpty({ lines: [], totalCommits: 0, truncated: false, range: { from: '', to: '' } }),
@@ -471,6 +478,7 @@ const apiShim = {
             projectId: a.projectId ?? '',
             branches: a.branches,
             maxCount: a.limit,
+            offset: a.offset ?? 0,
           });
         },
       );

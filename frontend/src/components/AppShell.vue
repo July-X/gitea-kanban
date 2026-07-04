@@ -147,10 +147,19 @@ defineProps<{ isMac: boolean }>();
   /* NavRail 内部已经包含实色背景和右边框，这里只做定位 */
 }
 
-/* 仅 macOS 下让位 traffic lights（y=16~40 NSWindow layer）：
- *   - navrail 内部 padding-top 32 让 logo 从 y=32 起，避免 traffic lights 跟 logo 重叠 */
-.shell--mac .shell__nav :deep(.navrail) {
+/* macOS 下让位 traffic lights (y=16~40 NSWindow layer)：
+ *   - .shell__nav wrapper 加 padding-top:32 + box-sizing:border-box 让 wrapper
+ *     从 y=32 起、高度变为 row_h − 32（NavRail 内部 logo / 菜单起点同时下移）
+ *   - **左 70px 区仍然是 drag region**（.shell--mac::before 全宽 32px drag region
+ *     在 .shell 层级，点 navrail 上部可以拖窗口）
+ *   - box-sizing: border-box 保证 wrapper 总宽仍 70（不被 padding 撑开）
+ *   - .navrail 内部 padding-top 重置为 0（外层已让位）避免重复让位 */
+.shell--mac .shell__nav {
+  box-sizing: border-box;
   padding-top: 32px;
+}
+.shell--mac .shell__nav :deep(.navrail) {
+  padding-top: 0;
 }
 
 /* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的实色背景 */

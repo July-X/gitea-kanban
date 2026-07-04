@@ -103,24 +103,31 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		remoteURL = remoteConfig.URLs[0]
 	}
 
-	// v2.9：超大仓库优化 - 使用 gh credential helper + git partial fetch
-	// 检测是否是超大仓库（通过 URL 判断）
-	isHugeRepo := strings.Contains(strings.ToLower(remoteURL), "unreal") ||
-		strings.Contains(strings.ToLower(remoteURL), "chromium") ||
-		strings.Contains(strings.ToLower(remoteURL), "linux") ||
-		strings.Contains(strings.ToLower(remoteURL), "webkit")
-
-	if opts.UseGitHubCLI || (isHugeRepo && opts.Depth > 0) {
-		if opts.Depth <= 0 {
-			return nil, fmt.Errorf("GitHub CLI blobless fetch 需要 depth > 0")
-		}
-		// GitHub 仓库必须走 gh credential helper + partial fetch；go-git 不支持 blobless，
-		// 回退会重新下载大量对象，违背“快速获得提交记录”的核心诉求。
+	// v0.6.3 架构调整：去掉 isHugeRepo / depth<=0 硬限制
+	//
+	// 旧设计（v2.7~v2.9）：GitHub 仓库 + 启发式超大仓库关键词 → 走 gh + --filter=blob:none +
+	// depth=2000 保护；避免拉全量元数据卡死前端（UnrealEngine release 中段 1407 lane / 963 flow 渲染
+	// 卡死）。
+	//
+	// 新设计（user 拍板 2026-07-04）：
+	//   - 有 loadMoreGraph 动态加载后，前端不再一次性画完整 264k commits，图谱只展示当前可见窗口
+	//   - 深度限制由用户掌控——不传 depth 默认走全量，本地拉全部 commit + tree 元数据
+	//   - isHugeRepo 启发式不再需要；GitHub / Gitea 统一走 gh + --filter=blob:none（不下载 blob），
+	//     depth=0 = 全量 fetch
+	//   - 单分支 / NoTags 也由 opts 驱动，不再硬编码
+	//
+	// 代价：UnrealEngine 全量 fetch ~28 GB 元数据 / 几十分钟；用户在 fetch 阶段需要等。
+	// 收益：用户不再被「只能看 2000 条」束缚，看老 commit 自由滚动加载。
+	//
+	// 边界：fetch 阶段仍走 --filter=blob:none + --no-checkout 保证不下载 blob、不写工作区。
+	// Go 端 go-git PlainClone/fetch 本身也支持 depth=0（=无限制）。
+	if opts.UseGitHubCLI {
+		// GitHub 仓库走 gh + partial clone（v2.9 引入，stable）
 		err := FetchWithFilter(opts.LocalPath, opts.Depth, opts.Token)
 		if err == nil {
 			return &FetchResult{Updated: true}, nil
 		}
-		return nil, fmt.Errorf("GitHub 仓库需要使用 gh 的 blobless fetch，但执行失败: %w", err)
+		return nil, fmt.Errorf("GitHub 仓库走 gh partial fetch 失败: %w", err)
 	}
 
 	// v2.8：构造 auth（不改变 URL，使用仓库现有的 remote URL）

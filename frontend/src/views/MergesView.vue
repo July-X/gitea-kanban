@@ -20,7 +20,7 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -696,7 +696,9 @@ function mentionActiveIdx(idx: number): number {
 function getPanel(idx: number): CommentPanelState {
   let p = commentPanels.value.get(idx);
   if (!p) {
-    p = { items: [], loading: false, posting: false, error: null, lastLoadedAt: null };
+    // v0.6.26: 用 reactive() 包装 panel,让 panel.items = items 这种直接赋值
+    // 能触发模板重新渲染(否则对话 Tab 评论列表不更新)
+    p = reactive({ items: [] as IssueCommentDto[], loading: false, posting: false, error: null as string | null, lastLoadedAt: null as number | null });
     commentPanels.value.set(idx, p);
   }
   return p;
