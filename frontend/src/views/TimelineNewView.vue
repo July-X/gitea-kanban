@@ -738,11 +738,34 @@ async function loadGraph(offset = 0): Promise<void> {
 
 /**
  * 加载更多 Git Graph 数据（滚动到底自动调）
+ *
+ * v0.6.3 修复：加载完成后让「最后一条 commit」滚到视口底部
+ *   - 旧行为：loadMore 后 DOM 高度增加但 scrollTop 不变 → 列表底部留出大段空白
+ *   - 用户体验：连续滚动加载时，每次加载完成都有大段空白，需要手动再往下滚
+ *   - 新行为：loadGraph 完成后等 nextTick，scrollIntoView({ block: 'end' }) 刚加载的最后一条 commit
+ *     —— 视野自然过渡到刚加载的末尾，「继续向下浏览」的手感连贯
+ *
+ * 实现要点：
+ *   - 用 data-sha 定位最后一条 commit-row（避免依赖 DOM 顺序的脆弱假设）
+ *   - block: 'end' 让元素贴到视口底部（不是顶部），保留上面已浏览区域的视觉稳定
+ *   - 首次加载不走这条路径（offset=0 时 scrollTop 已经在顶部，用户期望看最新 commit）
  */
 async function loadMoreGraph(): Promise<void> {
   if (loadingMore.value || allLoaded.value || !graphDto.value) return;
   const offset = graphDto.value.nodes.length;
   await loadGraph(offset);
+  // v0.6.3：等 DOM 更新后滚动到刚加载的最后一条 commit
+  await nextTick();
+  const allNodes = graphDto.value?.nodes ?? [];
+  const lastNode = allNodes[allNodes.length - 1];
+  if (lastNode?.sha) {
+    const lastRow = document.querySelector(
+      `.commit-row[data-sha="${lastNode.sha}"]`,
+    ) as HTMLElement | null;
+    if (lastRow) {
+      lastRow.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    }
+  }
 }
 
 /**
@@ -2128,6 +2151,7 @@ function refBadgeClass(refType?: string): string {
               <div
                 v-if="r.commit"
                 class="commit-row"
+                :data-sha="r.commit.sha"
                 :class="{
                   'commit-row--clickable': r.commit,
                   'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
