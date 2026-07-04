@@ -19,6 +19,16 @@
  *     · 右侧主区顶 Header 下边界 1px --color-divider（Header / Body 分界）
  *     · 底部 StatusBar 上边界 1px --color-divider-strong（区域边界强度更高）
  *   - 区域边界 token 已在 theme.css 提档（dark 10% / light 12%）保证可读
+ *
+ * v1.x 拍板 2026-07-04（macOS 标题栏主题跟随）：
+ *   - 配套 main.go `Mac.TitleBar = mac.TitleBarHiddenInset()`：标题栏背景透明 + webview 占满整 NSWindow
+ *   - 在 macOS 上让出 28px 给 traffic lights（红/黄/绿），同时避免 navrail / 主区被遮
+ *   - 该 28px 区域设为 drag region（--wails-draggable: drag）：
+ *     · Wails v2.5+ 默认 CSSDragProperty="--wails-draggable", CSSDragValue="drag"
+ *     · 拖动该区域可移动窗口（替代默认不可拖的标题栏）
+ *   - 标题栏位置的颜色由 .shell 的 background: var(--color-bg) 接管
+ *     · dark=#0F1115 / light=#e8f1f5，主题切换时自动跟随
+ *   - data-platform 是 index.html 内联脚本同步设的 attr，first paint 之前可用
  */
 import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
@@ -52,6 +62,32 @@ import StatusBar from './StatusBar.vue';
   overflow: hidden;
   /* v1.5：删透明透网格 → 走纯色背景，让各区域边界线清晰可读 */
   background: var(--color-bg);
+}
+
+/* v1.x 拍板 2026-07-04（macOS 标题栏主题跟随）：
+ * macOS TitleBarHiddenInset 让 webview 占满整个 NSWindow（含原标题栏区 0..28px），
+ * traffic lights 浮在该 28px 区上方。给 .shell 加 padding-top: 28px 让 navrail / 主区
+ * 不挡 traffic lights；::before 作为 drag region 占位让该 28px 区可拖窗口。
+ * 颜色 = var(--color-bg) 即 dark=#0F1115 / light=#e8f1f5，主题切换自动跟随。
+ *
+ * 用 :global() 穿透 scoped style 选择 html[data-platform='mac']（index.html 内联脚本同步设置）
+ * —— :deep() 只能往下穿透，:global() 才能向上选到 <html> */
+:global(html[data-platform='mac']) .shell {
+  box-sizing: border-box;
+  padding-top: 28px;
+}
+:global(html[data-platform='mac']) .shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  background: var(--color-bg);
+  /* Wails v2.5+ 默认 CSSDragProperty="--wails-draggable", CSSDragValue="drag"
+   * 该 28px 区鼠标按下拖动 → 移动整个 NSWindow，替代 macOS 默认标题栏 */
+  --wails-draggable: drag;
+  z-index: 9999;
 }
 
 .shell__nav {

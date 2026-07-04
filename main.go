@@ -40,8 +40,17 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
+		// Mac.TitleBar 拍板 2026-07-04：macOS 标题栏让 webview CSS 接管颜色，跟暗/亮主题自动跟随。
+		//   - TitleBarHiddenInset() 等价 TitleBar{ TitlebarAppearsTransparent: true,
+		//     HideTitle: true, FullSizeContent: true, UseToolbar: true,
+		//     HideToolbarSeparator: true }
+		//     "标题栏背景透明 + 不显示 'Gitea Kanban' 窗口标题 + webview 占满整个 NSWindow"
+		//   - 颜色由 AppShell .shell 的 background: var(--color-bg) 接管：
+		//     dark=#0F1115 / light=#e8f1f5，主题切换时自动跟随
+		//   - traffic lights (红/黄/绿) 仍显示（macOS 浮层在 webview 上面）
+		//   - 28px 顶部让给 traffic lights 由 AppShell padding-top + ::before drag region 实现
 		Mac: &mac.Options{
-			TitleBar: mac.TitleBarDefault(),
+			TitleBar: mac.TitleBarHiddenInset(),
 			About: &mac.AboutInfo{
 				Title:   "Gitea Kanban",
 				Message: "版本 2.0.0\n基于 Gitea/GitHub 的桌面端看板 + 时间轴工具",

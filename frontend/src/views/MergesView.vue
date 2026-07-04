@@ -896,6 +896,14 @@ function cancelEditComment(): void {
   editingCommentId.value = null;
 }
 
+/** 编辑态自动聚焦（v0.6.26） */
+watch(editingCommentId, async (newId) => {
+  if (newId === null) return;
+  await nextTick();
+  editTextareaRef.value?.focus();
+  editTextareaRef.value?.select();
+});
+
 /**
  * 提交编辑
  * 流程：
@@ -1570,7 +1578,10 @@ function formatRelative(iso: string | undefined): string {
                           >{{ (item.author.username || '?').charAt(0).toUpperCase() }}</div>
                           <div class="merge-item__comment-name">{{ item.author.username }}</div>
                         </div>
-                        <div class="merge-item__comment-bubble">
+                        <div
+                          class="merge-item__comment-bubble"
+                          :class="{ 'merge-item__comment-bubble--editing': editingCommentId === item.id }"
+                        >
                           <div class="merge-item__comment-meta">
                             <span v-if="currentUsername && item.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
                             <span class="merge-item__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
@@ -3769,6 +3780,12 @@ function formatRelative(iso: string | undefined): string {
   background: var(--color-bg-hover);
   color: var(--color-text);
 }
+.merge-item__comment-editing-hint {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  margin-right: auto;
+  font-style: italic;
+}
 .merge-item__comment-edited-mark {
   display: inline-block;
   font-size: 10px;
@@ -3985,6 +4002,13 @@ function formatRelative(iso: string | undefined): string {
   opacity: 0.9;
   padding-left: 4px;
 }
+
+/* ===== v0.6.26: 编辑态气泡高亮 ===== */
+.merge-item__comment-bubble--editing {
+  border-color: var(--color-primary-alpha-45) !important;
+  box-shadow: 0 0 0 2px var(--color-primary-softer) !important;
+}
+
 .merge-item__comment--review-approved {
   border-left: 3px solid var(--color-success, #16a34a);
 }
