@@ -417,6 +417,31 @@ export interface IssueCommentDto {
   updatedAt: string;
 }
 
+
+// ============================================================
+// ===== inline review comments 命名空间（v0.5.0 文件评论） =====
+// ============================================================
+
+/** PR 行内评论（挂在文件 diff 某一行上的评审评论） */
+export interface PullReviewCommentDto {
+  id: number;
+  body: string;
+  author: PullAuthorDto;
+  path: string;       // 文件路径，如 src/auth/oauth.ts
+  line: number;       // 行号
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** 行内评论的创建参数 */
+export interface CreatePullReviewCommentArgs {
+  projectId: string;
+  index: number;
+  body: string;
+  path: string;
+  line: number;
+}
+
 // ============================================================
 // ===== review 命名空间（v0.5.0 M3） =====
 // ============================================================
@@ -702,6 +727,45 @@ export interface GraphLinesDto {
   truncated: boolean;
   range: { from: string; to: string };
 }
+
+// ============================================================
+// ===== 文件评论命名空间（v0.5.0 M4） =====
+// ============================================================
+
+/** PR 修改文件的变更状态 */
+export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+
+/** PR 修改的文件项 */
+export interface PullFileDto {
+  filename: string;
+  status: FileStatus;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+  previousFilename?: string; // status=renamed 时
+}
+
+/** Diff Hunk（unified diff 中的一个 @@ 块） */
+export interface PullDiffHunkDto {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  header: string; // "@@ ... @@"
+  lines: string[]; // 包含前缀: ' ' = 上下文, '+' = 新增, '-' = 删除
+}
+
+/** 单个文件的 diff 详情 */
+export interface PullFileDiffDto {
+  filename: string;
+  rawDiff: string; // 完整 unified diff 文本
+  hunks: PullDiffHunkDto[];
+}
+
+// ============================================================
+// ===== Git Graph 命名空间 =====
+// ============================================================
 
 /** commits.gitgraph.pull 返回 */
 export interface GitGraphPullResp {

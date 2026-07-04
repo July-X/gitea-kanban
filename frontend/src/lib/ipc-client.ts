@@ -38,9 +38,14 @@ import type {
   IssueCommentDto,
   LabelDto,
   PullDto,
+  PullFileDto,
+  PullFileDiffDto,
+  PullReviewCommentDto,
   RepoProjectDto,
   GraphResultDto,
   GraphLinesDto,
+  ReactionDto,
+  PullReviewDto,
 } from '@renderer/types/dto';
 
 /** window.api 的精确类型（preload/index.ts导出） */
@@ -1145,6 +1150,46 @@ export function pullsReviewCreate(args: {
 }
 
 // ============================================================
+// ===== 文件评论 / 文件 diff（v0.5.0 M4） =====
+// ============================================================
+
+/** 列 PR 行内评审评论（按文件分组） */
+export function pullsReviewCommentsList(args: {
+  projectId: string;
+  index: number;
+}): Promise<PullReviewCommentDto[]> {
+  return getIpcClient().invokeNested('pulls', 'reviewComments', 'list', args);
+}
+
+/** 创建 PR 行内评审评论 */
+export function pullsReviewCommentCreate(args: {
+  projectId: string;
+  index: number;
+  body: string;
+  path: string;
+  line: number;
+}): Promise<PullReviewCommentDto> {
+  return getIpcClient().invokeNested('pulls', 'reviewComments', 'create', args);
+}
+
+/** 列 PR 修改的文件列表 */
+export function pullsFilesList(args: {
+  projectId: string;
+  index: number;
+}): Promise<PullFileDto[]> {
+  return getIpcClient().invokeNested('pulls', 'files', 'list', args);
+}
+
+/** 获取单个文件的 diff 内容 */
+export function pullsFileDiffGet(args: {
+  projectId: string;
+  index: number;
+  filePath: string;
+}): Promise<PullFileDiffDto> {
+  return getIpcClient().invokeNested('pulls', 'fileDiff', 'get', args);
+}
+
+// ============================================================
 // ===== labels.* （ADR-0002：看板列绑 gitea label 用） =====
 // ============================================================
 
@@ -1314,3 +1359,6 @@ export function exportLogs(args: ExportLogsArgs = {}): Promise<ExportLogsResult>
 export function copyRecentLogs(args: CopyRecentLogsArgs = {}): Promise<CopyRecentLogsResult> {
   return getIpcClient().invoke('logs', 'copyRecent', args);
 }
+
+// Re-export types used by ReactionBar component
+export type { ReactionDto, PullReviewDto } from '@renderer/types/dto';

@@ -3240,6 +3240,150 @@ func (a *App) CreatePullReview(args CreatePullReviewArgs) (PullReviewDTO, error)
 	return *d, nil
 }
 
+// ===== 行内评审评论 (Review Comments) =====
+
+// ListPullReviewCommentsArgs 列行内评审评论参数
+type ListPullReviewCommentsArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullReviewComments 列 PR 行内评审评论（v0.5.0 M4）
+func (a *App) ListPullReviewComments(args ListPullReviewCommentsArgs) ([]platformAdapter.PullReviewCommentDto, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items, err := adapter.ListPullReviewComments(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]platformAdapter.PullReviewCommentDto, 0, len(items))
+	for _, it := range items {
+		out = append(out, platformAdapter.PullReviewCommentDto{
+			ID:        it.ID,
+			Body:      it.Body,
+			Path:      it.Path,
+			Line:      it.Line,
+			CreatedAt: it.CreatedAt,
+			UpdatedAt: it.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// CreatePullReviewCommentArgs 发行内评审评论参数
+type CreatePullReviewCommentArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Body      string `json:"body"`
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+}
+
+// CreatePullReviewComment 发行内评审评论（v0.5.0 M4）
+func (a *App) CreatePullReviewComment(args CreatePullReviewCommentArgs) (platformAdapter.PullReviewCommentDto, error) {
+	if strings.TrimSpace(args.Body) == "" {
+		return platformAdapter.PullReviewCommentDto{}, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	if strings.TrimSpace(args.Path) == "" {
+		return platformAdapter.PullReviewCommentDto{}, ipc.NewValidationFailed("路径不能为空", "")
+	}
+	if args.Line <= 0 {
+		return platformAdapter.PullReviewCommentDto{}, ipc.NewValidationFailed("行号必须大于0", "")
+	}
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return platformAdapter.PullReviewCommentDto{}, err
+	}
+	if a.logger != nil {
+		a.logger.Info("CreatePullReviewComment", "projectId", args.ProjectID, "index", args.Index, "path", args.Path, "line", args.Line)
+	}
+	d, err := adapter.CreatePullReviewComment(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Body, args.Path, args.Line)
+	if err != nil {
+		return platformAdapter.PullReviewCommentDto{}, err
+	}
+	if d == nil {
+		return platformAdapter.PullReviewCommentDto{}, nil
+	}
+	return *d, nil
+}
+
+// ===== 文件修改列表 (PR Files) =====
+
+// ListPullFilesArgs 列 PR 修改文件
+type ListPullFilesArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullFiles 列 PR 修改文件（v0.5.0 M4）
+func (a *App) ListPullFiles(args ListPullFilesArgs) ([]platformAdapter.PullFileDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items, err := adapter.ListPullFiles(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			// 低版本 Gitea / GitHub 不支援此端点，前端隐藏此区
+			return []platformAdapter.PullFileDTO{}, nil
+		}
+		return nil, err
+	}
+	out := make([]platformAdapter.PullFileDTO, 0, len(items))
+	for _, it := range items {
+		out = append(out, platformAdapter.PullFileDTO{
+			Filename:         it.Filename,
+			Status:           it.Status,
+			Additions:        it.Additions,
+			Deletions:        it.Deletions,
+			Changes:          it.Changes,
+			Patch:            it.Patch,
+			PreviousFilename: it.PreviousFilename,
+		})
+	}
+	return out, nil
+}
+
+// GetPullFileDiffArgs 单文件 Diff 参数
+type GetPullFileDiffArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	FilePath  string `json:"filePath"`
+}
+
+// GetPullFileDiff 获取单个文件的 diff 内容（v0.5.0 M4）
+func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFileDiffDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return platformAdapter.PullFileDiffDTO{}, err
+	}
+	d, err := adapter.GetPullFileDiff(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.FilePath)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			return platformAdapter.PullFileDiffDTO{}, nil
+		}
+		return platformAdapter.PullFileDiffDTO{}, err
+	}
+	return platformAdapter.PullFileDiffDTO{
+		Filename: d.Filename,
+		RawDiff:  d.RawDiff,
+	}, nil
+}
+
 // ColumnDTO 看板列（暴露给前端，与 store.BoardColumn 对齐）
 type ColumnDTO struct {
 	ID        string `json:"id"`

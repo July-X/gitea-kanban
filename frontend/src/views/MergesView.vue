@@ -47,10 +47,12 @@ import {
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ReactionBar from '@renderer/components/ReactionBar.vue';
+import PullFileComments from '@renderer/components/PullFileComments.vue';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 import type { CollaboratorDto, PullDto, RepoDto, MergeMethod } from '@renderer/types/dto';
 import type { CreateReviewArgs, IssueCommentDto, PullReviewDto, ReviewEvent } from '@renderer/types/dto';
+import type { PullFileDto } from '@renderer/types/dto';
 
 const repo = useRepoStore();
 const pull = usePullStore();
@@ -123,6 +125,8 @@ const confirmMergeOpen = ref(false);
 const confirmDeleteOpen = ref(false);
 /** 待删除的评论信息 */
 const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
+
+const detailTab = ref<'overview' | 'files' | 'conversation'>('overview');
 
 /** 打开删除确认弹窗 */
 function confirmDeleteComment(p: PullDto, c: IssueCommentDto): void {
@@ -1377,50 +1381,98 @@ function formatRelative(iso: string | undefined): string {
               <span>编辑属性</span>
             </button>
           </div>
-          <!-- ===== v0.5.0 M3: 评审区 ===== -->
-          <div v-if="p.state === 'open'" class="merge-item__reviews">
-            <!-- 评审列表 -->
-            <div v-if="getReviewPanel(p.index).length > 0" class="merge-item__reviews-list">
-              <div
-                v-for="r in getReviewPanel(p.index)"
-                :key="r.id"
-                class="merge-item__review-item"
-                :class="`merge-item__review-item--${r.state}`"
-              >
-                <span class="merge-item__review-state-badge">{{ reviewStateLabel(r.state) }}</span>
-                <span class="merge-item__review-author">{{ r.author.username }}</span>
-                <span class="merge-item__review-body">{{ r.body }}</span>
-                <span class="merge-item__review-time">{{ formatRelative(r.submittedAt) }}</span>
+          <!-- ===== v0.5.0 M4: 三 Tab 切换 ===== -->
+          <div class="merge-item__detail-tabs">
+            <button
+              type="button"
+              class="merge-item__detail-tab"
+              :class="{ 'merge-item__detail-tab--active': detailTab === 'overview' }"
+              @click.stop="detailTab = 'overview'"
+            >
+              概览
+            </button>
+            <button
+              type="button"
+              class="merge-item__detail-tab"
+              :class="{ 'merge-item__detail-tab--active': detailTab === 'files' }"
+              @click.stop="detailTab = 'files'"
+            >
+              文件评论
+              <span v-if="pull.filesByPR.get(p.index)?.length > 0" class="merge-item__detail-tab-count">
+                {{ pull.filesByPR.get(p.index)!.length }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="merge-item__detail-tab"
+              :class="{ 'merge-item__detail-tab--active': detailTab === 'conversation' }"
+              @click.stop="detailTab = 'conversation'"
+            >
+              对话
+              <span v-if="getPanel(p.index).items.length > 0" class="merge-item__detail-tab-count">
+                {{ getPanel(p.index).items.length }}
+              </span>
+            </button>
+          </div>
+
+          <!-- ===== Tab 内容 ===== -->
+
+          <!-- 概览 Tab: meta + 审查 -->
+          <div v-if="detailTab === 'overview'" class="merge-item__detail-overview">
+            <!-- ===== v0.5.0 M3: 评审区 ===== -->
+            <div v-if="p.state === 'open'" class="merge-item__reviews">
+              <!-- 评审列表 -->
+              <div v-if="getReviewPanel(p.index).length > 0" class="merge-item__reviews-list">
+                <div
+                  v-for="r in getReviewPanel(p.index)"
+                  :key="r.id"
+                  class="merge-item__review-item"
+                  :class="`merge-item__review-item--${r.state}`"
+                >
+                  <span class="merge-item__review-state-badge">{{ reviewStateLabel(r.state) }}</span>
+                  <span class="merge-item__review-author">{{ r.author.username }}</span>
+                  <span class="merge-item__review-body">{{ r.body }}</span>
+                  <span class="merge-item__review-time">{{ formatRelative(r.submittedAt) }}</span>
+                </div>
               </div>
-            </div>
-            <!-- 评审编辑器 -->
-            <div v-if="reviewEditorOpen.has(p.index)" class="merge-item__review-editor">
-              <div class="merge-item__review-editor-header">
-                <span class="merge-item__review-editor-label">{{ reviewEventLabel(reviewEditorEvent.get(p.index) ?? 'comment') }}</span>
-              </div>
-              <textarea
-                class="merge-item__review-editor-input"
-                rows="3"
-                :value="reviewEditorBody.get(p.index) ?? ''"
-                @input="reviewEditorBody.set(p.index, ($event.target as HTMLTextAreaElement).value)"
-                placeholder="评审总结（可选）"
-                spellcheck="false"
-              ></textarea>
-              <div class="merge-item__review-editor-actions">
-                <button
-                  type="button"
-                  class="merge-item__review-submit"
-                  :disabled="reviewSubmitting"
-                  @click.stop="submitReview(p)"
-                >{{ reviewSubmitting ? '提交中…' : '提交评审' }}</button>
-                <button
-                  type="button"
-                  class="merge-item__review-cancel"
-                  @click.stop="reviewEditorOpen.delete(p.index); reviewEditorBody.delete(p.index)"
-                >取消</button>
+              <!-- 评审编辑器 -->
+              <div v-if="reviewEditorOpen.has(p.index)" class="merge-item__review-editor">
+                <div class="merge-item__review-editor-header">
+                  <span class="merge-item__review-editor-label">{{ reviewEventLabel(reviewEditorEvent.get(p.index) ?? 'comment') }}</span>
+                </div>
+                <textarea
+                  class="merge-item__review-editor-input"
+                  rows="3"
+                  :value="reviewEditorBody.get(p.index) ?? ''"
+                  @input="reviewEditorBody.set(p.index, ($event.target as HTMLTextAreaElement).value)"
+                  placeholder="评审总结（可选）"
+                  spellcheck="false"
+                ></textarea>
+                <div class="merge-item__review-editor-actions">
+                  <button
+                    type="button"
+                    class="merge-item__review-submit"
+                    :disabled="reviewSubmitting"
+                    @click.stop="submitReview(p)"
+                  >{{ reviewSubmitting ? '提交中…' : '提交评审' }}</button>
+                  <button
+                    type="button"
+                    class="merge-item__review-cancel"
+                    @click.stop="reviewEditorOpen.delete(p.index); reviewEditorBody.delete(p.index)"
+                  >取消</button>
+                </div>
               </div>
             </div>
           </div>
+
+          <!-- 文件评论 Tab: PullFileComments 组件 -->
+          <div v-if="detailTab === 'files'" class="merge-item__detail-files">
+            <PullFileComments
+              :pr="p"
+              :project-id="activeProjectId ?? ''"
+            />
+          </div>
+
           <!-- ===== 评论区：v1.5 header 整行 + 左历史/右输入各 50% ===== -->
             <div class="merge-item__comments">
               <!-- 顶部：对话标题 + 刷新按钮（整行铺满） -->

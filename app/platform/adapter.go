@@ -193,10 +193,90 @@ type PlatformAdapter interface {
 	// 返回创建评审（含服务端 id / state / submittedAt）。
 	CreatePullReview(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts CreateReviewOpts) (*PullReviewDTO, error)
 
+	// ListPullReviewComments 列合并请求行内评审评论（v0.5.0 M4）
+	//
+	// 按文件分组的行内 review comment（diff 评论），区别于 ListPullComments（整体 issue 评论）。
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/comments
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{pull_number}/comments
+	ListPullReviewComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]PullReviewCommentDto, error)
+
+	// CreatePullReviewComment 创建行内评审评论（v0.5.0 M4）
+	//
+	// Gitea:  POST /repos/{owner}/{repo}/pulls/{index}/comments
+	//          body: {body, path, new_position: <line>}
+	// GitHub: POST /repos/{owner}/{repo}/pulls/{pull_number}/comments
+	//          body: {body, path, line}
+	CreatePullReviewComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string, path string, line int) (*PullReviewCommentDto, error)
+
+	// ListPullFiles 列出 PR 修改的文件列表（v0.5.0 M4）
+	//
+	// 每个元素包含文件名 + 变更类型（added / modified / deleted / renamed）+
+	// 增删行数 + 文件级 patch（可选，小文件直接带，大文件前端按需 GetPullFileDiff）。
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/files
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{pull_number}/files
+	// GitHub 返 JSON 数组；Gitea 也返 JSON 数组（Gitea 1.21+）。
+	// 对于低版本 Gitea 不支援此端点（404），前端隐藏"文件评论" Tab。
+	ListPullFiles(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]PullFileDTO, error)
+
+	// GetPullFileDiff 获取单个文件的 diff 内容（v0.5.0 M4）
+	//
+	// 返回 unified diff 格式文本（patch 格式），前端按行解析后渲染
+	// 代码折叠 / 行内评论挂载点。
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/files/{file_index}/patch
+	//        或直接 GET /repos/{owner}/{repo}/pulls/{index}.diff 取完整 diff 再按文件拆分
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{filename} 走 redir；推荐用 pulls/{number}.diff
+	//        后端统一拉完整 diff 后按文件拆分 → 降低实现跨平台一致性成本
+	GetPullFileDiff(ctx context.Context, hostURL, username, token, owner, repo string, index int, filePath string) (*PullFileDiffDTO, error)
+
 	ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]LabelDTO, error)
 
 	// ListMembers 列出仓库成员
 	ListMembers(ctx context.Context, hostURL, username, token, owner, repo string) ([]MemberDTO, error)
+}
+
+// PullFileDTO PR 修改文件列表项（v0.5.0 M4）
+//
+// Gitea 字段：filename, status, additions, deletions, changes, patch, blob_url, raw_url
+// GitHub 字段：filename, status, additions, deletions, changes, patch, blob_url, raw_url, sha
+// 两者结构几乎一致，必须用 filename + status + additions + deletions。
+type PullFileDTO struct {
+	Filename  string `json:"filename"`
+	Status    string `json:"status"` // "added" | "modified" | "deleted" | "renamed"
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Changes   int    `json:"changes"`
+	// Patch 可选（小文件才带，大文件前端按需 GetPullFileDiff）；
+	// Gitea 和 GitHub 都返 patch 字段但内容量不稳定。
+	Patch string `json:"patch,omitempty"`
+	// PreviousFilename 仅 status=renamed 时有值（旧文件名）。
+	PreviousFilename string `json:"previousFilename,omitempty"`
+}
+
+// PullFileDiffDTO 单文件的 diff 详情（v0.5.0 M4）
+//
+// 包含原始 unified diff 文本 + 解析后行号锚点（前端行内评论挂载点）。
+type PullFileDiffDTO struct {
+	Filename string `json:"filename"`
+	// RawDiff 完整 unified diff 文本（hunk header + context +/- lines）
+	RawDiff string `json:"rawDiff"`
+	// Hunks 解析后的 diff hunk 列表（前端按 hunk 渲染上下文代码块）
+	Hunks []PullDiffHunk `json:"hunks"`
+}
+
+// PullDiffHunk 单个 diff hunk（v0.5.0 M4）
+//
+// 对应 unified diff 中一个 @@ 块。
+type PullDiffHunk struct {
+	OldStart int    `json:"oldStart"`
+	OldLines int    `json:"oldLines"`
+	NewStart int    `json:"newStart"`
+	NewLines int    `json:"newLines"`
+	// Header hunk 第一行（@@ -a,b +c,d @@ 上下文）
+	Header string `json:"header"`
+	// Lines hunk 内所有代码行（前缀 ' ' = 上下文, '+' = 新增, '-' = 删除）
+	Lines []string `json:"lines"`
 }
 
 // ListReposOpts 列仓库参数
@@ -425,6 +505,20 @@ type CreateReviewOpts struct {
 	CommitID string // 可选：评审针对的 commit SHA（空 = HEAD）
 	Body     string // 评审总结文
 	Event    string // "approve" | "request_changes" | "comment"（前端统一小写）
+}
+
+// PullReviewCommentDto 行内评审评论 DTO（v0.5.0 M4）
+//
+// 字段对齐 Gitea ReviewComment + GitHub Pull Request Review Comment，
+// 包含文件路径 + 行号，前端按 path 分组渲染到 diff 侧边栏。
+type PullReviewCommentDto struct {
+	ID        int64        `json:"id"`
+	Body      string       `json:"body"`
+	Author    *PullUserDTO `json:"author,omitempty"`
+	Path      string       `json:"path"`
+	Line      int          `json:"line"`
+	CreatedAt string       `json:"createdAt"`
+	UpdatedAt string       `json:"updatedAt,omitempty"`
 }
 
 // LabelDTO 标签信息
