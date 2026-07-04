@@ -1,4 +1,4 @@
-# Reasonix 模型 Hook：post-edit
+# Reasonix 模型 Hook：post-edit + commit-msg
 
 让 Reasonix 在大模型完成代码修改后，自动按
 **format → build → test → git commit（中文记录）** 的链路收尾。
@@ -6,10 +6,12 @@
 
 ## 文件
 
-| 文件 | 作用 | git 跟踪 |
-| --- | --- | --- |
-| `scripts/hooks/post-edit.sh` | 实际执行脚本（核心） | ✅ |
-| `.reasonix/settings.json` | 注册 hook 事件和命令 | ❌（reasonix 加载） |
+| 文件 | 作用 | git 跟踪 | 自动加载 |
+| --- | --- | --- | --- |
+| `scripts/hooks/post-edit.sh` | Reasonix Stop / PostToolUse 事件处理（核心） | ✅ | ✅（reasonix 读 `.reasonix/settings.json`） |
+| `scripts/hooks/check-commit-message.sh` | git commit-msg hook：拦截 `docs:` 伪装 commit（v0.5.0 bugfix） | ✅ | ❌（需手动安装，详见 §commit-msg hook） |
+| `scripts/hooks/install-hooks.sh` | 一键安装 commit-msg hook 到 `.git/hooks/commit-msg` | ✅ | — |
+| `.reasonix/settings.json` | 注册 hook 事件和命令 | ❌（reasonix 加载） | — |
 
 > `.reasonix/settings.json` 在 `.gitignore` 内，本身不进 git。
 > 首次启用需在桌面端「设置 → Hooks → 项目」点 **信任此工作区**，
@@ -88,3 +90,47 @@ echo '{"event":"Stop","cwd":"'$(pwd)'"}' | POST_EDIT_SKIP_TEST=1 bash scripts/ho
   echo 'export POST_EDIT_SKIP_TEST=1' >> ~/.zshrc
   ```
   或者修复测试本身（建议改用按 `Subject` 查找而不是索引）。
+
+---
+
+## commit-msg hook（v0.5.0 bugfix）
+
+防 `ac897fc` 类「伪装成 docs commit 实际改了 store / 视图」的提交。具体规则与复盘见 [docs/adr/0009-commit-message-discipline.md](../../docs/adr/0009-commit-message-discipline.md)。
+
+### 一键安装
+
+```bash
+bash scripts/hooks/install-hooks.sh
+```
+
+脚本会创建 symlink：`.git/hooks/commit-msg -> ../../scripts/hooks/check-commit-message.sh`
+
+### 手动安装
+
+```bash
+ln -sf ../../scripts/hooks/check-commit-message.sh .git/hooks/commit-msg
+chmod +x scripts/hooks/check-commit-message.sh
+```
+
+### 规则摘要
+
+- commit subject 以 `docs:` 开头时，校验 `git diff --cached --name-only`
+- 文档白名单 = `AGENTS.md / CLAUDE.md / docs/**/*.md / README* / CHANGELOG* / *.md / .github/*`
+- 含非白名单文件 → exit 1 拒绝 + 列出违规文件 + 给出修正建议
+- 非 docs commit 不做限制
+
+### 临时绕过
+
+```bash
+SKIP_DOCS_COMMIT_CHECK=1 git commit -m "..."   # 环境变量
+git commit --no-verify -m "..."                # git 标准
+```
+
+### 验证
+
+```bash
+echo "// x" > test.go && git add test.go
+git commit -m "docs: 测试"  # ❌ exit 1 + 「docs commit 文件白名单校验失败」
+
+git commit -m "feat: 测试"  # ✅ exit 0
+```
