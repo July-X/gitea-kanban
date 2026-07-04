@@ -3,7 +3,14 @@
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-04（**v0.5.0 PR 评论模块对齐 Gitea/GitHub** + **v0.6.2 右上角按钮「刷新」**）
+> 最后更新：2026-07-04（**v0.5.0 PR 评论模块对齐 Gitea/GitHub** + **v0.6.2 右上角按钮「刷新」** + **v0.6.3 fetch 全量元数据 + 滚动加载更多修复**）
+>
+> - **v0.6.3** (2026-07-04)：产品架构调整：去掉 fetch depth 硬限制，用户掌控本地 commit 元数据深度。
+>   1. **修复 shim offset 透传 bug**：v0.6.1+ `gitgraphLines` shim 处理器只提取 `projectId/branches/limit` 三个字段，**丢失 `offset`**，导致前端滚动加载更多每次都拿到首屏前 300 条 + 永远 `truncated=true` → 用户看到「闪一下又消失」的 loading 循环 + 永远看不到「已是末尾」提示。修复：`shim.ts:438-484` 补 `offset?: number` 类型 + 透传给 `app.GetGitGraph` / `app.GetGitGraphAscii`。
+>   2. **去掉 fetch depth=2000 硬限制**：`app.go:2524-2550` PullRepoByProjectId 改为显式 `Depth=0/CountLimit=0/SingleBranch=false/NoTags=false`；`app/git/sync.go` FetchRepo 与 `app/git/clone.go` CloneRepo 去掉 `isHugeRepo` 启发式判断（unreal/chromium/linux/webkit 关键词）+ `if opts.Depth <= 0 { return error }` 防御检查；`sync.go` fetch timeout 从 2 分钟改 30 分钟适配全量 fetch。
+>   3. **新语义**：用户点击「刷新」后，`loadMoreGraph` 首次可以拉完整 264k commits 元数据（UnrealEngine 实测 ~28 GB，blobless 拦下 ~1.5 GB blob）；本地拉多少 commit 完全由用户决定，UI 不再有「只能看 2000 条」硬限制。loadMoreGraph 动态加载继续保留——用户点 loadMore 时，本地全量下后端 offset 分页直接走完，不需二次 fetch。
+>   4. **代价**：首次同步 UnrealEngine 类超大仓库会持续 30~60 分钟（gh partial fetch + blobless + depth=0）；本机磁盘吃 ~28 GB 元数据（实测本仓库 4492 commits + ue6-main 2173 commits 已占 731 MB，去掉 104 条散落 blob 后元数据 660 MB；264k 全量理论上 ~28 GB）。fetch 阶段失败时需用户重试。
+>   5. **改动文件**：`frontend/src/lib/wails-api-shim.ts`（offset 透传）、`app/git/sync.go`（FetchRepo 限制去掉）、`app/git/clone.go`（CloneRepo 限制去掉）、`app.go`（PullRepoByProjectId 调用改全量）。
 >
 > - **v0.6.2** (2026-07-04)：Git Graph 右上角按钮语义重定义（UI 改名「刷新」，内部函数 `goToLatest` 保留）。
 >   1. **旧痛点**：右上角「同步」按钮只调 `commitsGitgraphPull` + `loadGraph(0)`，loadGraph(0) 重置 graphDto 让用户滚动加载到的更深历史 commit 全部丢失；用户还得手动滚回顶部看最新 commit，两个动作割裂。

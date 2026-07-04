@@ -2522,41 +2522,30 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 	}
 
 	// 5. 调 git.PullRepo（v2.6：装 progress 回调）
-	singleBranch := account.Platform == "github"
-	depth := 0
-	countLimit := 500
-
-	// v2.7：超大仓库优化（UnrealEngine / Chromium 等）
-	// 识别超大仓库的启发式规则：repo 名称包含已知大仓库关键词
-	isHugeRepo := strings.Contains(strings.ToLower(project.Name), "unreal") ||
-		strings.Contains(strings.ToLower(project.Name), "chromium") ||
-		strings.Contains(strings.ToLower(project.Name), "linux") ||
-		strings.Contains(strings.ToLower(project.Name), "webkit")
-
-	if singleBranch {
-		// v2.x 修复 July-X/UnrealEngine 渲染卡死：深度与 largeRepoGraphDepth 对齐到 2000。
-		// 5000 会拉到 release 中段超宽 merge 历史（单行 1407 lane），前端渲染卡死。
-		// 2000 以内 graph 很窄（列宽 ≤3），更早历史交给「加载更多」+ RunGraphLog 超宽回退保护。
-		depth = 2000
-		countLimit = 2000
-		if isHugeRepo {
-			// gh blobless fetch 已经足够快：初始同步允许最多 5 分钟，
-			// 先给 Git Graph 一个更可用的近期窗口；更早历史交给用户手动"加载更多"。
-			depth = 2000
-			countLimit = 2000
-		}
-	}
+	//
+	// v0.6.3 架构调整（user 拍板 2026-07-04）：
+	//   去掉所有 hardcoded fetch depth 限制，由用户掌控要加载多少 commit 到本地。
+	//   配合 loadMoreGraph 动态加载，首次 sync 可以拉全量元数据（depth=0），
+	//   需要用户主动权衡磁盘/网络代价（UnrealEngine 全量 ~28 GB 元数据）。
+	//
+	//   - depth=0：fetch 全量 commit + tree 元数据（不下载 blob，blobless + NoCheckout 仍然生效）
+	//   - countLimit=0：精确统计全量 commit 数（usedCountLimit=0 时 go-git 走全量遍历）
+	//   - singleBranch=false：fetch 所有分支（refs/heads/* + refs/tags/*），不限定为默认分支
+	//   - noTags=false：fetch tag refs（不走 git.NoTags）
+	//
+	// 旧 v2.7~v2.9 设计的 singleBranch / isHugeRepo 启发式判断（unreal/chromium/linux/webkit
+	// 关键词）全部移除——这逻辑是过渡期 hack，现在 Git Graph 有动态加载后不再需要。
 
 	result, err := git.PullRepo(git.PullOptions{
 		LocalPath: localPath,
 		Token:     token,
 		Username:  account.Username,
-		// 大仓库不做全历史计数；Git Graph 页面只展示有限窗口，更新提示也只需要判断近期是否变化。
-		CountLimit: countLimit,
-		Depth:      depth,
-		// GitHub 超大仓库默认只更新默认分支最近窗口；Gitea 保持完整多分支同步。
-		SingleBranch: singleBranch,
-		NoTags:       singleBranch,
+		// v0.6.3：depth=0（全量元数据），countLimit=0（精确统计全部）
+		// GitHub / Gitea 统一走完整 fetch，不再按平台差异化限制
+		CountLimit: 0,
+		Depth:      0,
+		SingleBranch: false,
+		NoTags:       false,
 		Progress:     a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
 		UseGitHubCLI: account.Platform == "github",
 	})

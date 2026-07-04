@@ -29,12 +29,22 @@ type PullOptions struct {
 	RemoteName string
 	// CountLimit commit 计数上限（0 = 精确统计全部）。
 	//
-	// 超大仓库（如 UnrealEngine）全量遍历历史成本过高；UI 更新提示只需要有限窗口。
+	// v0.6.3 之前：超大仓库（如 UnrealEngine）全量遍历历史成本过高；UI 更新提示只需要有限窗口。
+	// v0.6.3 之后：默认 0（统计全部），有动态加载后用户按需加载更深历史。
 	CountLimit int
-	// Depth/SingleBranch/NoTags 用于超大仓库更新：只取默认分支最近窗口。
-	Depth        int
+	// Depth fetch depth 限制（0 = 无限制，拉全量 commit + tree 元数据）。
+	//
+	// v0.6.3 架构调整：去掉硬编码 depth=2000，由 caller 决定。配合 loadMoreGraph 动态加载，
+	// 用户首次可拉全量（元数据 = ~30MB/1000 commits，UnrealEngine 全量 ~28 GB），需要用户主动权衡。
+	Depth int
+	// SingleBranch true = 只 fetch 默认分支；false = fetch 所有分支（refs/heads/* + refs/tags/*）。
+	//
+	// v0.6.3 之前：GitHub 仓库硬编码 true（限制大仓库带宽）；v0.6.3 之后由 caller 决定。
 	SingleBranch bool
-	NoTags       bool
+	// NoTags true = 不 fetch tags；false = fetch 所有 tag refs。
+	//
+	// v0.6.3 之前：GitHub 仓库硬编码 true；v0.6.3 之后由 caller 决定。
+	NoTags bool
 	// Progress 进度回调（v2.6：可选，给前端实时推送百分比）
 	//
 	// fetch 阶段 go-git 的 sideband 输出会被解析成 SyncProgress 事件
@@ -96,13 +106,6 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		return nil, fmt.Errorf("远程 %s 不存在: %w", remoteName, err)
 	}
 
-	// 获取 remote URL
-	remoteConfig := remote.Config()
-	var remoteURL string
-	if len(remoteConfig.URLs) > 0 {
-		remoteURL = remoteConfig.URLs[0]
-	}
-
 	// v0.6.3 架构调整：去掉 isHugeRepo / depth<=0 硬限制
 	//
 	// 旧设计（v2.7~v2.9）：GitHub 仓库 + 启发式超大仓库关键词 → 走 gh + --filter=blob:none +
@@ -148,7 +151,7 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		refSpecs = []config.RefSpec{config.RefSpec("+HEAD:refs/remotes/origin/HEAD")}
 	}
 
-	// fetch（默认同步所有分支；超大仓库可走 SingleBranch 只取默认分支）
+	// fetch（默认同步所有分支；opts.SingleBranch=true 时只取默认分支）
 	fetchOpts := &git.FetchOptions{
 		Auth:     auth,
 		RefSpecs: refSpecs,
@@ -161,9 +164,13 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		fetchOpts.Progress = NewSidebandWriter(SafeWrap(opts.Progress))
 	}
 
-	// v2.7：添加 2 分钟超时保护（超大仓库如 UnrealEngine 可能卡很久）
+	// v2.7：添加 2 分钟超时保护（保护 Go 进程不被卡死；用户可接受 fetch 中途失败重试）
+	//
+	// v0.6.3 架构调整：depth=0 全量 fetch 可能需要几十分钟（UnrealEngine ~28 GB 元数据），
+	// 2 分钟不够。改 30 分钟；gh 命令走 nativeGitTimeout=5min 另算（命令本身超时机制）。
+	// 超大仓库 fetch 超过 30 分钟视为异常（网络/磁盘问题），用户可重试。
 	slog.Default().Info("git fetch 开始", "localPath", opts.LocalPath, "remote", remoteName, "depth", opts.Depth)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	start := time.Now()

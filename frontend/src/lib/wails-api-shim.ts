@@ -118,8 +118,18 @@ type WailsApp = {
   }>;
   /** v2.15：按本地仓库路径读取 commit 详情（含 files / +/- stats） */
   GetCommitDetail?: (args: { localPath: string; sha: string }) => Promise<unknown>;
-  /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token） */
-  GetGitGraph?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<{
+  /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token）
+   *
+   * v0.6.3 修复：补 `offset` 字段（之前 shim 漏传导致滚动加载更多每次都拉首屏）。
+   * 注意：实际 args 由 Wails 自动生成的 bindings 提供，shim 这里手动声明的
+   * 旧版本只覆盖部分字段；调用方传额外字段时，TS 会因类型不匹配报错。
+   * 这里用更宽松的类型（`& { offset?: number }`）兼容 Wails bindings + 透传需求。
+   */
+  GetGitGraph?: (args: {
+    projectId: string;
+    branches?: string[];
+    maxCount?: number;
+  } & { offset?: number }) => Promise<{
     nodes: Array<{
       row: number;
       lane: number;
