@@ -602,7 +602,11 @@ async function loadReviews(p: PullDto): Promise<void> {
       projectId: activeProjectId.value,
       index: p.index,
     });
-    reviewPanels.value.set(p.index, (list ?? []) as PullReviewDto[]);
+    const reviews = (list ?? []) as PullReviewDto[];
+    reviewPanels.value.set(p.index, reviews);
+    // v0.5.0 bugfix: 同步写入 store 的 reviewPanels,让 pull.timelineItems computed 能拿到数据
+    // (timelineItems 把 review 事件 + 普通评论合并,按时间排序用于对话 Tab 渲染)
+    pull.reviewPanels.set(p.index, reviews);
   } catch {
     // 不阻断主流程
   }
@@ -816,8 +820,12 @@ async function fetchComments(p: PullDto): Promise<void> {
       projectId: String(activeProjectId.value),
       index: p.index,
     })) as IssueCommentDto[];
-    panel.items = Array.isArray(list) ? list : [];
+    const items = Array.isArray(list) ? list : [];
+    panel.items = items;
     panel.lastLoadedAt = Date.now();
+    // v0.5.0 bugfix: 同步写入 store 的 commentPanels,让 pull.timelineItems computed 能拿到数据
+    // (timelineItems 是 store 端的合并时间线,被对话 Tab 渲染使用)
+    pull.getPanel(p.index).items = items;
   } catch (e) {
     const err = e as { messageText?: string };
     panel.error = err.messageText ?? '加载评论失败';
@@ -914,7 +922,11 @@ async function submitEditComment(p: PullDto, c: IssueCommentDto): Promise<void> 
     })) as IssueCommentDto;
     // 本地更新对应评论（避免全量刷新）
     const idx = panel.items.findIndex((x) => x.id === c.id);
-    if (idx >= 0) panel.items[idx] = updated;
+    if (idx >= 0) {
+      panel.items[idx] = updated;
+      // v0.5.0 bugfix: 同步 store 的 commentPanels,让 timelineItems 实时反映编辑结果
+      pull.getPanel(p.index).items = [...panel.items];
+    }
     editingCommentId.value = null;
     editDrafts.value.delete(c.id);
     showToast({ type: 'success', message: '评论已更新' });
@@ -938,7 +950,10 @@ async function deleteComment(p: PullDto, c: IssueCommentDto): Promise<void> {
       commentId: c.id,
     });
     // 本地过滤掉被删除的评论
-    panel.items = panel.items.filter((x) => x.id !== c.id);
+    const nextItems = panel.items.filter((x) => x.id !== c.id);
+    panel.items = nextItems;
+    // v0.5.0 bugfix: 同步 store 的 commentPanels,让 timelineItems 实时反映删除结果
+    pull.getPanel(p.index).items = nextItems;
     showToast({ type: 'success', message: '评论已删除' });
   } catch (e) {
     const err = e as { messageText?: string };

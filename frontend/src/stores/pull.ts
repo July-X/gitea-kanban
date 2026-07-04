@@ -10,7 +10,7 @@
  */
 
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import {
   pullsList,
   pullsGet,
@@ -186,7 +186,15 @@ export const usePullStore = defineStore('pull', () => {
   function getPanel(index: number): CommentPanel {
     let p = commentPanels.value.get(index);
     if (!p) {
-      p = { items: [], loading: false, posting: false, error: null };
+      // v0.5.0 bugfix: 用 reactive() 包装 panel,让 panel.items = items 这种直接赋值
+      // 能触发 timelineItems computed 重算(ref(new Map()) 内部对象不是 reactive proxy,
+      // 直接赋值属性不会触发响应,导致对话 Tab 标题显示「对话 N」但列表区域空白)
+      p = reactive({
+        items: [] as IssueCommentDto[],
+        loading: false,
+        posting: false,
+        error: null as string | null,
+      });
       commentPanels.value.set(index, p);
     }
     return p;
