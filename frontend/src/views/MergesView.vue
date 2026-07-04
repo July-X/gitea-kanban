@@ -126,7 +126,7 @@ const confirmDeleteOpen = ref(false);
 /** 待删除的评论信息 */
 const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
 
-const detailTab = ref<'overview' | 'files' | 'conversation'>('overview');
+const detailTab = ref<'overview' | 'files' | 'conversation'>('conversation');
 
 /** 打开删除确认弹窗 */
 function confirmDeleteComment(p: PullDto, c: IssueCommentDto): void {
