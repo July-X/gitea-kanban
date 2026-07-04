@@ -105,7 +105,14 @@ defineProps<{ isMac: boolean }>();
  *
  * 不用 :global(html[...]) .shell 是因为 Vue 3 scoped CSS 编译拆 selector 吞 .shell 让 CSS 静默失效（史季） */
 .shell--mac {
-  height: calc(var(--vheight, 100vh) - 32px);
+  /* v1.8 拍板 2026-07-04：修负 32 太狠。
+   * 实测 Wails WKWebView macOS standard titlebar 下，window.innerHeight 包含了
+   * 28px macOS titlebar，var(--vheight) 已是 webview 高度 = NSWindow.height − 28。
+   * StatusBar 作为 flex item 在 .shell 底部 → 自动贴到 NSWindow.bottom。
+   * 上一版减 32 → StatusBar 与窗口底 32px 空白。改成不减。
+   *
+   * 仍让 NavRail 让位 32px traffic lights (y=16~40) —— 这是 wrapper padding-top，与 .shell height 独立 */
+  height: var(--vheight, 100vh);
 }
 
 /* 顶部 32px drag region —— 让用户能拖窗口 + 避免 navrail / main 元素遮 traffic lights
