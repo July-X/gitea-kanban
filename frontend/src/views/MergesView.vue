@@ -3073,15 +3073,15 @@ function formatRelative(iso: string | undefined): string {
 }
 
 /* 单条评论 li：聊天气泡布局（v0.6.26）
- * 默认 = 他人：左对齐，max-width 85%
- * --self = 我：右对齐，max-width 85% */
+ * 默认 = 他人：左对齐，max-width 100%
+ * --self = 我：右对齐，max-width 100% */
 .merge-item__comment {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
   margin: 0 0 10px;
-  max-width: 85%;
+  max-width: 100%;
   transition: opacity var(--t-fast) var(--ease);
 }
 .merge-item__comment--self {
