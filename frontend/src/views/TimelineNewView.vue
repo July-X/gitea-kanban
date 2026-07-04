@@ -23,7 +23,9 @@ import {
   commitsGitgraphLines,
   commitsGitgraphCloneRepo,
   commitsGitgraphPull,
+  getIpcClient,
 } from '@renderer/lib/ipc-client';
+import { GitSyncProgressEvent } from '@renderer/types/sync-progress';
 // v0.4.0：删除 deepenRepo 「加载更多」 import + 调用（GitHub 仓库 UI 与 Gitea 对齐，
 //         「加载更多」按钮 + 滚动监听整段移除；commit ba0b41c 一次性收口）
 import EmptyState from '@renderer/components/EmptyState.vue';
@@ -81,6 +83,12 @@ const loadingMore = ref(false);
 const allLoaded = ref(false);
 /** 本地错误信息 */
 const localError = ref<string | null>(null);
+/** 本地 commit 已全部取出，后端正在后台 deepen 拉取远端更早历史 */
+const localExhausted = ref(false);
+/** 后端 deepen 已启动，前端等待 repo:sync:progress done 后自动重试 */
+const deepenInProgress = ref(false);
+/** 等待 deepen 完成的重试定时器（避免内存泄漏） */
+let deepenRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Git Graph 加载更多文字显示控制（与 StatusBarPulse 动效同步）：
@@ -654,6 +662,10 @@ onUnmounted(() => {
     cancelAnimationFrame(colDragRafId);
     colDragRafId = 0;
   }
+  if (deepenRetryTimer) {
+    clearTimeout(deepenRetryTimer);
+    deepenRetryTimer = null;
+  }
 });
 
 /**
@@ -705,6 +717,22 @@ async function loadGraph(offset = 0): Promise<void> {
     }
     // truncated = false 表示已加载全部
     allLoaded.value = !dto?.truncated;
+
+    // v0.6.2: 后端告知本地 commit 已全部取出，远端可能有更多。
+    // 此时 dto.nodes 为空，dto.truncated=false。前端不能把 allLoaded=true，
+    // 需要等后台 deepen 完成后再次 loadGraph(offset)。
+    if (dto?.localExhausted) {
+      allLoaded.value = false;
+      localExhausted.value = true;
+      deepenInProgress.value = !!dto?.deepenTriggered;
+      if (dto?.deepenTriggered && !deepenRetryTimer) {
+        await waitForDeepenAndRetry(offset);
+      }
+    } else {
+      localExhausted.value = false;
+      deepenInProgress.value = false;
+    }
+
     expandedSha.value = null;
   } catch (e: unknown) {
     const err = e as {
@@ -765,6 +793,47 @@ async function loadMoreGraph(): Promise<void> {
     if (lastRow) {
       lastRow.scrollIntoView({ block: 'end', behavior: 'smooth' });
     }
+  }
+}
+
+/**
+ * v0.6.2 滚动按需 deepen：loadGraph 返 localExhausted=true + deepenTriggered=true 时调用。
+ * 监听 wails runtime EventsEmit("git:sync:progress") 事件，Stage=done 后自动重试 loadMoreGraph。
+ *
+ * 注意：
+ *  - 不依赖 wailsEvents shim，直接用 getIpcClient().on() 与 repo store initProgressEvents 同路径
+ *  - 超时 300 秒（相当于 5 分钟，深历史 deepen 可能几十秒 ~ 几分钟）
+ *  - 超时后给用户展示「重试」按钮（localExhausted.value=true，但 deepenInProgress.value=false）
+ */
+async function waitForDeepenAndRetry(offset: number): Promise<void> {
+  if (!activeRepo.value) return;
+  const repoKey = activeRepo.value.fullName;
+  let off: (() => void) | null = null;
+  let timedOut = false;
+  deepenInProgress.value = true;
+  try {
+    const client = getIpcClient();
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        off = client.on(GitSyncProgressEvent, (payload: unknown) => {
+          const p = payload as { repoKey?: string; stage?: string };
+          if (p?.repoKey === repoKey && p?.stage === 'done') resolve();
+        });
+      }),
+      new Promise<void>((resolve) => {
+        deepenRetryTimer = setTimeout(() => { timedOut = true; resolve(); }, 300_000);
+      }),
+    ]);
+  } finally {
+    if (off) off();
+    if (deepenRetryTimer) { clearTimeout(deepenRetryTimer); deepenRetryTimer = null; }
+    deepenInProgress.value = false;
+    localExhausted.value = false;
+  }
+  if (timedOut) return;
+  if (!allLoaded.value && graphDto.value) {
+    const newOffset = graphDto.value.nodes.length;
+    if (newOffset > offset) await loadMoreGraph();
   }
 }
 
@@ -2295,11 +2364,21 @@ function refBadgeClass(refType?: string): string {
 
             <!-- v0.6.1+ Git Graph 滚动加载更多哨兵（idle 时占位保持高度让 IntersectionObserver 可检测） -->
             <div
-              v-if="!allLoaded && graphDto"
+              v-if="!allLoaded && graphDto && !localExhausted"
               ref="loadMoreSentinel"
               class="git-graph-load-more-sentinel"
               aria-hidden="true"
             ></div>
+            <!-- v0.6.2: 本地 commit 已全部取出，后台 deepen 进行中 -->
+            <div
+              v-if="localExhausted && graphDto"
+              class="git-graph-load-more git-graph-load-more-deepen"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
+              <span>{{ deepenInProgress ? '正在深化本地历史…' : '本地历史已加载完' }}</span>
+            </div>
             <!-- 加载中文字（与 StatusBarPulse 动效同步显示/隐藏，由 globalLoading 控制） -->
             <div
               v-if="showLoadMoreStatus"

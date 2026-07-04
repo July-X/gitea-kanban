@@ -133,6 +133,10 @@ export interface GraphResultDto {
   branches?: GraphBranchDto[];
   maxLane: number;
   truncated: boolean;
+  /** 本地 commit 已全部取出，远端可能有更多（需 deepen） */
+  localExhausted?: boolean;
+  /** 后端已启动后台增量 deepen */
+  deepenTriggered?: boolean;
 }
 
 // ===== SVG 渲染常量 =====
