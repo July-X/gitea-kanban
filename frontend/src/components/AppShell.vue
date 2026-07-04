@@ -98,21 +98,18 @@ defineProps<{ isMac: boolean }>();
 }
 
 /* v1.9 拍板 2026-07-04：macOS 标准 titlebar + AppShell 让位 32px
+ * v1.10 拍板 2026-07-04：macOS 仅 NavRail 让位 32px, .shell__row 不让位
  *
- * 背景：macOS TitleBarDefault 下：
- *   - NSWindow chrome (28px titlebar + traffic lights) 系统绘制，macOS dark mode 下 #1e1e1e
- *     跟应用 #0F1115 dark canvas 视觉协调（同一个家族色）
- *   - webview 从 y=28 起，traffic lights 在 y=16~40 (NSWindow 层浮在 webview 上面)
- *   - webview 顶 32px 区 (y=28..60) 会被 traffic lights 徽章遮挡
+ * 上一版 v1.9 错在 `.shell--mac .shell__row { margin-top: 32px }`：整个 row 下移 32px，
+ * 但 .shell__main 不需让位（view 内部 topbar 可以从 y=28 webview top 开始），
+ * 这导致主区顶部产生 32px 空白（被 NavRail 内部 padding-top:12 叠加成 70-80px 留白观感）。
  *
- * 修法：让 .shell__row (包裹 navrail + main 的 flex row) 在 macOS 下让出 32px top:
- *   - .shell--mac .shell__row { margin-top: 32px; height: calc(100% - 32px) }
- *     高度计算：.shell height = var(--vheight), .shell__status = 33px bottom, .shell__row = flex:1
- *     margin-top: 32 让 NavRail / main 内容起点 = y=28+32 = y=60，刚好避开 traffic lights
- *   - 用户拖窗口：点 y=0..28 NSWindow titlebar 拖 —— NSWindow 标准行为，不需自定义 drag region
+ * 本轮：移除 .shell__row 让位；只在 NavRail wrapper 让位（给 macOS traffic lights）：
+ *   - .shell--mac .shell__nav { padding-top: 32px; box-sizing: border-box; }
+ *     NavRail wrapper 从 y=28 webview top 起、内部 padding-top:32 让 logo 从 y=60 起
+ *   - .shell__main 保持从 webview y=28 起，view topbar 完整可见不被 traffic lights 遮
  *
- * 不用自定义 .shell--mac::before drag region —— TitleBarDefault 下 NSWindow titlebar 本就可拖，
- * 加 ::before 会遮住 NSWindow titlebar click，影响 traffic lights 区域交互（pointer-events 覆盖）。
+ * 拖窗口：点 NSWindow titlebar (y=0..28) 系统可拖 —— 不需自定义 drag region。
  */
 .shell--mac {
   height: var(--vheight, 100vh);
@@ -128,14 +125,8 @@ defineProps<{ isMac: boolean }>();
   flex-direction: row;
 }
 
-/* macOS 下让 .shell__row 从 y=60 起 (避开 traffic lights y=16~40):
- *   - margin-top: 32 让 row 上方留 32px 给 macOS 标题栏重叠区
- *   - flex: 1 + margin-top 共存：flex 容器在 main axis 是 row layout，margin-top 让 main axis 起点下移
- *   - 高度 = 100% − 32 (parent .shell height − margin) —— flex 自动重新计算 */
-.shell--mac .shell__row {
-  margin-top: 32px;
-  height: calc(100% - 32px);
-}
+/* v1.10 移除 .shell--mac .shell__row 让位，避免主区顶部产生 32px 空白。
+ * webview 内容从 y=28 webview top 起，view 内 topbar 完整可见。 */
 
 .shell__nav {
   position: relative;
@@ -144,6 +135,19 @@ defineProps<{ isMac: boolean }>();
   flex-shrink: 0;
   width: 70px;
   /* NavRail 内部已经包含实色背景和右边框，这里只做定位 */
+}
+
+/* v1.10 macOS 仅 NavRail 让位 traffic lights (y=16~40 NSWindow layer)：
+ *   - .shell__nav wrapper 加 padding-top:32 + box-sizing:border-box
+ *     NavRail wrapper 从 y=28 webview top 起、内部 padding-top:32 让 logo 从 y=60 起
+ *   - wrapper 总高度 = row_h − 32, 宽度 70px 不变
+ *   - .navrail 内部 padding-top 重置为 0 避免重复让位 */
+.shell--mac .shell__nav {
+  box-sizing: border-box;
+  padding-top: 32px;
+}
+.shell--mac .shell__nav :deep(.navrail) {
+  padding-top: 0;
 }
 
 /* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的实色背景 */

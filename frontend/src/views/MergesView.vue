@@ -3129,15 +3129,14 @@ function formatRelative(iso: string | undefined): string {
   font-weight: 500;
 }
 
-/* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
+/* 气泡容器（v0.6.26 恢复聊天气泡效果） */
 .merge-item__comment-bubble {
   flex: 1 1 0;
   min-width: 0;
   max-width: 100%;
-  padding: 6px 10px;
-  /* v0.6.26：淡色底纹提升可读性 */
-  background: var(--color-bg-subtle);
-  border: 1px solid var(--color-divider);
+  padding: 8px 12px;
+  background: var(--color-bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--color-text-dim) 25%, transparent);
   border-radius: var(--radius-md);
   position: relative;
   overflow-wrap: break-word;
@@ -3147,7 +3146,7 @@ function formatRelative(iso: string | undefined): string {
 }
 /* v0.6.26：评论区宽度撑满，减少左右留白 */
 .merge-item__comment-list {
-  padding: 8px 16px;
+  padding: 8px 4px;
   display: flex;
   flex-direction: column;
 }
@@ -3156,14 +3155,14 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
   padding-right: 50px;
 }
-/* v0.6.26：评论使用全宽，他人靠左，"我"靠右 */
+/* v0.6.26：聊天气泡布局 — 他人靠左(max-width 85%)，"我"靠右(max-width 85%) */
 .merge-item__comment {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
-  margin: 0 0 8px;
-  width: 100%;
+  margin: 0 0 10px;
+  max-width: 85%;
   transition: opacity var(--t-fast) var(--ease);
 }
 /* v0.6.26："我"的评论靠右 */
@@ -3172,31 +3171,26 @@ function formatRelative(iso: string | undefined): string {
   flex-direction: row-reverse;
   justify-content: flex-end;
 }
-/* 气泡小箭头（指向头像）—— 用 CSS border 画三角形 */
+/* 气泡小箭头（指向头像）—— 用 CSS border 画三角形（v0.6.26 恢复可见性） */
 .merge-item__comment-bubble::before {
   content: '';
   position: absolute;
   top: 10px;
   width: 8px;
   height: 8px;
-  background: inherit;
-  border: 1px solid var(--color-divider);
+  background: var(--color-bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--color-text-dim) 25%, transparent);
   /* 默认（他人，左侧）：箭头指向左 */
   left: -5px;
-  border-right: 1px solid var(--color-divider);
-  border-top: none;
+  border-right: none;
   border-bottom: none;
   transform: rotate(45deg);
 }
-.merge-item__comment-bubble {
-  /* 让他人箭头也跟随气泡背景色 */
-  background-clip: padding-box;
-}
+
 /* v0.6.26："我"的气泡用主色软底 + 主色边框 */
 .merge-item__comment--self .merge-item__comment-bubble {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary-alpha-45);
-  border-width: 1px;
+  background: var(--color-primary-alpha-22);
+  border: 1.5px solid var(--color-primary-alpha-45);
   color: var(--color-text);
 }
 /* "我"的气泡里所有文字保持默认色（背景已透明） */
@@ -3252,12 +3246,11 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment--self .merge-item__comment-bubble::before {
   left: auto;
   right: -5px;
-  /* v0.6.20：背景透明，箭头跟随边框颜色 */
-  background: transparent;
+  background: var(--color-primary-alpha-22);
   border-left: none;
   border-bottom: none;
-  border-right: 1.5px solid var(--color-primary);
-  border-top: 1.5px solid var(--color-primary);
+  border-right: 1.5px solid var(--color-primary-alpha-45);
+  border-top: 1.5px solid var(--color-primary-alpha-45);
   /* 旋转 45° 让两个边形成指向右的三角箭头 */
   transform: rotate(45deg);
 }
@@ -3317,8 +3310,8 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-body table {
   max-width: 100%;
   min-width: 0;
-  word-break: break-all;
   overflow-wrap: break-word;
+  word-break: break-word;
 }
 .merge-item__comment-body pre,
 .merge-item__comment-body pre code {
