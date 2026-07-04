@@ -97,42 +97,25 @@ defineProps<{ isMac: boolean }>();
   background: var(--color-bg);
 }
 
-/* v1.x 拍板 2026-07-04（macOS 圆角安全区）：
- * WKWebView macOS Big Sur+ 的 NSWindow 圆角在系统层 visual clip，
- * 不论 TitleBar 配置如何，webview 内容延伸到 NSWindow bottom 都会被部分圆角遮。
- * 让 .shell--mac height = NSWindow height - 32（macOS Big Sur ~14 / Sonoma ~22 / Sequoia ~28 预留 32 保守）；
- * .shell__status 作为 flex item 总在 .shell 底部，落在 NSWindow safe area，完全 visible。
+/* v1.9 拍板 2026-07-04：macOS 标准 titlebar + AppShell 让位 32px
  *
- * 不用 :global(html[...]) .shell 是因为 Vue 3 scoped CSS 编译拆 selector 吞 .shell 让 CSS 静默失效（史季） */
+ * 背景：macOS TitleBarDefault 下：
+ *   - NSWindow chrome (28px titlebar + traffic lights) 系统绘制，macOS dark mode 下 #1e1e1e
+ *     跟应用 #0F1115 dark canvas 视觉协调（同一个家族色）
+ *   - webview 从 y=28 起，traffic lights 在 y=16~40 (NSWindow 层浮在 webview 上面)
+ *   - webview 顶 32px 区 (y=28..60) 会被 traffic lights 徽章遮挡
+ *
+ * 修法：让 .shell__row (包裹 navrail + main 的 flex row) 在 macOS 下让出 32px top:
+ *   - .shell--mac .shell__row { margin-top: 32px; height: calc(100% - 32px) }
+ *     高度计算：.shell height = var(--vheight), .shell__status = 33px bottom, .shell__row = flex:1
+ *     margin-top: 32 让 NavRail / main 内容起点 = y=28+32 = y=60，刚好避开 traffic lights
+ *   - 用户拖窗口：点 y=0..28 NSWindow titlebar 拖 —— NSWindow 标准行为，不需自定义 drag region
+ *
+ * 不用自定义 .shell--mac::before drag region —— TitleBarDefault 下 NSWindow titlebar 本就可拖，
+ * 加 ::before 会遮住 NSWindow titlebar click，影响 traffic lights 区域交互（pointer-events 覆盖）。
+ */
 .shell--mac {
-  /* v1.8 拍板 2026-07-04：修负 32 太狠。
-   * 实测 Wails WKWebView macOS standard titlebar 下，window.innerHeight 包含了
-   * 28px macOS titlebar，var(--vheight) 已是 webview 高度 = NSWindow.height − 28。
-   * StatusBar 作为 flex item 在 .shell 底部 → 自动贴到 NSWindow.bottom。
-   * 上一版减 32 → StatusBar 与窗口底 32px 空白。改成不减。
-   *
-   * 仍让 NavRail 让位 32px traffic lights (y=16~40) —— 这是 wrapper padding-top，与 .shell height 独立 */
   height: var(--vheight, 100vh);
-}
-
-/* 顶部 32px drag region —— 让用户能拖窗口 + 避免 navrail / main 元素遮 traffic lights
- *   - 仅在 macOS 下启用（其他平台用系统标准标题栏拖区，无需 .shell--mac::before）
- *   - ::before position: absolute top:0 in .shell，背景透明让 .shell 的 bg 透上来
- *     → 标题栏颜色 = var(--color-bg) 跟主题走 */
-.shell--mac::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 32px;
-  background: transparent;
-  /* Wails v2.5+ 默认 CSSDragProperty="--wails-draggable", CSSDragValue="drag"
-   * 该 32px 区鼠标按下拖动 → 移动整个 NSWindow，替代 macOS 默认标题栏 */
-  --wails-draggable: drag;
-  /* 高于所有 layer，但 macOS traffic lights 在更上层 NSWindow，永远可点 */
-  z-index: 99999;
-  pointer-events: auto;
 }
 
 /* .shell__row = flex row 包裹 navrail + main
@@ -145,6 +128,15 @@ defineProps<{ isMac: boolean }>();
   flex-direction: row;
 }
 
+/* macOS 下让 .shell__row 从 y=60 起 (避开 traffic lights y=16~40):
+ *   - margin-top: 32 让 row 上方留 32px 给 macOS 标题栏重叠区
+ *   - flex: 1 + margin-top 共存：flex 容器在 main axis 是 row layout，margin-top 让 main axis 起点下移
+ *   - 高度 = 100% − 32 (parent .shell height − margin) —— flex 自动重新计算 */
+.shell--mac .shell__row {
+  margin-top: 32px;
+  height: calc(100% - 32px);
+}
+
 .shell__nav {
   position: relative;
   z-index: 1;
@@ -152,21 +144,6 @@ defineProps<{ isMac: boolean }>();
   flex-shrink: 0;
   width: 70px;
   /* NavRail 内部已经包含实色背景和右边框，这里只做定位 */
-}
-
-/* macOS 下让位 traffic lights (y=16~40 NSWindow layer)：
- *   - .shell__nav wrapper 加 padding-top:32 + box-sizing:border-box 让 wrapper
- *     从 y=32 起、高度变为 row_h − 32（NavRail 内部 logo / 菜单起点同时下移）
- *   - **左 70px 区仍然是 drag region**（.shell--mac::before 全宽 32px drag region
- *     在 .shell 层级，点 navrail 上部可以拖窗口）
- *   - box-sizing: border-box 保证 wrapper 总宽仍 70（不被 padding 撑开）
- *   - .navrail 内部 padding-top 重置为 0（外层已让位）避免重复让位 */
-.shell--mac .shell__nav {
-  box-sizing: border-box;
-  padding-top: 32px;
-}
-.shell--mac .shell__nav :deep(.navrail) {
-  padding-top: 0;
 }
 
 /* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的实色背景 */
