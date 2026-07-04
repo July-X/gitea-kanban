@@ -111,7 +111,7 @@ const pulling = ref(false);
 const loadMoreSentinel = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
 
-/** v0.6.2：滚动容器 ref，用于「回到最新」按钮 smooth scroll 到顶部
+/** v0.6.2：滚动容器 ref，用于「刷新」按钮 smooth scroll 到顶部
  *  - 复用现有 .timeline-new__main DOM（无需新增 wrapper）
  *  - 只在 goToLatest 内访问；其他滚动场景（watch(expandedSha)）继续走 querySelector
  *    避免与 watcher 内同名局部变量冲突
@@ -746,7 +746,7 @@ async function loadMoreGraph(): Promise<void> {
 }
 
 /**
- * v0.6.2 重定义：右上角按钮语义从「同步」改为「回到最新」
+ * v0.6.2 重定义：右上角按钮语义从「同步」改为「刷新」
  *
  * 旧版（v2.x）只做 pull + 重新渲染，用户滚到下方翻历史后还得手动滚回顶部；
  * 而且 loadGraph(0) 整页重置会让已经滚动加载到的更深历史 commit 全部丢失。
@@ -762,7 +762,12 @@ async function loadMoreGraph(): Promise<void> {
  *   2. 已 clone → 调 commitsGitgraphPull（git fetch + 更新本地 HEAD + 统计 addedCommits）
  *   3. loadGraph() 重渲染顶部 300 条
  *   4. nextTick 后 mainScrollEl.scrollTo({ top: 0, behavior: 'smooth' })
- *   5. Toast 反馈：「已回到最新」/「已同步 N 个新提交」/ 错误
+ *   5. Toast 反馈：「已刷新」/「已刷新，同步了 N 个新提交」/ 错误
+ *
+ * 命名说明：
+ *   - UI 按钮文案「刷新」传达用户视角：一次性把图谱同步到最新并跳到顶部
+ *   - 函数名 `goToLatest` 反映代码逻辑：拉远端 + 跳到顶部（更准确）
+ *   - 内部保留 goToLatest / mainScrollEl 等英文命名，避免无谓 churn
  *
  * 与现有机制的关系：
  *   - 与「滚动加载更多」互补，不冲突（loadMore 在用户向下滚时触发）
@@ -788,7 +793,7 @@ async function goToLatest(): Promise<void> {
       }
       showToast({
         type: 'success',
-        message: '已回到最新',
+        message: '已刷新',
         description: `${repo2?.fullName ?? ''} 首次同步完成`,
       });
     } else {
@@ -798,9 +803,9 @@ async function goToLatest(): Promise<void> {
       });
       addedCommits = resp.addedCommits ?? 0;
       if (addedCommits > 0) {
-        showToast({ type: 'info', message: `已回到最新，同步了 ${addedCommits} 个新提交` });
+        showToast({ type: 'info', message: `已刷新，同步了 ${addedCommits} 个新提交` });
       } else {
-        showToast({ type: 'info', message: '已回到最新，已是最新版本' });
+        showToast({ type: 'info', message: '已刷新，已是最新版本' });
       }
     }
     // 重新加载 graph（显示最新 commit + 完整 layout）
@@ -814,7 +819,7 @@ async function goToLatest(): Promise<void> {
     }
   } catch (e: unknown) {
     const err = e as { messageText?: string; message?: string; hint?: string };
-    const msg = err.messageText ?? err.message ?? String(e) ?? '回到最新失败';
+    const msg = err.messageText ?? err.message ?? String(e) ?? '刷新失败';
     logError('TimelineNewView.goToLatest', msg, e instanceof Error ? e.stack : undefined);
     showToast({ type: 'error', message: msg });
   } finally {
@@ -823,13 +828,14 @@ async function goToLatest(): Promise<void> {
   }
 }
 
-/** v0.6.2 按钮文字：根据 pulling 状态显示「回到最新」/「正在回到最新…」
- *  - 语义对用户透明：loading 期间用户知道正在干啥
- *  - 文案长度比旧版「同步」长 3 字，header 布局自适应（CSS 已用 flex + gap）
+/** v0.6.2 按钮文字：根据 pulling 状态显示「刷新」/「正在刷新…」
+ *  - UI 文案用「刷新」（与全应用其他「刷新」按钮语义对齐，如 StatusBar 主题旁的全局刷新）
+ *  - 内部函数仍叫 goToLatest（更准确表达「拉远端 + 跳到顶部」逻辑）
+ *  - loading 期间用户知道正在干啥
  */
 const goToLatestLabel = computed<string>(() => {
-  if (pulling.value) return '正在回到最新…';
-  return '回到最新';
+  if (pulling.value) return '正在刷新…';
+  return '刷新';
 });
 
 /**
@@ -1769,14 +1775,14 @@ function refBadgeClass(refType?: string): string {
 
       <div class="timeline-new__actions">
         <!--
-          v0.6.2 重定义：右上角按钮语义从「同步」改为「回到最新」
+          v0.6.2 重定义：右上角按钮语义从「同步」改为「刷新」
             - 拉取远端最新 commit（未 clone → cloneRepo；已 clone → pull）
             - 重新渲染顶部 300 条
             - smooth scroll 回列表开头
-          命名理由：「回到最新」三个字同时传达「滚动动作（回到）」+「时间位置（最新），
-          即列表开头 = 时间倒序最新」，对用户透明不需要额外解释。
-          与 StatusBar 行末「更新」按钮（只 pull 不滚）、StatusBar 全局刷新（只重渲不 fetch）
-          形成三档粒度分工。
+          命名理由：「刷新」与 StatusBar 主题旁的全局刷新按钮、StatusBar 仓库行末的「更新」
+          在用户心智模型里都属于同一组——「把图谱状态拉到最新」。本按钮是三档粒度里
+          最完整的：拉远端 + 重渲染 + 滚顶。
+          函数名 `goToLatest` 在代码层反映「拉远端 + 跳到顶部」组合动作，比 UI 名更准确。
         -->
         <button
           class="sync-btn"

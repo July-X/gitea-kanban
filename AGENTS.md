@@ -3,14 +3,15 @@
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-04（**v0.5.0 PR 评论模块对齐 Gitea/GitHub** + **v0.6.2 右上角按钮「回到最新」**）
+> 最后更新：2026-07-04（**v0.5.0 PR 评论模块对齐 Gitea/GitHub** + **v0.6.2 右上角按钮「刷新」**）
 >
-> - **v0.6.2** (2026-07-04)：Git Graph 右上角按钮语义重定义。
+> - **v0.6.2** (2026-07-04)：Git Graph 右上角按钮语义重定义（UI 改名「刷新」，内部函数 `goToLatest` 保留）。
 >   1. **旧痛点**：右上角「同步」按钮只调 `commitsGitgraphPull` + `loadGraph(0)`，loadGraph(0) 重置 graphDto 让用户滚动加载到的更深历史 commit 全部丢失；用户还得手动滚回顶部看最新 commit，两个动作割裂。
->   2. **新语义**：「回到最新」（`goToLatest`），三合一：① 拉远端最新 commit（已 clone → `commitsGitgraphPull`；未 clone → `commitsGitgraphCloneRepo`）；② `loadGraph()` 重新渲染顶部 300 条 + 完整 layout；③ `nextTick` 后 `mainScrollEl.scrollTo({ top: 0, behavior: 'smooth' })` 平滑滚顶。
->   3. **与「滚动加载更多」互补不冲突**：IntersectionObserver 自动追加载历史；用户主动点「回到最新」= 预期会跳走。
->   4. **三档粒度分工保留**：「回到最新」（pull + 重渲染 + 滚顶）/ StatusBar 仓库行末「更新」（仅 pull）/ StatusBar 全局刷新（仅重渲染本地数据）。
->   5. **改动文件**：仅 `frontend/src/views/TimelineNewView.vue`（加 `mainScrollEl` ref + 改 `syncRepo → goToLatest` + 改 `syncButtonLabel → goToLatestLabel` + 按钮 title/Toast 文案围绕「回到最新」语义）。
+>   2. **新语义**：「刷新」（`goToLatest`），三合一：① 拉远端最新 commit（已 clone → `commitsGitgraphPull`；未 clone → `commitsGitgraphCloneRepo`）；② `loadGraph()` 重新渲染顶部 300 条 + 完整 layout；③ `nextTick` 后 `mainScrollEl.scrollTo({ top: 0, behavior: 'smooth' })` 平滑滚顶。
+>   3. **UI vs 内部命名分层**：按钮文案「刷新」对齐用户心智（与 StatusBar 全局刷新、仓库行末「更新」属同一组「把图谱拉到最新」）；内部函数 `goToLatest` / `goToLatestLabel` 保留英文，更准确表达「拉远端 + 跳到顶部」组合动作，避免无谓 churn。
+>   4. **与「滚动加载更多」互补不冲突**：IntersectionObserver 自动追加载历史；用户主动点「刷新」= 预期会跳走。
+>   5. **三档粒度分工保留**：「刷新」（pull + 重渲染 + 滚顶）/ StatusBar 仓库行末「更新」（仅 pull）/ StatusBar 全局刷新（仅重渲染本地数据）。
+>   6. **改动文件**：仅 `frontend/src/views/TimelineNewView.vue`（加 `mainScrollEl` ref + 改 `syncRepo → goToLatest` + 改 `syncButtonLabel → goToLatestLabel` + 按钮 title/Toast 文案围绕「刷新」语义）。
 >
 > - **v0.5.0** (2026-07-04)：PR 评论模块 M1-M4 完整交付。
 >   1. **文件评论**：新增 PullFileComments.vue 组件 + ListPullFiles / GetPullFileDiff / ListPullReviewComments / CreatePullReviewComment 4 个 platform adapter 方法，Gitea/GitHub 双端实现，PR 详情顶部「文件评论」Tab 按文件分组、折叠展开、行号 reaction 展示。
