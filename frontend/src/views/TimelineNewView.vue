@@ -111,6 +111,13 @@ const pulling = ref(false);
 const loadMoreSentinel = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
 
+/** v0.6.2：滚动容器 ref，用于「回到最新」按钮 smooth scroll 到顶部
+ *  - 复用现有 .timeline-new__main DOM（无需新增 wrapper）
+ *  - 只在 goToLatest 内访问；其他滚动场景（watch(expandedSha)）继续走 querySelector
+ *    避免与 watcher 内同名局部变量冲突
+ */
+const mainScrollEl = ref<HTMLElement | null>(null);
+
 // ============================================================
 // v2.9 commit 详情：行下手风琴（inline 展开）
 // ============================================================
@@ -739,22 +746,30 @@ async function loadMoreGraph(): Promise<void> {
 }
 
 /**
- * v2.x 同步按钮（v1 旧名 pullRepo）
+ * v0.6.2 重定义：右上角按钮语义从「同步」改为「回到最新」
  *
- * 与 StatusBar 仓库选择界面的「同步/更新」按钮逻辑一致(v2.3 StatusBar 多行重写):
- *   - 未同步本地(clonedMap[owner/repo] = false)→ 调 commitsGitgraphCloneRepo
- *     (首次 clone,go-git NoCheckout 轻量模式,只拉元信息不拉工作区文件)
- *   - 已同步本地(clonedMap = true)→ 调 commitsGitgraphPull
- *     (git fetch + 更新本地 HEAD + 统计 commit 变化)
+ * 旧版（v2.x）只做 pull + 重新渲染，用户滚到下方翻历史后还得手动滚回顶部；
+ * 而且 loadGraph(0) 整页重置会让已经滚动加载到的更深历史 commit 全部丢失。
  *
- * 按钮可用性:`!loading && !pulling && activeProjectId` —— 跟 v1 旧版比,**不再依赖 localPath**:
- *   - 旧版要求 localPath 非空(导致"已 clone 但 view 不知情"时按钮永久 disabled)
- *   - 新版 Go 端 GetGitGraph / PullRepo 都按 projectId 反算 localPath(v2.4 已支持),
- *     所以前端只看 activeProjectId 就够
+ * 新版语义（user 拍板 2026-07-04）：
+ *   - 拉取远端最新数据（pull / 首次 clone）
+ *   - 重新渲染最新 300 条
+ *   - **强制 smooth scroll 回列表开头**
+ *   用户主动点的按钮，他预期会跳走；想继续看历史？往下滚，loadMore 仍然生效。
  *
- * 成功后:刷新本地 clonedMap 缓存 + 重新 loadGraph(显示最新 commit)
+ * 流程：
+ *   1. 未 clone（clonedMap=false）→ 调 commitsGitgraphCloneRepo（NoCheckout 轻量模式）
+ *   2. 已 clone → 调 commitsGitgraphPull（git fetch + 更新本地 HEAD + 统计 addedCommits）
+ *   3. loadGraph() 重渲染顶部 300 条
+ *   4. nextTick 后 mainScrollEl.scrollTo({ top: 0, behavior: 'smooth' })
+ *   5. Toast 反馈：「已回到最新」/「已同步 N 个新提交」/ 错误
+ *
+ * 与现有机制的关系：
+ *   - 与「滚动加载更多」互补，不冲突（loadMore 在用户向下滚时触发）
+ *   - 与 StatusBar 全局刷新按钮互补（那个只重新渲染本地数据，不拉远端）
+ *   - 与 StatusBar 仓库行末「更新」按钮互补（那个只 pull，不切回顶部）
  */
-async function syncRepo(): Promise<void> {
+async function goToLatest(): Promise<void> {
   if (!activeProjectId.value) return;
   pulling.value = true;
   useGlobalLoadingStore().show('timeline');
@@ -763,41 +778,44 @@ async function syncRepo(): Promise<void> {
     const cloned = repo2 ? repo.clonedMap[`${repo2.owner}/${repo2.name}`] === true : false;
     let addedCommits = 0;
     if (!cloned) {
-      // 未同步 → 首次 clone
+      // 未同步本地 → 首次 clone（与旧版 syncRepo 行为一致）
       await commitsGitgraphCloneRepo({
         projectId: activeProjectId.value,
       });
-      // 更新 clonedMap 缓存(避免下次又走 clone 分支)
+      // 更新 clonedMap 缓存（避免下次又走 clone 分支）
       if (repo2) {
         repo.clonedMap[`${repo2.owner}/${repo2.name}`] = true;
       }
-      // clone 完后端会返 localPath,但这里前端不再依赖它;
-      // 显式让 loadGraph 重渲染用新的 local commit DAG
       showToast({
         type: 'success',
-        message: '同步成功',
-        description: `${repo2?.fullName ?? ''} 已同步到本地`,
+        message: '已回到最新',
+        description: `${repo2?.fullName ?? ''} 首次同步完成`,
       });
     } else {
-      // 已同步 → pull 更新
+      // 已同步本地 → pull 更新
       const resp = await commitsGitgraphPull({
         projectId: activeProjectId.value,
       });
       addedCommits = resp.addedCommits ?? 0;
       if (addedCommits > 0) {
-        showToast({ type: 'info', message: `同步了 ${addedCommits} 个新提交` });
+        showToast({ type: 'info', message: `已回到最新，同步了 ${addedCommits} 个新提交` });
       } else {
-        showToast({ type: 'info', message: '已是最新' });
+        showToast({ type: 'info', message: '已回到最新，已是最新版本' });
       }
     }
-    // 重新加载 graph（显示最新 commit）
+    // 重新加载 graph（显示最新 commit + 完整 layout）
     await loadGraph();
-    // 刷新 clonedMap 缓存(让 StatusBar 仓库行按钮切到"更新")
+    // 刷新 clonedMap 缓存（让 StatusBar 仓库行按钮切到「更新」）
     await repo.refreshClonedStatus();
+    // 滚动到列表开头：等 nextTick 让 loadGraph 完成的 DOM 更新落地
+    await nextTick();
+    if (mainScrollEl.value) {
+      mainScrollEl.value.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   } catch (e: unknown) {
     const err = e as { messageText?: string; message?: string; hint?: string };
-    const msg = err.messageText ?? err.message ?? String(e) ?? '同步失败';
-    logError('TimelineNewView.syncRepo', msg, e instanceof Error ? e.stack : undefined);
+    const msg = err.messageText ?? err.message ?? String(e) ?? '回到最新失败';
+    logError('TimelineNewView.goToLatest', msg, e instanceof Error ? e.stack : undefined);
     showToast({ type: 'error', message: msg });
   } finally {
     pulling.value = false;
@@ -805,13 +823,13 @@ async function syncRepo(): Promise<void> {
   }
 }
 
-/** v2.x 按钮文字:根据 cloned 状态显示"同步"/"同步中…"
- *  - 跟 StatusBar 行末按钮文案风格对齐(StatusBar 未同步显示"同步",已同步显示"更新")
- *  - 这里统一叫"同步"(因为按钮在 Header 位置,顶部操作更直白;"更新"暗示已同步)
+/** v0.6.2 按钮文字：根据 pulling 状态显示「回到最新」/「正在回到最新…」
+ *  - 语义对用户透明：loading 期间用户知道正在干啥
+ *  - 文案长度比旧版「同步」长 3 字，header 布局自适应（CSS 已用 flex + gap）
  */
-const syncButtonLabel = computed<string>(() => {
-  if (pulling.value) return '同步中…';
-  return '同步';
+const goToLatestLabel = computed<string>(() => {
+  if (pulling.value) return '正在回到最新…';
+  return '回到最新';
 });
 
 /**
@@ -1751,12 +1769,14 @@ function refBadgeClass(refType?: string): string {
 
       <div class="timeline-new__actions">
         <!--
-          v2.x：右上角"拉取"按钮 → 改名为"同步",逻辑跟 StatusBar 仓库选择界面一致
-            - 未同步本地 → commitsGitgraphCloneRepo(首次 clone)
-            - 已同步本地 → commitsGitgraphPull(git fetch + 更新本地 HEAD)
-            - 不再依赖 localPath(Go 端按 projectId 反算,v2.4 已支持)
-          命名:Header 顶部按钮统一叫"同步",跟 StatusBar 行末按钮文案风格对齐;
-          StatusBar 的"更新"暗示已 clone,Header 这里更直白。
+          v0.6.2 重定义：右上角按钮语义从「同步」改为「回到最新」
+            - 拉取远端最新 commit（未 clone → cloneRepo；已 clone → pull）
+            - 重新渲染顶部 300 条
+            - smooth scroll 回列表开头
+          命名理由：「回到最新」三个字同时传达「滚动动作（回到）」+「时间位置（最新），
+          即列表开头 = 时间倒序最新」，对用户透明不需要额外解释。
+          与 StatusBar 行末「更新」按钮（只 pull 不滚）、StatusBar 全局刷新（只重渲不 fetch）
+          形成三档粒度分工。
         -->
         <button
           class="sync-btn"
@@ -1764,22 +1784,21 @@ function refBadgeClass(refType?: string): string {
             repo.clonedMap[
               `${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}`
             ] === true
-              ? '从远端拉取最新 commit（git fetch + pull --rebase）'
-              : '克隆仓库元信息到本地（go-git 轻量模式，只拉 commit / tree / branch / tag）'
+              ? '拉取远端最新 commit 并回到列表开头'
+              : '克隆仓库元信息到本地并回到列表开头（go-git 轻量模式）'
           "
           :disabled="loading || pulling || !activeProjectId"
-          @click="syncRepo"
+          @click="goToLatest"
         >
           <RotateCw :size="15" :class="{ spinning: pulling }" />
-          <span class="sync-btn__label">{{ syncButtonLabel }}</span>
+          <span class="sync-btn__label">{{ goToLatestLabel }}</span>
         </button>
-        <!-- v0.4.0：删除「加载更多」按钮 + 「滚动到底部自动加载」footer
-             （GitHub 仓库 UI 与 Gitea 对齐，统一固定 300 条初始上限）-->
       </div>
     </header>
 
     <!-- ===== 主内容 ===== -->
     <div
+      ref="mainScrollEl"
       class="timeline-new__main"
       :class="{ 'timeline-new__main--dragging': colDragging }"
     >
