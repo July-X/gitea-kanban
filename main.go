@@ -40,17 +40,18 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
-		// Mac.TitleBar 拍板 2026-07-04：macOS 标题栏让 webview CSS 接管颜色，跟暗/亮主题自动跟随。
-		//   - TitleBarHiddenInset() 等价 TitleBar{ TitlebarAppearsTransparent: true,
-		//     HideTitle: true, FullSizeContent: true, UseToolbar: true,
-		//     HideToolbarSeparator: true }
-		//     "标题栏背景透明 + 不显示 'Gitea Kanban' 窗口标题 + webview 占满整个 NSWindow"
-		//   - 颜色由 AppShell .shell 的 background: var(--color-bg) 接管：
-		//     dark=#0F1115 / light=#e8f1f5，主题切换时自动跟随
-		//   - traffic lights (红/黄/绿) 仍显示（macOS 浮层在 webview 上面）
-		//   - 28px 顶部让给 traffic lights 由 AppShell padding-top + ::before drag region 实现
+		// v1.x 拍板 2026-07-04：保留 macOS standard titlebar。
+		// 之前回合改的 mac.TitleBarHiddenInset 在 Wails WKWebView (Big Sur+) 上让
+		// AppShell statusbar 不再可点（"完全看不到、无法使用"）。
+		// 原因：TitleBarHiddenInset 等价 TitlebarAppearsTransparent + HideTitle +
+		// FullSizeContent + UseToolbar + HideToolbarSeparator，让 webview 占满整个 NSWindow，
+		// 配 AppShell 的 padding-top:28 + ::before drag region 后，Big Sur+ 圆角 + safe area
+		// 让 statusbar 落在 webview frame 圆角区下方，被 macOS 系统覆盖。
+		// 退回 TitleBarDefault + 让 BackgroundColour #0F1115（dark canvas）作为兜底；
+		// macOS 系统 dark mode 时 titlebar 整体深色（与 .shell background 协调）。
+		// 标题栏精确跟随应用主题的方案用后续版本探索（不再靠 webview CSS 覆盖 nswindow 标题栏）。
 		Mac: &mac.Options{
-			TitleBar: mac.TitleBarHiddenInset(),
+			TitleBar: mac.TitleBarDefault(),
 			About: &mac.AboutInfo{
 				Title:   "Gitea Kanban",
 				Message: "版本 2.0.0\n基于 Gitea/GitHub 的桌面端看板 + 时间轴工具",
