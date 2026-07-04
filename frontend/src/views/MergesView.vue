@@ -1575,9 +1575,10 @@ function formatRelative(iso: string | undefined): string {
                             <span v-if="currentUsername && item.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
                             <span class="merge-item__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
                           </div>
-                          <!-- 编辑态：textarea 替代渲染后的 markdown -->
+                          <!-- 编辑态：textarea 替代渲染后的 markdown (v0.6.26 优化) -->
                           <template v-if="editingCommentId === item.id">
                             <textarea
+                              :ref="el => { if (el) editTextareaRef = el as HTMLTextAreaElement }"
                               class="merge-item__comment-edit-input"
                               rows="3"
                               :value="editDrafts.get(item.id) ?? ''"
@@ -1587,17 +1588,18 @@ function formatRelative(iso: string | undefined): string {
                               spellcheck="false"
                             ></textarea>
                             <div class="merge-item__comment-edit-actions">
+                              <span class="merge-item__comment-editing-hint">ESC 取消 · Enter 保存</span>
+                              <button
+                                type="button"
+                                class="merge-item__comment-edit-cancel"
+                                @click.stop="cancelEditComment()"
+                              >取消</button>
                               <button
                                 type="button"
                                 class="merge-item__comment-edit-save"
                                 :disabled="(editDrafts.get(item.id) ?? '').trim().length === 0"
                                 @click.stop="submitEditComment(p, item as any)"
                               >保存</button>
-                              <button
-                                type="button"
-                                class="merge-item__comment-edit-cancel"
-                                @click.stop="cancelEditComment()"
-                              >取消</button>
                             </div>
                           </template>
                           <!-- 展示态 -->
@@ -3014,10 +3016,10 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: 5px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 2px;
   flex: 1 1 0;
   min-height: 0;
   min-width: 0;
@@ -3068,22 +3070,25 @@ function formatRelative(iso: string | undefined): string {
   max-width: 80px;
 }
 
-/* 头像圈（首字母） */
+/* 头像圈（首字母）— v0.6.26：彩色底区分作者 */
 .merge-item__comment-avatar {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: var(--color-divider);
-  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   font-weight: 600;
   user-select: none;
+  border: 1.5px solid var(--color-divider);
+  flex-shrink: 0;
 }
 .merge-item__comment--self .merge-item__comment-avatar {
   background: var(--color-primary);
+  border-color: var(--color-primary);
   color: var(--color-text-inverse);
 }
 
@@ -3106,15 +3111,16 @@ function formatRelative(iso: string | undefined): string {
   flex: 1 1 0;
   min-width: 0;
   max-width: 100%;
-  padding: 5px 8px;
-  /* v0.6.23：取消背景色，用边框线表达 */
-  background: transparent;
+  padding: 6px 10px;
+  /* v0.6.26：淡色底纹提升可读性 */
+  background: var(--color-bg-subtle);
   border: 1px solid var(--color-divider);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   position: relative;
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 /* v0.6.22：评论区宽度撑满，padding 只控制左右留白 */
 .merge-item__comment-list {
@@ -3133,8 +3139,9 @@ function formatRelative(iso: string | undefined): string {
   align-items: flex-start;
   gap: 6px;
   min-width: 0;
-  margin: 0 0 12px;
-  max-width: 70%;
+  margin: 0 0 8px;
+  max-width: 75%;
+  transition: opacity var(--t-fast) var(--ease);
 }
 /* v0.6.22："我"的评论靠右 */
 .merge-item__comment--self {
@@ -3161,13 +3168,11 @@ function formatRelative(iso: string | undefined): string {
   /* 让他人箭头也跟随气泡背景色 */
   background-clip: padding-box;
 }
-/* v1.5.11：复刻 gitea 颜色——"我"的气泡用主色实色 + 白字（强对比），
- * 他人保持 elevated 浅色 + 默认字（弱对比） */
+/* v0.6.26："我"的气泡用主色软底 + 主色边框 */
 .merge-item__comment--self .merge-item__comment-bubble {
-  /* v0.6.20：去掉背景色，改用主色边框线表达"我发的评论" */
-  background: transparent;
-  border-color: var(--color-primary);
-  border-width: 1.5px;
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-alpha-45);
+  border-width: 1px;
   color: var(--color-text);
 }
 /* "我"的气泡里所有文字保持默认色（背景已透明） */
@@ -3183,7 +3188,7 @@ function formatRelative(iso: string | undefined): string {
   text-decoration: underline;
 }
 
-/* v1.5.11：复刻 Gitea 引用评论——hover 气泡显示"引用"按钮（他人消息才显示，自己不能引用自己） */
+/* v1.5.11：复刻 Gitea 引用评论（v0.6.26 适配淡色气泡） */
 .merge-item__comment-quote {
   position: absolute;
   top: 4px;
@@ -3192,7 +3197,7 @@ function formatRelative(iso: string | undefined): string {
   align-items: center;
   gap: 3px;
   padding: 2px 6px;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   font-size: var(--font-xs);
@@ -3237,9 +3242,10 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
+  flex-wrap: wrap;
 }
 .merge-item__comment-author {
   font-weight: 600;
@@ -3304,14 +3310,18 @@ function formatRelative(iso: string | undefined): string {
   flex-direction: column;
   gap: 4px;
   padding: 5px;
-  /* v0.6.25：去掉浅苍蓝背景色，与整页背景统一 */
   background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   min-width: 0;
-  height: 120px;                /* v2.62：100 → 120 */
+  height: 120px;
   flex-shrink: 0;
   overflow: hidden;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.merge-item__comment-compose:focus-within {
+  border-color: var(--color-primary-alpha-45);
+  box-shadow: 0 0 0 2px var(--color-primary-softer);
 }
 
 /* textarea + @ 候选下拉的相对定位容器（v2.62：内部右上角放发送按钮） */
@@ -3346,7 +3356,11 @@ function formatRelative(iso: string | undefined): string {
 }
 .merge-item__comment-send-absolute:hover:not(:disabled) {
   background: var(--color-primary-hover);
-  transform: scale(1.05);
+  transform: scale(1.08);
+  box-shadow: 0 2px 6px rgba(var(--shadow-rgb), 0.22);
+}
+.merge-item__comment-send-absolute:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .merge-item__comment-send-absolute:disabled {
   opacity: 0.4;
@@ -3698,21 +3712,22 @@ function formatRelative(iso: string | undefined): string {
 /* ===== v0.5.0 M1: 评论编辑 / 删除 ===== */
 .merge-item__comment-edit-input {
   width: 100%;
-  min-height: 60px;
+  min-height: 72px;
   padding: 8px 10px;
-  border: 1px solid var(--color-border);
+  border: 1.5px solid var(--color-primary-alpha-45);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
+  background: var(--color-bg);
   color: var(--color-text);
-  font-family: var(--font-mono);
+  font-family: inherit;
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: 1.6;
   resize: vertical;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
 .merge-item__comment-edit-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-primary-softer);
+  box-shadow: 0 0 0 3px var(--color-primary-softer);
 }
 .merge-item__comment-edit-actions {
   display: flex;
@@ -3721,33 +3736,48 @@ function formatRelative(iso: string | undefined): string {
 }
 .merge-item__comment-edit-save,
 .merge-item__comment-edit-cancel {
-  padding: 4px 12px;
+  padding: 5px 14px;
   border-radius: var(--radius-sm);
   font-size: var(--font-xs);
+  font-weight: 500;
   cursor: pointer;
   border: 1px solid;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 .merge-item__comment-edit-save {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: white;
+  color: var(--color-text-inverse);
+}
+.merge-item__comment-edit-save:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+}
+.merge-item__comment-edit-save:active:not(:disabled) {
+  transform: translateY(0);
 }
 .merge-item__comment-edit-save:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 .merge-item__comment-edit-cancel {
   background: transparent;
-  border-color: var(--color-border);
+  border-color: var(--color-divider);
   color: var(--color-text-muted);
 }
 .merge-item__comment-edit-cancel:hover {
   background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 .merge-item__comment-edited-mark {
-  font-size: var(--font-xs);
-  color: var(--color-text-muted);
-  margin-left: 4px;
+  display: inline-block;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  margin-left: 6px;
+  padding: 1px 5px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-xs);
+  font-style: italic;
 }
 .merge-item__comment-actions {
   display: flex;
@@ -3759,16 +3789,16 @@ function formatRelative(iso: string | undefined): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  border: none;
-  background: transparent;
+  border: 1px solid transparent;
+  background: var(--color-bg-subtle);
   color: var(--color-text-muted);
   border-radius: var(--radius-sm);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 .merge-item__comment:hover .merge-item__comment-edit-btn,
 .merge-item__comment:hover .merge-item__comment-delete-btn {
@@ -3776,10 +3806,12 @@ function formatRelative(iso: string | undefined): string {
 }
 .merge-item__comment-edit-btn:hover {
   background: var(--color-bg-hover);
+  border-color: var(--color-divider);
   color: var(--color-text);
 }
 .merge-item__comment-delete-btn:hover {
   background: var(--color-danger-soft);
+  border-color: var(--color-danger);
   color: var(--color-danger);
 }
 
@@ -3946,11 +3978,12 @@ function formatRelative(iso: string | undefined): string {
   background: var(--color-bg-hover);
 }
 
-/* ===== v0.5.0 M4: Review Event 系统卡片 ===== */
+/* ===== v0.5.0 M4: Review Event 系统卡片 (v0.6.26 优化) ===== */
 .merge-item__comment--review-event {
   background: transparent;
   border-style: dashed;
-  opacity: 0.85;
+  opacity: 0.9;
+  padding-left: 4px;
 }
 .merge-item__comment--review-approved {
   border-left: 3px solid var(--color-success, #16a34a);
