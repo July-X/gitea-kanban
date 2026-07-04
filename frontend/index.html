@@ -4,6 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gitea Kanban</title>
+    <!--
+      v1.x 拍板 2026-07-04：启动期 platform 同步检测（必须在 main.ts ESM 之前执行）
+       - 给 <html> 加 data-platform="mac|linux|windows" 属性
+       - CSS 用 [data-platform="mac"] 给 .shell__nav 加 padding-top:32 让位 macOS traffic lights
+       - 用 navigator.platform 而非 async runtime.Environment() —— 必须保证 first paint 之前 attr 已就位
+    -->
+    <script>
+      (function () {
+        var p = (navigator.platform || '').toLowerCase();
+        var ua = (navigator.userAgent || '').toLowerCase();
+        var platform =
+          p.indexOf('mac') >= 0 || ua.indexOf('mac os x') >= 0
+            ? 'mac'
+            : p.indexOf('linux') >= 0
+              ? 'linux'
+              : p.indexOf('win') >= 0
+                ? 'windows'
+                : 'unknown';
+        document.documentElement.setAttribute('data-platform', platform);
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

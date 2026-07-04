@@ -20,12 +20,17 @@
  *     · 底部 StatusBar 上边界 1px --color-divider-strong（区域边界强度更高）
  *   - 区域边界 token 已在 theme.css 提档（dark 10% / light 12%）保证可读
  *
- * v1.6 拍板 2026-07-04（macOS 布局修复）：
- *   - 上一回合的 mac.TitleBarHiddenInset + padding-top 28 + ::before drag region 方案
- *     在 Wails WKWebView (Big Sur+) 上让 statusbar 落在 webview 圆角区外被遮挡，
- *     已回退 main.go 到 TitleBarDefault —— 见 main.go 注释 + docs/releases 后续 ADR。
- *   - 保留 syncViewportHeight（App.vue + --vheight CSS var）以解决 WKWebView 中 100vh ≠ NSWindow 高度
- *   - 保留 .shell__status z-index: 9999 防止 view 内 transform/opacity promoted layer 覆盖
+ * v1.x 拍板 2026-07-04 v2.1（macOS 标题栏主题跟随 + 不破坏 StatusBar）：
+ *   - 配套 main.go `Mac.TitleBar = mac.TitleBarHiddenInset()`：标题栏背景透明 + webview 占满整 NSWindow
+ *   - 颜色由 AppShell .shell 的 background: var(--color-bg) 接管：
+ *     dark=#0F1115 / light=#e8f1f5，主题切换时自动跟随
+ *   - traffic lights (红/黄/绿) 仍显示（macOS 浮层在 webview 上面）
+ *   - **不给 .shell padding-top: 28**（上一版这么做让 StatusBar 落在 webview 圆角区被遮挡）
+ *     只给 .shell__nav (NavRail) 加 padding-top: 32 仅 macOS，让位 28px+给 traffic lights
+ *   - **.shell height = var(--vheight) - 22px** 仅 macOS，让 22px 给 macOS Big Sur/Sonoma+ 圆角，
+ *     .shell__status `bottom: 0` 现在落在屏幕安全区内，StatusBar 33px 完整可见可点
+ *   - .shell__status z-index: 9999 保持，避免 view 内 transform promoted layer 覆盖
+ *   - data-platform 是 index.html 内联脚本同步设的 attr，first paint 之前可用
  */
 import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
@@ -63,11 +68,50 @@ import StatusBar from './StatusBar.vue';
   background: var(--color-bg);
 }
 
-/* v1.6 拍板 2026-07-04：macOS 透明标题栏 padding-top + ::before drag region 整段删除。
- * 之前的方案（mac.TitleBarHiddenInset + padding-top:28 + ::before 28px drag region）
- * 在 Big Sur+ WKWebView 上让 statusbar 被 macOS 圆角 / safe area 遮挡；
- * 退回 mac.TitleBarDefault()，NSWindow 自带 28px titlebar 区，webview 起点已在 y=28 之下，
- * AppShell padding-top 多让 28px 反让 navrail 下沉。这块整个删。 */
+/* v1.x 拍板 2026-07-04 v2（macOS 标题栏主题跟随）：
+ * TitleBarHiddenInset 让 webview 占满整个 NSWindow（含原标题栏区 0..28px），
+ * traffic lights 浮在该 28px 区上方。
+ *
+ * v2.1 拍板 2026-07-04（macOS 圆角修复）：
+ * TitleBarHiddenInset + FullSizeContent 让 webview 占满 NSWindow，但 macOS Sonoma+
+ * 默认 NSWindow 底部圆角 ~22px 在系统层 visual clip，**.shell__status (height 33px,
+ * bottom: 0) 落在圆角区被遮 22px**，按钮下半截看不到也点不到（被 GitGraph 加载更多等
+ * 上层元素接收 hit）。
+ * 修法：让 .shell 整体上抬 22px（仅 macOS），让那 22px 给 macOS 圆角：
+ *   - .shell height = var(--vheight) - 22px
+ *   - .shell__status bottom: 0 现在落在 webview 内容底部 = 屏幕安全区
+ *   - StatusBar 33px 完整可见可点
+ *   - NSWindow 底部 22px 圆角 transparent 区显示 NSWindow bg (#0F1115) 与 .shell bg 视觉一致
+ *
+ * v2 拍板：不给 .shell padding-top: 28，让位 NavRail 内部 padding-top: 32 + ::before drag region
+ *
+ * 用 :global() 穿透 scoped style 选择 html[data-platform='mac']（index.html 内联脚本同步设置） */
+:global(html[data-platform='mac']) .shell {
+  /* macOS Big Sur / Monterey / Ventura ~14-16px, Sonoma+ ~22px。Sonoma 是当前主流 release，
+   * 取 22px 保守估计覆盖 Sonoma/Sequoia。如果未来 macOS 再增，让这个值同步增长 */
+  height: calc(var(--vheight, 100vh) - 22px);
+}
+:global(html[data-platform='mac']) .shell__nav :deep(.navrail) {
+  /* 让 navrail 内部 logo / 按钮从 y=32 开始 (traffic lights 在 y=16~40)，
+   * Header↔Body 分界仍由 1px navrail border 提供。 */
+  padding-top: 32px;
+}
+/* 顶部 32px drag region —— 让用户能拖窗口 + 避免 navrail / main 元素遮 traffic lights
+ *   - ::before pointer-events: auto 让 NSWindow 处理 drag（Wails v2.5+ 默认 CSSDragProperty="--wails-draggable"）
+ *   - background 透明，让 .shell 的 var(--color-bg) 透上来 → 标题栏颜色跟主题走
+ *   - z-index 99999 高于所有 layer，但 macOS traffic lights 在更上层 NSWindow，永远可点 */
+:global(html[data-platform='mac']) .shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  background: transparent;
+  --wails-draggable: drag;
+  z-index: 99999;
+  pointer-events: auto;
+}
 
 .shell__nav {
   position: relative;
