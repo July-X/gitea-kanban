@@ -38,6 +38,7 @@ import {
   systemOpenPath,
   exportLogs,
   copyRecentLogs,
+  normalizeError,
 } from '@renderer/lib/ipc-client';
 import {
   testGitBinary,
@@ -77,9 +78,9 @@ async function onExportLogs(): Promise<void> {
       description: `共 ${result.logCount} 个日志文件，${(result.logBytes / 1024).toFixed(1)}KB`,
     });
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    logError('settings', '导出日志失败', errMsg);
-    showToast({ type: 'error', message: '导出失败', description: errMsg });
+    const normalized = normalizeError(err);
+    logError('settings', '导出日志失败', normalized.messageText);
+    showToast({ type: 'error', message: '导出失败', description: normalized.messageText });
   } finally {
     exportingLogs.value = false;
   }
@@ -100,9 +101,9 @@ async function onCopyRecentLogs(): Promise<void> {
       description: `最近日志 ${result.bytes} 字节`,
     });
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    logError('settings', '复制最近日志失败', errMsg);
-    showToast({ type: 'error', message: '复制失败', description: errMsg });
+    const normalized = normalizeError(err);
+    logError('settings', '复制最近日志失败', normalized.messageText);
+    showToast({ type: 'error', message: '复制失败', description: normalized.messageText });
   } finally {
     copyingLogs.value = false;
   }
