@@ -3039,10 +3039,10 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: 8px 10px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   flex: 1 1 0;
   min-height: 0;
   min-width: 0;
@@ -3072,14 +3072,22 @@ function formatRelative(iso: string | undefined): string {
   background: var(--color-text-muted);
 }
 
-/* 单条评论 li：横向 flex，avatar + bubble
- * 默认 = 他人：左对齐
- * --self = 我：右对齐（reverse + 行内交换顺序） */
+/* 单条评论 li：聊天气泡布局（v0.6.26）
+ * 默认 = 他人：左对齐，max-width 85%
+ * --self = 我：右对齐，max-width 85% */
 .merge-item__comment {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  margin: 0 0 10px;
+  max-width: 85%;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.merge-item__comment--self {
+  margin-left: auto;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 
 /* v0.6.26：评论侧栏（头像 + 用户名垂直排列）— 更紧凑 */
@@ -3136,40 +3144,13 @@ function formatRelative(iso: string | undefined): string {
   max-width: 100%;
   padding: 8px 12px;
   background: var(--color-bg-elevated);
-  border: 1px solid color-mix(in srgb, var(--color-text-dim) 25%, transparent);
+  border: 1px solid rgba(128,128,128,0.3);
   border-radius: var(--radius-md);
   position: relative;
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
   transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
-}
-/* v0.6.26：评论区宽度撑满，减少左右留白 */
-.merge-item__comment-list {
-  padding: 8px 4px;
-  display: flex;
-  flex-direction: column;
-}
-/* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
- * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
-.merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
-  padding-right: 50px;
-}
-/* v0.6.26：聊天气泡布局 — 他人靠左(max-width 85%)，"我"靠右(max-width 85%) */
-.merge-item__comment {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  margin: 0 0 10px;
-  max-width: 85%;
-  transition: opacity var(--t-fast) var(--ease);
-}
-/* v0.6.26："我"的评论靠右 */
-.merge-item__comment--self {
-  margin-left: auto;
-  flex-direction: row-reverse;
-  justify-content: flex-end;
 }
 /* 气泡小箭头（指向头像）—— 用 CSS border 画三角形（v0.6.26 恢复可见性） */
 .merge-item__comment-bubble::before {
@@ -3179,7 +3160,7 @@ function formatRelative(iso: string | undefined): string {
   width: 8px;
   height: 8px;
   background: var(--color-bg-elevated);
-  border: 1px solid color-mix(in srgb, var(--color-text-dim) 25%, transparent);
+  border: 1px solid rgba(128,128,128,0.3);
   /* 默认（他人，左侧）：箭头指向左 */
   left: -5px;
   border-right: none;
@@ -3251,7 +3232,6 @@ function formatRelative(iso: string | undefined): string {
   border-bottom: none;
   border-right: 1.5px solid var(--color-primary-alpha-45);
   border-top: 1.5px solid var(--color-primary-alpha-45);
-  /* 旋转 45° 让两个边形成指向右的三角箭头 */
   transform: rotate(45deg);
 }
 

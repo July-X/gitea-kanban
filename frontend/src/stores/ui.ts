@@ -38,6 +38,10 @@ import { logWarn } from '@renderer/lib/frontend-log';
 import { ref } from 'vue';
 import { getIpcClient } from '@renderer/lib/ipc-client';
 import { showToast } from '@renderer/lib/toast';
+import {
+  WindowSetDarkTheme,
+  WindowSetLightTheme,
+} from '../../wailsjs/wailsjs/runtime/runtime';
 
 /** 主题枚举（与 frontend/wailsjs/wailsjs/go/main/App.d.ts ThemeEnumSchema 同步 · single source of truth）
  *
@@ -182,6 +186,23 @@ export const useUiStore = defineStore('ui', () => {
     persistTheme(theme).catch(() => {
       showToast({ type: 'error', message: '主题保存失败，请重试' });
     });
+
+    // 4. 同步调 Wails runtime API 让 Windows 平台 titlebar 颜色跟随主题切换
+    //    Windows 专用 API（macOS / Linux 上 no-op）—— runtime.d.ts 注释明标 *Windows only*
+    //    Go 端 dispatcher 在 macOS / Linux 上调用 appFrontend.WindowSetDarkTheme() 静默返回，
+    //    不会报错（runtime_prod_desktop.js 调用通过 WailsInvoke "WADT"/"WALT"，Go 端内部判平台）
+    //    v1.12 2026-07-04：用户反馈 Windows 平台 titlebar 颜色可以跟随应用主题
+    //    （macOS 没有 runtime NSAppearance API，标题栏仍是 macOS 系统色）
+    try {
+      if (theme === 'dark') {
+        WindowSetDarkTheme();
+      } else {
+        WindowSetLightTheme();
+      }
+    } catch {
+      // runtime API 不可用时静默（web 跑在非 Wails 桌面环境、或 wailsjs runtime 未生成）
+      // 主题切换本身已成功（步骤 1-3），不影响主体逻辑
+    }
   }
 
   /**
@@ -210,6 +231,18 @@ export const useUiStore = defineStore('ui', () => {
     currentTheme.value = initialTheme;
     if (typeof document !== 'undefined') {
       document.documentElement.dataset.theme = initialTheme;
+    }
+
+    // 同步调 Wails runtime API 让 Windows 平台启动期 titlebar 颜色就跟用户偏好
+    // （避免启动后看到短暂错色才跟随主题切换）
+    try {
+      if (initialTheme === 'dark') {
+        WindowSetDarkTheme();
+      } else {
+        WindowSetLightTheme();
+      }
+    } catch {
+      // 静默：runtime API 不可用时不影响主题逻辑（macOS / Linux / 浏览器跑）
     }
 
     // 2. 异步：拉远端持久化值，reconcile（启动期 50-200ms 后台完成）
