@@ -1442,6 +1442,11 @@ function formatRelative(iso: string | undefined): string {
 
           <!-- 概览 Tab: meta + 审查 -->
           <div v-if="detailTab === 'overview'" class="merge-item__detail-overview">
+            <!-- ===== v0.6.26: PR 描述/正文 ===== -->
+            <div v-if="p.body" class="merge-item__detail-body">
+              <div class="merge-item__detail-body-label">描述</div>
+              <div class="merge-item__detail-body-content md-body" v-html="renderMarkdown(p.body)"></div>
+            </div>
             <!-- ===== v0.5.0 M3: 评审区 ===== -->
             <div v-if="p.state === 'open'" class="merge-item__reviews">
               <!-- 评审列表 -->
@@ -1485,6 +1490,10 @@ function formatRelative(iso: string | undefined): string {
                   >取消</button>
                 </div>
               </div>
+            </div>
+            <!-- v0.6.26: 概览空态（无描述 + 无评审） -->
+            <div v-if="!p.body && getReviewPanel(p.index).length === 0" class="merge-item__detail-overview-empty">
+              暂无描述和评审信息
             </div>
           </div>
 
@@ -3871,6 +3880,58 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__btn--review-comment:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
+}
+
+/* ===== v0.6.26: PR 描述/正文 ===== */
+.merge-item__detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-divider-soft);
+  margin-bottom: 8px;
+}
+.merge-item__detail-body-label {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.merge-item__detail-body-content {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  line-height: 1.6;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
+}
+.merge-item__detail-body-content :deep(p) { margin: 0 0 6px; }
+.merge-item__detail-body-content :deep(p:last-child) { margin-bottom: 0; }
+.merge-item__detail-body-content :deep(code) {
+  background: var(--color-bg-subtle);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  font-size: 0.9em;
+}
+.merge-item__detail-body-content :deep(pre) {
+  background: var(--color-bg-subtle);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.merge-item__detail-body-content :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+.merge-item__detail-body-content :deep(a) {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.merge-item__detail-body-content :deep(ul),
+.merge-item__detail-body-content :deep(ol) {
+  padding-left: 20px;
 }
 
 /* ===== v0.5.0 M3: 评审区 ===== */
