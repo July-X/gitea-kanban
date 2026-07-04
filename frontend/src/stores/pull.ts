@@ -113,6 +113,56 @@ export const usePullStore = defineStore('pull', () => {
     return result;
   });
 
+  /**
+   * 对话时间线：把评审事件 + 普通评论按时间合并，用于对话 Tab 渲染
+   * 每个元素标记 source: 'review' | 'comment'
+   */
+  const timelineItems = computed(() => {
+    const result = new Map<number, Array<
+      { source: 'review'; id: number; state: string; body: string; author: { username: string }; submittedAt: string; isReviewEvent: true }
+      | { source: 'comment'; id: number; body: string; author: { username: string }; createdAt: string; updatedAt?: string; isReviewEvent: false }
+    >>();
+    for (const [prIdx, panel] of commentPanels.value.entries()) {
+      const items = result.get(prIdx) ?? [];
+      for (const c of panel.items) {
+        items.push({
+          source: 'comment',
+          id: c.id,
+          body: c.body,
+          author: { username: c.author?.username ?? '匿名' },
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          isReviewEvent: false,
+        });
+      }
+      result.set(prIdx, items);
+    }
+    for (const [prIdx, reviews] of reviewPanels.value.entries()) {
+      const items = result.get(prIdx) ?? [];
+      for (const r of reviews) {
+        items.push({
+          source: 'review',
+          id: r.id,
+          state: r.state,
+          body: r.body ?? '',
+          author: { username: r.author?.username ?? '匿名' },
+          submittedAt: r.submittedAt,
+          isReviewEvent: true,
+        });
+      }
+      result.set(prIdx, items);
+    }
+    // Sort each PR's items by date (ascending)
+    for (const items of result.values()) {
+      items.sort((a, b) => {
+        const dateA = a.source === 'comment' ? a.createdAt : a.submittedAt;
+        const dateB = b.source === 'comment' ? b.createdAt : b.submittedAt;
+        return dateA.localeCompare(dateB);
+      });
+    }
+    return result;
+  });
+
   const filteredItems = computed<PullDto[]>(() => {
     const q = search.value.trim().toLowerCase();
     let arr = items.value;
@@ -485,6 +535,7 @@ export const usePullStore = defineStore('pull', () => {
     reviewCommentsGrouped,
     getPanel,
     getReviewPanel,
+    timelineItems,
     // actions
     list,
     loadMore,

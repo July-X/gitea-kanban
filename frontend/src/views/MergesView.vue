@@ -1514,102 +1514,128 @@ function formatRelative(iso: string | undefined): string {
                   <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
                     暂无对话，发起第一条评论开始讨论吧
                   </div>
-                  <!-- 评论列表：气泡聊天布局 + 滚动 -->
+                  <!-- 评论列表：时间线渲染（评审事件系统消息 + 普通评论混合，按时间排序） -->
                   <ul v-else class="merge-item__comment-list">
-                    <li
-                      v-for="c in getPanel(p.index).items"
-                      :key="c.id"
-                      class="merge-item__comment"
-                      :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
-                    >
-                      <div class="merge-item__comment-side">
-                        <div
-                          class="merge-item__comment-avatar"
-                          :title="c.author.username"
-                          aria-hidden="true"
-                        >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
-                        <div class="merge-item__comment-name">{{ c.author.username }}</div>
-                      </div>
-                      <div class="merge-item__comment-bubble">
-                        <div class="merge-item__comment-meta">
-                          <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
-                          <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
+                    <template v-for="(item, ti) in pull.timelineItems.get(p.index) ?? []" :key="`${item.source}-${item.id}`">
+                      <!-- ===== 评审事件系统卡片 ===== -->
+                      <li
+                        v-if="item.isReviewEvent"
+                        class="merge-item__comment merge-item__comment--review-event"
+                        :class="`merge-item__comment--review-${item.state}`"
+                      >
+                        <div class="merge-item__comment-side">
+                          <div class="merge-item__comment-avatar" :class="`merge-item__comment-avatar--${item.state}`">
+                            {{ item.state === 'approved' ? '✓' : item.state === 'changes_requested' ? '✗' : '💬' }}
+                          </div>
+                          <div class="merge-item__comment-name merge-item__comment-name--muted">系统</div>
                         </div>
-                        <!-- 编辑态：textarea 替代渲染后的 markdown -->
-                        <template v-if="editingCommentId === c.id">
-                          <textarea
-                            class="merge-item__comment-edit-input"
-                            rows="3"
-                            :value="editDrafts.get(c.id) ?? ''"
-                            @input="editDrafts.set(c.id, ($event.target as HTMLTextAreaElement).value)"
-                            @keydown.escape.stop="cancelEditComment()"
-                            @keydown.enter.stop.prevent="submitEditComment(p, c)"
-                            spellcheck="false"
-                          ></textarea>
-                          <div class="merge-item__comment-edit-actions">
-                            <button
-                              type="button"
-                              class="merge-item__comment-edit-save"
-                              :disabled="(editDrafts.get(c.id) ?? '').trim().length === 0"
-                              @click.stop="submitEditComment(p, c)"
-                            >保存</button>
-                            <button
-                              type="button"
-                              class="merge-item__comment-edit-cancel"
-                              @click.stop="cancelEditComment()"
-                            >取消</button>
+                        <div class="merge-item__comment-bubble merge-item__comment-bubble--event">
+                          <div class="merge-item__comment-meta">
+                            <span class="merge-item__review-state-badge" :class="`merge-item__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
+                            <span class="merge-item__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
                           </div>
-                        </template>
-                        <!-- 展示态 -->
-                        <template v-else>
-                          <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
-                          <!-- v0.5.0 M1：已编辑标记 -->
-                          <span
-                            v-if="c.updatedAt && c.updatedAt !== c.createdAt"
-                            class="merge-item__comment-edited-mark"
-                            :title="'编辑于 ' + formatDate(c.updatedAt)"
-                          >（已编辑）</span>
-                          <!-- v1.5.11：复刻 Gitea 引用评论 -->
-                          <div class="merge-item__comment-actions">
-                            <button
-                              v-if="currentUsername && c.author.username !== currentUsername"
-                              type="button"
-                              class="merge-item__comment-quote"
-                              :title="'引用这条评论'"
-                              @click.stop="quoteComment(p.index, c)"
-                            >
-                              <Quote :size="11" :stroke-width="2" aria-hidden="true" />
-                              <span>引用</span>
-                            </button>
-                            <!-- v0.5.0 M1：编辑 / 删除仅作者本人可见 -->
-                            <template v-if="currentUsername && c.author.username === currentUsername">
+                          <div v-if="item.body" class="merge-item__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                          <div v-if="item.author?.username" class="merge-item__comment-event-author">
+                            — {{ item.author.username }}
+                          </div>
+                        </div>
+                      </li>
+
+                      <!-- ===== 普通评论卡片 ===== -->
+                      <li
+                        v-else
+                        class="merge-item__comment"
+                        :class="{ 'merge-item__comment--self': currentUsername && item.author.username === currentUsername }"
+                      >
+                        <div class="merge-item__comment-side">
+                          <div
+                            class="merge-item__comment-avatar"
+                            :title="item.author.username"
+                            aria-hidden="true"
+                          >{{ (item.author.username || '?').charAt(0).toUpperCase() }}</div>
+                          <div class="merge-item__comment-name">{{ item.author.username }}</div>
+                        </div>
+                        <div class="merge-item__comment-bubble">
+                          <div class="merge-item__comment-meta">
+                            <span v-if="currentUsername && item.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
+                            <span class="merge-item__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
+                          </div>
+                          <!-- 编辑态：textarea 替代渲染后的 markdown -->
+                          <template v-if="editingCommentId === item.id">
+                            <textarea
+                              class="merge-item__comment-edit-input"
+                              rows="3"
+                              :value="editDrafts.get(item.id) ?? ''"
+                              @input="editDrafts.set(item.id, ($event.target as HTMLTextAreaElement).value)"
+                              @keydown.escape.stop="cancelEditComment()"
+                              @keydown.enter.stop.prevent="submitEditComment(p, item as any)"
+                              spellcheck="false"
+                            ></textarea>
+                            <div class="merge-item__comment-edit-actions">
                               <button
                                 type="button"
-                                class="merge-item__comment-edit-btn"
-                                :title="'编辑'"
-                                @click.stop="startEditComment(c)"
-                              >
-                                <Pencil :size="11" :stroke-width="2" aria-hidden="true" />
-                              </button>
+                                class="merge-item__comment-edit-save"
+                                :disabled="(editDrafts.get(item.id) ?? '').trim().length === 0"
+                                @click.stop="submitEditComment(p, item as any)"
+                              >保存</button>
                               <button
                                 type="button"
-                                class="merge-item__comment-delete-btn"
-                                :title="'删除'"
-                                @click.stop="confirmDeleteComment(p, c)"
+                                class="merge-item__comment-edit-cancel"
+                                @click.stop="cancelEditComment()"
+                              >取消</button>
+                            </div>
+                          </template>
+                          <!-- 展示态 -->
+                          <template v-else>
+                            <div class="merge-item__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                            <!-- v0.5.0 M1：已编辑标记 -->
+                            <span
+                              v-if="item.updatedAt && item.updatedAt !== item.createdAt"
+                              class="merge-item__comment-edited-mark"
+                              :title="'编辑于 ' + formatDate(item.updatedAt)"
+                            >（已编辑）</span>
+                            <!-- v1.5.11：复刻 Gitea 引用评论 -->
+                            <div class="merge-item__comment-actions">
+                              <button
+                                v-if="currentUsername && item.author.username !== currentUsername"
+                                type="button"
+                                class="merge-item__comment-quote"
+                                :title="'引用这条评论'"
+                                @click.stop="quoteComment(p.index, item as any)"
                               >
-                                <XCircle :size="11" :stroke-width="2" aria-hidden="true" />
+                                <Quote :size="11" :stroke-width="2" aria-hidden="true" />
+                                <span>引用</span>
                               </button>
-                            </template>
-                          </div>
-                          <!-- v0.5.0 M2：表情反应条 -->
-                          <ReactionBar
-                            :project-id="activeProjectId"
-                            :comment-id="c.id"
-                            :editable="p.state === 'open'"
-                          />
-                        </template>
-                      </div>
-                    </li>
+                              <!-- v0.5.0 M1：编辑 / 删除仅作者本人可见 -->
+                              <template v-if="currentUsername && item.author.username === currentUsername">
+                                <button
+                                  type="button"
+                                  class="merge-item__comment-edit-btn"
+                                  :title="'编辑'"
+                                  @click.stop="startEditComment(item as any)"
+                                >
+                                  <Pencil :size="11" :stroke-width="2" aria-hidden="true" />
+                                </button>
+                                <button
+                                  type="button"
+                                  class="merge-item__comment-delete-btn"
+                                  :title="'删除'"
+                                  @click.stop="confirmDeleteComment(p, item as any)"
+                                >
+                                  <XCircle :size="11" :stroke-width="2" aria-hidden="true" />
+                                </button>
+                              </template>
+                            </div>
+                            <!-- v0.5.0 M2：表情反应条 -->
+                            <ReactionBar
+                              :project-id="activeProjectId"
+                              :comment-id="item.id"
+                              :editable="p.state === 'open'"
+                            />
+                          </template>
+                        </div>
+                      </li>
+                    </template>
                   </ul>
                 </div>
 
@@ -3903,6 +3929,55 @@ function formatRelative(iso: string | undefined): string {
 }
 .merge-item__review-cancel:hover {
   background: var(--color-bg-hover);
+}
+
+/* ===== v0.5.0 M4: Review Event 系统卡片 ===== */
+.merge-item__comment--review-event {
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.85;
+}
+.merge-item__comment--review-approved {
+  border-left: 3px solid var(--color-success, #16a34a);
+}
+.merge-item__comment--review-changes_requested {
+  border-left: 3px solid var(--color-danger, #dc2626);
+}
+.merge-item__comment--review-commented {
+  border-left: 3px solid var(--color-text-muted);
+}
+.merge-item__comment-avatar--approved {
+  background: var(--color-success, #16a34a);
+  color: #fff;
+}
+.merge-item__comment-avatar--changes_requested {
+  background: var(--color-danger, #dc2626);
+  color: #fff;
+}
+.merge-item__comment-avatar--commented {
+  background: var(--color-text-muted);
+  color: #fff;
+}
+.merge-item__comment-bubble--event {
+  border-style: dashed;
+  background: transparent;
+}
+.merge-item__review-state-badge--approved {
+  color: var(--color-success, #16a34a);
+}
+.merge-item__review-state-badge--changes_requested {
+  color: var(--color-danger, #dc2626);
+}
+.merge-item__review-state-badge--commented {
+  color: var(--color-text-muted);
+}
+.merge-item__comment-name--muted {
+  font-style: italic;
+}
+.merge-item__comment-event-author {
+  margin-top: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
 }
 
 </style>

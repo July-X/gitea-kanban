@@ -1,9 +1,21 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.5.0-m9)
+# AGENTS.md — gitea-kanban (v2.0 → v0.5.0)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-02（**v0.4.0 Git 二进制设置 + Git Graph UI 收敛**）
+> 最后更新：2026-07-04（**v0.5.0 PR 评论模块对齐 Gitea/GitHub**）
+>
+> - **v0.5.0** (2026-07-04)：PR 评论模块 M1-M4 完整交付。
+>   1. **文件评论**：新增 PullFileComments.vue 组件 + ListPullFiles / GetPullFileDiff / ListPullReviewComments / CreatePullReviewComment 4 个 platform adapter 方法，Gitea/GitHub 双端实现，PR 详情顶部「文件评论」Tab 按文件分组、折叠展开、行号 reaction 展示。
+>   2. **对话流融合 Review 事件**：PullStore.timelineItems（`comment` + `review` 按时间升序合并），对话 Tab 中为 approval/request_changes/commented 状态渲染虚线边框系统卡片（绿/橙/灰）。
+>   3. **三 Tab 布局**：概览（保留 v1.x meta+审查区） / 文件评论（PullFileComments 组件） / 对话（timelineItems 混合时间线），默认 Tab = overview。
+>   4. **零术语**：Diff/Hunk 等技术原词仅在代码/DTO 中展示，UI 文案保持中文（"文件评论"、"已批准"、"请求修改"、"已评论"）。
+>
+>   相关文件：
+>   - Go: `app/platform/adapter.go`（4 DTO + 4 接口方法）、`app/platform/gitea/adapter.go`、`app/platform/github/adapter.go`、`app.go`（4 bindings）
+>   - TS: `frontend/src/types/dto.ts`（+3 interface）、`frontend/src/lib/ipc-client.ts`（+4 方法）、`frontend/src/stores/pull.ts`（重构 timelineItems）
+>   - Vue: `frontend/src/components/PullFileComments.vue`（新增 383 行）、`frontend/src/views/MergesView.vue`（三 Tab 改造 + 对话流 review 卡片 CSS）
+>   - 文档: `docs/adr/0008-pr-comment-v05-enhancement.md`、`docs/releases/v0.5.0.md`
 >
 > - **v0.4.0** (2026-07-02)：3 件用户拍板工作。
 >   1. **Git Graph 加载更多 UI 收敛**：GitHub 仓库 UI 顶部「加载更多」按钮 + 滚动监听彻底删除（与 Gitea UI 对齐），含后端 `App.DepenRepo` binding、`app/git/deepen.go`、`frontend/src/lib/ipc-client.ts` 的 `deepenRepo` 全栈清理。Graph DTO `truncated` 字段保留兼容。

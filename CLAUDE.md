@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-01（v2.0 + v2.4 + v2.5 + v2.6 + v3.0–v3.14 + v0.3.0 + v0.5.0-m9）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-04（v2.0 + v2.4 + v2.5 + v2.6 + v3.0–v3.14 + v0.3.0 + v0.5.0）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -17,6 +17,8 @@
 > **v2.5 增量**：workspace 按账号分层（旧布局自动迁移到 `_pre_v25_workspace` 备份）
 >
 > **v2.6 增量**：StatusBar 同步进度条（go-git sideband → EventsEmit → 前端 UI）
+>
+> **v0.5.0 增量**：PR 评论模块 M1-M4 完整交付。文件评论（PullFileComments.vue + 4 个 platform adapter 方法 + 4 个 bindings）、对话流融合 Review 事件系统消息、三 Tab PR 详情布局（概览/文件评论/对话），TS DTO + store + ipc-client 扩展。docs/adr/0008 + docs/releases/v0.5.0.md。
 >
 > **v3.0–v3.14 增量**：Git Graph 严格 1:1 复刻 vscode-git-graph（dot hover / ref badge / lane 几何 / S 曲线 / 列宽拖动 / 表头中文 / blobless clone 修复）
 >
