@@ -3,8 +3,50 @@
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-04（**v0.5.0 PR 评论模块对齐 Gitea/GitHub** + **v0.6.2 右上角按钮「刷新」** + **v0.6.3 fetch 全量元数据 + 滚动加载更多修复**）
+> 最后更新：2026-07-04（**v0.5.0 PR 评论模块对齐 Gitea/GitHub** + **v0.6.2 右上角按钮「刷新」** + **v0.6.3 fetch 全量元数据** + **v0.6.4 滚动按需 deepen**）
+
 >
+
+> - **v0.6.4** (2026-07-04)：滚动按需 deepen，替代 v0.6.3 的全量 unshallow。
+
+>   1. **背景**：v0.6.3 改动让 GitHub 仓库首次同步时一次性拉全量元数据（`--unshallow`，UnrealEngine 264k commits 约 28 GB，耗时 30~60 分钟）。代价太重：用户只想翻几屏也被迫拉全量。
+
+>   2. **新语义**：「翻几页、拉几页」。参照 vscode-git-graph 的按需加载思想，当用户滚到底且 offset 超过本地 commit 数时，后端自动发起增量 `git fetch --depth=N`（每次 +500 commits）拉回更多历史。用户只为真正浏览到的历史付出网络/磁盘代价。
+
+>   3. **技术实现**：
+
+>      - `LogResult` 新增 `LocalExhausted bool` + `DeepenTriggered bool` 字段，告知前端「本地已取完但远端可能有更多」
+
+>      - `LogCommits` / `LogCommitsVscode` 新增 offset 越界检测：`opts.Offset >= len(commits)` 时调 `tryTriggerDeepen()` 异步 deepen，立即返 `LocalExhausted=true`
+
+>      - `tryTriggerDeepen()`（`app/git/log.go`）：读 `.git/shallow` 数推算当前深度 → goroutine 异步调 `fetchRemoteWithFilter(localPath, "origin", curDepth+500, token)` → 不阻塞主请求
+
+>      - 前端 `loadGraph` 检测 `dto.localExhausted`：`allLoaded=false` + 显示「正在深化本地历史…」+ `waitForDeepenAndRetry()` 监听 `git:sync:progress` stage=done 自动重试
+
+>      - 前端哨兵 DOM `v-if` 增加 `!localExhausted` 条件，deepen 期间不触发出示
+
+>   4. **与 v0.6.3 分工**：v0.6.3 去掉 depth 硬限制（不再 limited to 2000），提供基础能力；v0.6.4 决定如何消费这个能力（按需 vs 全量）。两者共存，互不冲突。
+
+>   5. **UnrealEngine 预期行为**（shallow 4492 commits 起）：
+
+>      | 用户操作 | 每次网络代价 | 磁盘增量 |
+
+>      |---|---|---|
+
+>      | 滚 1~14 屏（前 4200 commits）| 0 | — |
+
+>      | 滚第 15 屏（offset≥4492）| `git fetch --depth=5492` ~5 分钟 | ~120 MB |
+
+>      | 滚第 31 屏（offset≥9000）| `git fetch --depth=9492` ~10 分钟 | 再 +120 MB |
+
+>      | 全滚完 264k | 多次小 fetch 合计 | 最终 ~28 GB |
+
+>      不再强制 30~60 分钟首屏等待。
+
+>   6. **改动文件**：`app/git/log.go`（LogResult 加字段 + offset 越界检测 + tryTriggerDeepen + getCurrentDepth）、`app/git/log_vscode.go`（同 LogCommitsVscode 路径）、`app.go`（GetGitGraphDTO Deepen 字段 + token 透传）、`app/platform/adapter.go`（DTO + LogGraphOpts Token）、`app/platform/gitea/adapter.go`（透传 + token 传 LogCommits）、`app/platform/github/adapter.go`（透传 + token 传 LogCommitsVscode）、`app/git/graph/layout.go`（GraphResult 加字段）、`frontend/src/views/TimelineNewView.vue`（localExhausted + deepenInProgress + waitForDeepenAndRetry + 哨兵 DOM 隐藏 + UI）、`frontend/src/types/dto.ts` + `frontend/src/lib/gitgraph/structured.ts`（GraphResultDto 加字段）。
+
+>
+
 > - **v0.6.3** (2026-07-04)：产品架构调整：去掉 fetch depth 硬限制，用户掌控本地 commit 元数据深度。
 >   1. **修复 shim offset 透传 bug**：v0.6.1+ `gitgraphLines` shim 处理器只提取 `projectId/branches/limit` 三个字段，**丢失 `offset`**，导致前端滚动加载更多每次都拿到首屏前 300 条 + 永远 `truncated=true` → 用户看到「闪一下又消失」的 loading 循环 + 永远看不到「已是末尾」提示。修复：`shim.ts:438-484` 补 `offset?: number` 类型 + 透传给 `app.GetGitGraph` / `app.GetGitGraphAscii`。
 >   2. **去掉 fetch depth=2000 硬限制**：`app.go:2524-2550` PullRepoByProjectId 改为显式 `Depth=0/CountLimit=0/SingleBranch=false/NoTags=false`；`app/git/sync.go` FetchRepo 与 `app/git/clone.go` CloneRepo 去掉 `isHugeRepo` 启发式判断（unreal/chromium/linux/webkit 关键词）+ `if opts.Depth <= 0 { return error }` 防御检查；`sync.go` fetch timeout 从 2 分钟改 30 分钟适配全量 fetch。
