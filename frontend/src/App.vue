@@ -28,6 +28,42 @@ const settings = useSettingsStore();
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * v1.x 拍板 2026-07-04：viewport 高度同步
+ *
+ * Wails WKWebView 在 macOS WKWebView 中 `100vh` 不一定 = NSWindow 内容高度
+ * （FullSizeContent + 圆角 + safe area inset 都可能让 webview frame ≠ NSWindow.bounds），
+ * 而 AppShell .shell 直接用 `100vh` 在主进程 Wails dev 跑时偶发 StatusBar / nav rail
+ * 偏移 ~8-22px（窗口底部圆角让 .shell__status 落不到 NSWindow 真正的可视底边）。
+ *
+ * 修法：用 window.innerHeight 持续同步 `--vheight` CSS var，.shell height 走这个 var，
+ * 所有 layer 跟随真实 webview content height。
+ *
+ * 触发：mount + 窗口 resize（Wails 启动期 macOS WebView ready 也可能晚到，再加 rAF 一次兜底）
+ */
+function syncViewportHeight(): void {
+  if (typeof window === 'undefined') return;
+  const h = window.innerHeight;
+  if (!Number.isFinite(h) || h <= 0) return;
+  document.documentElement.style.setProperty('--vheight', `${h}px`);
+}
+
+let onResize: (() => void) | null = null;
+onMounted(() => {
+  syncViewportHeight();
+  // rAF 兜底一次：Wails WKWebView 在 macOS 上 ready 时刻 innerHeight 可能晚到
+  requestAnimationFrame(syncViewportHeight);
+  onResize = syncViewportHeight;
+  window.addEventListener('resize', onResize);
+});
+
+onBeforeUnmount(() => {
+  if (onResize) {
+    window.removeEventListener('resize', onResize);
+    onResize = null;
+  }
+});
+
 /** 启动 / 重新设置 interval 用的内部函数 */
 function startPolling(): void {
   if (pollTimer) clearInterval(pollTimer);

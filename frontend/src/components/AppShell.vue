@@ -57,7 +57,9 @@ import StatusBar from './StatusBar.vue';
   position: relative;
   display: flex;
   flex-direction: row;
-  height: 100vh;
+  /* v1.x 拍板 2026-07-04：用 var(--vheight) 替代 100vh，App.vue mount + resize
+   * 时把 window.innerHeight 注入 --vheight，避免 WKWebView 中 100vh ≠ NSWindow 高度。 */
+  height: var(--vheight, 100vh);
   width: 100vw;
   overflow: hidden;
   /* v1.5：删透明透网格 → 走纯色背景，让各区域边界线清晰可读 */
@@ -87,7 +89,8 @@ import StatusBar from './StatusBar.vue';
   /* Wails v2.5+ 默认 CSSDragProperty="--wails-draggable", CSSDragValue="drag"
    * 该 28px 区鼠标按下拖动 → 移动整个 NSWindow，替代 macOS 默认标题栏 */
   --wails-draggable: drag;
-  z-index: 9999;
+  /* 高于 navrail(1) 但低于 statusbar(9999)，保证拖拽区不被状态栏遮挡 */
+  z-index: 100;
 }
 
 .shell__nav {
@@ -141,7 +144,10 @@ import StatusBar from './StatusBar.vue';
 
 .shell__status {
   position: absolute;
-  z-index: 2;
+  /* v1.x 2026-07-04:z-index 提到 9999，确保在所有 view 内部 transform stacking context
+   * 之上（比如 GitGraph 滚动容器 transform / opacity 触发的 promoted layer，
+   * 之前 z-index: 2 时偶发"压住状态栏"） */
+  z-index: 9999;
   bottom: 0;
   left: 0;
   right: 0;

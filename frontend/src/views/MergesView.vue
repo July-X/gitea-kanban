@@ -1497,7 +1497,7 @@ function formatRelative(iso: string | undefined): string {
           </div>
 
           <!-- ===== 评论区：v1.5 header 整行 + 左历史/右输入各 50% ===== -->
-            <div class="merge-item__comments">
+            <div v-if="detailTab === 'conversation'" class="merge-item__comments">
               <!-- 顶部：对话标题 + 刷新按钮（整行铺满） -->
               <div class="merge-item__comments-header">
                 <div class="merge-item__comments-header-left">
@@ -2598,9 +2598,9 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  /* PR row 高度再增加 80px */
-  min-height: 460px;
-  max-height: min(90vh, 900px);
+  /* v0.6.26: 加高对话区，让核心内容有更多空间 */
+  min-height: 520px;
+  max-height: min(90vh, 1000px);
   overflow: hidden;
 }
 
@@ -2618,6 +2618,7 @@ function formatRelative(iso: string | undefined): string {
   justify-content: space-between;
   gap: var(--space-3);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .merge-item__meta-inline {
   display: flex;
@@ -3070,15 +3071,15 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
 }
 
-/* v0.6.21：评论侧栏（头像 + 用户名垂直排列） */
+/* v0.6.26：评论侧栏（头像 + 用户名垂直排列）— 更紧凑 */
 .merge-item__comment-side {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  min-width: 60px;
-  max-width: 80px;
+  gap: 3px;
+  min-width: 40px;
+  max-width: 50px;
 }
 
 /* 头像圈（首字母）— v0.6.26：彩色底区分作者 */
@@ -3108,7 +3109,7 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
-  max-width: 60px;
+  max-width: 48px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -3133,31 +3134,32 @@ function formatRelative(iso: string | undefined): string {
   word-break: break-word;
   transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
-/* v0.6.22：评论区宽度撑满，padding 只控制左右留白 */
+/* v0.6.26：评论区宽度撑满，减少左右留白 */
 .merge-item__comment-list {
-  padding: 4px 50px;
+  padding: 8px 16px;
   display: flex;
   flex-direction: column;
 }
 /* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
  * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
 .merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
-  padding-right: 56px;
+  padding-right: 50px;
 }
-/* v0.6.22：评论自适应宽度，他人靠左，"我"靠右 */
+/* v0.6.26：评论使用全宽，他人靠左，"我"靠右 */
 .merge-item__comment {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   margin: 0 0 8px;
-  max-width: 75%;
+  width: 100%;
   transition: opacity var(--t-fast) var(--ease);
 }
-/* v0.6.22："我"的评论靠右 */
+/* v0.6.26："我"的评论靠右 */
 .merge-item__comment--self {
   margin-left: auto;
   flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 /* 气泡小箭头（指向头像）—— 用 CSS border 画三角形 */
 .merge-item__comment-bubble::before {
