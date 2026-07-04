@@ -3272,37 +3272,41 @@ function formatRelative(iso: string | undefined): string {
   max-width: 100%;
   min-width: 0;
 }
-/* 强制 .merge-item__comment-body 内的所有 markdown 节点都限制在气泡里 */
-.merge-item__comment-body > *,
-.merge-item__comment-body p,
-.merge-item__comment-body pre,
-.merge-item__comment-body code,
-.merge-item__comment-body ul,
-.merge-item__comment-body ol,
-.merge-item__comment-body li,
-.merge-item__comment-body blockquote,
-.merge-item__comment-body h1,
-.merge-item__comment-body h2,
-.merge-item__comment-body h3,
-.merge-item__comment-body h4,
-.merge-item__comment-body h5,
-.merge-item__comment-body h6,
-.merge-item__comment-body table {
+/* 强制 .merge-item__comment-body 内的所有 markdown 节点都限制在气泡里（v0.6.26 用 :deep 穿透 v-html） */
+.merge-item__comment-body > :deep(*),
+.merge-item__comment-body :deep(p),
+.merge-item__comment-body :deep(pre),
+.merge-item__comment-body :deep(code),
+.merge-item__comment-body :deep(ul),
+.merge-item__comment-body :deep(ol),
+.merge-item__comment-body :deep(li),
+.merge-item__comment-body :deep(blockquote),
+.merge-item__comment-body :deep(h1),
+.merge-item__comment-body :deep(h2),
+.merge-item__comment-body :deep(h3),
+.merge-item__comment-body :deep(h4),
+.merge-item__comment-body :deep(h5),
+.merge-item__comment-body :deep(h6),
+.merge-item__comment-body :deep(table) {
   max-width: 100%;
   min-width: 0;
   overflow-wrap: break-word;
-  word-break: break-word;
+  word-break: break-all;
 }
-.merge-item__comment-body pre,
-.merge-item__comment-body pre code {
+.merge-item__comment-body :deep(pre),
+.merge-item__comment-body :deep(pre code) {
   white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: break-word;
+  word-break: break-all;
+  overflow-wrap: anywhere;
   overflow-x: auto;
   max-width: 100%;
 }
-.merge-item__comment-body code {
+.merge-item__comment-body :deep(code) {
   white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 /* 发评论输入区（v2.62 · 改到历史对话下方，固定 120px，发送按钮在输入框内右上角） */
@@ -3454,7 +3458,11 @@ function formatRelative(iso: string | undefined): string {
  *
  * 给所有 .md-body 内的元素加 reset，避免 markdown-it 产出的 HTML 走浏览器默认样式
  * （gitea 评论在暗色主题下默认 <code> 黑色字看不清；<pre> 没滚动条等）。
- * 颜色用项目主题变量，不写死。 */
+ * 颜色用项目主题变量，不写死。
+ *
+ * v0.6.26: 所有子元素选择器用 :deep() 穿透 scoped CSS
+ * (vhtml 动态内容没有 data-v-xxx 属性，普通子选择器不生效)
+ */
 .md-body {
   font-size: var(--font-sm);
   line-height: 1.6;
@@ -3464,66 +3472,65 @@ function formatRelative(iso: string | undefined): string {
   max-width: 100%;
   min-width: 0;
 }
-.md-body p {
+.md-body :deep(p) {
   margin: 0 0 4px 0;
 }
-.md-body p:last-child {
+.md-body :deep(p:last-child) {
   margin-bottom: 0;
 }
-.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+.md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3), .md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) {
   margin: var(--space-2) 0 4px 0;
   font-weight: 600;
   line-height: 1.3;
 }
-.md-body h1 { font-size: var(--font-lg); }
-.md-body h2 { font-size: var(--font-md); }
-.md-body h3 { font-size: var(--font-sm); }
-.md-body h4, .md-body h5, .md-body h6 { font-size: var(--font-sm); }
-.md-body ul, .md-body ol {
+.md-body :deep(h1) { font-size: var(--font-lg); }
+.md-body :deep(h2) { font-size: var(--font-md); }
+.md-body :deep(h3) { font-size: var(--font-sm); }
+.md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) { font-size: var(--font-sm); }
+.md-body :deep(ul), .md-body :deep(ol) {
   margin: 4px 0;
   padding-left: var(--space-4);
 }
-.md-body li { margin: 2px 0; }
-.md-body blockquote {
+.md-body :deep(li) { margin: 2px 0; }
+.md-body :deep(blockquote) {
   margin: 4px 0;
   padding: 4px var(--space-3);
   border-left: 3px solid var(--color-divider);
   color: var(--color-text-secondary);
   background: var(--color-bg);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  /* 强制引用块超长文本自动换行 */
   word-break: break-all;
   overflow-wrap: break-word;
   white-space: pre-wrap;
   max-width: 100%;
   min-width: 0;
 }
-.md-body blockquote > * {
+.md-body :deep(blockquote > *) {
   word-break: break-all;
   overflow-wrap: break-word;
   max-width: 100%;
   min-width: 0;
 }
-.md-body code {
+.md-body :deep(code) {
   padding: 1px 6px;
   background: var(--color-bg);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.9em;
   color: var(--color-accent);
-  word-break: break-word;
+  word-break: break-all;
   overflow-wrap: anywhere;
   overflow-x: auto;
   white-space: pre-wrap;
   max-width: 100%;
 }
-.md-body pre {
+.md-body :deep(pre) {
   margin: 4px 0;
   padding: var(--space-2);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
   overflow-wrap: anywhere;
   overflow-x: auto;
   max-width: 100%;
@@ -3532,43 +3539,43 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-xs);
   line-height: 1.5;
 }
-.md-body pre code {
+.md-body :deep(pre code) {
   padding: 0;
   background: transparent;
   color: var(--color-text);
   font-size: inherit;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
   overflow-wrap: anywhere;
   overflow-x: auto;
   max-width: 100%;
 }
-.md-body a {
+.md-body :deep(a) {
   color: var(--color-primary);
   text-decoration: none;
 }
-.md-body a:hover {
+.md-body :deep(a:hover) {
   text-decoration: underline;
 }
-.md-body img {
+.md-body :deep(img) {
   max-width: 100%;
   height: auto;
   border-radius: var(--radius-sm);
 }
-.md-body table {
+.md-body :deep(table) {
   border-collapse: collapse;
   margin: 4px 0;
   font-size: var(--font-xs);
 }
-.md-body th, .md-body td {
+.md-body :deep(th), .md-body :deep(td) {
   padding: 4px 8px;
   border: 1px solid var(--color-divider);
 }
-.md-body th {
+.md-body :deep(th) {
   background: var(--color-bg);
   font-weight: 600;
 }
-.md-body hr {
+.md-body :deep(hr) {
   border: 0;
   border-top: 1px solid var(--color-divider);
   margin: var(--space-2) 0;
