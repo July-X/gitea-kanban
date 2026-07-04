@@ -112,7 +112,9 @@ defineProps<{ isMac: boolean }>();
  * 拖窗口：点 NSWindow titlebar (y=0..28) 系统可拖 —— 不需自定义 drag region。
  */
 .shell--mac {
-  height: var(--vheight, 100vh);
+  box-sizing: border-box;
+  /* WKWebView Big Sur+ 圆角 ~22px mask，让 StatusBar 落在 webview 内容区 */
+  padding-bottom: 22px;
 }
 
 /* .shell__row = flex row 包裹 navrail + main
@@ -142,13 +144,10 @@ defineProps<{ isMac: boolean }>();
  *     NavRail wrapper 从 y=28 webview top 起、内部 padding-top:32 让 logo 从 y=60 起
  *   - wrapper 总高度 = row_h − 32, 宽度 70px 不变
  *   - .navrail 内部 padding-top 重置为 0 避免重复让位 */
-.shell--mac .shell__nav {
-  box-sizing: border-box;
-  padding-top: 32px;
-}
-.shell--mac .shell__nav :deep(.navrail) {
-  padding-top: 0;
-}
+/* TitleBarHiddenInset 下 traffic lights 是 NSWindow 层浮在 webview 之上，
+   webview 内容从 y=0 起无需让位，NavRail 不需要 padding-top 让位 */
+
+
 
 /* 穿透子组件 scoped style —— 让 NavRail 内部根元素继承 shell__nav 的实色背景 */
 .shell__nav :deep(.navrail) {

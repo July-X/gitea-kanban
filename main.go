@@ -57,7 +57,7 @@ func main() {
 		// 用户后续如果要做 macOS dark/light mode 与应用主题完全同步（含标题栏），需要走 cgo/objc bridge
 		// 调用 NSWindow.appearance setter（超出 Wails v2 暴露 API 范围）。本轮先确保稳定正确。
 		Mac: &mac.Options{
-			TitleBar: mac.TitleBarDefault(),
+			TitleBar: mac.TitleBarHiddenInset(),
 			About: &mac.AboutInfo{
 				Title:   "Gitea Kanban",
 				Message: "版本 2.0.0\n基于 Gitea/GitHub 的桌面端看板 + 时间轴工具",
