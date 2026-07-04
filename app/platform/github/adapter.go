@@ -337,12 +337,15 @@ func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts pla
 		LocalPath: localPath,
 		MaxCount:  opts.MaxCount,
 		Offset:    opts.Offset,
+		Token:     opts.Token,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, opts.Head, logResult.Truncated)
+	graphResult.LocalExhausted = logResult.LocalExhausted
+	graphResult.DeepenTriggered = logResult.DeepenTriggered
 	return graphResultToDTO(graphResult), nil
 }
 
@@ -1550,5 +1553,7 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 		Branches:  branches,
 		MaxLane:   r.MaxLane,
 		Truncated: r.Truncated,
+		LocalExhausted:  r.LocalExhausted,
+		DeepenTriggered: r.DeepenTriggered,
 	}
 }

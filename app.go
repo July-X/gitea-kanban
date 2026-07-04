@@ -625,6 +625,12 @@ type GraphResultDTO struct {
 	Branches  []GraphBranchDTO `json:"branches,omitempty"`
 	MaxLane   int              `json:"maxLane"`
 	Truncated bool             `json:"truncated"`
+	// LocalExhausted 本地 commit 已全部取出，远端可能有更多（需 deepen）。
+	// 前端据此显示「本地历史已加载完」提示 + 是否加载更早历史的按钮。
+	LocalExhausted bool `json:"localExhausted"`
+	// DeepenTriggered 后端已启动后台增量 deepen 拉取远端 commit。
+	// 前端收到此信号时不该再次触发 deepen，等待 repo:sync:progress 事件即可。
+	DeepenTriggered bool `json:"deepenTriggered"`
 }
 
 // GraphBranchDTO 一条完整 branch path（对齐 platform.GraphBranchDTO）
@@ -1033,13 +1039,14 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 	head := git.ResolveLocalHead(localPath)
 
 	// 6. token 透传给 adapter（go-git 用 BasicAuth，不需要 user 传）
-	_ = token
+	// v0.6.2: token 也用于 offset 越界时后台 deepen 认证。
 
 	result, err := adapter.LogGraph(a.ctx, localPath, platformAdapter.LogGraphOpts{
 		Branches: args.Branches,
 		MaxCount: args.MaxCount,
 		Head:     head,
 		Offset:   args.Offset,
+		Token:    token,
 	})
 	if err != nil {
 		return GraphResultDTO{}, err

@@ -131,6 +131,10 @@ type GraphResult struct {
 	MaxLane   int // 最大 lane 号（对齐 Gitea MaxColumn）
 	MaxColor  int // 实际用到的最大颜色号（≤15）
 	Truncated bool
+	// LocalExhausted 本地 commit 已全部取出，远端可能有更多（需 deepen）。
+	LocalExhausted bool
+	// DeepenTriggered 后端已启动后台增量 deepen 拉取远端 commit。
+	DeepenTriggered bool
 }
 
 // BuildGraph 从 commit 列表构建 lane 布局

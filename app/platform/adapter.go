@@ -328,6 +328,8 @@ type LogGraphOpts struct {
 	Head string
 	// Offset 跳过前 N 条 commit（分页用，0 = 不跳过）
 	Offset int
+	// Token 仓库 token（offset 越界 + repoIsShallow 时后台增量 deepen 用）
+	Token string
 }
 
 // GraphResult Graph 布局结果（与 app/git/graph.GraphResult 对齐，但作为 DTO 不含内部类型）
@@ -339,6 +341,10 @@ type GraphResult struct {
 	Branches  []GraphBranchDTO `json:"branches,omitempty"`
 	MaxLane   int              `json:"maxLane"`
 	Truncated bool             `json:"truncated"`
+	// LocalExhausted 本地 commit 已全部取出，远端可能有更多（需 deepen）。
+	LocalExhausted bool `json:"localExhausted"`
+	// DeepenTriggered 后端已启动后台增量 deepen 拉取远端 commit。
+	DeepenTriggered bool `json:"deepenTriggered"`
 }
 
 // GraphBranchDTO 1:1 复刻 vscode-git-graph 的 Branch 对象

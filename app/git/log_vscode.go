@@ -108,6 +108,18 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 		truncated = true
 	}
 
+	// v0.6.2: offset 越界（本地 commit 已全部取出）时，若本地是 shallow clone
+	// 且前端传了 token，后台自动触发增量 deepen。
+	if opts.Offset > 0 && len(commits) == 0 && opts.Token != "" {
+		triggered := tryTriggerDeepen(opts.LocalPath, opts.Token)
+		return &LogResult{
+			Commits:         nil,
+			Truncated:       false,
+			LocalExhausted:  true,
+			DeepenTriggered: triggered,
+		}, nil
+	}
+
 	// v3.x：探测 worktree dirty count，1:1 复刻 vscode-git-graph 的
 	// commits[0].hash === UNCOMMITTED 模式（数据源: git status --porcelain）。
 	// 探测失败 / dirty 0 → 跳过，不影响主流程。
