@@ -3296,6 +3296,10 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-body pre,
 .merge-item__comment-body pre code {
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  overflow-x: auto;
+  max-width: 100%;
 }
 .merge-item__comment-body code {
   white-space: pre-wrap;
@@ -3507,8 +3511,9 @@ function formatRelative(iso: string | undefined): string {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.9em;
   color: var(--color-accent);
-  word-break: break-all;
+  word-break: break-word;
   overflow-wrap: anywhere;
+  overflow-x: auto;
   white-space: pre-wrap;
   max-width: 100%;
 }
@@ -3518,8 +3523,9 @@ function formatRelative(iso: string | undefined): string {
   background: var(--color-bg);
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
-  word-break: break-all;
-  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
   max-width: 100%;
   min-width: 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -3532,8 +3538,10 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
   font-size: inherit;
   white-space: pre-wrap;
-  word-break: break-all;
-  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  max-width: 100%;
 }
 .md-body a {
   color: var(--color-primary);

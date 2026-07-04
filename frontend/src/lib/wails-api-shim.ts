@@ -206,6 +206,22 @@ type WailsApp = {
   StripGitBinaryQuarantine?: (args: { path: string }) => Promise<void>;
   OpenGitBinaryPicker?: () => Promise<string>;
 
+  // ===== v0.6.0 日志导出 / Bug 上报（Wails bindings）=====
+  /** 一键导出日志 zip 到桌面 */
+  ExportLogs?: (args: { maxLogs?: number }) => Promise<{
+    zipPath: string;
+    logCount: number;
+    logBytes: number;
+    stateBytes: number;
+    generatedAt: string;
+    logFiles: string[];
+  }>;
+  /** 读最近 N 条日志到剪贴板（贴 issue 用） */
+  CopyRecentLogs?: (args: { maxBytes?: number }) => Promise<{
+    content: string;
+    bytes: number;
+  }>;
+
   // ===== v0.6+ Pull Request 合并请求（Wails bindings）=====
   //
   // 平台选择由 Go 端按 projectId → account.Platform 自动派发，
