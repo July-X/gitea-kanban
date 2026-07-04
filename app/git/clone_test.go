@@ -432,3 +432,46 @@ func TestCloneRepo_LargeRepoMode_ShallowSingleBranchNoTags(t *testing.T) {
 		t.Fatalf("expected no tags to be fetched, got %d", tagCount)
 	}
 }
+
+// TestRepoIsShallow 验证 v0.6.3 root cause fix 的回归测试
+//
+// bug: UnrealEngine 测试仓库滚不到底报「加载更多不生效」。
+//   - 本地仓库是 shallow clone（gh repo clone 默认产物）
+//   - 后续 fetch 调用方传 depth=0（无限制）期望拉全量
+//   - 但 git fetch 在 shallow repo 默认不 deepen；必须显式 --unshallow
+//   - 没加这个保护前，本地 commit 数永远停在浅克隆状态（4492 vs GitHub 264k）
+//
+// 验证：
+//   - 不存在 shallow 文件 → false
+//   - 存在 .git/shallow 文件 → true
+//   - 存在 bare 仓库根目录 shallow 文件 → true（兼容 bare layout）
+//   - shallow 文件存在但 0 字节 → true（git 内部仍视为 shallow）
+func TestRepoIsShallow(t *testing.T) {
+	dir := t.TempDir()
+
+	// 1. 空目录 → false
+	if repoIsShallow(dir) {
+		t.Error("repoIsShallow should be false for empty dir")
+	}
+
+	// 2. 有 .git/shallow → true
+	gitDir := filepath.Join(dir, ".git")
+	os.MkdirAll(gitDir, 0o755)
+	shallowPath := filepath.Join(gitDir, "shallow")
+	if err := os.WriteFile(shallowPath, []byte("commit1\ncommit2\n"), 0o644); err != nil {
+		t.Fatalf("write shallow failed: %v", err)
+	}
+	if !repoIsShallow(dir) {
+		t.Error("repoIsShallow should be true for dir with .git/shallow")
+	}
+
+	// 3. bare 仓库（直接 shallow 在根目录）→ true
+	bareDir := t.TempDir()
+	bareShallow := filepath.Join(bareDir, "shallow")
+	if err := os.WriteFile(bareShallow, []byte("commit1\n"), 0o644); err != nil {
+		t.Fatalf("write bare shallow failed: %v", err)
+	}
+	if !repoIsShallow(bareDir) {
+		t.Error("repoIsShallow should be true for bare repo with root shallow")
+	}
+}
