@@ -112,9 +112,7 @@ defineProps<{ isMac: boolean }>();
  * 拖窗口：点 NSWindow titlebar (y=0..28) 系统可拖 —— 不需自定义 drag region。
  */
 .shell--mac {
-  box-sizing: border-box;
-  /* WKWebView Big Sur+ 圆角 ~22px mask，让 StatusBar 落在 webview 内容区 */
-  padding-bottom: 22px;
+  height: var(--vheight, 100vh);
 }
 
 /* .shell__row = flex row 包裹 navrail + main
@@ -137,6 +135,19 @@ defineProps<{ isMac: boolean }>();
   flex-shrink: 0;
   width: 70px;
   /* NavRail 内部已经包含实色背景和右边框，这里只做定位 */
+}
+
+/* macOS 下让 NavRail wrapper 让位 32px 给 traffic lights (NSWindow 系统层 y=16~40)：
+ *   - .shell__nav 加 padding-top:32 + box-sizing:border-box
+ *     wrapper 从 y=28 webview top 起、内部 padding-top:32 让 logo 从 y=60 起
+ *   - wrapper 总高 = row_h − 32，宽度 70px 不变 (box-sizing: border-box)
+ *   - .navrail 内部 padding-top 重置为 0 避免重复让位 */
+.shell--mac .shell__nav {
+  box-sizing: border-box;
+  padding-top: 32px;
+}
+.shell--mac .shell__nav :deep(.navrail) {
+  padding-top: 0;
 }
 
 /* v1.10 macOS 仅 NavRail 让位 traffic lights (y=16~40 NSWindow layer)：
