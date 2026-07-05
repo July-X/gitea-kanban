@@ -2832,9 +2832,8 @@ function refBadgeClass(refType?: string): string {
   z-index: 6;
   width: 100%;
   background: var(--color-bg, var(--color-canvas));
-  padding: var(--space-3, 12px) var(--space-4, 16px);
-  overflow-x: auto;
-  overscroll-behavior: contain;
+  padding: var(--space-3, 12px) 0;
+  /* v0.7.4：去掉 overflow-x: auto，去掉左右 padding —— .commit-heatmap 自己 max-width 960px 居中 */
   box-sizing: border-box;
 }
 

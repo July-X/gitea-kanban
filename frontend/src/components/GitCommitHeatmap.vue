@@ -243,14 +243,6 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
     <!--
       头部：左侧 title + count，右侧 periodLabel（小字标注数据周期，对齐 GitHub 风格）
     -->
-    <div class="commit-heatmap__header">
-      <div class="commit-heatmap__head-main">
-        <h3 class="commit-heatmap__title">{{ title }}</h3>
-        <span class="commit-heatmap__count">{{ totalCommits }} 次提交</span>
-      </div>
-      <span class="commit-heatmap__period">{{ periodLabel }}</span>
-    </div>
-
     <!--
       主体：横向铺开——
         - 月份标签条（顶部 absolute 定位到每列）
@@ -259,14 +251,20 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
         - 底部图例（少 → 多）
     -->
     <div class="commit-heatmap__chart" role="img" :aria-label="`提交热力图：${totalCommits} 次提交，周期 ${periodLabel}`">
-      <div class="commit-heatmap__months" aria-hidden="true">
-        <span
-          v-for="label in monthLabels"
-          :key="`${label.col}-${label.text}`"
-          class="commit-heatmap__month-label"
-          :style="{ left: `calc(${label.col} * var(--heatmap-col-width))` }"
-        >
-          {{ label.text }}
+      <!-- v0.7.4：月份标签条 + 右侧 periodLabel 在同一行 -->
+      <div class="commit-heatmap__top-line">
+        <div class="commit-heatmap__months" aria-hidden="true">
+          <span
+            v-for="label in monthLabels"
+            :key="`${label.col}-${label.text}`"
+            class="commit-heatmap__month-label"
+            :style="{ left: `calc(${label.col} * var(--heatmap-col-width))` }"
+          >
+            {{ label.text }}
+          </span>
+        </div>
+        <span class="commit-heatmap__period" aria-label="数据时间范围">
+          {{ periodLabel }}
         </span>
       </div>
 
@@ -314,54 +312,37 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
   --heatmap-col-width: calc(var(--heatmap-cell-size) + var(--heatmap-gap));
   --heatmap-radius: 2px;
 
+  /* v0.7.4：居中 + 横向最大宽度（避免数据多时撑爆主区） */
   width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--space-3, 12px) 0;
+  padding: var(--space-3, 12px) var(--space-4, 16px);
   background: transparent;
   color: var(--color-text);
   font-family: var(--font-sans);
   user-select: none;
-  /* 不限制 overflow：让内部 grid 自主决定尺寸 */
   display: flex;
   flex-direction: column;
-  /* 精确高度: header (24) + margin-bottom (12) + chart (16+8+95+8+16=143) + padding (12+12) = 211 */
 }
 
-/* ===== 头部 ===== */
-.commit-heatmap__header {
+/* ===== 顶部行：月份标签条 + 右侧 periodLabel ===== */
+.commit-heatmap__top-line {
   display: flex;
-  align-items: baseline;
+  align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-3, 12px);
-  margin-bottom: var(--space-3, 12px);
-  flex-wrap: wrap;
+  margin-bottom: var(--space-2, 8px);
 }
 
-.commit-heatmap__head-main {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2, 8px);
-}
-
-.commit-heatmap__title {
-  font-size: var(--font-md, 15px);
-  font-weight: 600;
-  margin: 0;
-  color: var(--color-text);
-}
-
-.commit-heatmap__count {
-  font-size: var(--font-sm, 13px);
-  color: var(--color-text-muted);
-  font-weight: 500;
-}
-
-/* 小字周期标注（GitHub 风格右侧灰字） */
+/* periodLabel（小字数据周期，GitHub 风格右侧灰字） */
 .commit-heatmap__period {
+  flex-shrink: 0;
   font-size: var(--font-xs, 11px);
   color: var(--color-text-dim);
   font-weight: 400;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 /* ===== 图表区 ===== */
