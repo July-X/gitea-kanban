@@ -14,7 +14,7 @@
  * - Gitea web_src/css/features/gitgraph.css（flow-color-16-N 16 色变量）
  */
 
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -563,6 +563,19 @@ function onAppRefresh(): void {
 }
 
 onMounted(async () => {
+  // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
+  document.addEventListener('app:refresh', onAppRefresh);
+  setupRowHeightObserver();
+  setupLoadMoreObserver();
+  await activateData();
+});
+
+/**
+ * v1.8 KeepAlive：视图进入（含首次挂载 + 从缓存恢复）时执行数据加载
+ *   - 已缓存 graphDto 时跳过重复请求（切换回来秒开）
+ *   - 仓库列表为空时拉一次，避免首次从 /auth 跳过来时显示空状态
+ */
+async function activateData() {
   if (repo.repos.length === 0) {
     try {
       await repo.loadRepos('', true);
@@ -570,15 +583,16 @@ onMounted(async () => {
       /* */
     }
   }
-  if (activeProjectId.value) {
+  if (activeProjectId.value && !graphDto.value) {
     await loadGraph();
   }
-  // 注册全局刷新事件监听器
-  document.addEventListener('app:refresh', onAppRefresh);
-  // v3.4：动态行高对齐——数据加载后测量 + 监听尺寸变化
-  setupRowHeightObserver();
-  // v0.6.1+ Git Graph 滚动加载更多
-  setupLoadMoreObserver();
+}
+
+/** v1.8 KeepAlive：视图停用（进入缓存）时断开 IntersectionObserver，避免后台误触发 loadMore */
+onDeactivated(() => {
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+  }
 });
 
 /** 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver */

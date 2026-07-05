@@ -52,6 +52,20 @@ import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
 
 defineProps<{ isMac: boolean }>();
+
+/**
+ * 可缓存的视图组件名（KeepAlive include 名单）
+ *
+ * 仅列主功能视图（进入后用户会多次来回切换），不缓存 /auth（仅首次访问）。
+ * 组件名须与各 view 文件 <script setup name="..."> 一致，
+ * 无显式 name 时 Vue 默认取 PascalCase 文件名。
+ */
+const CACHEABLE_VIEWS = [
+  'TimelineNewView', // Git Graph 主视图
+  'MergesView', // 合并请求视图
+  'SettingsView', // 设置视图
+  'TeamView', // 团队视图（占位，统一缓存无副作用）
+];
 </script>
 
 <template>
@@ -70,7 +84,20 @@ defineProps<{ isMac: boolean }>();
       <main class="shell__main">
         <div class="shell__content">
           <router-view v-slot="{ Component }">
-            <component :is="Component" />
+            <!--
+              v1.8 拍板 2026-07-05：用 KeepAlive 缓存所有功能视图组件
+                - 避免每次路由切换销毁重建视图，回来需要二次加载数据
+                - max=10 最多缓存 10 个视图实例（本应用仅 4 个功能视图，留余量）
+                - include 显式指定缓存名单（按组件名），避免缓存 AuthView 等不需要缓存的视图
+                - 缓存后组件生命周期变为：
+                    onMounted → 仅首次挂载执行（事件监听等一次性设置）
+                    onActivated → 每次进入（含从缓存恢复）都执行（数据加载/事件恢复）
+                    onDeactivated → 切出到缓存时执行（暂停 observer/定时器等）
+                    onUnmounted → 仅真正销毁时执行（KeepAlive 不会触发，除 max 溢出淘汰）
+              -->
+            <KeepAlive :include="CACHEABLE_VIEWS" :max="10">
+              <component :is="Component" :key="$route.fullPath" />
+            </KeepAlive>
           </router-view>
         </div>
       </main>

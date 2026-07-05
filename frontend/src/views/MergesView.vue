@@ -20,7 +20,7 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -135,20 +135,13 @@ function confirmDeleteComment(p: PullDto, c: IssueCommentDto): void {
 }
 
 onMounted(async () => {
-  if (repo.repos.length === 0) {
-    try {
-      await repo.loadRepos('', true);
-    } catch {
-      /* error in repo.error */
-    }
-  }
-  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
-  if (activeProjectId.value) {
-    await loadPulls();
-  }
-  // v0.6+ bugfix：滚动到底自动加载下一页
-  // - rootMargin: 200px 预加载（用户还没滚到底就开始拉，体验更顺）
-  // - threshold: 0 不需要可见，仅进入 rootMargin 范围即触发
+  // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
+  setupLoadMoreObserver();
+  await activateData();
+});
+
+/** v1.8 KeepAlive：设置 IntersectionObserver（首次挂载 + 从缓存恢复时调用） */
+function setupLoadMoreObserver(): void {
   loadMoreObserver = new IntersectionObserver(
     (entries) => {
       const e = entries[0];
@@ -162,10 +155,34 @@ onMounted(async () => {
   if (loadMoreSentinel.value) {
     loadMoreObserver.observe(loadMoreSentinel.value);
   }
+}
+
+/** v1.8 KeepAlive：每次进入视图（含从缓存恢复）时拉数据，已缓存则跳过 */
+async function activateData() {
+  if (repo.repos.length === 0) {
+    try {
+      await repo.loadRepos('', true);
+    } catch {
+      /* error in repo.error */
+    }
+  }
+  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
+  if (activeProjectId.value && pull.items.length === 0 && !pull.loading) {
+    await loadPulls();
+  }
+}
+
+/** v1.8 KeepAlive：视图停用（进入缓存）时断开 observer，避免后台内存泄露 */
+onDeactivated(() => {
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
+  }
 });
 
 onUnmounted(() => {
   // v0.6+：避免 component 卸载后 observer 继续触发回调（内存泄露）
+  // v1.8 KeepAlive：非缓存淘汰场景（max 溢出或整个 shell 卸载）仍需清理
   if (loadMoreObserver) {
     loadMoreObserver.disconnect();
     loadMoreObserver = null;
