@@ -150,24 +150,26 @@ const heatmapGrid = computed(() => {
  */
 const monthLabels = computed(() => {
   const labels: { col: number; text: string }[] = [];
-  const rows = heatmapGrid.value;
-  if (!rows.length || !rows[0].length) return labels;
+  const cols = heatmapGrid.value;
+  if (!cols.length) return labels;
 
   let lastMonth = -1;
-  for (let col = 0; col < rows[0].length; col++) {
-    // 取该列第一个 inRange 的格子判断（跳过末尾 padding）
-    let cell = rows[0][col];
-    if (!cell?.inRange) {
-      for (let r = 1; r < 7; r++) {
-        cell = rows[r]?.[col];
-        if (cell?.inRange) break;
+  for (let colIdx = 0; colIdx < cols.length; colIdx++) {
+    const col = cols[colIdx];
+    if (!col) continue;
+    // 取该列第一个 inRange 的 cell（跳过末尾 padding 周的空 cell）
+    let firstCell = col[0];
+    if (!firstCell?.inRange) {
+      for (let d = 1; d < 7; d++) {
+        firstCell = col[d];
+        if (firstCell?.inRange) break;
       }
     }
-    if (!cell) continue;
-    const m = cell.dateObj.getMonth();
+    if (!firstCell) continue;
+    const m = firstCell.dateObj.getMonth();
     if (m !== lastMonth) {
       lastMonth = m;
-      labels.push({ col, text: MONTH_NAMES_CN[m] ?? '' });
+      labels.push({ col: colIdx, text: MONTH_NAMES_CN[m] ?? '' });
     }
   }
   return labels;
@@ -274,13 +276,13 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
         </div>
         <div class="commit-heatmap__grid">
           <div
-            v-for="(row, rowIndex) in heatmapGrid"
-            :key="`row-${rowIndex}`"
-            class="commit-heatmap__row"
+            v-for="(col, colIdx) in heatmapGrid"
+            :key="`col-${colIdx}`"
+            class="commit-heatmap__col"
           >
             <div
-              v-for="(cell, colIndex) in row"
-              :key="`cell-${rowIndex}-${colIndex}`"
+              v-for="(cell, dayIdx) in col"
+              :key="`cell-${colIdx}-${dayIdx}`"
               class="commit-heatmap__cell"
               :class="`commit-heatmap__cell--level-${getLevel(cell.count, cell.inRange)}`"
               :style="getCellStyle(getLevel(cell.count, cell.inRange))"
@@ -289,7 +291,6 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
           </div>
         </div>
       </div>
-
       <div class="commit-heatmap__legend">
         <span class="commit-heatmap__legend-label">少</span>
         <div
@@ -414,10 +415,11 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
   flex-shrink: 0;
 }
 
-.commit-heatmap__row {
+.commit-heatmap__col {
   display: flex;
   flex-direction: column;
   gap: var(--heatmap-gap);
+  flex-shrink: 0;
 }
 
 .commit-heatmap__cell {
