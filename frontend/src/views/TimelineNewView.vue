@@ -586,17 +586,42 @@ async function activateData() {
   if (activeProjectId.value && !graphDto.value) {
     await loadGraph();
   }
+  // v0.7.3：KeepAlive 恢复时哨兵 DOM 可能已被重建，需要重新 setup observer
+  // 确保重新进入视图后滚动加载功能可用
+  if (!loadMoreObserver) {
+    setupLoadMoreObserver();
+  }
 }
 
 /** v1.8 KeepAlive：视图停用（进入缓存）时断开 IntersectionObserver，避免后台误触发 loadMore */
 onDeactivated(() => {
   if (loadMoreObserver) {
     loadMoreObserver.disconnect();
+    loadMoreObserver = null;  // v0.7.3：清空引用，让 activateData 内重新创建
   }
 });
 
-/** 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver */
+/**
+ * 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver。
+ *
+ * v0.7.3 修复：把 root 设为实际滚动容器 .timeline-new__main（mainScrollEl），
+ * 而不是默认的 viewport，让哨兵在滚动容器内的可见性才是正确的判断标准。
+ *
+ * 背景：哨兵在 .timeline-new__main 内滚动，只有当它出现在滚动容器可见区域内时
+ * InterObserver 才应触发。旧实现以 viewport 为 root，当 StatusBar（33px）遮住
+ * viewport 底部时，交叉判断可能不稳定。
+ *
+ * 哨兵变化时的重新观察策略：
+ *   - 哨兵从 null → DOM：创建 observer（如果还不存在）+ observe 哨兵
+ *   - 哨兵从 DOM → null：disconnect observer 停止观察
+ *   - 哨兵 DOM 替换（v-if 重渲染）：unobserve 旧 + observe 新
+ */
 function setupLoadMoreObserver(): void {
+  // 清理旧 observer，避免重复观察
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
+  }
   loadMoreObserver = new IntersectionObserver(
     (entries) => {
       const e = entries[0];
@@ -606,17 +631,27 @@ function setupLoadMoreObserver(): void {
       if (loadingMore.value || allLoaded.value || !graphDto.value) return;
       void loadMoreGraph();
     },
-    { rootMargin: '200px 0px', threshold: 0 },
+    {
+      // root = 滚动容器（.timeline-new__main），null 时回退到 viewport
+      root: mainScrollEl.value ?? null,
+      // 哨兵距离滚动容器底部 200px 时提前触发，让用户无感加载
+      rootMargin: '0px 0px 200px 0px',
+      threshold: 0,
+    },
   );
   if (loadMoreSentinel.value) {
     loadMoreObserver.observe(loadMoreSentinel.value);
   }
 }
 
-// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 observe
+// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 setup observer（重新 observe 新哨兵）
 watch(loadMoreSentinel, (el) => {
   if (el && loadMoreObserver) {
     loadMoreObserver.observe(el);
+  } else if (!el && loadMoreObserver) {
+    // 哨兵移除时清理 observer，避免对已不存在的节点持有引用
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
   }
 });
 
@@ -829,11 +864,15 @@ async function loadMoreGraph(): Promise<void> {
   const lastNode = allNodes[allNodes.length - 1];
   const afterCount = allNodes.length;
 
-  // v0.7.0：明确反馈「没有更多提交记录了」
-  // 条件：本次加载未增加节点 + 后端确认没有更多 + 不在 deepen 等待中
-  // localExhausted 时 UI 已经显示「正在深化本地历史…」，不重复 toast
-  if (
-    afterCount === beforeCount &&
+  // v0.7.3：加载结果 toast 反馈，让用户明确知道加载到了什么
+  const loadedCount = afterCount - beforeCount;
+  if (loadedCount > 0) {
+    // 成功加载更多 → 轻量提示，不干扰浏览
+    showToast({ type: 'success', message: `已加载 ${loadedCount} 条提交`, duration: 1800 });
+  } else if (
+    // v0.7.0：明确反馈「没有更多提交记录了」
+    // 条件：本次加载未增加节点 + 后端确认没有更多 + 不在 deepen 等待中
+    // localExhausted 时 UI 已经显示「正在深化本地历史…」，不重复 toast
     allLoaded.value &&
     !localExhausted.value &&
     !deepenInProgress.value
