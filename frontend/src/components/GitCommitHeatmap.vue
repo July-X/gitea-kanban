@@ -308,20 +308,23 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
 
 <style scoped>
 .commit-heatmap {
-  /* 单格尺寸 + 列宽统一变量（横向展开时 column width 显式定义，便于月份标签 left 定位） */
+  /* 单格尺寸 + 列宽统一变量 */
   --heatmap-cell-size: 11px;
   --heatmap-gap: 3px;
   --heatmap-col-width: calc(var(--heatmap-cell-size) + var(--heatmap-gap));
   --heatmap-radius: 2px;
 
   width: 100%;
-  padding: var(--space-4, 16px);
+  box-sizing: border-box;
+  padding: var(--space-3, 12px) 0;
   background: transparent;
   color: var(--color-text);
   font-family: var(--font-sans);
-  overflow: hidden;
   user-select: none;
-  box-sizing: border-box;
+  /* 不限制 overflow：让内部 grid 自主决定尺寸 */
+  display: flex;
+  flex-direction: column;
+  /* 精确高度: header (24) + margin-bottom (12) + chart (16+8+95+8+16=143) + padding (12+12) = 211 */
 }
 
 /* ===== 头部 ===== */
@@ -367,6 +370,8 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
   flex-direction: column;
   gap: var(--space-2, 8px);
   min-width: 0;
+  min-height: 0;
+  flex-shrink: 0;
 }
 
 /* 月份标签条：absolute 定位每个标签 left=列号*列宽 */
@@ -390,6 +395,8 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
   display: flex;
   align-items: flex-start;
   gap: var(--space-2, 8px);
+  min-height: 0;
+  flex-shrink: 0;
 }
 
 .commit-heatmap__weekdays {
@@ -410,16 +417,19 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
 }
 
 .commit-heatmap__grid {
-  display: flex;
+  /* 用 CSS grid 精确控制：7 行固定高度，每列自动 11px 宽，列从左到右自动 flow */
+  display: grid;
+  grid-template-rows: repeat(7, var(--heatmap-cell-size));
+  grid-auto-columns: var(--heatmap-cell-size);
+  grid-auto-flow: column;
   gap: var(--heatmap-gap);
+  min-height: 0;
   flex-shrink: 0;
 }
 
+/* CSS grid 模式下 __col wrapper 不需要，但保留以兼容 template */
 .commit-heatmap__col {
-  display: flex;
-  flex-direction: column;
-  gap: var(--heatmap-gap);
-  flex-shrink: 0;
+  display: contents;
 }
 
 .commit-heatmap__cell {
