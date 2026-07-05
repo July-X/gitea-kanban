@@ -787,30 +787,126 @@ async function loadGraph(offset = 0): Promise<void> {
  * v0.6.3 修复：加载完成后让「最后一条 commit」滚到视口底部
  *   - 旧行为：loadMore 后 DOM 高度增加但 scrollTop 不变 → 列表底部留出大段空白
  *   - 用户体验：连续滚动加载时，每次加载完成都有大段空白，需要手动再往下滚
- *   - 新行为：loadGraph 完成后等 nextTick，scrollIntoView({ block: 'end' }) 刚加载的最后一条 commit
- *     —— 视野自然过渡到刚加载的末尾，「继续向下浏览」的手感连贯
+ *   - v0.7.1 fix：loadMoreGraph 路径改用 scrollIntoView({ block: 'end' }) 精确定位，
+ *     不再走 springScrollTo —— easeOutBack 的过冲会把最后一行推到视口外被遮挡
  *
  * 实现要点：
  *   - 用 data-sha 定位最后一条 commit-row（避免依赖 DOM 顺序的脆弱假设）
  *   - block: 'end' 让元素贴到视口底部（不是顶部），保留上面已浏览区域的视觉稳定
  *   - 首次加载不走这条路径（offset=0 时 scrollTop 已经在顶部，用户期望看最新 commit）
+ *
+ * v0.7.0 新增：
+ *   1. 加载不到新记录（已全部加载 / 后端 0 新提交）→ 给明确 toast 提示
+ *      - 用户原来连续滚动但 UI 没有任何反馈：「为什么没动静？」
+ *      - 新增 toast：「没有更多提交记录了」/「加载失败：[错误]」
+ *   2. scrollIntoView 替换为 springScrollTo —— 用 easeOutBack Q弹柔和回弹
+ *      - 浏览器默认 smooth 是 cubic-bezier(0.0, 0.0, 0.2, 1)，无回弹感
+ *      - easeOutBack 在 t=1 附近有 10% 左右的过冲再回落，Q弹效果
+ *      - 距离 < 8px 时直接跳到目标（避免微小滚动触发完整动画）
  */
 async function loadMoreGraph(): Promise<void> {
   if (loadingMore.value || allLoaded.value || !graphDto.value) return;
   const offset = graphDto.value.nodes.length;
-  await loadGraph(offset);
+  const beforeCount = offset;
+  try {
+    await loadGraph(offset);
+  } catch {
+    // loadGraph 内部已 logError，这里给用户一个明确反馈
+    showToast({ type: 'error', message: '加载更多失败，请稍后重试' });
+    return;
+  }
   // v0.6.3：等 DOM 更新后滚动到刚加载的最后一条 commit
   await nextTick();
   const allNodes = graphDto.value?.nodes ?? [];
   const lastNode = allNodes[allNodes.length - 1];
+  const afterCount = allNodes.length;
+
+  // v0.7.0：明确反馈「没有更多提交记录了」
+  // 条件：本次加载未增加节点 + 后端确认没有更多 + 不在 deepen 等待中
+  // localExhausted 时 UI 已经显示「正在深化本地历史…」，不重复 toast
+  if (
+    afterCount === beforeCount &&
+    allLoaded.value &&
+    !localExhausted.value &&
+    !deepenInProgress.value
+  ) {
+    showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
+  }
+
   if (lastNode?.sha) {
     const lastRow = document.querySelector(
       `.commit-row[data-sha="${lastNode.sha}"]`,
     ) as HTMLElement | null;
-    if (lastRow) {
-      lastRow.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    const scrollContainer = mainScrollEl.value;
+    if (lastRow && scrollContainer) {
+      // v0.7.1 fix：自动分页加载后只需确保最后一行可见，禁止 spring 过冲
+      // （easeOutBack overshoot 会把最后一行推到视口上方被遮挡）
+      lastRow.scrollIntoView({ block: 'end', inline: 'nearest' });
     }
   }
+}
+
+/**
+ * v0.7.0：Q弹 spring 滚动到指定 scrollTop
+ *  - 用 requestAnimationFrame 自定义动画曲线，绕开浏览器 scroll-behavior: smooth 的固定缓动
+ *  - easeOutBack：t 接近 1 时有过冲（overshoot），再回落，类弹簧手感
+ *    公式：1 + c3 * (t - 1)^3 + c1 * (t - 1)^2，c1=1.55, c3=c1+1=2.55
+ *  - 距离 < 8px 时直接跳到目标，避免微小滚动触发完整动画
+ *  - 用户手动滚动（滚轮/触摸）会触发 scroll 事件，此时取消动画（避免冲突）
+ *
+ *  @param el 滚动容器
+ *  @param targetTop 目标 scrollTop（CSS px）
+ *  @param duration 动画时长（ms），默认 560
+ */
+function springScrollTo(
+  el: HTMLElement,
+  targetTop: number,
+  duration = 560,
+): void {
+  const startTop = el.scrollTop;
+  const distance = targetTop - startTop;
+  if (Math.abs(distance) < 8) {
+    el.scrollTop = targetTop;
+    return;
+  }
+  // easeOutBack: c1=1.55 → 过冲约 10%，Q弹但不夸张
+  const c1 = 1.55;
+  const c3 = c1 + 1;
+  const easeOutBack = (t: number): number => {
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  };
+  let rafId = 0;
+  let cancelled = false;
+  const onUserScroll = (): void => {
+    // 用户中途手动滚 → 取消动画，避免 spring 跟用户抢控制权
+    cancelled = true;
+    cancelAnimationFrame(rafId);
+    el.removeEventListener('wheel', onUserScroll);
+    el.removeEventListener('touchstart', onUserScroll);
+    el.removeEventListener('keydown', onUserScroll);
+  };
+  // 用户主动输入源：wheel（鼠标滚轮）+ touchstart（移动端触摸）+ keydown（PgDn/Space 等）
+  el.addEventListener('wheel', onUserScroll, { passive: true, once: true });
+  el.addEventListener('touchstart', onUserScroll, { passive: true, once: true });
+  el.addEventListener('keydown', onUserScroll, { once: true });
+
+  const startTime = performance.now();
+  const tick = (now: number): void => {
+    if (cancelled) return;
+    const elapsed = now - startTime;
+    const t = Math.min(1, elapsed / duration);
+    const eased = easeOutBack(t);
+    el.scrollTop = startTop + distance * eased;
+    if (t < 1) {
+      rafId = requestAnimationFrame(tick);
+    } else {
+      // 动画结束 → 清理用户输入监听器
+      el.removeEventListener('wheel', onUserScroll);
+      el.removeEventListener('touchstart', onUserScroll);
+      el.removeEventListener('keydown', onUserScroll);
+    }
+  };
+  rafId = requestAnimationFrame(tick);
 }
 
 /**
@@ -2408,15 +2504,27 @@ function refBadgeClass(refType?: string): string {
               role="status"
               aria-live="polite"
             >
-              <template v-if="gitGraphLoadMoreClass === 'git-graph-load-more-loading'">
-                <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
-                <span>正在加载更多提交记录…</span>
-              </template>
-              <template v-else>
-                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
-                <span>已到全部提交记录的末尾</span>
-                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
-              </template>
+              <!--
+                v0.7.0：内容切换 Q弹动画（loading → end）
+                - Vue Transition + mode="out-in"，旧内容先 180ms fade out，新内容 380ms easeOutBack 弹入
+                - c1=1.55 easeOutBack ≈ 10% 过冲后回落，Q弹柔和但不夸张
+                - 状态 class 同时在父级 .git-graph-load-more 上，CSS 也能用 :class 触发样式
+              -->
+              <Transition name="git-graph-load-more-flip" mode="out-in">
+                <div
+                  v-if="gitGraphLoadMoreClass === 'git-graph-load-more-loading'"
+                  key="loading"
+                  class="git-graph-load-more__inner"
+                >
+                  <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
+                  <span>正在加载更多提交记录…</span>
+                </div>
+                <div v-else key="end" class="git-graph-load-more__inner">
+                  <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+                  <span>已到全部提交记录的末尾</span>
+                  <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+                </div>
+              </Transition>
             </div>
           </div>
         </div>
@@ -2448,6 +2556,17 @@ function refBadgeClass(refType?: string): string {
   width: 100%;
   text-align: center;
   transition: opacity var(--t-base) var(--ease);
+}
+/*
+ * v0.7.0：内层 flex 容器，让 Transition 子元素参与 flex 布局
+ * - 旧版直接挂 spinner/divider/text，会被外层 flex 的 gap 拉扯
+ * - 内层 inline-flex 让 loading 状态（spinner+text）和 end 状态（divider+text+divider）
+ *   各自紧凑成块，Q弹动画 transform 时不影响外层布局
+ */
+.git-graph-load-more__inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .git-graph-load-more-loading {
   display: inline-flex;
@@ -2507,6 +2626,40 @@ function refBadgeClass(refType?: string): string {
 @keyframes git-graph-load-more-idle-breath {
   0%, 100% { opacity: 0.55; transform: translateY(0); }
   50% { opacity: 0.9; transform: translateY(2px); }
+}
+
+/*
+ * v0.7.0：内容切换 Q弹动画（mode="out-in"）
+ * - 旧内容 180ms ease-out 上移淡出
+ * - 新内容 380ms easeOutBack 弹入：6px 下移 + 0.92 scale 起手，过冲到 1.04 scale + -2px 上移，落到原位
+ * - easeOutBack 公式：1 + c3 * (t-1)^3 + c1 * (t-1)^2，c1=1.55 → ~10% 过冲后回落
+ * - 避免与外层 .git-graph-load-more 上 padding/min-height 冲突：transform 只动 inner 自身
+ */
+.git-graph-load-more-flip-leave-active {
+  animation: git-graph-load-more-flip-out 180ms ease-out;
+}
+.git-graph-load-more-flip-enter-active {
+  animation: git-graph-load-more-flip-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes git-graph-load-more-flip-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes git-graph-load-more-flip-in {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* ===== 顶部栏 ===== */
