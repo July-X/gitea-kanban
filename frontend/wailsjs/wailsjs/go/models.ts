@@ -1013,6 +1013,8 @@ export namespace main {
 	    branches?: GraphBranchDTO[];
 	    maxLane: number;
 	    truncated: boolean;
+	    localExhausted: boolean;
+	    deepenTriggered: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GraphResultDTO(source);
@@ -1025,6 +1027,8 @@ export namespace main {
 	        this.branches = this.convertValues(source["branches"], GraphBranchDTO);
 	        this.maxLane = source["maxLane"];
 	        this.truncated = source["truncated"];
+	        this.localExhausted = source["localExhausted"];
+	        this.deepenTriggered = source["deepenTriggered"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
