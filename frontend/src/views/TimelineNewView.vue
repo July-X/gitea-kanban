@@ -2108,6 +2108,23 @@ function refBadgeClass(refType?: string): string {
       </div>
     </header>
 
+<div ref="heatmapStickyEl" class="timeline-new__heatmap-sticky">
+            <GitCommitHeatmap
+              :commits="graphDto?.nodes ?? []"
+              :months="12"
+            />
+          </div>
+
+          <!-- Git Graph -->
+        <!--
+          v2.27：git-graph 整合为表格第一列（用户反馈"应该是整体是表格的一个列，
+                 而不是和表头分离的布局模式"）
+          - 整张 SVG + dot overlay 作为背景层铺在 body 底层（position: absolute, z-index: 0）
+          - header / commit-row 改为 5 列 grid：graph | 描述 | 作者 | 日期 | SHA
+          - 每个 commit-row 第一列是占位（高度 = ROW_H），让背景的 SVG 在每行精确对齐
+          - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
+        -->
+        
     <!-- ===== 主内容 ===== -->
     <div
       ref="mainScrollEl"
@@ -2151,29 +2168,8 @@ function refBadgeClass(refType?: string): string {
         >
           <EmptyState title="没有提交记录" />
         </div>
-
-        <template v-else>
-          <!--
-            v0.7.4：提交热力图作为 Git Graph 上方的概览（GitHub 贡献图风格，居中显示）。
-            复用 graphDto 中已有的 commit 元数据，不改变 Graph 表格的数据源与加载流程。
-          -->
-          <div ref="heatmapStickyEl" class="timeline-new__heatmap-sticky">
-            <GitCommitHeatmap
-              :commits="graphDto?.nodes ?? []"
-              :months="12"
-            />
-          </div>
-
-          <!-- Git Graph -->
-        <!--
-          v2.27：git-graph 整合为表格第一列（用户反馈"应该是整体是表格的一个列，
-                 而不是和表头分离的布局模式"）
-          - 整张 SVG + dot overlay 作为背景层铺在 body 底层（position: absolute, z-index: 0）
-          - header / commit-row 改为 5 列 grid：graph | 描述 | 作者 | 日期 | SHA
-          - 每个 commit-row 第一列是占位（高度 = ROW_H），让背景的 SVG 在每行精确对齐
-          - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
-        -->
         <div
+          v-else
           class="git-graph-wrapper"
           :data-dragging="colDragging ? '' : null"
           :style="{
@@ -2641,9 +2637,8 @@ function refBadgeClass(refType?: string): string {
               </Transition>
             </div>
           </div>
-        </div>
-        </template>
-    </div>
+        </div><!-- /git-graph-wrapper -->
+    </div><!-- /timeline-new__main -->
   </div>
 </template>
 
@@ -2833,8 +2828,9 @@ function refBadgeClass(refType?: string): string {
   width: 100%;
   background: var(--color-bg, var(--color-canvas));
   padding: var(--space-3, 12px) 0;
-  /* v0.7.4：去掉 overflow-x: auto，去掉左右 padding —— .commit-heatmap 自己 max-width 960px 居中 */
-  box-sizing: border-box;
+  /* v0.7.5: 阻止内部 overflow 撑大 main 导致 sticky 失效 */
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
 /*
@@ -2844,7 +2840,7 @@ function refBadgeClass(refType?: string): string {
  *  - 这样表头永远 sticky 在热力图正下方，下方 commit-row 才参与纵向滚动
  */
 .git-graph-header {
-  top: var(--heatmap-sticky-height, 0px);
+  top: 0;
   z-index: 5;
 }
 

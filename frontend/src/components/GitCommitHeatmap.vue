@@ -304,6 +304,8 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
   user-select: none;
   display: flex;
   flex-direction: column;
+  /* v0.7.5: 避免内部 grid 意外撑开宽度导致 sticky 失效 */
+  min-height: 0;
 }
 
 /* ===== 顶部行：月份标签条 + 右侧 periodLabel ===== */
