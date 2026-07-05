@@ -182,6 +182,10 @@ export function OpenDataDir() {
   return window['go']['main']['App']['OpenDataDir']();
 }
 
+export function OpenDesktopFolder() {
+  return window['go']['main']['App']['OpenDesktopFolder']();
+}
+
 export function OpenGitBinaryPicker() {
   return window['go']['main']['App']['OpenGitBinaryPicker']();
 }

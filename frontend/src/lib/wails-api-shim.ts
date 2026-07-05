@@ -1219,6 +1219,28 @@ const apiShim = {
       ),
   },
 
+  // ===== v0.6.1 打开桌面文件夹 =====
+  openDesktopFolder: (): Promise<unknown> =>
+    forwardToWails(
+      () =>
+        Promise.reject({
+          code: 'internal',
+          message: 'system.openDesktopFolder 尚未连接到 Go 后端（Wails 未启动）',
+          hint: '请在 Wails 桌面窗口中操作',
+        }),
+      (app) => {
+        if (!app.OpenDesktopFolder) {
+          return Promise.reject({
+            code: 'internal',
+            message: 'Wails 绑定缺失 OpenDesktopFolder',
+            hint: '请重新构建应用',
+          });
+        }
+        return app.OpenDesktopFolder();
+      },
+    ),
+  },
+
   // ===== v0.6.0 日志导出 / Bug 上报 =====
   logs: {
     export: (args: { maxLogs?: number }): Promise<unknown> =>

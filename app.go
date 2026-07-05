@@ -295,6 +295,57 @@ func (a *App) OpenDataDir() error {
 	return nil
 }
 
+// OpenDesktopFolder 用系统文件管理器打开用户桌面目录
+//
+// 跨平台实现：
+//   - macOS: `open <path>`
+//   - Windows: `explorer <path>`
+//   - Linux: `xdg-open <path>`
+//
+// 优先使用 logexport.DesktopDir() 解析桌面路径；
+// 若结果为空，fallback 到 os.UserHomeDir()。
+// 失败时返 *ipc.IpcError（前端可展示 toast）
+func (a *App) OpenDesktopFolder() error {
+	desktopPath := logexport.DesktopDir()
+	if desktopPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ipc.NewInternal("获取桌面目录失败：" + err.Error())
+		}
+		desktopPath = home
+	}
+
+	// 确保目录存在（避免打开空目录时某些 OS 报错）
+	if err := os.MkdirAll(desktopPath, 0o755); err != nil {
+		return ipc.NewInternal("确保桌面目录存在失败：" + err.Error())
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", desktopPath)
+	case "windows":
+		cmd = exec.Command("explorer", desktopPath)
+	default: // linux + 其它 unix
+		cmd = exec.Command("xdg-open", desktopPath)
+	}
+
+	if a.logger != nil {
+		a.logger.Info("OpenDesktopFolder", "path", desktopPath, "cmd", cmd.String())
+	}
+
+	if err := cmd.Start(); err != nil {
+		return ipc.NewInternal("打开桌面目录失败：" + err.Error())
+	}
+
+	// 不等 cmd.Wait() —— `open` / `xdg-open` / `explorer` 都是 detach 模式
+	// 等会阻塞到子进程退出才返回
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return nil
+}
+
 // ===== v2.x 前端日志统一记录（前后端共用 slog）=====
 //
 // 设计动机：

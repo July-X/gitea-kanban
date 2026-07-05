@@ -95,6 +95,8 @@ export function MergePull(arg1:main.MergePullArgs):Promise<platform.PullDetailDT
 
 export function OpenDataDir():Promise<void>;
 
+export function OpenDesktopFolder():Promise<void>;
+
 export function OpenGitBinaryPicker():Promise<string>;
 
 export function PullRepo(arg1:main.PullRepoArgs):Promise<main.PullRepoResult>;
