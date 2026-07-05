@@ -2,14 +2,15 @@
 /**
  * GitCommitHeatmap —— 提交热力图组件
  *
- * 类似 GitHub Contributions 贡献日历，展示过去 N 个月内每日提交密度。
- * 本组件只依赖 commit 列表中的 date（ISO 字符串）和 authorName，纯前端聚合计算。
+ * 类似 GitHub Contributions Calendar，展示过去 12 个月每日提交密度。
+ * 本组件只依赖 commit 列表中的 date（ISO 字符串），纯前端聚合计算。
  *
  * 设计约束：
  * - 不引入额外依赖
- * - 使用项目主题 CSS 变量（暗色/亮色自动切换）
+ * - 使用项目主题 CSS 变量（暗色 / 亮色自动切换）
  * - 小方块颜色走主色 alpha 分档，无贡献走底色
  * - 中文 UI，零术语（AGENTS §9.1）
+ * - 横向铺开，类似 GitHub 贡献图
  */
 
 import { computed } from 'vue';
@@ -25,22 +26,25 @@ const props = withDefaults(
   defineProps<{
     /** commit 数据列表 */
     commits: HeatmapCommit[];
-    /** 展示最近多少个月（默认 6） */
+    /** 展示最近多少个月（默认 12，对齐 GitHub 贡献图周期） */
     months?: number;
-    /** 标题前缀（不传则显示默认文案） */
-    title?: string;
   }>(),
   {
-    months: 6,
-    title: '',
+    months: 12,
   },
 );
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
+const MONTH_NAMES_CN = [
+  '1月', '2月', '3月', '4月', '5月', '6月',
+  '7月', '8月', '9月', '10月', '11月', '12月',
+];
+const WEEKDAY_NAMES_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
 /**
  * 将 ISO 日期字符串归一化为本地日期 YYYY-MM-DD
- * 注意：用 Date 的本地年月日，避免 UTC 边界导致周一被算成周日
+ * 用 Date 的本地年月日，避免 UTC 边界导致周一被算成周日
  */
 function toLocalDateKey(iso: string): string {
   const d = new Date(iso);
@@ -49,6 +53,27 @@ function toLocalDateKey(iso: string): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+/** 总提交数 */
+const totalCommits = computed(() => props.commits.length);
+
+/**
+ * 数据周期：开始 = today - months 月（对齐到所在周周日开始），
+ * 结束 = 今天（包含）。
+ */
+const dateRange = computed<{ start: Date; end: Date }>(() => {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  const rawStart = new Date(
+    end.getFullYear(),
+    end.getMonth() - props.months + 1,
+    end.getDate(),
+  );
+  rawStart.setHours(0, 0, 0, 0);
+  // 对齐到所在周的周日（GitHub 风格：每周从周日开始）
+  const start = new Date(rawStart.getTime() - rawStart.getDay() * ONE_DAY_MS);
+  return { start, end };
+});
 
 /**
  * 聚合 commit：Map<dateKey, count>
@@ -63,48 +88,30 @@ const countByDate = computed<Map<string, number>>(() => {
 });
 
 /**
- * 总提交数
- */
-const totalCommits = computed(() => props.commits.length);
-
-/**
  * 生成热力图网格数据。
- *
- * 网格形状：7 行（周日..周六，与 GitHub 一致） × 若干列（周）。
- * 时间窗口：从今天往前推 N 个月，并对齐到周日开始（取整周）。
- * 每个单元格：{ dateKey, count, dateObj }。
+ * 返回一维数组，每个元素是一周（7 天）的数据。
+ * 渲染时使用 CSS grid：grid-template-rows: repeat(7, 11px), grid-auto-flow: column。
  */
-const heatmapGrid = computed(() => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+const heatmapWeeks = computed(() => {
+  const { start, end } = dateRange.value;
+  const days: {
+    dateKey: string;
+    count: number;
+    dateObj: Date;
+    inRange: boolean;
+  }[] = [];
 
-  // 结束日期：今天
-  const endDate = new Date(today);
-  // 开始日期：N 个月前
-  const startDate = new Date(
-    today.getFullYear(),
-    today.getMonth() - props.months,
-    today.getDate(),
-  );
-  startDate.setHours(0, 0, 0, 0);
-
-  // 对齐到所在周的周日（GitHub 风格：每周从周日开始）
-  const startDay = startDate.getDay(); // 0=周日
-  const alignedStart = new Date(startDate.getTime() - startDay * ONE_DAY_MS);
-
-  // 生成从 alignedStart 到 endDate（含）的每一天
-  const days: { dateKey: string; count: number; dateObj: Date }[] = [];
-  for (let t = alignedStart.getTime(); t <= endDate.getTime(); t += ONE_DAY_MS) {
+  for (let t = start.getTime(); t <= end.getTime(); t += ONE_DAY_MS) {
     const d = new Date(t);
     const dateKey = toLocalDateKey(d.toISOString());
     days.push({
       dateKey,
       count: countByDate.value.get(dateKey) ?? 0,
       dateObj: d,
+      inRange: true,
     });
   }
-
-  // 补齐到完整的 7 行 × N 列（右侧可能需要多几天）
+  // 补齐到完整周（右侧可能需要几天才能整除 7）
   const remainder = days.length % 7;
   if (remainder !== 0) {
     const last = days[days.length - 1];
@@ -114,62 +121,68 @@ const heatmapGrid = computed(() => {
         dateKey: toLocalDateKey(d.toISOString()),
         count: 0,
         dateObj: d,
+        inRange: false,
       });
     }
   }
-
-  // 组织成 7 行 × (days.length / 7) 列
-  const cols = days.length / 7;
-  const rows: Array<typeof days[number][]> = [];
-  for (let row = 0; row < 7; row++) {
-    const rowCells: typeof days[number][] = [];
-    for (let col = 0; col < cols; col++) {
-      rowCells.push(days[col * 7 + row]);
-    }
-    rows.push(rowCells);
+  // 组织为 weeks 数组：weeks[weekIdx][dayIdx]（dayIdx 0=周日 6=周六）
+  const weeks: typeof days[] = [];
+  for (let i = 0; i < days.length; i += 7) {
+    weeks.push(days.slice(i, i + 7));
   }
-  return rows;
+  return weeks;
 });
 
 /**
- * 月份标签：在顶部显示每个月第一次出现的列
+ * 月份标签：在每周（col）的第一个 inRange 的 cell 判断月份切换。
+ * GitHub 风格：只有当该列内首个 inRange 的日期所在月份跟前一列不同时才显示月份名。
  */
 const monthLabels = computed(() => {
   const labels: { col: number; text: string }[] = [];
-  const seen = new Set<string>();
-  const rows = heatmapGrid.value;
-  if (!rows.length || !rows[0].length) return labels;
+  const weeks = heatmapWeeks.value;
+  if (!weeks.length) return labels;
 
-  const months = [
-    '1月', '2月', '3月', '4月', '5月', '6月',
-    '7月', '8月', '9月', '10月', '11月', '12月',
-  ];
-
-  for (let col = 0; col < rows[0].length; col++) {
-    const cell = rows[0][col];
-    if (!cell) continue;
-    const key = `${cell.dateObj.getFullYear()}-${cell.dateObj.getMonth()}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      labels.push({
-        col,
-        text: months[cell.dateObj.getMonth()] ?? '',
-      });
+  let lastMonth = -1;
+  for (let colIdx = 0; colIdx < weeks.length; colIdx++) {
+    const week = weeks[colIdx];
+    if (!week) continue;
+    // 取该列第一个 inRange 的 cell（跳过末尾 padding 周的空 cell）
+    let firstCell = week[0];
+    if (!firstCell?.inRange) {
+      for (let d = 1; d < 7; d++) {
+        firstCell = week[d];
+        if (firstCell?.inRange) break;
+      }
+    }
+    if (!firstCell) continue;
+    const m = firstCell.dateObj.getMonth();
+    if (m !== lastMonth) {
+      lastMonth = m;
+      labels.push({ col: colIdx, text: MONTH_NAMES_CN[m] ?? '' });
     }
   }
   return labels;
 });
 
+/** 周期小字标签：「M月 YYYY → M月 YYYY」（GitHub 风格） */
+const periodLabel = computed(() => {
+  const { end } = dateRange.value;
+  const endMonth = end.getMonth();
+  const endYear = end.getFullYear();
+  const startRaw = new Date(end.getFullYear(), end.getMonth() - props.months + 1, end.getDate());
+  return `${MONTH_NAMES_CN[startRaw.getMonth()] ?? ''} ${startRaw.getFullYear()} → ${MONTH_NAMES_CN[endMonth] ?? ''} ${endYear}`;
+});
+
 /**
  * 获取颜色强度级别（0-4）
- * 0 = 无提交
+ * 0 = 无提交 / 范围外
  * 1 = 1 次
  * 2 = 2-3 次
  * 3 = 4-5 次
  * 4 = 6+ 次
  */
-function getLevel(count: number): number {
-  if (count <= 0) return 0;
+function getLevel(count: number, inRange: boolean): number {
+  if (!inRange || count <= 0) return 0;
   if (count === 1) return 1;
   if (count <= 3) return 2;
   if (count <= 5) return 3;
@@ -182,152 +195,145 @@ function getLevel(count: number): number {
 function getCellStyle(level: number): Record<string, string> {
   if (level === 0) {
     return {
-      backgroundColor: 'var(--color-elevated)',
+      backgroundColor: 'var(--color-bg-elevated)',
       border: '1px solid var(--color-divider)',
     };
   }
-  const alphas: Record<number, string> = {
+  const alphaMap: Record<number, string> = {
     1: '0.22',
     2: '0.45',
     3: '0.7',
     4: '1',
   };
   return {
-    backgroundColor: `color-mix(in srgb, var(--color-primary) ${Math.round(Number(alphas[level]) * 100)}%, transparent)`,
+    backgroundColor: `color-mix(in srgb, var(--color-primary) ${Math.round(Number(alphaMap[level]) * 100)}%, transparent)`,
     border: '1px solid transparent',
   };
 }
 
-/**
- * 格式化 tooltip 日期：YYYY年M月D日 星期X
- */
-function formatTooltipDate(dateObj: Date): string {
-  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  return `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月${dateObj.getDate()}日 ${weekdays[dateObj.getDay()]}`;
-}
-
-/**
- * 格式化 tooltip 提交数量文案
- */
-function formatCountText(count: number): string {
-  if (count === 0) return '无提交';
-  return `${count} 次提交`;
+/** tooltip 日期 + 提交数量文案 */
+function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean }): string {
+  if (!cell.inRange) {
+    return `${cell.dateObj.getFullYear()}年${cell.dateObj.getMonth() + 1}月${cell.dateObj.getDate()}日：不在数据周期内`;
+  }
+  const weekday = WEEKDAY_NAMES_CN[cell.dateObj.getDay()] ?? '';
+  if (cell.count === 0) {
+    return `${cell.dateObj.getFullYear()}年${cell.dateObj.getMonth() + 1}月${cell.dateObj.getDate()}日 ${weekday}：无提交`;
+  }
+  return `${cell.dateObj.getFullYear()}年${cell.dateObj.getMonth() + 1}月${cell.dateObj.getDate()}日 ${weekday}：${cell.count} 次提交`;
 }
 </script>
 
 <template>
   <div class="commit-heatmap">
-    <div class="commit-heatmap__header">
-      <h3 class="commit-heatmap__title">
-        {{ title || `近 ${months} 个月提交热力图` }}
-      </h3>
-      <span class="commit-heatmap__total">{{ totalCommits }} 次提交</span>
-    </div>
-
-    <div class="commit-heatmap__chart">
-      <!-- 月份标签 -->
+    <!--
+      顶部行：左侧横向铺开月份标签条（absolute 定位到每列），右侧 periodLabel（小字数据周期）
+    -->
+    <div class="commit-heatmap__top-line">
       <div class="commit-heatmap__months" aria-hidden="true">
         <span
           v-for="label in monthLabels"
-          :key="label.col"
+          :key="`${label.col}-${label.text}`"
           class="commit-heatmap__month-label"
-          :style="{ left: `calc(${label.col} * (var(--heatmap-cell-size) + var(--heatmap-gap)))` }"
+          :style="{ left: `calc(${label.col} * var(--heatmap-col-width))` }"
         >
           {{ label.text }}
         </span>
       </div>
+      <span class="commit-heatmap__period" aria-label="数据时间范围">
+        {{ periodLabel }}
+      </span>
+    </div>
 
-      <!-- 主体：星期侧边标签 + 网格 -->
-      <div class="commit-heatmap__body">
-        <div class="commit-heatmap__weekdays" aria-hidden="true">
-          <span>周日</span>
-          <span>周二</span>
-          <span>周四</span>
-          <span>周六</span>
-        </div>
-        <div class="commit-heatmap__grid" role="img" :aria-label="`近 ${months} 个月提交热力图，共 ${totalCommits} 次提交`">
-          <div
-            v-for="(row, rowIndex) in heatmapGrid"
-            :key="rowIndex"
-            class="commit-heatmap__row"
-          >
-            <div
-              v-for="(cell, colIndex) in row"
-              :key="`${rowIndex}-${colIndex}`"
-              class="commit-heatmap__cell"
-              :class="`commit-heatmap__cell--level-${getLevel(cell.count)}`"
-              :style="getCellStyle(getLevel(cell.count))"
-              :title="`${formatTooltipDate(cell.dateObj)}：${formatCountText(cell.count)}`"
-            />
-          </div>
-        </div>
+    <!--
+      主体：左侧 weekday 栏 + 右侧日格矩阵（CSS grid 横向铺开）
+    -->
+    <div class="commit-heatmap__body">
+      <div class="commit-heatmap__weekdays" aria-hidden="true">
+        <span v-for="(d, i) in ['', '周一', '', '周三', '', '周五', '']" :key="i" class="commit-heatmap__weekday">{{ d }}</span>
       </div>
-
-      <!-- 图例 -->
-      <div class="commit-heatmap__legend">
-        <span class="commit-heatmap__legend-label">少</span>
+      <div class="commit-heatmap__grid" role="img" :aria-label="`提交热力图：${totalCommits} 次提交，周期 ${periodLabel}`">
         <div
-          v-for="level in 4"
-          :key="level"
-          class="commit-heatmap__cell"
-          :style="getCellStyle(level)"
-          aria-hidden="true"
-        />
-        <span class="commit-heatmap__legend-label">多</span>
+          v-for="(week, weekIdx) in heatmapWeeks"
+          :key="`week-${weekIdx}`"
+          class="commit-heatmap__week"
+        >
+          <div
+            v-for="(cell, dayIdx) in week"
+            :key="`cell-${weekIdx}-${dayIdx}`"
+            class="commit-heatmap__cell"
+            :class="`commit-heatmap__cell--level-${getLevel(cell.count, cell.inRange)}`"
+            :style="getCellStyle(getLevel(cell.count, cell.inRange))"
+            :title="formatTooltip(cell)"
+          />
+        </div>
       </div>
+    </div>
+
+    <!-- 图例：少 → 多 -->
+    <div class="commit-heatmap__legend">
+      <span class="commit-heatmap__legend-label">少</span>
+      <div
+        v-for="level in 4"
+        :key="`legend-${level}`"
+        class="commit-heatmap__cell commit-heatmap__cell--legend"
+        :style="getCellStyle(level)"
+        aria-hidden="true"
+      />
+      <span class="commit-heatmap__legend-label">多</span>
     </div>
   </div>
 </template>
 
 <style scoped>
 .commit-heatmap {
-  --heatmap-cell-size: 10px;
+  /* 单格尺寸 + 列宽统一变量 */
+  --heatmap-cell-size: 11px;
   --heatmap-gap: 3px;
+  --heatmap-col-width: calc(var(--heatmap-cell-size) + var(--heatmap-gap));
   --heatmap-radius: 2px;
 
-  padding: var(--space-4, 16px);
-  background: var(--color-bg, var(--color-canvas));
-  border-radius: var(--radius-md, 8px);
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  background: transparent;
+  color: var(--color-text);
   font-family: var(--font-sans);
-  color: var(--color-text);
-  overflow: hidden;
   user-select: none;
-}
-
-.commit-heatmap__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3, 12px);
-  margin-bottom: var(--space-4, 16px);
-}
-
-.commit-heatmap__title {
-  font-size: var(--font-md, 15px);
-  font-weight: 600;
-  margin: 0;
-  color: var(--color-text);
-}
-
-.commit-heatmap__total {
-  font-size: var(--font-sm, 13px);
-  color: var(--color-text-muted);
-  font-weight: 500;
-}
-
-.commit-heatmap__chart {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 8px);
-  overflow-x: auto;
-  padding-bottom: var(--space-2, 8px);
 }
 
-/* 月份标签条 */
+/* ===== 顶部行：月份标签条 + 右侧 periodLabel ===== */
+.commit-heatmap__top-line {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  margin-bottom: var(--space-2, 8px);
+}
+
+/* periodLabel（小字数据周期，GitHub 风格右侧灰字） */
+.commit-heatmap__period {
+  flex-shrink: 0;
+  font-size: var(--font-xs, 11px);
+  color: var(--color-text-dim);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* 月份标签条容器 */
 .commit-heatmap__months {
   position: relative;
   height: 16px;
-  margin-left: 32px; /* 与 weekdays 宽度对齐 */
+  flex: 1 1 auto;
+  min-width: 0;
+  /* 让 month-label absolute left=colIdx*col-width 与下方 cell 列对齐 */
+  /* 需要与 .commit-heatmap__body 的 weekdays+gap 偏移同步：28+8=36px */
+  margin-left: 36px;
 }
 
 .commit-heatmap__month-label {
@@ -339,25 +345,25 @@ function formatCountText(count: number): string {
   line-height: 16px;
 }
 
-/* 主体：星期标签 + 网格 */
+/* ===== 主体：星期标签 + 网格 ===== */
 .commit-heatmap__body {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2, 8px);
+  gap: 6px;
+  min-height: 0;
+  flex-shrink: 0;
 }
 
 .commit-heatmap__weekdays {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  width: 24px;
+  width: 28px;
   min-height: calc(7 * var(--heatmap-cell-size) + 6 * var(--heatmap-gap));
-  padding-top: 0;
-  padding-bottom: 0;
   flex-shrink: 0;
 }
 
-.commit-heatmap__weekdays span {
+.commit-heatmap__weekday {
   font-size: var(--font-xs, 11px);
   color: var(--color-text-muted);
   line-height: var(--heatmap-cell-size);
@@ -365,16 +371,20 @@ function formatCountText(count: number): string {
   height: var(--heatmap-cell-size);
 }
 
+/* 网格容器：CSS grid 精确控制 7 行固定高度，每列自动 11px 宽，列从左到右自动 flow */
 .commit-heatmap__grid {
-  display: flex;
+  display: grid;
+  grid-template-rows: repeat(7, var(--heatmap-cell-size));
+  grid-auto-columns: var(--heatmap-cell-size);
+  grid-auto-flow: column;
   gap: var(--heatmap-gap);
+  min-height: 0;
   flex-shrink: 0;
 }
 
-.commit-heatmap__row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--heatmap-gap);
+/* 每个 week 在 grid 中不需要额外容器（display: contents 让 cell 直接成为 grid children） */
+.commit-heatmap__week {
+  display: contents;
 }
 
 .commit-heatmap__cell {
@@ -382,23 +392,26 @@ function formatCountText(count: number): string {
   height: var(--heatmap-cell-size);
   border-radius: var(--heatmap-radius);
   box-sizing: border-box;
-  transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
   cursor: pointer;
+  transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
 }
 
-.commit-heatmap__cell:hover {
+.commit-heatmap__cell--legend {
+  cursor: default;
+}
+
+.commit-heatmap__cell:not(.commit-heatmap__cell--legend):hover {
   transform: scale(1.25);
   opacity: 0.9;
   z-index: 1;
 }
 
-/* 图例 */
+/* ===== 图例 ===== */
 .commit-heatmap__legend {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: var(--space-1, 4px);
-  margin-top: var(--space-2, 8px);
+  margin-top: 4px;
   font-size: var(--font-xs, 11px);
   color: var(--color-text-muted);
 }
