@@ -1986,7 +1986,12 @@ function refBadgeClass(refType?: string): string {
       <div class="timeline-new__title">
         <GitCommit :size="16" />
         <span>Git Graph</span>
-        <span v-if="activeRepo" class="timeline-new__repo-name">{{ activeRepo.fullName }}</span>
+        <span v-if="activeRepo" class="timeline-new__repo-name">
+          {{ activeRepo.fullName }}
+          <span v-if="graphDto" class="timeline-new__commit-count">
+            （{{ activeCommitCount }} 条）
+          </span>
+        </span>
         <span v-else class="timeline-new__repo-name muted">请选择仓库</span>
       </div>
 
@@ -2691,9 +2696,20 @@ function refBadgeClass(refType?: string): string {
 .timeline-new__repo-name {
   color: var(--color-text-secondary);
   font-weight: 400;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .timeline-new__repo-name.muted {
   color: var(--color-text-disabled);
+}
+/* v0.7.2：commit 数量 badge，紧随仓库名之后弱化显示 */
+.timeline-new__commit-count {
+  color: var(--color-text-disabled);
+  font-weight: 400;
+  font-size: var(--font-xs);
+  white-space: nowrap;
 }
 .timeline-new__actions {
   display: flex;
