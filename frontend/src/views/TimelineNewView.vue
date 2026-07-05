@@ -123,9 +123,6 @@ const cloneProgress = ref<string | null>(null);
 /** 是否正在 pull */
 const pulling = ref(false);
 
-// v0.7.4：Git Graph / 提交热力图 视图切换
-const viewMode = ref<'graph' | 'heatmap'>('graph');
-
 // v0.6.1+ Git Graph 滚动加载更多：哨兵 + IntersectionObserver
 const loadMoreSentinel = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
@@ -2030,28 +2027,6 @@ function refBadgeClass(refType?: string): string {
 
       <div class="timeline-new__actions">
         <!--
-          v0.7.4：新增 Git Graph / 提交热力图 视图切换
-          早期设计里 TimelineNewView 就要做半年提交热力图，这里把入口放在顶部栏。
-        -->
-        <div class="timeline-new__view-switch" role="tablist" aria-label="Git Graph 视图切换">
-          <button
-            role="tab"
-            :aria-selected="viewMode === 'graph'"
-            :class="['view-switch-btn', { 'view-switch-btn--active': viewMode === 'graph' }]"
-            @click="viewMode = 'graph'"
-          >
-            Git Graph
-          </button>
-          <button
-            role="tab"
-            :aria-selected="viewMode === 'heatmap'"
-            :class="['view-switch-btn', { 'view-switch-btn--active': viewMode === 'heatmap' }]"
-            @click="viewMode = 'heatmap'"
-          >
-            提交热力图
-          </button>
-        </div>
-        <!--
           v0.6.2 重定义：右上角按钮语义从「同步」改为「刷新」
             - 拉取远端最新 commit（未 clone → cloneRepo；已 clone → pull）
             - 重新渲染顶部 300 条
@@ -2085,41 +2060,56 @@ function refBadgeClass(refType?: string): string {
       class="timeline-new__main"
       :class="{ 'timeline-new__main--dragging': colDragging }"
     >
-      <div v-show="viewMode === 'graph'">
+        <!--
+          v0.7.4：Git Graph 与提交热力图上下同时显示。
+          状态占位（未选仓库/错误/未启用/无提交记录）放到最外层，
+          有数据时下方同时渲染热力图概览 + Graph 表格。
+        -->
         <div v-if="!activeRepo" class="timeline-new__placeholder">
-        <EmptyState title="请先选择一个仓库" />
-      </div>
-      <div v-else-if="localError" class="timeline-new__placeholder">
-        <EmptyState :title="localError" />
-      </div>
-      <div
-        v-else-if="featureDisabled"
-        class="timeline-new__placeholder timeline-new__placeholder--feature"
-      >
-        <EmptyState
-          title="Git Graph 功能暂未启用"
-          description="使用 go-git 轻量同步仓库元信息后，基于 commit DAG 渲染接近 Gitea 官方效果的 Git Graph。点下面按钮一键启用，克隆完成后下次进入此页面自动加载。"
-        />
-        <button
-          v-if="!cloning"
-          class="enable-gitgraph-btn"
-          @click="enableGitGraph"
-        >
-          启用 Git Graph（git clone 仓库到本地）
-        </button>
-        <div v-if="cloneProgress" class="clone-progress">
-          {{ cloneProgress }}
+          <EmptyState title="请先选择一个仓库" />
         </div>
-      </div>
-      <div
-        v-else-if="activeCommitCount === 0"
-        class="timeline-new__placeholder"
-      >
-        <EmptyState title="没有提交记录" />
-      </div>
+        <div v-else-if="localError" class="timeline-new__placeholder">
+          <EmptyState :title="localError" />
+        </div>
+        <div
+          v-else-if="featureDisabled"
+          class="timeline-new__placeholder timeline-new__placeholder--feature"
+        >
+          <EmptyState
+            title="Git Graph 功能暂未启用"
+            description="使用 go-git 轻量同步仓库元信息后，基于 commit DAG 渲染接近 Gitea 官方效果的 Git Graph。点下面按钮一键启用，克隆完成后下次进入此页面自动加载。"
+          />
+          <button
+            v-if="!cloning"
+            class="enable-gitgraph-btn"
+            @click="enableGitGraph"
+          >
+            启用 Git Graph（git clone 仓库到本地）
+          </button>
+          <div v-if="cloneProgress" class="clone-progress">
+            {{ cloneProgress }}
+          </div>
+        </div>
+        <div
+          v-else-if="activeCommitCount === 0"
+          class="timeline-new__placeholder"
+        >
+          <EmptyState title="没有提交记录" />
+        </div>
 
-      <!-- Git Graph -->
-      <template v-else>
+        <template v-else>
+          <!--
+            v0.7.4：提交热力图作为 Git Graph 上方的概览（GitHub 贡献图风格，居中显示）。
+            复用 graphDto 中已有的 commit 元数据，不改变 Graph 表格的数据源与加载流程。
+          -->
+          <div class="timeline-new__heatmap-wrap">
+            <GitCommitHeatmap
+              :commits="graphDto?.nodes ?? []"
+              :months="6"
+            />
+          </div>
+
+          <!-- Git Graph -->
         <!--
           v2.27：git-graph 整合为表格第一列（用户反馈"应该是整体是表格的一个列，
                  而不是和表头分离的布局模式"）
@@ -2597,22 +2587,7 @@ function refBadgeClass(refType?: string): string {
             </div>
           </div>
         </div>
-       </template>
-      </div>
-      <div v-show="viewMode === 'heatmap'">
-        <div v-if="!activeRepo" class="timeline-new__placeholder">
-          <EmptyState title="请先选择一个仓库" />
-        </div>
-        <div v-else-if="activeCommitCount === 0" class="timeline-new__placeholder">
-          <EmptyState title="没有提交记录" />
-        </div>
-        <div v-else class="timeline-new__heatmap-wrap">
-          <GitCommitHeatmap
-            :commits="graphDto?.nodes ?? []"
-            :months="6"
-          />
-        </div>
-      </div>
+        </template>
     </div>
   </div>
 </template>
@@ -2789,40 +2764,10 @@ function refBadgeClass(refType?: string): string {
   margin-left: auto;
 }
 
-/* v0.7.4：视图切换按钮 */
-.timeline-new__view-switch {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  background: var(--color-elevated);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-btn, 6px);
-}
-
-.view-switch-btn {
-  padding: 4px 10px;
-  border-radius: var(--radius-xs, 4px);
-  font-size: var(--font-xs, 11px);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all var(--t-fast) var(--ease);
-}
-
-.view-switch-btn:hover:not(.view-switch-btn--active) {
-  color: var(--color-text);
-  background: var(--color-hover);
-}
-
-.view-switch-btn--active {
-  color: var(--color-text-inverse);
-  background: var(--color-primary);
-}
-
-/* 提交热力图容器 */
+/* 提交热力图容器（v0.7.4：居中显示，受 graphDto 数据驱动）*/
 .timeline-new__heatmap-wrap {
+  max-width: 960px;
+  margin: 0 auto;
   padding: var(--space-4, 16px);
   overflow: auto;
   overscroll-behavior: contain;
