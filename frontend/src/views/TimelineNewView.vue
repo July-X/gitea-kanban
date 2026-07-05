@@ -3095,8 +3095,8 @@ function refBadgeClass(refType?: string): string {
   z-index: 2;
   background: var(--color-graph-bg, var(--color-shell-main-bg));
   pointer-events: none;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 24px;
+  /* v0.7.4：移除 content-visibility: auto + contain-intrinsic-size，根因同 .commit-row。
+   * SVG 跳过屏外渲染后重新实例化时闪烁，滚动时 lane 圆点也出空白。 */
   overflow: visible;
   flex: 0 0 auto;
   display: block;
@@ -3336,11 +3336,13 @@ function refBadgeClass(refType?: string): string {
   box-sizing: border-box;
   position: relative; /* 自身建立 stacking context，让 col 内容在 SVG 之上 */
   z-index: 1;
-  /* v1.7 滚动性能优化：屏幕外 commit-row 跳过渲染（content-visibility + contain）
-   * 注意：contain: layout 与 :hover 状态不影响——hover 时只重渲染当前 row，
-   * 但浏览器对每个 row 单独走 hit-test 后才知道哪行 hover，所以 c-v: auto 仍有效。*/
-  content-visibility: auto;
-  contain-intrinsic-size: auto 24px;
+  /* v0.7.4：移除 content-visibility: auto + contain-intrinsic-size。
+   * 根因：content-visibility: auto 让浏览器跳过屏外 commit-row 的渲染，
+   * 快速滚动时新滚入区域的 DOM 需要即时实例化 + 布局 + 绘制，
+   * 出现白色空白闪烁。contain-intrinsic-size: auto 24px 的占位高度
+   * 也可能与实际行高(24px + accordion 展开时不固定)不匹配，占位不准加剧空白。
+   * 对于 600-900 行的现代浏览器，不依赖 cv: auto 也能流畅滚动。
+   * 如果未来行数破千引发性能问题，再考虑改用虚拟滚动(只渲染可视区域+buffer)。 */
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)
