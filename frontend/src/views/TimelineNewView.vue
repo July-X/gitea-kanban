@@ -134,6 +134,16 @@ let loadMoreObserver: IntersectionObserver | null = null;
  */
 const mainScrollEl = ref<HTMLElement | null>(null);
 
+/**
+ * v0.7.4：热力图外层 sticky 容器的高度（用于让 git-graph-header sticky 在其下方）。
+ *  - 0 表示热力图尚未挂载或已被 v-if 移除 → git-graph-header 自然 sticky 在顶部
+ *  - ResizeObserver 实时更新（窗口缩放 / 主题切换 / 拉宽/缩窄列宽会触发）
+ */
+const heatmapStickyHeight = ref(0);
+/** v0.7.4：热力图 sticky 外层 div ref（用于 ResizeObserver 读取其 offsetHeight）。 */
+const heatmapStickyEl = ref<HTMLElement | null>(null);
+let heatmapResizeObserver: ResizeObserver | null = null;
+
 // ============================================================
 // v2.9 commit 详情：行下手风琴（inline 展开）
 // ============================================================
@@ -461,6 +471,12 @@ onUnmounted(() => {
     rowHeightResizeObserver.disconnect();
     rowHeightResizeObserver = null;
   }
+  if (heatmapResizeObserver) {
+    heatmapResizeObserver.disconnect();
+    heatmapResizeObserver = null;
+  }
+  if (heatmapResizeRaf) cancelAnimationFrame(heatmapResizeRaf);
+  heatmapResizeRaf = 0;
 });
 
 /** 仓库 web URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
@@ -574,6 +590,7 @@ onMounted(async () => {
   // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
   document.addEventListener('app:refresh', onAppRefresh);
   setupRowHeightObserver();
+  setupHeatmapObserver();
   setupLoadMoreObserver();
   await activateData();
 });
@@ -1170,6 +1187,43 @@ function measureRowHeights(): void {
       if (rowH > 0) dynamicGridY.value = rowH;
     }
   }
+}
+
+/**
+ * v0.7.4：监听热力图容器尺寸变化，把高度注入 CSS 变量 --heatmap-sticky-height，
+ * 让 git-graph-header sticky top 跟随调整，热力图与表头稳定分隔。
+ *
+ * ponytail：rAF 节流 + 值不变不写回，避免 observer 喂回自己触发
+ * "ResizeObserver loop completed with undelivered notifications"。
+ */
+let heatmapResizeRaf = 0;
+function setupHeatmapObserver(): void {
+  if (heatmapResizeObserver) {
+    heatmapResizeObserver.disconnect();
+    heatmapResizeObserver = null;
+  }
+  nextTick(() => {
+    const el = heatmapStickyEl.value;
+    if (!el) return;
+    // 首次同步读一次（不依赖 observer）
+    const initialH = el.offsetHeight;
+    if (initialH > 0 && heatmapStickyHeight.value !== initialH) {
+      heatmapStickyHeight.value = initialH;
+    }
+    heatmapResizeObserver = new ResizeObserver(() => {
+      if (heatmapResizeRaf) return;
+      heatmapResizeRaf = requestAnimationFrame(() => {
+        heatmapResizeRaf = 0;
+        const cur = heatmapStickyEl.value;
+        if (!cur) return;
+        const h = cur.offsetHeight;
+        if (heatmapStickyHeight.value !== h) {
+          heatmapStickyHeight.value = h;
+        }
+      });
+    });
+    heatmapResizeObserver.observe(el);
+  });
 }
 
 function setupRowHeightObserver(): void {
@@ -2059,6 +2113,7 @@ function refBadgeClass(refType?: string): string {
       ref="mainScrollEl"
       class="timeline-new__main"
       :class="{ 'timeline-new__main--dragging': colDragging }"
+      :style="{ '--heatmap-sticky-height': `${heatmapStickyHeight}px` }"
     >
         <!--
           v0.7.4：Git Graph 与提交热力图上下同时显示。
@@ -2102,10 +2157,10 @@ function refBadgeClass(refType?: string): string {
             v0.7.4：提交热力图作为 Git Graph 上方的概览（GitHub 贡献图风格，居中显示）。
             复用 graphDto 中已有的 commit 元数据，不改变 Graph 表格的数据源与加载流程。
           -->
-          <div class="timeline-new__heatmap-wrap">
+          <div ref="heatmapStickyEl" class="timeline-new__heatmap-sticky">
             <GitCommitHeatmap
               :commits="graphDto?.nodes ?? []"
-              :months="6"
+              :months="12"
             />
           </div>
 
@@ -2764,13 +2819,34 @@ function refBadgeClass(refType?: string): string {
   margin-left: auto;
 }
 
-/* 提交热力图容器（v0.7.4：居中显示，受 graphDto 数据驱动）*/
-.timeline-new__heatmap-wrap {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: var(--space-4, 16px);
-  overflow: auto;
+/*
+ * v0.7.4：提交热力图 sticky 顶部（不参与纵向滚动）+ 横向铺开。
+ *  - position: sticky; top: 0 贴在 main 滚动容器顶部，热力图自身不滚动
+ *  - 宽 100% 不限 max-width，横向跟随容器铺开
+ *  - overflow-x: auto 让数据极多时内部横向滚动（绝不影响外层纵向滚动）
+ *  - background 跟主区画布同色，避免 sticky 跟下方 commit 行视觉脱节
+ */
+.timeline-new__heatmap-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  width: 100%;
+  background: var(--color-bg, var(--color-canvas));
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  overflow-x: auto;
   overscroll-behavior: contain;
+  box-sizing: border-box;
+}
+
+/*
+ * v0.7.4：git-graph-header sticky top 跟随热力图高度。
+ *  - 默认 0px，热力图未挂载时表头自然 sticky 在顶部
+ *  - 热力图挂载后由 ResizeObserver 把 offsetHeight 写入 --heatmap-sticky-height
+ *  - 这样表头永远 sticky 在热力图正下方，下方 commit-row 才参与纵向滚动
+ */
+.git-graph-header {
+  top: var(--heatmap-sticky-height, 0px);
+  z-index: 5;
 }
 
 /* ===== 主内容 ===== */
@@ -2909,8 +2985,7 @@ function refBadgeClass(refType?: string): string {
   padding-right: var(--space-3, 12px);
   box-sizing: border-box;
   position: sticky;
-  top: 0;
-  z-index: 5;
+  /* top 由 .git-graph-header 独立块用 var(--heatmap-sticky-height) 接管（v0.7.4） */
 }
 .git-graph-header__col {
   padding: 0 var(--space-3, 12px);
