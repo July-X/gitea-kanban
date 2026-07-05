@@ -123,6 +123,9 @@ const cloneProgress = ref<string | null>(null);
 /** 是否正在 pull */
 const pulling = ref(false);
 
+// v0.7.4：Git Graph / 提交热力图 视图切换
+const viewMode = ref<'graph' | 'heatmap'>('graph');
+
 // v0.6.1+ Git Graph 滚动加载更多：哨兵 + IntersectionObserver
 const loadMoreSentinel = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
@@ -2027,6 +2030,28 @@ function refBadgeClass(refType?: string): string {
 
       <div class="timeline-new__actions">
         <!--
+          v0.7.4：新增 Git Graph / 提交热力图 视图切换
+          早期设计里 TimelineNewView 就要做半年提交热力图，这里把入口放在顶部栏。
+        -->
+        <div class="timeline-new__view-switch" role="tablist" aria-label="Git Graph 视图切换">
+          <button
+            role="tab"
+            :aria-selected="viewMode === 'graph'"
+            :class="['view-switch-btn', { 'view-switch-btn--active': viewMode === 'graph' }]"
+            @click="viewMode = 'graph'"
+          >
+            Git Graph
+          </button>
+          <button
+            role="tab"
+            :aria-selected="viewMode === 'heatmap'"
+            :class="['view-switch-btn', { 'view-switch-btn--active': viewMode === 'heatmap' }]"
+            @click="viewMode = 'heatmap'"
+          >
+            提交热力图
+          </button>
+        </div>
+        <!--
           v0.6.2 重定义：右上角按钮语义从「同步」改为「刷新」
             - 拉取远端最新 commit（未 clone → cloneRepo；已 clone → pull）
             - 重新渲染顶部 300 条
@@ -2060,7 +2085,7 @@ function refBadgeClass(refType?: string): string {
       class="timeline-new__main"
       :class="{ 'timeline-new__main--dragging': colDragging }"
     >
-      <template v-if="viewMode === 'graph'">
+      <div v-show="viewMode === 'graph'">
         <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
       </div>
@@ -2573,9 +2598,8 @@ function refBadgeClass(refType?: string): string {
           </div>
         </div>
        </template>
-
-      <!-- ===== 主内容：提交热力图 ===== -->
-      <template v-else-if="viewMode === 'heatmap'">
+      </div>
+      <div v-show="viewMode === 'heatmap'">
         <div v-if="!activeRepo" class="timeline-new__placeholder">
           <EmptyState title="请先选择一个仓库" />
         </div>
@@ -2588,7 +2612,7 @@ function refBadgeClass(refType?: string): string {
             :months="6"
           />
         </div>
-      </template>
+      </div>
     </div>
   </div>
 </template>
@@ -2763,6 +2787,45 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   gap: var(--space-2, 8px);
   margin-left: auto;
+}
+
+/* v0.7.4：视图切换按钮 */
+.timeline-new__view-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  background: var(--color-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-btn, 6px);
+}
+
+.view-switch-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-xs, 4px);
+  font-size: var(--font-xs, 11px);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+
+.view-switch-btn:hover:not(.view-switch-btn--active) {
+  color: var(--color-text);
+  background: var(--color-hover);
+}
+
+.view-switch-btn--active {
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+}
+
+/* 提交热力图容器 */
+.timeline-new__heatmap-wrap {
+  padding: var(--space-4, 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 /* ===== 主内容 ===== */
