@@ -3176,6 +3176,16 @@ function refBadgeClass(refType?: string): string {
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
   background: transparent;
   padding: 0 var(--space-3, 12px) 0 0;
+  /*
+   * v0.7.2：scroll-margin-bottom —— 让 scrollIntoView({ block: 'end' }) 留出 StatusBar 高度空间
+   * 问题：loadMoreGraph 调 scrollIntoView({ block: 'end' }) 后，最后一行贴到视口底部 = StatusBar 顶，
+   *   被 StatusBar 遮挡，用户需手动再滚一下，这个额外滚动会再次触发 IntersectionObserver → loadMoreGraph，
+   *   loadingMore guard 拦了重复调用，但整体体验割裂（抖动 + 哨兵再次探测）。
+   * 解法：scroll-margin-bottom = StatusBar 高度（--statusbar-height: 33px）+ 8px 余量。
+   *   scrollIntoView 会把目标元素底边对齐到「视口底边 - scroll-margin-bottom」位置，
+   *   从而把最后一行完整暴露在 StatusBar 上方，用户不再需要手动补滚。
+   */
+  scroll-margin-bottom: calc(var(--statusbar-height, 33px) + 8px);
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
