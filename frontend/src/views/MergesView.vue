@@ -2639,6 +2639,82 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
 }
 
+/* ===== v0.5.0 M4: 三 Tab 切换 —— 视觉区分 ===== */
+.merge-item__detail-tabs {
+  display: flex;
+  gap: 0;
+  margin: 4px 0 var(--space-3);
+  padding: 0;
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  /* v0.6.30: 让 tabs 在上方固定，下方 tab 内容可以独立滚动 */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-shell-main-bg);
+}
+
+.merge-item__detail-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* 让 active 底边线和容器底边线重叠 */
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+  border-radius: 4px 4px 0 0;
+  line-height: 1.3;
+}
+
+.merge-item__detail-tab:hover {
+  color: var(--color-text);
+  background: var(--color-primary-soft);
+}
+
+.merge-item__detail-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.merge-item__detail-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: 9px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  line-height: 1;
+}
+
+.merge-item__detail-tab--active .merge-item__detail-tab-count {
+  background: var(--color-primary);
+  color: var(--color-shell-main-bg);
+}
+
+/* ===== v0.5.0 M4: Tab 内容区 公共边距 ===== */
+.merge-item__detail-overview,
+.merge-item__detail-files {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: var(--space-1);
+}
+
+
 /* v1.4 · 详情头部一行：meta 紧凑 + 编辑按钮（同行右对齐）*/
 .merge-item__detail-meta-row {
   display: flex;
