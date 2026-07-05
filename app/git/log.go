@@ -225,11 +225,36 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		return commits[i].SHA < commits[j].SHA
 	})
 
+	// localTotal：offset 分页前本地可用 commit 总数，用于 v0.7.2 的「本地耗尽」检测。
+	localTotal := len(commits)
+
 	// offset 分页：跳过前 N 条（在排序后、截断前执行，保证稳定分页）
 	if opts.Offset > 0 && opts.Offset < len(commits) {
 		commits = commits[opts.Offset:]
 	} else if opts.Offset >= len(commits) {
 		commits = nil
+	}
+
+	truncated := false
+	if opts.MaxCount > 0 && len(commits) > opts.MaxCount {
+		commits = commits[:opts.MaxCount]
+		truncated = true
+	}
+
+	// v0.7.2 修复：shallow clone 下本地 commit 已耗尽但未触发 offset 越界。
+	// 与 LogCommitsVscode 同逻辑：当 offset 接近末尾，截取后 commits 不满 MaxCount，
+	// 且分页前总条数 localTotal 不足 offset+1（即本地已取完全部 commit），且仓库是 shallow 时，
+	// 触发 LocalExhausted + 后台 deepen，避免前端把 truncated=false 当成"全加载完了"。
+	if opts.Offset > 0 && opts.Token != "" &&
+		!truncated && len(commits) < opts.MaxCount &&
+		localTotal < opts.Offset+opts.MaxCount && repoIsShallow(opts.LocalPath) {
+		triggered := tryTriggerDeepen(opts.LocalPath, opts.Token)
+		return &LogResult{
+			Commits:         nil,
+			Truncated:       false,
+			LocalExhausted:  true,
+			DeepenTriggered: triggered,
+		}, nil
 	}
 
 	// v0.6.2: offset 越界（本地 commit 全部取出）时，若本地是 shallow clone
@@ -244,12 +269,6 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 			LocalExhausted:  true,
 			DeepenTriggered: triggered,
 		}, nil
-	}
-
-	truncated := false
-	if opts.MaxCount > 0 && len(commits) > opts.MaxCount {
-		commits = commits[:opts.MaxCount]
-		truncated = true
 	}
 
 	// v3.x：探测 worktree dirty count，1:1 复刻 vscode-git-graph 的

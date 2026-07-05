@@ -744,6 +744,14 @@ async function loadGraph(offset = 0): Promise<void> {
       deepenInProgress.value = !!dto?.deepenTriggered;
       if (dto?.deepenTriggered && !deepenRetryTimer) {
         await waitForDeepenAndRetry(offset);
+      } else if (!dto?.deepenTriggered) {
+        // v0.7.2 修复：LocalExhausted=true 但 DeepenTriggered=false。
+        // 意味着本地 offset 已耗尽且后端无法 deepen（非 shallow 或没 token），
+        // 此时若设 allLoaded=false 会让哨兵保持在 DOM 中，用户再次滚到底会再次
+        // 触发 loadMoreGraph → 后端又返回 localExhausted → 死循环。
+        // 改为 allLoaded=true + toast 提示用户已加载完全部可用 commit。
+        allLoaded.value = true;
+        showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
       }
     } else {
       localExhausted.value = false;
