@@ -767,6 +767,11 @@ export function systemOpenPath(args: { path: string }): Promise<void> {
   return getIpcClient().invoke('system', 'openPath', args);
 }
 
+/** 打开用户桌面目录（openDesktopFolder） */
+export function openDesktopFolder(): Promise<void> {
+  return getIpcClient().invoke('system', 'openDesktopFolder');
+}
+
 // ============================================================
 // ===== pulls.* （A3 补：前端 wrapper，让 MergesView 能调） =====
 // ============================================================

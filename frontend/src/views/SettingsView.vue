@@ -36,6 +36,7 @@ import { logInfo, logError } from '@renderer/lib/frontend-log';
 import {
   commitsGitgraphGetWorkspace,
   systemOpenPath,
+  openDesktopFolder,
   exportLogs,
   copyRecentLogs,
   normalizeError,
@@ -106,6 +107,15 @@ async function onCopyRecentLogs(): Promise<void> {
     showToast({ type: 'error', message: '复制失败', description: normalized.messageText });
   } finally {
     copyingLogs.value = false;
+  }
+}
+
+async function onOpenDesktopFolder(): Promise<void> {
+  try {
+    await openDesktopFolder();
+  } catch (err) {
+    const normalized = normalizeError(err);
+    showToast({ type: 'error', message: '打开桌面文件夹失败', description: normalized.messageText });
   }
 }
 
@@ -696,6 +706,13 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
             @click="onCopyRecentLogs"
           >
             {{ copyingLogs ? '读取中…' : '复制最近日志' }}
+          </button>
+          <button
+            type="button"
+            class="settings__reset"
+            @click="onOpenDesktopFolder"
+          >
+            打开桌面文件夹
           </button>
         </div>
         <p class="settings__hint settings__hint--compact">
