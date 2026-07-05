@@ -2781,7 +2781,7 @@ function refBadgeClass(refType?: string): string {
   display: flex;
   align-items: center;
   gap: var(--space-3, 12px);
-  padding: var(--space-3, 12px) var(--space-4, 16px);
+  padding: var(--space-2, 8px) var(--space-4, 16px);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   flex-wrap: wrap;
@@ -2832,7 +2832,7 @@ function refBadgeClass(refType?: string): string {
   z-index: 6;
   width: 100%;
   background: var(--color-bg, var(--color-canvas));
-  padding: var(--space-3, 12px) 0;
+  padding: 6px 0;
   /* v0.7.4：去掉 overflow-x: auto，去掉左右 padding —— .commit-heatmap 自己 max-width 960px 居中 */
   box-sizing: border-box;
 }
@@ -2846,6 +2846,8 @@ function refBadgeClass(refType?: string): string {
 .git-graph-header {
   top: var(--heatmap-sticky-height, 0px);
   z-index: 5;
+  /* v0.7.4：sticky 视觉强化 —— shadow 让滚动时表头有"漂浮"反馈 */
+  box-shadow: 0 1px 0 var(--color-divider), 0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
 /* ===== 主内容 ===== */
