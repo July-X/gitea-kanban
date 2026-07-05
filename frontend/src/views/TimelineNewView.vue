@@ -601,6 +601,9 @@ function setupLoadMoreObserver(): void {
     (entries) => {
       const e = entries[0];
       if (!e || !e.isIntersecting) return;
+      // v0.6.5：observer 回调里同样加 loadMoreGraph 已有的 guard 条件，
+      // 避免在 sentinel 已显示但仍在 IO 队列里重复入队 loadMoreGraph
+      if (loadingMore.value || allLoaded.value || !graphDto.value) return;
       void loadMoreGraph();
     },
     { rootMargin: '200px 0px', threshold: 0 },
@@ -819,7 +822,7 @@ async function loadMoreGraph(): Promise<void> {
  *  - 超时 300 秒（相当于 5 分钟，深历史 deepen 可能几十秒 ~ 几分钟）
  *  - 超时后给用户展示「重试」按钮（localExhausted.value=true，但 deepenInProgress.value=false）
  */
-async function waitForDeepenAndRetry(offset: number): Promise<void> {
+async function waitForDeepenAndRetry(_offset: number): Promise<void> {
   if (!activeRepo.value) return;
   const repoKey = activeRepo.value.fullName;
   let off: (() => void) | null = null;
@@ -845,9 +848,13 @@ async function waitForDeepenAndRetry(offset: number): Promise<void> {
     localExhausted.value = false;
   }
   if (timedOut) return;
+  // v0.6.5：deepen 完成后直接调 loadMoreGraph() 重新尝试加载。
+  // loadMoreGraph 内部已有 guard (loadingMore/allLoaded/graphDto)，
+  // 会重新算 offset = graphDto.value.nodes.length 然后调 loadGraph(offset)。
+  // 去掉 `newOffset > offset` 判断：之前该条件不满足时会丢失自动重试，
+  // 因为 graphDto.value.nodes.length 在 deepen 后未即时变，但下一次 loadGraph offset 分页能拿到新 commit。
   if (!allLoaded.value && graphDto.value) {
-    const newOffset = graphDto.value.nodes.length;
-    if (newOffset > offset) await loadMoreGraph();
+    await loadMoreGraph();
   }
 }
 
@@ -2485,6 +2492,14 @@ function refBadgeClass(refType?: string): string {
   flex: 0 0 24px;
   height: 1px;
   background: var(--color-divider);
+}
+/* v0.6.5：哨兵占位必须保持高度让 IntersectionObserver 能触发。
+   之前没写 CSS → div 0px 高 → 永远不被触发 → 滚到底加载不了更多 commit。
+   对齐 MergesView .merges__load-more min-height: 56px */
+.git-graph-load-more-sentinel {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 56px;
 }
 @keyframes git-graph-load-more-spin {
   to { transform: rotate(360deg); }
