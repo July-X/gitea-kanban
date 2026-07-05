@@ -42,6 +42,7 @@ import {
   VSCODE_COLORS,
   type VscodeSvgRenderResult,
 } from '@renderer/lib/gitgraph/vscode-render';
+import GitCommitHeatmap from '@renderer/components/GitCommitHeatmap.vue';
 
 // ============================================================
 // 常量
@@ -61,6 +62,13 @@ const repo = useRepoStore();
 // 对齐 vscode-git-graph 默认分页：initialLoad=300。
 // v0.4.0：移除「加载更多」分页机制（GitHub 仓库 UI 与 Gitea 对齐），固定用 INITIAL_GRAPH_LIMIT。
 const INITIAL_GRAPH_LIMIT = 300;
+/**
+ * v0.7.3：当前加载上限（对齐 vscode-git-graph 的 maxCommits）。
+ * 初始 = INITIAL_GRAPH_LIMIT；每次「加载更多」增加 INITIAL_GRAPH_LIMIT。
+ * 后端从 offset=0 拉取 maxCommits+1 条（+1 用于判断 truncated），layout 从 0 分配 row。
+ * 前端整体替换 graphDto，不追加 —— 严格复刻 vscode-git-graph 做法。
+ */
+const maxCommits = ref(INITIAL_GRAPH_LIMIT);
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const activeRepo = computed(() => {
   const fn = repo.currentProject
@@ -658,6 +666,8 @@ watch(loadMoreSentinel, (el) => {
 watch(
   () => activeProjectId.value,
   async (id) => {
+    // v0.7.3：切换仓库时重置 maxCommits，对齐 vscode-git-graph 切换仓库后重新从 0 拉取
+    maxCommits.value = INITIAL_GRAPH_LIMIT;
     if (id) await loadGraph();
   },
 );
@@ -721,15 +731,23 @@ onUnmounted(() => {
 });
 
 /**
- * 加载 Git Graph 数据（支持分页）
+ * 加载 Git Graph 数据。
  *
- * @param offset 跳过前 N 条 commit（0 = 首次加载）
+ * v0.7.3 修复：严格复刻 vscode-git-graph 的 loadMoreCommits 做法 ——
+ * 每次加载更多时从 offset=0 拉取 limit=总数 的全量 commit，后端 layout 算法
+ * 对完整数组从 0 分配 row，前端整体替换 graphDto。
+ *
+ * 旧做法（offset 追加）的 bug：后端 layout 每次对当次返回的 commits 从 0 分配 row，
+ * 导致 page1(row 0-299) + page2(row 0-299) 合并时 row 冲突，byRow map 被覆盖，
+ * 表现为「总条目增加，但 Commit row 不增加显示」。
+ *
+ * @param offset 保留参数（兼容旧调用），实际对外只传 0 或 INITIAL_GRAPH_LIMIT 的增量
  */
 async function loadGraph(offset = 0): Promise<void> {
   if (!activeProjectId.value) {
     return;
   }
-  const isFirstLoad = offset === 0;
+  const isFirstLoad = graphDto.value === null;
   if (isFirstLoad) {
     loading.value = true;
     localError.value = null;
@@ -740,51 +758,34 @@ async function loadGraph(offset = 0): Promise<void> {
   }
   useGlobalLoadingStore().show('timeline');
   try {
+    // v0.7.3：严格复刻 vscode-git-graph 做法 ——
+    // 始终从 offset=0 拉取 maxCommits 条，后端 layout 从 0 分配 row，前端整体替换 graphDto。
+    // 不追加、不合并，避免行号冲突（旧 bug：page1 row 0-299 + page2 row 0-299 合并时覆盖）。
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
-      limit: INITIAL_GRAPH_LIMIT,
-      offset,
+      limit: maxCommits.value,
+      offset: 0,
     });
 
     const nodes = dto?.nodes ?? [];
     if (isFirstLoad && nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
       featureDisabled.value = true;
       graphDto.value = null;
-    } else if (isFirstLoad) {
-      graphDto.value = dto;
-      nextTick(() => measureRowHeights());
     } else {
-      // 分页加载：追加新 nodes 和 edges（去重）
-      if (graphDto.value) {
-        const existingSha = new Set(graphDto.value.nodes.map((n) => n.sha));
-        const newNodes = nodes.filter((n) => !existingSha.has(n.sha));
-        graphDto.value = {
-          ...graphDto.value,
-          nodes: [...graphDto.value.nodes, ...newNodes],
-          edges: [...graphDto.value.edges, ...(dto?.edges ?? [])],
-        };
-      } else {
-        graphDto.value = dto;
-      }
+      graphDto.value = dto;
+      if (isFirstLoad) nextTick(() => measureRowHeights());
     }
     // truncated = false 表示已加载全部
     allLoaded.value = !dto?.truncated;
 
     // v0.6.2: 后端告知本地 commit 已全部取出，远端可能有更多。
-    // 此时 dto.nodes 为空，dto.truncated=false。前端不能把 allLoaded=true，
-    // 需要等后台 deepen 完成后再次 loadGraph(offset)。
     if (dto?.localExhausted) {
       allLoaded.value = false;
       localExhausted.value = true;
       deepenInProgress.value = !!dto?.deepenTriggered;
       if (dto?.deepenTriggered && !deepenRetryTimer) {
-        await waitForDeepenAndRetry(offset);
+        await waitForDeepenAndRetry(0);
       } else if (!dto?.deepenTriggered) {
-        // v0.7.2 修复：LocalExhausted=true 但 DeepenTriggered=false。
-        // 意味着本地 offset 已耗尽且后端无法 deepen（非 shallow 或没 token），
-        // 此时若设 allLoaded=false 会让哨兵保持在 DOM 中，用户再次滚到底会再次
-        // 触发 loadMoreGraph → 后端又返回 localExhausted → 死循环。
-        // 改为 allLoaded=true + toast 提示用户已加载完全部可用 commit。
         allLoaded.value = true;
         showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
       }
@@ -825,54 +826,42 @@ async function loadGraph(offset = 0): Promise<void> {
 }
 
 /**
- * 加载更多 Git Graph 数据（滚动到底自动调）
+ * 加载更多 Git Graph 数据（滚动到底自动调）。
  *
- * v0.6.3 修复：加载完成后让「最后一条 commit」滚到视口底部
- *   - 旧行为：loadMore 后 DOM 高度增加但 scrollTop 不变 → 列表底部留出大段空白
- *   - 用户体验：连续滚动加载时，每次加载完成都有大段空白，需要手动再往下滚
- *   - v0.7.1 fix：loadMoreGraph 路径改用 scrollIntoView({ block: 'end' }) 精确定位，
- *     不再走 springScrollTo —— easeOutBack 的过冲会把最后一行推到视口外被遮挡
+ * v0.7.3 修复：严格复刻 vscode-git-graph 做法 —— 增加 maxCommits 后从 offset=0 全量拉取。
  *
- * 实现要点：
- *   - 用 data-sha 定位最后一条 commit-row（避免依赖 DOM 顺序的脆弱假设）
- *   - block: 'end' 让元素贴到视口底部（不是顶部），保留上面已浏览区域的视觉稳定
- *   - 首次加载不走这条路径（offset=0 时 scrollTop 已经在顶部，用户期望看最新 commit）
+ * 根因：旧做法 offset 追加时，后端 layout 每次对当次返回的 commits 从 0 分配 row，
+ * 导致 page1(row 0-299) + page2(row 0-299) 合并时 row 冲突，byRow map 被覆盖，
+ * 表现为「总条目数增加，但 Commit row 不增加显示」。
  *
- * v0.7.0 新增：
- *   1. 加载不到新记录（已全部加载 / 后端 0 新提交）→ 给明确 toast 提示
- *      - 用户原来连续滚动但 UI 没有任何反馈：「为什么没动静？」
- *      - 新增 toast：「没有更多提交记录了」/「加载失败：[错误]」
- *   2. scrollIntoView 替换为 springScrollTo —— 用 easeOutBack Q弹柔和回弹
- *      - 浏览器默认 smooth 是 cubic-bezier(0.0, 0.0, 0.2, 1)，无回弹感
- *      - easeOutBack 在 t=1 附近有 10% 左右的过冲再回落，Q弹效果
- *      - 距离 < 8px 时直接跳到目标（避免微小滚动触发完整动画）
+ * 做法（对齐 vscode-git-graph loadMoreCommits）：
+ *   - maxCommits += INITIAL_GRAPH_LIMIT（每次增加 300）
+ *   - 调 loadGraph() 从 offset=0 拉取 maxCommits 条
+ *   - 后端 layout 对完整数组从 0 分配 row
+ *   - 前端整体替换 graphDto，不追加、不合并
  */
 async function loadMoreGraph(): Promise<void> {
   if (loadingMore.value || allLoaded.value || !graphDto.value) return;
-  const offset = graphDto.value.nodes.length;
-  const beforeCount = offset;
+  const beforeCount = graphDto.value.nodes.length;
+  // v0.7.3：增加 maxCommits（对齐 vscode-git-graph 的 maxCommits += config.loadMoreCommits）
+  maxCommits.value += INITIAL_GRAPH_LIMIT;
   try {
-    await loadGraph(offset);
+    await loadGraph();
   } catch {
-    // loadGraph 内部已 logError，这里给用户一个明确反馈
+    // loadGraph 内部已 logError，回滚 maxCommits 并提示
+    maxCommits.value -= INITIAL_GRAPH_LIMIT;
     showToast({ type: 'error', message: '加载更多失败，请稍后重试' });
     return;
   }
-  // v0.6.3：等 DOM 更新后滚动到刚加载的最后一条 commit
+  // 等 DOM 更新
   await nextTick();
   const allNodes = graphDto.value?.nodes ?? [];
-  const lastNode = allNodes[allNodes.length - 1];
   const afterCount = allNodes.length;
 
-  // v0.7.3：加载结果 toast 反馈，让用户明确知道加载到了什么
-  const loadedCount = afterCount - beforeCount;
-  if (loadedCount > 0) {
-    // 成功加载更多 → 轻量提示，不干扰浏览
-    showToast({ type: 'success', message: `已加载 ${loadedCount} 条提交`, duration: 1800 });
+  // 加载结果 toast 反馈
+  if (afterCount > beforeCount) {
+    showToast({ type: 'success', message: `已加载 ${afterCount} 条提交`, duration: 1800 });
   } else if (
-    // v0.7.0：明确反馈「没有更多提交记录了」
-    // 条件：本次加载未增加节点 + 后端确认没有更多 + 不在 deepen 等待中
-    // localExhausted 时 UI 已经显示「正在深化本地历史…」，不重复 toast
     allLoaded.value &&
     !localExhausted.value &&
     !deepenInProgress.value
@@ -880,14 +869,14 @@ async function loadMoreGraph(): Promise<void> {
     showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
   }
 
+  // 滚动到底部让用户看到新加载的 commit
+  const lastNode = allNodes[allNodes.length - 1];
   if (lastNode?.sha) {
     const lastRow = document.querySelector(
       `.commit-row[data-sha="${lastNode.sha}"]`,
     ) as HTMLElement | null;
     const scrollContainer = mainScrollEl.value;
     if (lastRow && scrollContainer) {
-      // v0.7.1 fix：自动分页加载后只需确保最后一行可见，禁止 spring 过冲
-      // （easeOutBack overshoot 会把最后一行推到视口上方被遮挡）
       lastRow.scrollIntoView({ block: 'end', inline: 'nearest' });
     }
   }
@@ -1032,6 +1021,8 @@ async function waitForDeepenAndRetry(_offset: number): Promise<void> {
  */
 async function goToLatest(): Promise<void> {
   if (!activeProjectId.value) return;
+  // v0.7.3：刷新时重置 maxCommits，回到初始状态
+  maxCommits.value = INITIAL_GRAPH_LIMIT;
   pulling.value = true;
   useGlobalLoadingStore().show('timeline');
   try {
@@ -2069,7 +2060,8 @@ function refBadgeClass(refType?: string): string {
       class="timeline-new__main"
       :class="{ 'timeline-new__main--dragging': colDragging }"
     >
-      <div v-if="!activeRepo" class="timeline-new__placeholder">
+      <template v-if="viewMode === 'graph'">
+        <div v-if="!activeRepo" class="timeline-new__placeholder">
         <EmptyState title="请先选择一个仓库" />
       </div>
       <div v-else-if="localError" class="timeline-new__placeholder">
@@ -2581,9 +2573,25 @@ function refBadgeClass(refType?: string): string {
           </div>
         </div>
        </template>
-     </div>
-   </div>
- </template>
+
+      <!-- ===== 主内容：提交热力图 ===== -->
+      <template v-else-if="viewMode === 'heatmap'">
+        <div v-if="!activeRepo" class="timeline-new__placeholder">
+          <EmptyState title="请先选择一个仓库" />
+        </div>
+        <div v-else-if="activeCommitCount === 0" class="timeline-new__placeholder">
+          <EmptyState title="没有提交记录" />
+        </div>
+        <div v-else class="timeline-new__heatmap-wrap">
+          <GitCommitHeatmap
+            :commits="graphDto?.nodes ?? []"
+            :months="6"
+          />
+        </div>
+      </template>
+    </div>
+  </div>
+</template>
 
 <style scoped>
 .timeline-new {
