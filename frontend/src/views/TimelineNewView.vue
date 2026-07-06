@@ -2163,12 +2163,6 @@ function refBadgeClass(refType?: string): string {
           </div>
         </div>
         <div
-          v-else-if="activeCommitCount === 0"
-          class="timeline-new__placeholder"
-        >
-          <EmptyState title="没有提交记录" />
-        </div>
-        <div
           v-else
           class="git-graph-wrapper"
           :data-dragging="colDragging ? '' : null"
@@ -2256,6 +2250,18 @@ function refBadgeClass(refType?: string): string {
             </div>
           </div>
 
+          <!--
+            本地 0 提交时空状态嵌入表内，渲染在表头下方的表体区中心。
+            对齐 vscode-git-graph 在空仓库时把"无提交"提示画在表格内部的语义，
+            替代之前把 .timeline-new__placeholder 放在 wrapper 外（即表格上方）
+            的旧布局——用户视角下"表格里看不到任何记录"的体验更自然。
+            wrapper 内部的 flex 居中 + min-height 撑出可见区域，EmptyState 走
+            自带 padding/居中样式即可。
+          -->
+          <div v-if="activeCommitCount === 0" class="git-graph-empty">
+            <EmptyState title="没有提交记录" />
+          </div>
+
           <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row）
                v3.0：mask 渐变遮盖，对齐 vscode-git-graph Graph.applyMaxWidth (graph.ts:689-695)，
                SVG 内部完整渲染 contentWidth，外层 CSS mask 在
@@ -2299,7 +2305,15 @@ function refBadgeClass(refType?: string): string {
               提交
             </button>
           </div>
-          <div class="git-graph-body" :style="{ minHeight: svgHeight }">
+          <!--
+            本地 0 提交时跳过 body 渲染（避免 0 height 的 SVG / 空 rows 容器
+            抢视觉焦点），由上方的 .git-graph-empty 接管。
+          -->
+          <div
+            v-if="activeCommitCount !== 0"
+            class="git-graph-body"
+            :style="{ minHeight: svgHeight }"
+          >
             <!--
               v3.1：背景层视觉宽度 = graphColumnWidth + COLUMN_LEFT_RIGHT_PADDING (24px)
               对齐 vscode main.ts:1713 --limitGraphWidth = columnWidths[0] + COLUMN_LEFT_RIGHT_PADDING
@@ -3081,6 +3095,23 @@ function refBadgeClass(refType?: string): string {
   position: relative;
   display: block;
   min-height: var(--git-graph-row-height, 24px);
+}
+
+/* 本仓库本地 0 提交时把空状态画在表格内部（表头下方的表体区）。
+ *
+ * 替代之前 .timeline-new__placeholder(height: 300px) 放在 .git-graph-wrapper
+ * 之外的旧位置——空状态和表格头/底纹分离感太强，用户视角下更像是「整页空了」。
+ * 移到 wrapper 内部 + 表头之后后，视觉重心自然落在表体中心，
+ * 配合 EmptyState 自带 padding/flex 居中即可（不需要再写一套 placeholder 高度）。
+ *
+ * min-height 320px：与原 .timeline-new__placeholder 的视觉占比接近，
+ * 在中小窗口下空状态不会被挤到表头边缘位置。 */
+.git-graph-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  padding: var(--space-5, 20px) var(--space-5, 20px);
 }
 
 /* 背景层：SVG + dot overlay，整张铺在 body 左上角
