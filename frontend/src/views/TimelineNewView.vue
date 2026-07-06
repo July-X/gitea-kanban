@@ -134,15 +134,6 @@ let loadMoreObserver: IntersectionObserver | null = null;
  */
 const mainScrollEl = ref<HTMLElement | null>(null);
 
-/**
- * v0.7.4：热力图外层 sticky 容器的高度（用于让 git-graph-header sticky 在其下方）。
- *  - 0 表示热力图尚未挂载或已被 v-if 移除 → git-graph-header 自然 sticky 在顶部
- *  - ResizeObserver 实时更新（窗口缩放 / 主题切换 / 拉宽/缩窄列宽会触发）
- */
-const heatmapStickyHeight = ref(0);
-/** v0.7.4：热力图 sticky 外层 div ref（用于 ResizeObserver 读取其 offsetHeight）。 */
-const heatmapStickyEl = ref<HTMLElement | null>(null);
-let heatmapResizeObserver: ResizeObserver | null = null;
 
 // ============================================================
 // v2.9 commit 详情：行下手风琴（inline 展开）
@@ -471,12 +462,6 @@ onUnmounted(() => {
     rowHeightResizeObserver.disconnect();
     rowHeightResizeObserver = null;
   }
-  if (heatmapResizeObserver) {
-    heatmapResizeObserver.disconnect();
-    heatmapResizeObserver = null;
-  }
-  if (heatmapResizeRaf) cancelAnimationFrame(heatmapResizeRaf);
-  heatmapResizeRaf = 0;
 });
 
 /** 仓库 web URL（用于 "在 Gitea/GitHub 打开 commit" 按钮）。
@@ -590,7 +575,6 @@ onMounted(async () => {
   // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
   document.addEventListener('app:refresh', onAppRefresh);
   setupRowHeightObserver();
-  setupHeatmapObserver();
   setupLoadMoreObserver();
   await activateData();
 });
@@ -1190,42 +1174,11 @@ function measureRowHeights(): void {
 }
 
 /**
- * v0.7.4：监听热力图容器尺寸变化，把高度注入 CSS 变量 --heatmap-sticky-height，
- * 让 git-graph-header sticky top 跟随调整，热力图与表头稳定分隔。
- *
- * ponytail：rAF 节流 + 值不变不写回，避免 observer 喂回自己触发
- * "ResizeObserver loop completed with undelivered notifications"。
+ * v3.4：动态行高 observer（对齐 vscode main.ts:801,804）
+ *   - grid.y = (bodyHeight - headerHeight) / commits.length（动态）
+ *   - offsetY = headerHeight + grid.y/2（补偿表头）
+ *   - dot cy 精确落在每行中心，不依赖固定 24px
  */
-let heatmapResizeRaf = 0;
-function setupHeatmapObserver(): void {
-  if (heatmapResizeObserver) {
-    heatmapResizeObserver.disconnect();
-    heatmapResizeObserver = null;
-  }
-  nextTick(() => {
-    const el = heatmapStickyEl.value;
-    if (!el) return;
-    // 首次同步读一次（不依赖 observer）
-    const initialH = el.offsetHeight;
-    if (initialH > 0 && heatmapStickyHeight.value !== initialH) {
-      heatmapStickyHeight.value = initialH;
-    }
-    heatmapResizeObserver = new ResizeObserver(() => {
-      if (heatmapResizeRaf) return;
-      heatmapResizeRaf = requestAnimationFrame(() => {
-        heatmapResizeRaf = 0;
-        const cur = heatmapStickyEl.value;
-        if (!cur) return;
-        const h = cur.offsetHeight;
-        if (heatmapStickyHeight.value !== h) {
-          heatmapStickyHeight.value = h;
-        }
-      });
-    });
-    heatmapResizeObserver.observe(el);
-  });
-}
-
 function setupRowHeightObserver(): void {
   if (rowHeightResizeObserver) rowHeightResizeObserver.disconnect();
   nextTick(() => {
@@ -2065,50 +2018,35 @@ function refBadgeClass(refType?: string): string {
 
 <template>
   <div class="timeline-new">
-    <!-- ===== 顶部栏 ===== -->
-    <header class="timeline-new__topbar">
-      <div class="timeline-new__title">
-        <GitCommit :size="16" />
-        <span>Git Graph</span>
-        <span v-if="activeRepo" class="timeline-new__repo-name">
-          {{ activeRepo.fullName }}
-          <span v-if="graphDto" class="timeline-new__commit-count">
-            （{{ activeCommitCount }} 条）
-          </span>
-        </span>
-        <span v-else class="timeline-new__repo-name muted">请选择仓库</span>
-      </div>
-
-      <div class="timeline-new__actions">
-        <!--
-          v0.6.2 重定义：右上角按钮语义从「同步」改为「刷新」
-            - 拉取远端最新 commit（未 clone → cloneRepo；已 clone → pull）
-            - 重新渲染顶部 300 条
-            - smooth scroll 回列表开头
-          命名理由：「刷新」与 StatusBar 主题旁的全局刷新按钮、StatusBar 仓库行末的「更新」
-          在用户心智模型里都属于同一组——「把图谱状态拉到最新」。本按钮是三档粒度里
-          最完整的：拉远端 + 重渲染 + 滚顶。
-          函数名 `goToLatest` 在代码层反映「拉远端 + 跳到顶部」组合动作，比 UI 名更准确。
-        -->
-        <button
-          class="sync-btn"
-          :title="
-            repo.clonedMap[
-              `${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}`
-            ] === true
-              ? '拉取远端最新 commit 并回到列表开头'
-              : '克隆仓库元信息到本地并回到列表开头（go-git 轻量模式）'
-          "
-          :disabled="loading || pulling || !activeProjectId"
-          @click="goToLatest"
-        >
-          <RotateCw :size="15" :class="{ spinning: pulling }" />
-          <span class="sync-btn__label">{{ goToLatestLabel }}</span>
-        </button>
-      </div>
-    </header>
-
 <div ref="heatmapStickyEl" class="timeline-new__heatmap-sticky">
+      <!-- v0.7.6: 标题栏 + 热力图 同行紧凑布局 -->
+      <header class="timeline-new__topbar">
+        <div class="timeline-new__title">
+          <GitCommit :size="16" />
+          <span>Git Graph</span>
+          <span v-if="activeRepo" class="timeline-new__repo-name">
+            {{ activeRepo.fullName }}
+            <span v-if="graphDto" class="timeline-new__commit-count">
+              （{{ activeCommitCount }} 条）
+            </span>
+          </span>
+          <span v-else class="timeline-new__repo-name muted">请选择仓库</span>
+        </div>
+        <div class="timeline-new__actions">
+          <button
+            class="sync-btn"
+            :title="
+              repo.clonedMap[`${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}`] === true
+                ? '拉取远端最新 commit 并回到列表开头'
+                : '克隆仓库元信息到本地并回到列表开头（go-git 轻量模式）'"
+            :disabled="loading || pulling || !activeProjectId"
+            @click="goToLatest"
+          >
+            <RotateCw :size="15" :class="{ spinning: pulling }" />
+            <span class="sync-btn__label">{{ goToLatestLabel }}</span>
+          </button>
+        </div>
+      </header>
             <GitCommitHeatmap
               :commits="graphDto?.nodes ?? []"
               :months="12"
@@ -2117,26 +2055,16 @@ function refBadgeClass(refType?: string): string {
 
           <!-- Git Graph -->
         <!--
-          v2.27：git-graph 整合为表格第一列（用户反馈"应该是整体是表格的一个列，
-                 而不是和表头分离的布局模式"）
-          - 整张 SVG + dot overlay 作为背景层铺在 body 底层（position: absolute, z-index: 0）
-          - header / commit-row 改为 5 列 grid：graph | 描述 | 作者 | 日期 | SHA
-          - 每个 commit-row 第一列是占位（高度 = ROW_H），让背景的 SVG 在每行精确对齐
+          v2.27：git-graph 整合为表格第一列 ...
           - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
         -->
-        
+
     <!-- ===== 主内容 ===== -->
     <div
       ref="mainScrollEl"
       class="timeline-new__main"
       :class="{ 'timeline-new__main--dragging': colDragging }"
-      :style="{ '--heatmap-sticky-height': `${heatmapStickyHeight}px` }"
     >
-        <!--
-          v0.7.4：Git Graph 与提交热力图上下同时显示。
-          状态占位（未选仓库/错误/未启用/无提交记录）放到最外层，
-          有数据时下方同时渲染热力图概览 + Graph 表格。
-        -->
         <div v-if="!activeRepo" class="timeline-new__placeholder">
           <EmptyState title="请先选择一个仓库" />
         </div>
@@ -2187,8 +2115,7 @@ function refBadgeClass(refType?: string): string {
             双击 handle → toggle HIDDEN ↔ AUTO/default
             右键 header → 列显隐菜单（v3.0 暂未实现菜单 UI，placeholder）
           -->
-          <div class="git-graph-header" @mousedown.stop @contextmenu="onHeaderContextMenu">
-            <!-- col 0: Graph -->
+          <div class="git-graph-header" @mousedown.stop @contextmenu="onHeaderContextMenu"> col 0: Graph -->
             <div class="git-graph-header__col git-graph-header__col--graph" data-col="0">
               <span class="git-graph-header__col-label">Graph</span>
               <div
@@ -2251,7 +2178,7 @@ function refBadgeClass(refType?: string): string {
           </div>
 
           <!--
-            本地 0 提交时空状态嵌入表内，渲染在表头下方的表体区中心。
+            v0.x：本地 0 提交时空状态嵌入表内，渲染在表头下方的表体区中心。
             对齐 vscode-git-graph 在空仓库时把"无提交"提示画在表格内部的语义，
             替代之前把 .timeline-new__placeholder 放在 wrapper 外（即表格上方）
             的旧布局——用户视角下"表格里看不到任何记录"的体验更自然。
@@ -2306,7 +2233,7 @@ function refBadgeClass(refType?: string): string {
             </button>
           </div>
           <!--
-            本地 0 提交时跳过 body 渲染（避免 0 height 的 SVG / 空 rows 容器
+            v0.x：本地 0 提交时跳过 body 渲染（避免 0 height 的 SVG / 空 rows 容器
             抢视觉焦点），由上方的 .git-graph-empty 接管。
           -->
           <div
@@ -2785,15 +2712,14 @@ function refBadgeClass(refType?: string): string {
   }
 }
 
-/* ===== 顶部栏 ===== */
+/* v0.7.6: topbar 在 heatmap-sticky 内部，左边标题右边按钮 */
 .timeline-new__topbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-3, 12px);
-  padding: var(--space-3, 12px) var(--space-4, 16px);
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  background: var(--color-bg, var(--color-canvas));
 }
 .timeline-new__title {
   display: flex;
@@ -2841,22 +2767,15 @@ function refBadgeClass(refType?: string): string {
   z-index: 6;
   width: 100%;
   background: var(--color-bg, var(--color-canvas));
-  padding: var(--space-3, 12px) 0;
-  /* v0.7.5: 阻止内部 overflow 撑大 main 导致 sticky 失效 */
+  padding: 0; /* v0.7.6: topbar 自带 padding */
   overflow: hidden;
   flex-shrink: 0;
+  /* v0.7.6: 让 topbar 和 heatmap 在同一视觉行 */
+  display: flex;
+  flex-direction: column;
 }
 
-/*
- * v0.7.4：git-graph-header sticky top 跟随热力图高度。
- *  - 默认 0px，热力图未挂载时表头自然 sticky 在顶部
- *  - 热力图挂载后由 ResizeObserver 把 offsetHeight 写入 --heatmap-sticky-height
- *  - 这样表头永远 sticky 在热力图正下方，下方 commit-row 才参与纵向滚动
- */
-.git-graph-header {
-  top: 0;
-  z-index: 5;
-}
+/* v0.7.6: .git-graph-header 不再需要 sticky 规则 */
 
 /* ===== 主内容 ===== */
 .timeline-new__main {
@@ -3097,7 +3016,7 @@ function refBadgeClass(refType?: string): string {
   min-height: var(--git-graph-row-height, 24px);
 }
 
-/* 本仓库本地 0 提交时把空状态画在表格内部（表头下方的表体区）。
+/* v0.x：本仓库本地 0 提交时把空状态画在表格内部（表头下方的表体区）。
  *
  * 替代之前 .timeline-new__placeholder(height: 300px) 放在 .git-graph-wrapper
  * 之外的旧位置——空状态和表格头/底纹分离感太强，用户视角下更像是「整页空了」。

@@ -18,8 +18,6 @@ import { computed } from 'vue';
 interface HeatmapCommit {
   /** commit 作者日期（ISO 8601，含时区） */
   date: string;
-  /** 作者名（可选，仅用于 tooltip 信息） */
-  authorName?: string;
 }
 
 const props = withDefaults(
@@ -94,41 +92,27 @@ const countByDate = computed<Map<string, number>>(() => {
  */
 const heatmapWeeks = computed(() => {
   const { start, end } = dateRange.value;
-  const days: {
+  const weeks: {
     dateKey: string;
     count: number;
     dateObj: Date;
     inRange: boolean;
-  }[] = [];
+  }[][] = [];
+  const daysInPeriod = Math.round((end.getTime() - start.getTime()) / ONE_DAY_MS) + 1;
+  const totalDays = daysInPeriod + ((7 - ((daysInPeriod % 7)) % 7) || 0);
 
-  for (let t = start.getTime(); t <= end.getTime(); t += ONE_DAY_MS) {
+  for (let i = 0; i < totalDays; i++) {
+    if (i % 7 === 0) weeks.push([]);
+    const t = start.getTime() + i * ONE_DAY_MS;
     const d = new Date(t);
     const dateKey = toLocalDateKey(d.toISOString());
-    days.push({
+    const inRange = i < daysInPeriod;
+    weeks[weeks.length - 1].push({
       dateKey,
       count: countByDate.value.get(dateKey) ?? 0,
       dateObj: d,
-      inRange: true,
+      inRange,
     });
-  }
-  // 补齐到完整周（右侧可能需要几天才能整除 7）
-  const remainder = days.length % 7;
-  if (remainder !== 0) {
-    const last = days[days.length - 1];
-    for (let i = 1; i <= 7 - remainder; i++) {
-      const d = new Date(last.dateObj.getTime() + i * ONE_DAY_MS);
-      days.push({
-        dateKey: toLocalDateKey(d.toISOString()),
-        count: 0,
-        dateObj: d,
-        inRange: false,
-      });
-    }
-  }
-  // 组织为 weeks 数组：weeks[weekIdx][dayIdx]（dayIdx 0=周日 6=周六）
-  const weeks: typeof days[] = [];
-  for (let i = 0; i < days.length; i += 7) {
-    weeks.push(days.slice(i, i + 7));
   }
   return weeks;
 });
@@ -146,16 +130,9 @@ const monthLabels = computed(() => {
   for (let colIdx = 0; colIdx < weeks.length; colIdx++) {
     const week = weeks[colIdx];
     if (!week) continue;
-    // 取该列第一个 inRange 的 cell（跳过末尾 padding 周的空 cell）
-    let firstCell = week[0];
-    if (!firstCell?.inRange) {
-      for (let d = 1; d < 7; d++) {
-        firstCell = week[d];
-        if (firstCell?.inRange) break;
-      }
-    }
-    if (!firstCell) continue;
-    const m = firstCell.dateObj.getMonth();
+    const firstInRange = week.find((c) => c.inRange) ?? week[0];
+    if (!firstInRange) continue;
+    const m = firstInRange.dateObj.getMonth();
     if (m !== lastMonth) {
       lastMonth = m;
       labels.push({ col: colIdx, text: MONTH_NAMES_CN[m] ?? '' });
@@ -253,11 +230,7 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
         <span v-for="(d, i) in ['', '周一', '', '周三', '', '周五', '']" :key="i" class="commit-heatmap__weekday">{{ d }}</span>
       </div>
       <div class="commit-heatmap__grid" role="img" :aria-label="`提交热力图：${totalCommits} 次提交，周期 ${periodLabel}`">
-        <div
-          v-for="(week, weekIdx) in heatmapWeeks"
-          :key="`week-${weekIdx}`"
-          class="commit-heatmap__week"
-        >
+        <template v-for="(week, weekIdx) in heatmapWeeks" :key="`week-${weekIdx}`">
           <div
             v-for="(cell, dayIdx) in week"
             :key="`cell-${weekIdx}-${dayIdx}`"
@@ -266,7 +239,7 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
             :style="getCellStyle(getLevel(cell.count, cell.inRange))"
             :title="formatTooltip(cell)"
           />
-        </div>
+        </template>
       </div>
     </div>
 
@@ -384,10 +357,6 @@ function formatTooltip(cell: { dateObj: Date; count: number; inRange: boolean })
   flex-shrink: 0;
 }
 
-/* 每个 week 在 grid 中不需要额外容器（display: contents 让 cell 直接成为 grid children） */
-.commit-heatmap__week {
-  display: contents;
-}
 
 .commit-heatmap__cell {
   width: var(--heatmap-cell-size);
