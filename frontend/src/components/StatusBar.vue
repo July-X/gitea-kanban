@@ -50,7 +50,6 @@ import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useSettingsStore } from '@renderer/stores/settings';
 import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stores/ui';
-import { useBoardActions } from '@renderer/composables/useBoardActions';
 import { showToast } from '@renderer/lib/toast';
 import { formatLastUpdated } from '@renderer/lib/last-updated';
 import type { SyncProgress } from '@renderer/types/sync-progress';
@@ -65,13 +64,30 @@ const settings = useSettingsStore();
 const ui = useUiStore();
 
 /**
- * 仓库切换统一走 useBoardActions.selectProject —— 与原 BoardTopbar picker 行为一致
+ * 仓库切换：addProject（如未加入）→ selectProject → 持久化 → 路由刷新
+ * 原 useBoardActions.selectProject 逻辑内联（board composable 已删）
  */
-const activeProjectId = computed<string | null>(() => repo.currentProjectId);
-const { selectProject } = useBoardActions({
-  newIssueDrafts: {},
-  activeProjectId,
-});
+async function selectProject(r: RepoDto): Promise<void> {
+  let project;
+  if (!r.isProject) {
+    try {
+      project = await repo.addProject({ owner: r.owner, name: r.name });
+      showToast({ type: 'success', message: '已加入看板' });
+    } catch {
+      return;
+    }
+  } else {
+    try {
+      project = await repo.addProject({ owner: r.owner, name: r.name });
+    } catch {
+      return;
+    }
+  }
+  if (project) {
+    repo.selectProject(project);
+    void repo.persistLastSelected(r, project, auth.currentGiteaUrl);
+  }
+}
 
 /** 主题简称（按钮文字用，跟 LogOut 风格对称：图标 + 短文字） */
 const THEME_SHORT_LABEL: Record<string, string> = {

@@ -62,9 +62,10 @@ const router = useRouter();
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
 // v0.6+ 滚动到底自动加载分页：哨兵 + IntersectionObserver
-// - loadMoreSentinel: <div ref="loadMoreSentinel"> 在 ul 之后
-// - loadMoreObserver: onMounted 时建，onUnmounted 时 disconnect 防内存泄露
+// - loadMoreSentinel: <li> 在 ul 之后
+// - mergesScrollEl: ul 自身（滚动容器，IntersectionObserver 的 root）
 const loadMoreSentinel = ref<HTMLElement | null>(null);
+const mergesScrollEl = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
 
 const activeRepo = computed<RepoDto | null>(() => {
@@ -140,9 +141,9 @@ onMounted(async () => {
   await activateData();
 });
 
-/** v1.8 KeepAlive：设置 IntersectionObserver（首次挂载 + 从缓存恢复时调用） */
-function setupLoadMoreObserver(): void {
-  loadMoreObserver = new IntersectionObserver(
+/** v1.8 KeepAlive：创建 IntersectionObserver，root 设为滚动容器 mergesScrollEl */
+function createLoadMoreObserver(): IntersectionObserver {
+  return new IntersectionObserver(
     (entries) => {
       const e = entries[0];
       if (!e || !e.isIntersecting) return;
@@ -150,20 +151,31 @@ function setupLoadMoreObserver(): void {
       if (pull.loadingMore || !pull.hasMore) return;
       void pull.loadMore();
     },
-    { rootMargin: '200px 0px', threshold: 0 },
+    {
+      root: mergesScrollEl.value ?? null,
+      // 哨兵距离滚动容器底部 200px 时提前触发，让用户无感加载
+      rootMargin: '0px 0px 200px 0px',
+      threshold: 0,
+    },
   );
+}
+
+/** 首次挂载时：创建 observer + 监听 ref 变化（KeepAlive 恢复时 ref 会重置） */
+function setupLoadMoreObserver(): void {
+  loadMoreObserver = createLoadMoreObserver();
   if (loadMoreSentinel.value) {
     loadMoreObserver.observe(loadMoreSentinel.value);
   }
 }
 
-// v1.8 KeepAlive：从缓存恢复时，onActivated 中 loadMoreSentinel 模板 ref 可能尚未重新绑定到 DOM。
-// 此时 setupLoadMoreObserver 创建的 observer 没有观察任何元素，滚动加载会永久失效。
-// 这里用 watch 兜底：当 ref 重新绑定到 DOM 时自动 observe。
-watch(loadMoreSentinel, (el) => {
-  if (el && loadMoreObserver) {
-    loadMoreObserver.observe(el);
+// v1.8 KeepAlive：从缓存恢复时 ref 可能尚未重新绑定，watch ref 变化后重建 observer
+watch([mergesScrollEl, loadMoreSentinel], ([el, sentinel]) => {
+  if (!el || !sentinel) return;
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
   }
+  loadMoreObserver = createLoadMoreObserver();
+  loadMoreObserver.observe(sentinel);
 });
 
 /** v1.8 KeepAlive：每次进入视图（含从缓存恢复）时拉数据，已缓存则跳过 */
@@ -1213,7 +1225,7 @@ function formatRelative(iso: string | undefined): string {
       />
     </div>
     <!-- 列表分支：直接用 template v-if（独立判断，避免污染 v-else 链） -->
-    <ul v-if="activeRepo && pull.filteredItems.length" class="merges__list">
+    <ul v-if="activeRepo && pull.filteredItems.length" ref="mergesScrollEl" class="merges__list">
       <li
         v-for="p in pull.filteredItems"
         :key="p.index"

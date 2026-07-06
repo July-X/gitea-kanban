@@ -42,10 +42,6 @@ export function CopyRecentLogs(arg1) {
   return window['go']['main']['App']['CopyRecentLogs'](arg1);
 }
 
-export function CreateColumn(arg1) {
-  return window['go']['main']['App']['CreateColumn'](arg1);
-}
-
 export function CreatePullComment(arg1) {
   return window['go']['main']['App']['CreatePullComment'](arg1);
 }
@@ -56,10 +52,6 @@ export function CreatePullReview(arg1) {
 
 export function CreatePullReviewComment(arg1) {
   return window['go']['main']['App']['CreatePullReviewComment'](arg1);
-}
-
-export function DeleteColumn(arg1) {
-  return window['go']['main']['App']['DeleteColumn'](arg1);
 }
 
 export function DeletePullComment(arg1) {
@@ -120,10 +112,6 @@ export function IsRepoCloned(arg1) {
 
 export function ListBranches(arg1) {
   return window['go']['main']['App']['ListBranches'](arg1);
-}
-
-export function ListColumns(arg1) {
-  return window['go']['main']['App']['ListColumns'](arg1);
 }
 
 export function ListIssues(arg1) {

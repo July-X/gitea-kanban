@@ -25,15 +25,11 @@ export function ClosePull(arg1:main.ClosePullArgs):Promise<platform.PullDetailDT
 
 export function CopyRecentLogs(arg1:main.CopyRecentLogsArgs):Promise<main.CopyRecentLogsResult>;
 
-export function CreateColumn(arg1:main.CreateColumnArgs):Promise<main.ColumnDTO>;
-
 export function CreatePullComment(arg1:main.CreatePullCommentArgs):Promise<platform.CommentDTO>;
 
 export function CreatePullReview(arg1:main.CreatePullReviewArgs):Promise<platform.PullReviewDTO>;
 
 export function CreatePullReviewComment(arg1:main.CreatePullReviewCommentArgs):Promise<platform.PullReviewCommentDto>;
-
-export function DeleteColumn(arg1:main.DeleteColumnArgs):Promise<void>;
 
 export function DeletePullComment(arg1:main.DeletePullCommentArgs):Promise<void>;
 
@@ -64,8 +60,6 @@ export function GetWorkspace():Promise<main.WorkspaceInfo>;
 export function IsRepoCloned(arg1:main.IsRepoClonedArgs):Promise<boolean>;
 
 export function ListBranches(arg1:main.ListBranchesArgs):Promise<Array<main.BranchDTO>>;
-
-export function ListColumns(arg1:main.ListColumnsArgs):Promise<Array<main.ColumnDTO>>;
 
 export function ListIssues(arg1:main.ListIssuesArgs):Promise<Array<main.IssueDTO>>;
 

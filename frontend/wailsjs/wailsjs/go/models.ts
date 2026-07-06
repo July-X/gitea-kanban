@@ -385,26 +385,6 @@ export namespace main {
 	        this.index = source["index"];
 	    }
 	}
-	export class ColumnDTO {
-	    id: string;
-	    projectId: string;
-	    title: string;
-	    position: number;
-	    wipLimit?: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new ColumnDTO(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.projectId = source["projectId"];
-	        this.title = source["title"];
-	        this.position = source["position"];
-	        this.wipLimit = source["wipLimit"];
-	    }
-	}
 	export class FileChangeDTO {
 	    filename: string;
 	    previousFilename?: string;
@@ -573,22 +553,6 @@ export namespace main {
 	        this.bytes = source["bytes"];
 	    }
 	}
-	export class CreateColumnArgs {
-	    projectId: string;
-	    title: string;
-	    position: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new CreateColumnArgs(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.projectId = source["projectId"];
-	        this.title = source["title"];
-	        this.position = source["position"];
-	    }
-	}
 	export class CreatePullCommentArgs {
 	    projectId: string;
 	    index: number;
@@ -643,18 +607,6 @@ export namespace main {
 	        this.body = source["body"];
 	        this.path = source["path"];
 	        this.line = source["line"];
-	    }
-	}
-	export class DeleteColumnArgs {
-	    columnId: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DeleteColumnArgs(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.columnId = source["columnId"];
 	    }
 	}
 	export class DeletePullCommentArgs {
@@ -1105,18 +1057,6 @@ export namespace main {
 	        this.token = source["token"];
 	        this.owner = source["owner"];
 	        this.repo = source["repo"];
-	    }
-	}
-	export class ListColumnsArgs {
-	    projectId: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ListColumnsArgs(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.projectId = source["projectId"];
 	    }
 	}
 	export class ListIssuesArgs {
