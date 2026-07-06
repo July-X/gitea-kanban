@@ -157,6 +157,15 @@ function setupLoadMoreObserver(): void {
   }
 }
 
+// v1.8 KeepAlive：从缓存恢复时，onActivated 中 loadMoreSentinel 模板 ref 可能尚未重新绑定到 DOM。
+// 此时 setupLoadMoreObserver 创建的 observer 没有观察任何元素，滚动加载会永久失效。
+// 这里用 watch 兜底：当 ref 重新绑定到 DOM 时自动 observe。
+watch(loadMoreSentinel, (el) => {
+  if (el && loadMoreObserver) {
+    loadMoreObserver.observe(el);
+  }
+});
+
 /** v1.8 KeepAlive：每次进入视图（含从缓存恢复）时拉数据，已缓存则跳过 */
 async function activateData() {
   if (repo.repos.length === 0) {
