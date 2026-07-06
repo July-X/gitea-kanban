@@ -79,9 +79,6 @@ type LocalState struct {
 	StarredBranches []StarredBranch `json:"starredBranches"`
 }
 
-// WorkspacePathPrefKey prefs 中 workspace 路径的 key
-const WorkspacePathPrefKey = "app.workspacePath"
-
 // GitBinaryPathPrefKey prefs 中 git 二进制路径的 key（v0.4.0 新增）
 //
 //   - 空字符串或不在 prefs：使用 app/gitbinary 释放的内嵌二进制（或 PATH 兜底）
@@ -201,23 +198,6 @@ func defaultState() *LocalState {
 }
 
 // GetWorkspacePath 从 localStore 读 workspace 路径
-//
-// 不存在时返回空字符串（调用方应走默认值）。
-func GetWorkspacePath(s *LocalStore) string {
-	if s == nil {
-		return ""
-	}
-	state := s.Get()
-	if state == nil || state.Prefs == nil {
-		return ""
-	}
-	if v, ok := state.Prefs[WorkspacePathPrefKey].(string); ok && v != "" {
-		return v
-	}
-	return ""
-}
-
-// GetGitBinaryPath 从 localStore 读用户在「设置 → Git 二进制」填的路径。
 //
 // 不存在 / 空 / 非 string 类型时返空字符串（= 走 app/gitbinary.ResolveGitBinaryPath 默认）。
 func GetGitBinaryPath(s *LocalStore) string {

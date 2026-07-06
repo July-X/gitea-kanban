@@ -111,10 +111,6 @@ const CODE_CATEGORY: Record<IpcErrorCodeValue, string> = {
   internal: '应用出错了',
   keychain_unavailable: '本机密钥库不可用',
   keychain_access_denied: '本机密钥库拒绝访问',
-  theme_not_found: '主题偏好有问题',
-  invalid_theme: '主题值不合法',
-  database_unavailable: '本地数据库不可用',
-  database_write_failed: '数据库写入失败',
 };
 
 /**错误码 → 是否可恢复（引导用户重试 / 重连） */
@@ -131,10 +127,6 @@ const RECOVERABLE: Record<IpcErrorCodeValue, boolean> = {
   internal: true, //通用重试
   keychain_unavailable: false, //平台问题
   keychain_access_denied: true, //引导用户授权
-  theme_not_found: true, // 重选主题即可
-  invalid_theme: false, // 用户输入错误 → 不重试
-  database_unavailable: true, // 重启可恢复
-  database_write_failed: true, // 写失败重试
 };
 
 /** 把 IpcErrorPayload 转成渲染端 UserFacingError（"人话"层）
@@ -189,20 +181,6 @@ export function normalizeError(err: unknown): UserFacingError {
   }
   if (err instanceof Error) {
     // v1 时代踩坑（2026-06-12 修复）：v1 Electron IPC 把 main process throw 的 plain object
-    // (IpcError.toJSON()) 包装成 Error, message = "Error invoking remote method 'xxx': [object Object]"
-    // code/hint 等自定义属性丢失——解析 message
-    // 2026-06-14 增强：兼容 [object Object] / [object Response] / 任何 [object XXX]
-    // v2.0 Wails 架构下不再有这个问题（Wails 自动序列化自定义类型）
-    const ipcMatch = err.message.match(/Error invoking remote method '([^']+)': \[object \w+\]/);
-    if (ipcMatch) {
-      return {
-        code: 'internal',
-        messageText: `操作失败：${ipcMatch[1]}`,
-        hint: '请稍候重试',
-        recoverable: true,
-      };
-    }
-    // Wails 2 + ErrorFormatter 走 err.Error() 兜底时，前端收到 Error.message 形如
     // "Error invoking remote method 'repos.list': 请求失败: Get ...: TLS handshake timeout"
     // 这种 message 包含 Go 端 err.Error() 全文，对用户排障很有用——直接展示
     return {
@@ -660,70 +638,6 @@ export function commitsGitgraphGetWorkspace(): Promise<{
  * @param args.cwd 新的工作区根目录（绝对路径；不存在会 mkdir -p）
  * @returns new cwd + 仓库路径模板（提示后续 gitgraph 仓库放哪）
  */
-export function commitsGitgraphSetWorkspace(args: {
-  cwd: string;
-}): Promise<{ cwd: string; suggestedRepoCwdTemplate: string }> {
-  return getIpcClient().invoke('commits', 'gitgraphSetWorkspace', args);
-}
-
-/**
- * v1.6 workspace 迁移：列出旧工作区里的仓库
- *
- * @param args.cwd 旧工作区根目录
- * @returns repos 列表（名称 + 路径 + 大小）+ 总大小
- */
-export function commitsGitgraphListWorkspaceRepos(args: {
-  cwd: string;
-}): Promise<{
-  repos: Array<{ name: string; fullPath: string; sizeBytes: number }>;
-  totalSizeBytes: number;
-}> {
-  return getIpcClient().invoke('commits', 'gitgraphListWorkspaceRepos', args);
-}
-
-/**
- * v1.6 workspace 迁移：从旧工作区复制仓库到新工作区
- *
- * 每复制完一个仓库会通过 event:workspace:migrateProgress 推进度。
- *
- * @param args.oldCwd 旧工作区路径
- * @param args.newCwd 新工作区路径
- * @param args.repoNames 要迁移的仓库目录名列表
- * @returns { migratedCount, failed }
- */
-export function commitsGitgraphMigrateWorkspace(args: {
-  oldCwd: string;
-  newCwd: string;
-  repoNames: string[];
-}): Promise<{ migratedCount: number; failed: Record<string, string> }> {
-  return getIpcClient().invoke('commits', 'gitgraphMigrateWorkspace', args);
-}
-
-/**
- * v1.6 workspace 迁移：在系统文件管理器中打开目录
- *
- * @param args.path 要打开的目录路径
- */
-export function commitsGitgraphOpenDirectory(args: { path: string }): Promise<void> {
-  return getIpcClient().invoke('commits', 'gitgraphOpenDirectory', args);
-}
-
-/**
- * v1.6 监听 workspace 迁移进度（main → renderer 推送事件）
- *
- * @returns off() 取消监听函数
- */
-export function onWorkspaceMigrateProgress(
-  cb: (payload: {
-    current: number;
-    total: number;
-    repoName: string;
-    phase: 'copying' | 'done' | 'error';
-    error?: string;
-  }) => void,
-): () => void {
-  return getIpcClient().on('workspace:migrateProgress', cb as (payload: unknown) => void);
-}
 
 // ============================================================
 // ===== preferences.* （v1.1.3 提交号 / 分支名复制）=====

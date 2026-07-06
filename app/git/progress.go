@@ -280,13 +280,3 @@ func SafeWrap(cb ProgressCallback) ProgressCallback {
 		cb(p)
 	}
 }
-
-// String 实现 fmt.Stringer（调试日志用）
-func (s SyncStage) String() string {
-	return string(s)
-}
-
-// Errorf 构造错误消息（带 stage 前缀）
-func Errorf(stage SyncStage, format string, args ...any) string {
-	return fmt.Sprintf("[%s] %s", stage, fmt.Sprintf(format, args...))
-}

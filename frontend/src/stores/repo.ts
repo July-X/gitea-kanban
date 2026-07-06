@@ -564,37 +564,6 @@ export const useRepoStore = defineStore('repo', () => {
    *
    * @returns PullRepoResult（成功）/ 抛 UserFacingError（失败）
    */
-  async function pullRepo(args: { localPath: string }): Promise<{
-    beforeCount: number;
-    afterCount: number;
-    addedCommits: number;
-    headChanged: boolean;
-  }> {
-    const auth = useAuthStore();
-    if (!auth.isConnected) {
-      throw {
-        code: 'unauthenticated',
-        messageText: '需要登录：尚未连接任何 gitea 实例',
-        hint: '请先连接 gitea',
-        recoverable: true,
-      } satisfies UserFacingError;
-    }
-    loading.value = true;
-    useGlobalLoadingStore().show('repo');
-    error.value = null;
-    try {
-      const r = await commitsGitgraphPull({
-        localPath: args.localPath,
-      });
-      return r;
-    } catch (e) {
-      error.value = normalizeError(e);
-      throw e;
-    } finally {
-      loading.value = false;
-      useGlobalLoadingStore().hide('repo');
-    }
-  }
 
   /**
    * pull 仓库（v2.4 · 按 projectId 走，Go 端反查 localPath + token）
@@ -654,7 +623,7 @@ export const useRepoStore = defineStore('repo', () => {
     // v2.3
     refreshClonedStatus,
     cloneRepo,
-    pullRepo,
+
     // v2.4
     pullRepoByProjectId,
     // v2.6 同步进度（StatusBar 行末进度条）

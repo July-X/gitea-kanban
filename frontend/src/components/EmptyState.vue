@@ -18,10 +18,7 @@ interface Props {
   actionLabel?: string;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  description: '',
-  actionLabel: '',
-});
+const props = defineProps<Props>();
 
 const emit = defineEmits<{
   (e: 'action'): void;

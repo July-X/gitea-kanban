@@ -42,15 +42,6 @@ const (
 	RefTypeTag          RefType = "tag"          // tag（refs/tags/...）
 )
 
-// CommitRef commit 关联的 ref（带类型）
-type CommitRef struct {
-	Name string  // ref 短名（已剥前缀）：main, v1.0, origin/main
-	Type RefType // branch / remoteBranch / tag
-	// IsHEAD 标记是否是 HEAD 指向（如 main 当前指向的 commit）
-	// 用于前端给 HEAD 引用特殊样式（v2.8 暂未消费，预留）
-	IsHEAD bool
-}
-
 // LogOptions log 遍历参数
 type LogOptions struct {
 	// LocalPath 本地仓库路径
@@ -304,58 +295,6 @@ func shortSHA(sha string) string {
 		return sha[:7]
 	}
 	return sha
-}
-
-// collectAllBranchHeads 收集仓库所有分支的 HEAD hash（本地 + 远程跟踪）
-func collectAllBranchHeads(repo *git.Repository) ([]plumbing.Hash, error) {
-	heads := make([]plumbing.Hash, 0)
-	seen := make(map[plumbing.Hash]bool)
-
-	// 1. 本地分支
-	localRefs, err := repo.References()
-	if err != nil {
-		return nil, err
-	}
-	err = localRefs.ForEach(func(ref *plumbing.Reference) error {
-		if ref.Type() == plumbing.HashReference && ref.Name().IsBranch() {
-			if !seen[ref.Hash()] {
-				seen[ref.Hash()] = true
-				heads = append(heads, ref.Hash())
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// 2. 远程跟踪分支
-	remoteRefs, err := repo.References()
-	if err != nil {
-		return nil, err
-	}
-	err = remoteRefs.ForEach(func(ref *plumbing.Reference) error {
-		if ref.Type() == plumbing.HashReference && ref.Name().IsRemote() {
-			if !seen[ref.Hash()] {
-				seen[ref.Hash()] = true
-				heads = append(heads, ref.Hash())
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// 3. 如果没有分支，fallback 到 HEAD
-	if len(heads) == 0 {
-		head, err := repo.Head()
-		if err == nil {
-			heads = append(heads, head.Hash())
-		}
-	}
-
-	return heads, nil
 }
 
 // branchInfo 分支信息（用于优先级排序）

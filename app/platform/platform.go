@@ -13,17 +13,3 @@ const (
 	// GitHub GitHub 平台
 	GitHub Platform = "github"
 )
-
-// IsValid 检查平台值是否合法
-func IsValid(p string) bool {
-	switch Platform(p) {
-	case Gitea, GitHub:
-		return true
-	}
-	return false
-}
-
-// Default 默认平台（旧数据迁移用）
-func Default() Platform {
-	return Gitea
-}

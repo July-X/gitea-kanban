@@ -119,18 +119,6 @@ export const useGlobalLoadingStore = defineStore('globalLoading', () => {
     recompute();
   }
 
-  /**
-   * 重置（路由切换 / 全局强制清除用）
-   * v1.4 暂未用，预留
-   */
-  function reset(): void {
-    if (showTimer) clearTimeout(showTimer);
-    if (hideTimer) clearTimeout(hideTimer);
-    showTimer = null;
-    hideTimer = null;
-    active.value = new Set();
-    visible.value = false;
-  }
 
   return {
     // state
@@ -139,6 +127,5 @@ export const useGlobalLoadingStore = defineStore('globalLoading', () => {
     // actions
     show,
     hide,
-    reset,
   };
 });
