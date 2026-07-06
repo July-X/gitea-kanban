@@ -614,6 +614,16 @@ onDeactivated(() => {
 });
 
 /**
+ * v1.8 KeepAlive：视图从缓存恢复时重建 IntersectionObserver + 按需加载数据
+ *
+ * 与 onDeactivated 成对：observer 在停用时断开并清空引用，在恢复时重建。
+ * activateData() 内部会检查 !loadMoreObserver 并自动重建。
+ */
+onActivated(() => {
+  void activateData();
+});
+
+/**
  * 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver。
  *
  * v0.7.3 修复：把 root 设为实际滚动容器 .timeline-new__main（mainScrollEl），
@@ -2792,6 +2802,8 @@ function refBadgeClass(refType?: string): string {
 .timeline-new__main {
   flex: 1;
   overflow: auto;
+  /* v0.7.7：滚动条不挤压内容列（滚动条出现后 header/body 列对齐保持不变） */
+  scrollbar-gutter: stable;
 }
 .timeline-new__placeholder {
   display: flex;
@@ -2924,7 +2936,12 @@ function refBadgeClass(refType?: string): string {
   padding-right: var(--space-3, 12px);
   box-sizing: border-box;
   position: sticky;
-  /* top 由 .git-graph-header 独立块用 var(--heatmap-sticky-height) 接管（v0.7.4） */
+  /* v0.7.7：表头固定不随纵向滚动。heatmap-sticky 虽然也 sticky top:0，
+   *   但其 sticky 滚动祖先是 .timeline-new__main（overflow:auto），而其自身高度被
+   *   .timeline-new__main 包含，所以滚动时 heatmap-sticky 自然退出视口，
+   *   表头再 sticky top:0 就贴在视口顶部。 */
+  top: 0;
+  z-index: 5;
 }
 .git-graph-header__col {
   padding: 0 var(--space-3, 12px);

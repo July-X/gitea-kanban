@@ -180,6 +180,18 @@ onDeactivated(() => {
   }
 });
 
+/**
+ * v1.8 KeepAlive：视图从缓存恢复时重建 observer + 按需加载数据
+ *
+ * 与 onDeactivated 成对：observer 在停用时断开，在恢复时重建。
+ * activateData() 内部用 pull.items.length === 0 守卫，仅首次或已清空时发起 IPC，
+ * 避免缓存恢复后重复拉取已有数据。
+ */
+onActivated(() => {
+  setupLoadMoreObserver();
+  void activateData();
+});
+
 onUnmounted(() => {
   // v0.6+：避免 component 卸载后 observer 继续触发回调（内存泄露）
   // v1.8 KeepAlive：非缓存淘汰场景（max 溢出或整个 shell 卸载）仍需清理
