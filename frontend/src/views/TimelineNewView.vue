@@ -15,7 +15,7 @@
  */
 
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
-import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
+import { GitCommit, RotateCw, GitBranch, Tag, Search } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { logError } from '@renderer/lib/frontend-log';
@@ -31,6 +31,8 @@ import { GitSyncProgressEvent } from '@renderer/types/sync-progress';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import CommitDetailPanel from '@renderer/components/CommitDetailPanel.vue';
 import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
+import GitGraphFindWidget from '@renderer/components/GitGraphFindWidget.vue';
+import type { FindCommit } from '@renderer/components/GitGraphFindWidget.vue';
 import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
@@ -97,6 +99,70 @@ const localExhausted = ref(false);
 const deepenInProgress = ref(false);
 /** 等待 deepen 完成的重试定时器（避免内存泄漏） */
 let deepenRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ============================================================
+// v3.x 提交搜索（复刻 vscode-git-graph Find Widget）
+// ============================================================
+const searchVisible = ref(false);
+const findWidgetRef = ref<InstanceType<typeof GitGraphFindWidget> | null>(null);
+const searchMatchShaSet = ref(new Set<string>());
+const searchCurrentSha = ref<string | null>(null);
+
+const searchCommits = computed<FindCommit[]>(() => {
+  const dto = graphDto.value;
+  if (!dto) return [];
+  return dto.nodes.map((n) => ({
+    sha: n.sha,
+    shortSha: n.shortSha,
+    subject: n.subject,
+    authorName: n.authorName,
+    date: n.date,
+    refs: n.refs,
+    refTypes: n.refTypes,
+  }));
+});
+
+function openSearch() {
+  searchVisible.value = true;
+  nextTick(() => findWidgetRef.value?.focus());
+}
+
+function closeSearch() {
+  searchVisible.value = false;
+  searchMatchShaSet.value = new Set();
+  searchCurrentSha.value = null;
+}
+
+function onSearchSelect(sha: string) {
+  searchCurrentSha.value = sha;
+  scrollCommitIntoView(sha);
+}
+
+/**
+ * 滚动到指定 commit：在 graph 行列表中找到对应 DOM，滚动到视口
+ * 对齐 vscode-git-graph 的 scrollToCommit 行为
+ */
+function scrollCommitIntoView(sha: string) {
+  const scrollContainer = mainScrollEl.value;
+  if (!scrollContainer) return;
+  const row = scrollContainer.querySelector(
+    `.commit-row[data-sha="${sha}"]`,
+  ) as HTMLElement | null;
+  if (!row) return;
+  nextTick(() => {
+    const rowRect = row.getBoundingClientRect();
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const rowTop = rowRect.top - containerRect.top + scrollContainer.scrollTop;
+    const rowBottom = rowTop + rowRect.height;
+    const visibleTop = scrollContainer.scrollTop;
+    const visibleBottom = visibleTop + containerRect.height;
+    // row 在视口内 → 不滚
+    if (rowTop >= visibleTop && rowBottom <= visibleBottom) return;
+    // row 在视口上方或下方 → 滚到 row 顶部贴视口顶
+    const targetScroll = Math.max(0, rowTop - 8);
+    scrollContainer.scrollTo({ top: targetScroll, behavior: 'smooth' });
+  });
+}
 
 /**
  * Git Graph 加载更多文字显示控制（与 StatusBarPulse 动效同步）：
@@ -577,10 +643,24 @@ function onAppRefresh(): void {
 onMounted(async () => {
   // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
   document.addEventListener('app:refresh', onAppRefresh);
+  document.addEventListener('keydown', onGlobalKeydown);
   setupRowHeightObserver();
   await setupLoadMoreObserver();
   await activateData();
 });
+
+/**
+ * v3.x：全局键盘事件监听
+ *  - Cmd/Ctrl+F: 打开提交搜索
+ */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+    if (!searchVisible.value && activeRepo.value && graphDto.value) {
+      e.preventDefault();
+      openSearch();
+    }
+  }
+}
 
 /**
  * v1.8 KeepAlive：视图进入（含首次挂载 + 从缓存恢复）时执行数据加载
@@ -741,6 +821,7 @@ onUnmounted(() => {
   document.removeEventListener('mousemove', onColDragMove);
   document.removeEventListener('mouseup', onColDragEnd);
   document.removeEventListener('app:refresh', onAppRefresh);
+  document.removeEventListener('keydown', onGlobalKeydown);
   // v0.6.1+ Git Graph 滚动加载更多：清理 IntersectionObserver
   if (loadMoreObserver) {
     loadMoreObserver.disconnect();
@@ -2067,6 +2148,15 @@ function refBadgeClass(refType?: string): string {
         </div>
         <div class="timeline-new__actions">
           <button
+            class="sync-btn search-btn"
+            title="搜索提交 (Ctrl+F / Cmd+F)"
+            :disabled="!activeRepo || !graphDto"
+            @click="openSearch"
+          >
+            <Search :size="15" />
+            <span class="sync-btn__label">搜索</span>
+          </button>
+          <button
             class="sync-btn"
             :title="
               repo.clonedMap[`${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}`] === true
@@ -2084,6 +2174,15 @@ function refBadgeClass(refType?: string): string {
               :commits="graphDto?.nodes ?? []"
               :months="12"
             />
+
+          <!-- v3.x: 提交搜索栏 (复刻 vscode-git-graph Find Widget) -->
+          <GitGraphFindWidget
+            v-if="searchVisible"
+            ref="findWidgetRef"
+            :commits="searchCommits"
+            @select="onSearchSelect"
+            @close="closeSearch"
+          />
           </div>
 
           <!-- Git Graph -->
@@ -2430,6 +2529,8 @@ function refBadgeClass(refType?: string): string {
                   /* v3.0：vscode-git-graph 风格的 dot hover —— 该行 dot 被 hover 时，
                    * 整行 graph 列用 lane 色软底（CSS var --active-lane-color 来自 dot）*/
                   'commit-row--dot-active': r.commit && hoveredDotSha === r.commit.sha,
+                  /* v3.x：搜索高亮 —— 当前搜索选中的 commit 行 */
+                  'commit-row--search-current': r.commit && searchCurrentSha === r.commit.sha,
                 }"
                 :style="{
                   /* VSCode row model：第一行固定 ROW_H，展开面板作为第二行插入。
@@ -2786,6 +2887,12 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   gap: var(--space-2, 8px);
   margin-left: auto;
+}
+
+/* v3.x: search highlight for the currently selected commit row */
+.commit-row--search-current {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 /*
