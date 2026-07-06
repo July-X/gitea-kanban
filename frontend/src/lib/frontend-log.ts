@@ -117,6 +117,10 @@ function send(args: FrontendLogArgs): void {
   // 这种情况 consoleFn 已经打过,前端能看到
 }
 
+export function logInfo(source: string, message: string, description?: string): void {
+  send({ level: 'info', message, source, ...(description !== undefined ? { description } : {}) });
+}
+
 export function logWarn(source: string, message: string, description?: string): void {
   send({ level: 'warn', message, source, ...(description !== undefined ? { description } : {}) });
 }
