@@ -9,6 +9,23 @@
 
 > - **v0.6.4** (2026-07-04)：滚动按需 deepen，替代 v0.6.3 的全量 unshallow。
 
+> - **v0.7.5** (2026-07-06)：Commit 搜索功能完善 + 滚动加载行为修正。
+>   1. **背景**：v3.x 实现了搜索框 UI（GitGraphFindWidget），但缺少 vscode-git-graph 原版的 findMatch 文字高亮、行级搜索匹配样式、已选/非已选匹配行的视觉分层；同时 v0.7.4 的 `loadMoreGraph` 在加载新数据后会跳转到新数据末尾，割裂用户浏览体验。
+>   2. **搜索功能完善**：
+>      - `GitGraphFindWidget` 新增 `SearchState` interface + `search-change` emit，向父组件暴露匹配集 + 正则 pattern
+>      - 修复 `watch` 去掉 `deep:true`，避免 `graphDto` 内部变化触发重复遍历
+>      - `TimelineNewView` 新增 `searchState` ref + `onSearchChange` handler
+>      - commit-row 新增 `commit-row--search-match` class（匹配但非当前选中行 → 轻量渐变背景）
+>      - commit-subject 拆段 + `commit-subject__find-match` span 包裹匹配文字（黄色高亮 + 细边框）
+>      - 双层视觉反馈对齐 vscode-git-graph：`findMatch` span + `findCurrentCommit` 行渐变 + outline
+>   3. **滚动加载行为修正**：
+>      - v0.7.4 的 `scrollTop = savedTop + addedHeight` 加载后跳转到底部，割裂
+>      - 改为对齐 vscode-git-graph 的 loadMoreCommits：全量重拉 + 全量重绘，不主动调整 scrollTop
+>      - 用户继续从原有视线位置往下翻，新数据在下方追加出现
+>   4. **其他**：commit-row 加 `scroll-margin-top: 8px` 避免搜索选中行被 sticky header 遮挡；GitGraphFindWidget flags 改为 `'giu'` 支持 `highlightSubject` 全局匹配。
+>   5. **改动文件**：`frontend/src/components/GitGraphFindWidget.vue`（SearchState + search-change emit + watch 修复）、`frontend/src/views/TimelineNewView.vue`（状态 + 样式 + 滚动行为 + highlightSubject）。
+>   6. **验证**：前端类型检查零新增错误（GitGraphFindWidget + TimelineNewView 搜索/滚动相关代码）。
+
 > - **v0.7.4** (2026-07-06)：App 交互性能优化 — 消除卡顿白屏 7 项修复。
 >   1. **背景**：切换功能按钮（NavRail 切换视图、StatusBar 刷新、仓库 picker 打开）、自动加载数据（Git Graph 滚动加载更多、loadRepos 返回）后界面出现可感知的卡顿或白屏，user 反馈"App 卡"。
 >   2. **根因定位**：

@@ -23,6 +23,18 @@ export interface FindCommit {
   refTypes?: string[];
 }
 
+/** 搜索状态（emit 给父组件用于文字高亮） */
+export interface SearchState {
+  /** 匹配的 SHA 列表（有序） */
+  matches: string[];
+  /** 搜索正则 pattern（空字符串 = 无搜索） */
+  pattern: string;
+  /** 正则 flags（如 'giu'） */
+  flags: string;
+  /** 是否有解析错误 */
+  error: string | null;
+}
+
 const props = defineProps<{
   commits: FindCommit[];
 }>();
@@ -30,6 +42,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', sha: string): void;
   (e: 'close'): void;
+  /** 搜索结果 / pattern 变化时 emit，供父组件高亮 */
+  (e: 'search-change', state: SearchState): void;
 }>();
 
 const searchText = ref('');
@@ -44,15 +58,17 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 function doSearch() {
   errorText.value = null;
+  const emptyState: SearchState = { matches: [], pattern: '', flags: '', error: null };
 
   if (!searchText.value) {
     matches.value = [];
     currentIndex.value = -1;
+    emit('search-change', emptyState);
     return;
   }
 
   const text = searchText.value;
-  const flags = isCaseSensitive.value ? 'u' : 'iu';
+  const flags = isCaseSensitive.value ? 'gu' : 'giu';
   let pattern: RegExp | null = null;
 
   if (isRegex.value) {
@@ -75,6 +91,7 @@ function doSearch() {
   if (!pattern) {
     matches.value = [];
     currentIndex.value = -1;
+    emit('search-change', { matches: [], pattern: text, flags, error: errorText.value });
     return;
   }
 
@@ -92,6 +109,8 @@ function doSearch() {
   }
   matches.value = result;
   currentIndex.value = result.length > 0 ? 0 : -1;
+
+  emit('search-change', { matches: result, pattern: text, flags, error: null });
 
   if (matches.value.length > 0) {
     emit('select', matches.value[0]);
@@ -150,12 +169,13 @@ defineExpose({
   },
 });
 
+// v0.7.5：只在 commits 数组引用变化时重新搜索（props 替换时触发），
+// 避免 deep watch 导致每次 graphDto 内部变化都重新遍历
 watch(
   () => props.commits,
   () => {
     doSearch();
   },
-  { deep: true },
 );
 </script>
 

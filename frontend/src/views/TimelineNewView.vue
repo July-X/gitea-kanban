@@ -32,7 +32,7 @@ import EmptyState from '@renderer/components/EmptyState.vue';
 import CommitDetailPanel from '@renderer/components/CommitDetailPanel.vue';
 import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
 import GitGraphFindWidget from '@renderer/components/GitGraphFindWidget.vue';
-import type { FindCommit } from '@renderer/components/GitGraphFindWidget.vue';
+import type { FindCommit, SearchState } from '@renderer/components/GitGraphFindWidget.vue';
 import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
@@ -107,6 +107,13 @@ const searchVisible = ref(false);
 const findWidgetRef = ref<InstanceType<typeof GitGraphFindWidget> | null>(null);
 const searchMatchShaSet = ref(new Set<string>());
 const searchCurrentSha = ref<string | null>(null);
+/** v0.7.5：搜索正则状态，用于 findMatch 文字高亮 */
+const searchState = ref<SearchState>({
+  matches: [],
+  pattern: '',
+  flags: '',
+  error: null,
+});
 
 const searchCommits = computed<FindCommit[]>(() => {
   const dto = graphDto.value;
@@ -131,11 +138,19 @@ function closeSearch() {
   searchVisible.value = false;
   searchMatchShaSet.value = new Set();
   searchCurrentSha.value = null;
+  searchState.value = { matches: [], pattern: '', flags: '', error: null };
+}
+
+/** v0.7.5：搜索状态变化时更新匹配集 + 正则 pattern，用于文字高亮 */
+function onSearchChange(state: SearchState) {
+  searchMatchShaSet.value = new Set(state.matches);
+  searchState.value = state;
 }
 
 function onSearchSelect(sha: string) {
   searchCurrentSha.value = sha;
   scrollCommitIntoView(sha);
+  // v0.7.5：选中行滚动后保持一定顶部偏移，避免贴 sticky header 过近
 }
 
 /**
@@ -947,10 +962,11 @@ async function loadGraph(offset = 0): Promise<void> {
  *   - 后端 layout 对完整数组从 0 分配 row
  *   - 前端整体替换 graphDto，不追加、不合并
  *
- * v0.7.4 性能优化：
- *   - 加载后不再 scrollIntoView 到底部（旧版：加载后滚到底部 → 哨兵进视口 → 又触发加载 → 链式调用）
- *   - 改为加载前记录当前 scrollHeight，加载后保持相对位置
- *   - 加 400ms 冷却时间避免 IntersectionObserver 快速连续触发
+ * v0.7.5：对齐 vscode-git-graph loadMoreCommits —— 不主动调整滚动位置
+ *   - 新数据全量重拉 + 全量重绘（graphDto 整体替换）
+ *   - 不跳顶部、不跳底部、不保持相对位置 = 什么都不做
+ *   - 用户继续从原有视线位置往下翻即可
+ *   - 保留 400ms 冷却时间避免 IntersectionObserver 链式触发
  */
 async function loadMoreGraph(): Promise<void> {
   if (loadingMore.value || allLoaded.value || !graphDto.value) return;
@@ -961,10 +977,6 @@ async function loadMoreGraph(): Promise<void> {
   const beforeCount = graphDto.value.nodes.length;
   // v0.7.3：增加 maxCommits（对齐 vscode-git-graph 的 maxCommits += config.loadMoreCommits）
   maxCommits.value += INITIAL_GRAPH_LIMIT;
-  // v0.7.4：记录当前滚动状态，加载后保持位置
-  const scrollContainer = mainScrollEl.value;
-  const savedScrollTop = scrollContainer?.scrollTop ?? 0;
-  const savedScrollHeight = scrollContainer?.scrollHeight ?? 0;
   try {
     await loadGraph();
   } catch {
@@ -989,12 +1001,6 @@ async function loadMoreGraph(): Promise<void> {
     showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
   }
 
-  // v0.7.4：加载后保持滚动位置相对不变，不再 scrollIntoView 到底部
-  if (scrollContainer && savedScrollHeight > 0) {
-    const newScrollHeight = scrollContainer.scrollHeight;
-    const addedHeight = newScrollHeight - savedScrollHeight;
-    scrollContainer.scrollTop = savedScrollTop + addedHeight;
-  }
 }
 
 /**
@@ -2107,6 +2113,42 @@ function avatarColorIndex(name: string): number {
 }
 
 /**
+ * v0.7.5：把 subject 拆成文本段，匹配区打标记（用于 findMatch 高亮）
+ * 对齐 vscode-git-graph 的 findMatches() 把匹配文字用 <span class="findMatch"> 包裹策略
+ */
+function highlightSubject(
+  subject: string,
+  pattern: string,
+  flags: string,
+): Array<{ text: string; match: boolean }> {
+  if (!pattern) return [{ text: subject, match: false }];
+  try {
+    const re = new RegExp(pattern, flags.includes('g') ? flags : flags + 'g');
+    const segments: Array<{ text: string; match: boolean }> = [];
+    let lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(subject)) !== null) {
+      // 零宽匹配保护：死循环兜底
+      if (m.index === re.lastIndex) {
+        re.lastIndex++;
+        continue;
+      }
+      if (m.index > lastIndex) {
+        segments.push({ text: subject.slice(lastIndex, m.index), match: false });
+      }
+      segments.push({ text: m[0], match: true });
+      lastIndex = re.lastIndex;
+    }
+    if (lastIndex < subject.length) {
+      segments.push({ text: subject.slice(lastIndex), match: false });
+    }
+    return segments;
+  } catch {
+    return [{ text: subject, match: false }];
+  }
+}
+
+/**
  * ref badge 类型判断（v2.8：用后端 refTypes 严格区分，不再启发式猜）
  *
  * 区分 branch / remoteBranch / tag 三大类，前端按类型给不同视觉样式。
@@ -2182,6 +2224,7 @@ function refBadgeClass(refType?: string): string {
             :commits="searchCommits"
             @select="onSearchSelect"
             @close="closeSearch"
+            @search-change="onSearchChange"
           />
           </div>
 
@@ -2531,6 +2574,8 @@ function refBadgeClass(refType?: string): string {
                   'commit-row--dot-active': r.commit && hoveredDotSha === r.commit.sha,
                   /* v3.x：搜索高亮 —— 当前搜索选中的 commit 行 */
                   'commit-row--search-current': r.commit && searchCurrentSha === r.commit.sha,
+                  /* v0.7.5：搜索匹配（非当前选中）的 commit 行 */
+                  'commit-row--search-match': r.commit && searchMatchShaSet.has(r.commit.sha) && searchCurrentSha !== r.commit.sha,
                 }"
                 :style="{
                   /* VSCode row model：第一行固定 ROW_H，展开面板作为第二行插入。
@@ -2586,7 +2631,16 @@ function refBadgeClass(refType?: string): string {
                     <span
                       class="commit-subject"
                       :class="{ 'commit-subject--uncommitted': r.commit.sha === '*' }"
-                    >{{ r.commit.subject }}</span>
+                    >
+                      <template v-if="searchState.pattern && searchMatchShaSet.has(r.commit.sha)">
+                        <span
+                          v-for="(segment, si) in highlightSubject(r.commit.subject, searchState.pattern, searchState.flags)"
+                          :key="si"
+                          :class="{ 'commit-subject__find-match': segment.match }"
+                        >{{ segment.text }}</span>
+                      </template>
+                      <template v-else>{{ r.commit.subject }}</template>
+                    </span>
                   </div>
                   <!-- col 2: Date 列（v3.0：v-if 控制显隐） -->
                   <div
@@ -2893,6 +2947,27 @@ function refBadgeClass(refType?: string): string {
 .commit-row--search-current {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
+}
+
+/* v0.7.5：搜索匹配（非当前选中）的 commit 行 —— 整行轻量背景，对齐 vscode-git-graph findCurrentCommit */
+.commit-row--search-match {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--color-primary) 14%, transparent),
+    color-mix(in srgb, var(--color-primary) 14%, transparent)
+  );
+}
+/* v0.7.5：行内 findMatch 文字高亮 —— 匹配文字加背景 + 细边框，对齐 vscode-git-graph .findMatch */
+.commit-subject__find-match {
+  background-color: color-mix(in srgb, var(--color-warning, #e3b341) 55%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--color-warning, #e3b341) 80%, transparent);
+  outline-offset: -1px;
+  border-radius: 2px;
+  color: inherit;
+}
+/* v0.7.5：当前匹配行内的 findMatch 叠加色更醒目（current 行背景 + match span 更亮） */
+.commit-row--search-current .commit-subject__find-match {
+  background-color: color-mix(in srgb, var(--color-warning, #e3b341) 70%, transparent);
+  outline-color: color-mix(in srgb, var(--color-warning, #e3b341) 90%, transparent);
 }
 
 /*
@@ -3433,6 +3508,8 @@ function refBadgeClass(refType?: string): string {
    *   从而把最后一行完整暴露在 StatusBar 上方，用户不再需要手动补滚。
    */
   scroll-margin-bottom: calc(var(--statusbar-height, 33px) + 8px);
+  /* v0.7.5：scroll-margin-top —— 让搜索选中行平滑滚动到视口时，行顶与 sticky header 底留 8px 余量 */
+  scroll-margin-top: 8px;
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
