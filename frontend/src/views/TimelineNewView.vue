@@ -34,7 +34,7 @@ import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
 import { showToast } from '@renderer/lib/toast';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
-import type { GraphResultDto } from '@renderer/lib/gitgraph/structured';
+import type { GraphResultDto } from '@renderer/types/dto';
 import {
   renderGraphVscode,
   VSCODE_EXPAND_Y,

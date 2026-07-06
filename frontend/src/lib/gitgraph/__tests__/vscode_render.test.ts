@@ -10,7 +10,7 @@ import {
 	VSCODE_VERTEX_RADIUS,
 	renderGraphVscode,
 } from '../vscode-render.ts';
-import type { GraphResultDto } from '../structured.ts';
+import type { GraphResultDto } from '@renderer/types/dto';
 
 // 测试用: 把 (fromRow, fromLane) → (toRow, toLane) 的 edge 转成单个 branch line
 // (跟 Go 端 BuildGraphVscode 的 Branch.lines 格式一致)

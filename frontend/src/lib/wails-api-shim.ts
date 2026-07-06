@@ -973,20 +973,6 @@ const apiShim = {
     },
   },
 
-  board: {
-    columns: {
-      list: (_args: unknown): Promise<unknown> => stubEmpty([]),
-      create: (_args: unknown): Promise<unknown> => notImplemented('board.columns', 'create'),
-      update: (_args: unknown): Promise<unknown> => notImplemented('board.columns', 'update'),
-      reorder: (_args: unknown): Promise<unknown> => notImplemented('board.columns', 'reorder'),
-      delete: (_args: unknown): Promise<unknown> => notImplemented('board.columns', 'delete'),
-      mapLabel: (_args: unknown): Promise<unknown> => notImplemented('board.columns', 'mapLabel'),
-      unmapLabel: (_args: unknown): Promise<unknown> =>
-        notImplemented('board.columns', 'unmapLabel'),
-      reset: (_args: unknown): Promise<unknown> => notImplemented('board.columns', 'reset'),
-    },
-  },
-
   issues: {
     list: (_args: unknown): Promise<unknown> => stubEmpty({ items: [], hasMore: false }),
     get: (_args: unknown): Promise<unknown> => notImplemented('issues', 'get'),

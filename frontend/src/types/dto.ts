@@ -348,30 +348,6 @@ export interface MergePrResult {
 }
 
 // ============================================================
-// ===== board.columns 命名空间 =====
-// ============================================================
-
-/** 看板列绑的 gitea label 摘要（DTO 形态） */
-export interface ColumnLabelDto {
-  id: number;
-  name: string;
-  color: string;
-}
-
-/** WIP 上限：正整数 = 上限，null = 无限 */
-export type WipLimit = number | null;
-
-/** 看板列 DTO（DB row + 绑定的 gitea labels） */
-export interface ColumnDto {
-  id: string;
-  projectId: string;
-  title: string;
-  position: number;
-  labels: ColumnLabelDto[];
-  wipLimit?: WipLimit;
-}
-
-// ============================================================
 // ===== issues 命名空间（ADR-0002 reset：卡片 = gitea issue）=====
 // ============================================================
 

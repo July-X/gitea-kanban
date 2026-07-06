@@ -61,26 +61,6 @@ type RepoProject struct {
 	CreatedAt     int64  `json:"createdAt"`
 }
 
-// BoardColumn 看板列
-type BoardColumn struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"projectId"`
-	Title     string `json:"title"`
-	Position  int    `json:"position"`
-	CreatedAt int64  `json:"createdAt"`
-	WipLimit  *int   `json:"wipLimit,omitempty"`
-}
-
-// ColumnLabelMap 列 ↔ Gitea label 映射
-type ColumnLabelMap struct {
-	ID             string `json:"id"`
-	ColumnID       string `json:"columnId"`
-	ProjectID      string `json:"projectId"`
-	GiteaLabelID   string `json:"giteaLabelId"`
-	GiteaLabelName string `json:"giteaLabelName"`
-	CreatedAt      int64  `json:"createdAt"`
-}
-
 // StarredBranch 收藏的分支
 type StarredBranch struct {
 	ID        string `json:"id"`
@@ -91,14 +71,12 @@ type StarredBranch struct {
 
 // LocalState 顶层状态（1 个 JSON 文件）
 type LocalState struct {
-	SchemaVersion   int              `json:"schemaVersion"`
-	Accounts        []GiteaAccount   `json:"accounts"`
-	Users           []LocalUser      `json:"users"`
-	Prefs           map[string]any   `json:"prefs"`
-	Projects        []RepoProject    `json:"projects"`
-	Columns         []BoardColumn    `json:"columns"`
-	LabelMaps       []ColumnLabelMap `json:"labelMaps"`
-	StarredBranches []StarredBranch  `json:"starredBranches"`
+	SchemaVersion   int             `json:"schemaVersion"`
+	Accounts        []GiteaAccount  `json:"accounts"`
+	Users           []LocalUser     `json:"users"`
+	Prefs           map[string]any  `json:"prefs"`
+	Projects        []RepoProject   `json:"projects"`
+	StarredBranches []StarredBranch `json:"starredBranches"`
 }
 
 // WorkspacePathPrefKey prefs 中 workspace 路径的 key
@@ -218,8 +196,6 @@ func defaultState() *LocalState {
 		},
 		Prefs:           map[string]any{},
 		Projects:        []RepoProject{},
-		Columns:         []BoardColumn{},
-		LabelMaps:       []ColumnLabelMap{},
 		StarredBranches: []StarredBranch{},
 	}
 }

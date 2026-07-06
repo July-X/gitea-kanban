@@ -23,7 +23,7 @@
  *   // r.style: 'rounded' | 'angular'
  */
 
-import type { GraphNodeDto, GraphResultDto } from './structured.js';
+import type { GraphNodeDto, GraphResultDto } from '@renderer/types/dto';
 
 // vscode 默认 grid 配置 (对齐 graph.ts GraphConfig 默认值)
 // vscode-git-graph config.ts:278 默认值

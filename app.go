@@ -3433,7 +3433,6 @@ func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFil
 	}, nil
 }
 
-// ColumnDTO 看板列（暴露给前端，与 store.BoardColumn 对齐）
 // getAdapter 根据平台返回对应的 PlatformAdapter
 func (a *App) getAdapter(platformStr string) platformAdapter.PlatformAdapter {
 	switch platformStr {
