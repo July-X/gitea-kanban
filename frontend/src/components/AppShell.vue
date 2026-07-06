@@ -85,19 +85,25 @@ const CACHEABLE_VIEWS = [
         <div class="shell__content">
           <router-view v-slot="{ Component }">
             <!--
-              v1.8 拍板 2026-07-05：用 KeepAlive 缓存所有功能视图组件
-                - 避免每次路由切换销毁重建视图，回来需要二次加载数据
-                - max=10 最多缓存 10 个视图实例（本应用仅 4 个功能视图，留余量）
-                - include 显式指定缓存名单（按组件名），避免缓存 AuthView 等不需要缓存的视图
-                - 缓存后组件生命周期变为：
-                    onMounted → 仅首次挂载执行（事件监听等一次性设置）
-                    onActivated → 每次进入（含从缓存恢复）都执行（数据加载/事件恢复）
-                    onDeactivated → 切出到缓存时执行（暂停 observer/定时器等）
-                    onUnmounted → 仅真正销毁时执行（KeepAlive 不会触发，除 max 溢出淘汰）
-              -->
-            <KeepAlive :include="CACHEABLE_VIEWS" :max="10">
-              <component :is="Component" :key="$route.fullPath" />
-            </KeepAlive>
+              v0.7.4 性能优化：给 router-view 包 <Suspense> + 骨架屏，
+              消除懒加载 chunk 下载期间的白屏。
+              fallback 在 chunk 加载时显示骨架屏，加载完成后自动切换。
+            -->
+            <Suspense>
+              <template #default>
+                <KeepAlive :include="CACHEABLE_VIEWS" :max="10">
+                  <component :is="Component" :key="$route.fullPath" />
+                </KeepAlive>
+              </template>
+              <template #fallback>
+                <div class="shell__skeleton">
+                  <div class="shell__skeleton-bar shell__skeleton-bar--title" />
+                  <div class="shell__skeleton-bar" />
+                  <div class="shell__skeleton-bar" />
+                  <div class="shell__skeleton-bar shell__skeleton-bar--short" />
+                </div>
+              </template>
+            </Suspense>
           </router-view>
         </div>
       </main>
@@ -256,5 +262,44 @@ const CACHEABLE_VIEWS = [
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ===== v0.7.4：路由懒加载骨架屏 ===== */
+.shell__skeleton {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 20px 0;
+  background: var(--color-shell-main-bg);
+}
+
+.shell__skeleton-bar {
+  height: 14px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--color-divider) 0%,
+    var(--color-divider-strong) 50%,
+    var(--color-divider) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+.shell__skeleton-bar--title {
+  width: 38%;
+  height: 20px;
+  margin-bottom: 8px;
+}
+
+.shell__skeleton-bar--short {
+  width: 60%;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

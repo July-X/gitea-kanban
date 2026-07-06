@@ -148,13 +148,15 @@ function togglePicker(): void {
 }
 
 /**
- * 打开 picker 时如果 clonedMap 是空 → 批量刷一次
- * （启动期 App.vue mount 也会调一次，但用户中途连接新账号后状态是空）
+ * v0.7.4 性能优化：picker 打开时不阻塞 UI 刷新 clonedMap。
+ *   - 旧版同步 await refreshClonedStatus()，打开下拉时 UI 冻结。
+ *   - 新版只在 clonedMap 为空时触发后台异步刷新（不 await），
+ *     数据到位后 clonedMap 响应式更新，picker 自动反映最新状态。
  */
-watch(pickerOpen, async (open) => {
+watch(pickerOpen, (open) => {
   if (open && auth.isConnected) {
     if (Object.keys(repo.clonedMap).length === 0) {
-      await repo.refreshClonedStatus();
+      void repo.refreshClonedStatus();
     }
   }
 });
@@ -362,8 +364,28 @@ watch(
 
 // ===== 刷新 / 主题 / 退出 =====
 
+/**
+ * v0.7.4 性能优化：刷新按钮防抖 + 异步执行。
+ *   - 旧版同步 await loadRepos + refreshClonedStatus，期间 UI 冻结。
+ *   - 新版：按钮点击后立即返回（fire-and-forget），后台异步执行刷新；
+ *     加 800ms 防抖避免用户连点导致并发刷新。
+ */
+let refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let refreshRunning = false;
+
 /** 主动刷新：拉最新仓库列表 + 重新检查 clone 状态，并广播全局刷新事件 */
-async function onRefreshClick(): Promise<void> {
+function onRefreshClick(): void {
+  if (refreshRunning) return;
+  if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
+  refreshDebounceTimer = setTimeout(() => {
+    refreshDebounceTimer = null;
+    void doRefresh();
+  }, 800);
+}
+
+async function doRefresh(): Promise<void> {
+  if (refreshRunning) return;
+  refreshRunning = true;
   try {
     await repo.loadRepos('', true);
     // 刷新 clone 状态缓存
@@ -374,6 +396,8 @@ async function onRefreshClick(): Promise<void> {
   } catch (e) {
     const err = e as { messageText?: string };
     showToast({ type: 'error', message: '刷新失败', description: err.messageText ?? '请稍后重试' });
+  } finally {
+    refreshRunning = false;
   }
 }
 

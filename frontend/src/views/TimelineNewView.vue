@@ -126,6 +126,9 @@ const pulling = ref(false);
 // v0.6.1+ Git Graph 滚动加载更多：哨兵 + IntersectionObserver
 const loadMoreSentinel = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
+// v0.7.4：防抖时间戳 + 冷却常数，避免链式触发
+let lastLoadMoreTime = 0;
+const LOAD_MORE_COOLDOWN_MS = 400;
 
 /** v0.6.2：滚动容器 ref，用于「刷新」按钮 smooth scroll 到顶部
  *  - 复用现有 .timeline-new__main DOM（无需新增 wrapper）
@@ -840,12 +843,25 @@ async function loadGraph(offset = 0): Promise<void> {
  *   - 调 loadGraph() 从 offset=0 拉取 maxCommits 条
  *   - 后端 layout 对完整数组从 0 分配 row
  *   - 前端整体替换 graphDto，不追加、不合并
+ *
+ * v0.7.4 性能优化：
+ *   - 加载后不再 scrollIntoView 到底部（旧版：加载后滚到底部 → 哨兵进视口 → 又触发加载 → 链式调用）
+ *   - 改为加载前记录当前 scrollHeight，加载后保持相对位置
+ *   - 加 400ms 冷却时间避免 IntersectionObserver 快速连续触发
  */
 async function loadMoreGraph(): Promise<void> {
   if (loadingMore.value || allLoaded.value || !graphDto.value) return;
+  // v0.7.4：冷却时间防抖，避免链式触发
+  const now = performance.now();
+  if (now - lastLoadMoreTime < LOAD_MORE_COOLDOWN_MS) return;
+  lastLoadMoreTime = now;
   const beforeCount = graphDto.value.nodes.length;
   // v0.7.3：增加 maxCommits（对齐 vscode-git-graph 的 maxCommits += config.loadMoreCommits）
   maxCommits.value += INITIAL_GRAPH_LIMIT;
+  // v0.7.4：记录当前滚动状态，加载后保持位置
+  const scrollContainer = mainScrollEl.value;
+  const savedScrollTop = scrollContainer?.scrollTop ?? 0;
+  const savedScrollHeight = scrollContainer?.scrollHeight ?? 0;
   try {
     await loadGraph();
   } catch {
@@ -870,16 +886,11 @@ async function loadMoreGraph(): Promise<void> {
     showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
   }
 
-  // 滚动到底部让用户看到新加载的 commit
-  const lastNode = allNodes[allNodes.length - 1];
-  if (lastNode?.sha) {
-    const lastRow = document.querySelector(
-      `.commit-row[data-sha="${lastNode.sha}"]`,
-    ) as HTMLElement | null;
-    const scrollContainer = mainScrollEl.value;
-    if (lastRow && scrollContainer) {
-      lastRow.scrollIntoView({ block: 'end', inline: 'nearest' });
-    }
+  // v0.7.4：加载后保持滚动位置相对不变，不再 scrollIntoView 到底部
+  if (scrollContainer && savedScrollHeight > 0) {
+    const newScrollHeight = scrollContainer.scrollHeight;
+    const addedHeight = newScrollHeight - savedScrollHeight;
+    scrollContainer.scrollTop = savedScrollTop + addedHeight;
   }
 }
 
