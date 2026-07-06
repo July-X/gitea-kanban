@@ -578,7 +578,7 @@ onMounted(async () => {
   // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
   document.addEventListener('app:refresh', onAppRefresh);
   setupRowHeightObserver();
-  setupLoadMoreObserver();
+  await setupLoadMoreObserver();
   await activateData();
 });
 
@@ -601,7 +601,7 @@ async function activateData() {
   // v0.7.3：KeepAlive 恢复时哨兵 DOM 可能已被重建，需要重新 setup observer
   // 确保重新进入视图后滚动加载功能可用
   if (!loadMoreObserver) {
-    setupLoadMoreObserver();
+    await setupLoadMoreObserver();
   }
 }
 
@@ -637,8 +637,20 @@ onActivated(() => {
  *   - 哨兵从 null → DOM：创建 observer（如果还不存在）+ observe 哨兵
  *   - 哨兵从 DOM → null：disconnect observer 停止观察
  *   - 哨兵 DOM 替换（v-if 重渲染）：unobserve 旧 + observe 新
+ *
+ * v0.7.7：KeepAlive 恢复时 mainScrollEl 模板 ref 可能尚未重新绑定到 DOM，
+ * 此时创建的 observer 会以 viewport 为 root，无法检测嵌套滚动容器内的哨兵。
+ * 如果 mainScrollEl 暂时为 null，先 nextTick 等待 DOM 重新插入后再创建 observer。
  */
-function setupLoadMoreObserver(): void {
+async function setupLoadMoreObserver(): Promise<void> {
+  // v0.7.7：KeepAlive 恢复时，确保滚动容器 ref 已绑定到 DOM 再创建 observer。
+  // 否则 root 会变成 viewport，导致嵌套滚动容器内的哨兵检测失效。
+  if (!mainScrollEl.value) {
+    await nextTick();
+  }
+  // 如果 nextTick 后仍然没有滚动容器，说明当前视图没有可滚动的 DOM，直接放弃
+  if (!mainScrollEl.value) return;
+
   // 清理旧 observer，避免重复观察
   if (loadMoreObserver) {
     loadMoreObserver.disconnect();
@@ -666,7 +678,7 @@ function setupLoadMoreObserver(): void {
   }
 }
 
-// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 setup observer（重新 observe 新哨兵）
+// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 setup observer（重新观察新哨兵）
 watch(loadMoreSentinel, (el) => {
   if (el && loadMoreObserver) {
     loadMoreObserver.observe(el);
