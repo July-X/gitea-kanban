@@ -2136,7 +2136,8 @@ function refBadgeClass(refType?: string): string {
             双击 handle → toggle HIDDEN ↔ AUTO/default
             右键 header → 列显隐菜单（v3.0 暂未实现菜单 UI，placeholder）
           -->
-          <div class="git-graph-header" @mousedown.stop @contextmenu="onHeaderContextMenu"> col 0: Graph -->
+          <div class="git-graph-header" @mousedown.stop @contextmenu="onHeaderContextMenu">
+            <!-- col 0: Graph -->
             <div class="git-graph-header__col git-graph-header__col--graph" data-col="0">
               <span class="git-graph-header__col-label">Graph</span>
               <div
