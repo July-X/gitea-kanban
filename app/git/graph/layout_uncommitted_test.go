@@ -18,8 +18,8 @@ func TestBuildGraphVscode_UncommittedVertex(t *testing.T) {
 
 	commits := []git.CommitInfo{
 		{
-			SHA:        git.UNCOMMITTED_HASH,
-			ShortSHA:   git.UNCOMMITTED_HASH,
+			SHA:      git.UNCOMMITTED_HASH,
+			ShortSHA: git.UNCOMMITTED_HASH,
 			// v0.3.0：UNCOMMITTED subject 改用 worktree dirty 语义，不再是 "N commits from origin ahead"
 			Subject:    "Uncommitted changes (3 files)",
 			AuthorName: "*",
@@ -74,8 +74,8 @@ func TestBuildGraphVscode_UncommittedBranchLineIsCommittedFalse(t *testing.T) {
 
 	commits := []git.CommitInfo{
 		{
-			SHA:        git.UNCOMMITTED_HASH,
-			ShortSHA:   git.UNCOMMITTED_HASH,
+			SHA:      git.UNCOMMITTED_HASH,
+			ShortSHA: git.UNCOMMITTED_HASH,
 			// v0.3.0：UNCOMMITTED subject 改用 worktree dirty 语义
 			Subject:    "Uncommitted changes (1 file)",
 			AuthorName: "*",
@@ -134,8 +134,8 @@ func TestBuildGraph_GiteaStyle_UncommittedIsCommittedFalse(t *testing.T) {
 
 	commits := []git.CommitInfo{
 		{
-			SHA:        git.UNCOMMITTED_HASH,
-			ShortSHA:   git.UNCOMMITTED_HASH,
+			SHA:      git.UNCOMMITTED_HASH,
+			ShortSHA: git.UNCOMMITTED_HASH,
 			// v0.3.0：UNCOMMITTED subject 改用 worktree dirty 语义
 			Subject:    "Uncommitted changes (1 file)",
 			AuthorName: "*",

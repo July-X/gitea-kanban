@@ -370,7 +370,6 @@ func TestGiteaAdapter_CreatePullComment_EmptyBody(t *testing.T) {
 	}
 }
 
-
 // ===== UpdatePullComment / DeletePullComment 测试（v0.5.0 M1） =====
 
 // TestGiteaAdapter_UpdatePullComment 验证 PATCH 路径 + Content-Type + 字段映射
@@ -489,7 +488,6 @@ func TestGiteaAdapter_DeletePullComment_NotFound(t *testing.T) {
 	}
 }
 
-
 // ===== 评论表情反应测试（v0.5.0 M2） =====
 
 // TestGiteaAdapter_ListPullCommentReactions 验证 GET + 字段映射（reaction 字段）
@@ -606,7 +604,6 @@ func TestGiteaAdapter_RemovePullCommentReaction(t *testing.T) {
 	}
 }
 
-
 // ===== 合并请求评审测试（v0.5.0 M3） =====
 
 // TestGiteaAdapter_ListPullReviews 验证 GET + 字段映射
@@ -675,7 +672,7 @@ func TestGiteaAdapter_CreatePullReview_Approve(t *testing.T) {
 
 	adapter := NewGiteaAdapter()
 	d, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42, platform.CreateReviewOpts{
-		Body: "Looks good!",
+		Body:  "Looks good!",
 		Event: "approve",
 	})
 	if err != nil {

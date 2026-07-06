@@ -305,7 +305,7 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 		return nil, fmt.Errorf("统计 commit 数失败: %w", err)
 	}
 
-	slog.Default().Info("git pull 完成", "localPath", opts.LocalPath, "addedCommits", afterCount - beforeCount, "headChanged", headBefore != headAfter)
+	slog.Default().Info("git pull 完成", "localPath", opts.LocalPath, "addedCommits", afterCount-beforeCount, "headChanged", headBefore != headAfter)
 	return &PullResult{
 		BeforeCount:  beforeCount,
 		AfterCount:   afterCount,

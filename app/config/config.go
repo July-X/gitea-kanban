@@ -54,8 +54,8 @@ type dailyRotateHandler struct {
 	attrs    []slog.Attr
 	group    string
 	now      func() time.Time // 可注入，便于测试
-	inner    slog.Handler    // 当前活跃的文件 handler
-	innerDay string          // 当前 handler 对应的日期（YYYY-MM-DD）
+	inner    slog.Handler     // 当前活跃的文件 handler
+	innerDay string           // 当前 handler 对应的日期（YYYY-MM-DD）
 }
 
 // newDailyRotateHandler 创建日切 handler（同时跑一次 GC）

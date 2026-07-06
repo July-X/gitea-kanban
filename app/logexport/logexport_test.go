@@ -1,8 +1,8 @@
 package logexport
 
 import (
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"

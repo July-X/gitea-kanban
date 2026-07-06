@@ -307,10 +307,10 @@ func TestResolveBinaryPath_EmbeddedSentinel(t *testing.T) {
 
 // TestPickInitialDirForGitBinary 验证 v0.5-mid3 优先级：
 //
-//	1. PATH git dirname（最高优先）
-//	2. Init() 释放的 embedded binary 所在目录
-//	3. userOverride 落定的路径 dirname
-//	4. dataDir 本身（兜底）
+//  1. PATH git dirname（最高优先）
+//  2. Init() 释放的 embedded binary 所在目录
+//  3. userOverride 落定的路径 dirname
+//  4. dataDir 本身（兜底）
 //
 // findSystemGit 是包级变量可重写，本测试用 stub 避 sandbox PATH git 干扰。
 func TestPickInitialDirForGitBinary(t *testing.T) {
@@ -414,7 +414,7 @@ func TestSystemGitDir(t *testing.T) {
 
 // TestPickInitialDirForGitBinary_Symlink 验证 v0.5-mid4 integration：
 //
-//	 findSystemGit 返 symlink path → PickInitialDir 应解析到实体 dir
+//	findSystemGit 返 symlink path → PickInitialDir 应解析到实体 dir
 func TestPickInitialDirForGitBinary_Symlink(t *testing.T) {
 	orig := findSystemGit
 	defer func() { findSystemGit = orig }()

@@ -18,12 +18,12 @@ import (
 	"strings"
 	"time"
 
-	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/logx"
 	"gitea-kanban/app/platform"
+	gogit "github.com/go-git/go-git/v5"
 )
 
 // GiteaAdapter Gitea 平台适配器
@@ -419,7 +419,7 @@ func (a *GiteaAdapter) GetPull(ctx context.Context, hostURL, username, token, ow
 func (a *GiteaAdapter) MergePull(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.MergePullOpts) (*platform.PullDetailDTO, error) {
 	style := mapMergeMethodToGitea(opts.Method)
 	do := map[string]any{
-		"merge_style_field":        style,
+		"merge_style_field":         style,
 		"delete_branch_after_merge": opts.DeleteBranchAfter,
 	}
 	if opts.CommitMessage != "" {
@@ -914,7 +914,6 @@ func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
 	return out
 }
 
-
 // ===== PR 修改文件列表 (v0.5.0 M4) =====
 
 // giteaPullFileRaw Gitea /pulls/{index}/files 原始响应
@@ -1066,13 +1065,13 @@ func (a *GiteaAdapter) splitDiffByFile(fullDiff, targetPath string) *platform.Pu
 
 // giteaReviewCommentRaw Gitea /pulls/{index}/comments 原始响应
 type giteaReviewCommentRaw struct {
-	ID        int64         `json:"id"`
-	Body      string        `json:"body"`
-	User      *giteaUserRaw `json:"user"`
-	Path      string        `json:"path"`
-	Line      int           `json:"new_position"`
-	Created   string        `json:"created_at"`
-	Updated   string        `json:"updated_at"`
+	ID      int64         `json:"id"`
+	Body    string        `json:"body"`
+	User    *giteaUserRaw `json:"user"`
+	Path    string        `json:"path"`
+	Line    int           `json:"new_position"`
+	Created string        `json:"created_at"`
+	Updated string        `json:"updated_at"`
 }
 
 // giteaReviewCommentToDTO 映射为平台中性 PullReviewCommentDto
@@ -1131,7 +1130,6 @@ func (a *GiteaAdapter) CreatePullReviewComment(ctx context.Context, hostURL, use
 	return &dto, nil
 }
 
-
 // encodeJSONBody 把任意对象序列化为 io.Reader
 //
 // GiteaAdapter 现有方法都是 GET，v0.6+ PR 写入接口需要 POST/PATCH/PUT。
@@ -1188,7 +1186,7 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 	defer resp.Body.Close()
 
 	// 成功/失败都写 HTTP 日志（区分级别：成功 INFO/Debug，失败 WARN）
-	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)  
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -1319,11 +1317,11 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 	}
 
 	return &platform.GraphResult{
-		Nodes:     nodes,
-		Edges:     edges,
-		Branches:  branches,
-		MaxLane:   r.MaxLane,
-		Truncated: r.Truncated,
+		Nodes:           nodes,
+		Edges:           edges,
+		Branches:        branches,
+		MaxLane:         r.MaxLane,
+		Truncated:       r.Truncated,
 		LocalExhausted:  r.LocalExhausted,
 		DeepenTriggered: r.DeepenTriggered,
 	}

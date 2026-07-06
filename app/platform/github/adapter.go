@@ -464,7 +464,6 @@ func encodeJSONBody(v any) (io.Reader, error) {
 	return strings.NewReader(string(b)), nil
 }
 
-
 // ===== 行内评审评论 (v0.5.0 M4) =====
 
 // githubReviewCommentRaw GitHub /pulls/{pull_number}/comments 原始响应
@@ -868,9 +867,10 @@ func (a *GitHubAdapter) ClosePull(ctx context.Context, hostURL, username, token,
 // body: {labels: ["bug", "feature"]}（按 name 字符串数组）
 //
 // 真实响应（v0.6+ integration test 验证）：
-//   PUT /repos/{owner}/{repo}/issues/{index}/labels
-//   → 200 OK + body = [{id, name, color, default, description}, ...]
-//   **不是** issue object，所以不要尝试解码成 PullRaw
+//
+//	PUT /repos/{owner}/{repo}/issues/{index}/labels
+//	→ 200 OK + body = [{id, name, color, default, description}, ...]
+//	**不是** issue object，所以不要尝试解码成 PullRaw
 func (a *GitHubAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*platform.PullDetailDTO, error) {
 	body := map[string]any{"labels": labelNames}
 	reader, err := encodeJSONBody(body)
@@ -1289,6 +1289,7 @@ func githubCommentToDTO(c githubCommentRaw) platform.CommentDTO {
 	}
 	return out
 }
+
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'
 // GitHub: 'merge' | 'rebase' | (无 'rebase-merge'，映射为 'rebase') | 'squash'
 func mapMergeMethodToGitHub(method string) string {
@@ -1548,11 +1549,11 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 	}
 
 	return &platform.GraphResult{
-		Nodes:     nodes,
-		Edges:     edges,
-		Branches:  branches,
-		MaxLane:   r.MaxLane,
-		Truncated: r.Truncated,
+		Nodes:           nodes,
+		Edges:           edges,
+		Branches:        branches,
+		MaxLane:         r.MaxLane,
+		Truncated:       r.Truncated,
 		LocalExhausted:  r.LocalExhausted,
 		DeepenTriggered: r.DeepenTriggered,
 	}

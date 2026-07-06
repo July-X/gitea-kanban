@@ -12,8 +12,8 @@ import (
 	"os"
 	"strconv"
 
-	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
+	gogit "github.com/go-git/go-git/v5"
 )
 
 type vscodeCommit struct {

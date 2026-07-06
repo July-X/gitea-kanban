@@ -59,8 +59,11 @@ func NewApp() *App {
 // newBindingCtx 为每次 binding 调用生成带 reqID 的局部 ctx
 //
 // 设计动机（v0.6.0）：
+//
 //   - 一次 binding 调用是一次「业务操作」,所有后续日志应该能用同一个 reqID 贯穿
+//
 //   - a.ctx 是共享的、不能改（并发 binding 会竞态）
+//
 //   - 本 helper 生成 ctx 副本,业务 binding 第一行调一下即可:
 //
 //     ctx := a.newBindingCtx("CloneRepo")
@@ -1697,8 +1700,8 @@ type WorkspaceInfo struct {
 	// 由应用根据业务自动创建，前端不应让用户直接选择这个路径
 	// (用户只选 DataRoot 即可，workspace 是应用内部约定)。
 	WorkspacePath string `json:"workspacePath"`
-	IsDefault bool   `json:"isDefault"`
-	Validated bool   `json:"validated"`
+	IsDefault     bool   `json:"isDefault"`
+	Validated     bool   `json:"validated"`
 }
 
 // GetWorkspace 返回当前数据根目录（**用户可感知的"全局路径"**）
@@ -1720,8 +1723,8 @@ func (a *App) GetWorkspace() WorkspaceInfo {
 	return WorkspaceInfo{
 		DataRoot:      root,
 		WorkspacePath: wsPath,
-		IsDefault: true, // 永远默认（不可改）
-		Validated: validated,
+		IsDefault:     true, // 永远默认（不可改）
+		Validated:     validated,
 	}
 }
 
@@ -1866,8 +1869,8 @@ func (a *App) OpenGitBinaryPicker() (string, error) {
 
 	options := func(title string, filters []wailsruntime.FileFilter) (string, error) {
 		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-			Title:           title,
-			Filters:         filters,
+			Title:            title,
+			Filters:          filters,
 			DefaultDirectory: initialDir,
 		})
 	}
@@ -2600,8 +2603,8 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 		Username:  account.Username,
 		// v0.6.3：depth=0（全量元数据），countLimit=0（精确统计全部）
 		// GitHub / Gitea 统一走完整 fetch，不再按平台差异化限制
-		CountLimit: 0,
-		Depth:      0,
+		CountLimit:   0,
+		Depth:        0,
 		SingleBranch: false,
 		NoTags:       false,
 		Progress:     a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
@@ -2655,7 +2658,6 @@ func (a *App) FetchRepo(args PullRepoArgs) (FetchRepoResultDTO, error) {
 	}
 	return FetchRepoResultDTO{Updated: result.Updated}, nil
 }
-
 
 // ===== 看板（issue + label 映射，仅 Gitea）（步骤 3.5）=====
 

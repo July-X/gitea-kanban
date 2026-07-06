@@ -1087,8 +1087,8 @@ func TestMapMergeMethodToGitHub(t *testing.T) {
 		{"rebase", "rebase"},
 		{"rebase-merge", "rebase"}, // GitHub 没区分，统一映射为 rebase
 		{"squash", "squash"},
-		{"", "merge"},              // 空 = 默认 merge
-		{"unknown", "unknown"},     // 未知透传（让 GitHub API 返 422 给前端友好提示）
+		{"", "merge"},          // 空 = 默认 merge
+		{"unknown", "unknown"}, // 未知透传（让 GitHub API 返 422 给前端友好提示）
 	}
 	for _, c := range cases {
 		got := mapMergeMethodToGitHub(c.input)
@@ -1220,7 +1220,6 @@ func TestGitHubAdapter_CreatePullComment_EmptyBody(t *testing.T) {
 	}
 }
 
-
 // ===== UpdatePullComment / DeletePullComment 测试（v0.5.0 M1） =====
 
 // TestGitHubAdapter_UpdatePullComment 验证 PATCH 路径 + Bearer + 字段映射
@@ -1338,7 +1337,6 @@ func TestGitHubAdapter_DeletePullComment_NotFound(t *testing.T) {
 		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeNotFound)
 	}
 }
-
 
 // ===== 评论表情反应测试（v0.5.0 M2） =====
 
@@ -1466,7 +1464,6 @@ func TestGitHubAdapter_RemovePullCommentReaction(t *testing.T) {
 	}
 }
 
-
 // ===== 合并请求评审测试（v0.5.0 M3） =====
 
 // TestGitHubAdapter_ListPullReviews 验证 GET + Bearer + snake_case 字段
@@ -1484,12 +1481,12 @@ func TestGitHubAdapter_ListPullReviews(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode([]map[string]interface{}{
 			{
-				"id":            70,
-				"state":         "APPROVED",
-				"body":          "Ship it!",
-				"user":          map[string]interface{}{"login": "alice", "avatar_url": "https://github.com/alice.png"},
-				"commit_id":     "def456",
-				"submitted_at":  "2024-06-06T10:00:00Z",
+				"id":           70,
+				"state":        "APPROVED",
+				"body":         "Ship it!",
+				"user":         map[string]interface{}{"login": "alice", "avatar_url": "https://github.com/alice.png"},
+				"commit_id":    "def456",
+				"submitted_at": "2024-06-06T10:00:00Z",
 			},
 		})
 	}))

@@ -3,7 +3,8 @@
 // 1:1 复刻几何公式 (GRID 16x24, 贝塞尔 C, 12 色调色板) 渲染。
 //
 // 用法:
-//   go run ./tools/vscode-recheck/debug <repo_path> [max_commits] > debug.html
+//
+//	go run ./tools/vscode-recheck/debug <repo_path> [max_commits] > debug.html
 //
 // 然后用浏览器打开 debug.html 即可看到 vscode-git-graph 风格的 git 图。
 package main
@@ -15,9 +16,9 @@ import (
 	"os"
 	"strconv"
 
-	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
+	gogit "github.com/go-git/go-git/v5"
 )
 
 const (
@@ -83,9 +84,9 @@ type output struct {
 		MaxCommits int    `json:"max_commits"`
 		Head       string `json:"head"`
 	} `json:"meta"`
-	Commits []commitJSON `json:"commits"`
-	Edges   []edgeJSON   `json:"edges"`
-	MaxLane int          `json:"max_lane"`
+	Commits  []commitJSON `json:"commits"`
+	Edges    []edgeJSON   `json:"edges"`
+	MaxLane  int          `json:"max_lane"`
 	Branches []branchJSON `json:"branches"`
 }
 
@@ -98,8 +99,8 @@ type lineJSON struct {
 }
 
 type branchJSON struct {
-	Color int       `json:"color"`
-	End   int       `json:"end"`
+	Color int        `json:"color"`
+	End   int        `json:"end"`
 	Lines []lineJSON `json:"lines"`
 }
 
@@ -111,12 +112,12 @@ type pathOut struct {
 }
 
 type nodeOut struct {
-	cx, cy  float64
-	r       float64
-	hex     string
-	sha     string
-	short   string
-	subject string
+	cx, cy    float64
+	r         float64
+	hex       string
+	sha       string
+	short     string
+	subject   string
 	isCurrent bool // HEAD 节点 (vscode Vertex.draw: 空心 stroke-only)
 	isStash   bool // stash 节点 (外圈 r=4.5 + 内圈 r=2)
 }
@@ -166,7 +167,7 @@ func main() {
 			SHA: n.SHA, Row: n.Row, Lane: n.Lane, Color: n.Color,
 			IsMerge: n.IsMerge, IsCurrent: n.IsCurrent, IsStash: n.IsStash,
 			Subject: n.Subject,
-			Author: n.AuthorName, Date: n.Date,
+			Author:  n.AuthorName, Date: n.Date,
 			Parents: n.Parents, Refs: n.Refs,
 		}
 		out.Commits = append(out.Commits, c)

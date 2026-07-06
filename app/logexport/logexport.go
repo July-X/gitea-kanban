@@ -189,13 +189,13 @@ func collectLogFiles(logDir string, max int) ([]string, int64, error) {
 // writeAppMeta 写 app.json（元信息）
 func writeAppMeta(zw *zip.Writer, opts ExportOptions, ts time.Time, logFiles []string) error {
 	meta := map[string]any{
-		"app":         "gitea-kanban",
-		"version":     opts.Version,
-		"platform":    opts.Platform,
-		"goVersion":   runtime.Version(),
-		"dataDir":     opts.DataDir,
-		"exportedAt":  ts.Format(time.RFC3339),
-		"logFiles":    logFiles,
+		"app":          "gitea-kanban",
+		"version":      opts.Version,
+		"platform":     opts.Platform,
+		"goVersion":    runtime.Version(),
+		"dataDir":      opts.DataDir,
+		"exportedAt":   ts.Format(time.RFC3339),
+		"logFiles":     logFiles,
 		"logFileCount": len(logFiles),
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")

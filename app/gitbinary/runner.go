@@ -4,9 +4,9 @@
 // 用户在 SettingsView 修改 git 路径后立即生效（无需 wails build 重新生成）。
 //
 // 优先级（ResolveGitBinaryPath）：
-//   1. LocalState.GitBinaryPath 非空 → 该值（可能是用户填的自定义路径）
-//   2. 内嵌二进制（已由 Init 释放到 ${dataDir}/tools/git/）
-//   3. exec.LookPath("git") — 兜底
+//  1. LocalState.GitBinaryPath 非空 → 该值（可能是用户填的自定义路径）
+//  2. 内嵌二进制（已由 Init 释放到 ${dataDir}/tools/git/）
+//  3. exec.LookPath("git") — 兜底
 //
 // 当前内置 macos (arm64+amd64) + windows (amd64) 二进制；Linux 平台走 PATH。
 //
@@ -65,16 +65,16 @@ func embeddedGitBytes() []byte {
 
 // embeddedGitFileName 按平台生成嵌入二进制在 ${dataDir}/tools/git/ 下的文件名：
 //
-//	v0.4.0 fix-2 关键命名约束：文件名不能以 "git-" 开头。
-//	macOS shell（bash/zsh/sh）有 hardcoded 行为：argv0 若以 "git-" 开头会被自动
-//	tokenize 成 "git <args>"，PATH 找 git 跑，<args> 当 git 子命令，导致
-//	「致命错误：无法作为内置命令处理 2.55.0-macos-amd64」exit 128。
-//	实测确认（test/embedded 文件名 = "git-2.55" / "git-bin" / "git-2" 都触发，
-//	"git_2.55" / "x-2.55-x" 不触发）。
+//		v0.4.0 fix-2 关键命名约束：文件名不能以 "git-" 开头。
+//		macOS shell（bash/zsh/sh）有 hardcoded 行为：argv0 若以 "git-" 开头会被自动
+//		tokenize 成 "git <args>"，PATH 找 git 跑，<args> 当 git 子命令，导致
+//		「致命错误：无法作为内置命令处理 2.55.0-macos-amd64」exit 128。
+//		实测确认（test/embedded 文件名 = "git-2.55" / "git-bin" / "git-2" 都触发，
+//		"git_2.55" / "x-2.55-x" 不触发）。
 //
-//	命名方案：gk-git-<ver>-<os>-<arch>[.exe]（gk = gitea-kanban 前缀，避免 git- 开头）
-//   - macos：gk-git-<ver>-macos-<arch>（无后缀）
-//   - windows：gk-git-<ver>-windows-<arch>.exe
+//		命名方案：gk-git-<ver>-<os>-<arch>[.exe]（gk = gitea-kanban 前缀，避免 git- 开头）
+//	  - macos：gk-git-<ver>-macos-<arch>（无后缀）
+//	  - windows：gk-git-<ver>-windows-<arch>.exe
 func embeddedGitFileName() string {
 	os := runtime.GOOS
 	arch := runtime.GOARCH
@@ -97,11 +97,11 @@ var defaultBinaryPath atomic.Value // string
 //
 // v0.4.0 引入：让用户在 Settings 改完立即生效，无需 wails build / 重启。
 // 优先级（ResolveGitBinaryPath）：
-//   1. caller 显式传的 userOverride 参数
-//   2. 本字段（globalOverride，运行时由 SetUserOverride 设置）
-//   3. defaultBinaryPath（Init 释放的内嵌）
-//   4. exec.LookPath("git")
-//   5. 全部失败 → 返 error
+//  1. caller 显式传的 userOverride 参数
+//  2. 本字段（globalOverride，运行时由 SetUserOverride 设置）
+//  3. defaultBinaryPath（Init 释放的内嵌）
+//  4. exec.LookPath("git")
+//  5. 全部失败 → 返 error
 //
 // 与 LocalState.prefs["app.gitBinaryPath"] 共用同源：
 //   - 启动期 OnStartup 调 SetUserOverride(store.GetGitBinaryPath())
@@ -110,15 +110,15 @@ var userBinaryOverride atomic.Value // string
 
 // Init 启动期一次性初始化：
 //
-//   1. 按当前 runtime.GOOS + runtime.GOARCH 把嵌入的 git 二进制释放到
-//      ${dataDir}/tools/git/<fileName>，parent 目录自动 MkdirAll 0755
-//   2. 释放后 chmod 0755（darwin/linux；windows 跳过）
-//   3. macOS 平台启动 `xattr -p <path>` 检查 com.apple.quarantine，
-//      有则 `xattr -d com.apple.quarantine <path>` 尝试自动剥离（仍可能触发 Gatekeeper 弹窗，
-//      见 macOS_GATEKEEPER_NOTES.md，由 UI hint 兜底引导用户「系统设置 → 隐私与安全 → 仍要打开」）
-//   4. 二进制内容为空（dev 期 0 字节 placeholder）→ 跳过释放，
-//      WARNING 日志：内嵌二进制缺失，请 wails build 前替换
-//   5. 释放成功 → defaultBinaryPath.Set(absPath)
+//  1. 按当前 runtime.GOOS + runtime.GOARCH 把嵌入的 git 二进制释放到
+//     ${dataDir}/tools/git/<fileName>，parent 目录自动 MkdirAll 0755
+//  2. 释放后 chmod 0755（darwin/linux；windows 跳过）
+//  3. macOS 平台启动 `xattr -p <path>` 检查 com.apple.quarantine，
+//     有则 `xattr -d com.apple.quarantine <path>` 尝试自动剥离（仍可能触发 Gatekeeper 弹窗，
+//     见 macOS_GATEKEEPER_NOTES.md，由 UI hint 兜底引导用户「系统设置 → 隐私与安全 → 仍要打开」）
+//  4. 二进制内容为空（dev 期 0 字节 placeholder）→ 跳过释放，
+//     WARNING 日志：内嵌二进制缺失，请 wails build 前替换
+//  5. 释放成功 → defaultBinaryPath.Set(absPath)
 //
 // 不要并发调。App.OnStartup 在所有 git/go-git 子包初始化后调用一次。
 func Init(dataDir string, logger *slog.Logger) error {
@@ -324,9 +324,9 @@ func DefaultBinaryPath() string {
 
 // RunGit 统一 git CLI 调用入口。
 //
-//   ctx        强制 5 min 超时（与原 nativeGitTimeout 对齐）
-//   localPath  -C <localPath> 前置参数，"" 时省略（部分命令如 `git --version` 不需要）
-//   args       git 子命令 + 参数
+//	ctx        强制 5 min 超时（与原 nativeGitTimeout 对齐）
+//	localPath  -C <localPath> 前置参数，"" 时省略（部分命令如 `git --version` 不需要）
+//	args       git 子命令 + 参数
 //
 // 内部拼接 Path(bin, args[0]...) 用 exec.CommandContext；
 // 捕 stderr + stdout → CombinedOutput。
@@ -373,9 +373,9 @@ func RunGitWithEnv(ctx context.Context, binPath string, localPath string, envVar
 // TestGitBinary 验证给定 git 二进制是否可执行。
 //
 // 实现：
-//   1. stat 文件存在 + 是可执行 (mode & 0111) 或 .exe 后缀
-//   2. 调用 <binPath> --version，捕获 stdout，期望首行匹配 `git version X.Y.Z`
-//   3. macOS 平台检查 quarantine 属性；有 → 返回 hint，调用方按需 strip
+//  1. stat 文件存在 + 是可执行 (mode & 0111) 或 .exe 后缀
+//  2. 调用 <binPath> --version，捕获 stdout，期望首行匹配 `git version X.Y.Z`
+//  3. macOS 平台检查 quarantine 属性；有 → 返回 hint，调用方按需 strip
 //
 // 返回 TestGitResult ok=true 表示版本号合法、推荐使用；hint 在 macOS 给出系统设置指引。
 type TestGitResult struct {

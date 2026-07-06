@@ -8,8 +8,8 @@
 // 设计原则（AGENTS §7.1 测试策略 + v0.6+ 用户拍板）：
 //   - //go:build integration tag：默认 go test ./... 不编译、不跑
 //   - 跑法：INTEGRATION_GITHUB_TOKEN=ghp_xxx \
-//          go test -tags integration -v -run TestGitHubIntegration \
-//          ./app/platform/github/...
+//     go test -tags integration -v -run TestGitHubIntegration \
+//     ./app/platform/github/...
 //   - CI 跳过（无 token → TestMain 直接 os.Exit(0)）
 //   - 测试仓库 hardcoded（July-X/kanban-test），保证 fixture 隔离
 //   - 每个测试函数自己创建 fixture PR + defer 关闭（幂等）
@@ -227,9 +227,9 @@ func TestGitHubIntegration_UpdatePullLabels(t *testing.T) {
 // TestGitHubIntegration_UpdatePullAssignee 验证 diff + DELETE+POST 增量替换
 //
 // 三步覆盖：
-//   1. 空 → 1（无现有 assignee → 直接 POST）
-//   2. 1 → 1（同 assignee → 无 POST 无 DELETE，幂等）
-//   3. 1 → 0（清空 → DELETE）
+//  1. 空 → 1（无现有 assignee → 直接 POST）
+//  2. 1 → 1（同 assignee → 无 POST 无 DELETE，幂等）
+//  3. 1 → 0（清空 → DELETE）
 func TestGitHubIntegration_UpdatePullAssignee(t *testing.T) {
 	ctx := context.Background()
 	token := mustToken(t)
@@ -450,13 +450,13 @@ func mustToken(t *testing.T) string {
 // createFixturePR 在测试仓库创建 1 个 fixture PR，返回 (index, cleanup)
 //
 // 创建流程（GitHub Git Data API）：
-//   1. GET /repos/{owner}/{repo} 拿 default_branch + head SHA
-//   2. POST /repos/{owner}/{repo}/git/blobs  (空 blob)
-//   3. POST /repos/{owner}/{repo}/git/trees  (tree 指向 blob)
-//   4. POST /repos/{owner}/{repo}/git/commits (commit，parent = base SHA)
-//   5. POST /repos/{owner}/{repo}/git/refs   (refs/heads/int-test-{ts})
-//   6. POST /repos/{owner}/{repo}/pulls     (head = 新分支, base = default_branch)
-//   7. 关闭 = PATCH state=closed
+//  1. GET /repos/{owner}/{repo} 拿 default_branch + head SHA
+//  2. POST /repos/{owner}/{repo}/git/blobs  (空 blob)
+//  3. POST /repos/{owner}/{repo}/git/trees  (tree 指向 blob)
+//  4. POST /repos/{owner}/{repo}/git/commits (commit，parent = base SHA)
+//  5. POST /repos/{owner}/{repo}/git/refs   (refs/heads/int-test-{ts})
+//  6. POST /repos/{owner}/{repo}/pulls     (head = 新分支, base = default_branch)
+//  7. 关闭 = PATCH state=closed
 //
 // cleanup 函数：defer 调一次确保测试失败也清理（不只是成功路径）
 func createFixturePR(t *testing.T, ctx context.Context, token string) (int, func()) {
@@ -569,10 +569,10 @@ func getDefaultBranch(ctx context.Context, token string) (ref, sha string, err e
 // createBranchWithEmptyCommit 通过 Git Data API 创建 1 个新分支（带空 commit）
 //
 // 步骤：
-//   1. POST /repos/{owner}/{repo}/git/blobs   {content: "", encoding: "utf-8"}
-//   2. POST /repos/{owner}/{repo}/git/trees   {tree: [{path: ".int-test", mode: "100644", type: "blob", sha: <blob>}]}
-//   3. POST /repos/{owner}/{repo}/git/commits {message: "...", tree: <tree>, parents: [<baseSHA>]}
-//   4. POST /repos/{owner}/{repo}/git/refs    {ref: "refs/heads/<branch>", sha: <commit>}
+//  1. POST /repos/{owner}/{repo}/git/blobs   {content: "", encoding: "utf-8"}
+//  2. POST /repos/{owner}/{repo}/git/trees   {tree: [{path: ".int-test", mode: "100644", type: "blob", sha: <blob>}]}
+//  3. POST /repos/{owner}/{repo}/git/commits {message: "...", tree: <tree>, parents: [<baseSHA>]}
+//  4. POST /repos/{owner}/{repo}/git/refs    {ref: "refs/heads/<branch>", sha: <commit>}
 func createBranchWithEmptyCommit(ctx context.Context, token, baseSHA, branchName string) error {
 	// 1. blob
 	var blobRaw struct {

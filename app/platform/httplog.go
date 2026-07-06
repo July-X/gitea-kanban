@@ -18,7 +18,7 @@ import (
 //
 // 用途（v0.6.1 日志增强 · 方便 Bug 上报时 grep "HTTP" 看请求链路）：
 //   - 2xx → Debug（日常请求量不大时可以通过 GITEA_KANBAN_LOG_LEVEL=debug 开启）；
-//      生产 Info 级只记耗时 >500ms 的慢请求，避免日志刷屏
+//     生产 Info 级只记耗时 >500ms 的慢请求，避免日志刷屏
 //   - 非 2xx → Warn（保持与旧代码一致，错误必现）
 //   - 网络层错误 → Error（err 非空时）
 //

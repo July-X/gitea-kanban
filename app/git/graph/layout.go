@@ -89,8 +89,8 @@ type GraphEdge struct {
 // 坐标以 row/lane 为单位 (像素 = row*GRID_Y + offsetY, lane*GRID_X + offsetX)
 // 渲染时 (前端) 直接读这个列表拼 path d
 type GraphBranchLine struct {
-	X1, Y1     int  // 起点 (lane, row)
-	X2, Y2     int  // 终点 (lane, row)
+	X1, Y1      int  // 起点 (lane, row)
+	X2, Y2      int  // 终点 (lane, row)
 	LockedFirst bool // 跨 lane 转场方向(true=锁 p1, false=锁 p2)
 	// IsCommitted 标记该 line 是否落在「已提交」commit 段。对齐 vscode Branch.draw
 	// (graph.ts:119-145)：line.isCommitted = (lineIndex >= this.numUncommitted)。
@@ -121,8 +121,8 @@ const (
 
 // GraphResult 完整的图布局结果
 type GraphResult struct {
-	Nodes     []GraphNode
-	Edges     []GraphEdge
+	Nodes []GraphNode
+	Edges []GraphEdge
 	// Branches 1:1 复刻 vscode-git-graph 的 Branch 对象列表
 	// 渲染时按 branch 画 path, 保留"column 0 主线贯通" 的几何
 	// (vscode 真实: 每条 branch 一条 path, line 沿 column 顺时针)

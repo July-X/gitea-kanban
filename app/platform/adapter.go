@@ -269,10 +269,10 @@ type PullFileDiffDTO struct {
 //
 // 对应 unified diff 中一个 @@ 块。
 type PullDiffHunk struct {
-	OldStart int    `json:"oldStart"`
-	OldLines int    `json:"oldLines"`
-	NewStart int    `json:"newStart"`
-	NewLines int    `json:"newLines"`
+	OldStart int `json:"oldStart"`
+	OldLines int `json:"oldLines"`
+	NewStart int `json:"newStart"`
+	NewLines int `json:"newLines"`
 	// Header hunk 第一行（@@ -a,b +c,d @@ 上下文）
 	Header string `json:"header"`
 	// Lines hunk 内所有代码行（前缀 ' ' = 上下文, '+' = 新增, '-' = 删除）
@@ -432,32 +432,32 @@ type PullDTO struct {
 // 与 PullDTO 区分：列表接口轻量，详情接口完整。
 // 字段对齐前端 PullDto（frontend/src/types/dto.ts），前端 store 直接复用。
 type PullDetailDTO struct {
-	Index         int               `json:"index"`
-	Number        int               `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
-	Title         string            `json:"title"`
-	State         string            `json:"state"` // "open" | "closed"
-	Draft         bool              `json:"draft"`
-	Merged        bool              `json:"merged"`
-	Head          PullRefDTO        `json:"head"`
-	Base          PullRefDTO        `json:"base"`
-	Author        *PullUserDTO      `json:"author,omitempty"`
-	CreatedAt     string            `json:"createdAt"`     // ISO 8601
-	UpdatedAt     string            `json:"updatedAt"`     // ISO 8601
-	Mergeable     bool              `json:"mergeable"`     // false=有冲突/不可合并
-	HasConflicts  bool              `json:"hasConflicts"`  // = !Mergeable（前端视图字段对齐）
-	Body          string            `json:"body,omitempty"`
-	CommentsCount int               `json:"commentsCount"`
-	Labels        []PullLabelDTO    `json:"labels,omitempty"`
-	Assignees     []PullUserDTO     `json:"assignees,omitempty"`
-	Reviewers     []PullUserDTO     `json:"reviewers,omitempty"`
-	MergedBy      *PullUserDTO      `json:"mergedBy,omitempty"`
-	MergeCommitSHA string           `json:"mergeCommitSha,omitempty"` // 合并成功后回填
+	Index          int            `json:"index"`
+	Number         int            `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
+	Title          string         `json:"title"`
+	State          string         `json:"state"` // "open" | "closed"
+	Draft          bool           `json:"draft"`
+	Merged         bool           `json:"merged"`
+	Head           PullRefDTO     `json:"head"`
+	Base           PullRefDTO     `json:"base"`
+	Author         *PullUserDTO   `json:"author,omitempty"`
+	CreatedAt      string         `json:"createdAt"`    // ISO 8601
+	UpdatedAt      string         `json:"updatedAt"`    // ISO 8601
+	Mergeable      bool           `json:"mergeable"`    // false=有冲突/不可合并
+	HasConflicts   bool           `json:"hasConflicts"` // = !Mergeable（前端视图字段对齐）
+	Body           string         `json:"body,omitempty"`
+	CommentsCount  int            `json:"commentsCount"`
+	Labels         []PullLabelDTO `json:"labels,omitempty"`
+	Assignees      []PullUserDTO  `json:"assignees,omitempty"`
+	Reviewers      []PullUserDTO  `json:"reviewers,omitempty"`
+	MergedBy       *PullUserDTO   `json:"mergedBy,omitempty"`
+	MergeCommitSHA string         `json:"mergeCommitSha,omitempty"` // 合并成功后回填
 }
 
 // PullRefDTO head / base 引用信息
 type PullRefDTO struct {
-	Ref string `json:"ref"`  // 分支名
-	SHA string `json:"sha"`  // 分支顶端 commit hash
+	Ref string `json:"ref"` // 分支名
+	SHA string `json:"sha"` // 分支顶端 commit hash
 }
 
 // PullUserDTO 嵌套用户信息（author / assignees / reviewers / mergedBy）
@@ -481,12 +481,12 @@ type PullLabelDTO struct {
 // v0.6+ 不引入"评论系统评论"（PR review / inline review comment）——
 // 只支持顶层 issue-style 评论，等需要 review 评论时再加新 DTO。
 type CommentDTO struct {
-	ID        int64         `json:"id"`
-	Body      string        `json:"body"`
-	Author    *PullUserDTO  `json:"author,omitempty"`
-	CreatedAt string        `json:"createdAt"`
-	UpdatedAt string        `json:"updatedAt,omitempty"`
-	UserID    int64         `json:"userId,omitempty"`
+	ID        int64        `json:"id"`
+	Body      string       `json:"body"`
+	Author    *PullUserDTO `json:"author,omitempty"`
+	CreatedAt string       `json:"createdAt"`
+	UpdatedAt string       `json:"updatedAt,omitempty"`
+	UserID    int64        `json:"userId,omitempty"`
 }
 
 // ReactionDTO 单条表情反应（v0.5.0 M2）
@@ -499,8 +499,8 @@ type ReactionDTO struct {
 // PullReviewDTO 合并请求评审（v0.5.0 M3）
 type PullReviewDTO struct {
 	ID          int64        `json:"id"`
-	State       string       `json:"state"`       // "approved" / "changes_requested" / "commented"
-	Body        string       `json:"body"`        // 评审总结文
+	State       string       `json:"state"` // "approved" / "changes_requested" / "commented"
+	Body        string       `json:"body"`  // 评审总结文
 	Author      *PullUserDTO `json:"author"`
 	CommitID    string       `json:"commitId"`    // 评审针对的 commit SHA
 	SubmittedAt string       `json:"submittedAt"` // 评审时间（Gitea: submitted; GitHub: submitted_at）

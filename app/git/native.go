@@ -188,12 +188,13 @@ func listGitRemotes(localPath string) ([]string, error) {
 // repoIsShallow 检测本地仓库是否为 shallow clone（用于判断是否需要 --unshallow）
 //
 // v0.6.3 根因修复：UnrealEngine 测试仓库滚不到底报「加载更多不生效」。
-//   背景：gh repo clone 初始化时传了 --no-single-branch，但 gh 内部仍会按
-//   single-branch 初始化 remote.origin.fetch（+refs/heads/release），而且
-//   本机仓库 .git/shallow 有 78 条记录——clone 阶段就是 shallow clone。
-//   用户后续 fetch 阶段，调用方传 depth=0 期望「拉全量」，但 git fetch
-//   在 shallow repo 状态下默认不会 deepen（必须显式 --unshallow），
-//   导致本地 commit 数永远停在浅克隆的状态。
+//
+//	背景：gh repo clone 初始化时传了 --no-single-branch，但 gh 内部仍会按
+//	single-branch 初始化 remote.origin.fetch（+refs/heads/release），而且
+//	本机仓库 .git/shallow 有 78 条记录——clone 阶段就是 shallow clone。
+//	用户后续 fetch 阶段，调用方传 depth=0 期望「拉全量」，但 git fetch
+//	在 shallow repo 状态下默认不会 deepen（必须显式 --unshallow），
+//	导致本地 commit 数永远停在浅克隆的状态。
 //
 // 检测方法：.git/shallow 文件存在即 shallow clone（兼容 bare 仓库直接 shallow）。
 func repoIsShallow(localPath string) bool {
@@ -253,7 +254,6 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 
 	return nil
 }
-
 
 // configureGHCommandEnv 给 gh 命令注入 env（GH_TOKEN + 防认证锁）。
 //
