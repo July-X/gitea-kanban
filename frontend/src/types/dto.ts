@@ -417,6 +417,84 @@ export interface IssueCommentDto {
   updatedAt: string;
 }
 
+
+// ============================================================
+// ===== inline review comments 命名空间（v0.5.0 文件评论） =====
+// ============================================================
+
+/** PR 行内评论（挂在文件 diff 某一行上的评审评论） */
+export interface PullReviewCommentDto {
+  id: number;
+  body: string;
+  author: PullAuthorDto;
+  path: string;       // 文件路径，如 src/auth/oauth.ts
+  line: number;       // 行号
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** 行内评论的创建参数 */
+export interface CreatePullReviewCommentArgs {
+  projectId: string;
+  index: number;
+  body: string;
+  path: string;
+  line: number;
+}
+
+// ============================================================
+// ===== review 命名空间（v0.5.0 M3） =====
+// ============================================================
+
+/** 评审状态：approved / changes_requested / commented */
+export type ReviewState = 'approved' | 'changes_requested' | 'commented';
+
+/** 评审操作事件：approve / request_changes / comment */
+export type ReviewEvent = 'approve' | 'request_changes' | 'comment';
+
+/** 合并请求评审 */
+export interface PullReviewDto {
+  id: number;
+  state: ReviewState;
+  body: string;
+  author: PullAuthorDto;
+  commitId?: string;
+  submittedAt: string;
+}
+
+/** 创建评审参数 */
+export interface CreateReviewArgs {
+  projectId: string;
+  index: number;
+  commitId?: string;
+  body?: string;
+  event: ReviewEvent;
+}
+
+// ============================================================
+// ===== reactions 命名空间（v0.5.0 M2） =====
+// ============================================================
+
+/** 受支持的 8 种表情类型 */
+export type ReactionContent = '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'eyes' | 'rocket';
+
+/** 单条表情反应 */
+export interface ReactionDto {
+  id: number;
+  content: ReactionContent;
+  user: IssueAuthorDto;
+}
+
+/** 按表情类型聚合的展示数据 */
+export interface ReactionGroupDto {
+  content: ReactionContent;
+  emoji: string;
+  label: string;
+  count: number;
+  usernames: string[];
+  viewerReacted: boolean;
+}
+
 // ============================================================
 // ===== labels 命名空间 =====
 // ============================================================
@@ -614,6 +692,10 @@ export interface GraphResultDto {
   branches?: GraphBranchDto[];
   maxLane: number;
   truncated: boolean;
+  /** 本地 commit 已全部取出，远端可能有更多（需 deepen） */
+  localExhausted?: boolean;
+  /** 后端已启动后台增量 deepen */
+  deepenTriggered?: boolean;
 }
 
 export type GraphRefGroupDto = 'heads' | 'tags' | 'remotes' | 'pull';
@@ -649,6 +731,45 @@ export interface GraphLinesDto {
   truncated: boolean;
   range: { from: string; to: string };
 }
+
+// ============================================================
+// ===== 文件评论命名空间（v0.5.0 M4） =====
+// ============================================================
+
+/** PR 修改文件的变更状态 */
+export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+
+/** PR 修改的文件项 */
+export interface PullFileDto {
+  filename: string;
+  status: FileStatus;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+  previousFilename?: string; // status=renamed 时
+}
+
+/** Diff Hunk（unified diff 中的一个 @@ 块） */
+export interface PullDiffHunkDto {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  header: string; // "@@ ... @@"
+  lines: string[]; // 包含前缀: ' ' = 上下文, '+' = 新增, '-' = 删除
+}
+
+/** 单个文件的 diff 详情 */
+export interface PullFileDiffDto {
+  filename: string;
+  rawDiff: string; // 完整 unified diff 文本
+  hunks: PullDiffHunkDto[];
+}
+
+// ============================================================
+// ===== Git Graph 命名空间 =====
+// ============================================================
 
 /** commits.gitgraph.pull 返回 */
 export interface GitGraphPullResp {

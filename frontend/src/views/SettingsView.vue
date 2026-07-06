@@ -32,9 +32,14 @@ import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useBranchStore } from '@renderer/stores/branch';
 import { showToast } from '@renderer/lib/toast';
+import { logInfo, logError } from '@renderer/lib/frontend-log';
 import {
   commitsGitgraphGetWorkspace,
   systemOpenPath,
+  openDesktopFolder,
+  exportLogs,
+  copyRecentLogs,
+  normalizeError,
 } from '@renderer/lib/ipc-client';
 import {
   testGitBinary,
@@ -55,6 +60,64 @@ const auth = useAuthStore();
 const repo = useRepoStore();
 const branch = useBranchStore();
 const router = useRouter();
+
+// ============================================================
+// v0.6.0：故障排查 —— 导出日志 / 最近日志
+// ============================================================
+const exportingLogs = ref(false);
+const copyingLogs = ref(false);
+
+async function onExportLogs(): Promise<void> {
+  if (exportingLogs.value) return;
+  exportingLogs.value = true;
+  logInfo('settings', '导出日志到桌面', '');
+  try {
+    const result = await exportLogs({ maxLogs: 5 });
+    showToast({
+      type: 'success',
+      message: '日志已导出到桌面',
+      description: `共 ${result.logCount} 个日志文件，${(result.logBytes / 1024).toFixed(1)}KB`,
+    });
+  } catch (err) {
+    const normalized = normalizeError(err);
+    logError('settings', '导出日志失败', normalized.messageText);
+    showToast({ type: 'error', message: '导出失败', description: normalized.messageText });
+  } finally {
+    exportingLogs.value = false;
+  }
+}
+
+async function onCopyRecentLogs(): Promise<void> {
+  if (copyingLogs.value) return;
+  copyingLogs.value = true;
+  logInfo('settings', '复制最近日志', '');
+  try {
+    const result = await copyRecentLogs({ maxBytes: 64 * 1024 });
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(result.content);
+    }
+    showToast({
+      type: 'success',
+      message: '已复制到剪贴板',
+      description: `最近日志 ${result.bytes} 字节`,
+    });
+  } catch (err) {
+    const normalized = normalizeError(err);
+    logError('settings', '复制最近日志失败', normalized.messageText);
+    showToast({ type: 'error', message: '复制失败', description: normalized.messageText });
+  } finally {
+    copyingLogs.value = false;
+  }
+}
+
+async function onOpenDesktopFolder(): Promise<void> {
+  try {
+    await openDesktopFolder();
+  } catch (err) {
+    const normalized = normalizeError(err);
+    showToast({ type: 'error', message: '打开桌面文件夹失败', description: normalized.messageText });
+  }
+}
 
 // ============================================================
 // v0.4.0：Git 二进制设置（独立卡片「Git 二进制」）
@@ -623,6 +686,41 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
           git 同步下来的仓库会放在数据根目录下的 <code>workspace/repos/&lt;owner&gt;__&lt;repo&gt;</code> 子目录（应用自动管理，不可指定）。
         </p>
       </section>
+
+      <!-- v0.6.0: 故障排查卡片 -->
+      <section class="settings__card settings__card--wide">
+        <h2>故障排查</h2>
+        <div class="settings__btn-row">
+          <button
+            type="button"
+            class="settings__save"
+            :disabled="exportingLogs"
+            @click="onExportLogs"
+          >
+            {{ exportingLogs ? '正在导出…' : '导出日志到桌面' }}
+          </button>
+          <button
+            type="button"
+            class="settings__reset"
+            :disabled="copyingLogs"
+            @click="onCopyRecentLogs"
+          >
+            {{ copyingLogs ? '读取中…' : '复制最近日志' }}
+          </button>
+          <button
+            type="button"
+            class="settings__reset"
+            @click="onOpenDesktopFolder"
+          >
+            打开桌面文件夹
+          </button>
+        </div>
+        <p class="settings__hint settings__hint--compact">
+          日志保存在数据目录下的 <code>logs/main/</code>，按天切分，保留 14 天。
+          导出包含最近 5 个日志文件 + 当前应用状态（脱敏 token/password），
+          一键「复制最近日志」适合贴到 GitHub issue 反馈问题。
+        </p>
+      </section>
     </div>
   </div>
     <Teleport to="body">
@@ -941,6 +1039,13 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
 .settings__reset:hover {
   border-color: var(--color-text-secondary);
   color: var(--color-text);
+}
+
+/* 按钮行（故障排查卡片：导出+复制 同行） */
+.settings__btn-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 /* 主题切换 */

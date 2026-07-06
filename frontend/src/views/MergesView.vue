@@ -20,7 +20,7 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -33,19 +33,26 @@ import { renderMarkdown } from '@renderer/lib/markdown';
 import { BrowserOpenURL } from '../../wailsjs/wailsjs/runtime/runtime';
 import {
   pullsCommentCreate,
+  pullsCommentDelete,
   pullsCommentList,
+  pullsCommentUpdate,
   labelsCreate,
   labelsList,
   membersList,
   pullsUpdateAssignee,
   pullsUpdateLabels,
+  pullsReviewCreate,
+  pullsReviewsList,
   pullsUpdateReviewers,
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
+import ReactionBar from '@renderer/components/ReactionBar.vue';
+import PullFileComments from '@renderer/components/PullFileComments.vue';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 import type { CollaboratorDto, PullDto, RepoDto, MergeMethod } from '@renderer/types/dto';
-import type { IssueCommentDto } from '@renderer/types/dto';
+import type { CreateReviewArgs, IssueCommentDto, PullReviewDto, ReviewEvent } from '@renderer/types/dto';
+import type { PullFileDto } from '@renderer/types/dto';
 
 const repo = useRepoStore();
 const pull = usePullStore();
@@ -114,21 +121,27 @@ const closing = ref(false);
 /** 二次确认弹窗开关 */
 const confirmMergeOpen = ref(false);
 
+/** 删除评论二次确认弹窗开关（v0.5.0 M1） */
+const confirmDeleteOpen = ref(false);
+/** 待删除的评论信息 */
+const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
+
+const detailTab = ref<'overview' | 'files' | 'conversation'>('conversation');
+
+/** 打开删除确认弹窗 */
+function confirmDeleteComment(p: PullDto, c: IssueCommentDto): void {
+  deletingComment.value = { p, c };
+  confirmDeleteOpen.value = true;
+}
+
 onMounted(async () => {
-  if (repo.repos.length === 0) {
-    try {
-      await repo.loadRepos('', true);
-    } catch {
-      /* error in repo.error */
-    }
-  }
-  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
-  if (activeProjectId.value) {
-    await loadPulls();
-  }
-  // v0.6+ bugfix：滚动到底自动加载下一页
-  // - rootMargin: 200px 预加载（用户还没滚到底就开始拉，体验更顺）
-  // - threshold: 0 不需要可见，仅进入 rootMargin 范围即触发
+  // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
+  setupLoadMoreObserver();
+  await activateData();
+});
+
+/** v1.8 KeepAlive：设置 IntersectionObserver（首次挂载 + 从缓存恢复时调用） */
+function setupLoadMoreObserver(): void {
   loadMoreObserver = new IntersectionObserver(
     (entries) => {
       const e = entries[0];
@@ -142,10 +155,55 @@ onMounted(async () => {
   if (loadMoreSentinel.value) {
     loadMoreObserver.observe(loadMoreSentinel.value);
   }
+}
+
+// v1.8 KeepAlive：从缓存恢复时，onActivated 中 loadMoreSentinel 模板 ref 可能尚未重新绑定到 DOM。
+// 此时 setupLoadMoreObserver 创建的 observer 没有观察任何元素，滚动加载会永久失效。
+// 这里用 watch 兜底：当 ref 重新绑定到 DOM 时自动 observe。
+watch(loadMoreSentinel, (el) => {
+  if (el && loadMoreObserver) {
+    loadMoreObserver.observe(el);
+  }
+});
+
+/** v1.8 KeepAlive：每次进入视图（含从缓存恢复）时拉数据，已缓存则跳过 */
+async function activateData() {
+  if (repo.repos.length === 0) {
+    try {
+      await repo.loadRepos('', true);
+    } catch {
+      /* error in repo.error */
+    }
+  }
+  // v1.4 任务 #statusbar-picker：删除"未选就默认选第一个"逻辑
+  if (activeProjectId.value && pull.items.length === 0 && !pull.loading) {
+    await loadPulls();
+  }
+}
+
+/** v1.8 KeepAlive：视图停用（进入缓存）时断开 observer，避免后台内存泄露 */
+onDeactivated(() => {
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
+  }
+});
+
+/**
+ * v1.8 KeepAlive：视图从缓存恢复时重建 observer + 按需加载数据
+ *
+ * 与 onDeactivated 成对：observer 在停用时断开，在恢复时重建。
+ * activateData() 内部用 pull.items.length === 0 守卫，仅首次或已清空时发起 IPC，
+ * 避免缓存恢复后重复拉取已有数据。
+ */
+onActivated(() => {
+  setupLoadMoreObserver();
+  void activateData();
 });
 
 onUnmounted(() => {
   // v0.6+：避免 component 卸载后 observer 继续触发回调（内存泄露）
+  // v1.8 KeepAlive：非缓存淘汰场景（max 溢出或整个 shell 卸载）仍需清理
   if (loadMoreObserver) {
     loadMoreObserver.disconnect();
     loadMoreObserver = null;
@@ -226,6 +284,7 @@ function toggleExpandWithComments(p: PullDto): void {
   toggleExpand(p.index);
   if (!wasExpanded) {
     void loadComments(p);
+    void loadReviews(p); // v0.5.0 M3
   }
 }
 
@@ -559,6 +618,95 @@ const mentionState = ref<Map<number, { key: string; cursor: number; activeIdx: n
 /** 当前用户 username（用来在评论旁标"我" / 加视觉高亮） */
 const currentUsername = computed<string | null>(() => auth.currentUser?.login ?? null);
 
+// ===== 评审（v0.5.0 M3） =====
+
+/** 每个合并请求的评审列表 */
+const reviewPanels = ref<Map<number, PullReviewDto[]>>(new Map());
+
+/** 每个合并请求的评审编辑器开关 + 选中的 event */
+const reviewEditorOpen = ref<Set<number>>(new Set());
+const reviewEditorEvent = ref<Map<number, ReviewEvent>>(new Map());
+const reviewEditorBody = ref<Map<number, string>>(new Map());
+const reviewSubmitting = ref(false);
+
+function getReviewPanel(idx: number): PullReviewDto[] {
+  return reviewPanels.value.get(idx) ?? [];
+}
+
+async function loadReviews(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  try {
+    const list = await pullsReviewsList({
+      projectId: activeProjectId.value,
+      index: p.index,
+    });
+    const reviews = (list ?? []) as PullReviewDto[];
+    reviewPanels.value.set(p.index, reviews);
+    // v0.5.0 bugfix: 同步写入 store 的 reviewPanels,让 pull.timelineItems computed 能拿到数据
+    // (timelineItems 把 review 事件 + 普通评论合并,按时间排序用于对话 Tab 渲染)
+    pull.reviewPanels.set(p.index, reviews);
+  } catch {
+    // 不阻断主流程
+  }
+}
+
+function toggleReviewEditor(p: PullDto, event: ReviewEvent): void {
+  if (reviewEditorOpen.value.has(p.index)) {
+    reviewEditorOpen.value.delete(p.index);
+    reviewEditorBody.value.delete(p.index);
+  } else {
+    reviewEditorOpen.value = new Set([p.index]); // 单一编辑态
+    reviewEditorEvent.value.set(p.index, event);
+    reviewEditorBody.value.set(p.index, '');
+  }
+}
+
+async function submitReview(p: PullDto): Promise<void> {
+  if (!activeProjectId.value || reviewSubmitting.value) return;
+  const event = reviewEditorEvent.value.get(p.index);
+  if (!event) return;
+  const body = reviewEditorBody.value.get(p.index) ?? '';
+  reviewSubmitting.value = true;
+  try {
+    await pullsReviewCreate({
+      projectId: activeProjectId.value,
+      index: p.index,
+      body: body.trim(),
+      event,
+    });
+    // 刷新评审列表
+    await loadReviews(p);
+    reviewEditorOpen.value.delete(p.index);
+    reviewEditorBody.value.delete(p.index);
+    showToast({ type: 'success', message: '评审已提交' });
+  } catch (e) {
+    const err = e as { messageText?: string; hint?: string };
+    showToast({ type: 'error', message: err.messageText ?? '提交评审失败', persistent: true });
+  } finally {
+    reviewSubmitting.value = false;
+  }
+}
+
+/** 评审状态标签（人话，零术语） */
+function reviewStateLabel(state: string): string {
+  switch (state) {
+    case 'approved': return '已批准';
+    case 'changes_requested': return '请求修改';
+    case 'commented': return '已评论';
+    default: return state;
+  }
+}
+
+/** 评审事件标签（人话，零术语） */
+function reviewEventLabel(event: ReviewEvent): string {
+  switch (event) {
+    case 'approve': return '批准此合并请求';
+    case 'request_changes': return '请求修改';
+    case 'comment': return '仅评论';
+    default: return event;
+  }
+}
+
 /** @ 提及下拉是否打开 */
 function isMentionOpen(idx: number): boolean {
   const s = mentionState.value.get(idx);
@@ -586,7 +734,9 @@ function mentionActiveIdx(idx: number): number {
 function getPanel(idx: number): CommentPanelState {
   let p = commentPanels.value.get(idx);
   if (!p) {
-    p = { items: [], loading: false, posting: false, error: null, lastLoadedAt: null };
+    // v0.6.26: 用 reactive() 包装 panel,让 panel.items = items 这种直接赋值
+    // 能触发模板重新渲染(否则对话 Tab 评论列表不更新)
+    p = reactive({ items: [] as IssueCommentDto[], loading: false, posting: false, error: null as string | null, lastLoadedAt: null as number | null });
     commentPanels.value.set(idx, p);
   }
   return p;
@@ -710,8 +860,12 @@ async function fetchComments(p: PullDto): Promise<void> {
       projectId: String(activeProjectId.value),
       index: p.index,
     })) as IssueCommentDto[];
-    panel.items = Array.isArray(list) ? list : [];
+    const items = Array.isArray(list) ? list : [];
+    panel.items = items;
     panel.lastLoadedAt = Date.now();
+    // v0.5.0 bugfix: 同步写入 store 的 commentPanels,让 pull.timelineItems computed 能拿到数据
+    // (timelineItems 是 store 端的合并时间线,被对话 Tab 渲染使用)
+    pull.getPanel(p.index).items = items;
   } catch (e) {
     const err = e as { messageText?: string };
     panel.error = err.messageText ?? '加载评论失败';
@@ -757,6 +911,102 @@ async function postComment(p: PullDto): Promise<void> {
     });
   } finally {
     panel.posting = false;
+  }
+}
+
+// ===== 评论编辑 / 删除（v0.5.0 M1） =====
+
+/** 正在编辑的评论 id（仅一个，确保 UI 单一编辑态） */
+const editingCommentId = ref<number | null>(null);
+/** 编辑中的评论草稿（与新增评论的草稿分开，互不干扰） */
+const editDrafts = ref<Map<number, string>>(new Map());
+
+/**
+ * 进入编辑态
+ * - 仅评论作者本人可调（调用方已做权限检查）
+ * - 自动把原 body 装进编辑草稿
+ */
+function startEditComment(c: IssueCommentDto): void {
+  editingCommentId.value = c.id;
+  editDrafts.value.set(c.id, c.body);
+}
+
+/** 取消编辑态（Esc 键或用户点取消） */
+function cancelEditComment(): void {
+  editingCommentId.value = null;
+}
+
+/** 编辑态自动聚焦（v0.6.26） */
+watch(editingCommentId, async (newId) => {
+  if (newId === null) return;
+  await nextTick();
+  editTextareaRef.value?.focus();
+  editTextareaRef.value?.select();
+});
+
+/**
+ * 提交编辑
+ * 流程：
+ *   1. 草稿 trim → 空 → 静默返回
+ *   2. 与原 body 相同 → 静默取消编辑态（不发请求）
+ *   3. 调 pullsCommentUpdate → 成功 → 更新 panel.items 中对应评论
+ *   4. 失败 → toast
+ */
+async function submitEditComment(p: PullDto, c: IssueCommentDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  const draft = (editDrafts.value.get(c.id) ?? '').trim();
+  if (!draft) return;
+  if (draft === c.body.trim()) {
+    editingCommentId.value = null;
+    return;
+  }
+  const panel = getPanel(p.index);
+  panel.error = null;
+  try {
+    const updated = (await pullsCommentUpdate({
+      projectId: String(activeProjectId.value),
+      commentId: c.id,
+      body: draft,
+    })) as IssueCommentDto;
+    // 本地更新对应评论（避免全量刷新）
+    const idx = panel.items.findIndex((x) => x.id === c.id);
+    if (idx >= 0) {
+      panel.items[idx] = updated;
+      // v0.5.0 bugfix: 同步 store 的 commentPanels,让 timelineItems 实时反映编辑结果
+      pull.getPanel(p.index).items = [...panel.items];
+    }
+    editingCommentId.value = null;
+    editDrafts.value.delete(c.id);
+    showToast({ type: 'success', message: '评论已更新' });
+  } catch (e) {
+    const err = e as { messageText?: string };
+    panel.error = err.messageText ?? '编辑失败';
+    showToast({ type: 'error', message: err.messageText ?? '编辑失败', persistent: true });
+  }
+}
+
+/**
+ * 删除评论（**危险操作**，调用前 UI 必须弹二次确认）
+ */
+async function deleteComment(p: PullDto, c: IssueCommentDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  const panel = getPanel(p.index);
+  panel.error = null;
+  try {
+    await pullsCommentDelete({
+      projectId: String(activeProjectId.value),
+      commentId: c.id,
+    });
+    // 本地过滤掉被删除的评论
+    const nextItems = panel.items.filter((x) => x.id !== c.id);
+    panel.items = nextItems;
+    // v0.5.0 bugfix: 同步 store 的 commentPanels,让 timelineItems 实时反映删除结果
+    pull.getPanel(p.index).items = nextItems;
+    showToast({ type: 'success', message: '评论已删除' });
+  } catch (e) {
+    const err = e as { messageText?: string };
+    panel.error = err.messageText ?? '删除失败';
+    showToast({ type: 'error', message: err.messageText ?? '删除失败', persistent: true });
   }
 }
 
@@ -1106,6 +1356,36 @@ function formatRelative(iso: string | undefined): string {
             <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
             <span>{{ closing && closingPull?.index === p.index ? '关闭中…' : '关闭' }}</span>
           </button>
+          <!-- v0.5.0 M3：评审按钮（仅 open 状态可见） -->
+          <template v-if="p.state === 'open'">
+            <button
+              type="button"
+              class="merge-item__btn merge-item__btn--approve"
+              :disabled="reviewSubmitting"
+              :title="'批准此合并请求'"
+              @click.stop="toggleReviewEditor(p, 'approve')"
+            >
+              <span>批准</span>
+            </button>
+            <button
+              type="button"
+              class="merge-item__btn merge-item__btn--request-changes"
+              :disabled="reviewSubmitting"
+              :title="'请求修改'"
+              @click.stop="toggleReviewEditor(p, 'request_changes')"
+            >
+              <span>请求修改</span>
+            </button>
+            <button
+              type="button"
+              class="merge-item__btn merge-item__btn--review-comment"
+              :disabled="reviewSubmitting"
+              :title="'仅评论（不批准也不请求修改）'"
+              @click.stop="toggleReviewEditor(p, 'comment')"
+            >
+              <span>评论</span>
+            </button>
+          </template>
           <span
             v-if="p.hasConflicts && p.state === 'open'"
             class="merge-item__conflict-hint"
@@ -1164,8 +1444,109 @@ function formatRelative(iso: string | undefined): string {
               <span>编辑属性</span>
             </button>
           </div>
+          <!-- ===== v0.5.0 M4: 三 Tab 切换 ===== -->
+          <div class="merge-item__detail-tabs">
+            <button
+              type="button"
+              class="merge-item__detail-tab"
+              :class="{ 'merge-item__detail-tab--active': detailTab === 'overview' }"
+              @click.stop="detailTab = 'overview'"
+            >
+              概览
+            </button>
+            <button
+              type="button"
+              class="merge-item__detail-tab"
+              :class="{ 'merge-item__detail-tab--active': detailTab === 'files' }"
+              @click.stop="detailTab = 'files'"
+            >
+              文件评论
+              <span v-if="pull.filesByPR.get(p.index)?.length > 0" class="merge-item__detail-tab-count">
+                {{ pull.filesByPR.get(p.index)!.length }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="merge-item__detail-tab"
+              :class="{ 'merge-item__detail-tab--active': detailTab === 'conversation' }"
+              @click.stop="detailTab = 'conversation'"
+            >
+              对话
+              <span v-if="getPanel(p.index).items.length > 0" class="merge-item__detail-tab-count">
+                {{ getPanel(p.index).items.length }}
+              </span>
+            </button>
+          </div>
+
+          <!-- ===== Tab 内容 ===== -->
+
+          <!-- 概览 Tab: meta + 审查 -->
+          <div v-if="detailTab === 'overview'" class="merge-item__detail-overview">
+            <!-- ===== v0.6.26: PR 描述/正文 ===== -->
+            <div v-if="p.body" class="merge-item__detail-body">
+              <div class="merge-item__detail-body-label">描述</div>
+              <div class="merge-item__detail-body-content md-body" v-html="renderMarkdown(p.body)"></div>
+            </div>
+            <!-- ===== v0.5.0 M3: 评审区 ===== -->
+            <div v-if="p.state === 'open'" class="merge-item__reviews">
+              <!-- 评审列表 -->
+              <div v-if="getReviewPanel(p.index).length > 0" class="merge-item__reviews-list">
+                <div
+                  v-for="r in getReviewPanel(p.index)"
+                  :key="r.id"
+                  class="merge-item__review-item"
+                  :class="`merge-item__review-item--${r.state}`"
+                >
+                  <span class="merge-item__review-state-badge">{{ reviewStateLabel(r.state) }}</span>
+                  <span class="merge-item__review-author">{{ r.author.username }}</span>
+                  <span class="merge-item__review-body">{{ r.body }}</span>
+                  <span class="merge-item__review-time">{{ formatRelative(r.submittedAt) }}</span>
+                </div>
+              </div>
+              <!-- 评审编辑器 -->
+              <div v-if="reviewEditorOpen.has(p.index)" class="merge-item__review-editor">
+                <div class="merge-item__review-editor-header">
+                  <span class="merge-item__review-editor-label">{{ reviewEventLabel(reviewEditorEvent.get(p.index) ?? 'comment') }}</span>
+                </div>
+                <textarea
+                  class="merge-item__review-editor-input"
+                  rows="3"
+                  :value="reviewEditorBody.get(p.index) ?? ''"
+                  @input="reviewEditorBody.set(p.index, ($event.target as HTMLTextAreaElement).value)"
+                  placeholder="评审总结（可选）"
+                  spellcheck="false"
+                ></textarea>
+                <div class="merge-item__review-editor-actions">
+                  <button
+                    type="button"
+                    class="merge-item__review-submit"
+                    :disabled="reviewSubmitting"
+                    @click.stop="submitReview(p)"
+                  >{{ reviewSubmitting ? '提交中…' : '提交评审' }}</button>
+                  <button
+                    type="button"
+                    class="merge-item__review-cancel"
+                    @click.stop="reviewEditorOpen.delete(p.index); reviewEditorBody.delete(p.index)"
+                  >取消</button>
+                </div>
+              </div>
+            </div>
+            <!-- v0.6.26: 概览空态（无描述 + 无评审） -->
+            <div v-if="!p.body && getReviewPanel(p.index).length === 0" class="merge-item__detail-overview-empty">
+              暂无描述和评审信息
+            </div>
+          </div>
+
+          <!-- 文件评论 Tab: PullFileComments 组件 -->
+          <div v-if="detailTab === 'files'" class="merge-item__detail-files">
+            <PullFileComments
+              :pr="p"
+              :project-id="activeProjectId ?? ''"
+            />
+          </div>
+
           <!-- ===== 评论区：v1.5 header 整行 + 左历史/右输入各 50% ===== -->
-            <div class="merge-item__comments">
+            <div v-if="detailTab === 'conversation'" class="merge-item__comments">
               <!-- 顶部：对话标题 + 刷新按钮（整行铺满） -->
               <div class="merge-item__comments-header">
                 <div class="merge-item__comments-header-left">
@@ -1205,41 +1586,133 @@ function formatRelative(iso: string | undefined): string {
                   <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
                     暂无对话，发起第一条评论开始讨论吧
                   </div>
-                  <!-- 评论列表：气泡聊天布局 + 滚动 -->
+                  <!-- 评论列表：时间线渲染（评审事件系统消息 + 普通评论混合，按时间排序） -->
                   <ul v-else class="merge-item__comment-list">
-                    <li
-                      v-for="c in getPanel(p.index).items"
-                      :key="c.id"
-                      class="merge-item__comment"
-                      :class="{ 'merge-item__comment--self': currentUsername && c.author.username === currentUsername }"
-                    >
-                      <div class="merge-item__comment-side">
-                        <div
-                          class="merge-item__comment-avatar"
-                          :title="c.author.username"
-                          aria-hidden="true"
-                        >{{ (c.author.username || '?').charAt(0).toUpperCase() }}</div>
-                        <div class="merge-item__comment-name">{{ c.author.username }}</div>
-                      </div>
-                      <div class="merge-item__comment-bubble">
-                        <div class="merge-item__comment-meta">
-                          <span v-if="currentUsername && c.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
-                          <span class="merge-item__comment-time" :title="formatDate(c.createdAt)">{{ formatRelative(c.createdAt) }}</span>
+                    <template v-for="(item, ti) in pull.timelineItems.get(p.index) ?? []" :key="`${item.source}-${item.id}`">
+                      <!-- ===== 评审事件系统卡片 ===== -->
+                      <li
+                        v-if="item.isReviewEvent"
+                        class="merge-item__comment merge-item__comment--review-event"
+                        :class="`merge-item__comment--review-${item.state}`"
+                      >
+                        <div class="merge-item__comment-side">
+                          <div class="merge-item__comment-avatar" :class="`merge-item__comment-avatar--${item.state}`">
+                            {{ item.state === 'approved' ? '✓' : item.state === 'changes_requested' ? '✗' : '💬' }}
+                          </div>
+                          <div class="merge-item__comment-name merge-item__comment-name--muted">系统</div>
                         </div>
-                        <div class="merge-item__comment-body md-body" v-html="renderMarkdown(c.body)"></div>
-                        <!-- v1.5.11：复刻 Gitea 引用评论 —— 鼠标 hover 气泡显示 "引用" 按钮，点击把评论作为 markdown 引用块插入输入框 -->
-                        <button
-                          v-if="currentUsername && c.author.username !== currentUsername"
-                          type="button"
-                          class="merge-item__comment-quote"
-                          :title="'引用这条评论'"
-                          @click.stop="quoteComment(p.index, c)"
+                        <div class="merge-item__comment-bubble merge-item__comment-bubble--event">
+                          <div class="merge-item__comment-meta">
+                            <span class="merge-item__review-state-badge" :class="`merge-item__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
+                            <span class="merge-item__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
+                          </div>
+                          <div v-if="item.body" class="merge-item__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                          <div v-if="item.author?.username" class="merge-item__comment-event-author">
+                            — {{ item.author.username }}
+                          </div>
+                        </div>
+                      </li>
+
+                      <!-- ===== 普通评论卡片 ===== -->
+                      <li
+                        v-else
+                        class="merge-item__comment"
+                        :class="{ 'merge-item__comment--self': currentUsername && item.author.username === currentUsername }"
+                      >
+                        <div class="merge-item__comment-side">
+                          <div
+                            class="merge-item__comment-avatar"
+                            :title="item.author.username"
+                            aria-hidden="true"
+                          >{{ (item.author.username || '?').charAt(0).toUpperCase() }}</div>
+                          <div class="merge-item__comment-name">{{ item.author.username }}</div>
+                        </div>
+                        <div
+                          class="merge-item__comment-bubble"
+                          :class="{ 'merge-item__comment-bubble--editing': editingCommentId === item.id }"
                         >
-                          <Quote :size="11" :stroke-width="2" aria-hidden="true" />
-                          <span>引用</span>
-                        </button>
-                      </div>
-                    </li>
+                          <div class="merge-item__comment-meta">
+                            <span v-if="currentUsername && item.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
+                            <span class="merge-item__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
+                          </div>
+                          <!-- 编辑态：textarea 替代渲染后的 markdown (v0.6.26 优化) -->
+                          <template v-if="editingCommentId === item.id">
+                            <textarea
+                              :ref="el => { if (el) editTextareaRef = el as HTMLTextAreaElement }"
+                              class="merge-item__comment-edit-input"
+                              rows="3"
+                              :value="editDrafts.get(item.id) ?? ''"
+                              @input="editDrafts.set(item.id, ($event.target as HTMLTextAreaElement).value)"
+                              @keydown.escape.stop="cancelEditComment()"
+                              @keydown.enter.stop.prevent="submitEditComment(p, item as any)"
+                              spellcheck="false"
+                            ></textarea>
+                            <div class="merge-item__comment-edit-actions">
+                              <span class="merge-item__comment-editing-hint">ESC 取消 · Enter 保存</span>
+                              <button
+                                type="button"
+                                class="merge-item__comment-edit-cancel"
+                                @click.stop="cancelEditComment()"
+                              >取消</button>
+                              <button
+                                type="button"
+                                class="merge-item__comment-edit-save"
+                                :disabled="(editDrafts.get(item.id) ?? '').trim().length === 0"
+                                @click.stop="submitEditComment(p, item as any)"
+                              >保存</button>
+                            </div>
+                          </template>
+                          <!-- 展示态 -->
+                          <template v-else>
+                            <div class="merge-item__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                            <!-- v0.5.0 M1：已编辑标记 -->
+                            <span
+                              v-if="item.updatedAt && item.updatedAt !== item.createdAt"
+                              class="merge-item__comment-edited-mark"
+                              :title="'编辑于 ' + formatDate(item.updatedAt)"
+                            >（已编辑）</span>
+                            <!-- v1.5.11：复刻 Gitea 引用评论 -->
+                            <div class="merge-item__comment-actions">
+                              <button
+                                v-if="currentUsername && item.author.username !== currentUsername"
+                                type="button"
+                                class="merge-item__comment-quote"
+                                :title="'引用这条评论'"
+                                @click.stop="quoteComment(p.index, item as any)"
+                              >
+                                <Quote :size="11" :stroke-width="2" aria-hidden="true" />
+                                <span>引用</span>
+                              </button>
+                              <!-- v0.5.0 M1：编辑 / 删除仅作者本人可见 -->
+                              <template v-if="currentUsername && item.author.username === currentUsername">
+                                <button
+                                  type="button"
+                                  class="merge-item__comment-edit-btn"
+                                  :title="'编辑'"
+                                  @click.stop="startEditComment(item as any)"
+                                >
+                                  <Pencil :size="11" :stroke-width="2" aria-hidden="true" />
+                                </button>
+                                <button
+                                  type="button"
+                                  class="merge-item__comment-delete-btn"
+                                  :title="'删除'"
+                                  @click.stop="confirmDeleteComment(p, item as any)"
+                                >
+                                  <XCircle :size="11" :stroke-width="2" aria-hidden="true" />
+                                </button>
+                              </template>
+                            </div>
+                            <!-- v0.5.0 M2：表情反应条 -->
+                            <ReactionBar
+                              :project-id="activeProjectId"
+                              :comment-id="item.id"
+                              :editable="p.state === 'open'"
+                            />
+                          </template>
+                        </div>
+                      </li>
+                    </template>
                   </ul>
                 </div>
 
@@ -1502,6 +1975,18 @@ function formatRelative(iso: string | undefined): string {
         </div>
       </div>
     </ConfirmDialog>
+
+    <!-- ============== 删除评论二次确认弹窗（v0.5.0 M1） ============== -->
+    <ConfirmDialog
+      :open="confirmDeleteOpen"
+      title="删除评论"
+      description="确定要删除这条评论吗？删除后无法恢复。"
+      confirm-label="删除"
+      :danger="true"
+      @update:open="confirmDeleteOpen = $event"
+      @confirm="deletingComment && deleteComment(deletingComment.p, deletingComment.c)"
+      @cancel="confirmDeleteOpen = false; deletingComment = null"
+    />
 
     <!-- ============== 关闭二次确认弹窗 ============== -->
     <ConfirmDialog
@@ -2162,9 +2647,9 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  /* PR row 高度再增加 80px */
-  min-height: 460px;
-  max-height: min(90vh, 900px);
+  /* v0.6.26: 加高对话区，让核心内容有更多空间 */
+  min-height: 520px;
+  max-height: min(90vh, 1000px);
   overflow: hidden;
 }
 
@@ -2175,6 +2660,82 @@ function formatRelative(iso: string | undefined): string {
   min-width: 0;
 }
 
+/* ===== v0.5.0 M4: 三 Tab 切换 —— 视觉区分 ===== */
+.merge-item__detail-tabs {
+  display: flex;
+  gap: 0;
+  margin: 4px 0 var(--space-3);
+  padding: 0;
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  /* v0.6.30: 让 tabs 在上方固定，下方 tab 内容可以独立滚动 */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-shell-main-bg);
+}
+
+.merge-item__detail-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* 让 active 底边线和容器底边线重叠 */
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+  border-radius: 4px 4px 0 0;
+  line-height: 1.3;
+}
+
+.merge-item__detail-tab:hover {
+  color: var(--color-text);
+  background: var(--color-primary-soft);
+}
+
+.merge-item__detail-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.merge-item__detail-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-radius: 9px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  line-height: 1;
+}
+
+.merge-item__detail-tab--active .merge-item__detail-tab-count {
+  background: var(--color-primary);
+  color: var(--color-shell-main-bg);
+}
+
+/* ===== v0.5.0 M4: Tab 内容区 公共边距 ===== */
+.merge-item__detail-overview,
+.merge-item__detail-files {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: var(--space-1);
+}
+
+
 /* v1.4 · 详情头部一行：meta 紧凑 + 编辑按钮（同行右对齐）*/
 .merge-item__detail-meta-row {
   display: flex;
@@ -2182,6 +2743,7 @@ function formatRelative(iso: string | undefined): string {
   justify-content: space-between;
   gap: var(--space-3);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .merge-item__meta-inline {
   display: flex;
@@ -2591,10 +3153,10 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment-list {
   list-style: none;
   margin: 0;
-  padding: 5px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   flex: 1 1 0;
   min-height: 0;
   min-width: 0;
@@ -2624,43 +3186,54 @@ function formatRelative(iso: string | undefined): string {
   background: var(--color-text-muted);
 }
 
-/* 单条评论 li：横向 flex，avatar + bubble
- * 默认 = 他人：左对齐
- * --self = 我：右对齐（reverse + 行内交换顺序） */
+/* 单条评论 li：聊天气泡布局（v0.6.26）
+ * 默认 = 他人：左对齐，max-width 95%
+ * --self = 我：右对齐，max-width 95% */
 .merge-item__comment {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  margin: 0 0 10px;
+  max-width: 95%;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.merge-item__comment--self {
+  margin-left: auto;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 
-/* v0.6.21：评论侧栏（头像 + 用户名垂直排列） */
+/* v0.6.26：评论侧栏（头像 + 用户名垂直排列）— 更紧凑 */
 .merge-item__comment-side {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  min-width: 60px;
-  max-width: 80px;
+  gap: 3px;
+  min-width: 40px;
+  max-width: 50px;
 }
 
-/* 头像圈（首字母） */
+/* 头像圈（首字母）— v0.6.26：彩色底区分作者 */
 .merge-item__comment-avatar {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: var(--color-divider);
-  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   font-weight: 600;
   user-select: none;
+  border: 1.5px solid var(--color-divider);
+  flex-shrink: 0;
 }
 .merge-item__comment--self .merge-item__comment-avatar {
   background: var(--color-primary);
+  border-color: var(--color-primary);
   color: var(--color-text-inverse);
 }
 
@@ -2669,7 +3242,7 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
-  max-width: 60px;
+  max-width: 48px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -2678,73 +3251,41 @@ function formatRelative(iso: string | undefined): string {
   font-weight: 500;
 }
 
-/* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
+/* 气泡容器（v0.6.26 恢复聊天气泡效果） */
 .merge-item__comment-bubble {
   flex: 1 1 0;
   min-width: 0;
   max-width: 100%;
-  padding: 5px 8px;
-  /* v0.6.23：取消背景色，用边框线表达 */
-  background: transparent;
-  border: 1px solid var(--color-divider);
-  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--color-bg-elevated);
+  border: 1px solid rgba(128,128,128,0.3);
+  border-radius: var(--radius-md);
   position: relative;
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
-/* v0.6.22：评论区宽度撑满，padding 只控制左右留白 */
-.merge-item__comment-list {
-  padding: 4px 50px;
-  display: flex;
-  flex-direction: column;
-}
-/* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
- * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
-.merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
-  padding-right: 56px;
-}
-/* v0.6.22：评论自适应宽度，他人靠左，"我"靠右 */
-.merge-item__comment {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  min-width: 0;
-  margin: 0 0 12px;
-  max-width: 70%;
-}
-/* v0.6.22："我"的评论靠右 */
-.merge-item__comment--self {
-  margin-left: auto;
-  flex-direction: row-reverse;
-}
-/* 气泡小箭头（指向头像）—— 用 CSS border 画三角形 */
+/* 气泡小箭头（指向头像）—— 用 CSS border 画三角形（v0.6.26 恢复可见性） */
 .merge-item__comment-bubble::before {
   content: '';
   position: absolute;
   top: 10px;
   width: 8px;
   height: 8px;
-  background: inherit;
-  border: 1px solid var(--color-divider);
+  background: var(--color-bg-elevated);
+  border: 1px solid rgba(128,128,128,0.3);
   /* 默认（他人，左侧）：箭头指向左 */
   left: -5px;
-  border-right: 1px solid var(--color-divider);
-  border-top: none;
+  border-right: none;
   border-bottom: none;
   transform: rotate(45deg);
 }
-.merge-item__comment-bubble {
-  /* 让他人箭头也跟随气泡背景色 */
-  background-clip: padding-box;
-}
-/* v1.5.11：复刻 gitea 颜色——"我"的气泡用主色实色 + 白字（强对比），
- * 他人保持 elevated 浅色 + 默认字（弱对比） */
+
+/* v0.6.26："我"的气泡用主色软底 + 主色边框 */
 .merge-item__comment--self .merge-item__comment-bubble {
-  /* v0.6.20：去掉背景色，改用主色边框线表达"我发的评论" */
-  background: transparent;
-  border-color: var(--color-primary);
-  border-width: 1.5px;
+  background: var(--color-primary-alpha-22);
+  border: 1.5px solid var(--color-primary-alpha-45);
   color: var(--color-text);
 }
 /* "我"的气泡里所有文字保持默认色（背景已透明） */
@@ -2760,7 +3301,7 @@ function formatRelative(iso: string | undefined): string {
   text-decoration: underline;
 }
 
-/* v1.5.11：复刻 Gitea 引用评论——hover 气泡显示"引用"按钮（他人消息才显示，自己不能引用自己） */
+/* v1.5.11：复刻 Gitea 引用评论（v0.6.26 适配淡色气泡） */
 .merge-item__comment-quote {
   position: absolute;
   top: 4px;
@@ -2769,7 +3310,7 @@ function formatRelative(iso: string | undefined): string {
   align-items: center;
   gap: 3px;
   padding: 2px 6px;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-sm);
   font-size: var(--font-xs);
@@ -2800,13 +3341,11 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__comment--self .merge-item__comment-bubble::before {
   left: auto;
   right: -5px;
-  /* v0.6.20：背景透明，箭头跟随边框颜色 */
-  background: transparent;
+  background: var(--color-primary-alpha-22);
   border-left: none;
   border-bottom: none;
-  border-right: 1.5px solid var(--color-primary);
-  border-top: 1.5px solid var(--color-primary);
-  /* 旋转 45° 让两个边形成指向右的三角箭头 */
+  border-right: 1.5px solid var(--color-primary-alpha-45);
+  border-top: 1.5px solid var(--color-primary-alpha-45);
   transform: rotate(45deg);
 }
 
@@ -2814,9 +3353,10 @@ function formatRelative(iso: string | undefined): string {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
+  flex-wrap: wrap;
 }
 .merge-item__comment-author {
   font-weight: 600;
@@ -2846,33 +3386,41 @@ function formatRelative(iso: string | undefined): string {
   max-width: 100%;
   min-width: 0;
 }
-/* 强制 .merge-item__comment-body 内的所有 markdown 节点都限制在气泡里 */
-.merge-item__comment-body > *,
-.merge-item__comment-body p,
-.merge-item__comment-body pre,
-.merge-item__comment-body code,
-.merge-item__comment-body ul,
-.merge-item__comment-body ol,
-.merge-item__comment-body li,
-.merge-item__comment-body blockquote,
-.merge-item__comment-body h1,
-.merge-item__comment-body h2,
-.merge-item__comment-body h3,
-.merge-item__comment-body h4,
-.merge-item__comment-body h5,
-.merge-item__comment-body h6,
-.merge-item__comment-body table {
+/* 强制 .merge-item__comment-body 内的所有 markdown 节点都限制在气泡里（v0.6.26 用 :deep 穿透 v-html） */
+.merge-item__comment-body > :deep(*),
+.merge-item__comment-body :deep(p),
+.merge-item__comment-body :deep(pre),
+.merge-item__comment-body :deep(code),
+.merge-item__comment-body :deep(ul),
+.merge-item__comment-body :deep(ol),
+.merge-item__comment-body :deep(li),
+.merge-item__comment-body :deep(blockquote),
+.merge-item__comment-body :deep(h1),
+.merge-item__comment-body :deep(h2),
+.merge-item__comment-body :deep(h3),
+.merge-item__comment-body :deep(h4),
+.merge-item__comment-body :deep(h5),
+.merge-item__comment-body :deep(h6),
+.merge-item__comment-body :deep(table) {
   max-width: 100%;
   min-width: 0;
-  word-break: break-all;
   overflow-wrap: break-word;
+  word-break: break-all;
 }
-.merge-item__comment-body pre,
-.merge-item__comment-body pre code {
+.merge-item__comment-body :deep(pre),
+.merge-item__comment-body :deep(pre code) {
   white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  max-width: 100%;
 }
-.merge-item__comment-body code {
+.merge-item__comment-body :deep(code) {
   white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 /* 发评论输入区（v2.62 · 改到历史对话下方，固定 120px，发送按钮在输入框内右上角） */
@@ -2881,14 +3429,18 @@ function formatRelative(iso: string | undefined): string {
   flex-direction: column;
   gap: 4px;
   padding: 5px;
-  /* v0.6.25：去掉浅苍蓝背景色，与整页背景统一 */
   background: transparent;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   min-width: 0;
-  height: 120px;                /* v2.62：100 → 120 */
+  height: 120px;
   flex-shrink: 0;
   overflow: hidden;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.merge-item__comment-compose:focus-within {
+  border-color: var(--color-primary-alpha-45);
+  box-shadow: 0 0 0 2px var(--color-primary-softer);
 }
 
 /* textarea + @ 候选下拉的相对定位容器（v2.62：内部右上角放发送按钮） */
@@ -2923,7 +3475,11 @@ function formatRelative(iso: string | undefined): string {
 }
 .merge-item__comment-send-absolute:hover:not(:disabled) {
   background: var(--color-primary-hover);
-  transform: scale(1.05);
+  transform: scale(1.08);
+  box-shadow: 0 2px 6px rgba(var(--shadow-rgb), 0.22);
+}
+.merge-item__comment-send-absolute:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .merge-item__comment-send-absolute:disabled {
   opacity: 0.4;
@@ -3016,7 +3572,11 @@ function formatRelative(iso: string | undefined): string {
  *
  * 给所有 .md-body 内的元素加 reset，避免 markdown-it 产出的 HTML 走浏览器默认样式
  * （gitea 评论在暗色主题下默认 <code> 黑色字看不清；<pre> 没滚动条等）。
- * 颜色用项目主题变量，不写死。 */
+ * 颜色用项目主题变量，不写死。
+ *
+ * v0.6.26: 所有子元素选择器用 :deep() 穿透 scoped CSS
+ * (vhtml 动态内容没有 data-v-xxx 属性，普通子选择器不生效)
+ */
 .md-body {
   font-size: var(--font-sm);
   line-height: 1.6;
@@ -3026,47 +3586,46 @@ function formatRelative(iso: string | undefined): string {
   max-width: 100%;
   min-width: 0;
 }
-.md-body p {
+.md-body :deep(p) {
   margin: 0 0 4px 0;
 }
-.md-body p:last-child {
+.md-body :deep(p:last-child) {
   margin-bottom: 0;
 }
-.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+.md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3), .md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) {
   margin: var(--space-2) 0 4px 0;
   font-weight: 600;
   line-height: 1.3;
 }
-.md-body h1 { font-size: var(--font-lg); }
-.md-body h2 { font-size: var(--font-md); }
-.md-body h3 { font-size: var(--font-sm); }
-.md-body h4, .md-body h5, .md-body h6 { font-size: var(--font-sm); }
-.md-body ul, .md-body ol {
+.md-body :deep(h1) { font-size: var(--font-lg); }
+.md-body :deep(h2) { font-size: var(--font-md); }
+.md-body :deep(h3) { font-size: var(--font-sm); }
+.md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) { font-size: var(--font-sm); }
+.md-body :deep(ul), .md-body :deep(ol) {
   margin: 4px 0;
   padding-left: var(--space-4);
 }
-.md-body li { margin: 2px 0; }
-.md-body blockquote {
+.md-body :deep(li) { margin: 2px 0; }
+.md-body :deep(blockquote) {
   margin: 4px 0;
   padding: 4px var(--space-3);
   border-left: 3px solid var(--color-divider);
   color: var(--color-text-secondary);
   background: var(--color-bg);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  /* 强制引用块超长文本自动换行 */
   word-break: break-all;
   overflow-wrap: break-word;
   white-space: pre-wrap;
   max-width: 100%;
   min-width: 0;
 }
-.md-body blockquote > * {
+.md-body :deep(blockquote > *) {
   word-break: break-all;
   overflow-wrap: break-word;
   max-width: 100%;
   min-width: 0;
 }
-.md-body code {
+.md-body :deep(code) {
   padding: 1px 6px;
   background: var(--color-bg);
   border-radius: var(--radius-sm);
@@ -3075,58 +3634,62 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-accent);
   word-break: break-all;
   overflow-wrap: anywhere;
+  overflow-x: auto;
   white-space: pre-wrap;
   max-width: 100%;
 }
-.md-body pre {
+.md-body :deep(pre) {
   margin: 4px 0;
   padding: var(--space-2);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
   word-break: break-all;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
   max-width: 100%;
   min-width: 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: var(--font-xs);
   line-height: 1.5;
 }
-.md-body pre code {
+.md-body :deep(pre code) {
   padding: 0;
   background: transparent;
   color: var(--color-text);
   font-size: inherit;
   white-space: pre-wrap;
   word-break: break-all;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  max-width: 100%;
 }
-.md-body a {
+.md-body :deep(a) {
   color: var(--color-primary);
   text-decoration: none;
 }
-.md-body a:hover {
+.md-body :deep(a:hover) {
   text-decoration: underline;
 }
-.md-body img {
+.md-body :deep(img) {
   max-width: 100%;
   height: auto;
   border-radius: var(--radius-sm);
 }
-.md-body table {
+.md-body :deep(table) {
   border-collapse: collapse;
   margin: 4px 0;
   font-size: var(--font-xs);
 }
-.md-body th, .md-body td {
+.md-body :deep(th), .md-body :deep(td) {
   padding: 4px 8px;
   border: 1px solid var(--color-divider);
 }
-.md-body th {
+.md-body :deep(th) {
   background: var(--color-bg);
   font-weight: 600;
 }
-.md-body hr {
+.md-body :deep(hr) {
   border: 0;
   border-top: 1px solid var(--color-divider);
   margin: var(--space-2) 0;
@@ -3271,4 +3834,389 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   color: var(--color-text);
 }
+
+/* ===== v0.5.0 M1: 评论编辑 / 删除 ===== */
+.merge-item__comment-edit-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 10px;
+  border: 1.5px solid var(--color-primary-alpha-45);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  resize: vertical;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.merge-item__comment-edit-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-softer);
+}
+.merge-item__comment-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.merge-item__comment-edit-save,
+.merge-item__comment-edit-cancel {
+  padding: 5px 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+.merge-item__comment-edit-save {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+.merge-item__comment-edit-save:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+}
+.merge-item__comment-edit-save:active:not(:disabled) {
+  transform: translateY(0);
+}
+.merge-item__comment-edit-save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.merge-item__comment-edit-cancel {
+  background: transparent;
+  border-color: var(--color-divider);
+  color: var(--color-text-muted);
+}
+.merge-item__comment-edit-cancel:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.merge-item__comment-editing-hint {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  margin-right: auto;
+  font-style: italic;
+}
+.merge-item__comment-edited-mark {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  margin-left: 6px;
+  padding: 1px 5px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-xs);
+  font-style: italic;
+}
+.merge-item__comment-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.merge-item__comment-edit-btn,
+.merge-item__comment-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.merge-item__comment:hover .merge-item__comment-edit-btn,
+.merge-item__comment:hover .merge-item__comment-delete-btn {
+  opacity: 1;
+}
+.merge-item__comment-edit-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-divider);
+  color: var(--color-text);
+}
+.merge-item__comment-delete-btn:hover {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+
+/* ===== v0.5.0 M2: 评论表情反应 ===== */
+.merge-item__comment-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+
+/* ===== v0.5.0 M3: 评审按钮 ===== */
+.merge-item__btn--approve {
+  background: var(--color-success-soft, #dcfce7);
+  border-color: var(--color-success, #16a34a);
+  color: var(--color-success, #16a34a);
+}
+.merge-item__btn--approve:hover {
+  background: var(--color-success, #16a34a);
+  color: white;
+}
+.merge-item__btn--request-changes {
+  background: var(--color-danger-soft, #fef2f2);
+  border-color: var(--color-danger, #dc2626);
+  color: var(--color-danger, #dc2626);
+}
+.merge-item__btn--request-changes:hover {
+  background: var(--color-danger, #dc2626);
+  color: white;
+}
+.merge-item__btn--review-comment {
+  background: var(--color-bg-subtle);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+.merge-item__btn--review-comment:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* ===== v0.6.26: PR 描述/正文 ===== */
+.merge-item__detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-divider-soft);
+  margin-bottom: 8px;
+}
+.merge-item__detail-body-label {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.merge-item__detail-body-content {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  line-height: 1.6;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
+}
+.merge-item__detail-body-content :deep(p) { margin: 0 0 6px; }
+.merge-item__detail-body-content :deep(p:last-child) { margin-bottom: 0; }
+.merge-item__detail-body-content :deep(code) {
+  background: var(--color-bg-subtle);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  font-size: 0.9em;
+}
+.merge-item__detail-body-content :deep(pre) {
+  background: var(--color-bg-subtle);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.merge-item__detail-body-content :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+.merge-item__detail-body-content :deep(a) {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.merge-item__detail-body-content :deep(ul),
+.merge-item__detail-body-content :deep(ol) {
+  padding-left: 20px;
+}
+
+/* ===== v0.5.0 M3: 评审区 ===== */
+.merge-item__reviews {
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 12px;
+}
+.merge-item__reviews-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.merge-item__review-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  border-left: 3px solid var(--color-border);
+  font-size: var(--font-sm);
+}
+.merge-item__review-item--approved {
+  border-left-color: var(--color-success, #16a34a);
+  background: var(--color-success-softer, #f0fdf4);
+}
+.merge-item__review-item--changes_requested {
+  border-left-color: var(--color-danger, #dc2626);
+  background: var(--color-danger-softer, #fef2f2);
+}
+.merge-item__review-item--commented {
+  border-left-color: var(--color-text-muted);
+}
+.merge-item__review-state-badge {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  white-space: nowrap;
+}
+.merge-item__review-item--approved .merge-item__review-state-badge {
+  color: var(--color-success, #16a34a);
+}
+.merge-item__review-item--changes_requested .merge-item__review-state-badge {
+  color: var(--color-danger, #dc2626);
+}
+.merge-item__review-author {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.merge-item__review-body {
+  flex: 1;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-item__review-time {
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+/* ===== v0.5.0 M3: 评审编辑器 ===== */
+.merge-item__review-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.merge-item__review-editor-label {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.merge-item__review-editor-input {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  resize: vertical;
+}
+.merge-item__review-editor-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.merge-item__review-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+.merge-item__review-submit {
+  padding: 4px 14px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: white;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.merge-item__review-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.merge-item__review-cancel {
+  padding: 4px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.merge-item__review-cancel:hover {
+  background: var(--color-bg-hover);
+}
+
+/* ===== v0.5.0 M4: Review Event 系统卡片 (v0.6.26 优化) ===== */
+.merge-item__comment--review-event {
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.9;
+  padding-left: 4px;
+}
+
+/* ===== v0.6.26: 编辑态气泡高亮 ===== */
+.merge-item__comment-bubble--editing {
+  border-color: var(--color-primary-alpha-45) !important;
+  box-shadow: 0 0 0 2px var(--color-primary-softer) !important;
+}
+
+.merge-item__comment--review-approved {
+  border-left: 3px solid var(--color-success, #16a34a);
+}
+.merge-item__comment--review-changes_requested {
+  border-left: 3px solid var(--color-danger, #dc2626);
+}
+.merge-item__comment--review-commented {
+  border-left: 3px solid var(--color-text-muted);
+}
+.merge-item__comment-avatar--approved {
+  background: var(--color-success, #16a34a);
+  color: #fff;
+}
+.merge-item__comment-avatar--changes_requested {
+  background: var(--color-danger, #dc2626);
+  color: #fff;
+}
+.merge-item__comment-avatar--commented {
+  background: var(--color-text-muted);
+  color: #fff;
+}
+.merge-item__comment-bubble--event {
+  border-style: dashed;
+  background: transparent;
+}
+.merge-item__review-state-badge--approved {
+  color: var(--color-success, #16a34a);
+}
+.merge-item__review-state-badge--changes_requested {
+  color: var(--color-danger, #dc2626);
+}
+.merge-item__review-state-badge--commented {
+  color: var(--color-text-muted);
+}
+.merge-item__comment-name--muted {
+  font-style: italic;
+}
+.merge-item__comment-event-author {
+  margin-top: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
 </style>

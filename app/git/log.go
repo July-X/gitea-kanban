@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -60,12 +61,21 @@ type LogOptions struct {
 	MaxCount int
 	// Offset 跳过前 N 条 commit（分页用，0 = 不跳过）
 	Offset int
+	// Token 仓库 token（offset 越界 + repoIsShallow 时自动调 git fetch --deepen 用）
+	Token string
 }
 
 // LogResult log 遍历结果
 type LogResult struct {
 	Commits   []CommitInfo
 	Truncated bool // 是否达到 MaxCount 截断
+	// LocalExhausted 本地 commit 已全部取出（越界或深度等于远端总 commit 数），
+	// 远端可能有更多（需 fetch --deepen 拉取）。true 时 Commits 为空，Truncated 为 false。
+	// 前端据此显示「本地历史已加载完，是否加载更早的历史？」按钮。
+	LocalExhausted bool
+	// DeepenTriggered LocalExhausted=true 时，后端已启动后台增量 deepen。前端等待
+	// repo:sync:progress 事件完成后再调 loadGraph(offset)，不应再次触发 deepen。
+	DeepenTriggered bool
 }
 
 // LogCommits 遍历 commit 历史（go-git DAG Log）
@@ -215,6 +225,9 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		return commits[i].SHA < commits[j].SHA
 	})
 
+	// localTotal：offset 分页前本地可用 commit 总数，用于 v0.7.2 的「本地耗尽」检测。
+	localTotal := len(commits)
+
 	// offset 分页：跳过前 N 条（在排序后、截断前执行，保证稳定分页）
 	if opts.Offset > 0 && opts.Offset < len(commits) {
 		commits = commits[opts.Offset:]
@@ -226,6 +239,36 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 	if opts.MaxCount > 0 && len(commits) > opts.MaxCount {
 		commits = commits[:opts.MaxCount]
 		truncated = true
+	}
+
+	// v0.7.2 修复：shallow clone 下本地 commit 已耗尽但未触发 offset 越界。
+	// 与 LogCommitsVscode 同逻辑：当 offset 接近末尾，截取后 commits 不满 MaxCount，
+	// 且分页前总条数 localTotal 不足 offset+1（即本地已取完全部 commit），且仓库是 shallow 时，
+	// 触发 LocalExhausted + 后台 deepen，避免前端把 truncated=false 当成"全加载完了"。
+	if opts.Offset > 0 && opts.Token != "" &&
+		!truncated && len(commits) < opts.MaxCount &&
+		localTotal < opts.Offset+opts.MaxCount && repoIsShallow(opts.LocalPath) {
+		triggered := tryTriggerDeepen(opts.LocalPath, opts.Token)
+		return &LogResult{
+			Commits:         nil,
+			Truncated:       false,
+			LocalExhausted:  true,
+			DeepenTriggered: triggered,
+		}, nil
+	}
+
+	// v0.6.2: offset 越界（本地 commit 全部取出）时，若本地是 shallow clone
+	// 且前端传了 token，后台自动触发增量 git fetch --deepen。
+	// 前端收到 LocalExhausted=true + DeepenTriggered=true 后等待
+	// repo:sync:progress 完成事件，然后重新 loadGraph(offset)。
+	if opts.Offset > 0 && len(commits) == 0 && opts.Token != "" {
+		triggered := tryTriggerDeepen(opts.LocalPath, opts.Token)
+		return &LogResult{
+			Commits:         nil,
+			Truncated:       false,
+			LocalExhausted:  true,
+			DeepenTriggered: triggered,
+		}, nil
 	}
 
 	// v3.x：探测 worktree dirty count，1:1 复刻 vscode-git-graph 的
@@ -590,4 +633,38 @@ func collectRefNamesByHash(repo *git.Repository) map[string]refData {
 		result[sha] = refData{Names: names, Types: types}
 	}
 	return result
+}
+
+// tryTriggerDeepen 检查本地是否为 shallow 仓库；若是则后台发起增量 deepen
+// (fetch --depth=N)，返回 true 表示已触发。
+// 前端收到 DeepenTriggered=true 后等待 repo:sync:progress 完成事件即可。
+func tryTriggerDeepen(localPath, token string) bool {
+	if !repoIsShallow(localPath) {
+		return false
+	}
+	curDepth, err := getCurrentDepth(localPath)
+	if err != nil {
+		return false
+	}
+	go func() {
+		_ = fetchRemoteWithFilter(localPath, "origin", curDepth+500, token)
+	}()
+	return true
+}
+
+// getCurrentDepth 读取当前 .git/shallow 行数，用于计算下次 --deepen 目标。
+func getCurrentDepth(localPath string) (int, error) {
+	data, err := os.ReadFile(localPath + "/.git/shallow")
+	if err != nil {
+		return 0, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	count := 0
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			count++
+		}
+	}
+	return count, nil
 }

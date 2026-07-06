@@ -8,7 +8,7 @@
  *   - 不在 App 层做业务（业务在 view + store 里）
  *   - 被动轮询：每 N 分钟（settings 可配，默认 5min）拉一次仓库列表
  */
-import { onBeforeUnmount, onMounted, watch } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppShell from '@renderer/components/AppShell.vue';
 import Toast from '@renderer/components/Toast.vue';
 import DevAnnotatePopover from '@renderer/components/DevAnnotatePopover.vue';
@@ -22,11 +22,72 @@ import { useSettingsStore } from '@renderer/stores/settings';
  */
 const isDev = import.meta.env.DEV;
 
+/**
+ * v1.x 2026-07-04：检测运行平台并作为 prop 传给 AppShell，
+ * 让 AppShell.vue scoped style 用普通 class selector（而不是 `:global(html[...]) .shell`）
+ * —— 后者在 Vue 3 scoped CSS compile 时被错误地拆分成只作用 `<html>` 的规则、
+ *   `.shell` 选择器被吞掉，整个安全区/让位/drag region 的 CSS 完全失效。
+ *
+ * 这是 StatusBar 在 macOS 上"依然看不到"的真根因（前三回合都没找对）：
+ *   - 第 1 回合：`.shell padding-top: 28` + ::before drag region，navrail 没让位 traffic lights，
+ *     statusbar 被上方内容覆盖
+ *   - 第 2 回合：撤回 transparent titlebar（用户对状态栏可见但不满标题栏白色）
+ *   - 第 3 回合：再加 transparent titlebar，`.shell height - 22px` 让 macOS 圆角不挡 statusbar
+ *   - **第 4 回合根因**：上一步计算被 Vue scoped CSS 编译吞掉，CSS 没生效，statusbar 还是
+ *     落在 WKWebView + macOS Big Sur+ 圆角区被视觉 mask 掉 22px + hit-test 出界
+ *
+ * 现在用 class binding 让 scoped CSS 编译正常，所有 macOS 特定样式生效
+ */
+const isMac = ref(false);
+
 const auth = useAuthStore();
 const repo = useRepoStore();
 const settings = useSettingsStore();
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * v1.x 拍板 2026-07-04：viewport 高度同步
+ *
+ * Wails WKWebView 在 macOS WKWebView 中 `100vh` 不一定 = NSWindow 内容高度
+ * （FullSizeContent + 圆角 + safe area inset 都可能让 webview frame ≠ NSWindow.bounds），
+ * 而 AppShell .shell 直接用 `100vh` 在主进程 Wails dev 跑时偶发 StatusBar / nav rail
+ * 偏移 ~8-22px（窗口底部圆角让 .shell__status 落不到 NSWindow 真正的可视底边）。
+ *
+ * 修法：用 window.innerHeight 持续同步 `--vheight` CSS var，.shell height 走这个 var，
+ * 所有 layer 跟随真实 webview content height。
+ *
+ * 触发：mount + 窗口 resize（Wails 启动期 macOS WebView ready 也可能晚到，再加 rAF 一次兜底）
+ */
+function syncViewportHeight(): void {
+  if (typeof window === 'undefined') return;
+  const h = window.innerHeight;
+  if (!Number.isFinite(h) || h <= 0) return;
+  document.documentElement.style.setProperty('--vheight', `${h}px`);
+}
+
+let onResize: (() => void) | null = null;
+onMounted(() => {
+  // v1.x 2026-07-04：检测 macOS（同步，设 ref 给 AppShell 用）
+  if (typeof navigator !== 'undefined') {
+    const p = (navigator.platform || '').toLowerCase();
+    const ua = (navigator.userAgent || '').toLowerCase();
+    isMac.value = p.indexOf('mac') >= 0 || ua.indexOf('mac os x') >= 0;
+  }
+
+  syncViewportHeight();
+  // rAF 兜底一次：Wails WKWebView 在 macOS 上 ready 时刻 innerHeight 可能晚到
+  requestAnimationFrame(syncViewportHeight);
+  onResize = syncViewportHeight;
+  window.addEventListener('resize', onResize);
+});
+
+onBeforeUnmount(() => {
+  if (onResize) {
+    window.removeEventListener('resize', onResize);
+    onResize = null;
+  }
+});
 
 /** 启动 / 重新设置 interval 用的内部函数 */
 function startPolling(): void {
@@ -160,7 +221,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <AppShell />
+  <AppShell :isMac="isMac" />
   <Toast />
   <!--
     Dev 模式注解 popover（v1.1.3 · task #42）

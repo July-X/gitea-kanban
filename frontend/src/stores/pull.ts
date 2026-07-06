@@ -1,31 +1,34 @@
 /**
  * pull store —— 当前 project 的合并请求列表（gitea /pulls）
  *
- * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出（与 my-card/branch/member 同源）
- *   - 数据源：pulls.list IPC（main 端包 listGiteaPulls + 30s 缓存 + linkedCards JOIN）
- *   - setup store 风格（与 board.ts / branch.ts 一致）
- *   - **不**持久化
- *   - 暴露 list / refresh / filter / currentSelectedItem
- *   - 状态维度：'all' | 'open' | 'closed'；merged 走 PullDto.merged 字段
- *     （gitea 把 merged 合并请求视为 closed）
- *     "全部 / 待合并 / 已合并 / 已关闭" 4 个 tab 拆解：
- *       all    = 全部
- *       open   = state==open
- *       merged = state==closed && merged==true
- *       closed = state==closed && merged==false
+ * 设计（AGENTS §5.2）：v1 末 4-store 重构阶段抽出
+ *   - 数据源：pulls.list IPC
+ *   - 状态维度：全部 / 待合并 / 已合并 / 已关闭
  *
  * 零术语：
- *   - 状态文案："全部 / 待合并 / 已合并 / 已关闭"
- *   - 禁用原词（"合并请求 / 合并 / 变基 / 派生 / 仓库 / 分支 / 维护者"）
- *     → 代码内标识符走 check:no-jargon.ts 白名单
+ *   - "合并请求" / "合并" / "变基" / "待合并" / "已合并" / "已关闭" / "草稿"
  */
 
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
-import { pullsList, pullsGet, pullsMerge, pullsClose } from '@renderer/lib/ipc-client';
+import { computed, reactive, ref } from 'vue';
+import {
+  pullsList,
+  pullsGet,
+  pullsMerge,
+  pullsClose,
+  pullsCommentList,
+  pullsCommentCreate,
+  pullsCommentUpdate,
+  pullsCommentDelete,
+  pullsReviewsList,
+  pullsReviewCreate,
+  pullsReviewCommentsList,
+  pullsFilesList,
+  pullsFileDiffGet,
+} from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
-import type { ListPullsResp, PullDto, PullState, MergeMethod } from '@renderer/types/dto';
+import type { ListPullsResp, PullDto, PullState, MergeMethod, IssueCommentDto, PullReviewCommentDto, PullFileDto, PullFileDiffDto, PullReviewDto } from '@renderer/types/dto';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import { useRepoStore } from '@renderer/stores/repo';
 
@@ -46,16 +49,39 @@ export const usePullStore = defineStore('pull', () => {
   // ===== selection state =====
   const currentSelectedItem = ref<PullDto | null>(null);
 
-  // ===== 分页状态（v0.6+ 用户拍板滚动到底自动加载） =====
-  const currentPage = ref(0);          // 0 = 未加载过
-  const hasMore = ref(false);          // 后端返 hasMore
-  const loadingMore = ref(false);      // 防重入：loadMore() 在飞中禁止重复调
-  const PAGE_SIZE = 30;                // 与 StatusBar / v0.4.0 Gitea/GitHub 默认一致
+  // ===== 分页状态 =====
+  const currentPage = ref(0);
+  const hasMore = ref(false);
+  const loadingMore = ref(false);
+  const PAGE_SIZE = 30;
+
+  // ===== 评论面板状态 =====
+  interface CommentPanel {
+    items: IssueCommentDto[];
+    loading: boolean;
+    posting: boolean;
+    error: string | null;
+  }
+  const commentPanels = ref<Map<number, CommentPanel>>(new Map());
+
+  // ===== Review 面板状态 =====
+  const reviewPanels = ref<Map<number, PullReviewDto[]>>(new Map());
+  const reviewSubmitting = ref(false);
+  const reviewEditorOpen = ref<Set<number>>(new Set());
+  const reviewEditorEvent = ref<Map<number, string>>(new Map());
+  const reviewEditorBody = ref<Map<number, string>>(new Map());
+
+  // ===== 文件评论状态（v0.5.0 M4） =====
+  /** 按 PR index 分组的行内评审评论缓存（升序） */
+  const reviewCommentsByPR = ref<Map<number, PullReviewCommentDto[]>>(new Map());
+  /** 按 PR index 分组的文件列表缓存 */
+  const filesByPR = ref<Map<number, PullFileDto[]>>(new Map());
+  /** 按 "index:filePath" 的 diff 缓存 */
+  const fileDiffByPath = ref<Map<string, PullFileDiffDto>>(new Map());
 
   // ===== getters =====
   const total = computed(() => items.value.length);
 
-  /** 按 filter 拆 4 类计数（UI tab 角标用） */
   const counts = computed(() => {
     let open = 0;
     let merged = 0;
@@ -72,10 +98,71 @@ export const usePullStore = defineStore('pull', () => {
     return { all: items.value.length, open, merged, closed };
   });
 
+  /** 按文件路径聚合 review comments（按 PR → path → list） */
+  const reviewCommentsGrouped = computed(() => {
+    const result = new Map<number, Map<string, PullReviewCommentDto[]>>();
+    for (const [prIdx, comments] of reviewCommentsByPR.value.entries()) {
+      const byPath = new Map<string, PullReviewCommentDto[]>();
+      for (const c of comments) {
+        const list = byPath.get(c.path) ?? [];
+        list.push(c);
+        byPath.set(c.path, list);
+      }
+      result.set(prIdx, byPath);
+    }
+    return result;
+  });
+
   /**
-   * 过滤后的列表（filter + search）
-   * search 匹配 title / head / base 三字段（不区分大小写）
+   * 对话时间线：把评审事件 + 普通评论按时间合并，用于对话 Tab 渲染
+   * 每个元素标记 source: 'review' | 'comment'
    */
+  const timelineItems = computed(() => {
+    const result = new Map<number, Array<
+      { source: 'review'; id: number; state: string; body: string; author: { username: string }; submittedAt: string; isReviewEvent: true }
+      | { source: 'comment'; id: number; body: string; author: { username: string }; createdAt: string; updatedAt?: string; isReviewEvent: false }
+    >>();
+    for (const [prIdx, panel] of commentPanels.value.entries()) {
+      const items = result.get(prIdx) ?? [];
+      for (const c of panel.items) {
+        items.push({
+          source: 'comment',
+          id: c.id,
+          body: c.body,
+          author: { username: c.author?.username ?? '匿名' },
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          isReviewEvent: false,
+        });
+      }
+      result.set(prIdx, items);
+    }
+    for (const [prIdx, reviews] of reviewPanels.value.entries()) {
+      const items = result.get(prIdx) ?? [];
+      for (const r of reviews) {
+        items.push({
+          source: 'review',
+          id: r.id,
+          state: r.state,
+          body: r.body ?? '',
+          author: { username: r.author?.username ?? '匿名' },
+          submittedAt: r.submittedAt,
+          isReviewEvent: true,
+        });
+      }
+      result.set(prIdx, items);
+    }
+    // Sort each PR's items by date (ascending)
+    for (const items of result.values()) {
+      items.sort((a, b) => {
+        const dateA = a.source === 'comment' ? a.createdAt : a.submittedAt;
+        const dateB = b.source === 'comment' ? b.createdAt : b.submittedAt;
+        return dateA.localeCompare(dateB);
+      });
+    }
+    return result;
+  });
+
   const filteredItems = computed<PullDto[]>(() => {
     const q = search.value.trim().toLowerCase();
     let arr = items.value;
@@ -91,25 +178,34 @@ export const usePullStore = defineStore('pull', () => {
     );
   });
 
-  /** 按 index 查合并请求 */
   function getByIndex(index: number): PullDto | null {
     return items.value.find((p) => p.index === index) ?? null;
   }
 
+  // ===== 评论面板 helpers =====
+  function getPanel(index: number): CommentPanel {
+    let p = commentPanels.value.get(index);
+    if (!p) {
+      // v0.5.0 bugfix: 用 reactive() 包装 panel,让 panel.items = items 这种直接赋值
+      // 能触发 timelineItems computed 重算(ref(new Map()) 内部对象不是 reactive proxy,
+      // 直接赋值属性不会触发响应,导致对话 Tab 标题显示「对话 N」但列表区域空白)
+      p = reactive({
+        items: [] as IssueCommentDto[],
+        loading: false,
+        posting: false,
+        error: null as string | null,
+      });
+      commentPanels.value.set(index, p);
+    }
+    return p;
+  }
+
+  function getReviewPanel(index: number): PullReviewDto[] {
+    return reviewPanels.value.get(index) ?? [];
+  }
+
   // ===== actions =====
 
-  /**
-   * 加载某 project 的合并请求列表（v0.6+ 分页版）
-   *
-   * v0.6+：取消 v1.6 「一次拉 100」硬编码。改成分页 + 滚动到底自动加载。
-   *   - reset=true：清 items / 分页状态 / 从第 1 页重新拉（默认 true）
-   *   - reset=false：保留 items / 递增 currentPage
-   *
-   * 状态：
-   *   - loading=true 适用于 list(projectId)（初始 / refresh）
-   *   - loadingMore=true 适用于 loadMore()（增量）
-   *   - 两者互斥：loadMore 不会同时触发 GlobalLoading
-   */
   async function list(projectId: string, reset = true): Promise<void> {
     loading.value = true;
     useGlobalLoadingStore().show('pull');
@@ -121,10 +217,9 @@ export const usePullStore = defineStore('pull', () => {
       hasMore.value = false;
     }
     try {
-      // A3 拍板 pulls.list 支持 state 过滤；v1 拉全量，UI 层按 merged/closed 拆
       const resp = (await pullsList({
         projectId,
-        state: 'all' as PullState | undefined, // gitea /pulls?state=closed 同时含 merged；'all' = 不过滤
+        state: 'all' as PullState | undefined,
         limit: PAGE_SIZE,
         page: 1,
       })) as ListPullsResp;
@@ -141,20 +236,6 @@ export const usePullStore = defineStore('pull', () => {
     }
   }
 
-  /**
-   * 加载下一页（滚动到底自动调）
-   *
-   * v0.6+ 用户拍板：滚动到底自动加载下一页（与 vscode-git-graph 同体验）。
-   *   - loadingMore 防重入
-   *   - 拉取后追加 items（**不**覆盖）
-   *   - hasMore=false 则不调
-   *   - currentProjectId 必须有
-   *
-   * 设计：
-   *   - 追加同 index 的去重（后端可能返重复，跨页边缘常见）
-   *   - 失败时不动 items，仅 error.value = e（用户可滚动再试）
-   *   - v0.6.1+：触发全局 loading → StatusBarPulse 心跳脉冲动画
-   */
   async function loadMore(): Promise<void> {
     if (loadingMore.value) return;
     if (!hasMore.value) return;
@@ -170,7 +251,6 @@ export const usePullStore = defineStore('pull', () => {
         limit: PAGE_SIZE,
         page: nextPage,
       })) as ListPullsResp;
-      // v0.6+ 增点：去重。GitHub /pulls 在状态转换边缘可能重复返同 index。
       const seen = new Set(items.value.map((p) => p.index));
       const fresh: PullDto[] = [];
       for (const p of resp.items) {
@@ -184,14 +264,12 @@ export const usePullStore = defineStore('pull', () => {
       hasMore.value = resp.hasMore;
     } catch (e) {
       error.value = normalizeError(e);
-      // 失败保留旧 items，不抛出（避免静默丢列表）
     } finally {
       loadingMore.value = false;
       useGlobalLoadingStore().hide('pull');
     }
   }
 
-  /** 刷新 */
   async function refresh(): Promise<void> {
     if (!currentProjectId.value) {
       throw {
@@ -204,20 +282,16 @@ export const usePullStore = defineStore('pull', () => {
     await list(currentProjectId.value, true);
   }
 
-  /** 切换 tab */
   function setFilter(f: PullFilter): void {
     filter.value = f;
   }
 
-  /** 选中某行 */
   function select(item: PullDto | null): void {
     currentSelectedItem.value = item;
   }
 
-  /** 拿单个合并请求详情 */
   async function get(projectId: string, index: number): Promise<PullDto> {
     const dto = await pullsGet({ projectId, index });
-    // 更新本地 items 中对应条目（如果存在）
     const idx = items.value.findIndex((p) => p.index === index);
     if (idx >= 0) {
       items.value[idx] = { ...dto };
@@ -225,17 +299,6 @@ export const usePullStore = defineStore('pull', () => {
     return dto;
   }
 
-  /**
-   * 合并合并请求（**危险操作**，调用前 UI 必须弹二次确认）
-   *
-   * 合并方式人话映射：
-   *   - 'merge'        → 普通合并
-   *   - 'rebase'       → 变基
-   *   - 'rebase-merge' → 变基+合并
-   *   - 'squash'       → 压缩
-   *
-   * @returns 合并结果（含 sha / merged / message）
-   */
   async function mergePull(args: {
     projectId: string;
     index: number;
@@ -244,59 +307,203 @@ export const usePullStore = defineStore('pull', () => {
     commitMessage?: string;
   }): Promise<{ sha: string; merged: boolean; message: string }> {
     const result = (await pullsMerge(args)) as { sha: string; merged: boolean; message: string };
-    // 合并成功后刷新列表（缓存已在主进程失效，重新拉取拿最新状态）
     if (result.merged && currentProjectId.value) {
       try {
         await list(currentProjectId.value, true);
-      } catch {
-        // 刷新失败不影响合并结果
-      }
-      // v0.6+：合并成功后自动同步 Git Graph
-      //   - 远端已产生新 merge commit，本地 refs 不刷新的话 graph 上看不到
-      //   - 复用 PullRepoByProjectId 链路（自带进度回调 → StatusBar 行末自动亮）
-      //   - 派发 app:refresh 事件 → TimelineNewView.vue 监听后重 loadGraph
+      } catch { /* 静默 */ }
       try {
         await useRepoStore().pullRepoByProjectId({ projectId: currentProjectId.value });
-      } catch {
-        // pull 失败不影响合并结果（前端可在 StatusBar 手动重试）
-      }
+      } catch { /* 静默 */ }
       try {
         window.dispatchEvent(new CustomEvent('app:refresh'));
-      } catch {
-        /* 静默 */
-      }
+      } catch { /* 静默 */ }
     }
     return result;
   }
 
-  /**
-   * 关闭合并请求（不合并，直接关闭）—— **危险操作**，调用前 UI 必须弹二次确认
-   *
-   * 对应 gitea PATCH /pulls/{index} {state: 'closed'}
-   * 关闭后合并请求状态变为 closed，不可再合并（除非 reopen）。
-   */
   async function closePull(args: {
     projectId: string;
     index: number;
     reason?: string;
   }): Promise<{ closed: boolean }> {
     const result = (await pullsClose(args)) as { closed: boolean };
-    // 关闭后刷新列表
     if (result.closed && currentProjectId.value) {
       try {
         await list(currentProjectId.value, true);
-      } catch {
-        // 刷新失败不影响关闭结果
-      }
-      // v0.6+：关闭后也派发 app:refresh，让 TimelineNewView 在用户切到 Git Graph 时
-      // 能看到关闭事件带来的潜在 DAG 变化（虽然 PR 不直接产 commit，但侧链 fetch 可能更新）
+      } catch { /* 静默 */ }
       try {
         window.dispatchEvent(new CustomEvent('app:refresh'));
-      } catch {
-        /* 静默 */
-      }
+      } catch { /* 静默 */ }
     }
     return result;
+  }
+
+  // ===== 评论 actions =====
+
+  /** 加载 PR 评论列表 */
+  async function fetchComments(p: PullDto): Promise<void> {
+    const panel = getPanel(p.index);
+    panel.loading = true;
+    panel.error = null;
+    try {
+      const items = (await pullsCommentList({
+        projectId: currentProjectId.value!,
+        index: p.index,
+      })) as unknown as IssueCommentDto[];
+      panel.items = items;
+    } catch (e) {
+      const err = e as { messageText?: string };
+      panel.error = err.messageText ?? '加载评论失败';
+    } finally {
+      panel.loading = false;
+    }
+  }
+
+  /** 发布 PR 评论 */
+  async function postComment(p: PullDto, body: string): Promise<void> {
+    const panel = getPanel(p.index);
+    panel.posting = true;
+    try {
+      await pullsCommentCreate({
+        projectId: currentProjectId.value!,
+        index: p.index,
+        body,
+      });
+      await fetchComments(p);
+    } catch (e) {
+      const err = e as { messageText?: string };
+      throw new Error(err.messageText ?? '发布失败');
+    } finally {
+      panel.posting = false;
+    }
+  }
+
+  /** 编辑 PR 评论 */
+  async function editComment(p: PullDto, commentId: number, body: string): Promise<void> {
+    try {
+      await pullsCommentUpdate({
+        projectId: currentProjectId.value!,
+        commentId,
+        body,
+      });
+      await fetchComments(p);
+    } catch (e) {
+      const err = e as { messageText?: string };
+      throw new Error(err.messageText ?? '编辑失败');
+    }
+  }
+
+  /** 删除 PR 评论 */
+  async function removeComment(p: PullDto, commentId: number): Promise<void> {
+    try {
+      await pullsCommentDelete({
+        projectId: currentProjectId.value!,
+        commentId,
+      });
+      const panel = getPanel(p.index);
+      panel.items = panel.items.filter((c) => c.id !== commentId);
+    } catch (e) {
+      const err = e as { messageText?: string };
+      throw new Error(err.messageText ?? '删除失败');
+    }
+  }
+
+  // ===== Review actions =====
+
+  /** 加载 PR 评审列表 */
+  async function fetchReviews(p: PullDto): Promise<void> {
+    try {
+      const items = (await pullsReviewsList({
+        projectId: currentProjectId.value!,
+        index: p.index,
+      })) as unknown as PullReviewDto[];
+      reviewPanels.value.set(p.index, items);
+    } catch { /* 静默 */ }
+  }
+
+  /** 提交 PR 评审 */
+  async function submitReview(p: PullDto, event: string, body: string): Promise<void> {
+    reviewSubmitting.value = true;
+    try {
+      await pullsReviewCreate({
+        projectId: currentProjectId.value!,
+        index: p.index,
+        body,
+        event,
+      });
+      reviewEditorOpen.value.delete(p.index);
+      reviewEditorBody.value.delete(p.index);
+      await fetchReviews(p);
+    } catch (e) {
+      const err = e as { messageText?: string };
+      throw new Error(err.messageText ?? '提交审查失败');
+    } finally {
+      reviewSubmitting.value = false;
+    }
+  }
+
+  // ===== 文件评论 actions（v0.5.0 M4） =====
+
+  /**
+   * 加载 PR 行内评审评论
+   * 返回指定 PR index 的所有 review comments
+   */
+  async function loadReviewComments(projectId: string, index: number): Promise<PullReviewCommentDto[]> {
+    try {
+      const comments = (await pullsReviewCommentsList({
+        projectId,
+        index,
+      })) as unknown as PullReviewCommentDto[];
+      reviewCommentsByPR.value.set(index, comments);
+      return comments;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 加载 PR 修改文件列表
+   * 低版本后端不支持时返空数组
+   */
+  async function loadFiles(projectId: string, index: number): Promise<PullFileDto[]> {
+    try {
+      const files = (await pullsFilesList({
+        projectId,
+        index,
+      })) as unknown as PullFileDto[];
+      filesByPR.value.set(index, files);
+      return files;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 加载单个文件的 diff（单文件）
+   * 返回 PullFileDiffDto（按 hunks 解析）
+   */
+  async function loadFileDiff(
+    projectId: string,
+    index: number,
+    filePath: string,
+  ): Promise<PullFileDiffDto | undefined> {
+    const cacheKey = `${index}:${filePath}`;
+    const cached = fileDiffByPath.value.get(cacheKey);
+    if (cached) return cached;
+    try {
+      const diff = (await pullsFileDiffGet({
+        projectId,
+        index,
+        filePath,
+      })) as unknown as PullFileDiffDto;
+      if (diff && diff.filename) {
+        fileDiffByPath.value.set(cacheKey, diff);
+        return diff;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   function clearError(): void {
@@ -313,16 +520,30 @@ export const usePullStore = defineStore('pull', () => {
     currentPage,
     hasMore,
     PAGE_SIZE,
-    // filter
     filter,
     search,
-    // selection
     currentSelectedItem,
+    // 评论面板
+    commentPanels,
+    // 评审面板
+    reviewPanels,
+    reviewSubmitting,
+    reviewEditorOpen,
+    reviewEditorEvent,
+    reviewEditorBody,
+    // 文件评论状态（v0.5.0 M4）
+    reviewCommentsByPR,
+    filesByPR,
+    fileDiffByPath,
     // getters
     total,
     counts,
     filteredItems,
     getByIndex,
+    reviewCommentsGrouped,
+    getPanel,
+    getReviewPanel,
+    timelineItems,
     // actions
     list,
     loadMore,
@@ -333,14 +554,24 @@ export const usePullStore = defineStore('pull', () => {
     mergePull,
     closePull,
     clearError,
+    // 评论
+    fetchComments,
+    postComment,
+    editComment,
+    removeComment,
+    // 评审
+    fetchReviews,
+    submitReview,
+    // 文件评论
+    loadReviewComments,
+    loadFiles,
+    loadFileDiff,
   };
 });
 
-/** 内部 helper：判断某合并请求是否命中 filter 维度 */
 function matchFilter(p: PullDto, f: PullFilter): boolean {
   if (f === 'all') return true;
   if (f === 'open') return p.state === 'open';
   if (f === 'merged') return p.state === 'closed' && p.merged;
-  // 'closed' = state==closed 但未 merged
   return p.state === 'closed' && !p.merged;
 }

@@ -185,6 +185,30 @@ func listGitRemotes(localPath string) ([]string, error) {
 	return strings.Fields(string(out)), nil
 }
 
+// repoIsShallow 检测本地仓库是否为 shallow clone（用于判断是否需要 --unshallow）
+//
+// v0.6.3 根因修复：UnrealEngine 测试仓库滚不到底报「加载更多不生效」。
+//
+//	背景：gh repo clone 初始化时传了 --no-single-branch，但 gh 内部仍会按
+//	single-branch 初始化 remote.origin.fetch（+refs/heads/release），而且
+//	本机仓库 .git/shallow 有 78 条记录——clone 阶段就是 shallow clone。
+//	用户后续 fetch 阶段，调用方传 depth=0 期望「拉全量」，但 git fetch
+//	在 shallow repo 状态下默认不会 deepen（必须显式 --unshallow），
+//	导致本地 commit 数永远停在浅克隆的状态。
+//
+// 检测方法：.git/shallow 文件存在即 shallow clone（兼容 bare 仓库直接 shallow）。
+func repoIsShallow(localPath string) bool {
+	for _, p := range []string{
+		filepath.Join(localPath, ".git", "shallow"),
+		filepath.Join(localPath, "shallow"),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func fetchRemoteWithFilter(localPath, remote string, depth int, token string) error {
 	args := []string{
 		"-c", "credential.helper=!gh auth git-credential",
@@ -194,6 +218,13 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 
 	if depth > 0 {
 		args = append(args, fmt.Sprintf("--depth=%d", depth))
+	} else if repoIsShallow(localPath) {
+		// v0.6.3 修复：depth=0（无限制）+ shallow repo → 显式 --unshallow
+		// git fetch 在 shallow repo 默认不 deepen；不传 --unshallow 会导致
+		// fetch 「看起来成功」但本地 commit 数永远停在浅克隆状态（UnrealEngine
+		// 测试仓库 4492 commits，GitHub 实际 264k）。如果仓库不是 shallow，
+		// 下面的 --unshallow 不传即可，避免 git 报「not a shallow repository」。
+		args = append(args, "--unshallow")
 	}
 
 	args = append(args,
@@ -223,7 +254,6 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 
 	return nil
 }
-
 
 // configureGHCommandEnv 给 gh 命令注入 env（GH_TOKEN + 防认证锁）。
 //

@@ -14,15 +14,18 @@
  * - Gitea web_src/css/features/gitgraph.css（flow-color-16-N 16 色变量）
  */
 
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitCommit, RotateCw, GitBranch, Tag } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
+import { logError } from '@renderer/lib/frontend-log';
 import {
   commitsGitgraphLines,
   commitsGitgraphCloneRepo,
   commitsGitgraphPull,
+  getIpcClient,
 } from '@renderer/lib/ipc-client';
+import { GitSyncProgressEvent } from '@renderer/types/sync-progress';
 // v0.4.0：删除 deepenRepo 「加载更多」 import + 调用（GitHub 仓库 UI 与 Gitea 对齐，
 //         「加载更多」按钮 + 滚动监听整段移除；commit ba0b41c 一次性收口）
 import EmptyState from '@renderer/components/EmptyState.vue';
@@ -39,6 +42,7 @@ import {
   VSCODE_COLORS,
   type VscodeSvgRenderResult,
 } from '@renderer/lib/gitgraph/vscode-render';
+import GitCommitHeatmap from '@renderer/components/GitCommitHeatmap.vue';
 
 // ============================================================
 // 常量
@@ -58,6 +62,13 @@ const repo = useRepoStore();
 // 对齐 vscode-git-graph 默认分页：initialLoad=300。
 // v0.4.0：移除「加载更多」分页机制（GitHub 仓库 UI 与 Gitea 对齐），固定用 INITIAL_GRAPH_LIMIT。
 const INITIAL_GRAPH_LIMIT = 300;
+/**
+ * v0.7.3：当前加载上限（对齐 vscode-git-graph 的 maxCommits）。
+ * 初始 = INITIAL_GRAPH_LIMIT；每次「加载更多」增加 INITIAL_GRAPH_LIMIT。
+ * 后端从 offset=0 拉取 maxCommits+1 条（+1 用于判断 truncated），layout 从 0 分配 row。
+ * 前端整体替换 graphDto，不追加 —— 严格复刻 vscode-git-graph 做法。
+ */
+const maxCommits = ref(INITIAL_GRAPH_LIMIT);
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 const activeRepo = computed(() => {
   const fn = repo.currentProject
@@ -80,6 +91,12 @@ const loadingMore = ref(false);
 const allLoaded = ref(false);
 /** 本地错误信息 */
 const localError = ref<string | null>(null);
+/** 本地 commit 已全部取出，后端正在后台 deepen 拉取远端更早历史 */
+const localExhausted = ref(false);
+/** 后端 deepen 已启动，前端等待 repo:sync:progress done 后自动重试 */
+const deepenInProgress = ref(false);
+/** 等待 deepen 完成的重试定时器（避免内存泄漏） */
+let deepenRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Git Graph 加载更多文字显示控制（与 StatusBarPulse 动效同步）：
@@ -109,6 +126,17 @@ const pulling = ref(false);
 // v0.6.1+ Git Graph 滚动加载更多：哨兵 + IntersectionObserver
 const loadMoreSentinel = ref<HTMLElement | null>(null);
 let loadMoreObserver: IntersectionObserver | null = null;
+// v0.7.4：防抖时间戳 + 冷却常数，避免链式触发
+let lastLoadMoreTime = 0;
+const LOAD_MORE_COOLDOWN_MS = 400;
+
+/** v0.6.2：滚动容器 ref，用于「刷新」按钮 smooth scroll 到顶部
+ *  - 复用现有 .timeline-new__main DOM（无需新增 wrapper）
+ *  - 只在 goToLatest 内访问；其他滚动场景（watch(expandedSha)）继续走 querySelector
+ *    避免与 watcher 内同名局部变量冲突
+ */
+const mainScrollEl = ref<HTMLElement | null>(null);
+
 
 // ============================================================
 // v2.9 commit 详情：行下手风琴（inline 展开）
@@ -547,6 +575,19 @@ function onAppRefresh(): void {
 }
 
 onMounted(async () => {
+  // v1.8 KeepAlive：onMounted 仅在首次挂载时触发；数据加载由 activateData() 统一处理
+  document.addEventListener('app:refresh', onAppRefresh);
+  setupRowHeightObserver();
+  await setupLoadMoreObserver();
+  await activateData();
+});
+
+/**
+ * v1.8 KeepAlive：视图进入（含首次挂载 + 从缓存恢复）时执行数据加载
+ *   - 已缓存 graphDto 时跳过重复请求（切换回来秒开）
+ *   - 仓库列表为空时拉一次，避免首次从 /auth 跳过来时显示空状态
+ */
+async function activateData() {
   if (repo.repos.length === 0) {
     try {
       await repo.loadRepos('', true);
@@ -554,42 +595,105 @@ onMounted(async () => {
       /* */
     }
   }
-  if (activeProjectId.value) {
+  if (activeProjectId.value && !graphDto.value) {
     await loadGraph();
   }
-  // 注册全局刷新事件监听器
-  document.addEventListener('app:refresh', onAppRefresh);
-  // v3.4：动态行高对齐——数据加载后测量 + 监听尺寸变化
-  setupRowHeightObserver();
-  // v0.6.1+ Git Graph 滚动加载更多
-  setupLoadMoreObserver();
+  // v0.7.3：KeepAlive 恢复时哨兵 DOM 可能已被重建，需要重新 setup observer
+  // 确保重新进入视图后滚动加载功能可用
+  if (!loadMoreObserver) {
+    await setupLoadMoreObserver();
+  }
+}
+
+/** v1.8 KeepAlive：视图停用（进入缓存）时断开 IntersectionObserver，避免后台误触发 loadMore */
+onDeactivated(() => {
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;  // v0.7.3：清空引用，让 activateData 内重新创建
+  }
 });
 
-/** 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver */
-function setupLoadMoreObserver(): void {
+/**
+ * v1.8 KeepAlive：视图从缓存恢复时重建 IntersectionObserver + 按需加载数据
+ *
+ * 与 onDeactivated 成对：observer 在停用时断开并清空引用，在恢复时重建。
+ * activateData() 内部会检查 !loadMoreObserver 并自动重建。
+ */
+onActivated(() => {
+  void activateData();
+});
+
+/**
+ * 设置 Git Graph 滚动到底自动加载更多的 IntersectionObserver。
+ *
+ * v0.7.3 修复：把 root 设为实际滚动容器 .timeline-new__main（mainScrollEl），
+ * 而不是默认的 viewport，让哨兵在滚动容器内的可见性才是正确的判断标准。
+ *
+ * 背景：哨兵在 .timeline-new__main 内滚动，只有当它出现在滚动容器可见区域内时
+ * InterObserver 才应触发。旧实现以 viewport 为 root，当 StatusBar（33px）遮住
+ * viewport 底部时，交叉判断可能不稳定。
+ *
+ * 哨兵变化时的重新观察策略：
+ *   - 哨兵从 null → DOM：创建 observer（如果还不存在）+ observe 哨兵
+ *   - 哨兵从 DOM → null：disconnect observer 停止观察
+ *   - 哨兵 DOM 替换（v-if 重渲染）：unobserve 旧 + observe 新
+ *
+ * v0.7.7：KeepAlive 恢复时 mainScrollEl 模板 ref 可能尚未重新绑定到 DOM，
+ * 此时创建的 observer 会以 viewport 为 root，无法检测嵌套滚动容器内的哨兵。
+ * 如果 mainScrollEl 暂时为 null，先 nextTick 等待 DOM 重新插入后再创建 observer。
+ */
+async function setupLoadMoreObserver(): Promise<void> {
+  // v0.7.7：KeepAlive 恢复时，确保滚动容器 ref 已绑定到 DOM 再创建 observer。
+  // 否则 root 会变成 viewport，导致嵌套滚动容器内的哨兵检测失效。
+  if (!mainScrollEl.value) {
+    await nextTick();
+  }
+  // 如果 nextTick 后仍然没有滚动容器，说明当前视图没有可滚动的 DOM，直接放弃
+  if (!mainScrollEl.value) return;
+
+  // 清理旧 observer，避免重复观察
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
+  }
   loadMoreObserver = new IntersectionObserver(
     (entries) => {
       const e = entries[0];
       if (!e || !e.isIntersecting) return;
+      // v0.6.5：observer 回调里同样加 loadMoreGraph 已有的 guard 条件，
+      // 避免在 sentinel 已显示但仍在 IO 队列里重复入队 loadMoreGraph
+      if (loadingMore.value || allLoaded.value || !graphDto.value) return;
       void loadMoreGraph();
     },
-    { rootMargin: '200px 0px', threshold: 0 },
+    {
+      // root = 滚动容器（.timeline-new__main），null 时回退到 viewport
+      root: mainScrollEl.value ?? null,
+      // 哨兵距离滚动容器底部 200px 时提前触发，让用户无感加载
+      rootMargin: '0px 0px 200px 0px',
+      threshold: 0,
+    },
   );
   if (loadMoreSentinel.value) {
     loadMoreObserver.observe(loadMoreSentinel.value);
   }
 }
 
-// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 observe
+// v0.6.1+ 当哨兵 DOM 因 v-if 重新渲染时，重新 setup observer（重新观察新哨兵）
 watch(loadMoreSentinel, (el) => {
   if (el && loadMoreObserver) {
     loadMoreObserver.observe(el);
+  } else if (!el && loadMoreObserver) {
+    // 哨兵移除时清理 observer，避免对已不存在的节点持有引用
+    loadMoreObserver.disconnect();
+    loadMoreObserver = null;
   }
 });
 
 watch(
   () => activeProjectId.value,
   async (id) => {
+    // v0.7.3：切换仓库时重置 maxCommits，对齐 vscode-git-graph 切换仓库后重新从 0 拉取
+    maxCommits.value = INITIAL_GRAPH_LIMIT;
     if (id) await loadGraph();
   },
 );
@@ -646,18 +750,30 @@ onUnmounted(() => {
     cancelAnimationFrame(colDragRafId);
     colDragRafId = 0;
   }
+  if (deepenRetryTimer) {
+    clearTimeout(deepenRetryTimer);
+    deepenRetryTimer = null;
+  }
 });
 
 /**
- * 加载 Git Graph 数据（支持分页）
+ * 加载 Git Graph 数据。
  *
- * @param offset 跳过前 N 条 commit（0 = 首次加载）
+ * v0.7.3 修复：严格复刻 vscode-git-graph 的 loadMoreCommits 做法 ——
+ * 每次加载更多时从 offset=0 拉取 limit=总数 的全量 commit，后端 layout 算法
+ * 对完整数组从 0 分配 row，前端整体替换 graphDto。
+ *
+ * 旧做法（offset 追加）的 bug：后端 layout 每次对当次返回的 commits 从 0 分配 row，
+ * 导致 page1(row 0-299) + page2(row 0-299) 合并时 row 冲突，byRow map 被覆盖，
+ * 表现为「总条目增加，但 Commit row 不增加显示」。
+ *
+ * @param offset 保留参数（兼容旧调用），实际对外只传 0 或 INITIAL_GRAPH_LIMIT 的增量
  */
 async function loadGraph(offset = 0): Promise<void> {
   if (!activeProjectId.value) {
     return;
   }
-  const isFirstLoad = offset === 0;
+  const isFirstLoad = graphDto.value === null;
   if (isFirstLoad) {
     loading.value = true;
     localError.value = null;
@@ -668,38 +784,44 @@ async function loadGraph(offset = 0): Promise<void> {
   }
   useGlobalLoadingStore().show('timeline');
   try {
+    // v0.7.3：严格复刻 vscode-git-graph 做法 ——
+    // 始终从 offset=0 拉取 maxCommits 条，后端 layout 从 0 分配 row，前端整体替换 graphDto。
+    // 不追加、不合并，避免行号冲突（旧 bug：page1 row 0-299 + page2 row 0-299 合并时覆盖）。
     const dto = await commitsGitgraphLines({
       projectId: activeProjectId.value,
-      limit: INITIAL_GRAPH_LIMIT,
-      offset,
+      limit: maxCommits.value,
+      offset: 0,
     });
 
     const nodes = dto?.nodes ?? [];
     if (isFirstLoad && nodes.length === 0 && (dto as unknown as { disabled?: boolean }).disabled) {
       featureDisabled.value = true;
       graphDto.value = null;
-    } else if (isFirstLoad) {
-      graphDto.value = dto;
-      nextTick(() => measureRowHeights());
     } else {
-      // 分页加载：追加新 nodes 和 edges（去重）
-      if (graphDto.value) {
-        const existingSha = new Set(graphDto.value.nodes.map((n) => n.sha));
-        const newNodes = nodes.filter((n) => !existingSha.has(n.sha));
-        graphDto.value = {
-          ...graphDto.value,
-          nodes: [...graphDto.value.nodes, ...newNodes],
-          edges: [...graphDto.value.edges, ...(dto?.edges ?? [])],
-        };
-      } else {
-        graphDto.value = dto;
-      }
+      graphDto.value = dto;
+      if (isFirstLoad) nextTick(() => measureRowHeights());
     }
     // truncated = false 表示已加载全部
     allLoaded.value = !dto?.truncated;
+
+    // v0.6.2: 后端告知本地 commit 已全部取出，远端可能有更多。
+    if (dto?.localExhausted) {
+      allLoaded.value = false;
+      localExhausted.value = true;
+      deepenInProgress.value = !!dto?.deepenTriggered;
+      if (dto?.deepenTriggered && !deepenRetryTimer) {
+        await waitForDeepenAndRetry(0);
+      } else if (!dto?.deepenTriggered) {
+        allLoaded.value = true;
+        showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
+      }
+    } else {
+      localExhausted.value = false;
+      deepenInProgress.value = false;
+    }
+
     expandedSha.value = null;
   } catch (e: unknown) {
-    console.error('[TimelineNewView] loadGraph failed:', e);
     const err = e as {
       code?: string;
       messageText?: string;
@@ -707,6 +829,7 @@ async function loadGraph(offset = 0): Promise<void> {
       hint?: string;
     };
     const msg = err.messageText ?? err.message ?? String(e) ?? '加载失败';
+    logError('TimelineNewView.loadGraph', msg, e instanceof Error ? e.stack : undefined);
 
     const looksLikeDisabled =
       err.code === 'internal' &&
@@ -729,32 +852,211 @@ async function loadGraph(offset = 0): Promise<void> {
 }
 
 /**
- * 加载更多 Git Graph 数据（滚动到底自动调）
+ * 加载更多 Git Graph 数据（滚动到底自动调）。
+ *
+ * v0.7.3 修复：严格复刻 vscode-git-graph 做法 —— 增加 maxCommits 后从 offset=0 全量拉取。
+ *
+ * 根因：旧做法 offset 追加时，后端 layout 每次对当次返回的 commits 从 0 分配 row，
+ * 导致 page1(row 0-299) + page2(row 0-299) 合并时 row 冲突，byRow map 被覆盖，
+ * 表现为「总条目数增加，但 Commit row 不增加显示」。
+ *
+ * 做法（对齐 vscode-git-graph loadMoreCommits）：
+ *   - maxCommits += INITIAL_GRAPH_LIMIT（每次增加 300）
+ *   - 调 loadGraph() 从 offset=0 拉取 maxCommits 条
+ *   - 后端 layout 对完整数组从 0 分配 row
+ *   - 前端整体替换 graphDto，不追加、不合并
+ *
+ * v0.7.4 性能优化：
+ *   - 加载后不再 scrollIntoView 到底部（旧版：加载后滚到底部 → 哨兵进视口 → 又触发加载 → 链式调用）
+ *   - 改为加载前记录当前 scrollHeight，加载后保持相对位置
+ *   - 加 400ms 冷却时间避免 IntersectionObserver 快速连续触发
  */
 async function loadMoreGraph(): Promise<void> {
   if (loadingMore.value || allLoaded.value || !graphDto.value) return;
-  const offset = graphDto.value.nodes.length;
-  await loadGraph(offset);
+  // v0.7.4：冷却时间防抖，避免链式触发
+  const now = performance.now();
+  if (now - lastLoadMoreTime < LOAD_MORE_COOLDOWN_MS) return;
+  lastLoadMoreTime = now;
+  const beforeCount = graphDto.value.nodes.length;
+  // v0.7.3：增加 maxCommits（对齐 vscode-git-graph 的 maxCommits += config.loadMoreCommits）
+  maxCommits.value += INITIAL_GRAPH_LIMIT;
+  // v0.7.4：记录当前滚动状态，加载后保持位置
+  const scrollContainer = mainScrollEl.value;
+  const savedScrollTop = scrollContainer?.scrollTop ?? 0;
+  const savedScrollHeight = scrollContainer?.scrollHeight ?? 0;
+  try {
+    await loadGraph();
+  } catch {
+    // loadGraph 内部已 logError，回滚 maxCommits 并提示
+    maxCommits.value -= INITIAL_GRAPH_LIMIT;
+    showToast({ type: 'error', message: '加载更多失败，请稍后重试' });
+    return;
+  }
+  // 等 DOM 更新
+  await nextTick();
+  const allNodes = graphDto.value?.nodes ?? [];
+  const afterCount = allNodes.length;
+
+  // 加载结果 toast 反馈
+  if (afterCount > beforeCount) {
+    showToast({ type: 'success', message: `已加载 ${afterCount} 条提交`, duration: 1800 });
+  } else if (
+    allLoaded.value &&
+    !localExhausted.value &&
+    !deepenInProgress.value
+  ) {
+    showToast({ type: 'info', message: '没有更多提交记录了', duration: 2200 });
+  }
+
+  // v0.7.4：加载后保持滚动位置相对不变，不再 scrollIntoView 到底部
+  if (scrollContainer && savedScrollHeight > 0) {
+    const newScrollHeight = scrollContainer.scrollHeight;
+    const addedHeight = newScrollHeight - savedScrollHeight;
+    scrollContainer.scrollTop = savedScrollTop + addedHeight;
+  }
 }
 
 /**
- * v2.x 同步按钮（v1 旧名 pullRepo）
+ * v0.7.0：Q弹 spring 滚动到指定 scrollTop
+ *  - 用 requestAnimationFrame 自定义动画曲线，绕开浏览器 scroll-behavior: smooth 的固定缓动
+ *  - easeOutBack：t 接近 1 时有过冲（overshoot），再回落，类弹簧手感
+ *    公式：1 + c3 * (t - 1)^3 + c1 * (t - 1)^2，c1=1.55, c3=c1+1=2.55
+ *  - 距离 < 8px 时直接跳到目标，避免微小滚动触发完整动画
+ *  - 用户手动滚动（滚轮/触摸）会触发 scroll 事件，此时取消动画（避免冲突）
  *
- * 与 StatusBar 仓库选择界面的「同步/更新」按钮逻辑一致(v2.3 StatusBar 多行重写):
- *   - 未同步本地(clonedMap[owner/repo] = false)→ 调 commitsGitgraphCloneRepo
- *     (首次 clone,go-git NoCheckout 轻量模式,只拉元信息不拉工作区文件)
- *   - 已同步本地(clonedMap = true)→ 调 commitsGitgraphPull
- *     (git fetch + 更新本地 HEAD + 统计 commit 变化)
- *
- * 按钮可用性:`!loading && !pulling && activeProjectId` —— 跟 v1 旧版比,**不再依赖 localPath**:
- *   - 旧版要求 localPath 非空(导致"已 clone 但 view 不知情"时按钮永久 disabled)
- *   - 新版 Go 端 GetGitGraph / PullRepo 都按 projectId 反算 localPath(v2.4 已支持),
- *     所以前端只看 activeProjectId 就够
- *
- * 成功后:刷新本地 clonedMap 缓存 + 重新 loadGraph(显示最新 commit)
+ *  @param el 滚动容器
+ *  @param targetTop 目标 scrollTop（CSS px）
+ *  @param duration 动画时长（ms），默认 560
  */
-async function syncRepo(): Promise<void> {
+function springScrollTo(
+  el: HTMLElement,
+  targetTop: number,
+  duration = 560,
+): void {
+  const startTop = el.scrollTop;
+  const distance = targetTop - startTop;
+  if (Math.abs(distance) < 8) {
+    el.scrollTop = targetTop;
+    return;
+  }
+  // easeOutBack: c1=1.55 → 过冲约 10%，Q弹但不夸张
+  const c1 = 1.55;
+  const c3 = c1 + 1;
+  const easeOutBack = (t: number): number => {
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  };
+  let rafId = 0;
+  let cancelled = false;
+  const onUserScroll = (): void => {
+    // 用户中途手动滚 → 取消动画，避免 spring 跟用户抢控制权
+    cancelled = true;
+    cancelAnimationFrame(rafId);
+    el.removeEventListener('wheel', onUserScroll);
+    el.removeEventListener('touchstart', onUserScroll);
+    el.removeEventListener('keydown', onUserScroll);
+  };
+  // 用户主动输入源：wheel（鼠标滚轮）+ touchstart（移动端触摸）+ keydown（PgDn/Space 等）
+  el.addEventListener('wheel', onUserScroll, { passive: true, once: true });
+  el.addEventListener('touchstart', onUserScroll, { passive: true, once: true });
+  el.addEventListener('keydown', onUserScroll, { once: true });
+
+  const startTime = performance.now();
+  const tick = (now: number): void => {
+    if (cancelled) return;
+    const elapsed = now - startTime;
+    const t = Math.min(1, elapsed / duration);
+    const eased = easeOutBack(t);
+    el.scrollTop = startTop + distance * eased;
+    if (t < 1) {
+      rafId = requestAnimationFrame(tick);
+    } else {
+      // 动画结束 → 清理用户输入监听器
+      el.removeEventListener('wheel', onUserScroll);
+      el.removeEventListener('touchstart', onUserScroll);
+      el.removeEventListener('keydown', onUserScroll);
+    }
+  };
+  rafId = requestAnimationFrame(tick);
+}
+
+/**
+ * v0.6.2 滚动按需 deepen：loadGraph 返 localExhausted=true + deepenTriggered=true 时调用。
+ * 监听 wails runtime EventsEmit("git:sync:progress") 事件，Stage=done 后自动重试 loadMoreGraph。
+ *
+ * 注意：
+ *  - 不依赖 wailsEvents shim，直接用 getIpcClient().on() 与 repo store initProgressEvents 同路径
+ *  - 超时 300 秒（相当于 5 分钟，深历史 deepen 可能几十秒 ~ 几分钟）
+ *  - 超时后给用户展示「重试」按钮（localExhausted.value=true，但 deepenInProgress.value=false）
+ */
+async function waitForDeepenAndRetry(_offset: number): Promise<void> {
+  if (!activeRepo.value) return;
+  const repoKey = activeRepo.value.fullName;
+  let off: (() => void) | null = null;
+  let timedOut = false;
+  deepenInProgress.value = true;
+  try {
+    const client = getIpcClient();
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        off = client.on(GitSyncProgressEvent, (payload: unknown) => {
+          const p = payload as { repoKey?: string; stage?: string };
+          if (p?.repoKey === repoKey && p?.stage === 'done') resolve();
+        });
+      }),
+      new Promise<void>((resolve) => {
+        deepenRetryTimer = setTimeout(() => { timedOut = true; resolve(); }, 300_000);
+      }),
+    ]);
+  } finally {
+    if (off) off();
+    if (deepenRetryTimer) { clearTimeout(deepenRetryTimer); deepenRetryTimer = null; }
+    deepenInProgress.value = false;
+    localExhausted.value = false;
+  }
+  if (timedOut) return;
+  // v0.6.5：deepen 完成后直接调 loadMoreGraph() 重新尝试加载。
+  // loadMoreGraph 内部已有 guard (loadingMore/allLoaded/graphDto)，
+  // 会重新算 offset = graphDto.value.nodes.length 然后调 loadGraph(offset)。
+  // 去掉 `newOffset > offset` 判断：之前该条件不满足时会丢失自动重试，
+  // 因为 graphDto.value.nodes.length 在 deepen 后未即时变，但下一次 loadGraph offset 分页能拿到新 commit。
+  if (!allLoaded.value && graphDto.value) {
+    await loadMoreGraph();
+  }
+}
+
+/**
+ * v0.6.2 重定义：右上角按钮语义从「同步」改为「刷新」
+ *
+ * 旧版（v2.x）只做 pull + 重新渲染，用户滚到下方翻历史后还得手动滚回顶部；
+ * 而且 loadGraph(0) 整页重置会让已经滚动加载到的更深历史 commit 全部丢失。
+ *
+ * 新版语义（user 拍板 2026-07-04）：
+ *   - 拉取远端最新数据（pull / 首次 clone）
+ *   - 重新渲染最新 300 条
+ *   - **强制 smooth scroll 回列表开头**
+ *   用户主动点的按钮，他预期会跳走；想继续看历史？往下滚，loadMore 仍然生效。
+ *
+ * 流程：
+ *   1. 未 clone（clonedMap=false）→ 调 commitsGitgraphCloneRepo（NoCheckout 轻量模式）
+ *   2. 已 clone → 调 commitsGitgraphPull（git fetch + 更新本地 HEAD + 统计 addedCommits）
+ *   3. loadGraph() 重渲染顶部 300 条
+ *   4. nextTick 后 mainScrollEl.scrollTo({ top: 0, behavior: 'smooth' })
+ *   5. Toast 反馈：「已刷新」/「已刷新，同步了 N 个新提交」/ 错误
+ *
+ * 命名说明：
+ *   - UI 按钮文案「刷新」传达用户视角：一次性把图谱同步到最新并跳到顶部
+ *   - 函数名 `goToLatest` 反映代码逻辑：拉远端 + 跳到顶部（更准确）
+ *   - 内部保留 goToLatest / mainScrollEl 等英文命名，避免无谓 churn
+ *
+ * 与现有机制的关系：
+ *   - 与「滚动加载更多」互补，不冲突（loadMore 在用户向下滚时触发）
+ *   - 与 StatusBar 全局刷新按钮互补（那个只重新渲染本地数据，不拉远端）
+ *   - 与 StatusBar 仓库行末「更新」按钮互补（那个只 pull，不切回顶部）
+ */
+async function goToLatest(): Promise<void> {
   if (!activeProjectId.value) return;
+  // v0.7.3：刷新时重置 maxCommits，回到初始状态
+  maxCommits.value = INITIAL_GRAPH_LIMIT;
   pulling.value = true;
   useGlobalLoadingStore().show('timeline');
   try {
@@ -762,41 +1064,44 @@ async function syncRepo(): Promise<void> {
     const cloned = repo2 ? repo.clonedMap[`${repo2.owner}/${repo2.name}`] === true : false;
     let addedCommits = 0;
     if (!cloned) {
-      // 未同步 → 首次 clone
+      // 未同步本地 → 首次 clone（与旧版 syncRepo 行为一致）
       await commitsGitgraphCloneRepo({
         projectId: activeProjectId.value,
       });
-      // 更新 clonedMap 缓存(避免下次又走 clone 分支)
+      // 更新 clonedMap 缓存（避免下次又走 clone 分支）
       if (repo2) {
         repo.clonedMap[`${repo2.owner}/${repo2.name}`] = true;
       }
-      // clone 完后端会返 localPath,但这里前端不再依赖它;
-      // 显式让 loadGraph 重渲染用新的 local commit DAG
       showToast({
         type: 'success',
-        message: '同步成功',
-        description: `${repo2?.fullName ?? ''} 已同步到本地`,
+        message: '已刷新',
+        description: `${repo2?.fullName ?? ''} 首次同步完成`,
       });
     } else {
-      // 已同步 → pull 更新
+      // 已同步本地 → pull 更新
       const resp = await commitsGitgraphPull({
         projectId: activeProjectId.value,
       });
       addedCommits = resp.addedCommits ?? 0;
       if (addedCommits > 0) {
-        showToast({ type: 'info', message: `同步了 ${addedCommits} 个新提交` });
+        showToast({ type: 'info', message: `已刷新，同步了 ${addedCommits} 个新提交` });
       } else {
-        showToast({ type: 'info', message: '已是最新' });
+        showToast({ type: 'info', message: '已刷新，已是最新版本' });
       }
     }
-    // 重新加载 graph（显示最新 commit）
+    // 重新加载 graph（显示最新 commit + 完整 layout）
     await loadGraph();
-    // 刷新 clonedMap 缓存(让 StatusBar 仓库行按钮切到"更新")
+    // 刷新 clonedMap 缓存（让 StatusBar 仓库行按钮切到「更新」）
     await repo.refreshClonedStatus();
+    // 滚动到列表开头：等 nextTick 让 loadGraph 完成的 DOM 更新落地
+    await nextTick();
+    if (mainScrollEl.value) {
+      mainScrollEl.value.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   } catch (e: unknown) {
     const err = e as { messageText?: string; message?: string; hint?: string };
-    const msg = err.messageText ?? err.message ?? String(e) ?? '同步失败';
-    console.error('[TimelineNewView] syncRepo failed:', e);
+    const msg = err.messageText ?? err.message ?? String(e) ?? '刷新失败';
+    logError('TimelineNewView.goToLatest', msg, e instanceof Error ? e.stack : undefined);
     showToast({ type: 'error', message: msg });
   } finally {
     pulling.value = false;
@@ -804,13 +1109,14 @@ async function syncRepo(): Promise<void> {
   }
 }
 
-/** v2.x 按钮文字:根据 cloned 状态显示"同步"/"同步中…"
- *  - 跟 StatusBar 行末按钮文案风格对齐(StatusBar 未同步显示"同步",已同步显示"更新")
- *  - 这里统一叫"同步"(因为按钮在 Header 位置,顶部操作更直白;"更新"暗示已同步)
+/** v0.6.2 按钮文字：根据 pulling 状态显示「刷新」/「正在刷新…」
+ *  - UI 文案用「刷新」（与全应用其他「刷新」按钮语义对齐，如 StatusBar 主题旁的全局刷新）
+ *  - 内部函数仍叫 goToLatest（更准确表达「拉远端 + 跳到顶部」逻辑）
+ *  - loading 期间用户知道正在干啥
  */
-const syncButtonLabel = computed<string>(() => {
-  if (pulling.value) return '同步中…';
-  return '同步';
+const goToLatestLabel = computed<string>(() => {
+  if (pulling.value) return '正在刷新…';
+  return '刷新';
 });
 
 /**
@@ -838,7 +1144,7 @@ async function enableGitGraph(): Promise<void> {
     const err = e as { messageText?: string; message?: string; hint?: string };
     const msg = err.messageText ?? err.message ?? String(e) ?? '启用失败';
     cloneProgress.value = `启用失败：${msg}`;
-    console.error('[TimelineNewView] enableGitGraph failed:', e);
+    logError('TimelineNewView.enableGitGraph', '启用 Git Graph 失败', e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e));
   } finally {
     cloning.value = false;
     useGlobalLoadingStore().hide('timeline');
@@ -900,6 +1206,12 @@ function measureRowHeights(): void {
   }
 }
 
+/**
+ * v3.4：动态行高 observer（对齐 vscode main.ts:801,804）
+ *   - grid.y = (bodyHeight - headerHeight) / commits.length（动态）
+ *   - offsetY = headerHeight + grid.y/2（补偿表头）
+ *   - dot cy 精确落在每行中心，不依赖固定 24px
+ */
 function setupRowHeightObserver(): void {
   if (rowHeightResizeObserver) rowHeightResizeObserver.disconnect();
   nextTick(() => {
@@ -1739,92 +2051,80 @@ function refBadgeClass(refType?: string): string {
 
 <template>
   <div class="timeline-new">
-    <!-- ===== 顶部栏 ===== -->
-    <header class="timeline-new__topbar">
-      <div class="timeline-new__title">
-        <GitCommit :size="16" />
-        <span>Git Graph</span>
-        <span v-if="activeRepo" class="timeline-new__repo-name">{{ activeRepo.fullName }}</span>
-        <span v-else class="timeline-new__repo-name muted">请选择仓库</span>
-      </div>
+<div ref="heatmapStickyEl" class="timeline-new__heatmap-sticky">
+      <!-- v0.7.6: 标题栏 + 热力图 同行紧凑布局 -->
+      <header class="timeline-new__topbar">
+        <div class="timeline-new__title">
+          <GitCommit :size="16" />
+          <span>Git Graph</span>
+          <span v-if="activeRepo" class="timeline-new__repo-name">
+            {{ activeRepo.fullName }}
+            <span v-if="graphDto" class="timeline-new__commit-count">
+              （{{ activeCommitCount }} 条）
+            </span>
+          </span>
+          <span v-else class="timeline-new__repo-name muted">请选择仓库</span>
+        </div>
+        <div class="timeline-new__actions">
+          <button
+            class="sync-btn"
+            :title="
+              repo.clonedMap[`${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}`] === true
+                ? '拉取远端最新 commit 并回到列表开头'
+                : '克隆仓库元信息到本地并回到列表开头（go-git 轻量模式）'"
+            :disabled="loading || pulling || !activeProjectId"
+            @click="goToLatest"
+          >
+            <RotateCw :size="15" :class="{ spinning: pulling }" />
+            <span class="sync-btn__label">{{ goToLatestLabel }}</span>
+          </button>
+        </div>
+      </header>
+            <GitCommitHeatmap
+              :commits="graphDto?.nodes ?? []"
+              :months="12"
+            />
+          </div>
 
-      <div class="timeline-new__actions">
+          <!-- Git Graph -->
         <!--
-          v2.x：右上角"拉取"按钮 → 改名为"同步",逻辑跟 StatusBar 仓库选择界面一致
-            - 未同步本地 → commitsGitgraphCloneRepo(首次 clone)
-            - 已同步本地 → commitsGitgraphPull(git fetch + 更新本地 HEAD)
-            - 不再依赖 localPath(Go 端按 projectId 反算,v2.4 已支持)
-          命名:Header 顶部按钮统一叫"同步",跟 StatusBar 行末按钮文案风格对齐;
-          StatusBar 的"更新"暗示已 clone,Header 这里更直白。
+          v2.27：git-graph 整合为表格第一列 ...
+          - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
         -->
-        <button
-          class="sync-btn"
-          :title="
-            repo.clonedMap[
-              `${activeRepo?.owner ?? ''}/${activeRepo?.name ?? ''}`
-            ] === true
-              ? '从远端拉取最新 commit（git fetch + pull --rebase）'
-              : '克隆仓库元信息到本地（go-git 轻量模式，只拉 commit / tree / branch / tag）'
-          "
-          :disabled="loading || pulling || !activeProjectId"
-          @click="syncRepo"
-        >
-          <RotateCw :size="15" :class="{ spinning: pulling }" />
-          <span class="sync-btn__label">{{ syncButtonLabel }}</span>
-        </button>
-        <!-- v0.4.0：删除「加载更多」按钮 + 「滚动到底部自动加载」footer
-             （GitHub 仓库 UI 与 Gitea 对齐，统一固定 300 条初始上限）-->
-      </div>
-    </header>
 
     <!-- ===== 主内容 ===== -->
     <div
+      ref="mainScrollEl"
       class="timeline-new__main"
       :class="{ 'timeline-new__main--dragging': colDragging }"
     >
-      <div v-if="!activeRepo" class="timeline-new__placeholder">
-        <EmptyState title="请先选择一个仓库" />
-      </div>
-      <div v-else-if="localError" class="timeline-new__placeholder">
-        <EmptyState :title="localError" />
-      </div>
-      <div
-        v-else-if="featureDisabled"
-        class="timeline-new__placeholder timeline-new__placeholder--feature"
-      >
-        <EmptyState
-          title="Git Graph 功能暂未启用"
-          description="使用 go-git 轻量同步仓库元信息后，基于 commit DAG 渲染接近 Gitea 官方效果的 Git Graph。点下面按钮一键启用，克隆完成后下次进入此页面自动加载。"
-        />
-        <button
-          v-if="!cloning"
-          class="enable-gitgraph-btn"
-          @click="enableGitGraph"
-        >
-          启用 Git Graph（git clone 仓库到本地）
-        </button>
-        <div v-if="cloneProgress" class="clone-progress">
-          {{ cloneProgress }}
+        <div v-if="!activeRepo" class="timeline-new__placeholder">
+          <EmptyState title="请先选择一个仓库" />
         </div>
-      </div>
-      <div
-        v-else-if="activeCommitCount === 0"
-        class="timeline-new__placeholder"
-      >
-        <EmptyState title="没有提交记录" />
-      </div>
-
-      <!-- Git Graph -->
-      <template v-else>
-        <!--
-          v2.27：git-graph 整合为表格第一列（用户反馈"应该是整体是表格的一个列，
-                 而不是和表头分离的布局模式"）
-          - 整张 SVG + dot overlay 作为背景层铺在 body 底层（position: absolute, z-index: 0）
-          - header / commit-row 改为 5 列 grid：graph | 描述 | 作者 | 日期 | SHA
-          - 每个 commit-row 第一列是占位（高度 = ROW_H），让背景的 SVG 在每行精确对齐
-          - 完全去掉 sticky / flex 两栏的复杂 z-index 体系
-        -->
+        <div v-else-if="localError" class="timeline-new__placeholder">
+          <EmptyState :title="localError" />
+        </div>
         <div
+          v-else-if="featureDisabled"
+          class="timeline-new__placeholder timeline-new__placeholder--feature"
+        >
+          <EmptyState
+            title="Git Graph 功能暂未启用"
+            description="使用 go-git 轻量同步仓库元信息后，基于 commit DAG 渲染接近 Gitea 官方效果的 Git Graph。点下面按钮一键启用，克隆完成后下次进入此页面自动加载。"
+          />
+          <button
+            v-if="!cloning"
+            class="enable-gitgraph-btn"
+            @click="enableGitGraph"
+          >
+            启用 Git Graph（git clone 仓库到本地）
+          </button>
+          <div v-if="cloneProgress" class="clone-progress">
+            {{ cloneProgress }}
+          </div>
+        </div>
+        <div
+          v-else
           class="git-graph-wrapper"
           :data-dragging="colDragging ? '' : null"
           :style="{
@@ -1911,6 +2211,18 @@ function refBadgeClass(refType?: string): string {
             </div>
           </div>
 
+          <!--
+            v0.x：本地 0 提交时空状态嵌入表内，渲染在表头下方的表体区中心。
+            对齐 vscode-git-graph 在空仓库时把"无提交"提示画在表格内部的语义，
+            替代之前把 .timeline-new__placeholder 放在 wrapper 外（即表格上方）
+            的旧布局——用户视角下"表格里看不到任何记录"的体验更自然。
+            wrapper 内部的 flex 居中 + min-height 撑出可见区域，EmptyState 走
+            自带 padding/居中样式即可。
+          -->
+          <div v-if="activeCommitCount === 0" class="git-graph-empty">
+            <EmptyState title="没有提交记录" />
+          </div>
+
           <!-- v2.27：body 区（背景层 SVG + dot overlay + 行层 commit-row）
                v3.0：mask 渐变遮盖，对齐 vscode-git-graph Graph.applyMaxWidth (graph.ts:689-695)，
                SVG 内部完整渲染 contentWidth，外层 CSS mask 在
@@ -1954,7 +2266,15 @@ function refBadgeClass(refType?: string): string {
               提交
             </button>
           </div>
-          <div class="git-graph-body" :style="{ minHeight: svgHeight }">
+          <!--
+            v0.x：本地 0 提交时跳过 body 渲染（避免 0 height 的 SVG / 空 rows 容器
+            抢视觉焦点），由上方的 .git-graph-empty 接管。
+          -->
+          <div
+            v-if="activeCommitCount !== 0"
+            class="git-graph-body"
+            :style="{ minHeight: svgHeight }"
+          >
             <!--
               v3.1：背景层视觉宽度 = graphColumnWidth + COLUMN_LEFT_RIGHT_PADDING (24px)
               对齐 vscode main.ts:1713 --limitGraphWidth = columnWidths[0] + COLUMN_LEFT_RIGHT_PADDING
@@ -2102,6 +2422,7 @@ function refBadgeClass(refType?: string): string {
               <div
                 v-if="r.commit"
                 class="commit-row"
+                :data-sha="r.commit.sha"
                 :class="{
                   'commit-row--clickable': r.commit,
                   'commit-row--expanded': r.commit && expandedSha === r.commit.sha,
@@ -2245,11 +2566,21 @@ function refBadgeClass(refType?: string): string {
 
             <!-- v0.6.1+ Git Graph 滚动加载更多哨兵（idle 时占位保持高度让 IntersectionObserver 可检测） -->
             <div
-              v-if="!allLoaded && graphDto"
+              v-if="!allLoaded && graphDto && !localExhausted"
               ref="loadMoreSentinel"
               class="git-graph-load-more-sentinel"
               aria-hidden="true"
             ></div>
+            <!-- v0.6.2: 本地 commit 已全部取出，后台 deepen 进行中 -->
+            <div
+              v-if="localExhausted && graphDto"
+              class="git-graph-load-more git-graph-load-more-deepen"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
+              <span>{{ deepenInProgress ? '正在深化本地历史…' : '本地历史已加载完' }}</span>
+            </div>
             <!-- 加载中文字（与 StatusBarPulse 动效同步显示/隐藏，由 globalLoading 控制） -->
             <div
               v-if="showLoadMoreStatus"
@@ -2258,22 +2589,33 @@ function refBadgeClass(refType?: string): string {
               role="status"
               aria-live="polite"
             >
-              <template v-if="gitGraphLoadMoreClass === 'git-graph-load-more-loading'">
-                <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
-                <span>正在加载更多提交记录…</span>
-              </template>
-              <template v-else>
-                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
-                <span>已到全部提交记录的末尾</span>
-                <span class="git-graph-load-more-divider" aria-hidden="true"></span>
-              </template>
+              <!--
+                v0.7.0：内容切换 Q弹动画（loading → end）
+                - Vue Transition + mode="out-in"，旧内容先 180ms fade out，新内容 380ms easeOutBack 弹入
+                - c1=1.55 easeOutBack ≈ 10% 过冲后回落，Q弹柔和但不夸张
+                - 状态 class 同时在父级 .git-graph-load-more 上，CSS 也能用 :class 触发样式
+              -->
+              <Transition name="git-graph-load-more-flip" mode="out-in">
+                <div
+                  v-if="gitGraphLoadMoreClass === 'git-graph-load-more-loading'"
+                  key="loading"
+                  class="git-graph-load-more__inner"
+                >
+                  <span class="git-graph-load-more-spinner" aria-hidden="true"></span>
+                  <span>正在加载更多提交记录…</span>
+                </div>
+                <div v-else key="end" class="git-graph-load-more__inner">
+                  <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+                  <span>已到全部提交记录的末尾</span>
+                  <span class="git-graph-load-more-divider" aria-hidden="true"></span>
+                </div>
+              </Transition>
             </div>
           </div>
-        </div>
-       </template>
-     </div>
-   </div>
- </template>
+        </div><!-- /git-graph-wrapper -->
+    </div><!-- /timeline-new__main -->
+  </div>
+</template>
 
 <style scoped>
 .timeline-new {
@@ -2298,6 +2640,17 @@ function refBadgeClass(refType?: string): string {
   width: 100%;
   text-align: center;
   transition: opacity var(--t-base) var(--ease);
+}
+/*
+ * v0.7.0：内层 flex 容器，让 Transition 子元素参与 flex 布局
+ * - 旧版直接挂 spinner/divider/text，会被外层 flex 的 gap 拉扯
+ * - 内层 inline-flex 让 loading 状态（spinner+text）和 end 状态（divider+text+divider）
+ *   各自紧凑成块，Q弹动画 transform 时不影响外层布局
+ */
+.git-graph-load-more__inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .git-graph-load-more-loading {
   display: inline-flex;
@@ -2343,6 +2696,14 @@ function refBadgeClass(refType?: string): string {
   height: 1px;
   background: var(--color-divider);
 }
+/* v0.6.5：哨兵占位必须保持高度让 IntersectionObserver 能触发。
+   之前没写 CSS → div 0px 高 → 永远不被触发 → 滚到底加载不了更多 commit。
+   对齐 MergesView .merges__load-more min-height: 56px */
+.git-graph-load-more-sentinel {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 56px;
+}
 @keyframes git-graph-load-more-spin {
   to { transform: rotate(360deg); }
 }
@@ -2351,15 +2712,48 @@ function refBadgeClass(refType?: string): string {
   50% { opacity: 0.9; transform: translateY(2px); }
 }
 
-/* ===== 顶部栏 ===== */
+/*
+ * v0.7.0：内容切换 Q弹动画（mode="out-in"）
+ * - 旧内容 180ms ease-out 上移淡出
+ * - 新内容 380ms easeOutBack 弹入：6px 下移 + 0.92 scale 起手，过冲到 1.04 scale + -2px 上移，落到原位
+ * - easeOutBack 公式：1 + c3 * (t-1)^3 + c1 * (t-1)^2，c1=1.55 → ~10% 过冲后回落
+ * - 避免与外层 .git-graph-load-more 上 padding/min-height 冲突：transform 只动 inner 自身
+ */
+.git-graph-load-more-flip-leave-active {
+  animation: git-graph-load-more-flip-out 180ms ease-out;
+}
+.git-graph-load-more-flip-enter-active {
+  animation: git-graph-load-more-flip-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes git-graph-load-more-flip-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes git-graph-load-more-flip-in {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* v0.7.6: topbar 在 heatmap-sticky 内部，左边标题右边按钮 */
 .timeline-new__topbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-3, 12px);
-  padding: var(--space-3, 12px) var(--space-4, 16px);
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  background: var(--color-bg, var(--color-canvas));
 }
 .timeline-new__title {
   display: flex;
@@ -2372,9 +2766,20 @@ function refBadgeClass(refType?: string): string {
 .timeline-new__repo-name {
   color: var(--color-text-secondary);
   font-weight: 400;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .timeline-new__repo-name.muted {
   color: var(--color-text-disabled);
+}
+/* v0.7.2：commit 数量 badge，紧随仓库名之后弱化显示 */
+.timeline-new__commit-count {
+  color: var(--color-text-disabled);
+  font-weight: 400;
+  font-size: var(--font-xs);
+  white-space: nowrap;
 }
 .timeline-new__actions {
   display: flex;
@@ -2383,10 +2788,35 @@ function refBadgeClass(refType?: string): string {
   margin-left: auto;
 }
 
+/*
+ * v0.7.4：提交热力图 sticky 顶部（不参与纵向滚动）+ 横向铺开。
+ *  - position: sticky; top: 0 贴在 main 滚动容器顶部，热力图自身不滚动
+ *  - 宽 100% 不限 max-width，横向跟随容器铺开
+ *  - overflow-x: auto 让数据极多时内部横向滚动（绝不影响外层纵向滚动）
+ *  - background 跟主区画布同色，避免 sticky 跟下方 commit 行视觉脱节
+ */
+.timeline-new__heatmap-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  width: 100%;
+  background: var(--color-bg, var(--color-canvas));
+  padding: 0; /* v0.7.6: topbar 自带 padding */
+  overflow: hidden;
+  flex-shrink: 0;
+  /* v0.7.6: 让 topbar 和 heatmap 在同一视觉行 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* v0.7.6: .git-graph-header 不再需要 sticky 规则 */
+
 /* ===== 主内容 ===== */
 .timeline-new__main {
   flex: 1;
   overflow: auto;
+  /* v0.7.7：滚动条不挤压内容列（滚动条出现后 header/body 列对齐保持不变） */
+  scrollbar-gutter: stable;
 }
 .timeline-new__placeholder {
   display: flex;
@@ -2519,6 +2949,10 @@ function refBadgeClass(refType?: string): string {
   padding-right: var(--space-3, 12px);
   box-sizing: border-box;
   position: sticky;
+  /* v0.7.7：表头固定不随纵向滚动。heatmap-sticky 虽然也 sticky top:0，
+   *   但其 sticky 滚动祖先是 .timeline-new__main（overflow:auto），而其自身高度被
+   *   .timeline-new__main 包含，所以滚动时 heatmap-sticky 自然退出视口，
+   *   表头再 sticky top:0 就贴在视口顶部。 */
   top: 0;
   z-index: 5;
 }
@@ -2623,6 +3057,23 @@ function refBadgeClass(refType?: string): string {
   min-height: var(--git-graph-row-height, 24px);
 }
 
+/* v0.x：本仓库本地 0 提交时把空状态画在表格内部（表头下方的表体区）。
+ *
+ * 替代之前 .timeline-new__placeholder(height: 300px) 放在 .git-graph-wrapper
+ * 之外的旧位置——空状态和表格头/底纹分离感太强，用户视角下更像是「整页空了」。
+ * 移到 wrapper 内部 + 表头之后后，视觉重心自然落在表体中心，
+ * 配合 EmptyState 自带 padding/flex 居中即可（不需要再写一套 placeholder 高度）。
+ *
+ * min-height 320px：与原 .timeline-new__placeholder 的视觉占比接近，
+ * 在中小窗口下空状态不会被挤到表头边缘位置。 */
+.git-graph-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  padding: var(--space-5, 20px) var(--space-5, 20px);
+}
+
 /* 背景层：SVG + dot overlay，整张铺在 body 左上角
  *
  * z-index 高于 commit-row，但 pointer-events:none；这样 graph 线和圆点不会被 row hover
@@ -2650,8 +3101,8 @@ function refBadgeClass(refType?: string): string {
   z-index: 2;
   background: var(--color-graph-bg, var(--color-shell-main-bg));
   pointer-events: none;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 24px;
+  /* v0.7.4：移除 content-visibility: auto + contain-intrinsic-size，根因同 .commit-row。
+   * SVG 跳过屏外渲染后重新实例化时闪烁，滚动时 lane 圆点也出空白。 */
   overflow: visible;
   flex: 0 0 auto;
   display: block;
@@ -2865,6 +3316,16 @@ function refBadgeClass(refType?: string): string {
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
   background: transparent;
   padding: 0 var(--space-3, 12px) 0 0;
+  /*
+   * v0.7.2：scroll-margin-bottom —— 让 scrollIntoView({ block: 'end' }) 留出 StatusBar 高度空间
+   * 问题：loadMoreGraph 调 scrollIntoView({ block: 'end' }) 后，最后一行贴到视口底部 = StatusBar 顶，
+   *   被 StatusBar 遮挡，用户需手动再滚一下，这个额外滚动会再次触发 IntersectionObserver → loadMoreGraph，
+   *   loadingMore guard 拦了重复调用，但整体体验割裂（抖动 + 哨兵再次探测）。
+   * 解法：scroll-margin-bottom = StatusBar 高度（--statusbar-height: 33px）+ 8px 余量。
+   *   scrollIntoView 会把目标元素底边对齐到「视口底边 - scroll-margin-bottom」位置，
+   *   从而把最后一行完整暴露在 StatusBar 上方，用户不再需要手动补滚。
+   */
+  scroll-margin-bottom: calc(var(--statusbar-height, 33px) + 8px);
   /* v2.0：去掉 min-width: 920px —— 让行宽度跟 wrapper 走，wrapper 已 width:100%，
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
@@ -2881,11 +3342,13 @@ function refBadgeClass(refType?: string): string {
   box-sizing: border-box;
   position: relative; /* 自身建立 stacking context，让 col 内容在 SVG 之上 */
   z-index: 1;
-  /* v1.7 滚动性能优化：屏幕外 commit-row 跳过渲染（content-visibility + contain）
-   * 注意：contain: layout 与 :hover 状态不影响——hover 时只重渲染当前 row，
-   * 但浏览器对每个 row 单独走 hit-test 后才知道哪行 hover，所以 c-v: auto 仍有效。*/
-  content-visibility: auto;
-  contain-intrinsic-size: auto 24px;
+  /* v0.7.4：移除 content-visibility: auto + contain-intrinsic-size。
+   * 根因：content-visibility: auto 让浏览器跳过屏外 commit-row 的渲染，
+   * 快速滚动时新滚入区域的 DOM 需要即时实例化 + 布局 + 绘制，
+   * 出现白色空白闪烁。contain-intrinsic-size: auto 24px 的占位高度
+   * 也可能与实际行高(24px + accordion 展开时不固定)不匹配，占位不准加剧空白。
+   * 对于 600-900 行的现代浏览器，不依赖 cv: auto 也能流畅滚动。
+   * 如果未来行数破千引发性能问题，再考虑改用虚拟滚动(只渲染可视区域+buffer)。 */
 }
 /* v2.36：commit-row hover 时给 4 个内容列加背景
  * v2.36 改动：graph 占位列也加入 hover 背景(之前注释说"让 SVG 始终透出"故意排除)

@@ -78,6 +78,15 @@ normalize_commit_subject() {
 guess_commit_type() {
   local FIRST
   FIRST="$(primary_changed_file)"
+  # v0.5.0 bugfix 复盘 (ac897fc): primary 是项目文档但同时改了非文档代码/视图时，
+  # type 不应该选 docs（否则 fallback 会生成 docs: 伪装标题被 commit-msg hook 拦下）。
+  # 先看是否有非文档改动，有的话用 primary_non_doc_file 重新判定。
+  if has_non_doc_changes; then
+    FIRST="$(primary_non_doc_file || true)"
+    if [ -z "$FIRST" ]; then
+      FIRST="$(primary_changed_file)"
+    fi
+  fi
   if printf '%s\n' "$FIRST" | grep -Eq '(^|/)(README|AGENTS|CLAUDE|docs/|.*\.md$)'; then
     printf 'docs'
   elif printf '%s\n' "$FIRST" | grep -Eq '(^|/)(.*(_test|\.test|\.spec)\.|tests?/)' ; then
@@ -108,10 +117,61 @@ primary_changed_file() {
   printf '%s' "$FIRST"
 }
 
+# v0.5.0 bugfix 复盘 (ac897fc)：「docs: 更新项目文档」 commit 实际改了
+# frontend/src/stores/pull.ts + frontend/src/views/MergesView.vue + 删除 scripts/review_code.go，
+# 因为 primary_changed_file 拿到 AGENTS.md 就把 type 判为 docs、area 判为「项目文档」。
+# commit-msg hook 能拦住 docs: 伪装 commit，但更上游应该不生成这种 subject。
+#
+# has_non_doc_changes: 当 staged/工作区中有任何不属于 docs 白名单的文件时返回 0，
+# 让 describe_changed_area 跳过 docs 区域，避免后续 fallback 生成 docs: 标题。
+has_non_doc_changes() {
+  local FILES F
+  FILES="$(git diff --cached --name-only 2>/dev/null; git diff --name-only 2>/dev/null)"
+  while IFS= read -r F; do
+    [ -z "$F" ] && continue
+    case "$F" in
+      AGENTS.md|CLAUDE.md|README*|CHANGELOG*|LICENSE*|CONTRIBUTING*|CODE_OF_CONDUCT*) continue ;;
+      docs/*|*.md|.github/*) continue ;;
+      *) return 0 ;;
+    esac
+  done <<EOF
+$FILES
+EOF
+  return 1
+}
+
+# primary_non_doc_file: 当 staged/工作区中有非文档文件时返回首个非文档文件路径。
+# (在 hooks 路径里的优先于其他)
+primary_non_doc_file() {
+  local FILES F
+  FILES="$(git diff --cached --name-only 2>/dev/null; git diff --name-only 2>/dev/null)"
+  while IFS= read -r F; do
+    [ -z "$F" ] && continue
+    case "$F" in
+      AGENTS.md|CLAUDE.md|README*|CHANGELOG*|LICENSE*|CONTRIBUTING*|CODE_OF_CONDUCT*) continue ;;
+      docs/*|*.md|.github/*) continue ;;
+      *) printf '%s' "$F"; return 0 ;;
+    esac
+  done <<EOF
+$FILES
+EOF
+  return 1
+}
+
 describe_changed_area() {
-  local FIRST BASE AREA
+  local FIRST BASE AREA NON_DOC
   FIRST="$(primary_changed_file)"
   BASE="${FIRST##*/}"
+  # v0.5.0 bugfix 复盘 (ac897fc): 当 primary 是项目文档但同时改了非文档代码/视图时，
+  # area 不应该选「项目文档」(否则 fallback 会生成 docs: 伪装标题，被 commit-msg hook 拦下)。
+  # 直接用首个非文档文件作为 area 源头。
+  if has_non_doc_changes; then
+    NON_DOC="$(primary_non_doc_file || true)"
+    if [ -n "$NON_DOC" ]; then
+      FIRST="$NON_DOC"
+      BASE="${FIRST##*/}"
+    fi
+  fi
   case "$FIRST" in
     frontend/src/views/TimelineNewView.vue) AREA="git-graph 时间线" ;;
     frontend/src/components/*) AREA="${BASE%.*} 组件" ;;

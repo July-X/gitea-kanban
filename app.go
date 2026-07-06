@@ -20,6 +20,8 @@ import (
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/gitbinary"
 	"gitea-kanban/app/ipc"
+	"gitea-kanban/app/logexport"
+	"gitea-kanban/app/logx"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/platform/gitea"
 	"gitea-kanban/app/platform/github"
@@ -54,18 +56,41 @@ func NewApp() *App {
 	return &App{}
 }
 
+// newBindingCtx 为每次 binding 调用生成带 reqID 的局部 ctx
+//
+// 设计动机（v0.6.0）：
+//
+//   - 一次 binding 调用是一次「业务操作」,所有后续日志应该能用同一个 reqID 贯穿
+//
+//   - a.ctx 是共享的、不能改（并发 binding 会竞态）
+//
+//   - 本 helper 生成 ctx 副本,业务 binding 第一行调一下即可:
+//
+//     ctx := a.newBindingCtx("CloneRepo")
+//     a.logger.InfoContext(ctx, "...")
+//
+// 这样 grep main.log "reqID=bind-CloneRepo-xxx" 能一次性看到整个调用栈。
+func (a *App) newBindingCtx(op string) context.Context {
+	reqID := "bind-" + op + "-" + uuid.NewString()[:8]
+	return logx.WithReqID(a.ctx, reqID)
+}
+
 // OnStartup 在 Wails 前端启动前调用
 func (a *App) OnStartup(ctx context.Context) {
-	a.ctx = ctx
+	// v0.6.0 · 生成启动期 reqID，让启动期日志都有同一个 reqID 贯穿
+	// 背景：之前启动期日志裸写,一条条看不到关联。启动阶段是一次「冷启动操作」,
+	// reqID 串起来能让用户反馈问题时一次性看到启动期所有事件
+	a.ctx = logx.WithReqID(ctx, "startup-"+uuid.NewString()[:8])
 
 	// 1. 解析数据根目录
 	a.dataDir = config.ResolveDataDir()
 
-	// 2. 初始化日志（写文件 ${dataDir}/logs/main/main.log）
+	// 2. 初始化日志（写文件 ${dataDir}/logs/main/main-YYYY-MM-DD.log）
 	//
 	// v2.2 简化（user 拍板 2026-06-22）：之前的 "${dataDir}/workspace/logs/..." 太深
 	// 现在 logs / state / dev-tokens 直接放 ${dataDir} 下
 	// git repos 才进 ${dataDir}/workspace
+	// v0.6.0 重写：slog + 自研 dailyRotateHandler 按天切分 + 14d GC
 	a.logger = config.NewLogger(a.dataDir)
 	a.logger.Info("gitea-kanban starting", "dataDir", a.dataDir, "version", "2.0.0")
 
@@ -273,6 +298,57 @@ func (a *App) OpenDataDir() error {
 	return nil
 }
 
+// OpenDesktopFolder 用系统文件管理器打开用户桌面目录
+//
+// 跨平台实现：
+//   - macOS: `open <path>`
+//   - Windows: `explorer <path>`
+//   - Linux: `xdg-open <path>`
+//
+// 优先使用 logexport.DesktopDir() 解析桌面路径；
+// 若结果为空，fallback 到 os.UserHomeDir()。
+// 失败时返 *ipc.IpcError（前端可展示 toast）
+func (a *App) OpenDesktopFolder() error {
+	desktopPath := logexport.DesktopDir()
+	if desktopPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ipc.NewInternal("获取桌面目录失败：" + err.Error())
+		}
+		desktopPath = home
+	}
+
+	// 确保目录存在（避免打开空目录时某些 OS 报错）
+	if err := os.MkdirAll(desktopPath, 0o755); err != nil {
+		return ipc.NewInternal("确保桌面目录存在失败：" + err.Error())
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", desktopPath)
+	case "windows":
+		cmd = exec.Command("explorer", desktopPath)
+	default: // linux + 其它 unix
+		cmd = exec.Command("xdg-open", desktopPath)
+	}
+
+	if a.logger != nil {
+		a.logger.Info("OpenDesktopFolder", "path", desktopPath, "cmd", cmd.String())
+	}
+
+	if err := cmd.Start(); err != nil {
+		return ipc.NewInternal("打开桌面目录失败：" + err.Error())
+	}
+
+	// 不等 cmd.Wait() —— `open` / `xdg-open` / `explorer` 都是 detach 模式
+	// 等会阻塞到子进程退出才返回
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return nil
+}
+
 // ===== v2.x 前端日志统一记录（前后端共用 slog）=====
 //
 // 设计动机：
@@ -308,13 +384,21 @@ const (
 
 // LogFrontendArgs 前端日志参数
 //
-// source 标识调用方(toast / console / window.onerror / unhandledrejection / 其它),
+// v0.6.0 增虽:
+//   - ReqID: 与本次请求/操作联动的请求 ID。后端从 ctx 补上时,
+//     优先用后端 ctx 里的,后端没有时用前端传来的
+//   - AccountID/ProjectID: 与业务联动,被后端溯源调用栈(当前实现走简单取传)
+//   - Source: 调用方(toast / console / window.onerror / unhandledrejection / 其它)
+//
 // 写日志时落到 src 字段方便过滤。
 type LogFrontendArgs struct {
 	Level       LogFrontendLevel `json:"level"`
 	Message     string           `json:"message"`
 	Description string           `json:"description,omitempty"`
 	Source      string           `json:"source,omitempty"`
+	ReqID       string           `json:"reqID,omitempty"`
+	AccountID   string           `json:"accountID,omitempty"`
+	ProjectID   string           `json:"projectID,omitempty"`
 }
 
 // LogFrontend 前端日志统一入口（fire-and-forget）
@@ -324,7 +408,11 @@ type LogFrontendArgs struct {
 //   - level 不在白名单 → 当成 info（防前端传 'panic' / 'fatal' 等让 slog 不识别）
 //   - description 截断到 1024 字符（防恶意前端打爆日志文件）
 //   - 永远不返回 error（Wails binding 抛错会触发前端 unhandledrejection 死循环）
+//   - panic recovery（v0.6.0）：binding 里的 panic 不会击穿到 Wails 外面,
+//     会被 recover 后落盘 main.log,下次启动反馈问题时能看到
 func (a *App) LogFrontend(args LogFrontendArgs) {
+	defer logx.Recover(a.logger, "App.LogFrontend")
+
 	if a.logger == nil {
 		return
 	}
@@ -350,11 +438,144 @@ func (a *App) LogFrontend(args LogFrontendArgs) {
 		slogLevel = slog.LevelInfo
 	}
 
+	// ctx 透传 + 前端覆盖：后端 ctx 有 reqID 则优先(后端是 source of truth),
+	// 前端传的 reqID 作为 fallback
+	ctx := a.ctx
+	if logx.ReqID(ctx) == "" && args.ReqID != "" {
+		ctx = logx.WithReqID(ctx, args.ReqID)
+	}
+	if logx.AccountID(ctx) == "" && args.AccountID != "" {
+		ctx = logx.WithAccountID(ctx, args.AccountID)
+	}
+	if logx.ProjectID(ctx) == "" && args.ProjectID != "" {
+		ctx = logx.WithProjectID(ctx, args.ProjectID)
+	}
+
 	// 写日志：source 字段方便 grep,desc 留原文方便定位
-	a.logger.Log(a.ctx, slogLevel, args.Message,
+	a.logger.Log(ctx, slogLevel, args.Message,
 		"src", args.Source,
 		"desc", desc,
 	)
+}
+
+// ===== v0.6.0 日志导出 / Bug 上报 =====
+//
+// 把 app/logexport 包的能力通过 Wails binding 暴露给前端：
+//   - ExportLogs: 一键打包 zip 到桌面（logs + state.json 脱敏 + 元信息）
+//   - CopyRecentLogs: 读最近 N 条日志到剪贴板（贴 issue 用）
+
+// ExportLogsArgs 导出日志参数
+type ExportLogsArgs struct {
+	// MaxLogs 最多包含几个日志文件（默认 5）
+	MaxLogs int `json:"maxLogs,omitempty"`
+}
+
+// ExportLogsResult 导出结果
+type ExportLogsResult struct {
+	ZipPath     string   `json:"zipPath"`
+	LogCount    int      `json:"logCount"`
+	LogBytes    int64    `json:"logBytes"`
+	StateBytes  int64    `json:"stateBytes"`
+	GeneratedAt string   `json:"generatedAt"`
+	LogFiles    []string `json:"logFiles"`
+}
+
+// ExportLogs 一键导出日志 zip 到桌面
+//
+// 打包内容：
+//   - app.json（版本/平台/数据目录/时间戳等元信息）
+//   - state.json（token/password/secret 字段自动脱敏）
+//   - logs/main-YYYY-MM-DD.log（最近 N 天）
+//
+// 文件名：gitea-kanban-logs-YYYY-MM-DD-HHMMSS.zip
+func (a *App) ExportLogs(args ExportLogsArgs) (*ExportLogsResult, error) {
+	ctx := a.newBindingCtx("ExportLogs")
+	defer logx.Recover(a.logger, "App.ExportLogs")
+
+	if a.logger == nil {
+		return nil, ipc.NewInternal("logger 未初始化")
+	}
+
+	desktopPath := logexport.DesktopDir()
+	if desktopPath == "" {
+		// 桌面目录解析失败 → fallback 到 home
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, ipc.NewInternal("无法解析桌面目录")
+		}
+		desktopPath = home
+	}
+
+	logDir := filepath.Join(a.dataDir, "logs", "main")
+	statePath := filepath.Join(a.dataDir, "state.json")
+
+	summary, err := logexport.Export(logexport.ExportOptions{
+		DesktopPath: desktopPath,
+		LogDir:      logDir,
+		StatePath:   statePath,
+		Version:     "2.0.0",
+		Platform:    runtime.GOOS,
+		DataDir:     a.dataDir,
+		MaxLogs:     args.MaxLogs,
+	})
+	if err != nil {
+		a.logger.ErrorContext(ctx, "ExportLogs 失败", "err", err)
+		return nil, ipc.NewInternal(fmt.Sprintf("导出日志失败: %v", err))
+	}
+
+	a.logger.InfoContext(ctx, "ExportLogs 完成",
+		"zipPath", summary.ZipPath,
+		"logCount", summary.LogCount,
+		"logBytes", summary.LogBytes,
+	)
+
+	return &ExportLogsResult{
+		ZipPath:     summary.ZipPath,
+		LogCount:    summary.LogCount,
+		LogBytes:    summary.LogBytes,
+		StateBytes:  summary.StateBytes,
+		GeneratedAt: summary.GeneratedAt,
+		LogFiles:    summary.LogFiles,
+	}, nil
+}
+
+// CopyRecentLogsArgs 复制最近日志参数
+type CopyRecentLogsArgs struct {
+	// MaxBytes 字节上限（默认 64KB）
+	MaxBytes int `json:"maxBytes,omitempty"`
+}
+
+// CopyRecentLogsResult 复制结果
+type CopyRecentLogsResult struct {
+	Content string `json:"content"`
+	Bytes   int    `json:"bytes"`
+}
+
+// CopyRecentLogs 读最近 N 条日志（贴 issue 用）
+//
+// 读最近 3 天的 main-*.log，截取尾部 maxBytes 字节。
+// 前端拿到 content 后调剪贴板 API 复制。
+func (a *App) CopyRecentLogs(args CopyRecentLogsArgs) (*CopyRecentLogsResult, error) {
+	ctx := a.newBindingCtx("CopyRecentLogs")
+	defer logx.Recover(a.logger, "App.CopyRecentLogs")
+
+	if a.logger == nil {
+		return nil, ipc.NewInternal("logger 未初始化")
+	}
+
+	logDir := filepath.Join(a.dataDir, "logs", "main")
+	content, err := logexport.ReadRecentLogs(logDir, args.MaxBytes)
+	if err != nil {
+		a.logger.ErrorContext(ctx, "ReadRecentLogs 失败", "err", err)
+		return nil, ipc.NewInternal(fmt.Sprintf("读取日志失败: %v", err))
+	}
+
+	a.logger.InfoContext(ctx, "CopyRecentLogs 完成", "bytes", len(content))
+
+	return &CopyRecentLogsResult{
+		Content: content,
+		Bytes:   len(content),
+	}, nil
 }
 
 // ===== v2.4 用户偏好（prefs）=====
@@ -458,6 +679,12 @@ type GraphResultDTO struct {
 	Branches  []GraphBranchDTO `json:"branches,omitempty"`
 	MaxLane   int              `json:"maxLane"`
 	Truncated bool             `json:"truncated"`
+	// LocalExhausted 本地 commit 已全部取出，远端可能有更多（需 deepen）。
+	// 前端据此显示「本地历史已加载完」提示 + 是否加载更早历史的按钮。
+	LocalExhausted bool `json:"localExhausted"`
+	// DeepenTriggered 后端已启动后台增量 deepen 拉取远端 commit。
+	// 前端收到此信号时不该再次触发 deepen，等待 repo:sync:progress 事件即可。
+	DeepenTriggered bool `json:"deepenTriggered"`
 }
 
 // GraphBranchDTO 一条完整 branch path（对齐 platform.GraphBranchDTO）
@@ -866,13 +1093,14 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 	head := git.ResolveLocalHead(localPath)
 
 	// 6. token 透传给 adapter（go-git 用 BasicAuth，不需要 user 传）
-	_ = token
+	// v0.6.2: token 也用于 offset 越界时后台 deepen 认证。
 
 	result, err := adapter.LogGraph(a.ctx, localPath, platformAdapter.LogGraphOpts{
 		Branches: args.Branches,
 		MaxCount: args.MaxCount,
 		Head:     head,
 		Offset:   args.Offset,
+		Token:    token,
 	})
 	if err != nil {
 		return GraphResultDTO{}, err
@@ -1472,8 +1700,8 @@ type WorkspaceInfo struct {
 	// 由应用根据业务自动创建，前端不应让用户直接选择这个路径
 	// (用户只选 DataRoot 即可，workspace 是应用内部约定)。
 	WorkspacePath string `json:"workspacePath"`
-	IsDefault bool   `json:"isDefault"`
-	Validated bool   `json:"validated"`
+	IsDefault     bool   `json:"isDefault"`
+	Validated     bool   `json:"validated"`
 }
 
 // GetWorkspace 返回当前数据根目录（**用户可感知的"全局路径"**）
@@ -1495,8 +1723,8 @@ func (a *App) GetWorkspace() WorkspaceInfo {
 	return WorkspaceInfo{
 		DataRoot:      root,
 		WorkspacePath: wsPath,
-		IsDefault: true, // 永远默认（不可改）
-		Validated: validated,
+		IsDefault:     true, // 永远默认（不可改）
+		Validated:     validated,
 	}
 }
 
@@ -1641,8 +1869,8 @@ func (a *App) OpenGitBinaryPicker() (string, error) {
 
 	options := func(title string, filters []wailsruntime.FileFilter) (string, error) {
 		return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-			Title:           title,
-			Filters:         filters,
+			Title:            title,
+			Filters:          filters,
 			DefaultDirectory: initialDir,
 		})
 	}
@@ -1871,8 +2099,16 @@ type ListReposResp struct {
 //  3. adapter.ListRepos 拉远端列表
 //  4. merge localStore.Projects 标记 isProject / lastSyncAt
 func (a *App) ListRepos(args ListReposArgs) (ListReposResp, error) {
+	// v0.6.0 生成 reqID，让 ListRepos 内部所有日志能贯穿
+	ctx := a.newBindingCtx("ListRepos")
+	defer logx.Recover(a.logger, "ListRepos")
+
 	if a.logger != nil {
-		a.logger.Info("ListRepos", "giteaAccountId", args.GiteaAccountID, "query", args.Query, "page", args.Page)
+		a.logger.InfoContext(ctx, "ListRepos",
+			"giteaAccountId", args.GiteaAccountID,
+			"query", args.Query,
+			"page", args.Page,
+		)
 	}
 
 	// 1. 找 account
@@ -2347,41 +2583,30 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 	}
 
 	// 5. 调 git.PullRepo（v2.6：装 progress 回调）
-	singleBranch := account.Platform == "github"
-	depth := 0
-	countLimit := 500
-
-	// v2.7：超大仓库优化（UnrealEngine / Chromium 等）
-	// 识别超大仓库的启发式规则：repo 名称包含已知大仓库关键词
-	isHugeRepo := strings.Contains(strings.ToLower(project.Name), "unreal") ||
-		strings.Contains(strings.ToLower(project.Name), "chromium") ||
-		strings.Contains(strings.ToLower(project.Name), "linux") ||
-		strings.Contains(strings.ToLower(project.Name), "webkit")
-
-	if singleBranch {
-		// v2.x 修复 July-X/UnrealEngine 渲染卡死：深度与 largeRepoGraphDepth 对齐到 2000。
-		// 5000 会拉到 release 中段超宽 merge 历史（单行 1407 lane），前端渲染卡死。
-		// 2000 以内 graph 很窄（列宽 ≤3），更早历史交给「加载更多」+ RunGraphLog 超宽回退保护。
-		depth = 2000
-		countLimit = 2000
-		if isHugeRepo {
-			// gh blobless fetch 已经足够快：初始同步允许最多 5 分钟，
-			// 先给 Git Graph 一个更可用的近期窗口；更早历史交给用户手动"加载更多"。
-			depth = 2000
-			countLimit = 2000
-		}
-	}
+	//
+	// v0.6.3 架构调整（user 拍板 2026-07-04）：
+	//   去掉所有 hardcoded fetch depth 限制，由用户掌控要加载多少 commit 到本地。
+	//   配合 loadMoreGraph 动态加载，首次 sync 可以拉全量元数据（depth=0），
+	//   需要用户主动权衡磁盘/网络代价（UnrealEngine 全量 ~28 GB 元数据）。
+	//
+	//   - depth=0：fetch 全量 commit + tree 元数据（不下载 blob，blobless + NoCheckout 仍然生效）
+	//   - countLimit=0：精确统计全量 commit 数（usedCountLimit=0 时 go-git 走全量遍历）
+	//   - singleBranch=false：fetch 所有分支（refs/heads/* + refs/tags/*），不限定为默认分支
+	//   - noTags=false：fetch tag refs（不走 git.NoTags）
+	//
+	// 旧 v2.7~v2.9 设计的 singleBranch / isHugeRepo 启发式判断（unreal/chromium/linux/webkit
+	// 关键词）全部移除——这逻辑是过渡期 hack，现在 Git Graph 有动态加载后不再需要。
 
 	result, err := git.PullRepo(git.PullOptions{
 		LocalPath: localPath,
 		Token:     token,
 		Username:  account.Username,
-		// 大仓库不做全历史计数；Git Graph 页面只展示有限窗口，更新提示也只需要判断近期是否变化。
-		CountLimit: countLimit,
-		Depth:      depth,
-		// GitHub 超大仓库默认只更新默认分支最近窗口；Gitea 保持完整多分支同步。
-		SingleBranch: singleBranch,
-		NoTags:       singleBranch,
+		// v0.6.3：depth=0（全量元数据），countLimit=0（精确统计全部）
+		// GitHub / Gitea 统一走完整 fetch，不再按平台差异化限制
+		CountLimit:   0,
+		Depth:        0,
+		SingleBranch: false,
+		NoTags:       false,
 		Progress:     a.buildSyncProgressCallback(project.Owner + "/" + project.Name),
 		UseGitHubCLI: account.Platform == "github",
 	})
@@ -2433,7 +2658,6 @@ func (a *App) FetchRepo(args PullRepoArgs) (FetchRepoResultDTO, error) {
 	}
 	return FetchRepoResultDTO{Updated: result.Updated}, nil
 }
-
 
 // ===== 看板（issue + label 映射，仅 Gitea）（步骤 3.5）=====
 
@@ -2861,6 +3085,352 @@ func (a *App) CreatePullComment(args CreatePullCommentArgs) (PullCommentDTO, err
 		return PullCommentDTO{}, nil
 	}
 	return *d, nil
+}
+
+// UpdatePullCommentArgs 编辑 PR 评论参数
+type UpdatePullCommentArgs struct {
+	ProjectID string `json:"projectId"`
+	CommentID int64  `json:"commentId"`
+	Body      string `json:"body"`
+}
+
+// UpdatePullComment 编辑 PR 评论
+//
+// 两端 adapter 实现都会在 trim 为空时 short-circuit 返回 ipc.ValidationFailed。
+// 返回更新后的评论（含新 updatedAt + userId），前端以此判断"已编辑"状态。
+func (a *App) UpdatePullComment(args UpdatePullCommentArgs) (PullCommentDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullCommentDTO{}, err
+	}
+
+	if a.logger != nil {
+		a.logger.Info("UpdatePullComment", "projectId", args.ProjectID, "commentId", args.CommentID)
+	}
+	d, err := adapter.UpdatePullComment(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.CommentID, args.Body)
+	if err != nil {
+		return PullCommentDTO{}, err
+	}
+	if d == nil {
+		return PullCommentDTO{}, nil
+	}
+	return *d, nil
+}
+
+// DeletePullCommentArgs 删除 PR 评论参数
+type DeletePullCommentArgs struct {
+	ProjectID string `json:"projectId"`
+	CommentID int64  `json:"commentId"`
+}
+
+// DeletePullComment 删除 PR 评论
+//
+// 成功返回 nil error（前端不关心返回值，只关心是否出错）。
+// 两端对已删除评论重复删除都返 2xx（幂等）。
+func (a *App) DeletePullComment(args DeletePullCommentArgs) error {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	if a.logger != nil {
+		a.logger.Info("DeletePullComment", "projectId", args.ProjectID, "commentId", args.CommentID)
+	}
+	return adapter.DeletePullComment(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.CommentID)
+}
+
+// ===== 评论表情反应（v0.5.0 M2） =====
+
+// ReactionDTO 是 frontend ReactionDto 的 Wails 边界类型别名（ReactionDTO 与 ReactionDTO 字段对齐）
+type ReactionDTO = platformAdapter.ReactionDTO
+
+// ListPullCommentReactionsArgs
+type ListPullCommentReactionsArgs struct {
+	ProjectID string `json:"projectId"`
+	CommentID int64  `json:"commentId"`
+}
+
+// ListPullCommentReactions 列评论表情反应
+func (a *App) ListPullCommentReactions(args ListPullCommentReactionsArgs) ([]ReactionDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items, err := adapter.ListPullCommentReactions(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.CommentID)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// AddPullCommentReactionArgs
+type AddPullCommentReactionArgs struct {
+	ProjectID string `json:"projectId"`
+	CommentID int64  `json:"commentId"`
+	Content   string `json:"content"`
+}
+
+// AddPullCommentReaction 添加表情反应
+func (a *App) AddPullCommentReaction(args AddPullCommentReactionArgs) (ReactionDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return ReactionDTO{}, err
+	}
+	if a.logger != nil {
+		a.logger.Info("AddPullCommentReaction", "projectId", args.ProjectID, "commentId", args.CommentID, "content", args.Content)
+	}
+	d, err := adapter.AddPullCommentReaction(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.CommentID, args.Content)
+	if err != nil {
+		return ReactionDTO{}, err
+	}
+	if d == nil {
+		return ReactionDTO{}, nil
+	}
+	return *d, nil
+}
+
+// RemovePullCommentReactionArgs
+type RemovePullCommentReactionArgs struct {
+	ProjectID string `json:"projectId"`
+	CommentID int64  `json:"commentId"`
+	Content   string `json:"content"`
+}
+
+// RemovePullCommentReaction 移除表情反应
+func (a *App) RemovePullCommentReaction(args RemovePullCommentReactionArgs) error {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return err
+	}
+	if a.logger != nil {
+		a.logger.Info("RemovePullCommentReaction", "projectId", args.ProjectID, "commentId", args.CommentID, "content", args.Content)
+	}
+	return adapter.RemovePullCommentReaction(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.CommentID, args.Content)
+}
+
+// ===== 合并请求评审（v0.5.0 M3） =====
+
+// PullReviewDTO 类型别名（ReactionDTO 在 platform 包已定义）
+type PullReviewDTO = platformAdapter.PullReviewDTO
+
+// ListPullReviewsArgs
+type ListPullReviewsArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullReviews 列评审
+func (a *App) ListPullReviews(args ListPullReviewsArgs) ([]PullReviewDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items, err := adapter.ListPullReviews(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// CreatePullReviewArgs
+type CreatePullReviewArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	CommitID  string `json:"commitId"`
+	Body      string `json:"body"`
+	Event     string `json:"event"`
+}
+
+// CreatePullReview 创建评审
+//
+// 前端传 event: "approve" | "request_changes" | "comment"（统一小写）
+// GitHub adapter 内部映射为 APPROVE / REQUEST_CHANGES / COMMENT
+func (a *App) CreatePullReview(args CreatePullReviewArgs) (PullReviewDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullReviewDTO{}, err
+	}
+	if a.logger != nil {
+		a.logger.Info("CreatePullReview", "projectId", args.ProjectID, "index", args.Index, "event", args.Event)
+	}
+	opts := platformAdapter.CreateReviewOpts{
+		CommitID: args.CommitID,
+		Body:     args.Body,
+		Event:    args.Event,
+	}
+	d, err := adapter.CreatePullReview(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, opts)
+	if err != nil {
+		return PullReviewDTO{}, err
+	}
+	if d == nil {
+		return PullReviewDTO{}, nil
+	}
+	return *d, nil
+}
+
+// ===== 行内评审评论 (Review Comments) =====
+
+// ListPullReviewCommentsArgs 列行内评审评论参数
+type ListPullReviewCommentsArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullReviewComments 列 PR 行内评审评论（v0.5.0 M4）
+func (a *App) ListPullReviewComments(args ListPullReviewCommentsArgs) ([]platformAdapter.PullReviewCommentDto, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items, err := adapter.ListPullReviewComments(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]platformAdapter.PullReviewCommentDto, 0, len(items))
+	for _, it := range items {
+		out = append(out, platformAdapter.PullReviewCommentDto{
+			ID:        it.ID,
+			Body:      it.Body,
+			Path:      it.Path,
+			Line:      it.Line,
+			CreatedAt: it.CreatedAt,
+			UpdatedAt: it.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// CreatePullReviewCommentArgs 发行内评审评论参数
+type CreatePullReviewCommentArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Body      string `json:"body"`
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+}
+
+// CreatePullReviewComment 发行内评审评论（v0.5.0 M4）
+func (a *App) CreatePullReviewComment(args CreatePullReviewCommentArgs) (platformAdapter.PullReviewCommentDto, error) {
+	if strings.TrimSpace(args.Body) == "" {
+		return platformAdapter.PullReviewCommentDto{}, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	if strings.TrimSpace(args.Path) == "" {
+		return platformAdapter.PullReviewCommentDto{}, ipc.NewValidationFailed("路径不能为空", "")
+	}
+	if args.Line <= 0 {
+		return platformAdapter.PullReviewCommentDto{}, ipc.NewValidationFailed("行号必须大于0", "")
+	}
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return platformAdapter.PullReviewCommentDto{}, err
+	}
+	if a.logger != nil {
+		a.logger.Info("CreatePullReviewComment", "projectId", args.ProjectID, "index", args.Index, "path", args.Path, "line", args.Line)
+	}
+	d, err := adapter.CreatePullReviewComment(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Body, args.Path, args.Line)
+	if err != nil {
+		return platformAdapter.PullReviewCommentDto{}, err
+	}
+	if d == nil {
+		return platformAdapter.PullReviewCommentDto{}, nil
+	}
+	return *d, nil
+}
+
+// ===== 文件修改列表 (PR Files) =====
+
+// ListPullFilesArgs 列 PR 修改文件
+type ListPullFilesArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullFiles 列 PR 修改文件（v0.5.0 M4）
+func (a *App) ListPullFiles(args ListPullFilesArgs) ([]platformAdapter.PullFileDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items, err := adapter.ListPullFiles(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			// 低版本 Gitea / GitHub 不支援此端点，前端隐藏此区
+			return []platformAdapter.PullFileDTO{}, nil
+		}
+		return nil, err
+	}
+	out := make([]platformAdapter.PullFileDTO, 0, len(items))
+	for _, it := range items {
+		out = append(out, platformAdapter.PullFileDTO{
+			Filename:         it.Filename,
+			Status:           it.Status,
+			Additions:        it.Additions,
+			Deletions:        it.Deletions,
+			Changes:          it.Changes,
+			Patch:            it.Patch,
+			PreviousFilename: it.PreviousFilename,
+		})
+	}
+	return out, nil
+}
+
+// GetPullFileDiffArgs 单文件 Diff 参数
+type GetPullFileDiffArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	FilePath  string `json:"filePath"`
+}
+
+// GetPullFileDiff 获取单个文件的 diff 内容（v0.5.0 M4）
+func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFileDiffDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return platformAdapter.PullFileDiffDTO{}, err
+	}
+	d, err := adapter.GetPullFileDiff(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.FilePath)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			return platformAdapter.PullFileDiffDTO{}, nil
+		}
+		return platformAdapter.PullFileDiffDTO{}, err
+	}
+	return platformAdapter.PullFileDiffDTO{
+		Filename: d.Filename,
+		RawDiff:  d.RawDiff,
+	}, nil
 }
 
 // ColumnDTO 看板列（暴露给前端，与 store.BoardColumn 对齐）

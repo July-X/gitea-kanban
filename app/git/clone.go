@@ -18,9 +18,11 @@ package git
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -156,26 +158,21 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// SSH 失败时自动回退到 HTTPS + token
 	auth, finalURL, authMethod := BuildAuth(cloneURL, opts.Username, opts.Token)
 
-	// v2.9：超大仓库优化 - 使用 git partial clone（--filter=blob:none）
+	// v0.6.3 架构调整：去掉 isHugeRepo 启发式 + depth<=0 硬限制
 	//
-	// 问题：go-git 不支持 partial clone（--filter=blob:none）
-	// 对于超大仓库（如 UnrealEngine），即使 depth=10，仍需下载大量 blob
+	// 旧设计（v2.9）：GitHub 仓库 + 启发式超大仓库关键词（unreal/chromium/linux/webkit）→ 走 gh +
+	// partial clone (--filter=blob:none) + depth>0 保护；避免下载全量 blob + 元数据。
 	//
-	// 解决方案：GitHub 仓库强制使用 gh repo clone，把 partial clone 参数透传给 git。
-	// 只下载 commits 和 trees，不下载文件内容（blob），大幅减少下载量
+	// 新设计（user 拍板 2026-07-04）：
+	//   - GitHub 仓库始终走 gh + --filter=blob:none（稳定 + 避免下载 blob）
+	//   - depth=0 走全量元数据（克隆所有 commit + tree 元数据，不下载 blob）
+	//   - 代价：UnrealEngine 全量 ~28 GB 元数据 / 几十分钟 clone 时间
 	//
-	// 启发式规则：仓库名包含已知超大仓库关键词
-	isHugeRepo := strings.Contains(strings.ToLower(opts.Repo), "unreal") ||
-		strings.Contains(strings.ToLower(opts.Repo), "chromium") ||
-		strings.Contains(strings.ToLower(opts.Repo), "linux") ||
-		strings.Contains(strings.ToLower(opts.Repo), "webkit")
-
-	if opts.UseGitHubCLI || (isHugeRepo && opts.Depth > 0) {
-		if opts.Depth <= 0 {
-			return nil, fmt.Errorf("GitHub CLI blobless clone 需要 depth > 0")
-		}
-		// GitHub 仓库必须走 gh + partial clone；go-git 不支持 blobless，
-		// 回退会重新下载大量对象，违背“快速获得提交记录”的核心诉求。
+	// v0.6.3 不再需要 isHugeRepo 启发式判断（caller 已决定 opts.Depth / opts.UseGitHubCLI）。
+	// CloneWithFilter 已支持 depth=0（不传 --depth 参数等于无限制）。
+	if opts.UseGitHubCLI {
+		// GitHub 仓库走 gh + partial clone（始终启用，确保 blobless + NoCheckout）
+		// 即使 opts.Depth=0 也走这里：gh 会透传所有 git 参数给底层 git clone
 		nativeURL := finalURL
 		nativeToken := opts.Token
 
@@ -189,7 +186,7 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 			// gh + partial clone 成功，直接返回
 			return &CloneResult{LocalPath: localPath}, nil
 		}
-		return nil, fmt.Errorf("GitHub 仓库需要使用 gh 的 blobless clone，但执行失败: %w", err)
+		return nil, fmt.Errorf("GitHub 仓库走 gh partial clone 失败: %w", err)
 	}
 
 	// 7. 执行 clone（v2.4 轻量模式：NoCheckout=true 跳过工作区文件）
@@ -230,7 +227,13 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 	// go-git 的 PlainClone 第 2 个参数是 isBare，固定 false
 	// （我们走 NoCheckout 模式不是 Bare 模式 —— NoCheckout 保留 worktree 概念但空，
 	//  Bare 完全无 worktree）
+	slog.Default().Info("git clone 开始",
+		"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+		"depth", opts.Depth, "singleBranch", opts.SingleBranch, "noTags", opts.NoTags,
+	)
+	start := time.Now()
 	_, err = git.PlainClone(localPath, false, cloneOpts)
+	duration := time.Since(start)
 	if err != nil {
 		// v2.8：SSH 失败时自动回退到 HTTPS
 		if authMethod == AuthMethodSSH {
@@ -245,14 +248,46 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 			}
 			cloneOpts.URL = cloneURL
 			cloneOpts.Auth = httpAuth
+			slog.Default().Warn("git clone SSH 失败，回退 HTTPS",
+				"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+			)
+			httpsStart := time.Now()
 			_, err = git.PlainClone(localPath, false, cloneOpts)
-		}
-
-		if err != nil {
+			httpsDuration := time.Since(httpsStart)
+			if err != nil {
+				slog.Default().Error("git clone HTTPS 回退也失败",
+					"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+					"ms", httpsDuration.Milliseconds(),
+					"err", err.Error(),
+				)
+				// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
+				os.RemoveAll(localPath)
+				return nil, fmt.Errorf("go-git clone 失败: %w", err)
+			}
+		} else {
+			slog.Default().Error("git clone 失败",
+				"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+				"ms", duration.Milliseconds(),
+				"auth", authMethod,
+				"err", err.Error(),
+			)
 			// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
 			os.RemoveAll(localPath)
 			return nil, fmt.Errorf("go-git clone 失败: %w", err)
 		}
+	}
+
+	// SSH 回退成功 / 正常成功都记完成日志
+	if authMethod == AuthMethodSSH {
+		slog.Default().Info("git clone 完成（SSH→HTTPS 回退）",
+			"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+			"ms", duration.Milliseconds(),
+		)
+	} else {
+		slog.Default().Info("git clone 完成",
+			"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
+			"ms", duration.Milliseconds(),
+		)
 	}
 
 	return &CloneResult{LocalPath: localPath}, nil

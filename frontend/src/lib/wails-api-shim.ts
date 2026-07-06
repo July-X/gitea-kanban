@@ -118,8 +118,18 @@ type WailsApp = {
   }>;
   /** v2.15：按本地仓库路径读取 commit 详情（含 files / +/- stats） */
   GetCommitDetail?: (args: { localPath: string; sha: string }) => Promise<unknown>;
-  /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token） */
-  GetGitGraph?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<{
+  /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token）
+   *
+   * v0.6.3 修复：补 `offset` 字段（之前 shim 漏传导致滚动加载更多每次都拉首屏）。
+   * 注意：实际 args 由 Wails 自动生成的 bindings 提供，shim 这里手动声明的
+   * 旧版本只覆盖部分字段；调用方传额外字段时，TS 会因类型不匹配报错。
+   * 这里用更宽松的类型（`& { offset?: number }`）兼容 Wails bindings + 透传需求。
+   */
+  GetGitGraph?: (args: {
+    projectId: string;
+    branches?: string[];
+    maxCount?: number;
+  } & { offset?: number }) => Promise<{
     nodes: Array<{
       row: number;
       lane: number;
@@ -157,7 +167,7 @@ type WailsApp = {
     truncated: boolean;
   }>;
   /** v2.x：GitHub/gh 超大仓库使用 git log --graph ASCII fallback */
-  GetGitGraphAscii?: (args: { projectId: string; branches?: string[]; maxCount?: number }) => Promise<unknown>;
+  GetGitGraphAscii?: (args: { projectId: string; branches?: string[]; maxCount?: number; offset?: number }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取（避免前端拼错 localPath） */
   PullRepoByProjectId?: (args: { projectId: string }) => Promise<{
     beforeCount: number;
@@ -195,6 +205,22 @@ type WailsApp = {
   }>;
   StripGitBinaryQuarantine?: (args: { path: string }) => Promise<void>;
   OpenGitBinaryPicker?: () => Promise<string>;
+
+  // ===== v0.6.0 日志导出 / Bug 上报（Wails bindings）=====
+  /** 一键导出日志 zip 到桌面 */
+  ExportLogs?: (args: { maxLogs?: number }) => Promise<{
+    zipPath: string;
+    logCount: number;
+    logBytes: number;
+    stateBytes: number;
+    generatedAt: string;
+    logFiles: string[];
+  }>;
+  /** 读最近 N 条日志到剪贴板（贴 issue 用） */
+  CopyRecentLogs?: (args: { maxBytes?: number }) => Promise<{
+    content: string;
+    bytes: number;
+  }>;
 
   // ===== v0.6+ Pull Request 合并请求（Wails bindings）=====
   //
@@ -440,6 +466,10 @@ const apiShim = {
         projectId: string;
         branches?: string[];
         limit?: number;
+        // v0.6.3 修复：offset 之前未透传，导致滚动加载更多每次都拉到首屏数据
+        // （commit d246b33 之前未发现的连锁 bug：allLoaded 永远 false、永远显示
+        // loadingMore spinner、永远看不到「已是末尾」提示）
+        offset?: number;
       };
       return forwardToWails(
         () => stubEmpty({ nodes: [], edges: [], maxLane: 0, truncated: false }),
@@ -451,6 +481,7 @@ const apiShim = {
             projectId: a.projectId ?? '',
             branches: a.branches,
             maxCount: a.limit,
+            offset: a.offset ?? 0,
           });
         },
       );
@@ -460,6 +491,8 @@ const apiShim = {
         projectId: string;
         branches?: string[];
         limit?: number;
+        // v0.6.3 修复：同上，offset 透传避免 ASCII 路径同样的分页失效
+        offset?: number;
       };
       return forwardToWails(
         () => stubEmpty({ lines: [], totalCommits: 0, truncated: false, range: { from: '', to: '' } }),
@@ -471,6 +504,7 @@ const apiShim = {
             projectId: a.projectId ?? '',
             branches: a.branches,
             maxCount: a.limit,
+            offset: a.offset ?? 0,
           });
         },
       );
@@ -799,6 +833,143 @@ const apiShim = {
           },
         );
       },
+      /**
+       * pulls.comment.update —— 编辑合并请求评论
+       *
+       * 关键：body 要在 UI 层 trim，后端还会再走 trim short-circuit（防御设计）。
+       */
+      update: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; commentId: number; body: string };
+        return forwardToWails(
+          () => notImplemented('pulls.comment', 'update'),
+          (app) => {
+            if (!app.UpdatePullComment) {
+              return notImplemented('pulls.comment', 'update');
+            }
+            return app.UpdatePullComment({
+              projectId: a.projectId,
+              commentId: a.commentId,
+              body: a.body,
+            });
+          },
+        );
+      },
+      /**
+       * pulls.comment.delete —— 删除合并请求评论
+       *
+       * 已删除的评论重复删除也返成功（幂等）。
+       */
+      delete: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; commentId: number };
+        return forwardToWails(
+          () => notImplemented('pulls.comment', 'delete'),
+          (app) => {
+            if (!app.DeletePullComment) {
+              return notImplemented('pulls.comment', 'delete');
+            }
+            return app.DeletePullComment({
+              projectId: a.projectId,
+              commentId: a.commentId,
+            });
+          },
+        );
+      },
+      /**
+       * pulls.comment.reactions —— 评论表情反应子命名空间（v0.5.0 M2）
+       */
+      reactions: {
+        list: (args: unknown): Promise<unknown> => {
+          const a = (args ?? {}) as { projectId: string; commentId: number };
+          return forwardToWails(
+            () => stubEmpty([]),
+            (app) => {
+              if (!app.ListPullCommentReactions) {
+                return stubEmpty([]);
+              }
+              return app.ListPullCommentReactions({
+                projectId: a.projectId,
+                commentId: a.commentId,
+              });
+            },
+          );
+        },
+        add: (args: unknown): Promise<unknown> => {
+          const a = (args ?? {}) as { projectId: string; commentId: number; content: string };
+          return forwardToWails(
+            () => notImplemented('pulls.comment.reactions', 'add'),
+            (app) => {
+              if (!app.AddPullCommentReaction) {
+                return notImplemented('pulls.comment.reactions', 'add');
+              }
+              return app.AddPullCommentReaction({
+                projectId: a.projectId,
+                commentId: a.commentId,
+                content: a.content,
+              });
+            },
+          );
+        },
+        remove: (args: unknown): Promise<unknown> => {
+          const a = (args ?? {}) as { projectId: string; commentId: number; content: string };
+          return forwardToWails(
+            () => notImplemented('pulls.comment.reactions', 'remove'),
+            (app) => {
+              if (!app.RemovePullCommentReaction) {
+                return notImplemented('pulls.comment.reactions', 'remove');
+              }
+              return app.RemovePullCommentReaction({
+                projectId: a.projectId,
+                commentId: a.commentId,
+                content: a.content,
+              });
+            },
+          );
+        },
+      },
+    },
+    /**
+     * pulls.reviews —— 合并请求评审子命名空间（v0.5.0 M3）
+     */
+    reviews: {
+      list: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number };
+        return forwardToWails(
+          () => stubEmpty([]),
+          (app) => {
+            if (!app.ListPullReviews) {
+              return stubEmpty([]);
+            }
+            return app.ListPullReviews({
+              projectId: a.projectId,
+              index: a.index,
+            });
+          },
+        );
+      },
+      create: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as {
+          projectId: string;
+          index: number;
+          commitId?: string;
+          body?: string;
+          event: string;
+        };
+        return forwardToWails(
+          () => notImplemented('pulls.reviews', 'create'),
+          (app) => {
+            if (!app.CreatePullReview) {
+              return notImplemented('pulls.reviews', 'create');
+            }
+            return app.CreatePullReview({
+              projectId: a.projectId,
+              index: a.index,
+              commitId: a.commitId ?? '',
+              body: a.body ?? '',
+              event: a.event,
+            });
+          },
+        );
+      },
     },
   },
 
@@ -1044,6 +1215,72 @@ const apiShim = {
             });
           }
           return app.OpenDataDir();
+        },
+      ),
+    /**
+     * system.openDesktopFolder —— v0.6.1 导出日志到桌面后的"打开桌面文件夹"按钮
+     *
+     * 转发到 window.go.main.App.OpenDesktopFolder()
+     */
+    openDesktopFolder: (): Promise<unknown> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'system.openDesktopFolder 尚未连接到 Go 后端（Wails 未启动）',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.OpenDesktopFolder) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 OpenDesktopFolder',
+              hint: '请重新构建应用',
+            });
+          }
+          return app.OpenDesktopFolder();
+        },
+      ),
+  },
+
+  // ===== v0.6.0 日志导出 / Bug 上报 =====
+  logs: {
+    export: (args: { maxLogs?: number }): Promise<unknown> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'logs.export 尚未连接到 Go 后端（Wails 未启动）',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.ExportLogs) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 ExportLogs',
+              hint: '请重新构建应用',
+            });
+          }
+          return app.ExportLogs({ maxLogs: args?.maxLogs ?? 5 });
+        },
+      ),
+    copyRecent: (args: { maxBytes?: number }): Promise<unknown> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'logs.copyRecent 尚未连接到 Go 后端（Wails 未启动）',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.CopyRecentLogs) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 CopyRecentLogs',
+              hint: '请重新构建应用',
+            });
+          }
+          return app.CopyRecentLogs({ maxBytes: args?.maxBytes ?? 65536 });
         },
       ),
   },

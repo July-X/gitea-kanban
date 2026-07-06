@@ -112,6 +112,11 @@
   --navrail-collapsed-width: 56px;
   --statusbar-height: 33px; /* v1.4 · 任务 #statusbar-picker：留出下拉空间放仓库触发器 */
   --topbar-height: 48px;
+  /* v1.x 2026-07-04 拍板：viewport 高度 CSS var
+   *  - 100vh 在 Wails WKWebView 中不严格等于 NSWindow 内容高度（圆角 / safe area 让 webview frame 略小）
+   *  - App.vue mount + resize 时把 window.innerHeight 注入 :root 覆盖这个 fallback
+   *  - 不写死 100vh：让 .shell 高 = 真实 webview 内容高度 → StatusBar 落到底部可贴边 */
+  --vheight: 100vh;
 
   /* === z-index === */
   --z-base: 1;

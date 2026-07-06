@@ -104,8 +104,14 @@ export const router = createRouter({
  * 全局守卫：
  * 1. 未连接时强制进 /auth（避免死循环：已在 /auth 时不重定向）
  * 2. v0.6+ 软废弃路由（/board、/my-cards、/members）：强制重定向到 /timeline
+ *
+ * v0.7.4 性能优化：守卫改为同步判断，不再 await IPC。
+ *   - 旧版在 requiresAuth 路由切换时 await auth.refreshStatus()，
+ *     导致每次切页都要等 IPC 返回，导航被同步卡住。
+ *   - 新版只做同步判断：auth.isConnected 在 App.vue mount 时已一次性拉好，
+ *     守卫直接读 store 状态，不阻塞导航。
  */
-router.beforeEach(async (to) => {
+router.beforeEach((to) => {
   // v0.6+ 软废弃路由访问保护：进入 deprecated 路由直接跳到 Git Graph
   if (to.meta.deprecated === true) {
     return { name: 'timeline' };
@@ -114,17 +120,7 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAuth) {
     const auth = useAuthStore();
     if (!auth.isConnected) {
-      // 首次进入尝试拉一次状态（避免 main 端已接好但 store 还没 hydrate）
-      if (auth.accounts.length === 0 && !auth.loading) {
-        try {
-          await auth.refreshStatus();
-        } catch {
-          /* 失败由 auth.error 处理 */
-        }
-      }
-      if (!auth.isConnected) {
-        return { name: 'auth', query: { from: to.fullPath } };
-      }
+      return { name: 'auth', query: { from: to.fullPath } };
     }
   }
   return true;

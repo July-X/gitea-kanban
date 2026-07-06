@@ -25,7 +25,7 @@ import { router } from './routes';
 import { mountCommandPalette } from './lib/command-palette';
 import { useUiStore } from './stores/ui';
 import { showToast } from './lib/toast';
-import { logError } from './lib/frontend-log';
+import { logError, logWarn } from './lib/frontend-log';
 
 // Wails 注入 window.api shim（替代 v1 Electron 时代的 preload bridge）
 // 必须在 createApp / 任何 store 调用前执行（ipc-client 依赖 window.api）
@@ -135,6 +135,10 @@ window.addEventListener('unhandledrejection', (e) => {
  *    防止"logError → console.error → logError"死循环导致 main thread 锁死、UI 冻屏
  *    （v2.5 复现：刷新按钮 → IPC 401 → unhandledrejection → console.error → logError →
  *     send → console.error → ... 164MB 日志无限增长、UI 卡死）
+ * 3. v0.7.4 性能优化：日志序列化移出主线程同步路径。
+ *    旧版在 monkey-patch 里同步 JSON.stringify(args)，对象大或循环引用时主线程卡顿。
+ *    新版只做轻量字符串提取（字符串直拼/Error 取 message），复杂对象只传引用给 logError；
+ *    logError 内部走异步批量写入，不再阻塞主线程交互。
  *
  * 顺序：先保存原始引用到 window，再做 monkey-patch。如果顺序反了 patch 又会用上被替换的。
  */
@@ -156,23 +160,41 @@ const originalConsoleDebug = console.debug.bind(console);
 (window as unknown as { __originalConsoleDebug: typeof originalConsoleDebug }).__originalConsoleDebug =
   originalConsoleDebug;
 
+/**
+ * v0.7.4：轻量字符串提取 —— 只处理基础类型，复杂对象保留引用传给 logError。
+ * 避免同步 JSON.stringify 阻塞主线程（尤其 Error 对象含大 stack/stringify 失败时）。
+ */
+function fastSerialize(a: unknown): string {
+  if (a === null || a === undefined) return String(a);
+  if (a instanceof Error) return a.message;
+  if (typeof a === 'string') return a;
+  if (typeof a === 'number' || typeof a === 'boolean') return String(a);
+  // 其他复杂类型：轻量信息，避免 JSON.stringify 大对象
+  try {
+    const s = typeof a === 'object' ? `[object ${a?.constructor?.name ?? 'Object'}]` : String(a);
+    return s;
+  } catch {
+    return String(a);
+  }
+}
+
 console.error = (...args: unknown[]) => {
   originalConsoleError(...args);
-  // 避免递归:logError 失败时 fallback 到 console.error(已经被替换),
-  // 但 logError 内部不用 console.error,所以这里安全
   try {
-    const msg = args
-      .map((a) => {
-        if (a instanceof Error) return a.message;
-        if (typeof a === 'string') return a;
-        try {
-          return JSON.stringify(a);
-        } catch {
-          return String(a);
-        }
-      })
-      .join(' ');
+    const msg = args.map(fastSerialize).join(' ');
     logError('console.error', msg);
+  } catch {
+    // 静默:拦截器本身不能抛
+  }
+};
+
+// console.warn 拦截 —— 与 console.error 完全对称（level=warn, source='console.warn'）
+// 触发场景:库代码 / 第三库组件 / 业务代码自己 console.warn（"deprecated"、"fallback to X"等）
+console.warn = (...args: unknown[]) => {
+  originalConsoleWarn(...args);
+  try {
+    const msg = args.map(fastSerialize).join(' ');
+    logWarn('console.warn', msg);
   } catch {
     // 静默:拦截器本身不能抛
   }

@@ -2,18 +2,21 @@
 // 与 Python 端 vscode-git-graph 参考实现 (vscode_graph.py) 对比 lane/color/edges。
 //
 // 用法:
-//   go run ./tools/vscode-recheck <repo_path> [max_commits] > go-result.json
+//
+//	go run ./tools/vscode-recheck <repo_path> [max_commits] > go-result.json
 //
 // 然后:
-//   python3 tools/vscode-recheck/compare.py go-result.json
+//
+//	python3 tools/vscode-recheck/compare.py go-result.json
 //
 // JSON 格式:
-//   {
-//     "meta": {"max_commits": N, "head": "..."},
-//     "commits": [{"sha": "...", "row": N, "lane": N, "color": N, "is_merge": bool, "parents": ["sha", ...]}],
-//     "edges":   [{"from_row": N, "to_row": N, "from_lane": N, "to_lane": N, "color": N, "type": "normal|branch|merge"}],
-//     "max_lane": N
-//   }
+//
+//	{
+//	  "meta": {"max_commits": N, "head": "..."},
+//	  "commits": [{"sha": "...", "row": N, "lane": N, "color": N, "is_merge": bool, "parents": ["sha", ...]}],
+//	  "edges":   [{"from_row": N, "to_row": N, "from_lane": N, "to_lane": N, "color": N, "type": "normal|branch|merge"}],
+//	  "max_lane": N
+//	}
 package main
 
 import (
@@ -22,9 +25,9 @@ import (
 	"os"
 	"strconv"
 
-	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
+	gogit "github.com/go-git/go-git/v5"
 )
 
 type commitOut struct {

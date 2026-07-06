@@ -94,6 +94,7 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 
 	refDataByHash := collectRefDataByHashNative(opts.LocalPath)
 	commits := parseVscodeLogOutput(output, refDataByHash)
+	localTotal := len(commits)
 
 	// offset 分页：跳过前 N 条（在截断前执行，保证稳定分页）
 	if opts.Offset > 0 && opts.Offset < len(commits) {
@@ -106,6 +107,42 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 	if maxCount > 0 && len(commits) > maxCount {
 		commits = commits[:maxCount]
 		truncated = true
+	}
+
+	// v0.7.2 修复：shallow clone 下本地 commit 已耗尽但未触发 offset 越界。
+	//
+	// 前提：请求了 logCount = offset + maxCount + 1 条，但 git 实际只返回 localTotal 条。
+	// 如果 localTotal < logCount 且 repoIsShallow() = true，说明本地已取完全部 shallow commit，
+	// 且当前页 commits 不满 maxCount。此时不该返回 truncated = false 误导前端"全加载完了"，
+	// 应视作 LocalExhausted，触发后台 deepen + 前端 waitForDeepenAndRetry 重试。
+	//
+	// 例：UnrealEngine shallow 4492 commits，offset = 4200, maxCount = 300：
+	//   logCount = 4501，git 只返回 4492 → localTotal = 4492 < logCount。
+	//   offset(4200) < localTotal(4492) → commits = commits[4200:] = 292 条。
+	//   292 < maxCount(300)，旧逻辑 truncated = false → 前端 allLoaded = true → 用户体验截断。
+	//   新逻辑进入此分支 → LocalExhausted + DeepenTriggered → 前端等待 deepen 后重试。
+	if opts.Offset > 0 && opts.Token != "" &&
+		!truncated && len(commits) < maxCount &&
+		localTotal < logCount && repoIsShallow(opts.LocalPath) {
+		triggered := tryTriggerDeepen(opts.LocalPath, opts.Token)
+		return &LogResult{
+			Commits:         nil,
+			Truncated:       false,
+			LocalExhausted:  true,
+			DeepenTriggered: triggered,
+		}, nil
+	}
+
+	// v0.6.2: offset 越界（本地 commit 已全部取出）时，若本地是 shallow clone
+	// 且前端传了 token，后台自动触发增量 deepen。
+	if opts.Offset > 0 && len(commits) == 0 && opts.Token != "" {
+		triggered := tryTriggerDeepen(opts.LocalPath, opts.Token)
+		return &LogResult{
+			Commits:         nil,
+			Truncated:       false,
+			LocalExhausted:  true,
+			DeepenTriggered: triggered,
+		}, nil
 	}
 
 	// v3.x：探测 worktree dirty count，1:1 复刻 vscode-git-graph 的

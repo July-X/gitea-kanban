@@ -7,6 +7,8 @@ import {gitbinary} from '../models';
 
 export function AddProject(arg1:main.AddProjectArgs):Promise<main.AddProjectResult>;
 
+export function AddPullCommentReaction(arg1:main.AddPullCommentReactionArgs):Promise<platform.ReactionDTO>;
+
 export function AuthConnect(arg1:main.ConnectArgs):Promise<main.ConnectResult>;
 
 export function AuthDisconnect(arg1:main.DisconnectArgs):Promise<void>;
@@ -21,11 +23,21 @@ export function CloneRepo(arg1:main.CloneRepoArgs):Promise<main.CloneRepoResult>
 
 export function ClosePull(arg1:main.ClosePullArgs):Promise<platform.PullDetailDTO>;
 
+export function CopyRecentLogs(arg1:main.CopyRecentLogsArgs):Promise<main.CopyRecentLogsResult>;
+
 export function CreateColumn(arg1:main.CreateColumnArgs):Promise<main.ColumnDTO>;
 
 export function CreatePullComment(arg1:main.CreatePullCommentArgs):Promise<platform.CommentDTO>;
 
+export function CreatePullReview(arg1:main.CreatePullReviewArgs):Promise<platform.PullReviewDTO>;
+
+export function CreatePullReviewComment(arg1:main.CreatePullReviewCommentArgs):Promise<platform.PullReviewCommentDto>;
+
 export function DeleteColumn(arg1:main.DeleteColumnArgs):Promise<void>;
+
+export function DeletePullComment(arg1:main.DeletePullCommentArgs):Promise<void>;
+
+export function ExportLogs(arg1:main.ExportLogsArgs):Promise<main.ExportLogsResult>;
 
 export function FetchRepo(arg1:main.PullRepoArgs):Promise<main.FetchRepoResultDTO>;
 
@@ -41,6 +53,8 @@ export function GetGitGraphAscii(arg1:main.GetGitGraphArgs):Promise<git.GraphLin
 
 export function GetPull(arg1:main.GetPullArgs):Promise<platform.PullDetailDTO>;
 
+export function GetPullFileDiff(arg1:main.GetPullFileDiffArgs):Promise<platform.PullFileDiffDTO>;
+
 export function GetRepoById(arg1:main.GetRepoByIdArgs):Promise<main.GetRepoByIdResult>;
 
 export function GetUserPrefs(arg1:main.GetUserPrefsArgs):Promise<Record<string, any>>;
@@ -55,7 +69,15 @@ export function ListColumns(arg1:main.ListColumnsArgs):Promise<Array<main.Column
 
 export function ListIssues(arg1:main.ListIssuesArgs):Promise<Array<main.IssueDTO>>;
 
+export function ListPullCommentReactions(arg1:main.ListPullCommentReactionsArgs):Promise<Array<platform.ReactionDTO>>;
+
 export function ListPullComments(arg1:main.ListPullCommentsArgs):Promise<Array<platform.CommentDTO>>;
+
+export function ListPullFiles(arg1:main.ListPullFilesArgs):Promise<Array<platform.PullFileDTO>>;
+
+export function ListPullReviewComments(arg1:main.ListPullReviewCommentsArgs):Promise<Array<platform.PullReviewCommentDto>>;
+
+export function ListPullReviews(arg1:main.ListPullReviewsArgs):Promise<Array<platform.PullReviewDTO>>;
 
 export function ListPulls(arg1:main.ListPullsArgs):Promise<main.PullListAppResp>;
 
@@ -73,6 +95,8 @@ export function MergePull(arg1:main.MergePullArgs):Promise<platform.PullDetailDT
 
 export function OpenDataDir():Promise<void>;
 
+export function OpenDesktopFolder():Promise<void>;
+
 export function OpenGitBinaryPicker():Promise<string>;
 
 export function PullRepo(arg1:main.PullRepoArgs):Promise<main.PullRepoResult>;
@@ -80,6 +104,8 @@ export function PullRepo(arg1:main.PullRepoArgs):Promise<main.PullRepoResult>;
 export function PullRepoByProjectId(arg1:main.PullRepoByProjectIdArgs):Promise<main.PullRepoResult>;
 
 export function RemoveProject(arg1:main.RemoveProjectArgs):Promise<void>;
+
+export function RemovePullCommentReaction(arg1:main.RemovePullCommentReactionArgs):Promise<void>;
 
 export function RemoveWorkspaceRepos(arg1:main.RemoveWorkspaceReposArgs):Promise<main.RemoveWorkspaceReposResult>;
 
@@ -98,6 +124,8 @@ export function TestGitBinary(arg1:main.SetGitBinaryPathArgs):Promise<gitbinary.
 export function UnstarBranch(arg1:main.UnstarBranchArgs):Promise<void>;
 
 export function UpdatePullAssignee(arg1:main.UpdatePullAssigneeArgs):Promise<platform.PullDetailDTO>;
+
+export function UpdatePullComment(arg1:main.UpdatePullCommentArgs):Promise<platform.CommentDTO>;
 
 export function UpdatePullLabels(arg1:main.UpdatePullLabelsArgs):Promise<platform.PullDetailDTO>;
 

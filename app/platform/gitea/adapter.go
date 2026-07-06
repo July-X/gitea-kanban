@@ -8,17 +8,22 @@ package gitea
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
-	gogit "github.com/go-git/go-git/v5"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
+	"gitea-kanban/app/logx"
 	"gitea-kanban/app/platform"
+	gogit "github.com/go-git/go-git/v5"
 )
 
 // GiteaAdapter Gitea 平台适配器
@@ -197,6 +202,7 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		Branches:  opts.Branches,
 		MaxCount:  opts.MaxCount,
 		Offset:    opts.Offset,
+		Token:     opts.Token,
 	})
 	if err != nil {
 		return nil, err
@@ -209,6 +215,8 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 	}
 
 	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, head, logResult.Truncated)
+	graphResult.LocalExhausted = logResult.LocalExhausted
+	graphResult.DeepenTriggered = logResult.DeepenTriggered
 
 	return graphResultToDTO(graphResult), nil
 }
@@ -337,6 +345,7 @@ type giteaPullRefRaw struct {
 }
 
 type giteaUserRaw struct {
+	ID        int64  `json:"id"`
 	Login     string `json:"login"`
 	AvatarURL string `json:"avatar_url"`
 }
@@ -410,7 +419,7 @@ func (a *GiteaAdapter) GetPull(ctx context.Context, hostURL, username, token, ow
 func (a *GiteaAdapter) MergePull(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.MergePullOpts) (*platform.PullDetailDTO, error) {
 	style := mapMergeMethodToGitea(opts.Method)
 	do := map[string]any{
-		"merge_style_field":        style,
+		"merge_style_field":         style,
 		"delete_branch_after_merge": opts.DeleteBranchAfter,
 	}
 	if opts.CommitMessage != "" {
@@ -687,6 +696,192 @@ func (a *GiteaAdapter) CreatePullComment(ctx context.Context, hostURL, username,
 	return &dto, nil
 }
 
+// UpdatePullComment 编辑合并请求评论（PATCH /repos/{owner}/{repo}/issues/comments/{id}）
+//
+// body: {body: "..."} —— 服务端会更新 updatedAt。
+// 返回更新后的评论（含新 updatedAt），前端以此判断"已编辑"状态。
+func (a *GiteaAdapter) UpdatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, body string) (*platform.CommentDTO, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{"body": body}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaCommentToDTO(raw)
+	return &dto, nil
+}
+
+// DeletePullComment 删除合并请求评论（DELETE /repos/{owner}/{repo}/issues/comments/{id}）
+//
+// 成功 → 服务端返 204 No Content；对已删除评论重复删除也返 2xx（幂等）。
+func (a *GiteaAdapter) DeletePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+}
+
+// ===== 评论表情反应（v0.5.0 M2） =====
+//
+// Gitea 端点：/repos/{owner}/{repo}/issues/comments/{id}/reactions
+// Gitea 字段：reaction 字段名（不是 content）; DELETE 必须带 body: {content: "..."}
+
+// giteaReactionRaw Gitea reactions 端点原始响应
+type giteaReactionRaw struct {
+	ID       int64         `json:"id"`
+	User     *giteaUserRaw `json:"user"`
+	Reaction string        `json:"reaction"` // Gitea 字段名（非 content）
+}
+
+// giteaReactionToDTO 映射为平台中性 ReactionDTO
+func giteaReactionToDTO(r giteaReactionRaw) platform.ReactionDTO {
+	out := platform.ReactionDTO{
+		ID:      r.ID,
+		Content: r.Reaction,
+	}
+	if r.User != nil {
+		out.User = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// ListPullCommentReactions 列评论表情反应（GET /repos/{owner}/{repo}/issues/comments/{id}/reactions）
+func (a *GiteaAdapter) ListPullCommentReactions(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) ([]platform.ReactionDTO, error) {
+	var raw []giteaReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.ReactionDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, giteaReactionToDTO(r))
+	}
+	return out, nil
+}
+
+// AddPullCommentReaction 添加表情反应（POST /repos/{owner}/{repo}/issues/comments/{id}/reactions）
+//
+// body: {content: "+1"}。Gitea 已存在的 reaction（同 user 同 content）会已被幂等——
+// 查 API 文档确认 Gitea 会静默返回 201 + 已有 reaction（不返 409）。
+func (a *GiteaAdapter) AddPullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) (*platform.ReactionDTO, error) {
+	payload := map[string]any{"content": content}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaReactionToDTO(raw)
+	return &dto, nil
+}
+
+// RemovePullCommentReaction 移除表情反应（DELETE /repos/{owner}/{repo}/issues/comments/{id}/reactions）
+//
+// ⚠️ Gitea 的 DELETE reactions 必须带 body: {content: "..."}（不是按 reaction id 删，区别于 GitHub）。
+func (a *GiteaAdapter) RemovePullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) error {
+	payload := map[string]any{"content": content}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, reader, nil)
+}
+
+// ===== 合并请求评审（v0.5.0 M3） =====
+//
+// Gitea review API: /repos/{owner}/{repo}/pulls/{index}/reviews
+// event 值: "approve" / "request_changes" / "comment"（小写，与前端统一）
+
+// giteaReviewRaw Gitea /pulls/{index}/reviews 原始响应
+type giteaReviewRaw struct {
+	ID        int64         `json:"id"`
+	State     string        `json:"state"`
+	Body      string        `json:"body"`
+	User      *giteaUserRaw `json:"user"`
+	CommitID  string        `json:"commit_id"`
+	Submitted string        `json:"submitted"`
+}
+
+// giteaReviewToDTO 映射为平台中性 PullReviewDTO
+func giteaReviewToDTO(r giteaReviewRaw) platform.PullReviewDTO {
+	out := platform.PullReviewDTO{
+		ID:          r.ID,
+		State:       r.State,
+		Body:        r.Body,
+		CommitID:    r.CommitID,
+		SubmittedAt: r.Submitted,
+	}
+	if r.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// validateGiteaReviewEvent 校验评审事件值（Gitea 支持 3 种小写）
+func validateGiteaReviewEvent(event string) error {
+	validEvents := map[string]bool{"approve": true, "request_changes": true, "comment": true}
+	if !validEvents[event] {
+		return ipc.NewValidationFailed("非法的评审事件: "+event, "支持的值: approve / request_changes / comment")
+	}
+	return nil
+}
+
+// ListPullReviews 列评审列表（GET /repos/{owner}/{repo}/pulls/{index}/reviews）
+func (a *GiteaAdapter) ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewDTO, error) {
+	var raw []giteaReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullReviewDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, giteaReviewToDTO(r))
+	}
+	return out, nil
+}
+
+// CreatePullReview 创建评审（POST /repos/{owner}/{repo}/pulls/{index}/reviews）
+//
+// body: {commit_id, body, event, comments: []}
+// Gitea event 值: "approve" / "request_changes" / "comment"（小写，与前端统一）
+func (a *GiteaAdapter) CreatePullReview(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.CreateReviewOpts) (*platform.PullReviewDTO, error) {
+	if err := validateGiteaReviewEvent(opts.Event); err != nil {
+		return nil, err
+	}
+	payload := map[string]any{
+		"commit_id": opts.CommitID,
+		"body":      opts.Body,
+		"event":     opts.Event,
+		"comments":  []interface{}{}, // 暂无行内评审（M4+）
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaReviewToDTO(raw)
+	return &dto, nil
+}
+
 // giteaCommentRaw Gitea /repos/.../issues/{index}/comments 原始响应
 //
 // swagger: https://try.gitea.io/swagger#/issueissueComment
@@ -714,11 +909,226 @@ func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
 			Username:  c.User.Login,
 			AvatarURL: c.User.AvatarURL,
 		}
+		out.UserID = c.User.ID
 	}
 	return out
 }
 
+// ===== PR 修改文件列表 (v0.5.0 M4) =====
+
+// giteaPullFileRaw Gitea /pulls/{index}/files 原始响应
+type giteaPullFileRaw struct {
+	Filename         string `json:"filename"`
+	Status           string `json:"status"`
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	Changes          int    `json:"changes"`
+	Patch            string `json:"patch,omitempty"`
+	PreviousFilename string `json:"previous_filename"`
+}
+
+// giteaPullFileToDTO 映射为平台中性 PullFileDTO
+func giteaPullFileToDTO(r giteaPullFileRaw) platform.PullFileDTO {
+	return platform.PullFileDTO{
+		Filename:         r.Filename,
+		Status:           r.Status,
+		Additions:        r.Additions,
+		Deletions:        r.Deletions,
+		Changes:          r.Changes,
+		Patch:            r.Patch,
+		PreviousFilename: r.PreviousFilename,
+	}
+}
+
+// ListPullFiles 列出 PR 修改的文件列表 (GET /repos/{owner}/{repo}/pulls/{index}/files)
+func (a *GiteaAdapter) ListPullFiles(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullFileDTO, error) {
+	var raw []giteaPullFileRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/files", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		var ipcErr *ipc.IpcError
+		if errors.As(err, &ipcErr) && ipcErr.Code == "NOT_FOUND" {
+			return nil, platform.ErrNotSupported
+		}
+		return nil, err
+	}
+	out := make([]platform.PullFileDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, giteaPullFileToDTO(r))
+	}
+	return out, nil
+}
+
+// GetPullFileDiff 获取单个文件的 diff 内容（Gitea 拉完整 diff 后按文件拆分）
+func (a *GiteaAdapter) GetPullFileDiff(ctx context.Context, hostURL, username, token, owner, repo string, index int, filePath string) (*platform.PullFileDiffDTO, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d.diff", owner, repo, index)
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(hostURL, "/")+"/api/v1"+path, nil)
+	if err != nil {
+		return nil, ipc.NewInternal("构造 Gitea 请求失败: " + err.Error())
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, ipc.NewNetworkOffline(fmt.Sprintf("Gitea GET pulls/%d.diff: %s", index, err.Error()))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		return nil, ipc.NewInternal(fmt.Sprintf("Gitea diff %d 失败: %d %s", index, resp.StatusCode, string(body)))
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, ipc.NewInternal("读取 diff 响应失败: " + err.Error())
+	}
+
+	fileDiff := a.splitDiffByFile(string(data), filePath)
+	if fileDiff == nil {
+		return nil, ipc.NewNotFound(fmt.Sprintf("文件 %s 在此 PR diff 中不存在", filePath))
+	}
+	return fileDiff, nil
+}
+
+// splitDiffByFile 把完整 unified diff 按文件头拆分为单个文件的 diff
+func (a *GiteaAdapter) splitDiffByFile(fullDiff, targetPath string) *platform.PullFileDiffDTO {
+	lines := strings.Split(fullDiff, "\n")
+
+	fileLines := []string{}
+	inTarget := false
+	var currentHunk *platform.PullDiffHunk
+	hunks := []platform.PullDiffHunk{}
+	hunkRegexp := regexp.MustCompile("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@(.*)")
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git") {
+			if inTarget && len(fileLines) > 0 {
+				break
+			}
+			filePathFromDiff := ""
+			parts := strings.SplitN(line, " ", 3)
+			if len(parts) >= 3 {
+				filePathFromDiff = strings.TrimPrefix(parts[2], "b/")
+			}
+			inTarget = (filePathFromDiff == targetPath)
+			if inTarget {
+				fileLines = append(fileLines, line)
+			}
+			continue
+		}
+		if !inTarget {
+			continue
+		}
+		fileLines = append(fileLines, line)
+
+		if matches := hunkRegexp.FindStringSubmatch(line); matches != nil {
+			oldStart, _ := strconv.Atoi(matches[1])
+			oldLines := 1
+			if matches[2] != "" {
+				oldLines, _ = strconv.Atoi(matches[2])
+			}
+			newStart, _ := strconv.Atoi(matches[3])
+			newLines := 1
+			if matches[4] != "" {
+				newLines, _ = strconv.Atoi(matches[4])
+			}
+			hunk := platform.PullDiffHunk{
+				OldStart: oldStart,
+				OldLines: oldLines,
+				NewStart: newStart,
+				NewLines: newLines,
+				Header:   "@@" + line[3:],
+				Lines:    []string{},
+			}
+			hunks = append(hunks, hunk)
+			currentHunk = &hunks[len(hunks)-1]
+			continue
+		}
+
+		if currentHunk != nil && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-")) {
+			currentHunk.Lines = append(currentHunk.Lines, line)
+		}
+	}
+
+	if !inTarget {
+		return nil
+	}
+	return &platform.PullFileDiffDTO{
+		Filename: targetPath,
+		RawDiff:  strings.Join(fileLines, "\n"),
+		Hunks:    hunks,
+	}
+}
+
 // ===== HTTP 请求封装 =====
+
+// ===== 行内评审评论 API (v0.5.0 M4) =====
+
+// giteaReviewCommentRaw Gitea /pulls/{index}/comments 原始响应
+type giteaReviewCommentRaw struct {
+	ID      int64         `json:"id"`
+	Body    string        `json:"body"`
+	User    *giteaUserRaw `json:"user"`
+	Path    string        `json:"path"`
+	Line    int           `json:"new_position"`
+	Created string        `json:"created_at"`
+	Updated string        `json:"updated_at"`
+}
+
+// giteaReviewCommentToDTO 映射为平台中性 PullReviewCommentDto
+func giteaReviewCommentToDTO(r giteaReviewCommentRaw) platform.PullReviewCommentDto {
+	out := platform.PullReviewCommentDto{
+		ID:        r.ID,
+		Body:      r.Body,
+		Path:      r.Path,
+		Line:      r.Line,
+		CreatedAt: r.Created,
+		UpdatedAt: r.Updated,
+	}
+	if r.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// ListPullReviewComments 列行内评审评论 (GET /repos/{owner}/{repo}/pulls/{index}/comments)
+func (a *GiteaAdapter) ListPullReviewComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewCommentDto, error) {
+	var raw []giteaReviewCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullReviewCommentDto, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, giteaReviewCommentToDTO(r))
+	}
+	return out, nil
+}
+
+// CreatePullReviewComment 创建行内评审评论 (POST /repos/{owner}/{repo}/pulls/{index}/comments)
+func (a *GiteaAdapter) CreatePullReviewComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string, filePath string, line int) (*platform.PullReviewCommentDto, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{
+		"body":         body,
+		"path":         filePath,
+		"new_position": line,
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaReviewCommentRaw
+	apiPath := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", apiPath, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := giteaReviewCommentToDTO(raw)
+	return &dto, nil
+}
 
 // encodeJSONBody 把任意对象序列化为 io.Reader
 //
@@ -763,13 +1173,20 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// v0.6.1 log enhancement: 记录 HTTP 耗时、状态码（Bug 上报时 grep "HTTP" 一链可见）
+	start := time.Now()
 	resp, err := a.httpClient.Do(req)
+	duration := time.Since(start)
 	if err != nil {
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）
 		// 包成 IpcError，code=network_offline，前端能识别为"网络问题"而非"未知错误"
+		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
 		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea %s %s: %s", method, fullURL, err.Error()))
 	}
 	defer resp.Body.Close()
+
+	// 成功/失败都写 HTTP 日志（区分级别：成功 INFO/Debug，失败 WARN）
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -900,11 +1317,13 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 	}
 
 	return &platform.GraphResult{
-		Nodes:     nodes,
-		Edges:     edges,
-		Branches:  branches,
-		MaxLane:   r.MaxLane,
-		Truncated: r.Truncated,
+		Nodes:           nodes,
+		Edges:           edges,
+		Branches:        branches,
+		MaxLane:         r.MaxLane,
+		Truncated:       r.Truncated,
+		LocalExhausted:  r.LocalExhausted,
+		DeepenTriggered: r.DeepenTriggered,
 	}
 }
 

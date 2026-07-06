@@ -18,18 +18,22 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/git/graph"
 	"gitea-kanban/app/ipc"
+	"gitea-kanban/app/logx"
 	"gitea-kanban/app/platform"
 )
 
@@ -333,12 +337,15 @@ func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts pla
 		LocalPath: localPath,
 		MaxCount:  opts.MaxCount,
 		Offset:    opts.Offset,
+		Token:     opts.Token,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, opts.Head, logResult.Truncated)
+	graphResult.LocalExhausted = logResult.LocalExhausted
+	graphResult.DeepenTriggered = logResult.DeepenTriggered
 	return graphResultToDTO(graphResult), nil
 }
 
@@ -378,6 +385,7 @@ type githubPullRefRaw struct {
 }
 
 type githubUserRaw struct {
+	ID        int64  `json:"id"`
 	Login     string `json:"login"`
 	AvatarURL string `json:"avatar_url"`
 }
@@ -454,6 +462,222 @@ func encodeJSONBody(v any) (io.Reader, error) {
 		return nil, fmt.Errorf("序列化 JSON body 失败: %w", err)
 	}
 	return strings.NewReader(string(b)), nil
+}
+
+// ===== 行内评审评论 (v0.5.0 M4) =====
+
+// githubReviewCommentRaw GitHub /pulls/{pull_number}/comments 原始响应
+type githubReviewCommentRaw struct {
+	ID        int64          `json:"id"`
+	Body      string         `json:"body"`
+	User      *githubUserRaw `json:"user"`
+	Path      string         `json:"path"`
+	Line      int            `json:"line"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+}
+
+// githubReviewCommentToDTO 映射为平台中性 PullReviewCommentDto
+func githubReviewCommentToDTO(r githubReviewCommentRaw) platform.PullReviewCommentDto {
+	out := platform.PullReviewCommentDto{
+		ID:        r.ID,
+		Body:      r.Body,
+		Path:      r.Path,
+		Line:      r.Line,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
+	}
+	if r.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// ListPullReviewComments 列行内评审评论 (GET /repos/{owner}/{repo}/pulls/{pull_number}/comments)
+func (a *GitHubAdapter) ListPullReviewComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewCommentDto, error) {
+	var raw []githubReviewCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullReviewCommentDto, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, githubReviewCommentToDTO(r))
+	}
+	return out, nil
+}
+
+// CreatePullReviewComment 发行内评审评论 (POST /repos/{owner}/{repo}/pulls/{pull_number}/comments)
+func (a *GitHubAdapter) CreatePullReviewComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string, filePath string, line int) (*platform.PullReviewCommentDto, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{
+		"body": body,
+		"path": filePath,
+		"line": line,
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubReviewCommentRaw
+	apiPath := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", apiPath, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubReviewCommentToDTO(raw)
+	return &dto, nil
+}
+
+// ===== PR 修改文件列表 (v0.5.0 M4) =====
+
+// githubPullFileRaw GitHub /pulls/{pull_number}/files 原始响应
+type githubPullFileRaw struct {
+	Filename         string `json:"filename"`
+	Status           string `json:"status"`
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	Changes          int    `json:"changes"`
+	Patch            string `json:"patch,omitempty"`
+	PreviousFilename string `json:"previous_filename"`
+}
+
+// githubPullFileToDTO 映射到平台中性 PullFileDTO
+func githubPullFileToDTO(r githubPullFileRaw) platform.PullFileDTO {
+	return platform.PullFileDTO{
+		Filename:         r.Filename,
+		Status:           r.Status,
+		Additions:        r.Additions,
+		Deletions:        r.Deletions,
+		Changes:          r.Changes,
+		Patch:            r.Patch,
+		PreviousFilename: r.PreviousFilename,
+	}
+}
+
+// ListPullFiles 列出 PR 修改的文件列表 (GET /repos/{owner}/{repo}/pulls/{pull_number}/files)
+func (a *GitHubAdapter) ListPullFiles(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullFileDTO, error) {
+	var raw []githubPullFileRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/files", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		var ipcErr *ipc.IpcError
+		if errors.As(err, &ipcErr) && ipcErr.Code == "NOT_FOUND" {
+			return nil, platform.ErrNotSupported
+		}
+		return nil, err
+	}
+	out := make([]platform.PullFileDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, githubPullFileToDTO(r))
+	}
+	return out, nil
+}
+
+// GetPullFileDiff 获取单个文件的 diff 内容
+func (a *GitHubAdapter) GetPullFileDiff(ctx context.Context, hostURL, username, token, owner, repo string, index int, filePath string) (*platform.PullFileDiffDTO, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
+	fullURL := strings.TrimRight(hostURL, "/") + path
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	if err != nil {
+		return nil, ipc.NewInternal("构造 GitHub 请求失败: " + err.Error())
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3.diff")
+	req.Header.Set("User-Agent", "gitea-kanban/"+GitHubAdapterVersion)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, ipc.NewNetworkOffline(fmt.Sprintf("GitHub GET pulls/%d.diff: %s", index, err.Error()))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		return nil, ipc.NewInternal(fmt.Sprintf("GitHub diff %d 失败: %d %s", index, resp.StatusCode, string(respBody)))
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, ipc.NewInternal("读取 diff 响应失败: " + err.Error())
+	}
+
+	fileDiff := splitDiffByFile(string(data), filePath)
+	if fileDiff == nil {
+		return nil, ipc.NewNotFound(fmt.Sprintf("文件 %s 在此 PR diff 中不存在", filePath))
+	}
+	return fileDiff, nil
+}
+
+// splitDiffByFile 把完整 unified diff 按文件头拆分为单个文件的 diff
+func splitDiffByFile(fullDiff, targetPath string) *platform.PullFileDiffDTO {
+	all := strings.Split(fullDiff, "\n")
+	fileLines := []string{}
+	inTarget := false
+	hunks := []platform.PullDiffHunk{}
+	var current *platform.PullDiffHunk
+	hunkRe := regexp.MustCompile("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@(.*)")
+
+	for _, line := range all {
+		if strings.HasPrefix(line, "diff --git") {
+			if inTarget && len(fileLines) > 0 {
+				break
+			}
+			parts := strings.SplitN(line, " ", 3)
+			if len(parts) >= 3 {
+				fp := strings.TrimPrefix(parts[2], "b/")
+				inTarget = (fp == targetPath)
+				if inTarget {
+					fileLines = append(fileLines, line)
+				}
+			}
+			continue
+		}
+		if !inTarget {
+			continue
+		}
+		fileLines = append(fileLines, line)
+
+		if m := hunkRe.FindStringSubmatch(line); m != nil {
+			os, _ := strconv.Atoi(m[1])
+			ol := 1
+			if m[2] != "" {
+				ol, _ = strconv.Atoi(m[2])
+			}
+			ns, _ := strconv.Atoi(m[3])
+			nl := 1
+			if m[4] != "" {
+				nl, _ = strconv.Atoi(m[4])
+			}
+			hunk := platform.PullDiffHunk{
+				OldStart: os,
+				OldLines: ol,
+				NewStart: ns,
+				NewLines: nl,
+				Header:   "@@" + line[3:],
+				Lines:    []string{},
+			}
+			hunks = append(hunks, hunk)
+			current = &hunks[len(hunks)-1]
+			continue
+		}
+
+		if current != nil && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-")) {
+			current.Lines = append(current.Lines, line)
+		}
+	}
+
+	if !inTarget {
+		return nil
+	}
+	return &platform.PullFileDiffDTO{
+		Filename: targetPath,
+		RawDiff:  strings.Join(fileLines, "\n"),
+		Hunks:    hunks,
+	}
 }
 
 // ===== 以下首期不支持 =====
@@ -643,9 +867,10 @@ func (a *GitHubAdapter) ClosePull(ctx context.Context, hostURL, username, token,
 // body: {labels: ["bug", "feature"]}（按 name 字符串数组）
 //
 // 真实响应（v0.6+ integration test 验证）：
-//   PUT /repos/{owner}/{repo}/issues/{index}/labels
-//   → 200 OK + body = [{id, name, color, default, description}, ...]
-//   **不是** issue object，所以不要尝试解码成 PullRaw
+//
+//	PUT /repos/{owner}/{repo}/issues/{index}/labels
+//	→ 200 OK + body = [{id, name, color, default, description}, ...]
+//	**不是** issue object，所以不要尝试解码成 PullRaw
 func (a *GitHubAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*platform.PullDetailDTO, error) {
 	body := map[string]any{"labels": labelNames}
 	reader, err := encodeJSONBody(body)
@@ -823,6 +1048,219 @@ func (a *GitHubAdapter) CreatePullComment(ctx context.Context, hostURL, username
 	return &dto, nil
 }
 
+// UpdatePullComment 编辑 PR 评论（PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}）
+//
+// body: {body: "..."} —— GitHub 只允许评论作者本人编辑（非作者 403→403 映射 permission_denied）。
+// 返回更新后的评论（含新 updated_at），前端以此判断"已编辑"状态。
+func (a *GitHubAdapter) UpdatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, body string) (*platform.CommentDTO, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, ipc.NewValidationFailed("评论内容不能为空", "")
+	}
+	payload := map[string]any{"body": body}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubCommentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubCommentToDTO(raw)
+	return &dto, nil
+}
+
+// DeletePullComment 删除 PR 评论（DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}）
+//
+// 成功 → 204 No Content；对已删除评论重复删除也返 2xx（幂等）。
+// 非作者 / 非管理员 → 403。
+func (a *GitHubAdapter) DeletePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d", owner, repo, commentID)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+}
+
+// ===== PR 评论表情反应（v0.5.0 M2） =====
+//
+// GitHub 端点：/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions
+// 注意：GitHub 按 reaction_id 删（DELETE /reactions/{reaction_id}），与 Gitea 按 content 删不同。
+
+// githubReactionRaw GitHub reactions 端点原始响应
+type githubReactionRaw struct {
+	ID      int64          `json:"id"`
+	User    *githubUserRaw `json:"user"`
+	Content string         `json:"content"` // GitHub 字段名
+}
+
+// githubReactionToDTO 映射为平台中性 ReactionDTO
+func githubReactionToDTO(r githubReactionRaw) platform.ReactionDTO {
+	out := platform.ReactionDTO{
+		ID:      r.ID,
+		Content: r.Content,
+	}
+	if r.User != nil {
+		out.User = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// ListPullCommentReactions 列评论表情反应（GET /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions）
+func (a *GitHubAdapter) ListPullCommentReactions(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) ([]platform.ReactionDTO, error) {
+	var raw []githubReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.ReactionDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, githubReactionToDTO(r))
+	}
+	return out, nil
+}
+
+// AddPullCommentReaction 添加表情反应（POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions）
+//
+// GitHub reactions content 白名单（至少支持 8 种）："+1" / "-1" / "laugh" / "confused" / "heart" / "hooray" / "eyes" / "rocket"。
+// 重复添加同一 reaction 时 GitHub 返 422。
+func (a *GitHubAdapter) AddPullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) (*platform.ReactionDTO, error) {
+	validReactions := map[string]bool{"+1": true, "-1": true, "laugh": true, "confused": true, "heart": true, "hooray": true, "eyes": true, "rocket": true}
+	if !validReactions[content] {
+		return nil, ipc.NewValidationFailed("不支持的表情类型: "+content, "")
+	}
+	payload := map[string]any{"content": content}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubReactionRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", owner, repo, commentID)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubReactionToDTO(raw)
+	return &dto, nil
+}
+
+// RemovePullCommentReaction 移除表情反应（先 list 找 reaction id，再 DELETE /reactions/{reaction_id}）
+//
+// GitHub 按 reaction_id 删（与 Gitea 按 content 删不同）。因为前端只传 content，
+// 这里先 list 找到当前用户 + 指定 content 的 reaction id，再 DELETE。
+func (a *GitHubAdapter) RemovePullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) error {
+	// 1. list reactions to find matching reaction id
+	reactions, err := a.ListPullCommentReactions(ctx, hostURL, username, token, owner, repo, commentID)
+	if err != nil {
+		return err
+	}
+	for _, r := range reactions {
+		if r.Content == content && r.User != nil && r.User.Username == username {
+			path := fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions/%d", owner, repo, commentID, r.ID)
+			return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+		}
+	}
+	// 没找到匹配的 reaction → 当作已删除（幂等）
+	return nil
+}
+
+// ===== 合并请求评审（v0.5.0 M3） =====
+//
+// GitHub review API: /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+// ⚠️ GitHub event 值是大写：APPROVE / REQUEST_CHANGES / COMMENT
+
+// githubReviewRaw GitHub /pulls/{pull_number}/reviews 原始响应
+type githubReviewRaw struct {
+	ID          int64          `json:"id"`
+	State       string         `json:"state"`
+	Body        string         `json:"body"`
+	User        *githubUserRaw `json:"user"`
+	CommitID    string         `json:"commit_id"`
+	SubmittedAt string         `json:"submitted_at"`
+}
+
+// githubReviewToDTO 映射为平台中性 PullReviewDTO
+func githubReviewToDTO(r githubReviewRaw) platform.PullReviewDTO {
+	out := platform.PullReviewDTO{
+		ID:          r.ID,
+		State:       r.State,
+		Body:        r.Body,
+		CommitID:    r.CommitID,
+		SubmittedAt: r.SubmittedAt,
+	}
+	if r.User != nil {
+		out.Author = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return out
+}
+
+// mapReviewEventToGitHub 把前端统一的小写 event 映射到 GitHub 大写
+// 前端: "approve" / "request_changes" / "comment"
+// GitHub: "APPROVE" / "REQUEST_CHANGES" / "COMMENT"
+func mapReviewEventToGitHub(event string) string {
+	switch event {
+	case "approve":
+		return "APPROVE"
+	case "request_changes":
+		return "REQUEST_CHANGES"
+	case "comment":
+		return "COMMENT"
+	default:
+		return event
+	}
+}
+
+// validateGitHubReviewEvent 校验评审事件值
+func validateGitHubReviewEvent(event string) error {
+	validEvents := map[string]bool{"approve": true, "request_changes": true, "comment": true}
+	if !validEvents[event] {
+		return ipc.NewValidationFailed("非法的评审事件: "+event, "支持的值: approve / request_changes / comment")
+	}
+	return nil
+}
+
+// ListPullReviews 列评审（GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews）
+func (a *GitHubAdapter) ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewDTO, error) {
+	var raw []githubReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullReviewDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, githubReviewToDTO(r))
+	}
+	return out, nil
+}
+
+// CreatePullReview 创建评审（POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews）
+//
+// ⚠️ GitHub event 值大写（APPROVE / REQUEST_CHANGES / COMMENT），需要在 adapter 层做映射
+func (a *GitHubAdapter) CreatePullReview(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts platform.CreateReviewOpts) (*platform.PullReviewDTO, error) {
+	if err := validateGitHubReviewEvent(opts.Event); err != nil {
+		return nil, err
+	}
+	payload := map[string]any{
+		"commit_id": opts.CommitID,
+		"body":      opts.Body,
+		"event":     mapReviewEventToGitHub(opts.Event),
+		"comments":  []interface{}{}, // 暂无行内评审（M4+）
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var raw githubReviewRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	dto := githubReviewToDTO(raw)
+	return &dto, nil
+}
+
 // githubCommentRaw GitHub /repos/.../issues/{index}/comments 原始响应
 //
 // 字段与上面 githubPullRaw 里的 user 部分对齐，复用不上不是问题但为可读性独立定义。
@@ -847,10 +1285,11 @@ func githubCommentToDTO(c githubCommentRaw) platform.CommentDTO {
 			Username:  c.User.Login,
 			AvatarURL: c.User.AvatarURL,
 		}
+		out.UserID = c.User.ID
 	}
 	return out
 }
-//
+
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'
 // GitHub: 'merge' | 'rebase' | (无 'rebase-merge'，映射为 'rebase') | 'squash'
 func mapMergeMethodToGitHub(method string) string {
@@ -927,30 +1366,28 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// v0.6.1 log enhancement: 记录 HTTP 耗时、状态码
+	start := time.Now()
 	resp, err := a.httpClient.Do(req)
+	duration := time.Since(start)
 	if err != nil {
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）
 		// 必须包成 IpcError，否则前端 normalizeError 落到 "未知错误" 占位文案
 		// 用户根本看不到真实原因（TLS handshake timeout / DNS 解析失败 / 502 等）
-		slog.Default().Warn("GitHub HTTP request failed",
-			"method", method, "url", fullURL, "err", err.Error())
+		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
 		return ipc.NewNetworkOffline(fmt.Sprintf("GitHub %s %s: %s", method, fullURL, err.Error()))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		bodyStr := ipc.TruncateCause(string(bodyBytes))
 		// 关键诊断：每次非 2xx 都写一条 slog,这样用户报错时
 		// ${dataDir}/logs/main/main.log 里有完整 status + url + body
-		slog.Default().Warn("GitHub HTTP non-2xx",
-			"method", method,
-			"url", fullURL,
-			"status", resp.StatusCode,
-			"body", bodyStr,
-		)
+		platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 		return mapHTTPError(resp.StatusCode, string(bodyBytes))
 	}
+
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 
 	if resp.StatusCode == http.StatusNoContent {
 		return nil
@@ -1112,10 +1549,12 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 	}
 
 	return &platform.GraphResult{
-		Nodes:     nodes,
-		Edges:     edges,
-		Branches:  branches,
-		MaxLane:   r.MaxLane,
-		Truncated: r.Truncated,
+		Nodes:           nodes,
+		Edges:           edges,
+		Branches:        branches,
+		MaxLane:         r.MaxLane,
+		Truncated:       r.Truncated,
+		LocalExhausted:  r.LocalExhausted,
+		DeepenTriggered: r.DeepenTriggered,
 	}
 }

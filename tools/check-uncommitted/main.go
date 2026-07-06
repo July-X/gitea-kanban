@@ -46,14 +46,14 @@ func main() {
 	gr := graph.BuildGraphVscodeWithHead(res.Commits, head, res.Truncated)
 
 	out := map[string]any{
-		"uncommittedPresent":  res.Commits[0].SHA == git.UNCOMMITTED_HASH,
-		"uncommittedNode":     res.Commits[0],
-		"headSHA":             head,
-		"totalCommits":        len(res.Commits),
-		"maxLane":             gr.MaxLane,
-		"maxColor":            gr.MaxColor,
-		"first5Subjects":      firstSubjects(res.Commits, 5),
-		"truncated":           res.Truncated,
+		"uncommittedPresent": res.Commits[0].SHA == git.UNCOMMITTED_HASH,
+		"uncommittedNode":    res.Commits[0],
+		"headSHA":            head,
+		"totalCommits":       len(res.Commits),
+		"maxLane":            gr.MaxLane,
+		"maxColor":           gr.MaxColor,
+		"first5Subjects":     firstSubjects(res.Commits, 5),
+		"truncated":          res.Truncated,
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

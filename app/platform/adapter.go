@@ -140,11 +140,143 @@ type PlatformAdapter interface {
 	// 拿到权威时间戳去更新 UI（避免"前端猜时间戳 + 实际服务端时间"不一致）。
 	CreatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string) (*CommentDTO, error)
 
-	// ListLabels 列出仓库标签
+	// UpdatePullComment 编辑合并请求评论
+	//
+	// Gitea:  PATCH /repos/{owner}/{repo}/issues/comments/{id}
+	// GitHub: PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}
+	//
+	// 仅评论作者本人能编辑（服务端 403 如果不是作者）。返回更新后的评论 DTO。
+	UpdatePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, body string) (*CommentDTO, error)
+
+	// DeletePullComment 删除合并请求评论
+	//
+	// Gitea:  DELETE /repos/{owner}/{repo}/issues/comments/{id}
+	// GitHub: DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}
+	//
+	// 仅评论作者本人 / 仓库管理员能删除。成功时返回 nil error。
+	// 两端对已删除的评论重复删除都返 2xx（幂等）。
+	DeletePullComment(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) error
+
+	// ListPullCommentReactions 列评论表情反应（v0.5.0 M2）
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/issues/comments/{id}/reactions
+	// GitHub: GET /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions
+	// 返回反应列表（按 user 维度，每个 user 一个 ReactionDTO）。
+	ListPullCommentReactions(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64) ([]ReactionDTO, error)
+
+	// AddPullCommentReaction 添加表情反应（v0.5.0 M2）
+	//
+	// Gitea:  POST /repos/{owner}/{repo}/issues/comments/{id}/reactions {content: "+1"}
+	// GitHub: POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions {content: "+1"}
+	// 返回新增的 ReactionDTO；重复添加同一 reaction 时 GitHub 返 422 / Gitea 静默返回已有 reaction。
+	AddPullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) (*ReactionDTO, error)
+
+	// RemovePullCommentReaction 移除表情反应（v0.5.0 M2）
+	//
+	// Gitea:  DELETE /repos/{owner}/{repo}/issues/comments/{id}/reactions {content: "+1"}（按 content 删，带 body）
+	// GitHub: DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions/{reaction_id}（按 reaction id 删，不带 body）
+	// 成功返回 nil error。
+	RemovePullCommentReaction(ctx context.Context, hostURL, username, token, owner, repo string, commentID int64, content string) error
+
+	// ListPullReviews 列合并请求评审（v0.5.0 M3）
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/reviews
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+	// 按 createdAt 升序。
+	ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]PullReviewDTO, error)
+
+	// CreatePullReview 创建评审（v0.5.0 M3）
+	//
+	// Gitea:  POST /repos/{owner}/{repo}/pulls/{index}/reviews
+	// GitHub: POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+	// event: "approve" / "request_changes" / "comment"（前端统一英语词，GitHub adapter 做大写映射）
+	// 返回创建评审（含服务端 id / state / submittedAt）。
+	CreatePullReview(ctx context.Context, hostURL, username, token, owner, repo string, index int, opts CreateReviewOpts) (*PullReviewDTO, error)
+
+	// ListPullReviewComments 列合并请求行内评审评论（v0.5.0 M4）
+	//
+	// 按文件分组的行内 review comment（diff 评论），区别于 ListPullComments（整体 issue 评论）。
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/comments
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{pull_number}/comments
+	ListPullReviewComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]PullReviewCommentDto, error)
+
+	// CreatePullReviewComment 创建行内评审评论（v0.5.0 M4）
+	//
+	// Gitea:  POST /repos/{owner}/{repo}/pulls/{index}/comments
+	//          body: {body, path, new_position: <line>}
+	// GitHub: POST /repos/{owner}/{repo}/pulls/{pull_number}/comments
+	//          body: {body, path, line}
+	CreatePullReviewComment(ctx context.Context, hostURL, username, token, owner, repo string, index int, body string, path string, line int) (*PullReviewCommentDto, error)
+
+	// ListPullFiles 列出 PR 修改的文件列表（v0.5.0 M4）
+	//
+	// 每个元素包含文件名 + 变更类型（added / modified / deleted / renamed）+
+	// 增删行数 + 文件级 patch（可选，小文件直接带，大文件前端按需 GetPullFileDiff）。
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/files
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{pull_number}/files
+	// GitHub 返 JSON 数组；Gitea 也返 JSON 数组（Gitea 1.21+）。
+	// 对于低版本 Gitea 不支援此端点（404），前端隐藏"文件评论" Tab。
+	ListPullFiles(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]PullFileDTO, error)
+
+	// GetPullFileDiff 获取单个文件的 diff 内容（v0.5.0 M4）
+	//
+	// 返回 unified diff 格式文本（patch 格式），前端按行解析后渲染
+	// 代码折叠 / 行内评论挂载点。
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/files/{file_index}/patch
+	//        或直接 GET /repos/{owner}/{repo}/pulls/{index}.diff 取完整 diff 再按文件拆分
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{filename} 走 redir；推荐用 pulls/{number}.diff
+	//        后端统一拉完整 diff 后按文件拆分 → 降低实现跨平台一致性成本
+	GetPullFileDiff(ctx context.Context, hostURL, username, token, owner, repo string, index int, filePath string) (*PullFileDiffDTO, error)
+
 	ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]LabelDTO, error)
 
 	// ListMembers 列出仓库成员
 	ListMembers(ctx context.Context, hostURL, username, token, owner, repo string) ([]MemberDTO, error)
+}
+
+// PullFileDTO PR 修改文件列表项（v0.5.0 M4）
+//
+// Gitea 字段：filename, status, additions, deletions, changes, patch, blob_url, raw_url
+// GitHub 字段：filename, status, additions, deletions, changes, patch, blob_url, raw_url, sha
+// 两者结构几乎一致，必须用 filename + status + additions + deletions。
+type PullFileDTO struct {
+	Filename  string `json:"filename"`
+	Status    string `json:"status"` // "added" | "modified" | "deleted" | "renamed"
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Changes   int    `json:"changes"`
+	// Patch 可选（小文件才带，大文件前端按需 GetPullFileDiff）；
+	// Gitea 和 GitHub 都返 patch 字段但内容量不稳定。
+	Patch string `json:"patch,omitempty"`
+	// PreviousFilename 仅 status=renamed 时有值（旧文件名）。
+	PreviousFilename string `json:"previousFilename,omitempty"`
+}
+
+// PullFileDiffDTO 单文件的 diff 详情（v0.5.0 M4）
+//
+// 包含原始 unified diff 文本 + 解析后行号锚点（前端行内评论挂载点）。
+type PullFileDiffDTO struct {
+	Filename string `json:"filename"`
+	// RawDiff 完整 unified diff 文本（hunk header + context +/- lines）
+	RawDiff string `json:"rawDiff"`
+	// Hunks 解析后的 diff hunk 列表（前端按 hunk 渲染上下文代码块）
+	Hunks []PullDiffHunk `json:"hunks"`
+}
+
+// PullDiffHunk 单个 diff hunk（v0.5.0 M4）
+//
+// 对应 unified diff 中一个 @@ 块。
+type PullDiffHunk struct {
+	OldStart int `json:"oldStart"`
+	OldLines int `json:"oldLines"`
+	NewStart int `json:"newStart"`
+	NewLines int `json:"newLines"`
+	// Header hunk 第一行（@@ -a,b +c,d @@ 上下文）
+	Header string `json:"header"`
+	// Lines hunk 内所有代码行（前缀 ' ' = 上下文, '+' = 新增, '-' = 删除）
+	Lines []string `json:"lines"`
 }
 
 // ListReposOpts 列仓库参数
@@ -196,6 +328,8 @@ type LogGraphOpts struct {
 	Head string
 	// Offset 跳过前 N 条 commit（分页用，0 = 不跳过）
 	Offset int
+	// Token 仓库 token（offset 越界 + repoIsShallow 时后台增量 deepen 用）
+	Token string
 }
 
 // GraphResult Graph 布局结果（与 app/git/graph.GraphResult 对齐，但作为 DTO 不含内部类型）
@@ -207,6 +341,10 @@ type GraphResult struct {
 	Branches  []GraphBranchDTO `json:"branches,omitempty"`
 	MaxLane   int              `json:"maxLane"`
 	Truncated bool             `json:"truncated"`
+	// LocalExhausted 本地 commit 已全部取出，远端可能有更多（需 deepen）。
+	LocalExhausted bool `json:"localExhausted"`
+	// DeepenTriggered 后端已启动后台增量 deepen 拉取远端 commit。
+	DeepenTriggered bool `json:"deepenTriggered"`
 }
 
 // GraphBranchDTO 1:1 复刻 vscode-git-graph 的 Branch 对象
@@ -294,32 +432,32 @@ type PullDTO struct {
 // 与 PullDTO 区分：列表接口轻量，详情接口完整。
 // 字段对齐前端 PullDto（frontend/src/types/dto.ts），前端 store 直接复用。
 type PullDetailDTO struct {
-	Index         int               `json:"index"`
-	Number        int               `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
-	Title         string            `json:"title"`
-	State         string            `json:"state"` // "open" | "closed"
-	Draft         bool              `json:"draft"`
-	Merged        bool              `json:"merged"`
-	Head          PullRefDTO        `json:"head"`
-	Base          PullRefDTO        `json:"base"`
-	Author        *PullUserDTO      `json:"author,omitempty"`
-	CreatedAt     string            `json:"createdAt"`     // ISO 8601
-	UpdatedAt     string            `json:"updatedAt"`     // ISO 8601
-	Mergeable     bool              `json:"mergeable"`     // false=有冲突/不可合并
-	HasConflicts  bool              `json:"hasConflicts"`  // = !Mergeable（前端视图字段对齐）
-	Body          string            `json:"body,omitempty"`
-	CommentsCount int               `json:"commentsCount"`
-	Labels        []PullLabelDTO    `json:"labels,omitempty"`
-	Assignees     []PullUserDTO     `json:"assignees,omitempty"`
-	Reviewers     []PullUserDTO     `json:"reviewers,omitempty"`
-	MergedBy      *PullUserDTO      `json:"mergedBy,omitempty"`
-	MergeCommitSHA string           `json:"mergeCommitSha,omitempty"` // 合并成功后回填
+	Index          int            `json:"index"`
+	Number         int            `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
+	Title          string         `json:"title"`
+	State          string         `json:"state"` // "open" | "closed"
+	Draft          bool           `json:"draft"`
+	Merged         bool           `json:"merged"`
+	Head           PullRefDTO     `json:"head"`
+	Base           PullRefDTO     `json:"base"`
+	Author         *PullUserDTO   `json:"author,omitempty"`
+	CreatedAt      string         `json:"createdAt"`    // ISO 8601
+	UpdatedAt      string         `json:"updatedAt"`    // ISO 8601
+	Mergeable      bool           `json:"mergeable"`    // false=有冲突/不可合并
+	HasConflicts   bool           `json:"hasConflicts"` // = !Mergeable（前端视图字段对齐）
+	Body           string         `json:"body,omitempty"`
+	CommentsCount  int            `json:"commentsCount"`
+	Labels         []PullLabelDTO `json:"labels,omitempty"`
+	Assignees      []PullUserDTO  `json:"assignees,omitempty"`
+	Reviewers      []PullUserDTO  `json:"reviewers,omitempty"`
+	MergedBy       *PullUserDTO   `json:"mergedBy,omitempty"`
+	MergeCommitSHA string         `json:"mergeCommitSha,omitempty"` // 合并成功后回填
 }
 
 // PullRefDTO head / base 引用信息
 type PullRefDTO struct {
-	Ref string `json:"ref"`  // 分支名
-	SHA string `json:"sha"`  // 分支顶端 commit hash
+	Ref string `json:"ref"` // 分支名
+	SHA string `json:"sha"` // 分支顶端 commit hash
 }
 
 // PullUserDTO 嵌套用户信息（author / assignees / reviewers / mergedBy）
@@ -343,11 +481,50 @@ type PullLabelDTO struct {
 // v0.6+ 不引入"评论系统评论"（PR review / inline review comment）——
 // 只支持顶层 issue-style 评论，等需要 review 评论时再加新 DTO。
 type CommentDTO struct {
-	ID        int64         `json:"id"`
-	Body      string        `json:"body"`
-	Author    *PullUserDTO  `json:"author,omitempty"`
-	CreatedAt string        `json:"createdAt"`
-	UpdatedAt string        `json:"updatedAt,omitempty"`
+	ID        int64        `json:"id"`
+	Body      string       `json:"body"`
+	Author    *PullUserDTO `json:"author,omitempty"`
+	CreatedAt string       `json:"createdAt"`
+	UpdatedAt string       `json:"updatedAt,omitempty"`
+	UserID    int64        `json:"userId,omitempty"`
+}
+
+// ReactionDTO 单条表情反应（v0.5.0 M2）
+type ReactionDTO struct {
+	ID      int64        `json:"id"`
+	Content string       `json:"content"` // "+1" / "-1" / "laugh" / "confused" / "heart" / "hooray" / "eyes" / "rocket"
+	User    *PullUserDTO `json:"user"`
+}
+
+// PullReviewDTO 合并请求评审（v0.5.0 M3）
+type PullReviewDTO struct {
+	ID          int64        `json:"id"`
+	State       string       `json:"state"` // "approved" / "changes_requested" / "commented"
+	Body        string       `json:"body"`  // 评审总结文
+	Author      *PullUserDTO `json:"author"`
+	CommitID    string       `json:"commitId"`    // 评审针对的 commit SHA
+	SubmittedAt string       `json:"submittedAt"` // 评审时间（Gitea: submitted; GitHub: submitted_at）
+}
+
+// CreatePullReviewOpts 创建评审参数（v0.5.0 M3）
+type CreateReviewOpts struct {
+	CommitID string // 可选：评审针对的 commit SHA（空 = HEAD）
+	Body     string // 评审总结文
+	Event    string // "approve" | "request_changes" | "comment"（前端统一小写）
+}
+
+// PullReviewCommentDto 行内评审评论 DTO（v0.5.0 M4）
+//
+// 字段对齐 Gitea ReviewComment + GitHub Pull Request Review Comment，
+// 包含文件路径 + 行号，前端按 path 分组渲染到 diff 侧边栏。
+type PullReviewCommentDto struct {
+	ID        int64        `json:"id"`
+	Body      string       `json:"body"`
+	Author    *PullUserDTO `json:"author,omitempty"`
+	Path      string       `json:"path"`
+	Line      int          `json:"line"`
+	CreatedAt string       `json:"createdAt"`
+	UpdatedAt string       `json:"updatedAt,omitempty"`
 }
 
 // LabelDTO 标签信息

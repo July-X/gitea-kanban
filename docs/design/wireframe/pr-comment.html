@@ -1,0 +1,2409 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gitea Kanban · PR 评论模块（还原稿 v5）</title>
+  <style>
+
+/* ====== 暗色主题 token（完整提取自 theme.css v1.6.1） ====== */
+
+:root,
+[data-theme='dark'] {
+  /* === 背景映射 === */
+  --color-bg: var(--color-canvas);
+  --color-bg-elevated: var(--color-elevated);
+  --color-bg-hover: var(--color-hover);
+  --color-bg-active: var(--color-active);
+  --color-bg-overlay: rgba(var(--shadow-rgb), 0.5);
+}
+
+html[data-theme='dark'] {
+  --color-elevated: #181c24;
+  --color-hover: #262b34;
+  --color-active: #353b46;
+  --color-divider: rgba(220, 233, 240, 0.1);
+  --color-divider-strong: rgba(220, 233, 240, 0.2);
+  --color-divider-region: rgba(220, 233, 240, 0.16);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.16);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.24), 0 2px 4px rgba(0, 0, 0, 0.16);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.32), 0 4px 8px rgba(0, 0, 0, 0.2);
+  --color-shell-main-bg: var(--color-bg);
+}
+
+[data-theme='dark'] {
+  --color-canvas: #0f1115;
+  --color-text: #ffffff;
+  --color-text-muted: #b4c6d4;
+  --color-text-dim: #94a4b2;
+  --color-text-inverse: #ffffff;
+  --color-primary: #74b830;
+  --color-primary-hover: #8ac544;
+  --color-primary-active: #5c9622;
+  --color-primary-soft: rgba(116, 184, 48, 0.22);
+  --color-primary-glow: rgba(116, 184, 48, 0.32);
+  --color-primary-alpha-22: rgba(116, 184, 48, 0.22);
+  --color-primary-alpha-45: rgba(116, 184, 48, 0.45);
+  --color-primary-alpha-70: rgba(116, 184, 48, 0.7);
+  --color-warning: #ff8534;
+  --color-error: #e14646;
+  --color-info: #4fc4d6;
+  --color-pending: #94a3b8;
+  --color-offline: #64748b;
+  --color-success: #5bc76a;
+  --color-success-soft: rgba(91, 199, 106, 0.18);
+  --color-accent: #ff8534;
+  --color-accent-soft: rgba(255, 133, 52, 0.18);
+  --color-danger: #e14646;
+  --color-danger-soft: rgba(225, 70, 70, 0.18);
+  --color-info-soft: rgba(79, 196, 214, 0.18);
+  --color-warning-soft: rgba(255, 133, 52, 0.18);
+  --shadow-rgb: 0, 0, 0;
+  --color-divider-soft: rgba(220, 233, 240, 0.06);
+}
+
+:root {
+  --color-focus-ring: rgba(116, 184, 48, 0.4);
+  --radius-xs: 4px; --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-pill: 999px;
+  --radius-card: 8px; --radius-btn: 6px; --radius-input: 6px; --radius-chip: 4px;
+  --radius-tag: 4px; --radius-modal: 8px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
+  --font-xs: 11px; --font-sm: 13px; --font-md: 15px; --font-lg: 16px; --font-xl: 20px; --font-2xl: 24px;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+
+    /* ====== 全局 ====== */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-size: var(--font-md);
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    code, .mono { font-family: var(--font-mono); font-size: 12px; }
+    textarea { font-family: inherit; }
+
+    /* ====== 完整 CSS（来自 MergesView.vue） ====== */
+
+.merges {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.merges__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  /* v1.6.1 改用主区中性色（--color-shell-main-bg），跟主区同色
+   * 区别靠 1px --color-divider 底边线分层 */
+  background: var(--color-shell-main-bg);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  gap: var(--space-3);
+}
+
+.merges__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  min-width: 0;
+}
+
+.merges__title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.merges__title-h1 {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.merges__repo {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merges__topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.merges__counter {
+  font-feature-settings: 'tnum';
+}
+
+/* A-3 P2 · B5 修法：顶栏只显示"默认：xxx" 提示文字，4 种合并方式不再
+ * 用 select 全展开，避免 PM 默认看到所有技术选项 */
+.merges__merge-method-hint {
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.merges__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  /* v1.6.1 改主区中性色（--color-shell-main-bg），跟 topbar / 主体内容同色
+   * 旧值 --color-bg (#E8F1F5 浅苍蓝) 在新主区 #F8FAFC 上对比过强 */
+  background: var(--color-shell-main-bg);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+}
+
+.merges__refresh:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.merges__refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.merges__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  /* v1.6.1 改主区中性色（--color-shell-main-bg），跟 topbar / 主体内容同色
+   * 工具栏 = topbar 跟主体内容之间的"内嵌工具区", 视觉上跟两边同色 */
+  background: var(--color-shell-main-bg);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.merges__tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+
+.merges__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+
+.merges__tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.merges__tab--active {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.merges__tab--active:hover {
+  background: var(--color-primary-hover);
+  color: var(--color-text-inverse);
+}
+
+.merges__tab-count {
+  font-size: var(--font-xs);
+  /* v1.6.1 改主区中性色（--color-shell-main-bg），跟主区同色 */
+  background: var(--color-shell-main-bg);
+  color: var(--color-text-muted);
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  font-feature-settings: 'tnum';
+}
+
+.merges__tab--active .merges__tab-count {
+  background: var(--color-primary-active);
+  color: var(--color-text-inverse);
+}
+
+.merges__search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 360px;
+  padding: 4px 10px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+
+.merges__search-input {
+  flex: 1;
+  background: transparent;
+  padding: 0;
+  border: none;
+}
+
+.merges__search-input:focus {
+  background: transparent;
+  box-shadow: none;
+}
+
+.merges__error {
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-danger-soft);
+  border-left: 3px solid var(--color-danger);
+  font-size: var(--font-sm);
+}
+
+.merges__error-msg {
+  color: var(--color-text);
+  font-weight: 500;
+  margin: 0 0 2px;
+}
+
+.merges__error-hint {
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.merges__placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.merges__list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* v2.62：用 margin-top 替代 gap（某些 WebKit flex gap 有 bug，多 item 时产生多余空白） */
+  margin: 0;
+  padding: var(--space-4);
+  overflow-y: auto;
+  /* v0.6+ bugfix：防止 PR row 内部内容撑出整页横向滚动条 */
+  overflow-x: hidden;
+  & > li + li {
+    margin-top: 2px;
+  }
+}
+
+/* v2.62 滚动到底自动加载分页：哨兵 + 三状态视觉反馈 */
+/* v0.6.1+：加载中动画已统一到 StatusBarPulse（底部状态栏心跳脉冲），merges__load-more-loading 和 merges__load-more-spinner 已移除 */
+.merges__load-more {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-4) 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-height: 56px;                /* v2.62：加大保证 IntersectionObserver 能可靠检测 */
+  list-style: none;                /* li 默认有 disc bullet，去掉 */
+  /* v2.62：idle 状态走脉冲呼吸动画提示用户可加载 */
+  transition: opacity var(--t-base) var(--ease);
+}
+/* 不同状态的边框/背景提示 */
+.merges__load-more[data-state='idle'] {
+  opacity: 0.6;
+}
+.merges__load-more[data-state='end'] {
+  opacity: 0.5;
+}
+.merges__load-more-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  animation: merges-load-idle-breath 2s ease-in-out infinite;
+}
+.merges__load-more-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--color-divider);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.merges__load-more-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-style: normal;
+  font-size: var(--font-xs);
+}
+.merges__load-more-divider {
+  flex: 0 0 24px;
+  height: 1px;
+  background: var(--color-divider);
+}
+@keyframes merges-load-idle-breath {
+  0%, 100% { opacity: 0.55; transform: translateY(0); }
+  50% { opacity: 0.9; transform: translateY(2px); }
+}
+
+.merge-item {
+  /* v0.6.24：去掉浅苍蓝背景色，使用透明背景，让整页背景色统一 */
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  transition: background var(--t-fast) var(--ease);
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: var(--space-3);
+  /* v2.59：紧凑布局——padding 12px → 8px（v2.62 再降至 4px，消灭超多 MR 时的空行）。
+     padding(4px)+gap(2px)=8px/item 间距，极致紧凑。 */
+  padding: 4px var(--space-3);
+}
+
+.merge-item:hover {
+  background: var(--color-bg-hover);
+}
+.merge-item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.merge-item--open {
+  border-left: 3px solid var(--color-success);
+}
+
+.merge-item--merged {
+  border-left: 3px solid var(--color-accent);
+}
+
+.merge-item--closed {
+  border-left: 3px solid var(--color-text-muted);
+  opacity: 0.85;
+}
+
+/* ===== leading: 状态图标（gitea octicon-git-pull-request 风格） ===== */
+
+.merge-item__leading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  align-self: center;
+}
+
+.merge-item__icon--open {
+  color: var(--color-success);
+}
+.merge-item__icon--merged {
+  color: var(--color-accent);
+}
+.merge-item__icon--draft {
+  color: var(--color-warning);
+}
+.merge-item__icon--closed {
+  color: var(--color-text-muted);
+}
+
+/* ===== main: 标题 + meta + body（gitea .flex-item-main） ===== */
+
+.merge-item__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.merge-item__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: nowrap;
+}
+
+.merge-item__title {
+  font-size: var(--font-md);
+  color: var(--color-text);
+  font-weight: 600;
+  text-decoration: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-item__title:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.merge-item__badge {
+  font-size: var(--font-xs);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  font-weight: 500;
+  flex-shrink: 0;
+  /* title → badge 间距跟 .merge-item__timeline-btn 宽度(22px)等宽
+   * —— header 自身 gap 4px + 本 margin 18px = 22px,视觉上像
+   * "title 后留出一格时钟按钮的位置再放 badge"，
+   * 让 title 跟 [badge+clock] 这一组在视觉上明确分块。
+   * 一改时钟按钮宽度,这个值要跟着改。 */
+  margin-left: 18px;
+}
+
+/* v1.4 · 任务 #merge-timeline-jump:
+   header 上的时钟按钮 —— 跳时间轴定位到本合并请求的 head 提交
+   视觉强调：默认就用主色软底 + 主色文字 + 主色描边(跟 TimelineView
+   .commit-row.is-pr-focus 同一主色系),用户一眼能识别"点这个跳过去"。
+
+   跟 title / badge 一起走 header 的 4px gap 紧贴成一组。 */
+.merge-item__timeline-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  /* 默认态：主色软底 + 主色文字 + 1px 主色描边 —— 强调色,与 is-pr-focus 同源 */
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.merge-item__timeline-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+.merge-item__timeline-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.merge-badge--open {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+.merge-badge--merged {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+.merge-badge--closed {
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
+}
+.merge-badge--draft {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning);
+}
+
+.merge-item__expand {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.merge-item__expand:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+}
+
+.merge-item__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.merge-item__index {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+.merge-item__index:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.merge-item__meta-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.merge-item__meta-text {
+  color: var(--color-text-muted);
+}
+
+.merge-item__author-link,
+.merge-item__author {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+.merge-item__author-link:hover {
+  text-decoration: underline;
+}
+
+/* 分支流向（gitea .branches 块） */
+.merge-item__branches {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.merge-item__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-item__branch:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.merge-item__branch-arrow {
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+/* 属性块：标签 + 里程碑 + 指派人 + 评审人（gitea 合并请求属性块） */
+.merge-item__attrs {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: var(--font-xs);
+}
+
+.merge-item__label {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--label-bg, var(--color-bg));
+  color: var(--label-color, var(--color-text));
+  border: 1px solid var(--label-color, var(--color-divider));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.merge-item__milestone,
+.merge-item__assignee,
+.merge-item__reviewer,
+.merge-item__comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ===== trailing: 操作按钮（gitea 把操作放行内） ===== */
+
+.merge-item__trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.merge-item__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--color-divider);
+}
+.merge-item__btn--merge {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-color: var(--color-primary);
+}
+.merge-item__btn--merge:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+.merge-item__btn--close {
+  background: transparent;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+.merge-item__btn--close:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+}
+.merge-item__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.merge-item__conflict-hint {
+  font-size: var(--font-xs);
+  color: var(--color-warning);
+  padding: 2px 6px;
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-sm);
+}
+
+.merge-item__ext-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast) var(--ease);
+  text-decoration: none;
+}
+.merge-item__ext-link:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* ===== 展开区：保留 meta 详细（gitea 合并请求详情页的属性块） ===== */
+
+.merge-item__detail {
+  grid-column: 1 / -1;
+  padding: 5px var(--space-4) var(--space-4);
+  border-top: 1px solid var(--color-divider);
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  /* PR row 高度再增加 80px */
+  min-height: 460px;
+  max-height: min(90vh, 900px);
+  overflow: hidden;
+}
+
+.merge-item__detail-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* v1.4 · 详情头部一行：meta 紧凑 + 编辑按钮（同行右对齐）*/
+.merge-item__detail-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.merge-item__meta-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.merge-item__meta-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+.merge-item__meta-chip dt {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.merge-item__meta-chip dd {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.merge-item__detail-right {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* meta 区使用单列紧凑布局（v1.3：左栏只占 1/3，多列会挤） */
+.merge-item__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+}
+
+.merge-item__meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-xs);
+}
+
+.merge-item__meta-row dt {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin: 0;
+  flex-shrink: 0;
+  min-width: 36px;
+}
+
+.merge-item__meta-row dd {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  margin: 0;
+  /* 长 branch 名字可以断行 */
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+/* ===== 操作区 ===== */
+
+/* (trailing/btn/conflict-hint/ext-link 已在前面 .merge-item__trailing 段定义) */
+
+/* ===== 合并确认弹窗内嵌 ===== */
+
+.merge-confirm__methods {
+  margin-top: var(--space-3);
+}
+
+.merge-confirm__methods-title {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.merge-confirm__method-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.merge-confirm__method {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.merge-confirm__method:hover {
+  background: var(--color-bg-hover);
+}
+
+.merge-confirm__method--active {
+  background: var(--color-primary-soft);
+}
+
+.merge-confirm__radio {
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.merge-confirm__method-label {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.merge-confirm__method-hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+/* A-3 P2 · B5 修法：高级方式 disclosure 按钮 */
+.merge-confirm__advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--space-2);
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.merge-confirm__advanced-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.merge-confirm__message {
+  margin-top: var(--space-3);
+}
+
+.merge-confirm__message-label {
+  display: block;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.merge-confirm__message-input {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-divider);
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
+.merge-confirm__message-input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+/* v0.6+：合并后顺手删除源分支 checkbox */
+.merge-confirm__delete-branch {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--color-divider) 70%, transparent);
+}
+
+.merge-confirm__delete-branch-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
+.merge-confirm__delete-branch-label code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+  color: var(--color-primary);
+}
+
+.merge-confirm__delete-branch-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.merge-confirm__delete-branch-hint {
+  margin: 6px 0 0 22px;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.merge-confirm__delete-branch-hint code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  padding: 0 4px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ===== 编辑属性按钮 ===== */
+
+.merge-item__edit-attrs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  margin-top: var(--space-2);
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.merge-item__edit-attrs:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* ===== 合并请求对话区（v1.3 · task #25 改）=====
+ *
+ * 移到右栏：占 detail 的 2/3 宽度。
+ * 评论布局 = 聊天气泡：他人评论靠左 + 头像在左；"我"评论靠右 + 头像在右。
+ * 评论列表在右栏内 flex:1 占满垂直空间（不再固定 max-height: 360px,
+ * 跟右栏高度自适应），数据多了支持滚动。
+ *
+ * 设计参考：gitea 评论右栏、微信聊天风格。
+ */
+
+.merge-item__detail-right {
+  /* v1.3.1：让右栏成为 flex column 容器,
+   * 子项（header / list / compose）能按 flex 规则分配高度 */
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.merge-item__comments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;                     /* v1.5.8：12 → 6，评论区子块紧凑 */
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  /* v0.6.25：强制透明背景，去掉浅苍蓝强调色 */
+  background: transparent;
+  /* v0.6+ bugfix：保证评论体长文本不越出面板边缘，避免出现整页横向滚动条 */
+  overflow-x: hidden;
+}
+
+/* ===== 顶部 header：左标题 + 右刷新按钮 ===== */
+.merge-item__comments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  flex-shrink: 0;
+  padding-bottom: 5px;          /* v1.5.8：8 → 5 */
+  border-bottom: 1px solid var(--color-divider-soft);
+}
+
+.merge-item__comments-header-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.merge-item__comments-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.merge-item__comments-count {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.merge-item__comments-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;        /* v1.5：稍微大一点，方便点 */
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.merge-item__comments-refresh:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.merge-item__comments-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== v2.62 主体：历史对话 + 发送评论（上下布局，发送评论固定 100px） ===== */
+.merge-item__comments-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  margin-bottom: 5px;
+  /* v0.6.25：强制透明背景 */
+  background: transparent;
+}
+
+/* 上：历史评论 + 各种态（loading/error/empty） */
+.merge-item__comments-history {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.merge-item__comments-loading,
+.merge-item__comments-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;  /* v1.5：水平居中 */
+  gap: 6px;
+  padding: 16px 8px;         /* v1.5：上下 padding 加大，让空态/加载态有"呼吸" */
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.merge-item__comments-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-warning);
+}
+.merge-item__comments-retry {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-warning);
+  cursor: pointer;
+}
+.merge-item__comments-retry:hover {
+  background: var(--color-warning);
+  color: var(--color-text-inverse);
+}
+
+/* ===== 气泡聊天列表（v1.3 重做）===== */
+
+.merge-item__comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 独立响应：滚动到顶部/底部时不冒泡到外层 .merges__list */
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-divider) transparent;
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+}
+
+.merge-item__comment-list::-webkit-scrollbar {
+  width: 6px;
+}
+.merge-item__comment-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.merge-item__comment-list::-webkit-scrollbar-thumb {
+  background: var(--color-divider);
+  border-radius: 3px;
+}
+.merge-item__comment-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* 单条评论 li：横向 flex，avatar + bubble
+ * 默认 = 他人：左对齐
+ * --self = 我：右对齐（reverse + 行内交换顺序） */
+.merge-item__comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* v0.6.21：评论侧栏（头像 + 用户名垂直排列） */
+.merge-item__comment-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 60px;
+  max-width: 80px;
+}
+
+/* 头像圈（首字母） */
+.merge-item__comment-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-divider);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+.merge-item__comment--self .merge-item__comment-avatar {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+/* 头像下方的用户名 */
+.merge-item__comment-name {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.merge-item__comment--self .merge-item__comment-name {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* 气泡容器（v1.5.9 撑满剩余空间 + v1.5.11 引用按钮绝对定位在右上角） */
+.merge-item__comment-bubble {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 8px;
+  /* v0.6.23：取消背景色，用边框线表达 */
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  position: relative;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+/* v0.6.22：评论区宽度撑满，padding 只控制左右留白 */
+.merge-item__comment-list {
+  padding: 4px 50px;
+  display: flex;
+  flex-direction: column;
+}
+/* v1.5.11：只有他人消息才给右侧预留位置（避免引用按钮遮挡 meta），
+ * 自己的消息没有引用按钮（不能引用自己），保持默认 padding */
+.merge-item__comment:not(.merge-item__comment--self) .merge-item__comment-bubble {
+  padding-right: 56px;
+}
+/* v0.6.22：评论自适应宽度，他人靠左，"我"靠右 */
+.merge-item__comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 12px;
+  max-width: 70%;
+}
+/* v0.6.22："我"的评论靠右 */
+.merge-item__comment--self {
+  margin-left: auto;
+  flex-direction: row-reverse;
+}
+/* 气泡小箭头（指向头像）—— 用 CSS border 画三角形 */
+.merge-item__comment-bubble::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  border: 1px solid var(--color-divider);
+  /* 默认（他人，左侧）：箭头指向左 */
+  left: -5px;
+  border-right: 1px solid var(--color-divider);
+  border-top: none;
+  border-bottom: none;
+  transform: rotate(45deg);
+}
+.merge-item__comment-bubble {
+  /* 让他人箭头也跟随气泡背景色 */
+  background-clip: padding-box;
+}
+/* v1.5.11：复刻 gitea 颜色——"我"的气泡用主色实色 + 白字（强对比），
+ * 他人保持 elevated 浅色 + 默认字（弱对比） */
+.merge-item__comment--self .merge-item__comment-bubble {
+  /* v0.6.20：去掉背景色，改用主色边框线表达"我发的评论" */
+  background: transparent;
+  border-color: var(--color-primary);
+  border-width: 1.5px;
+  color: var(--color-text);
+}
+/* "我"的气泡里所有文字保持默认色（背景已透明） */
+.merge-item__comment--self .merge-item__comment-author,
+.merge-item__comment--self .merge-item__comment-time,
+.merge-item__comment--self .merge-item__comment-self-tag,
+.merge-item__comment--self .merge-item__comment-body {
+  color: var(--color-text);
+}
+/* "我"的气泡里 markdown body 内链接保持默认主色 */
+.merge-item__comment--self .merge-item__comment-body a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+/* v1.5.11：复刻 Gitea 引用评论——hover 气泡显示"引用"按钮（他人消息才显示，自己不能引用自己） */
+.merge-item__comment-quote {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.merge-item__comment-bubble:hover .merge-item__comment-quote {
+  opacity: 1;
+}
+.merge-item__comment-quote:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+/* v1.5.11：自己消息的气泡，hover 引用按钮也保持反色（深背景上） */
+.merge-item__comment--self .merge-item__comment-quote {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-inverse);
+}
+.merge-item__comment--self .merge-item__comment-quote:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--color-text-inverse);
+  border-color: var(--color-text-inverse);
+}
+.merge-item__comment--self .merge-item__comment-bubble::before {
+  left: auto;
+  right: -5px;
+  /* v0.6.20：背景透明，箭头跟随边框颜色 */
+  background: transparent;
+  border-left: none;
+  border-bottom: none;
+  border-right: 1.5px solid var(--color-primary);
+  border-top: 1.5px solid var(--color-primary);
+  /* 旋转 45° 让两个边形成指向右的三角箭头 */
+  transform: rotate(45deg);
+}
+
+.merge-item__comment-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+.merge-item__comment-author {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.merge-item__comment-self-tag {
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-pill);
+  line-height: 1.6;
+}
+.merge-item__comment-time {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.merge-item__comment-body {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: normal;
+  line-height: 1.5;
+  max-width: 100%;
+  min-width: 0;
+}
+/* 强制 .merge-item__comment-body 内的所有 markdown 节点都限制在气泡里 */
+.merge-item__comment-body > *,
+.merge-item__comment-body p,
+.merge-item__comment-body pre,
+.merge-item__comment-body code,
+.merge-item__comment-body ul,
+.merge-item__comment-body ol,
+.merge-item__comment-body li,
+.merge-item__comment-body blockquote,
+.merge-item__comment-body h1,
+.merge-item__comment-body h2,
+.merge-item__comment-body h3,
+.merge-item__comment-body h4,
+.merge-item__comment-body h5,
+.merge-item__comment-body h6,
+.merge-item__comment-body table {
+  max-width: 100%;
+  min-width: 0;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+.merge-item__comment-body pre,
+.merge-item__comment-body pre code {
+  white-space: pre-wrap;
+}
+.merge-item__comment-body code {
+  white-space: pre-wrap;
+}
+
+/* 发评论输入区（v2.62 · 改到历史对话下方，固定 120px，发送按钮在输入框内右上角） */
+.merge-item__comment-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  /* v0.6.25：去掉浅苍蓝背景色，与整页背景统一 */
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  min-width: 0;
+  height: 120px;                /* v2.62：100 → 120 */
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* textarea + @ 候选下拉的相对定位容器（v2.62：内部右上角放发送按钮） */
+.merge-item__comment-input-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* v2.62：发送按钮定位在输入框内右上角（圆形主色实色 + 阴影，复刻参考图） */
+.merge-item__comment-send-absolute {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.merge-item__comment-send-absolute:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  transform: scale(1.05);
+}
+.merge-item__comment-send-absolute:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.merge-item__comment-send-absolute:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* v1.5.4：去掉 min-height，按你要求只保留 max-height 兜底
+ *  - 高度由 rows 决定基础（rows=8 ≈ 8 行高），用 flex:1 在右列空间大时撑满
+ *  - 空间不够时 flex shrink 到 rows 大小，输入框换行溢出由 max-height 触发滚动 */
+.merge-item__comment-input {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  resize: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  font-family: inherit;
+  /* v2.62：右侧留 40px 给绝对定位的发送按钮，避免文本压在按钮下 */
+  padding: 6px 40px 6px 8px;
+  line-height: 1.5;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* v1.4 @ 提及下拉（绝对定位，浮在 textarea 上方） */
+.merge-item__mention-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 5;
+}
+
+.merge-item__mention-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px var(--space-3);  /* v1.5：6 → 8，更易点 */
+  background: transparent;
+  border: none;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.merge-item__mention-item:hover,
+.merge-item__mention-item--active {
+  background: var(--color-primary-soft, var(--color-bg-hover));
+  color: var(--color-primary);
+}
+.merge-item__comment-input:focus {
+  outline: none;
+}
+.merge-item__comment-input::placeholder {
+  color: var(--color-text-muted);
+}
+.merge-item__comment-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.merge-item__comment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+.merge-item__comment-counter {
+  margin-right: auto;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+/* ===== markdown 正文全局样式（v1.2）=====
+ *
+ * 给所有 .md-body 内的元素加 reset，避免 markdown-it 产出的 HTML 走浏览器默认样式
+ * （gitea 评论在暗色主题下默认 <code> 黑色字看不清；<pre> 没滚动条等）。
+ * 颜色用项目主题变量，不写死。 */
+.md-body {
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  color: var(--color-text);
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
+}
+.md-body p {
+  margin: 0 0 4px 0;
+}
+.md-body p:last-child {
+  margin-bottom: 0;
+}
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+  margin: var(--space-2) 0 4px 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.md-body h1 { font-size: var(--font-lg); }
+.md-body h2 { font-size: var(--font-md); }
+.md-body h3 { font-size: var(--font-sm); }
+.md-body h4, .md-body h5, .md-body h6 { font-size: var(--font-sm); }
+.md-body ul, .md-body ol {
+  margin: 4px 0;
+  padding-left: var(--space-4);
+}
+.md-body li { margin: 2px 0; }
+.md-body blockquote {
+  margin: 4px 0;
+  padding: 4px var(--space-3);
+  border-left: 3px solid var(--color-divider);
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  /* 强制引用块超长文本自动换行 */
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  max-width: 100%;
+  min-width: 0;
+}
+.md-body blockquote > * {
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
+}
+.md-body code {
+  padding: 1px 6px;
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.9em;
+  color: var(--color-accent);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-width: 100%;
+}
+.md-body pre {
+  margin: 4px 0;
+  padding: var(--space-2);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--font-xs);
+  line-height: 1.5;
+}
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: inherit;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+.md-body a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.md-body a:hover {
+  text-decoration: underline;
+}
+.md-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+.md-body table {
+  border-collapse: collapse;
+  margin: 4px 0;
+  font-size: var(--font-xs);
+}
+.md-body th, .md-body td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-divider);
+}
+.md-body th {
+  background: var(--color-bg);
+  font-weight: 600;
+}
+.md-body hr {
+  border: 0;
+  border-top: 1px solid var(--color-divider);
+  margin: var(--space-2) 0;
+}
+
+/* ===== 属性编辑器弹窗内容 ===== */
+
+.attr-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.attr-editor__section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attr-editor__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.attr-editor__add-btn {
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.attr-editor__add-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.attr-editor__new-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+}
+
+.attr-editor__new-label-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+.attr-editor__new-label-input:focus { outline: none; }
+
+.attr-editor__new-label-color {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.attr-editor__new-label-confirm {
+  padding: 2px 8px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.attr-editor__new-label-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.attr-editor__label {
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.attr-editor__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.attr-editor__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--tag-bg, var(--color-bg));
+  border: 1px solid var(--tag-color, var(--color-divider));
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.attr-editor__tag--selected {
+  background: var(--tag-color, var(--color-primary));
+  color: var(--color-text-inverse);
+}
+.attr-editor__tag--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.attr-editor__hint {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.attr-editor__checkbox {
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+.attr-editor__checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.attr-editor__select {
+  padding: 4px 8px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
+/* ===== v0.5.0 M1: 评论编辑 / 删除 ===== */
+.merge-item__comment-edit-input {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  resize: vertical;
+}
+.merge-item__comment-edit-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-softer);
+}
+.merge-item__comment-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.merge-item__comment-edit-save,
+.merge-item__comment-edit-cancel {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  border: 1px solid;
+}
+.merge-item__comment-edit-save {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+.merge-item__comment-edit-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.merge-item__comment-edit-cancel {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+.merge-item__comment-edit-cancel:hover {
+  background: var(--color-bg-hover);
+}
+.merge-item__comment-edited-mark {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  margin-left: 4px;
+}
+.merge-item__comment-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.merge-item__comment-edit-btn,
+.merge-item__comment-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.merge-item__comment:hover .merge-item__comment-edit-btn,
+.merge-item__comment:hover .merge-item__comment-delete-btn {
+  opacity: 1;
+}
+.merge-item__comment-edit-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.merge-item__comment-delete-btn:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+
+/* ===== v0.5.0 M2: 评论表情反应 ===== */
+.merge-item__comment-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+
+/* ===== v0.5.0 M3: 评审按钮 ===== */
+.merge-item__btn--approve {
+  background: var(--color-success-soft, #dcfce7);
+  border-color: var(--color-success, #16a34a);
+  color: var(--color-success, #16a34a);
+}
+.merge-item__btn--approve:hover {
+  background: var(--color-success, #16a34a);
+  color: white;
+}
+.merge-item__btn--request-changes {
+  background: var(--color-danger-soft, #fef2f2);
+  border-color: var(--color-danger, #dc2626);
+  color: var(--color-danger, #dc2626);
+}
+.merge-item__btn--request-changes:hover {
+  background: var(--color-danger, #dc2626);
+  color: white;
+}
+.merge-item__btn--review-comment {
+  background: var(--color-bg-subtle);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+.merge-item__btn--review-comment:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* ===== v0.5.0 M3: 评审区 ===== */
+.merge-item__reviews {
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 12px;
+}
+.merge-item__reviews-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.merge-item__review-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  border-left: 3px solid var(--color-border);
+  font-size: var(--font-sm);
+}
+.merge-item__review-item--approved {
+  border-left-color: var(--color-success, #16a34a);
+  background: var(--color-success-softer, #f0fdf4);
+}
+.merge-item__review-item--changes_requested {
+  border-left-color: var(--color-danger, #dc2626);
+  background: var(--color-danger-softer, #fef2f2);
+}
+.merge-item__review-item--commented {
+  border-left-color: var(--color-text-muted);
+}
+.merge-item__review-state-badge {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  white-space: nowrap;
+}
+.merge-item__review-item--approved .merge-item__review-state-badge {
+  color: var(--color-success, #16a34a);
+}
+.merge-item__review-item--changes_requested .merge-item__review-state-badge {
+  color: var(--color-danger, #dc2626);
+}
+.merge-item__review-author {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.merge-item__review-body {
+  flex: 1;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-item__review-time {
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+/* ===== v0.5.0 M3: 评审编辑器 ===== */
+.merge-item__review-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.merge-item__review-editor-label {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.merge-item__review-editor-input {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  resize: vertical;
+}
+.merge-item__review-editor-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.merge-item__review-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+.merge-item__review-submit {
+  padding: 4px 14px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: white;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.merge-item__review-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.merge-item__review-cancel {
+  padding: 4px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.merge-item__review-cancel:hover {
+  background: var(--color-bg-hover);
+}
+
+
+
+    /* ====== wireframe 布局 ====== */
+    .wf-shell { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+    .wf-sidebar { width: 200px; background: var(--color-bg-elevated); border-right: 1px solid var(--color-divider); padding: 16px 8px; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+    .wf-nav-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--color-text-muted); cursor: pointer; }
+    .wf-nav-item:hover { background: var(--color-bg-hover); color: var(--color-text); }
+    .wf-nav-item--active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: 500; }
+    .wf-nav-icon { width: 16px; text-align: center; }
+    .wf-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .wf-titlebar { display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid var(--color-divider); flex-shrink: 0; }
+    .wf-titlebar h1 { font-size: 16px; font-weight: 600; }
+    .wf-titlebar__repo { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; background: var(--color-bg-elevated); font-size: 13px; }
+    .wf-titlebar__spacer { flex: 1; }
+    .wf-content { flex: 1; overflow-y: auto; padding: 16px 24px; display: flex; flex-direction: column; gap: 8px; }
+
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+    .badge--open { background: var(--color-success-soft); color: var(--color-success); }
+    .badge--merged { background: var(--color-accent-soft); color: var(--color-accent); }
+    .badge--closed { background: var(--color-bg-active); color: var(--color-text-secondary); }
+    .badge--draft { background: var(--color-warning-soft); color: var(--color-warning); border: 1px solid var(--color-warning); }
+    .text-muted { color: var(--color-text-muted); }
+    .text-secondary { color: var(--color-text-secondary); }
+    .text-primary { color: var(--color-primary); }
+  </style>
+</head>
+<body>
+
+<div class="wf-shell">
+  <nav class="wf-sidebar">
+    <div class="wf-nav-item"><span class="wf-nav-icon">📊</span> 看板</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">📈</span> Git Graph</div>
+    <div class="wf-nav-item wf-nav-item--active"><span class="wf-nav-icon">🔀</span> 合并请求</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">📋</span> 议题</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">👥</span> 成员</div>
+    <div class="wf-nav-item"><span class="wf-nav-icon">🏷</span> 标签</div>
+  </nav>
+
+  <div class="wf-main">
+    <div class="wf-titlebar">
+      <h1>合并请求</h1>
+      <div class="wf-titlebar__repo">📦 my-org/project-alpha</div>
+      <div class="wf-titlebar__spacer"></div>
+      <span style="font-size:12px;color:var(--color-text-muted);">● 已同步</span>
+    </div>
+
+    <div class="wf-content">
+      <!-- Tabs -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <div style="display:flex;gap:2px;background:var(--color-bg-elevated);padding:3px;border-radius:8px;">
+          <span style="padding:5px 14px;border-radius:6px;font-size:13px;color:var(--color-text-muted);">全部 <code style="background:var(--color-bg);padding:0 5px;border-radius:8px;">12</code></span>
+          <span style="padding:5px 14px;border-radius:6px;font-size:13px;background:var(--color-bg);color:var(--color-primary);font-weight:500;">待合并 <code style="background:var(--color-primary-soft);padding:0 5px;border-radius:8px;">5</code></span>
+          <span style="padding:5px 14px;border-radius:6px;font-size:13px;color:var(--color-text-muted);">已合并 <code style="background:var(--color-bg);padding:0 5px;border-radius:8px;">4</code></span>
+          <span style="padding:5px 14px;border-radius:6px;font-size:13px;color:var(--color-text-muted);">已关闭 <code style="background:var(--color-bg);padding:0 5px;border-radius:8px;">3</code></span>
+        </div>
+        <div style="flex:1;"></div>
+        <input placeholder="🔍 搜索..." style="width:240px;padding:6px 10px;border:1px solid var(--color-divider);border-radius:6px;background:var(--color-bg-elevated);color:var(--color-text);font-size:13px;" />
+      </div>
+
+      <!-- PR #128 Expanded -->
+      <div class="merge-item merge-item--open" data-pr-idx="128">
+        <div class="merge-item__main">
+          <div class="merge-item__header">
+            <span class="merge-item__title">feat: 用户登录增加 OAuth 支持</span>
+            <span class="badge badge--open">待合并</span>
+            <button class="merge-item__timeline-btn">🕐</button>
+          </div>
+          <div class="merge-item__body">
+            <a class="merge-item__index mono">#128</a>
+            <span>打开于 2 小时前 由 <span class="text-primary" style="font-weight:500;">alice</span></span>
+            <div class="merge-item__branches">
+              <span class="merge-item__branch">main</span>
+              <span class="merge-item__branch-arrow">←</span>
+              <span class="merge-item__branch">feat/oauth-login</span>
+            </div>
+            <div class="merge-item__attrs">
+              <span class="merge-item__label" style="--label-color:#5bc76a;--label-bg:rgba(91,199,106,0.15)">enhancement</span>
+              <span class="merge-item__label" style="--label-color:#4fc4d6;--label-bg:rgba(79,196,214,0.15)">auth</span>
+              <span class="merge-item__milestone">🎯 v2.0</span>
+              <span class="merge-item__assignee">👤 bob</span>
+              <span class="merge-item__comments">💬 5</span>
+            </div>
+          </div>
+        </div>
+        <div class="merge-item__trailing">
+          <button class="merge-item__btn merge-item__btn--merge">合并</button>
+          <button class="merge-item__btn merge-item__btn--close">关闭</button>
+          <button class="merge-item__btn merge-item__btn--approve">✓ 批准</button>
+          <button class="merge-item__btn merge-item__btn--request-changes">✗ 请求修改</button>
+          <a class="merge-item__ext-link">↗</a>
+        </div>
+
+        <!-- Expanded -->
+        <div class="merge-item__detail">
+          <div style="font-size:12px;font-weight:600;color:var(--color-text-muted);margin-bottom:6px;">概览</div>
+          <div class="merge-item__detail-meta-row">
+            <dl class="merge-item__meta-inline">
+              <div class="merge-item__meta-chip"><dt>作者</dt><dd>alice</dd></div>
+              <div class="merge-item__meta-chip"><dt>创建</dt><dd>2024-07-02 14:30</dd></div>
+              <div class="merge-item__meta-chip"><dt>更新</dt><dd>2024-07-02 16:45</dd></div>
+              <div class="merge-item__meta-chip"><dt>冲突</dt><dd>无冲突</dd></div>
+              <div class="merge-item__meta-chip"><dt>可合并</dt><dd>是</dd></div>
+            </dl>
+          </div>
+
+          <!-- Reviews -->
+          <div style="font-size:12px;font-weight:600;color:var(--color-text-muted);margin:12px 0 6px;">审查</div>
+          <div class="merge-item__reviews">
+            <div class="merge-item__reviews-list">
+              <div class="merge-item__review-item merge-item__review-item--approved">
+                <span class="merge-item__review-state-badge">已批准</span>
+                <span class="merge-item__review-author">bob</span>
+                <span class="merge-item__review-body">代码整洁，测试覆盖充分，LGTM！</span>
+                <span class="merge-item__review-time">1 小时前</span>
+              </div>
+              <div class="merge-item__review-item merge-item__review-item--changes_requested">
+                <span class="merge-item__review-state-badge">请求修改</span>
+                <span class="merge-item__review-author">carol</span>
+                <span class="merge-item__review-body">第 42 行建议用 const 替代 let</span>
+                <span class="merge-item__review-time">30 分钟前</span>
+              </div>
+            </div>
+            <div class="merge-item__review-editor">
+              <div class="merge-item__review-editor-header">
+                <span class="merge-item__review-editor-label">批准此合并请求</span>
+              </div>
+              <textarea class="merge-item__review-editor-input" rows="3" placeholder="评审总结（可选）"></textarea>
+              <div class="merge-item__review-editor-actions">
+                <button class="merge-item__review-submit">提交评审</button>
+                <button class="merge-item__review-cancel">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="height:1px;background:var(--color-divider);margin:12px 0;"></div>
+
+          <!-- Inline Comments -->
+          <div style="font-size:12px;font-weight:600;color:var(--color-text-muted);margin-bottom:6px;">文件评论 (3)</div>
+          <div style="border:1px solid var(--color-divider);border-radius:8px;overflow:hidden;margin-bottom:12px;">
+            <div style="border-bottom:1px solid var(--color-divider);">
+              <div style="padding:6px 12px;background:var(--color-bg-elevated);font-size:12px;display:flex;align-items:center;gap:6px;">
+                <code>src/auth/oauth.ts</code>
+                <span class="text-muted">+45 / -12</span>
+                <div style="flex:1;"></div>
+                <span class="text-muted">2 条评论</span>
+              </div>
+              <div style="display:flex;gap:8px;padding:8px 12px;border-left:3px solid var(--color-info);">
+                <div style="width:26px;height:26px;border-radius:50%;background:var(--color-divider);display:grid;place-items:center;font-size:11px;font-weight:600;flex-shrink:0;">王</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <span style="font-size:13px;font-weight:500;">王五</span>
+                    <code style="background:var(--color-bg-elevated);padding:1px 6px;border-radius:4px;">第 42 行</code>
+                    <span class="text-muted" style="font-size:11px;">1 小时前</span>
+                  </div>
+                  <div style="font-size:13px;line-height:1.5;">这里建议用 <code>const</code> 替代 <code>let</code>。</div>
+                  <div style="display:flex;gap:4px;margin-top:4px;">
+                    <span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border:1px solid var(--color-primary);border-radius:11px;background:var(--color-primary-soft);font-size:11px;">👍 2</span>
+                    <span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border:1px solid var(--color-divider);border-radius:11px;font-size:11px;">👀 1</span>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;padding:8px 12px;border-left:3px solid var(--color-primary);">
+                <div style="width:26px;height:26px;border-radius:50%;background:var(--color-primary);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:600;flex-shrink:0;">李</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <span style="font-size:13px;font-weight:500;">李四</span>
+                    <span style="font-size:11px;color:var(--color-primary);background:var(--color-primary-soft);padding:0 5px;border-radius:6px;">我</span>
+                    <code style="background:var(--color-bg-elevated);padding:1px 6px;border-radius:4px;">第 42 行</code>
+                  </div>
+                  <div style="font-size:13px;line-height:1.5;">好建议，已修改。</div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div style="padding:6px 12px;background:var(--color-bg-elevated);font-size:12px;display:flex;align-items:center;gap:6px;">
+                <code>src/auth/refresh.ts</code>
+                <span class="text-muted">+89 / -0</span>
+                <div style="flex:1;"></div>
+                <span class="text-muted">1 条评论</span>
+              </div>
+              <div style="padding:8px 12px;text-align:center;">
+                <span style="font-size:12px;color:var(--color-text-muted);">+ 在第 89 行添加评论...</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="height:1px;background:var(--color-divider);margin:12px 0;"></div>
+
+          <!-- Conversation -->
+          <div style="font-size:12px;font-weight:600;color:var(--color-text-muted);margin-bottom:6px;">对话 (5)</div>
+          <div class="merge-item__comments">
+            <div class="merge-item__comments-header">
+              <div class="merge-item__comments-header-left" style="gap:6px;">💬 评论 <span class="merge-item__comments-count">5</span></div>
+              <button class="merge-item__comments-refresh">↻ 刷新</button>
+            </div>
+            <div class="merge-item__comments-body">
+              <div class="merge-item__comments-history">
+                <ul class="merge-item__comment-list">
+                  <li class="merge-item__comment">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar">张</div>
+                      <div class="merge-item__comment-name">张三</div>
+                    </div>
+                    <div class="merge-item__comment-bubble">
+                      <div class="merge-item__comment-meta"><span class="merge-item__comment-time">1 小时前</span></div>
+                      <div class="merge-item__comment-body md-body"><p>这个 OAuth 实现看起来不错。</p></div>
+                      <button class="merge-item__comment-quote">📎 引用</button>
+                    </div>
+                  </li>
+                  <li class="merge-item__comment merge-item__comment--self">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar">李</div>
+                      <div class="merge-item__comment-name">李四</div>
+                    </div>
+                    <div class="merge-item__comment-bubble">
+                      <div class="merge-item__comment-meta">
+                        <span class="merge-item__comment-author">李四</span>
+                        <span class="merge-item__comment-self-tag">我</span>
+                        <span class="merge-item__comment-time">45 分钟前</span>
+                        <span class="merge-item__comment-edited-mark">（已编辑）</span>
+                      </div>
+                      <div class="merge-item__comment-body md-body"><p>好的，我加上 <code>refreshToken</code> 逻辑。</p></div>
+                    </div>
+                  </li>
+                  <li class="merge-item__comment merge-item__comment--self">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar">李</div>
+                      <div class="merge-item__comment-name">李四</div>
+                    </div>
+                    <div class="merge-item__comment-bubble">
+                      <div class="merge-item__comment-meta">
+                        <span class="merge-item__comment-author">李四</span>
+                        <span class="merge-item__comment-self-tag">我</span>
+                        <span style="font-size:11px;color:var(--color-warning);">正在编辑...</span>
+                      </div>
+                      <div class="merge-item__comment-edit-input">好的，我加上 refreshToken 逻辑。另外发现一个小问题。</div>
+                      <div class="merge-item__comment-edit-actions">
+                        <button class="merge-item__comment-edit-save">保存</button>
+                        <button class="merge-item__comment-edit-cancel">取消</button>
+                      </div>
+                    </div>
+                  </li>
+                  <!-- Review event in conversation -->
+                  <li class="merge-item__comment" style="opacity:0.7;">
+                    <div class="merge-item__comment-side">
+                      <div class="merge-item__comment-avatar" style="background:var(--color-success);color:#fff;">✓</div>
+                      <div class="merge-item__comment-name text-muted">系统</div>
+                    </div>
+                    <div class="merge-item__comment-bubble" style="border-style:dashed;">
+                      <div class="merge-item__comment-meta"><span class="merge-item__comment-time">15 分钟前</span></div>
+                      <div class="merge-item__comment-body"><span style="color:var(--color-success);font-weight:600;">bob 批准了此合并请求</span></div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+              <div style="border-top:1px solid var(--color-divider);padding:8px;">
+                <div style="position:relative;">
+                  <textarea class="merge-item__comment-input" rows="3" style="width:100%;padding:8px 36px 8px 8px;border:1px solid var(--color-divider);border-radius:6px;background:var(--color-bg-elevated);color:var(--color-text);font-size:13px;resize:vertical;">发条评论...</textarea>
+                  <button class="merge-item__comment-send-absolute" style="position:absolute;bottom:6px;right:6px;width:28px;height:28px;border:none;border-radius:6px;background:var(--color-primary);color:#fff;cursor:pointer;">➤</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PR #127 -->
+      <div class="merge-item merge-item--merged" data-pr-idx="127">
+        <div class="merge-item__main">
+          <div class="merge-item__header">
+            <span class="merge-item__title">fix: 修复 token 过期后无限重定向</span>
+            <span class="badge badge--merged">已合并</span>
+            <button class="merge-item__timeline-btn">🕐</button>
+          </div>
+          <div class="merge-item__body">
+            <a class="merge-item__index mono">#127</a>
+            <span>昨天打开 由 <span class="text-primary" style="font-weight:500;">bob</span></span>
+            <span class="merge-item__comments">💬 3</span>
+          </div>
+        </div>
+        <div class="merge-item__trailing">
+          <button class="merge-item__btn" disabled style="opacity:0.5;">已合并</button>
+        </div>
+      </div>
+
+      <!-- PR #126 -->
+      <div class="merge-item merge-item--open" data-pr-idx="126" style="border-left-color:var(--color-warning);">
+        <div class="merge-item__main">
+          <div class="merge-item__header">
+            <span class="merge-item__title">docs: 更新 API 文档</span>
+            <span class="badge badge--draft">草稿</span>
+            <button class="merge-item__timeline-btn">🕐</button>
+          </div>
+          <div class="merge-item__body">
+            <a class="merge-item__index mono">#126</a>
+            <span>3 天前打开 由 <span class="text-primary" style="font-weight:500;">carol</span></span>
+            <span class="merge-item__comments">💬 0</span>
+          </div>
+        </div>
+        <div class="merge-item__trailing">
+          <button class="merge-item__btn" disabled style="opacity:0.5;">合并</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

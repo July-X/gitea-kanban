@@ -1087,8 +1087,8 @@ func TestMapMergeMethodToGitHub(t *testing.T) {
 		{"rebase", "rebase"},
 		{"rebase-merge", "rebase"}, // GitHub 没区分，统一映射为 rebase
 		{"squash", "squash"},
-		{"", "merge"},              // 空 = 默认 merge
-		{"unknown", "unknown"},     // 未知透传（让 GitHub API 返 422 给前端友好提示）
+		{"", "merge"},          // 空 = 默认 merge
+		{"unknown", "unknown"}, // 未知透传（让 GitHub API 返 422 给前端友好提示）
 	}
 	for _, c := range cases {
 		got := mapMergeMethodToGitHub(c.input)
@@ -1217,5 +1217,382 @@ func TestGitHubAdapter_CreatePullComment_EmptyBody(t *testing.T) {
 	}
 	if serverHit {
 		t.Error("server should not be hit for empty body (short-circuit)")
+	}
+}
+
+// ===== UpdatePullComment / DeletePullComment 测试（v0.5.0 M1） =====
+
+// TestGitHubAdapter_UpdatePullComment 验证 PATCH 路径 + Bearer + 字段映射
+func TestGitHubAdapter_UpdatePullComment(t *testing.T) {
+	var capturedMethod, capturedPath, capturedAuth string
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":         300,
+			"body":       capturedBody["body"],
+			"user":       map[string]interface{}{"login": "alice", "avatar_url": "https://github.com/alice.png", "id": 1},
+			"created_at": "2024-06-01T10:00:00Z",
+			"updated_at": "2024-06-03T09:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	d, err := adapter.UpdatePullComment(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 300, "Updated via v0.5")
+	if err != nil {
+		t.Fatalf("UpdatePullComment failed: %v", err)
+	}
+	if capturedMethod != "PATCH" {
+		t.Errorf("method = %q, want PATCH", capturedMethod)
+	}
+	if capturedPath != "/repos/alice/dolphin/issues/comments/300" {
+		t.Errorf("path = %q", capturedPath)
+	}
+	if capturedAuth != "Bearer ghp-test-token" {
+		t.Errorf("Authorization = %q, want 'Bearer ghp-test-token'", capturedAuth)
+	}
+	if capturedBody["body"] != "Updated via v0.5" {
+		t.Errorf("body = %v", capturedBody["body"])
+	}
+	if d.ID != 300 {
+		t.Errorf("ID = %d, want 300", d.ID)
+	}
+	if d.UpdatedAt != "2024-06-03T09:00:00Z" {
+		t.Errorf("UpdatedAt = %q", d.UpdatedAt)
+	}
+}
+
+// TestGitHubAdapter_UpdatePullComment_EmptyBody 验证 short-circuit
+func TestGitHubAdapter_UpdatePullComment_EmptyBody(t *testing.T) {
+	serverHit := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.UpdatePullComment(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 300, "   ")
+	if err == nil {
+		t.Fatal("expected validation error for whitespace-only body")
+	}
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeValidationFailed {
+		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeValidationFailed)
+	}
+	if serverHit {
+		t.Error("server should not be hit for empty body")
+	}
+}
+
+// TestGitHubAdapter_DeletePullComment 验证 DELETE 路径 + 204 No Content
+func TestGitHubAdapter_DeletePullComment(t *testing.T) {
+	var capturedMethod, capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	err := adapter.DeletePullComment(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 300)
+	if err != nil {
+		t.Fatalf("DeletePullComment failed: %v", err)
+	}
+	if capturedMethod != "DELETE" {
+		t.Errorf("method = %q, want DELETE", capturedMethod)
+	}
+	if capturedPath != "/repos/alice/dolphin/issues/comments/300" {
+		t.Errorf("path = %q", capturedPath)
+	}
+}
+
+// TestGitHubAdapter_DeletePullComment_NotFound 验证 404 错误映射
+func TestGitHubAdapter_DeletePullComment_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Not Found"})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	err := adapter.DeletePullComment(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 999)
+	if err == nil {
+		t.Fatal("expected error for non-existent comment")
+	}
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeNotFound {
+		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeNotFound)
+	}
+}
+
+// ===== 评论表情反应测试（v0.5.0 M2） =====
+
+// TestGitHubAdapter_ListPullCommentReactions 验证 GET + Bearer + content 字段（GitHub 字段名）
+func TestGitHubAdapter_ListPullCommentReactions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/alice/dolphin/issues/comments/100/reactions" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.Method != "GET" {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer ghp-test-token" {
+			t.Errorf("Authorization = %q, want 'Bearer ghp-test-token'", auth)
+		}
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"id":      5,
+				"content": "+1",
+				"user":    map[string]interface{}{"login": "alice", "avatar_url": "https://github.com/alice.png", "id": 1},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullCommentReactions(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 100)
+	if err != nil {
+		t.Fatalf("ListPullCommentReactions failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].Content != "+1" {
+		t.Errorf("Content = %q, want +1 (GitHub content 字段映射)", items[0].Content)
+	}
+	if items[0].User == nil || items[0].User.Username != "alice" {
+		t.Errorf("User = %+v", items[0].User)
+	}
+}
+
+// TestGitHubAdapter_AddPullCommentReaction 验证 POST + 白名单校验
+func TestGitHubAdapter_AddPullCommentReaction(t *testing.T) {
+	var capturedMethod string
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":      20,
+			"content": capturedBody["content"],
+			"user":    map[string]interface{}{"login": "alice", "avatar_url": "https://github.com/alice.png"},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	d, err := adapter.AddPullCommentReaction(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 100, "hooray")
+	if err != nil {
+		t.Fatalf("AddPullCommentReaction failed: %v", err)
+	}
+	if capturedMethod != "POST" {
+		t.Errorf("method = %q, want POST", capturedMethod)
+	}
+	if capturedBody["content"] != "hooray" {
+		t.Errorf("content = %v, want hooray", capturedBody["content"])
+	}
+	if d.ID != 20 || d.Content != "hooray" {
+		t.Errorf("d = %+v", d)
+	}
+}
+
+// TestGitHubAdapter_AddPullCommentReaction_InvalidContent 验证 content 白名单校验
+func TestGitHubAdapter_AddPullCommentReaction_InvalidContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.AddPullCommentReaction(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 100, "invalid_emoji")
+	if err == nil {
+		t.Fatal("expected validation error for invalid reaction content")
+	}
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeValidationFailed {
+		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeValidationFailed)
+	}
+}
+
+// TestGitHubAdapter_RemovePullCommentReaction 验证 list + DELETE by reaction_id
+func TestGitHubAdapter_RemovePullCommentReaction(t *testing.T) {
+	var deletedID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			// list reactions
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 30, "content": "+1", "user": map[string]interface{}{"login": "alice", "id": 1}},
+				{"id": 31, "content": "heart", "user": map[string]interface{}{"login": "bob", "id": 2}},
+			})
+		case "DELETE":
+			// DELETE /repos/.../reactions/{reaction_id}
+			deletedID = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected method %q", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	err := adapter.RemovePullCommentReaction(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 100, "+1")
+	if err != nil {
+		t.Fatalf("RemovePullCommentReaction failed: %v", err)
+	}
+	expectedDelPath := "/repos/alice/dolphin/issues/comments/100/reactions/30"
+	if deletedID != expectedDelPath {
+		t.Errorf("DELETE path = %q, want %q (deleted by reaction_id, not content)", deletedID, expectedDelPath)
+	}
+}
+
+// ===== 合并请求评审测试（v0.5.0 M3） =====
+
+// TestGitHubAdapter_ListPullReviews 验证 GET + Bearer + snake_case 字段
+func TestGitHubAdapter_ListPullReviews(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/alice/dolphin/pulls/42/reviews" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.Method != "GET" {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer ghp-test-token" {
+			t.Errorf("Authorization = %q, want 'Bearer ghp-test-token'", auth)
+		}
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"id":           70,
+				"state":        "APPROVED",
+				"body":         "Ship it!",
+				"user":         map[string]interface{}{"login": "alice", "avatar_url": "https://github.com/alice.png"},
+				"commit_id":    "def456",
+				"submitted_at": "2024-06-06T10:00:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullReviews(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullReviews failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].State != "APPROVED" {
+		t.Errorf("State = %q, want APPROVED", items[0].State)
+	}
+	if items[0].Body != "Ship it!" {
+		t.Errorf("Body = %q", items[0].Body)
+	}
+	if items[0].SubmittedAt != "2024-06-06T10:00:00Z" {
+		t.Errorf("SubmittedAt = %q (snake_case field mapping)", items[0].SubmittedAt)
+	}
+}
+
+// TestGitHubAdapter_CreatePullReview_Approve 验证 POST + 大写 event 映射
+func TestGitHubAdapter_CreatePullReview_Approve(t *testing.T) {
+	var capturedMethod string
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":           80,
+			"state":        "APPROVED",
+			"body":         "Looks great",
+			"user":         map[string]interface{}{"login": "alice"},
+			"commit_id":    "abc123",
+			"submitted_at": "2024-06-07T12:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	d, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.CreateReviewOpts{
+		Body:  "Looks great",
+		Event: "approve",
+	})
+	if err != nil {
+		t.Fatalf("CreatePullReview failed: %v", err)
+	}
+	if capturedMethod != "POST" {
+		t.Errorf("method = %q, want POST", capturedMethod)
+	}
+	if capturedBody["event"] != "APPROVE" {
+		t.Errorf("event = %v, want APPROVE (GitHub uses uppercase)", capturedBody["event"])
+	}
+	if d.State != "APPROVED" {
+		t.Errorf("State = %q, want APPROVED", d.State)
+	}
+}
+
+// TestGitHubAdapter_CreatePullReview_RequestChanges 验证 event request_changes → REQUEST_CHANGES
+func TestGitHubAdapter_CreatePullReview_RequestChanges(t *testing.T) {
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": 81, "state": "CHANGES_REQUESTED",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.CreateReviewOpts{
+		Body:  "Please fix line 42",
+		Event: "request_changes",
+	})
+	if err != nil {
+		t.Fatalf("CreatePullReview failed: %v", err)
+	}
+	if capturedBody["event"] != "REQUEST_CHANGES" {
+		t.Errorf("event = %v, want REQUEST_CHANGES", capturedBody["event"])
+	}
+}
+
+// TestGitHubAdapter_CreatePullReview_InvalidEvent 验证 event 校验
+func TestGitHubAdapter_CreatePullReview_InvalidEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.CreateReviewOpts{
+		Event: "bad_event",
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid event")
+	}
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeValidationFailed {
+		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeValidationFailed)
 	}
 }
