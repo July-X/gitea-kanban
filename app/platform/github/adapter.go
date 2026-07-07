@@ -891,7 +891,7 @@ func (a *GitHubAdapter) UpdatePullLabels(ctx context.Context, hostURL, username,
 // GitHub 端点接受 JSON 对象 {"assignees": ["alice"]} 或 {"assignees": ["alice", "bob"]}（追加语义）。
 // 为与前端契约（"替换所有"）一致：先 GET 现状，diff 后做 DELETE + POST。
 // 同样 PR 走 /issues/{index}/assignees 端点。
-func (a *GitHubAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignee string) (*platform.PullDetailDTO, error) {
+func (a *GitHubAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignees []string) (*platform.PullDetailDTO, error) {
 	cur, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 	if err != nil {
 		return nil, err
@@ -900,23 +900,27 @@ func (a *GitHubAdapter) UpdatePullAssignee(ctx context.Context, hostURL, usernam
 	for _, u := range cur.Assignees {
 		existing = append(existing, u.Username)
 	}
+	target := make(map[string]bool, len(assignees))
+	for _, u := range assignees {
+		target[u] = true
+	}
 	toRemove := []string{}
 	for _, u := range existing {
-		if u != assignee {
+		if !target[u] {
 			toRemove = append(toRemove, u)
 		}
 	}
 	toAdd := []string{}
-	if assignee != "" {
+	for _, u := range assignees {
 		found := false
-		for _, u := range existing {
-			if u == assignee {
+		for _, e := range existing {
+			if e == u {
 				found = true
 				break
 			}
 		}
 		if !found {
-			toAdd = append(toAdd, assignee)
+			toAdd = append(toAdd, u)
 		}
 	}
 	if len(toRemove) > 0 {

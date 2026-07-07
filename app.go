@@ -2971,8 +2971,8 @@ func (a *App) UpdatePullLabels(args UpdatePullLabelsArgs) (PullDetailAppDTO, err
 type UpdatePullAssigneeArgs struct {
 	ProjectID string `json:"projectId"`
 	Index     int    `json:"index"`
-	// Assignee 空字符串 = 清空；非空 = 设置为该 username
-	Assignee string `json:"assignee"`
+	// Assignees 多人指派（空切片 = 清空）
+	Assignees []string `json:"assignees"`
 }
 
 // UpdatePullAssignee 替换合并请求指派人（空 = 清空）
@@ -2987,7 +2987,7 @@ func (a *App) UpdatePullAssignee(args UpdatePullAssigneeArgs) (PullDetailAppDTO,
 		return PullDetailAppDTO{}, err
 	}
 
-	d, err := adapter.UpdatePullAssignee(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Assignee)
+	d, err := adapter.UpdatePullAssignee(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Assignees)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}

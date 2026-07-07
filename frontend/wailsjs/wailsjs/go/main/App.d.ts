@@ -63,6 +63,8 @@ export function ListBranches(arg1:main.ListBranchesArgs):Promise<Array<main.Bran
 
 export function ListIssues(arg1:main.ListIssuesArgs):Promise<Array<main.IssueDTO>>;
 
+export function ListMilestones(arg1:main.ListMilestonesArgs):Promise<Array<platform.MilestoneDTO>>;
+
 export function ListPullCommentReactions(arg1:main.ListPullCommentReactionsArgs):Promise<Array<platform.ReactionDTO>>;
 
 export function ListPullComments(arg1:main.ListPullCommentsArgs):Promise<Array<platform.CommentDTO>>;
@@ -122,5 +124,7 @@ export function UpdatePullAssignee(arg1:main.UpdatePullAssigneeArgs):Promise<pla
 export function UpdatePullComment(arg1:main.UpdatePullCommentArgs):Promise<platform.CommentDTO>;
 
 export function UpdatePullLabels(arg1:main.UpdatePullLabelsArgs):Promise<platform.PullDetailDTO>;
+
+export function UpdatePullMilestone(arg1:main.UpdatePullMilestoneArgs):Promise<platform.PullDetailDTO>;
 
 export function UpdatePullReviewers(arg1:main.UpdatePullReviewersArgs):Promise<platform.PullDetailDTO>;

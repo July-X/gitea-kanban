@@ -770,7 +770,7 @@ export function pullsUpdateLabels(args: {
 export function pullsUpdateAssignee(args: {
   projectId: string;
   index: number;
-  assignee: string;
+  assignees: string[];
 }): Promise<PullDto> {
   return getIpcClient().invoke('pulls', 'updateAssignee', args);
 }
@@ -875,13 +875,14 @@ export function pullsReviewsList(args: {
   return getIpcClient().invokeNested('pulls', 'reviews', 'list', args);
 }
 
-/** 创建合并请求评审（批准 / 请求修改 / 仅评论） */
+/** 创建合并请求评审（批准 / 请求修改 / 仅评论，v0.6.0 支持附带行内评论） */
 export function pullsReviewCreate(args: {
   projectId: string;
   index: number;
   commitId?: string;
   body?: string;
   event: string;
+  comments?: { body: string; path: string; position: number }[];
 }): Promise<PullReviewDto> {
   return getIpcClient().invokeNested('pulls', 'reviews', 'create', args);
 }

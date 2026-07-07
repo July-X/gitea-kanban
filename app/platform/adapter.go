@@ -121,7 +121,7 @@ type PlatformAdapter interface {
 	UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*PullDetailDTO, error)
 
 	// UpdatePullAssignee 替换合并请求的指派人（空字符串 = 清空）
-	UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignee string) (*PullDetailDTO, error)
+	UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignees []string) (*PullDetailDTO, error)
 
 	// UpdatePullReviewers 替换合并请求的审查者（空切片 = 清空；Gitea 走 requested_reviewers，GitHub 等价）
 	UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*PullDetailDTO, error)
@@ -526,11 +526,22 @@ type PullReviewDTO struct {
 	SubmittedAt string       `json:"submittedAt"` // 评审时间（Gitea: submitted; GitHub: submitted_at）
 }
 
-// CreatePullReviewOpts 创建评审参数（v0.5.0 M3）
+// CreatePullReviewOpts 创建评审参数（v0.5.0 M3 + v0.6.0 补 comments）
 type CreateReviewOpts struct {
 	CommitID string // 可选：评审针对的 commit SHA（空 = HEAD）
 	Body     string // 评审总结文
 	Event    string // "approve" | "request_changes" | "comment"（前端统一小写）
+	// Comments 行内评审评论列表（v0.6.0 新增，允许创建 Review 时一次性附带）
+	// Gitea: comments[].body, comments[].path, comments[].new_position
+	// GitHub: comments[].body, comments[].path, comments[].line
+	Comments []CreateReviewCommentOpts `json:"comments,omitempty"`
+}
+
+// CreateReviewCommentOpts 创建评审时附带的单条行内评论（v0.6.0）
+type CreateReviewCommentOpts struct {
+	Body     string `json:"body"`
+	Path     string `json:"path"`
+	Position int    `json:"new_position"` // Gitea 用 new_position；GitHub 用 line（adapter 层翻译）
 }
 
 // PullReviewCommentDto 行内评审评论 DTO（v0.5.0 M4）

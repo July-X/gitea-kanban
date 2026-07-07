@@ -1083,6 +1083,20 @@ export namespace main {
 	        this.state = source["state"];
 	    }
 	}
+	export class ListMilestonesArgs {
+	    projectId: string;
+	    state: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListMilestonesArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.state = source["state"];
+	    }
+	}
 	export class ListPullCommentReactionsArgs {
 	    projectId: string;
 	    commentId: number;
@@ -1605,6 +1619,22 @@ export namespace main {
 	        this.labels = source["labels"];
 	    }
 	}
+	export class UpdatePullMilestoneArgs {
+	    projectId: string;
+	    index: number;
+	    milestone: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdatePullMilestoneArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.milestone = source["milestone"];
+	    }
+	}
 	export class UpdatePullReviewersArgs {
 	    projectId: string;
 	    index: number;
@@ -1699,6 +1729,24 @@ export namespace platform {
 		    }
 		    return a;
 		}
+	}
+	export class MilestoneDTO {
+	    id: number;
+	    title: string;
+	    state: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MilestoneDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.state = source["state"];
+	        this.description = source["description"];
+	    }
 	}
 	export class PullLabelDTO {
 	    id: number;

@@ -118,6 +118,10 @@ export function ListIssues(arg1) {
   return window['go']['main']['App']['ListIssues'](arg1);
 }
 
+export function ListMilestones(arg1) {
+  return window['go']['main']['App']['ListMilestones'](arg1);
+}
+
 export function ListPullCommentReactions(arg1) {
   return window['go']['main']['App']['ListPullCommentReactions'](arg1);
 }
@@ -236,6 +240,10 @@ export function UpdatePullComment(arg1) {
 
 export function UpdatePullLabels(arg1) {
   return window['go']['main']['App']['UpdatePullLabels'](arg1);
+}
+
+export function UpdatePullMilestone(arg1) {
+  return window['go']['main']['App']['UpdatePullMilestone'](arg1);
 }
 
 export function UpdatePullReviewers(arg1) {

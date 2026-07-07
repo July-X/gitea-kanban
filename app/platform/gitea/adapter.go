@@ -479,8 +479,8 @@ func (a *GiteaAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, 
 // UpdatePullAssignee 替换合并请求指派人（Gitea 端点为 POST/DELETE /pulls/{index}/assignees 追加/移除）
 //
 // 为与前端契约（"替换所有"）一致：先 GET 现状，diff 后做 1 次 DELETE + 1 次 POST。
-// 简化：当前仅支持单 assignee；assignee="" 表示清空。
-func (a *GiteaAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignee string) (*platform.PullDetailDTO, error) {
+// v0.6.0 支持多人 assignees
+func (a *GiteaAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignees []string) (*platform.PullDetailDTO, error) {
 	cur, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 	if err != nil {
 		return nil, err
@@ -489,23 +489,27 @@ func (a *GiteaAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username
 	for _, u := range cur.Assignees {
 		existing = append(existing, u.Username)
 	}
+	target := make(map[string]bool, len(assignees))
+	for _, u := range assignees {
+		target[u] = true
+	}
 	toRemove := []string{}
 	for _, u := range existing {
-		if u != assignee {
+		if !target[u] {
 			toRemove = append(toRemove, u)
 		}
 	}
 	toAdd := []string{}
-	if assignee != "" {
+	for _, u := range assignees {
 		found := false
-		for _, u := range existing {
-			if u == assignee {
+		for _, e := range existing {
+			if e == u {
 				found = true
 				break
 			}
 		}
 		if !found {
-			toAdd = append(toAdd, assignee)
+			toAdd = append(toAdd, u)
 		}
 	}
 	if len(toRemove) > 0 {
@@ -889,6 +893,14 @@ func validateGiteaReviewEvent(event string) error {
 	return nil
 }
 
+func giteaReviewCommentFromOpts(opts platform.CreateReviewCommentOpts) map[string]any {
+	return map[string]any{
+		"body":         opts.Body,
+		"path":         opts.Path,
+		"new_position": opts.Position,
+	}
+}
+
 // ListPullReviews 列评审列表（GET /repos/{owner}/{repo}/pulls/{index}/reviews）
 func (a *GiteaAdapter) ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewDTO, error) {
 	var raw []giteaReviewRaw
@@ -911,11 +923,15 @@ func (a *GiteaAdapter) CreatePullReview(ctx context.Context, hostURL, username, 
 	if err := validateGiteaReviewEvent(opts.Event); err != nil {
 		return nil, err
 	}
+	comments := make([]map[string]any, 0, len(opts.Comments))
+	for _, c := range opts.Comments {
+		comments = append(comments, giteaReviewCommentFromOpts(c))
+	}
 	payload := map[string]any{
 		"commit_id": opts.CommitID,
 		"body":      opts.Body,
 		"event":     opts.Event,
-		"comments":  []interface{}{}, // 暂无行内评审（M4+）
+		"comments":  comments,
 	}
 	reader, err := encodeJSONBody(payload)
 	if err != nil {

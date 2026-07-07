@@ -445,6 +445,14 @@ export interface CreateReviewArgs {
   commitId?: string;
   body?: string;
   event: ReviewEvent;
+  comments?: ReviewCommentArg[]; // v0.6.0 行内评论
+}
+
+/** 创建评审时的单条行内评论（v0.6.0） */
+export interface ReviewCommentArg {
+  body: string;
+  path: string;
+  position: number;
 }
 
 // ============================================================
