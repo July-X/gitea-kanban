@@ -20,7 +20,6 @@
 package git
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"

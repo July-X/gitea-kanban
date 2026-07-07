@@ -16,4 +16,13 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
   },
+  server: {
+    // Wails v2 HMR WebSocket 兼容：WebView 在 wails.localhost:34115 宿主
+    // 内部向 localhost:5173 建立 ws 连接时需放宽 origin 限制
+    hmr: {
+      protocol: 'ws',
+      host: 'localhost',
+    },
+    allowedHosts: ['wails.localhost'],
+  },
 })
