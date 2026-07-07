@@ -368,6 +368,61 @@ GITEA_KANBAN_DATA_DIR="$GITEA_KANBAN_DATA_DIR" wails dev
 - `go version` / `node -v` / `pnpm -v` 的输出
 - `wails doctor` 输出
 - 复现步骤（越具体越好）
+
+## 路线图（Roadmap）
+
+### 已完成（v0.5.3）
+
+- **Git Graph — 核心提交图谱**
+  - commit DAG 渲染（自研 Go layout，1:1 复刻 vscode-git-graph）
+  - dot hover + ref badge + lane 几何 + S 曲线 + 列宽拖动 + 表头中文
+  - 亮色/暗色 2 主题（品牌 Gitea 绿贯穿，纯白画布 + 纯黑画布）
+  - **提交搜索**：Ctrl+F / 正则 / 大小写 / 上下跳转 / findMatch 文字高亮
+  - 滚动按需 deepen（翻几页、拉几页；超大仓库不再全量 unshallow）
+  - 性能优化：HMR WebSocket、StatusBar 防抖、fastSerialize
+
+- **合并请求管理（M1-M4）**
+  - 列表 + 三 Tab 详情（概览 / 文件评论 / 对话流）
+  - 行级 Review 评论 + reaction + 表情回复
+  - 对话流融合 Review 事件（approval / request_changes / commented）
+  - inline merge / close（危险操作二次确认）
+
+- **仓库管理**
+  - Gitea + GitHub 多账号鉴权（token 进系统 keychain，不落盘）
+  - clone / pull / fetch（go-git NoCheckout 轻量模式）
+  - 提交详情面板（文件级 diff、加删行、binary 检测）
+
+- **安全与存储**
+  - 零 SQLite，JSON 文件 + 原子写
+  - queue.jsonl 离线队列 + 30 天 GC
+  - go-keyring 凭证存储 + dev fallback
+
+### 开发中（main 分支，未发版）
+
+- [ ] GitHub 多仓库列仓适配（当前仅登录用户可访问的仓库）
+- [ ] workspace 路径沙箱校验（`newWorkspacePath` 逃逸防御）
+- [ ] commit 数量 badge 动态刷新 + 远端 ahead/behind 提示
+- [ ] 跨平台 CI（Windows + Linux + macOS universal binary）
+
+### 计划（v0.6.0）
+
+- [ ] GitHub 议题 / PR / 标签 / 成员（首期仅 Git Graph，UI 已隐藏）
+- [ ] 看板式议题管理拖拽（Gitea 完整，GitHub 随功能补全）
+- [ ] 仓库深度一键 unshallow（用户控制，避免后台静默深化）
+- [ ] 提交签名验证 + GPG 状态展示
+
+### 调研中
+
+- [ ] OAuth2 鉴权（PAD → OAuth2，是否打破"仅 PAT"策略）
+- [ ] 实时协作（WebSocket 推送更新，当前是用户主动刷新）
+- [ ] in-app 冲突解决（当前拒绝合并 + 引导用户到 Gitea/GitHub 页面）
+
+### 不做
+
+- 不做 v1-style HUD / 科技感装饰（v1.6 拍板 Minimalism）
+- 不做 v1 单主题策略（v1.2 起 2 主题 fixed）
+- 不做打包目标新增（macOS / Windows / Linux 三平台）
+- 不做重大新依赖（如换 go-git 为 git CLI wrapper / 引入 SQLite）
 - 截图或 slog 日志内容（`${GITEA_KANBAN_DATA_DIR}/logs/main/main.log`）
 
 > 本仓库使用中文 commit message，每个交付物一个 commit。v2.0 单分支 `main`（v1 是 `master`，已迁回 `main`）。
