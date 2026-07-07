@@ -26,6 +26,14 @@ import {
   pullsFilesList,
   pullsFileDiffGet,
 } from '@renderer/lib/ipc-client';
+import {
+  pullsUpdateLabels,
+  pullsUpdateAssignee,
+  pullsUpdateReviewers,
+  pullsUpdateMilestone,
+  membersList,
+  milestonesList,
+} from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type { ListPullsResp, PullDto, PullState, MergeMethod, IssueCommentDto, PullReviewCommentDto, PullFileDto, PullFileDiffDto, PullReviewDto } from '@renderer/types/dto';

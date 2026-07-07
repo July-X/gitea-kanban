@@ -415,7 +415,7 @@ const confirmCloseOpen = ref(false);
 const attrEditorOpen = ref(false);
 const editingPull = ref<PullDto | null>(null);
 const editingLabels = ref<string[]>([]);
-const editingAssignee = ref('');
+const editingAssignees = ref<string[]>([]);
 const editingReviewers = ref<string[]>([]);
 const editingMilestone = ref('');
 
@@ -439,7 +439,7 @@ const creatingLabel = ref(false);
 async function openAttrEditor(p: PullDto): Promise<void> {
   editingPull.value = p;
   editingLabels.value = (p.labels ?? []).map(l => l.name);
-  editingAssignee.value = p.assignee?.username ?? '';
+  editingAssignees.value = (p.assignees ?? []).map(a => a.username);
   editingReviewers.value = (p.reviewers ?? []).map(r => r.username);
   attrEditorOpen.value = true;
 
@@ -528,12 +528,12 @@ async function saveAttrs(p: PullDto): Promise<void> {
     errors.push(`标签: ${err.messageText ?? err.message ?? '失败'}`);
   }
 
-  // 2. 更新指派人（空串 = 清除指派人）
+  // 2. 更新指派人（多选，空数组 = 清除指派人）
   try {
     await pullsUpdateAssignee({
       projectId,
       index: p.index,
-      assignee: editingAssignee.value,
+      assignees: editingAssignees.value,
     });
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
@@ -1855,21 +1855,22 @@ function formatRelative(iso: string | undefined): string {
                 </label>
               </div>
             </div>
-            <!-- 指派人 -->
+            <!-- 指派人（v0.6.0 多选） -->
             <div class="attr-editor__section">
               <label class="attr-editor__label" for="attr-assignee">指派人：</label>
               <select
                 id="attr-assignee"
-                v-model="editingAssignee"
+                v-model="editingAssignees"
                 class="attr-editor__select"
+                multiple
               >
-                <option value="">未指派</option>
                 <option
                   v-for="member in availableMembers"
                   :key="member"
                   :value="member"
                 >{{ member }}</option>
               </select>
+              <span class="attr-editor__hint">按住 ⌘/Ctrl 多选</span>
             </div>
             <!-- 里程碑（v0.6.0，仅 Gitea） -->
             <div v-if="currentPlatform.value === 'gitea'" class="attr-editor__section">

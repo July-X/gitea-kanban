@@ -1574,7 +1574,7 @@ export namespace main {
 	export class UpdatePullAssigneeArgs {
 	    projectId: string;
 	    index: number;
-	    assignee: string;
+	    assignees: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdatePullAssigneeArgs(source);
@@ -1584,7 +1584,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projectId = source["projectId"];
 	        this.index = source["index"];
-	        this.assignee = source["assignee"];
+	        this.assignees = source["assignees"];
 	    }
 	}
 	export class UpdatePullCommentArgs {
