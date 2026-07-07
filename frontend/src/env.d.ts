@@ -6,8 +6,8 @@ declare module '*.vue' {
   export default component;
 }
 
-// Wails Go bindings 注入（v0.6.0 已删除 wails-api-shim 兼容层）
+// window.api（Wails API shim 注入；详见 lib/wails-api-shim.ts）
 declare interface Window {
+  api: Record<string, Record<string, (...args: any[]) => Promise<any>>>;
   go?: Record<string, Record<string, (...args: any[]) => Promise<any>>>;
-  };
 }
