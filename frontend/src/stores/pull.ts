@@ -31,6 +31,8 @@ import {
   pullsUpdateAssignee,
   pullsUpdateReviewers,
   pullsUpdateMilestone,
+  pullsLabelsList,
+  pullsMembersList,
   membersList,
   milestonesList,
 } from '@renderer/lib/ipc-client';

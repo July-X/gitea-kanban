@@ -27,10 +27,9 @@ import { useUiStore } from './stores/ui';
 import { showToast } from './lib/toast';
 import { logError, logWarn } from './lib/frontend-log';
 
-// Wails 注入 window.api shim（替代 v1 Electron 时代的 preload bridge）
-// 必须在 createApp / 任何 store 调用前执行（ipc-client 依赖 window.api）
-import { installApiShim } from './lib/wails-api-shim';
-installApiShim();
+// v0.6.0 已删除 wails-api-shim（window.api 旧 IPC 兼容层）
+// 所有 IPC 调用走 ipc-client → Wails bindings，无需 shim
+// 如需恢复：git log 搜 wails-api-shim.ts，checkout 旧版即可
 
 // 全局样式（字体声明 + reset + 主题变量）
 import './styles/fonts.css';

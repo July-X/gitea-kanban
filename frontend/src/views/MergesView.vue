@@ -32,20 +32,15 @@ import { renderMarkdown } from '@renderer/lib/markdown';
 // （v2 是 Wails WebView，<a target="_blank"> / window.open 在这里不可靠）。
 import { BrowserOpenURL } from '../../wailsjs/wailsjs/runtime/runtime';
 import {
+  labelsCreate,
+  labelsList,
+  membersList,
   pullsCommentCreate,
   pullsCommentDelete,
   pullsCommentList,
   pullsCommentUpdate,
-  labelsCreate,
-  labelsList,
-  membersList,
-  pullsUpdateAssignee,
-  pullsUpdateLabels,
   pullsReviewCreate,
   pullsReviewsList,
-  pullsUpdateReviewers,
-  pullsUpdateMilestone,
-  milestonesList,
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ReactionBar from '@renderer/components/ReactionBar.vue';
@@ -57,7 +52,8 @@ import type { CreateReviewArgs, IssueCommentDto, PullReviewDto, ReviewEvent } fr
 import type { PullFileDto } from '@renderer/types/dto';
 
 const repo = useRepoStore();
-const pull = usePullStore();
+const pullStore = usePullStore();
+const pull = pullStore;
 const auth = useAuthStore();
 /** 当前平台（gitea / github）v0.6.0 */
 const currentPlatform = computed<'gitea' | 'github'>(
@@ -413,6 +409,7 @@ const confirmCloseOpen = ref(false);
 
 /** 属性编辑器状态 */
 const attrEditorOpen = ref(false);
+const attrEditorSaving = ref(false);
 const editingPull = ref<PullDto | null>(null);
 const editingLabels = ref<string[]>([]);
 const editingAssignees = ref<string[]>([]);
@@ -454,8 +451,9 @@ async function openAttrEditor(p: PullDto): Promise<void> {
     // v0.6.0 加载里程碑列表（仅 Gitea 数据源）
     if (currentPlatform.value === 'gitea') {
       try {
-        const msResp = await milestonesList({ projectId: String(activeProjectId.value), state: 'open' });
-        availableMilestones.value = (msResp.items ?? []).map((m) => ({ title: m.title, state: m.state }));
+        await pullStore.loadAttrEditorData(String(activeProjectId.value));
+        availableMilestones.value = pullStore.availableMilestones;
+        availableMembers.value = pullStore.availableMembers.map(m => m.login);
       } catch { /* 忽略 */ }
     }
   }
@@ -514,15 +512,12 @@ async function createNewLabel(): Promise<void> {
 async function saveAttrs(p: PullDto): Promise<void> {
   if (!activeProjectId.value) return;
   const projectId = String(activeProjectId.value); // 显式解 ref
+  attrEditorSaving.value = true;
   const errors: string[] = [];
 
   // 1. 更新标签（替换所有标签）
   try {
-    await pullsUpdateLabels({
-      projectId,
-      index: p.index,
-      labels: editingLabels.value,
-    });
+    await pullStore.updateLabels(projectId, p.index, editingLabels.value);
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     errors.push(`标签: ${err.messageText ?? err.message ?? '失败'}`);
@@ -530,11 +525,7 @@ async function saveAttrs(p: PullDto): Promise<void> {
 
   // 2. 更新指派人（多选，空数组 = 清除指派人）
   try {
-    await pullsUpdateAssignee({
-      projectId,
-      index: p.index,
-      assignees: editingAssignees.value,
-    });
+    await pullStore.updateAssignees(projectId, p.index, editingAssignees.value);
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     errors.push(`指派人: ${err.messageText ?? err.message ?? '失败'}`);
@@ -543,17 +534,23 @@ async function saveAttrs(p: PullDto): Promise<void> {
   // 3. 更新评审人（过滤掉组织账号——gitea 1.x 不允许）
   const validReviewers = editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r));
   try {
-    await pullsUpdateReviewers({
-      projectId,
-      index: p.index,
-      reviewers: validReviewers,
-    });
+    await pullStore.updateReviewers(projectId, p.index, validReviewers);
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     const msg = err.messageText ?? err.message ?? '失败';
     // 保留 messageText 完整内容（含 gitea 真实原因）
     errors.push(`评审人: ${msg}`);
   }
+
+  // 4. 更新里程碑（v0.6.0）
+  try {
+    await pullStore.updateMilestone(projectId, p.index, editingMilestone.value);
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    errors.push(`里程碑: ${err.messageText ?? err.message ?? '失败'}`);
+  }
+
+  attrEditorSaving.value = false;
 
   if (errors.length > 0) {
     // 错误（业务/系统）→ persistent toast（不自动消失，必须用户点击关闭）

@@ -5,7 +5,7 @@
  *
 > **⚠️ 2026-07-01 注释更新（v0.3.0 梳理）**：本文件早期注释引用的 `docs/design/02-architecture.md §5.1`（已 DEPRECATED）和 `sandboxed preload`（v2.0 起已无 preload 概念）已不再适用。当前实现：
 > - v2.0 起无 preload：渲染端通过 `window.go.main.App.<Method>()` 直接调 Go 后端（Wails 自动注入 bindings 到 `frontend/wailsjs/`）
-> - 兼容层：`frontend/src/lib/wails-api-shim.ts` 把 `window.api.<namespace>.<method>()` 老调用转译到 `window.go.main.App.*`，等所有 namespace 迁完可拆
+> - 渲染端 IPC 调用走 `ipc-client.ts` → Wails bindings（`window.go.main.App.*`），不走 shim。
 >
 > 端点清单（v0.5.0-m9 当前生效，44 个）：从 `frontend/wailsjs/wailsjs/go/main/App.d.ts` 生成；以 `git diff frontend/wailsjs/ main.go` 验证一致性
  *
@@ -38,7 +38,7 @@
  * 命名说明（v1.1.2 主题端点）：
  * - channel 字面量 = `'preferences.theme.get'` / `'preferences.theme.set'` / `'preferences.clipboard.write'`
  * - 走 `preferences.*` 而非 `theme.*`：v1.1.2 之后还会有更多"应用级偏好"共享同一 namespace
- * - 渲染端 API 暴露 = `window.api.preferences.{theme,clipboard}.{get,set,write}`（由 `wails-api-shim.ts` 转译）
+ * - 渲染端 API 暴露 = `window.go.main.App.*`（Wails bindings 直调，v0.6.0 已删除 wails-api-shim）
  */
 
 export const IpcChannel = {
