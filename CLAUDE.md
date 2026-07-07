@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-04（v2.0 + v2.4 + v2.5 + v2.6 + v3.0–v3.14 + v0.3.0 + v0.5.0）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-07（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -10,7 +10,7 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3）
 
 > **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
 >
@@ -20,9 +20,7 @@
 >
 > **v0.5.0 增量**：PR 评论模块 M1-M4 完整交付。文件评论（PullFileComments.vue + 4 个 platform adapter 方法 + 4 个 bindings）、对话流融合 Review 事件系统消息、三 Tab PR 详情布局（概览/文件评论/对话），TS DTO + store + ipc-client 扩展。docs/adr/0008 + docs/releases/v0.5.0.md。
 >
-> **v3.0–v3.14 增量**：Git Graph 严格 1:1 复刻 vscode-git-graph（dot hover / ref badge / lane 几何 / S 曲线 / 列宽拖动 / 表头中文 / blobless clone 修复）
->
-> **v0.3.0 增量**：UNCOMMITTED lane 1:1 对齐 vscode-git-graph（git status --porcelain 直采）
+> **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
 - 运行时：Go 1.22+ + Wails v2.12（用系统 WebView，非 Chromium）
 - git 客户端：go-git v5（纯 Go，无 CGO，替代旧的 spawn('git')；v2.4 走 NoCheckout 轻量模式）
