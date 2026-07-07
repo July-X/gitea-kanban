@@ -421,8 +421,6 @@ const availableLabels = ref<{ name: string; color: string }[]>([]);
 const availableMembers = ref<string[]>([]);
 /** 可用里程碑列表（v0.6.0） */
 const availableMilestones = ref<{ title: string; state: string }[]>([]);
-/** 可用里程碑列表（v0.6.0） */
-const availableMilestones = ref<{ title: string; state: string }[]>([]);
 
 /** 不可作评审人的成员（gitea 1.x 限制：组织账号不能作评审人） */
 const nonReviewableMembers = ref<Set<string>>(new Set());
