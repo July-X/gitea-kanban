@@ -44,6 +44,8 @@ import {
   pullsReviewCreate,
   pullsReviewsList,
   pullsUpdateReviewers,
+  pullsUpdateMilestone,
+  milestonesList,
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ReactionBar from '@renderer/components/ReactionBar.vue';
@@ -411,11 +413,16 @@ const editingPull = ref<PullDto | null>(null);
 const editingLabels = ref<string[]>([]);
 const editingAssignee = ref('');
 const editingReviewers = ref<string[]>([]);
+const editingMilestone = ref('');
 
 /** 可用标签列表（从 store 或 IPC 获取） */
 const availableLabels = ref<{ name: string; color: string }[]>([]);
 /** 可用成员列表 */
 const availableMembers = ref<string[]>([]);
+/** 可用里程碑列表（v0.6.0） */
+const availableMilestones = ref<{ title: string; state: string }[]>([]);
+/** 可用里程碑列表（v0.6.0） */
+const availableMilestones = ref<{ title: string; state: string }[]>([]);
 
 /** 不可作评审人的成员（gitea 1.x 限制：组织账号不能作评审人） */
 const nonReviewableMembers = ref<Set<string>>(new Set());
@@ -442,6 +449,13 @@ async function openAttrEditor(p: PullDto): Promise<void> {
     } catch { /* 忽略 */ }
     // v0.6+ bugfix：复用 loadMembers，避免重复代码
     await loadMembers();
+    // v0.6.0 加载里程碑列表（仅 Gitea 数据源）
+    if (currentPlatform.value === 'gitea') {
+      try {
+        const msResp = await milestonesList({ projectId: String(activeProjectId.value), state: 'open' });
+        availableMilestones.value = (msResp.items ?? []).map((m) => ({ title: m.title, state: m.state }));
+      } catch { /* 忽略 */ }
+    }
   }
 }
 
@@ -1853,6 +1867,22 @@ function formatRelative(iso: string | undefined): string {
                   :key="member"
                   :value="member"
                 >{{ member }}</option>
+              </select>
+            </div>
+            <!-- 里程碑（v0.6.0，仅 Gitea） -->
+            <div v-if="currentPlatform.value === 'gitea'" class="attr-editor__section">
+              <label class="attr-editor__label" for="attr-milestone">里程碑：</label>
+              <select
+                id="attr-milestone"
+                v-model="editingMilestone"
+                class="attr-editor__select"
+              >
+                <option value="">无</option>
+                <option
+                  v-for="ms in availableMilestones"
+                  :key="ms.title"
+                  :value="ms.title"
+                >{{ ms.title }}</option>
               </select>
             </div>
             <!-- 评审人 -->

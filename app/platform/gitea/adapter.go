@@ -654,6 +654,54 @@ func (a *GiteaAdapter) ListMembers(ctx context.Context, hostURL, username, token
 	return members, nil
 }
 
+// ===== 里程碑（v0.6.0） =====
+
+// giteaMilestoneRaw Gitea 里程碑原始响应
+type giteaMilestoneRaw struct {
+	ID          int64  `json:"id"`
+	Title       string `json:"title"`
+	State       string `json:"state"`
+	Description string `json:"description"`
+}
+
+// ListMilestones 列出仓库里程碑（GET /repos/{owner}/{repo}/milestones?state=open|closed|all）
+func (a *GiteaAdapter) ListMilestones(ctx context.Context, hostURL, username, token, owner, repo string, state string) ([]platform.MilestoneDTO, error) {
+	if state == "" {
+		state = "open"
+	}
+	var raw []giteaMilestoneRaw
+	path := fmt.Sprintf("/repos/%s/%s/milestones?state=%s", owner, repo, state)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.MilestoneDTO, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, platform.MilestoneDTO{
+			ID:          r.ID,
+			Title:       r.Title,
+			State:       r.State,
+			Description: r.Description,
+		})
+	}
+	return out, nil
+}
+
+// UpdatePullMilestone 给合并请求关联里程碑（PATCH /repos/{owner}/{repo}/pulls/{index} {"milestone": <title>|""}）
+func (a *GiteaAdapter) UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*platform.PullDetailDTO, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
+	body := map[string]any{"milestone": milestone}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	var raw giteaPullRaw
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
+	}
+	d := giteaPullToDetail(raw)
+	return &d, nil
+}
+
 // ===== 合并请求评论（v0.6+） =====
 //
 // Gitea 端点：/repos/{owner}/{repo}/issues/{index}/comments

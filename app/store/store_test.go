@@ -107,28 +107,5 @@ func TestLocalStore_Migration_PlatformDefault(t *testing.T) {
 	}
 }
 
-func TestGetWorkspacePath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-
-	s, err := NewLocalStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// 未设置 → 空字符串
-	if got := GetWorkspacePath(s); got != "" {
-		t.Errorf("expected empty workspace path, got %q", got)
-	}
-
-	// 设置后能读到
-	err = s.Mutate(func(st *LocalState) {
-		st.Prefs[WorkspacePathPrefKey] = "/tmp/workspace"
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := GetWorkspacePath(s); got != "/tmp/workspace" {
-		t.Errorf("workspace path = %q, want /tmp/workspace", got)
-	}
-}
+// TestGetWorkspacePath removed in v0.6: workspacePath derives from config.ResolveDataDir;
+// WorkspacePathPrefKey + GetWorkspacePath were deleted by ponytail cleanup.

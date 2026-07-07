@@ -2932,6 +2932,19 @@ type UpdatePullLabelsArgs struct {
 	LabelNames []string `json:"labels"` // 按 label 名替换（Gitea 自动解析为 id；GitHub 直接传 name）
 }
 
+// ListMilestonesArgs 列出仓库里程碑（v0.6.0）
+type ListMilestonesArgs struct {
+	ProjectID string `json:"projectId"`
+	State     string `json:"state"` // "open" | "closed" | "all"（空 = open）
+}
+
+// UpdatePullMilestoneArgs 给合并请求关联里程碑（v0.6.0）
+type UpdatePullMilestoneArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Milestone string `json:"milestone"` // "" 清空
+}
+
 // UpdatePullLabels 替换合并请求所有标签（替换语义）
 //
 // Gitea: PUT /repos/{owner}/{repo}/pulls/{index}/labels
@@ -3412,6 +3425,39 @@ type GetPullFileDiffArgs struct {
 }
 
 // GetPullFileDiff 获取单个文件的 diff 内容（v0.5.0 M4）
+func (a *App) ListMilestones(args ListMilestonesArgs) ([]platformAdapter.MilestoneDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	d, err := adapter.ListMilestones(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.State)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			return []platformAdapter.MilestoneDTO{}, nil
+		}
+		return nil, err
+	}
+	return d, nil
+}
+
+func (a *App) UpdatePullMilestone(args UpdatePullMilestoneArgs) (PullDetailAppDTO, error) {
+	ctx := struct {
+		ProjectID string `json:"projectId"`
+	}{ProjectID: args.ProjectID}
+	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	d, err := adapter.UpdatePullMilestone(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Milestone)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
 func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFileDiffDTO, error) {
 	ctx := struct {
 		ProjectID string `json:"projectId"`

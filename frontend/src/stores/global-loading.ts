@@ -26,7 +26,6 @@ import { ref } from 'vue';
 /** 受控的 loading namespace —— store action 用这个枚举来 register 自己 */
 export type LoadingNs =
   | 'auth' // 鉴权 / 连接
-  | 'board' // 看板列 + 卡片
   | 'repo' // 仓库列表
   | 'member' // 成员
   | 'branch' // 分支

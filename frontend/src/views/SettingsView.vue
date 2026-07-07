@@ -475,8 +475,8 @@ async function onUpdateAccount(): Promise<void> {
     }
     // 3) 清掉分支 store 的旧 selected（可能在新 gitea 上不存在）
     branch.select(null);
-    // 4) 跳到 /board —— BoardView mount 时重拉 columns
-    void router.push('/board');
+    // 4) 跳到 /timeline（Git Graph 核心视图）
+    void router.push('/timeline');
     accountModalOpen.value = false;
     showToast({
       type: 'success',

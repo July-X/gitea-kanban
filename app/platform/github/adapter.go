@@ -1321,6 +1321,16 @@ func (a *GitHubAdapter) ListMembers(ctx context.Context, hostURL, username, toke
 	return nil, platform.ErrNotSupported
 }
 
+// ListMilestones v0.6.0 Gitea only
+func (a *GitHubAdapter) ListMilestones(ctx context.Context, hostURL, username, token, owner, repo string, state string) ([]platform.MilestoneDTO, error) {
+	return nil, platform.ErrNotSupported
+}
+
+// UpdatePullMilestone v0.6.0 Gitea only
+func (a *GitHubAdapter) UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*platform.PullDetailDTO, error) {
+	return nil, platform.ErrNotSupported
+}
+
 // ===== HTTP 请求封装 =====
 
 // doRequest 发送 GitHub API 请求

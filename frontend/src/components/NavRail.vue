@@ -9,7 +9,6 @@
  *   - 从导航 items 数组移除入口
  *   - 路由保留并加 deprecated 标记，访问时重定向到 Git Graph
  *   - 相关视图文件、stores、composables 标记 @deprecated，待后续彻底清理
- *   - 保留三个原始 DevAnnotation 常量（DEPRECATED_NAV_ANNOTATIONS）以便回滚
  */
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
@@ -29,27 +28,6 @@ interface NavItem {
 const route = useRoute();
 const auth = useAuthStore();
 
-const DEPRECATED_NAV_ANNOTATIONS = {
-  board: {
-    web: '/<owner>/<repo>/issues',
-    api: 'GET /api/v1/repos/<owner>/<repo>/issues?state=open',
-    ipc: 'board.columns.list（列）· issues.list（卡片，按 label 过滤映射）',
-    notes: 'v0.6+ 已软废弃：导航栏移除入口，路由重定向到 /timeline',
-  },
-  myCards: {
-    web: '/<owner>/<repo>/issues?q=assignee:@me&state=open',
-    api: 'GET /api/v1/repos/<owner>/<repo>/issues?assignee=<me>&state=open',
-    ipc: 'issues.list（带 assignee 过滤，per active project）',
-    notes: 'v0.6+ 已软废弃：导航栏移除入口，路由重定向到 /timeline',
-  },
-  members: {
-    web: '/<owner>/<repo>/collaborators',
-    api: 'GET /api/v1/repos/<owner>/<repo>/collaborators',
-    ipc: 'members.list',
-    notes: 'v0.6+ 已软废弃：导航栏移除入口，路由重定向到 /timeline',
-  },
-} as const;
-
 const items: NavItem[] = [
   {
     id: 'timeline',
@@ -60,7 +38,7 @@ const items: NavItem[] = [
       web: '/<owner>/<repo>/graphs/commits',
       api: 'go-git DAG 图渲染',
       ipc: 'commits.gitgraph.lines',
-      notes: 'Git Graph 视图：Go 端输出结构化 nodes+edges，前端 structured.ts 直接渲染 SVG',
+      notes: 'Go 端输出结构化 nodes+edges，前端 structured.ts 直接渲染 SVG',
     },
   },
   {
@@ -83,12 +61,10 @@ const items: NavItem[] = [
     devAnnotation: {
       web: '（无 gitea 对应页 · 本地应用设置）',
       ipc: 'preferences.theme.get/set（主题）· auth.connect/disconnect/status（账号）',
-      notes: '主题 / 轮询间隔（走 localStorage） / 账号管理（gitea 地址 + 登录用户 + 更新连接）',
+      notes: '主题 / 账号管理',
     },
   },
 ];
-
-void DEPRECATED_NAV_ANNOTATIONS;
 
 const currentPath = computed(() => route.path);
 

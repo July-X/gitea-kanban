@@ -234,6 +234,26 @@ type PlatformAdapter interface {
 
 	// ListMembers 列出仓库成员
 	ListMembers(ctx context.Context, hostURL, username, token, owner, repo string) ([]MemberDTO, error)
+
+	// ListMilestones 列出仓库里程碑（v0.6.0）
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/milestones?state=open|closed|all
+	// GitHub: GET /repos/{owner}/{repo}/miliseconds?state=open|closed|all
+	ListMilestones(ctx context.Context, hostURL, username, token, owner, repo string, state string) ([]MilestoneDTO, error)
+
+	// UpdatePullMilestone 给合并请求关联里程碑（v0.6.0）
+	//
+	// Gitea:  PATCH /repos/{owner}/{repo}/pulls/{index} {"milestone": <title>|""}（title 查找或 404）
+	// GitHub: PATCH /repos/{owner}/{repo}/pulls/{pull_number} {"milestone": <number>|null}
+	UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*PullDetailDTO, error)
+}
+
+// MilestoneDTO 里程碑（v0.6.0）
+type MilestoneDTO struct {
+	ID          int64  `json:"id"`
+	Title       string `json:"title"`
+	State       string `json:"state"` // "open" | "closed"
+	Description string `json:"description,omitempty"`
 }
 
 // PullFileDTO PR 修改文件列表项（v0.5.0 M4）

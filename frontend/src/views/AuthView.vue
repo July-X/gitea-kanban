@@ -156,7 +156,7 @@ async function onSubmit(): Promise<void> {
 
 function goNext(): void {
   const from = route.query.from;
-  const target = typeof from === 'string' && from.startsWith('/') ? from : '/board';
+  const target = typeof from === 'string' && from.startsWith('/') ? from : '/timeline';
   void router.push(target);
 }
 </script>

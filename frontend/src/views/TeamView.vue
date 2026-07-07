@@ -26,7 +26,7 @@ const router = useRouter();
  * - "看设计边界"信息已在 view 描述里写清楚
  */
 function onBackToBoard(): void {
-  void router.push({ name: 'board' });
+  void router.push({ name: 'timeline' });
 }
 </script>
 

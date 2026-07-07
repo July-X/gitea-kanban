@@ -784,6 +784,15 @@ export function pullsUpdateReviewers(args: {
   return getIpcClient().invoke('pulls', 'updateReviewers', args);
 }
 
+/** 给合并请求关联里程碑（v0.6.0，仅 Gitea 数据源） */
+export function pullsUpdateMilestone(args: {
+  projectId: string;
+  index: number;
+  milestone: string; // 空串 = 清除
+}): Promise<PullDto> {
+  return getIpcClient().invoke('pulls', 'updateMilestone', args);
+}
+
 
 
 // ============================================================
