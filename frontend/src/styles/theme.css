@@ -313,17 +313,17 @@ html[data-theme='light'] {
      dark 主题不设 --label-fg → 走 --color-text-inverse 白字（暗 label OK）。 */
   --label-fg: #0f1a24;
 
-  /* === 主色（压暗到 #466B16 过 AA 4.5:1；hover 提亮到原色 #609926） === */
-  --color-primary: #466b16; /* vs #E8F1F5 5.55:1 ✅ */
-  --color-primary-hover: #609926; /* hover 回到品牌色 #609926 */
-  --color-primary-active: #3d5512; /* active 进一步压暗 */
-  --color-primary-soft: rgba(70, 107, 22, 0.16);
-  --color-primary-glow: rgba(70, 107, 22, 0.28);
+  /* === 主色（冷调青蓝 · 与 #E8F1F5 冷底同色系） === */
+  --color-primary: #0f766e; /* teal-700 · vs #E8F1F5 6.5:1 ✅ */
+  --color-primary-hover: #0d9488; /* teal-600 · hover 微提亮 */
+  --color-primary-active: #115e59; /* teal-800 · active 压暗 */
+  --color-primary-soft: rgba(15, 118, 110, 0.16);
+  --color-primary-glow: rgba(15, 118, 110, 0.28);
   /* === 主色 alpha 分档（C-3 硬约束 #4/#7 修法 · 2026-06-14）===
-   * 亮色版走 #466B16 调 alpha，对 #E8F1F5 全档过 AA 4.5:1 */
-  --color-primary-alpha-22: rgba(70, 107, 22, 0.22);
-  --color-primary-alpha-45: rgba(70, 107, 22, 0.45);
-  --color-primary-alpha-70: rgba(70, 107, 22, 0.7);
+   * 亮色版走 #0F766E 调 alpha，对 #E8F1F5 全档过 AA 4.5:1 */
+  --color-primary-alpha-22: rgba(15, 118, 110, 0.22);
+  --color-primary-alpha-45: rgba(15, 118, 110, 0.45);
+  --color-primary-alpha-70: rgba(15, 118, 110, 0.7);
 
   /* === 状态色（v1.2 重新过 AA） === */
   --color-warning: #d85804; /* vs #E8F1F5 3.79:1 ⚠️ large only；用于警示 icon / chip 文字 */
@@ -337,8 +337,8 @@ html[data-theme='light'] {
   --color-accent-hover: #f76707;
   --color-accent-soft: rgba(216, 88, 4, 0.16);
 
-  --color-success: #466b16;
-  --color-success-soft: rgba(70, 107, 22, 0.14);
+  --color-success: #0f766e;
+  --color-success-soft: rgba(15, 118, 110, 0.14);
 
   --color-warning-soft: rgba(216, 88, 4, 0.14);
   --color-warning-active: #b04804;
@@ -410,10 +410,11 @@ html[data-theme='light'] {
    *   暗色用 hover 会让卡片看起来"陷进去"，违反 elevation 逻辑 */
   --color-shell-main-bg: #f8fafc;
 
-  /* === 滚动条（v1.6 弱化 · 走主色软底 + hover 实色 · 无 glow） === */
-  --scrollbar-thumb: rgba(70, 107, 22, 0.25);
-  --scrollbar-thumb-hover: rgba(70, 107, 22, 0.55);
-  --scrollbar-thumb-active: #466b16;
+  /* === 滚动条（v1.6 弱化 · 走主色软底 + hover 实色 · 无 glow） ===
+   * 亮色换色：thumb 在冷蓝底（#E8F1F5）需与主色（teal）协调 */
+  --scrollbar-thumb: rgba(15, 118, 110, 0.25);
+  --scrollbar-thumb-hover: rgba(15, 118, 110, 0.55);
+  --scrollbar-thumb-active: #0f766e;
 }
 
 /* ==========================================================================
