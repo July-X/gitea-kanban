@@ -59,6 +59,10 @@ import type { PullFileDto } from '@renderer/types/dto';
 const repo = useRepoStore();
 const pull = usePullStore();
 const auth = useAuthStore();
+/** 当前平台（gitea / github）v0.6.0 */
+const currentPlatform = computed<'gitea' | 'github'>(
+  () => (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github'
+);
 const router = useRouter();
 
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
