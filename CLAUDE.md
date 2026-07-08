@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-07（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-08（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -10,7 +10,7 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0）
 
 > **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
 >
@@ -38,9 +38,9 @@
 | 平台 | 鉴权 | 首期支持 |
 |---|---|---|
 | **Gitea** | `Authorization: token <pat>` | 完整：仓库/分支/Git Graph/议题/合并/标签/成员 |
-| **GitHub** | `Authorization: Bearer <token>` | **仅 Git Graph**（VerifyToken + CloneRepo + LogGraph） |
+| **GitHub** | `Authorization: Bearer [redacted]` | **PR 闭环已完成**（VerifyToken + CloneRepo + LogGraph + ListRepos + ListPulls + GetPull + MergePull + ClosePull + Comments + Reviews + Files + Diff + Reactions）；**待补**：Labels / Members / Milestones（v0.7.0） |
 
-GitHub 其他功能返回 `platform.ErrNotSupported`，UI 必须隐藏对应入口。
+GitHub Issue 暂不做（等 v0.7.x）；GitHub 看板暂不做。
 
 ## 关键产品约束
 

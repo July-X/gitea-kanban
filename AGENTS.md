@@ -1,11 +1,22 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.5.3)
+# AGENTS.md — gitea-kanban (v2.0 → v0.6.0)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-07（**v0.5.3 发版** — 含 v0.5.1-v0.5.3 累积修复；Git Graph 提交搜索 + 亮色主题校准 + 代码清理为开发中未发版）
+> 最后更新：2026-07-08（**v0.6.0 发版** — GitHub PR 闭环完整实现；Gitea 功能深化；app.go 9 文件拆分）
 
 >
+
+> - **v0.6.0** (2026-07-08)：Gitea 平台深化 + PR 模块重构 + 代码瘦身。
+>   1. **app.go 9 文件拆分**：主文件从 3563 行拆分为 app_auth / app_pull / app_gitgraph / app_repo / app_issue / app_sync / app_prefs / app_log / app_gitbinary 共 9 个领域文件，主文件精简到 226 行。
+>   2. **MergesView.vue 三 Tab 重构**：概览 / 文件评论 / 对话流三 Tab；文件评论 Tab 按文件分组 + 折叠展开；对话 Tab 融合 review 事件（approval/request_changes/commented）用绿/橙/灰虚线边框卡片。
+>   3. **PR 属性编辑器**：Milestone 全链路（列表/选择/展示/过滤）；Review 行内评论完整化（CreatePullReview 带行内评论）；Assignee 多选（`<select multiple>`）。
+>   4. **Store-first 封装**：pull store 新增 updateLabels / updateAssignees / updateReviewers / updateMilestone actions；MergesView.vue 删掉直接 IPC 调用；attr-editor loading 状态。
+>   5. **提交签名验证**：CommitGpgStatus DTO + 9 种状态（Good/Bad/U/X/Y/R/B/N/E）+ Shield 徽章 + 签名者 + 指纹。
+>   6. **commit 计数 badge**：activeCommitCount computed + 已加载 N 条徽章。
+>   7. **GitHub PR 闭环已完整实现**：v0.5.0 ADR-0008 计划内做，后端 + 前端全链路打通（ListPulls / GetPull / Merge / Close / Comments / Reviews / Files / Diff / Reactions）；README/CLAUDE 已同步更新产品文档对齐现状。
+>   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
+>   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
 
 > - **v0.6.4** (2026-07-04)：滚动按需 deepen，替代 v0.6.3 的全量 unshallow。
 
