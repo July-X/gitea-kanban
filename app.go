@@ -2407,10 +2407,11 @@ type CommitDetailDTO struct {
 	AuthorWhen   string          `json:"authorWhen"`
 	Message      string          `json:"message"`
 	Parents      []string        `json:"parents"`
-	Files        []FileChangeDTO `json:"files,omitempty"`        // 变更文件列表（含 +/- 行数）
-	Additions    int             `json:"additions,omitempty"`    // 总新增行数
-	Deletions    int             `json:"deletions,omitempty"`    // 总删除行数
-	FilesChanged int             `json:"filesChanged,omitempty"` // 变更文件数
+	Files        []FileChangeDTO      `json:"files,omitempty"`        // 变更文件列表（含 +/- 行数）
+	Additions    int                  `json:"additions,omitempty"`    // 总新增行数
+	Deletions    int                  `json:"deletions,omitempty"`    // 总删除行数
+	FilesChanged int                  `json:"filesChanged,omitempty"` // 变更文件数
+	Gpg          *git.CommitGpgStatus `json:"gpg,omitempty"`
 }
 
 // FileChangeDTO 文件变更（前端 CommitDetailPanel 用）
@@ -2459,6 +2460,7 @@ func (a *App) GetCommitDetail(args GetCommitDetailArgs) (CommitDetailDTO, error)
 		AuthorWhen:  commit.AuthorWhen,
 		Message:     commit.Message,
 		Parents:     commit.Parents,
+		Gpg:         commit.Gpg,
 	}
 
 	// v2.15：调 GetCommitDiff 拿文件变更 + 累计 +/- 行数

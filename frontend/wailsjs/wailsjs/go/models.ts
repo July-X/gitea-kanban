@@ -1,5 +1,21 @@
 export namespace git {
 	
+	export class CommitGpgStatus {
+	    status: string;
+	    key: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CommitGpgStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.key = source["key"];
+	        this.name = source["name"];
+	    }
+	}
 	export class GitRef {
 	    name: string;
 	    refGroup: string;
@@ -420,6 +436,7 @@ export namespace main {
 	    additions?: number;
 	    deletions?: number;
 	    filesChanged?: number;
+	    gpg?: git.CommitGpgStatus;
 	
 	    static createFrom(source: any = {}) {
 	        return new CommitDetailDTO(source);
@@ -439,6 +456,7 @@ export namespace main {
 	        this.additions = source["additions"];
 	        this.deletions = source["deletions"];
 	        this.filesChanged = source["filesChanged"];
+	        this.gpg = this.convertValues(source["gpg"], git.CommitGpgStatus);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

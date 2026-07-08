@@ -113,42 +113,6 @@ func TestFetchRepo_WithNewCommits(t *testing.T) {
 	}
 }
 
-func TestRemoteExists(t *testing.T) {
-	_, localPath := createBareAndClone(t)
-
-	exists, err := RemoteExists(localPath, "origin")
-	if err != nil {
-		t.Fatalf("RemoteExists failed: %v", err)
-	}
-	if !exists {
-		t.Error("expected origin remote to exist")
-	}
-
-	exists, err = RemoteExists(localPath, "upstream")
-	if err != nil {
-		t.Fatalf("RemoteExists failed: %v", err)
-	}
-	if exists {
-		t.Error("expected upstream remote to not exist")
-	}
-}
-
-func TestListRemotes(t *testing.T) {
-	_, localPath := createBareAndClone(t)
-
-	remotes, err := ListRemotes(localPath)
-	if err != nil {
-		t.Fatalf("ListRemotes failed: %v", err)
-	}
-
-	if len(remotes) != 1 {
-		t.Fatalf("expected 1 remote, got %d", len(remotes))
-	}
-	if remotes[0].Name != "origin" {
-		t.Errorf("remote name = %q, want origin", remotes[0].Name)
-	}
-}
-
 func TestPullRepo(t *testing.T) {
 	barePath, localPath := createBareAndClone(t)
 

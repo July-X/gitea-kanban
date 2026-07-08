@@ -30,6 +30,123 @@ func OpenRepo(localPath string) (*Repo, error) {
 	return &Repo{repo: repo, localPath: localPath}, nil
 }
 
+// CommitGpgStatus 单个 commit 的 GPG 签名状态。
+//
+// 字段对应 git log --format 的占位符：
+//   - Status：%G? 返的单字符状态（G/B/U/X/Y/R/N/E）
+//   - Key：%GF 返的签名者 key 指纹（hex）
+//   - Name：%GS 返的 UID（昵称 <email>；缺失 UID 时 fallback 返指纹）
+//
+// 解析失败的 commit（git 命令返错 / 输出不含分隔符）对应字段为空字符串。
+type CommitGpgStatus struct {
+	Status string `json:"status"`
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+}
+
+// Category 把签名状态归到语义分类：
+//   - "valid"        G / g — 有效签名
+//   - "unknown-trust"U     — 有效但 trust 未知
+//   - "warn"         X / Y / R — key 过期 / 撤销 / 从服务器吊销
+//   - "bad"          B     — 签名被破坏
+//   - "none"         N     — 无签名
+//   - "missing-key"  E     — 无法验证（缺公钥）
+//   - "unknown"      其它
+func (s CommitGpgStatus) Category() string {
+	switch s.Status {
+	case "G", "g":
+		return "valid"
+	case "U":
+		return "unknown-trust"
+	case "X", "Y", "R":
+		return "warn"
+	case "B":
+		return "bad"
+	case "N":
+		return "none"
+	case "E":
+		return "missing-key"
+	default:
+		return "unknown"
+	}
+}
+
+// Sha1LikeHex 判断字符串是否为 sha1 风格 hex（长度 40，仅 [0-9a-fA-F]），
+// 用于区分 GPG 签名 UID 昵称 vs 指纹 fallback（git %GS 大写 hex）。
+func Sha1LikeHex(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// IsNameFingerprint 判断 Name 字符串实际是 key 指纹。
+//
+// 背景：git log %GS 在找不到姓名 UID 时会 fallback 返 key 指纹（40/64 字符 hex）。
+// 例如 key ID 0x1234ABCD... 没有注册 Name 时，%GS 输出 1234ABCD...（hex）。
+// 这种位置显示指纹比显示"UID 缺失"更诚实。
+func (s CommitGpgStatus) IsNameFingerprint() bool {
+	name := strings.TrimSpace(s.Name)
+	if len(name) == 0 {
+		return false
+	}
+	return Sha1LikeHex(name) || len(name) == 64
+}
+
+// getCommitGpgStatus 用系统 git log 单次读取签名状态 + 签名者 UID。
+//
+// 关键 format 占位符：
+//   - %G? 单字符签名状态（G/B/U/X/Y/R/N/E）
+//   - %GF 签名 key 指纹（hex）
+//   - %GS 签名者 UID（昵称 <email>；缺失 UID 时 fallback 返指纹）
+//
+// 多签名 / merge commit 等复杂场景暂不覆盖：取第一条签名记录。
+// go-git 5.16 原生不暴露 %G? 语义，必须走 native git 子进程。
+func (r *Repo) getCommitGpgStatus(sha string) (*CommitGpgStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
+	defer cancel()
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return nil, err
+	}
+	subArgs := []string{
+		"log", "-1", "--no-walk",
+		"--format=%G?%x00%GF%x00%GS",
+		sha,
+	}
+	output, err := gitbinary.RunGit(ctx, bin, r.localPath, subArgs...)
+	if err != nil {
+		return nil, err
+	}
+	if len(output) == 0 {
+		return nil, nil
+	}
+	return parseGpgStatus(string(output)), nil
+}
+
+// parseGpgStatus 解析 "<Status><NULL><Fingerprint><NULL><UID>" 单行输出。
+// 任何分隔符缺失 / 字段为空时用空字符串兜底，不返 error。
+func parseGpgStatus(line string) *CommitGpgStatus {
+	fields := strings.SplitN(line, "\x00", 4)
+	gs := &CommitGpgStatus{}
+	if len(fields) >= 1 {
+		gs.Status = strings.TrimRight(fields[0], "\r\n")
+	}
+	if len(fields) >= 2 {
+		gs.Key = strings.TrimSpace(strings.TrimRight(fields[1], "\r\n"))
+	}
+	if len(fields) >= 3 {
+		gs.Name = strings.TrimSpace(strings.TrimRight(fields[2], "\r\n"))
+	}
+	return gs
+}
+
 // CommitDetail commit 详情（含完整 message）
 type CommitDetail struct {
 	SHA         string
@@ -40,6 +157,7 @@ type CommitDetail struct {
 	AuthorWhen  string
 	Message     string
 	Parents     []string
+	Gpg         *CommitGpgStatus
 }
 
 // GetCommit 获取单个 commit 的详情
@@ -55,6 +173,11 @@ func (r *Repo) GetCommit(sha string) (*CommitDetail, error) {
 		parents[i] = h.String()
 	}
 
+	var gpg *CommitGpgStatus
+	if gs, err := r.getCommitGpgStatus(hash.String()); err == nil {
+		gpg = gs
+	}
+
 	return &CommitDetail{
 		SHA:         commit.Hash.String(),
 		ShortSHA:    commit.Hash.String()[:7],
@@ -64,6 +187,7 @@ func (r *Repo) GetCommit(sha string) (*CommitDetail, error) {
 		AuthorWhen:  commit.Author.When.Format("2006-01-02T15:04:05Z07:00"),
 		Message:     commit.Message,
 		Parents:     parents,
+		Gpg:         gpg,
 	}, nil
 }
 

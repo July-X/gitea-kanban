@@ -26,8 +26,15 @@ import {
   Plus,
   Minus,
   Link2,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldX,
+  ShieldOff,
+  ShieldQuestion,
+  KeyRound,
 } from 'lucide-vue-next';
 import { commitsGet } from '@renderer/lib/ipc-client';
+import type { CommitGpgDto } from '@renderer/types/dto';
 import { showToast } from '@renderer/lib/toast';
 // Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL（window.open 在 Wails
 // WebView 下不可靠——v1 Electron 时代的 setWindowOpenHandler 拦截已不存在）。
@@ -85,6 +92,8 @@ interface CommitDetail {
     functions?: string[];
   }>;
   linkedCards?: Array<{ cardId: string; columnName: string }>;
+  /** GPG 签名状态（commitsGet 单条详情才有） */
+  gpg?: CommitGpgDto;
 }
 const detailCache = new Map<string, CommitDetail>();
 
@@ -259,6 +268,62 @@ function shortenPathMiddle(path: string, maxLen = 60): string {
   return `${first}/.../${last}`;
 }
 
+/** GPG 签名显示数据（与 go /git/repo.go CommitGpgStatus 同源） */
+const gpg = computed<CommitGpgDto | null>(() => detail.value?.gpg ?? null);
+
+const gpgStatusLabel = computed<string | undefined>(() => {
+  const g = gpg.value;
+  if (!g || !g.status) return undefined;
+  switch (g.status) {
+    case 'G': return '有效签名';
+    case 'g': return '有效签名（key 状态变化）';
+    case 'U': return '签名有效（未知 trust）';
+    case 'X': return '签名有效（key 已过期）';
+    case 'Y': return '签名有效（key 已撤销）';
+    case 'R': return '签名有效（key 已吊销）';
+    case 'B': return '签名无效';
+    case 'N': return '无签名';
+    case 'E': return '无法验证（缺公钥）';
+    default: return `签名状态 ${g.status}`;
+  }
+});
+
+const gpgCategory = computed<string>(() => {
+  switch (gpg.value?.status) {
+    case 'G': case 'g': return 'valid';
+    case 'U': return 'unknown-trust';
+    case 'X': case 'Y': case 'R': return 'warn';
+    case 'B': return 'bad';
+    case 'N': return 'none';
+    case 'E': return 'missing-key';
+    default: return 'unknown';
+  }
+});
+
+const gpgTooltip = computed<string | undefined>(() => {
+  const g = gpg.value;
+  if (!g || !g.status) return undefined;
+  const lines: string[] = [gpgStatusLabel.value ?? `状态 ${g.status}`];
+  const name = g.name?.trim();
+  if (name) lines.push(`签名者：${name}`);
+  if (g.key) lines.push(`指纹：${g.key}`);
+  return lines.join('\n');
+});
+
+const gpgSignerLabel = computed<string | null>(() => {
+  const g = gpg.value;
+  if (!g) return null;
+  const name = g.name?.trim();
+  if (!name) return g.key?.trim() ? g.key.trim().slice(-16) : null;
+  const m = name.match(/^([^<]+)?(?:<(.+)>)?$/);
+  if (m) {
+    const nick = (m[1] ?? '').trim();
+    const email = (m[2] ?? '').trim();
+    return email ? (nick ? `${nick} <${email}>` : `<${email}>`) : nick || name;
+  }
+  return name;
+});
+
 /** 多行 message 拆分：第一行是标题，其余是正文 */
 const messageTitle = computed(() => {
   const msg = detail.value?.message ?? props.commit?.subject ?? '';
@@ -409,6 +474,25 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
               </span>
             </span>
           </div>
+          <!-- GPG 签名（panel 变体：inline badge，在 title 上方） -->
+          <div v-if="gpg && gpgStatusLabel" class="cd-gpg-row">
+            <span
+              class="cd-gpg"
+              :class="`cd-gpg--${gpgCategory}`"
+              role="status"
+              :aria-label="gpgTooltip"
+              :title="gpgTooltip"
+            >
+              <ShieldCheck v-if="gpgCategory === 'valid'" :size="13" aria-hidden="true" />
+              <ShieldQuestion v-else-if="gpgCategory === 'unknown-trust'" :size="13" aria-hidden="true" />
+              <ShieldAlert v-else-if="gpgCategory === 'warn'" :size="13" aria-hidden="true" />
+              <ShieldX v-else-if="gpgCategory === 'bad'" :size="13" aria-hidden="true" />
+              <ShieldOff v-else-if="gpgCategory === 'none'" :size="13" aria-hidden="true" />
+              <KeyRound v-else :size="13" aria-hidden="true" />
+              <span class="cd-gpg__label">{{ gpgStatusLabel }}</span>
+              <span v-if="gpgSignerLabel" class="cd-gpg__signer">{{ gpgSignerLabel }}</span>
+            </span>
+          </div>
           <div class="cd-message__title">{{ messageTitle }}</div>
           <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
           <div v-if="loading" class="cd-loading">加载详情中…</div>
@@ -539,6 +623,31 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
               :title="ref"
             >
               {{ ref }}
+            </span>
+          </div>
+        </div>
+        <!-- GPG 签名行（dialog 变体：进 meta table） -->
+        <div
+          v-if="gpg && gpgStatusLabel"
+          class="cd-meta__row cd-meta__gpg"
+        >
+          <span class="cd-meta__label">签名</span>
+          <div class="cd-meta__value">
+            <span
+              class="cd-gpg"
+              :class="`cd-gpg--${gpgCategory}`"
+              role="status"
+              :aria-label="gpgTooltip"
+              :title="gpgTooltip"
+            >
+              <ShieldCheck v-if="gpgCategory === 'valid'" :size="13" aria-hidden="true" />
+              <ShieldQuestion v-else-if="gpgCategory === 'unknown-trust'" :size="13" aria-hidden="true" />
+              <ShieldAlert v-else-if="gpgCategory === 'warn'" :size="13" aria-hidden="true" />
+              <ShieldX v-else-if="gpgCategory === 'bad'" :size="13" aria-hidden="true" />
+              <ShieldOff v-else-if="gpgCategory === 'none'" :size="13" aria-hidden="true" />
+              <KeyRound v-else :size="13" aria-hidden="true" />
+              <span class="cd-gpg__label">{{ gpgStatusLabel }}</span>
+              <span v-if="gpgSignerLabel" class="cd-gpg__signer">{{ gpgSignerLabel }}</span>
             </span>
           </div>
         </div>
@@ -1055,6 +1164,64 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 .cd-ref-badge--tag {
   background-color: rgba(245, 158, 11, 0.12);
   color: #d97706;
+}
+
+/* ===== GPG 签名（与 vscode-git-graph commit 详情同源样式） ===== */
+.cd-gpg-row {
+  padding: 2px 0 0;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.cd-gpg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+.cd-meta__gpg {
+  margin-top: 2px;
+}
+.cd-gpg__label {
+  flex-shrink: 0;
+}
+.cd-gpg__signer {
+  font-weight: 400;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cd-gpg--valid {
+  background-color: rgba(22, 163, 74, 0.12);
+  color: var(--color-success, #16a34a);
+}
+.cd-gpg--unknown-trust {
+  background-color: rgba(100, 116, 139, 0.12);
+  color: #64748b;
+}
+.cd-gpg--warn {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+.cd-gpg--bad {
+  background-color: rgba(220, 38, 38, 0.12);
+  color: var(--color-danger, #dc2626);
+}
+.cd-gpg--none,
+.cd-gpg--missing-key,
+.cd-gpg--unknown {
+  background-color: rgba(120, 120, 120, 0.10);
+  color: var(--color-text-muted);
 }
 
 /* ===== Files ===== */

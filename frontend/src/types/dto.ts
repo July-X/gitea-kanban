@@ -247,6 +247,15 @@ export interface CommitDto {
   /** 单条 commit 详情才返（list 端点不返） */
   files?: CommitFileChangeDto[];
   linkedCards?: LinkedCardDto[];
+  /** GPG 签名状态（commitsGet 单条详情才有） */
+  gpg?: CommitGpgDto;
+}
+
+/** 单个 commit 的 GPG 签名状态（go 后端 app/git/repo.go CommitGpgStatus 的 TS 镜像） */
+export interface CommitGpgDto {
+  status: string;
+  key: string;
+  name: string;
 }
 
 export type CommitDetailDTO = CommitDto;

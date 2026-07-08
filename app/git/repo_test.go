@@ -87,3 +87,109 @@ func getHeadSHA(t *testing.T, dir string) string {
 	}
 	return s
 }
+
+
+// TestParseGpgStatus 覆盖 parseGpgStatus 的 9 种状态线。
+//
+// Good (G) / Unknown-trust (U) / Warn (X) / Bad (B) / Missing-key (E) /
+// No signature (N) / 空输入 / trailing newline / Name fallback 到指纹。
+//
+// 用内存里 parseGpgStatus 单测，不依赖任何 GPG key。字段分隔符使用 NUL（\x00），
+// 与 getCommitGpgStatus 里 git log --format 拼接的二进制 NUL 占位符保持一致。
+func TestParseGpgStatus(t *testing.T) {
+	cases := []struct {
+		name         string
+		input        string
+		wantStatus   string
+		wantKey      string
+		wantCategory string
+		wantNameFP   bool
+	}{
+		{
+			name:         "Good signature",
+			input:        "G\x00A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2\x00Alice <alice@example.com>",
+			wantStatus:   "G",
+			wantKey:      "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2",
+			wantCategory: "valid",
+			wantNameFP:   false,
+		},
+		{
+			name:         "Bad signature",
+			input:        "B\x00\x00",
+			wantStatus:   "B",
+			wantKey:      "",
+			wantCategory: "bad",
+			wantNameFP:   false,
+		},
+		{
+			name:         "Unknown trust",
+			input:        "U\x00AABBCCDD\x00Bob",
+			wantStatus:   "U",
+			wantKey:      "AABBCCDD",
+			wantCategory: "unknown-trust",
+			wantNameFP:   false,
+		},
+		{
+			name:         "Expired key",
+			input:        "X\x00\x00Charlie",
+			wantStatus:   "X",
+			wantKey:      "",
+			wantCategory: "warn",
+			wantNameFP:   false,
+		},
+		{
+			name:         "Missing pubkey",
+			input:        "E\x00\x00\x00",
+			wantStatus:   "E",
+			wantKey:      "",
+			wantCategory: "missing-key",
+			wantNameFP:   false,
+		},
+		{
+			name:         "No signature",
+			input:        "N\x00\x00\x00",
+			wantStatus:   "N",
+			wantKey:      "",
+			wantCategory: "none",
+			wantNameFP:   false,
+		},
+		{
+			name:         "Name fallback to fingerprint",
+			// 40 hex char in name 位置 → IsNameFingerprint=true
+			input:        "G\x00KEYFP\x00" + "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",
+			wantStatus:   "G",
+			wantKey:      "KEYFP",
+			wantCategory: "valid",
+			wantNameFP:   true,
+		},
+		{
+			name:         "Empty input",
+			input:        "",
+			wantStatus:   "",
+			wantKey:      "",
+			wantCategory: "unknown",
+			wantNameFP:   false,
+		},
+		{
+			name:         "Trailing newline stripped",
+			input:        "G\x00KEY123\x00Name\r\n",
+			wantStatus:   "G",
+			wantKey:      "KEY123",
+			wantCategory: "valid",
+			wantNameFP:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseGpgStatus(tc.input)
+			require.NotNil(t, got)
+			require.Equal(t, tc.wantStatus, got.Status, "Status")
+			if tc.wantKey != "" {
+				require.Equal(t, tc.wantKey, got.Key, "Key")
+			}
+			require.Equal(t, tc.wantCategory, got.Category(), "Category")
+			require.Equal(t, tc.wantNameFP, got.IsNameFingerprint(), "IsNameFingerprint")
+		})
+	}
+}
