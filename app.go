@@ -3453,6 +3453,9 @@ func (a *App) UpdatePullMilestone(args UpdatePullMilestoneArgs) (PullDetailAppDT
 	}
 	d, err := adapter.UpdatePullMilestone(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Milestone)
 	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			return PullDetailAppDTO{}, nil
+		}
 		return PullDetailAppDTO{}, err
 	}
 	return *d, nil

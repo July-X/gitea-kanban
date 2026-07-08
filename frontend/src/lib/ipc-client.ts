@@ -2,13 +2,13 @@
  * IPC客户端 ——渲染端所有 IPC调用的唯一入口
  *
  *职责（AGENTS.md §5.2 frontend agent + §8.2鉴权铁律 + OVERRIDE §3错误人话）：
- *1.薄封装 `window.api`（preload桥）
+ *1.薄封装 `window.api`（Wails API shim 注入，详见 lib/wails-api-shim.ts）
  *2. 把 IpcError reject 转成 typed Error形态（"人话"层）
  *3. 提供分类错误码到中文 hint 的映射（O v1：直接用 IpcError.hint；fallback 用 message）
  *4.记录不写明文 token / payload 到 console（避免误入用户屏幕）
  *
  * 不做的事（避免越权）：
- * - 不直接 fetch gitea（必须走 window.api → preload → main）
+ * - 不直接 fetch gitea（必须走 window.api → Wails bindings → main）
  * - 不持久化 token（keychain 由 main端管，详见 AGENTS §8.2）
  * - 不在 localStorage写任何 IPC 数据
  *
@@ -45,7 +45,7 @@ import type {
   PullReviewDto,
 } from '@renderer/types/dto';
 
-/** window.api 的精确类型（preload/index.ts导出） */
+/** window.api 的精确类型（Wails API shim 注入，详见 lib/wails-api-shim.ts） */
 export type WindowApi = NonNullable<typeof window.api>;
 
 /**渲染端友好的"人话"错误形态 */
@@ -387,9 +387,9 @@ export function getIpcClient(): IpcClient {
   if (!_instance) {
     if (typeof window === 'undefined' || !window.api) {
       throw {
-        code: 'internal',
+        code: 'internal' as IpcErrorCodeValue,
         messageText: '应用出错了：window.api 未注入',
-        hint: '请检查 preload桥是否正常',
+        hint: '请刷新应用或重启（Wails bindings 加载失败）',
         recoverable: false,
       } satisfies UserFacingError;
     }
