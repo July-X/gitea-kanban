@@ -56,25 +56,15 @@ func (a *App) ListRepos(args ListReposArgs) (ListReposResp, error) {
 	}
 
 	// 1. 找 account
-	state := a.localStore.Get()
-	var matched *store.GiteaAccount
-	for i := range state.Accounts {
-		if state.Accounts[i].ID == args.GiteaAccountID {
-			matched = &state.Accounts[i]
-			break
-		}
-	}
-	if matched == nil {
-		return ListReposResp{}, ipc.NewNotFound("未找到账号: " + args.GiteaAccountID)
+	matched, err := a.findAccountByID(args.GiteaAccountID)
+	if err != nil {
+		return ListReposResp{}, err
 	}
 
 	// 2. 拿 token
-	token, err := a.secretStore.Get(matched.Platform, matched.GiteaURL, matched.Username)
+	token, err := a.resolveToken(matched)
 	if err != nil {
-		return ListReposResp{}, classifyKeychainError(err)
-	}
-	if token == "" {
-		return ListReposResp{}, ipc.NewInternal("token 为空（keychain 里有记录但 token 字符串为空）")
+		return ListReposResp{}, err
 	}
 
 	// 3. 远端拉
@@ -100,9 +90,8 @@ func (a *App) ListRepos(args ListReposArgs) (ListReposResp, error) {
 	}
 
 	// 4. merge isProject / lastSyncAt（按 owner+name 匹配）
+	state := a.localStore.Get()
 	projects := state.Projects
-	nowISO := time.Now().UTC().Format(time.RFC3339)
-	_ = nowISO // 占位
 	for i := range remoteRepos {
 		for j := range projects {
 			if projects[j].Platform == matched.Platform &&
@@ -157,19 +146,13 @@ func (a *App) AddProject(args AddProjectArgs) (AddProjectResult, error) {
 	}
 
 	// 1. 找 account
-	state := a.localStore.Get()
-	var matched *store.GiteaAccount
-	for i := range state.Accounts {
-		if state.Accounts[i].ID == args.GiteaAccountID {
-			matched = &state.Accounts[i]
-			break
-		}
-	}
-	if matched == nil {
-		return AddProjectResult{}, ipc.NewNotFound("未找到账号: " + args.GiteaAccountID)
+	matched, err := a.findAccountByID(args.GiteaAccountID)
+	if err != nil {
+		return AddProjectResult{}, err
 	}
 
 	// 2. 幂等：已存在则返回原 project
+	state := a.localStore.Get()
 	for i := range state.Projects {
 		if state.Projects[i].Platform == matched.Platform &&
 			state.Projects[i].AccountID == matched.ID &&

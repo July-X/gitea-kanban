@@ -225,7 +225,6 @@ func (a *App) resolveTokenByLocalPath(localPath string) (token string, username 
 	// 2. localStore.Projects 里找匹配
 	state := a.localStore.Get()
 	var matchedAccountID string
-	var matchedPlatform string
 	for _, p := range state.Projects {
 		if p.Owner == owner && p.Name == repo {
 			// 如果 path 里给了 accountUsername，优先匹配同账号的 project
@@ -242,7 +241,6 @@ func (a *App) resolveTokenByLocalPath(localPath string) (token string, username 
 				}
 			}
 			matchedAccountID = p.AccountID
-			matchedPlatform = p.Platform
 			break
 		}
 	}
@@ -267,12 +265,9 @@ func (a *App) resolveTokenByLocalPath(localPath string) (token string, username 
 	}
 
 	// 4. secretStore 拿 token
-	token, e = a.secretStore.Get(matchedPlatform, matchedAccount.GiteaURL, matchedAccount.Username)
+	token, e = a.resolveToken(matchedAccount)
 	if e != nil {
-		return "", "", classifyKeychainError(e)
-	}
-	if token == "" {
-		return "", "", ipc.NewInternal("token 为空：keychain 里有记录但 token 字符串为空")
+		return "", "", e
 	}
 
 	return token, matchedAccount.Username, nil

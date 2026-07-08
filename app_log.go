@@ -33,58 +33,18 @@ func (a *App) GetAppInfo() AppInfo {
 
 // OpenDataDir 用系统文件管理器打开应用数据根目录
 //
-// v2.2：前端设置页"打开应用数据目录"按钮调，跨平台实现：
-//   - macOS: `open <path>`
-//   - Windows: `explorer <path>`
-//   - Linux: `xdg-open <path>`
-//
-// 失败时返 *ipc.IpcError（前端可展示 toast）
+// v2.2：前端设置页"打开应用数据目录"按钮调
 func (a *App) OpenDataDir() error {
 	if a.dataDir == "" {
 		return ipc.NewInternal("dataDir 未初始化")
 	}
-
-	// 确保目录存在（避免打开空目录时某些 OS 报错）
-	if err := os.MkdirAll(a.dataDir, 0o755); err != nil {
-		return ipc.NewInternal("确保数据目录存在失败：" + err.Error())
-	}
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", a.dataDir)
-	case "windows":
-		cmd = exec.Command("explorer", a.dataDir)
-	default: // linux + 其它 unix
-		cmd = exec.Command("xdg-open", a.dataDir)
-	}
-
-	if a.logger != nil {
-		a.logger.Info("OpenDataDir", "path", a.dataDir, "cmd", cmd.String())
-	}
-
-	if err := cmd.Start(); err != nil {
-		return ipc.NewInternal("打开目录失败：" + err.Error())
-	}
-
-	// 不等 cmd.Wait() —— `open` / `xdg-open` / `explorer` 都是 detach 模式
-	// 等会阻塞到子进程退出才返回
-	go func() {
-		_ = cmd.Wait()
-	}()
-	return nil
+	return a.openFolderInOS(a.dataDir)
 }
 
 // OpenDesktopFolder 用系统文件管理器打开用户桌面目录
 //
-// 跨平台实现：
-//   - macOS: `open <path>`
-//   - Windows: `explorer <path>`
-//   - Linux: `xdg-open <path>`
-//
 // 优先使用 logexport.DesktopDir() 解析桌面路径；
 // 若结果为空，fallback 到 os.UserHomeDir()。
-// 失败时返 *ipc.IpcError（前端可展示 toast）
 func (a *App) OpenDesktopFolder() error {
 	desktopPath := logexport.DesktopDir()
 	if desktopPath == "" {
@@ -94,35 +54,36 @@ func (a *App) OpenDesktopFolder() error {
 		}
 		desktopPath = home
 	}
+	return a.openFolderInOS(desktopPath)
+}
 
-	// 确保目录存在（避免打开空目录时某些 OS 报错）
-	if err := os.MkdirAll(desktopPath, 0o755); err != nil {
-		return ipc.NewInternal("确保桌面目录存在失败：" + err.Error())
+// openFolderInOS 跨平台用系统文件管理器打开目录
+//
+// macOS: `open <path>` / Windows: `explorer <path>` / Linux: `xdg-open <path>`
+// 不等 cmd.Wait() —— 这些命令都是 detach 模式，等会阻塞到子进程退出才返回
+func (a *App) openFolderInOS(path string) error {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return ipc.NewInternal("确保目录存在失败：" + err.Error())
 	}
 
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", desktopPath)
+		cmd = exec.Command("open", path)
 	case "windows":
-		cmd = exec.Command("explorer", desktopPath)
-	default: // linux + 其它 unix
-		cmd = exec.Command("xdg-open", desktopPath)
+		cmd = exec.Command("explorer", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
 	}
 
 	if a.logger != nil {
-		a.logger.Info("OpenDesktopFolder", "path", desktopPath, "cmd", cmd.String())
+		a.logger.Info("openFolderInOS", "path", path, "cmd", cmd.String())
 	}
 
 	if err := cmd.Start(); err != nil {
-		return ipc.NewInternal("打开桌面目录失败：" + err.Error())
+		return ipc.NewInternal("打开目录失败：" + err.Error())
 	}
-
-	// 不等 cmd.Wait() —— `open` / `xdg-open` / `explorer` 都是 detach 模式
-	// 等会阻塞到子进程退出才返回
-	go func() {
-		_ = cmd.Wait()
-	}()
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 

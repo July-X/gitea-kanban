@@ -64,6 +64,17 @@ func (a *App) newBindingCtx(op string) context.Context {
 	return logx.WithReqID(a.ctx, reqID)
 }
 
+// getAdapter 根据平台返回对应的 PlatformAdapter
+func (a *App) getAdapter(platformStr string) platformAdapter.PlatformAdapter {
+	switch platformStr {
+	case "gitea":
+		return a.giteaAdapter
+	case "github":
+		return a.githubAdapter
+	}
+	return nil
+}
+
 // OnStartup 在 Wails 前端启动前调用
 func (a *App) OnStartup(ctx context.Context) {
 	// v0.6.0 · 生成启动期 reqID，让启动期日志都有同一个 reqID 贯穿

@@ -41,23 +41,18 @@ type PullListAppResp struct {
 // 返回：project + account + token + adapter，调用方拿到后直接调 adapter 方法。
 // 失败时返 IpcError，前端 ErrorFormatter 会结构化序列化。
 //
-// 注意：args 接受 projectId，**不**接受 hostUrl/token；AGENTS §8.1 铁律。
-func (a *App) resolvePullContext(args struct {
-	ProjectID string `json:"projectId"`
-}) (*store.RepoProject, *store.GiteaAccount, string, platformAdapter.PlatformAdapter, error) {
-	if strings.TrimSpace(args.ProjectID) == "" {
+// 注意：只接受 projectId，**不**接受 hostUrl/token；AGENTS §8.1 铁律。
+func (a *App) resolvePullContext(projectID string) (*store.RepoProject, *store.GiteaAccount, string, platformAdapter.PlatformAdapter, error) {
+	if strings.TrimSpace(projectID) == "" {
 		return nil, nil, "", nil, ipc.NewValidationFailed("projectId 不能为空", "")
 	}
-	project, account, err := a.findProjectAndAccount(args.ProjectID)
+	project, account, err := a.findProjectAndAccount(projectID)
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
-	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
+	token, err := a.resolveToken(account)
 	if err != nil {
-		return nil, nil, "", nil, classifyKeychainError(err)
-	}
-	if token == "" {
-		return nil, nil, "", nil, ipc.NewInternal("token 为空（keychain 里有记录但 token 字符串为空）")
+		return nil, nil, "", nil, err
 	}
 	adapter := a.getAdapter(account.Platform)
 	if adapter == nil {
@@ -83,10 +78,7 @@ type ListPullsArgs struct {
 // 鉴权铁律（AGENTS §8.1）：前端只传 projectId。
 // 平台选择走 findProjectAndAccount → account.Platform → giteaAdapter / githubAdapter。
 func (a *App) ListPulls(args ListPullsArgs) (PullListAppResp, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullListAppResp{}, err
 	}
@@ -129,10 +121,7 @@ type GetPullArgs struct {
 
 // GetPull 获取单个合并请求详情（Gitea + GitHub 都支持）
 func (a *App) GetPull(args GetPullArgs) (PullDetailAppDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
@@ -166,10 +155,7 @@ type MergePullArgs struct {
 // method="squash" 时 CommitMessage 建议非空（部分平台要求）。
 // 合并到主线分支（如 main）时 UI 层额外二次确认。
 func (a *App) MergePull(args MergePullArgs) (PullDetailAppDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
@@ -205,10 +191,7 @@ type ClosePullArgs struct {
 // 对应 gitea PATCH /pulls/{index} {state: 'closed'}；GitHub 等价。
 // 关闭后合并请求状态变为 closed，不可再合并（除非 reopen，本期不实现 reopen）。
 func (a *App) ClosePull(args ClosePullArgs) (PullDetailAppDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
@@ -251,10 +234,7 @@ type UpdatePullMilestoneArgs struct {
 // Gitea: PUT /repos/{owner}/{repo}/pulls/{index}/labels
 // GitHub: PUT /repos/{owner}/{repo}/issues/{index}/labels
 func (a *App) UpdatePullLabels(args UpdatePullLabelsArgs) (PullDetailAppDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
@@ -280,10 +260,7 @@ type UpdatePullAssigneeArgs struct {
 //
 // 本期简化为单 assignee；多 assignees 后续迭代再加。
 func (a *App) UpdatePullAssignee(args UpdatePullAssigneeArgs) (PullDetailAppDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
@@ -309,10 +286,7 @@ type UpdatePullReviewersArgs struct {
 // Gitea: POST/DELETE /pulls/{index}/requested_reviewers
 // GitHub: POST/DELETE /pulls/{index}/requested_reviewers（同名端点，语义一致）
 func (a *App) UpdatePullReviewers(args UpdatePullReviewersArgs) (PullDetailAppDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
@@ -348,10 +322,7 @@ type ListPullCommentsArgs struct {
 //   - 401/403 → token_invalid / permission_denied
 //   - 404 → not_found（项目/仓库不存在）
 func (a *App) ListPullComments(args ListPullCommentsArgs) ([]PullCommentDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -380,10 +351,7 @@ type CreatePullCommentArgs struct {
 // 返回创建的评论（含服务端 id / createdAt），前端拿这个刷列表以避免
 // “前端猜时间戳与实际服务端时间不一致”问题。
 func (a *App) CreatePullComment(args CreatePullCommentArgs) (PullCommentDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullCommentDTO{}, err
 	}
@@ -413,10 +381,7 @@ type UpdatePullCommentArgs struct {
 // 两端 adapter 实现都会在 trim 为空时 short-circuit 返回 ipc.ValidationFailed。
 // 返回更新后的评论（含新 updatedAt + userId），前端以此判断"已编辑"状态。
 func (a *App) UpdatePullComment(args UpdatePullCommentArgs) (PullCommentDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullCommentDTO{}, err
 	}
@@ -445,10 +410,7 @@ type DeletePullCommentArgs struct {
 // 成功返回 nil error（前端不关心返回值，只关心是否出错）。
 // 两端对已删除评论重复删除都返 2xx（幂等）。
 func (a *App) DeletePullComment(args DeletePullCommentArgs) error {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -472,10 +434,7 @@ type ListPullCommentReactionsArgs struct {
 
 // ListPullCommentReactions 列评论表情反应
 func (a *App) ListPullCommentReactions(args ListPullCommentReactionsArgs) ([]ReactionDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -495,10 +454,7 @@ type AddPullCommentReactionArgs struct {
 
 // AddPullCommentReaction 添加表情反应
 func (a *App) AddPullCommentReaction(args AddPullCommentReactionArgs) (ReactionDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return ReactionDTO{}, err
 	}
@@ -524,10 +480,7 @@ type RemovePullCommentReactionArgs struct {
 
 // RemovePullCommentReaction 移除表情反应
 func (a *App) RemovePullCommentReaction(args RemovePullCommentReactionArgs) error {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -550,10 +503,7 @@ type ListPullReviewsArgs struct {
 
 // ListPullReviews 列评审
 func (a *App) ListPullReviews(args ListPullReviewsArgs) ([]PullReviewDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -578,10 +528,7 @@ type CreatePullReviewArgs struct {
 // 前端传 event: "approve" | "request_changes" | "comment"（统一小写）
 // GitHub adapter 内部映射为 APPROVE / REQUEST_CHANGES / COMMENT
 func (a *App) CreatePullReview(args CreatePullReviewArgs) (PullReviewDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullReviewDTO{}, err
 	}
@@ -613,10 +560,7 @@ type ListPullReviewCommentsArgs struct {
 
 // ListPullReviewComments 列 PR 行内评审评论（v0.5.0 M4）
 func (a *App) ListPullReviewComments(args ListPullReviewCommentsArgs) ([]platformAdapter.PullReviewCommentDto, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -624,18 +568,7 @@ func (a *App) ListPullReviewComments(args ListPullReviewCommentsArgs) ([]platfor
 	if err != nil {
 		return nil, err
 	}
-	out := make([]platformAdapter.PullReviewCommentDto, 0, len(items))
-	for _, it := range items {
-		out = append(out, platformAdapter.PullReviewCommentDto{
-			ID:        it.ID,
-			Body:      it.Body,
-			Path:      it.Path,
-			Line:      it.Line,
-			CreatedAt: it.CreatedAt,
-			UpdatedAt: it.UpdatedAt,
-		})
-	}
-	return out, nil
+	return items, nil
 }
 
 // CreatePullReviewCommentArgs 发行内评审评论参数
@@ -658,10 +591,7 @@ func (a *App) CreatePullReviewComment(args CreatePullReviewCommentArgs) (platfor
 	if args.Line <= 0 {
 		return platformAdapter.PullReviewCommentDto{}, ipc.NewValidationFailed("行号必须大于0", "")
 	}
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return platformAdapter.PullReviewCommentDto{}, err
 	}
@@ -688,10 +618,7 @@ type ListPullFilesArgs struct {
 
 // ListPullFiles 列 PR 修改文件（v0.5.0 M4）
 func (a *App) ListPullFiles(args ListPullFilesArgs) ([]platformAdapter.PullFileDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -703,19 +630,7 @@ func (a *App) ListPullFiles(args ListPullFilesArgs) ([]platformAdapter.PullFileD
 		}
 		return nil, err
 	}
-	out := make([]platformAdapter.PullFileDTO, 0, len(items))
-	for _, it := range items {
-		out = append(out, platformAdapter.PullFileDTO{
-			Filename:         it.Filename,
-			Status:           it.Status,
-			Additions:        it.Additions,
-			Deletions:        it.Deletions,
-			Changes:          it.Changes,
-			Patch:            it.Patch,
-			PreviousFilename: it.PreviousFilename,
-		})
-	}
-	return out, nil
+	return items, nil
 }
 
 // GetPullFileDiffArgs 单文件 Diff 参数
@@ -725,12 +640,9 @@ type GetPullFileDiffArgs struct {
 	FilePath  string `json:"filePath"`
 }
 
-// GetPullFileDiff 获取单个文件的 diff 内容（v0.5.0 M4）
+// ListMilestones 列出仓库里程碑（v0.6.0）
 func (a *App) ListMilestones(args ListMilestonesArgs) ([]platformAdapter.MilestoneDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -745,10 +657,7 @@ func (a *App) ListMilestones(args ListMilestonesArgs) ([]platformAdapter.Milesto
 }
 
 func (a *App) UpdatePullMilestone(args UpdatePullMilestoneArgs) (PullDetailAppDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
@@ -763,10 +672,7 @@ func (a *App) UpdatePullMilestone(args UpdatePullMilestoneArgs) (PullDetailAppDT
 }
 
 func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFileDiffDTO, error) {
-	ctx := struct {
-		ProjectID string `json:"projectId"`
-	}{ProjectID: args.ProjectID}
-	project, account, token, adapter, err := a.resolvePullContext(ctx)
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
 		return platformAdapter.PullFileDiffDTO{}, err
 	}
@@ -777,88 +683,6 @@ func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFil
 		}
 		return platformAdapter.PullFileDiffDTO{}, err
 	}
-	return platformAdapter.PullFileDiffDTO{
-		Filename: d.Filename,
-		RawDiff:  d.RawDiff,
-	}, nil
+	return *d, nil
 }
 
-// getAdapter 根据平台返回对应的 PlatformAdapter
-func (a *App) getAdapter(platformStr string) platformAdapter.PlatformAdapter {
-	switch platformStr {
-	case "gitea":
-		return a.giteaAdapter
-	case "github":
-		return a.githubAdapter
-	}
-	return nil
-}
-
-// graphResultToAppDTO 把 platform.GraphResult 转为 App 的 GraphResultDTO
-func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
-	if r == nil {
-		return GraphResultDTO{}
-	}
-
-	nodes := make([]GraphNodeDTO, 0, len(r.Nodes))
-	for _, n := range r.Nodes {
-		nodes = append(nodes, GraphNodeDTO{
-			Row:         n.Row,
-			Lane:        n.Lane,
-			Color:       n.Color,
-			SHA:         n.SHA,
-			ShortSHA:    n.ShortSHA,
-			Subject:     n.Subject,
-			AuthorName:  n.AuthorName,
-			AuthorEmail: n.AuthorEmail,
-			Date:        n.Date,
-			IsMerge:     n.IsMerge,
-			Parents:     n.Parents,
-			Refs:        n.Refs,
-			RefTypes:    n.RefTypes,
-			IsCurrent:   n.IsCurrent,
-			IsStash:     n.IsStash,
-			IsCommitted: n.IsCommitted,
-		})
-	}
-
-	edges := make([]GraphEdgeDTO, 0, len(r.Edges))
-	for _, e := range r.Edges {
-		edges = append(edges, GraphEdgeDTO{
-			FromRow:  e.FromRow,
-			ToRow:    e.ToRow,
-			FromLane: e.FromLane,
-			ToLane:   e.ToLane,
-			Color:    e.Color,
-			Type:     e.Type,
-		})
-	}
-
-	branches := make([]GraphBranchDTO, 0, len(r.Branches))
-	for _, b := range r.Branches {
-		lines := make([]GraphBranchLineDTO, 0, len(b.Lines))
-		for _, ln := range b.Lines {
-			lines = append(lines, GraphBranchLineDTO{
-				X1:          ln.X1,
-				Y1:          ln.Y1,
-				X2:          ln.X2,
-				Y2:          ln.Y2,
-				LockedFirst: ln.LockedFirst,
-				IsCommitted: ln.IsCommitted,
-			})
-		}
-		branches = append(branches, GraphBranchDTO{
-			Color: b.Color,
-			End:   b.End,
-			Lines: lines,
-		})
-	}
-
-	return GraphResultDTO{
-		Nodes:     nodes,
-		Edges:     edges,
-		Branches:  branches,
-		MaxLane:   r.MaxLane,
-		Truncated: r.Truncated,
-	}
-}

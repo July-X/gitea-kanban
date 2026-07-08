@@ -264,14 +264,9 @@ func (a *App) CloneRepo(args CloneRepoArgs) (CloneRepoResult, error) {
 	}
 
 	// 2. 从 keychain 拿 token（绝不传给前端）
-	token, err := a.secretStore.Get(platformName, hostURL, username)
+	token, err := a.resolveToken(matchedAccount)
 	if err != nil {
-		return CloneRepoResult{}, classifyKeychainError(err)
-	}
-	if token == "" {
-		return CloneRepoResult{}, ipc.NewInternal(
-			"token 为空：keychain 里有记录但 token 字符串为空 (platform=" + platformName +
-				" hostUrl=" + hostURL + " username=" + username + ")")
+		return CloneRepoResult{}, err
 	}
 
 	// 3. clone
@@ -415,12 +410,9 @@ func (a *App) GetGitGraph(args GetGitGraphArgs) (GraphResultDTO, error) {
 	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
 
 	// 4. 拿 token
-	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
+	token, err := a.resolveToken(account)
 	if err != nil {
-		return GraphResultDTO{}, classifyKeychainError(err)
-	}
-	if token == "" {
-		return GraphResultDTO{}, ipc.NewInternal("token 为空（keychain 里有记录但 token 字符串为空）")
+		return GraphResultDTO{}, err
 	}
 
 	// 5. 调 adapter.LogGraph
@@ -551,4 +543,73 @@ func (a *App) findProjectAndAccount(projectID string) (*store.RepoProject, *stor
 		"project 关联的 account 不存在: projectId=" + projectID +
 			" accountId=" + matchedProject.AccountID,
 	)
+}
+
+// graphResultToAppDTO 把 platform.GraphResult 转为 App 的 GraphResultDTO
+func graphResultToAppDTO(r *platformAdapter.GraphResult) GraphResultDTO {
+	if r == nil {
+		return GraphResultDTO{}
+	}
+
+	nodes := make([]GraphNodeDTO, 0, len(r.Nodes))
+	for _, n := range r.Nodes {
+		nodes = append(nodes, GraphNodeDTO{
+			Row:         n.Row,
+			Lane:        n.Lane,
+			Color:       n.Color,
+			SHA:         n.SHA,
+			ShortSHA:    n.ShortSHA,
+			Subject:     n.Subject,
+			AuthorName:  n.AuthorName,
+			AuthorEmail: n.AuthorEmail,
+			Date:        n.Date,
+			IsMerge:     n.IsMerge,
+			Parents:     n.Parents,
+			Refs:        n.Refs,
+			RefTypes:    n.RefTypes,
+			IsCurrent:   n.IsCurrent,
+			IsStash:     n.IsStash,
+			IsCommitted: n.IsCommitted,
+		})
+	}
+
+	edges := make([]GraphEdgeDTO, 0, len(r.Edges))
+	for _, e := range r.Edges {
+		edges = append(edges, GraphEdgeDTO{
+			FromRow:  e.FromRow,
+			ToRow:    e.ToRow,
+			FromLane: e.FromLane,
+			ToLane:   e.ToLane,
+			Color:    e.Color,
+			Type:     e.Type,
+		})
+	}
+
+	branches := make([]GraphBranchDTO, 0, len(r.Branches))
+	for _, b := range r.Branches {
+		lines := make([]GraphBranchLineDTO, 0, len(b.Lines))
+		for _, ln := range b.Lines {
+			lines = append(lines, GraphBranchLineDTO{
+				X1:          ln.X1,
+				Y1:          ln.Y1,
+				X2:          ln.X2,
+				Y2:          ln.Y2,
+				LockedFirst: ln.LockedFirst,
+				IsCommitted: ln.IsCommitted,
+			})
+		}
+		branches = append(branches, GraphBranchDTO{
+			Color: b.Color,
+			End:   b.End,
+			Lines: lines,
+		})
+	}
+
+	return GraphResultDTO{
+		Nodes:     nodes,
+		Edges:     edges,
+		Branches:  branches,
+		MaxLane:   r.MaxLane,
+		Truncated: r.Truncated,
+	}
 }

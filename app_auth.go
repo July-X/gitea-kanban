@@ -152,7 +152,7 @@ func (a *App) AuthConnect(args ConnectArgs) (ConnectResult, error) {
 		// adapter 返回的 *ipc.IpcError 已经结构化（带 code + hint）
 		// 兜底：万一是非 IpcError，包成 internal
 		var ipcErr *ipc.IpcError
-		if !errorsAs(err, &ipcErr) {
+		if !errors.As(err, &ipcErr) {
 			return ConnectResult{}, ipc.NewInternal("验证 token 失败：" + err.Error())
 		}
 		return ConnectResult{}, err
@@ -472,13 +472,6 @@ func epochMsToISO(ms int64) string {
 	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
 }
 
-// errorsAs 是 errors.As 的薄封装（让 auth 流程读起来更顺眼）
-//
-// 用法：var ipcErr *ipc.IpcError; if errorsAs(err, &ipcErr) { ... }
-func errorsAs(err error, target interface{}) bool {
-	return errors.As(err, target)
-}
-
 // classifyKeychainError 把 secret.Store 的错误映射成 *ipc.IpcError
 func classifyKeychainError(err error) *ipc.IpcError {
 	msg := err.Error()
@@ -496,6 +489,32 @@ func classifyKeychainError(err error) *ipc.IpcError {
 		return ipc.NewKeychainAccessDenied(msg)
 	}
 	return ipc.NewInternal("凭证存储失败：" + msg)
+}
+
+// resolveToken 从 keychain 取账号 token，统一错误处理
+//
+// 6 处调用方共用：resolvePullContext / ListRepos / GetGitGraph / CloneRepo /
+// PullRepoByProjectId / resolveTokenByLocalPath。
+func (a *App) resolveToken(account *store.GiteaAccount) (string, error) {
+	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
+	if err != nil {
+		return "", classifyKeychainError(err)
+	}
+	if token == "" {
+		return "", ipc.NewInternal("token 为空（keychain 里有记录但 token 字符串为空）")
+	}
+	return token, nil
+}
+
+// findAccountByID 按 accountID 在 localStore 中查找账号
+func (a *App) findAccountByID(accountID string) (*store.GiteaAccount, error) {
+	state := a.localStore.Get()
+	for i := range state.Accounts {
+		if state.Accounts[i].ID == accountID {
+			return &state.Accounts[i], nil
+		}
+	}
+	return nil, ipc.NewNotFound("未找到账号: " + accountID)
 }
 
 // WorkspaceInfo GetWorkspace 返回值结构（对齐前端 ipc-client.ts 契约）

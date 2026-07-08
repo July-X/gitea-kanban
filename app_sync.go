@@ -90,12 +90,9 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
 
 	// 4. 拿 token
-	token, err := a.secretStore.Get(account.Platform, account.GiteaURL, account.Username)
+	token, err := a.resolveToken(account)
 	if err != nil {
-		return PullRepoResult{}, classifyKeychainError(err)
-	}
-	if token == "" {
-		return PullRepoResult{}, ipc.NewInternal("token 为空")
+		return PullRepoResult{}, err
 	}
 
 	if account.Platform == "github" {

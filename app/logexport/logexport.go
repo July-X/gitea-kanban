@@ -233,10 +233,17 @@ func writeStateRedacted(zw *zip.Writer, statePath string) (int64, error) {
 		return int64(len(data)), werr
 	}
 	redactAny(v)
-	redacted, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
+
+	// 用 json.Encoder + SetEscapeHTML(false) 避免 < > 被 HTML 转义成 \u003c \u003e
+	// （json.MarshalIndent 默认开启 HTML 转义，导致 <REDACTED> 变成 \u003cREDACTED\u003e）
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
 		return 0, err
 	}
+	redacted := bytes.TrimRight(buf.Bytes(), "\n")
 
 	w, err := zw.Create("state.json")
 	if err != nil {
