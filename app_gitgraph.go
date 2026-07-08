@@ -2,16 +2,15 @@ package main
 
 import (
 	"fmt"
-	"strings"
-	"time"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/store"
 	"github.com/google/uuid"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"strings"
+	"time"
 )
-
 
 // ===== Git Graph 相关方法（步骤 3.1）=====
 

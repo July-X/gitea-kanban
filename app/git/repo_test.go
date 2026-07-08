@@ -88,7 +88,6 @@ func getHeadSHA(t *testing.T, dir string) string {
 	return s
 }
 
-
 // TestParseGpgStatus 覆盖 parseGpgStatus 的 9 种状态线。
 //
 // Good (G) / Unknown-trust (U) / Warn (X) / Bad (B) / Missing-key (E) /
@@ -154,7 +153,7 @@ func TestParseGpgStatus(t *testing.T) {
 			wantNameFP:   false,
 		},
 		{
-			name:         "Name fallback to fingerprint",
+			name: "Name fallback to fingerprint",
 			// 40 hex char in name 位置 → IsNameFingerprint=true
 			input:        "G\x00KEYFP\x00" + "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",
 			wantStatus:   "G",

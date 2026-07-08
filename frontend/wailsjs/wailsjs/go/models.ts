@@ -1143,6 +1143,20 @@ export namespace main {
 	        this.index = source["index"];
 	    }
 	}
+	export class ListPullCommitsArgs {
+	    projectId: string;
+	    index: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListPullCommitsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	    }
+	}
 	export class ListPullFilesArgs {
 	    projectId: string;
 	    index: number;
@@ -1764,6 +1778,34 @@ export namespace platform {
 	        this.title = source["title"];
 	        this.state = source["state"];
 	        this.description = source["description"];
+	    }
+	}
+	export class PullCommitDTO {
+	    sha: string;
+	    shortSha: string;
+	    subject: string;
+	    body?: string;
+	    authorName: string;
+	    authorMail?: string;
+	    authoredAt: string;
+	    committed?: string;
+	    verified?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PullCommitDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sha = source["sha"];
+	        this.shortSha = source["shortSha"];
+	        this.subject = source["subject"];
+	        this.body = source["body"];
+	        this.authorName = source["authorName"];
+	        this.authorMail = source["authorMail"];
+	        this.authoredAt = source["authoredAt"];
+	        this.committed = source["committed"];
+	        this.verified = source["verified"];
 	    }
 	}
 	export class PullLabelDTO {

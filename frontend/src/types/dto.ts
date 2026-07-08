@@ -732,6 +732,19 @@ export interface GraphLinesDto {
 /** PR 修改文件的变更状态 */
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 
+/** PR 提交列表项（对齐 Gitea /pulls/{index}/commits） */
+export interface PullCommitDto {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  body?: string;
+  authorName: string;
+  authorMail?: string;
+  authoredAt: string;
+  committed?: string;
+  verified?: boolean;
+}
+
 /** PR 修改的文件项 */
 export interface PullFileDto {
   filename: string;

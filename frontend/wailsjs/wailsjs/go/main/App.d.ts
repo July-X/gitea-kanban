@@ -69,6 +69,8 @@ export function ListPullCommentReactions(arg1:main.ListPullCommentReactionsArgs)
 
 export function ListPullComments(arg1:main.ListPullCommentsArgs):Promise<Array<platform.CommentDTO>>;
 
+export function ListPullCommits(arg1:main.ListPullCommitsArgs):Promise<Array<platform.PullCommitDTO>>;
+
 export function ListPullFiles(arg1:main.ListPullFilesArgs):Promise<Array<platform.PullFileDTO>>;
 
 export function ListPullReviewComments(arg1:main.ListPullReviewCommentsArgs):Promise<Array<platform.PullReviewCommentDto>>;

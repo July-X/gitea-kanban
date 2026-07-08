@@ -2,15 +2,14 @@ package main
 
 import (
 	"fmt"
-	"time"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/logx"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/store"
 	"github.com/google/uuid"
+	"time"
 )
-
 
 // ===== v2.3 仓库管理（StatusBar 刷新按钮 + selectProject）=====
 
@@ -326,14 +325,14 @@ func filterStarredBranches(branches []store.StarredBranch, projectID, branch str
 // 修复"展开 commit 后手风琴无文件信息"bug —— 之前 DTO 只有 8 个元信息字段，
 // 完全没有文件变更数据，前端 CommitDetailPanel 永远拿不到 files。
 type CommitDetailDTO struct {
-	SHA          string          `json:"sha"`
-	ShortSHA     string          `json:"shortSha"`
-	Subject      string          `json:"subject"`
-	AuthorName   string          `json:"authorName"`
-	AuthorEmail  string          `json:"authorEmail"`
-	AuthorWhen   string          `json:"authorWhen"`
-	Message      string          `json:"message"`
-	Parents      []string        `json:"parents"`
+	SHA          string               `json:"sha"`
+	ShortSHA     string               `json:"shortSha"`
+	Subject      string               `json:"subject"`
+	AuthorName   string               `json:"authorName"`
+	AuthorEmail  string               `json:"authorEmail"`
+	AuthorWhen   string               `json:"authorWhen"`
+	Message      string               `json:"message"`
+	Parents      []string             `json:"parents"`
 	Files        []FileChangeDTO      `json:"files,omitempty"`        // 变更文件列表（含 +/- 行数）
 	Additions    int                  `json:"additions,omitempty"`    // 总新增行数
 	Deletions    int                  `json:"deletions,omitempty"`    // 总删除行数

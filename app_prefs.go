@@ -5,7 +5,6 @@ import (
 	"gitea-kanban/app/store"
 )
 
-
 // ===== v2.4 用户偏好（prefs）=====
 //
 // 修复 v2.0 stub bug：

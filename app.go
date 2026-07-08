@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"gitea-kanban/app/config"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/gitbinary"
@@ -15,8 +12,10 @@ import (
 	"gitea-kanban/app/secret"
 	"gitea-kanban/app/store"
 	"github.com/google/uuid"
+	"log/slog"
+	"os"
+	"path/filepath"
 )
-
 
 // App 是暴露给前端的主后端对象（Wails binding）
 //

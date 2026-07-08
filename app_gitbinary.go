@@ -1,16 +1,15 @@
 package main
 
 import (
-	"path/filepath"
-	"runtime"
-	"strings"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/gitbinary"
 	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/store"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"path/filepath"
+	"runtime"
+	"strings"
 )
-
 
 // ===== v0.4.0 Git 二进制设置（v2.0 拍板「默认内嵌 git 2.55.0」）=====
 //

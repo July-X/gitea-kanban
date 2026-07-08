@@ -230,6 +230,12 @@ type PlatformAdapter interface {
 	//        后端统一拉完整 diff 后按文件拆分 → 降低实现跨平台一致性成本
 	GetPullFileDiff(ctx context.Context, hostURL, username, token, owner, repo string, index int, filePath string) (*PullFileDiffDTO, error)
 
+	// ListPullCommits 列出 PR 中包含的提交（head 分支有但 base 分支没有的 commit）
+	//
+	// Gitea:  GET /repos/{owner}/{repo}/pulls/{index}/commits
+	// GitHub: GET /repos/{owner}/{repo}/pulls/{pull_number}/commits
+	ListPullCommits(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]PullCommitDTO, error)
+
 	ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]LabelDTO, error)
 
 	// ListMembers 列出仓库成员
@@ -246,6 +252,21 @@ type PlatformAdapter interface {
 	// Gitea:  PATCH /repos/{owner}/{repo}/pulls/{index} {"milestone": <title>|""}（title 查找或 404）
 	// GitHub: PATCH /repos/{owner}/{repo}/pulls/{pull_number} {"milestone": <number>|null}
 	UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*PullDetailDTO, error)
+}
+
+// PullCommitDTO PR 提交列表项
+//
+// 对齐 Gitea /repos/{owner}/{repo}/pulls/{index}/commits 返回结构。
+type PullCommitDTO struct {
+	SHA        string `json:"sha"`
+	ShortSHA   string `json:"shortSha"`
+	Subject    string `json:"subject"`
+	Body       string `json:"body,omitempty"`
+	AuthorName string `json:"authorName"`
+	AuthorMail string `json:"authorMail,omitempty"`
+	AuthoredAt string `json:"authoredAt"`
+	Committed  string `json:"committed,omitempty"`
+	Verified   bool   `json:"verified,omitempty"`
 }
 
 // MilestoneDTO 里程碑（v0.6.0）

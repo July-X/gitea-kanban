@@ -2,12 +2,11 @@ package main
 
 import (
 	"errors"
-	"strings"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/store"
+	"strings"
 )
-
 
 // ===== 合并请求（Pull Request）Wails bindings =====
 //
@@ -633,6 +632,30 @@ func (a *App) ListPullFiles(args ListPullFilesArgs) ([]platformAdapter.PullFileD
 	return items, nil
 }
 
+// ===== PR 提交列表 (PR Commits) =====
+
+// ListPullCommitsArgs 列 PR 提交
+type ListPullCommitsArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullCommits 列 PR 中包含的提交（head 分支有但 base 分支没有的 commit）
+func (a *App) ListPullCommits(args ListPullCommitsArgs) ([]platformAdapter.PullCommitDTO, error) {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	items, err := adapter.ListPullCommits(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			return []platformAdapter.PullCommitDTO{}, nil
+		}
+		return nil, err
+	}
+	return items, nil
+}
+
 // GetPullFileDiffArgs 单文件 Diff 参数
 type GetPullFileDiffArgs struct {
 	ProjectID string `json:"projectId"`
@@ -685,4 +708,3 @@ func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFil
 	}
 	return *d, nil
 }
-

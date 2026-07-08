@@ -130,6 +130,10 @@ export function ListPullComments(arg1) {
   return window['go']['main']['App']['ListPullComments'](arg1);
 }
 
+export function ListPullCommits(arg1) {
+  return window['go']['main']['App']['ListPullCommits'](arg1);
+}
+
 export function ListPullFiles(arg1) {
   return window['go']['main']['App']['ListPullFiles'](arg1);
 }

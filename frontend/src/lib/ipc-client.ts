@@ -37,6 +37,7 @@ import type {
   PullDto,
   PullFileDto,
   PullFileDiffDto,
+  PullCommitDto,
   PullReviewCommentDto,
   RepoProjectDto,
   GraphResultDto,
@@ -916,6 +917,14 @@ export function pullsFilesList(args: {
   index: number;
 }): Promise<PullFileDto[]> {
   return getIpcClient().invokeNested('pulls', 'files', 'list', args);
+}
+
+/** 列 PR 中包含的提交列表 */
+export function pullsCommitsList(args: {
+  projectId: string;
+  index: number;
+}): Promise<PullCommitDto[]> {
+  return getIpcClient().invokeNested('pulls', 'commits', 'list', args);
 }
 
 /** 获取单个文件的 diff 内容 */

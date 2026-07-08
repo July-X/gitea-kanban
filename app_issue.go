@@ -5,7 +5,6 @@ import (
 	platformAdapter "gitea-kanban/app/platform"
 )
 
-
 // ===== 看板（issue + label 映射，仅 Gitea）（步骤 3.5）=====
 
 // IssueDTO 议题（暴露给前端）

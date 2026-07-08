@@ -2,16 +2,15 @@ package main
 
 import (
 	"fmt"
+	"gitea-kanban/app/ipc"
+	"gitea-kanban/app/logexport"
+	"gitea-kanban/app/logx"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"gitea-kanban/app/ipc"
-	"gitea-kanban/app/logexport"
-	"gitea-kanban/app/logx"
 )
-
 
 // ===== 暴露给前端的基础方法（桩化，后续步骤逐步实现）=====
 

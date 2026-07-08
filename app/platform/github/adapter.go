@@ -1335,6 +1335,11 @@ func (a *GitHubAdapter) UpdatePullMilestone(ctx context.Context, hostURL, userna
 	return nil, platform.ErrNotSupported
 }
 
+// ListPullCommits 首期不支持（GitHub 仅 Git Graph）
+func (a *GitHubAdapter) ListPullCommits(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullCommitDTO, error) {
+	return nil, platform.ErrNotSupported
+}
+
 // ===== HTTP 请求封装 =====
 
 // doRequest 发送 GitHub API 请求

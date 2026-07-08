@@ -21,8 +21,7 @@
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Timer } from 'lucide-vue-next';
+import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -41,6 +40,7 @@ import {
   pullsCommentUpdate,
   pullsReviewCreate,
   pullsReviewsList,
+  pullsCommitsList,
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ReactionBar from '@renderer/components/ReactionBar.vue';
@@ -49,7 +49,7 @@ import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
 import type { CollaboratorDto, PullDto, RepoDto, MergeMethod } from '@renderer/types/dto';
 import type { CreateReviewArgs, IssueCommentDto, PullReviewDto, ReviewEvent } from '@renderer/types/dto';
-import type { PullFileDto } from '@renderer/types/dto';
+import type { PullFileDto, PullCommitDto } from '@renderer/types/dto';
 
 const repo = useRepoStore();
 const pullStore = usePullStore();
@@ -59,8 +59,6 @@ const auth = useAuthStore();
 const currentPlatform = computed<'gitea' | 'github'>(
   () => (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github'
 );
-const router = useRouter();
-
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
 // v0.6+ 滚动到底自动加载分页：哨兵 + IntersectionObserver
@@ -75,8 +73,8 @@ const activeRepo = computed<RepoDto | null>(() => {
   return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
 });
 
-/** 展开的合并请求 index Set（UI 状态，**不**持久化） */
-const expanded = ref<Set<number>>(new Set());
+/** 当前选中的合并请求（左右布局：左列表点击 → 右侧详情，null = 未选中显示空态） */
+const selectedPR = ref<PullDto | null>(null);
 
 /** tab 列表：全部 / 待合并 / 已合并 / 已关闭 */
 const tabs: { id: PullFilter; label: string }[] = [
@@ -129,7 +127,11 @@ const confirmDeleteOpen = ref(false);
 /** 待删除的评论信息 */
 const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
 
-const detailTab = ref<'overview' | 'files' | 'conversation'>('conversation');
+const detailTab = ref<'conversation' | 'commits' | 'files'>('conversation');
+
+/** 模板 ref：评论输入框 + 编辑评论 textarea */
+const commentInputRef = ref<HTMLTextAreaElement | null>(null);
+const editTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 /** 打开删除确认弹窗 */
 function confirmDeleteComment(p: PullDto, c: IssueCommentDto): void {
@@ -227,6 +229,11 @@ onUnmounted(() => {
 watch(
   () => activeProjectId.value,
   async (id) => {
+    // Bug fix: 切换仓库时必须清空右侧详情面板，否则旧 PR 的评论/评审状态
+    // 会残留到新仓库，导致操作逻辑错乱（评论发到旧 PR、评审面板错位等）
+    selectedPR.value = null;
+    detailTab.value = 'conversation';
+    commitsByPR.value.clear();
     if (id) {
       await loadPulls();
     } else {
@@ -282,37 +289,67 @@ async function onRefresh(): Promise<void> {
   }
 }
 
-function toggleExpand(idx: number): void {
-  const next = new Set<number>();
-  if (!expanded.value.has(idx)) next.add(idx);
-  expanded.value = next;
+/**
+ * 选中一个合并请求：左侧列表点击 → 右侧加载详情 + 评论 + 评审
+ *
+ * 已加载过的评论 panel 不重复拉（避免抖动）
+ */
+/** PR 提交列表缓存（按 PR index 分组） */
+const commitsByPR = ref<Map<number, PullCommitDto[]>>(new Map());
+const commitsLoading = ref(false);
+
+function selectPR(p: PullDto): void {
+  selectedPR.value = p;
+  void loadComments(p);
+  void loadReviews(p);
+  void loadCommits(p);
 }
 
-/**
- * 行点击展开：除切 expanded 外,展开的瞬间调 loadComments 拉评论
- *
- * 收起时**不**清空 panel —— 用户再次展开能秒开（避免重复 IO）
- */
-function toggleExpandWithComments(p: PullDto): void {
-  const wasExpanded = expanded.value.has(p.index);
-  toggleExpand(p.index);
-  if (!wasExpanded) {
-    void loadComments(p);
-    void loadReviews(p); // v0.5.0 M3
+/** 加载 PR 提交列表 */
+async function loadCommits(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  if (commitsByPR.value.has(p.index)) return; // 已缓存
+  commitsLoading.value = true;
+  try {
+    const list = (await pullsCommitsList({
+      projectId: String(activeProjectId.value),
+      index: p.index,
+    })) as PullCommitDto[];
+    commitsByPR.value.set(p.index, list);
+  } catch {
+    // 失败不阻断
+  } finally {
+    commitsLoading.value = false;
   }
 }
 
 /**
- * 跳转到 Git Graph 视图（/timeline），查看该合并请求的 head 分支
- *
- * @click.stop 阻止冒泡到 merge-item 行（避免同时触发 toggleExpandWithComments 展开手风琴）
+ * 生成 commit 在 Git Server（Gitea / GitHub）的 web 链接
+ * Gitea:  {baseUrl}/{owner}/{repo}/commit/{sha}
+ * GitHub: {baseUrl}/{owner}/{repo}/commit/{sha}
  */
-function onJumpToTimeline(p: PullDto): void {
-  if (!p.head?.ref || !p.head?.sha) {
-    showToast({ type: 'error', message: '这条合并请求没有可跳转的分支信息' });
-    return;
+function commitWebUrl(sha: string): string {
+  if (!activeRepo.value) return '#';
+  const platform = (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github';
+  const baseUrl = (auth.getAccountUrlByPlatform(platform) || '').replace(/\/+$/, '');
+  if (!baseUrl) return '#';
+  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/commit/${sha}`;
+}
+
+/** 在系统浏览器打开 commit 页面 */
+function openCommitExternal(sha: string): void {
+  const url = commitWebUrl(sha);
+  if (url && url !== '#') BrowserOpenURL(url);
+}
+
+/** 复制 SHA 到剪贴板 */
+async function copySha(sha: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(sha);
+    showToast({ type: 'success', message: '已复制 SHA' });
+  } catch {
+    showToast({ type: 'error', message: '复制失败' });
   }
-  void router.push('/timeline');
 }
 
 /** 生成 gitea / github web 链接（reactive：跟随 giteaUrl / activeRepo 变化）
@@ -801,9 +838,7 @@ function quoteComment(idx: number, c: IssueCommentDto): void {
   mentionState.value.delete(idx);
   // 让 textarea 反映新值 + 自动 focus + 光标移到末尾
   nextTick(() => {
-    const ta = document.querySelector<HTMLTextAreaElement>(
-      `.merge-item[data-pr-idx="${idx}"] .merge-item__comment-input`,
-    );
+    const ta = document.querySelector<HTMLTextAreaElement>('.pr-detail__comment-input');
     if (ta) {
       ta.focus();
       const pos = next.length;
@@ -848,9 +883,7 @@ function insertMention(idx: number, member: string): void {
   mentionState.value.delete(idx);
   // 让 textarea 反映新值
   nextTick(() => {
-    const ta = document.querySelector<HTMLTextAreaElement>(
-      `.merge-item[data-pr-idx="${idx}"] .merge-item__comment-input`,
-    );
+    const ta = document.querySelector<HTMLTextAreaElement>('.pr-detail__comment-input');
     if (ta) {
       const pos = replaced.length;
       ta.focus();
@@ -1175,36 +1208,6 @@ function formatRelative(iso: string | undefined): string {
       </div>
     </header>
 
-    <!-- ============== Tabs + 搜索 ============== -->
-    <div v-if="activeProjectId" class="merges__controls">
-      <div class="merges__tabs" role="tablist">
-        <button
-          v-for="t in tabs"
-          :key="t.id"
-          type="button"
-          role="tab"
-          class="merges__tab"
-          :class="{ 'merges__tab--active': pull.filter === t.id }"
-          :aria-selected="pull.filter === t.id"
-          @click="pull.setFilter(t.id)"
-        >
-          <span>{{ t.label }}</span>
-          <span class="merges__tab-count">{{ pull.counts[t.id] }}</span>
-        </button>
-      </div>
-      <div class="merges__search">
-        <Search :size="14" :stroke-width="2" aria-hidden="true" />
-        <input
-          v-model="pull.search"
-          type="text"
-          class="merges__search-input"
-          placeholder="按标题 / 来源 / 目标搜索"
-          autocomplete="off"
-          spellcheck="false"
-        />
-      </div>
-    </div>
-
     <!-- ============== 错误条 ============== -->
     <div v-if="pull.error" class="merges__error" role="alert">
       <p class="merges__error-msg">{{ pull.error.messageText }}</p>
@@ -1212,19 +1215,11 @@ function formatRelative(iso: string | undefined): string {
     </div>
 
     <!--
-      主体：5 个独立 v-if 分支。
-      注意：v-if/v-else-if/v-else 链要求所有 element 同 tag，且 AST 会"折叠"到第一个 v-if 节点的 children 里——
-      也就是说链里最后一个元素如果是 <ul>，那么 <li> 实际成了 <div v-if> 的 child 而不是 <ul> 的 child，
-      </li></ul> 闭合会错位（这就是之前"Element is missing end tag" bug 的根因）。
-      所以这里直接用独立 v-if，每个分支自己决定渲染什么。
+      主体空态判断（独立 v-if，避免污染 v-else 链）
     -->
     <div v-if="!activeRepo" class="merges__placeholder">
       <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看合并请求' />
     </div>
-    <!--
-      v0.6.1+ 拍板"替换模式"：删 v-else-if="pull.loading && ..." 的"加载中…"占位
-      全局 StatusBarPulse 接管请求级 loading
-    -->
     <div v-else-if="!pull.items.length" class="merges__placeholder">
       <EmptyState
         title="这个仓库还没有合并请求"
@@ -1237,705 +1232,580 @@ function formatRelative(iso: string | undefined): string {
         description="试试切换其他 tab，或调整搜索词"
       />
     </div>
-    <!-- 列表分支：直接用 template v-if（独立判断，避免污染 v-else 链） -->
-    <ul v-if="activeRepo && pull.filteredItems.length" ref="mergesScrollEl" class="merges__list">
-      <li
-        v-for="p in pull.filteredItems"
-        :key="p.index"
-        class="merge-item"
-        :class="{
-          'merge-item--open': p.state === 'open',
-          'merge-item--merged': p.merged,
-          'merge-item--closed': p.state === 'closed' && !p.merged,
-        }"
-        role="button"
-        tabindex="0"
-        :aria-expanded="expanded.has(p.index)"
-        @click="toggleExpandWithComments(p)"
-        @keydown.enter="toggleExpandWithComments(p)"
-        @keydown.space.prevent="toggleExpandWithComments(p)"
-      >
-        <!-- 模仿 gitea /pulls 列表布局：
-             [leading: 状态图标] [main: 标题 + #index + 时间/作者 + 分支流向] [trailing: 操作按钮] -->
-        <div class="merge-item__leading" aria-hidden="true">
-          <GitPullRequestArrow
-            v-if="!p.merged && !p.draft && p.state === 'open'"
-            :size="16"
-            :stroke-width="2"
-            class="merge-item__icon merge-item__icon--open"
-          />
-          <GitPullRequestArrow
-            v-else-if="p.merged"
-            :size="16"
-            :stroke-width="2"
-            class="merge-item__icon merge-item__icon--merged"
-          />
-          <GitPullRequestArrow
-            v-else-if="p.draft"
-            :size="16"
-            :stroke-width="2"
-            class="merge-item__icon merge-item__icon--draft"
-          />
-          <GitPullRequestArrow
-            v-else
-            :size="16"
-            :stroke-width="2"
-            class="merge-item__icon merge-item__icon--closed"
-          />
-        </div>
-        <div class="merge-item__main">
-          <div class="merge-item__header">
-            <span class="merge-item__title" :title="p.title">{{ p.title }}</span>
-            <span :class="badgeClass(p)" class="merge-item__badge">{{ badgeText(p) }}</span>
-            <!-- v1.4 · 任务 #merge-timeline-jump:
-                 跳时间轴定位到本合并请求的 head 提交。
-                 默认态用主色软底 + 主色文字 + 主色描边(跟 TimelineView .is-pr-focus
-                 同一强调色系,让用户一眼识别"点这个就能跳过去看")。
-                 @click.stop 避免同时触发行的 toggleExpandWithComments 展开手风琴 -->
+
+    <!-- ===== 左右分栏主体（空态已在上方判断，此处有数据才渲染） ===== -->
+    <div v-if="activeRepo && pull.filteredItems.length" class="pr-split">
+      <!-- ===== 左侧：PR 列表面板 ===== -->
+      <aside class="pr-list-panel">
+        <!-- 工具栏：筛选 tabs + 搜索 -->
+        <div class="pr-list-toolbar">
+          <div class="merges__tabs" role="tablist">
             <button
+              v-for="t in tabs"
+              :key="t.id"
               type="button"
-              class="merge-item__timeline-btn"
-              :title="`跳到时间轴，定位到 ${p.head.ref} 上的提交 ${p.head.sha.slice(0, 7)}`"
-              :aria-label="`跳到时间轴，定位到 ${p.head.ref} 上的提交 ${p.head.sha.slice(0, 7)}`"
-              @click.stop="onJumpToTimeline(p)"
+              role="tab"
+              class="merges__tab"
+              :class="{ 'merges__tab--active': pull.filter === t.id }"
+              :aria-selected="pull.filter === t.id"
+              @click="pull.setFilter(t.id)"
             >
-              <Timer :size="13" :stroke-width="2" aria-hidden="true" />
+              <span>{{ t.label }}</span>
+              <span class="merges__tab-count">{{ pull.counts[t.id] }}</span>
             </button>
           </div>
-          <div class="merge-item__body">
-            <a
-              :href="giteaPullUrl(p)"
-              class="merge-item__index mono"
-              :title="'在 gitea 中打开 #' + p.index"
-              @click.stop.prevent="openPullExternal(p)"
-            >#{{ p.index }}</a>
-            <span class="merge-item__meta-line">
-              <span class="merge-item__meta-text">打开于 {{ formatRelative(p.createdAt) }}</span>
-              <span class="merge-item__meta-text">由</span>
-              <span class="merge-item__author">{{ p.author.username }}</span>
-            </span>
-            <!-- 分支流向（base ← head），照搬 gitea /pulls 列表 -->
-            <div class="merge-item__branches">
-              <span
-                class="merge-item__branch"
-                :title="p.base.ref"
-              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.base.ref }}</span>
-              <span class="merge-item__branch-arrow" aria-hidden="true">←</span>
-              <span
-                class="merge-item__branch"
-                :title="p.head.ref"
-              ><GitBranch :size="12" :stroke-width="2" aria-hidden="true" />{{ p.head.ref }}</span>
+          <div class="merges__search">
+            <Search :size="14" :stroke-width="2" aria-hidden="true" />
+            <input
+              v-model="pull.search"
+              type="text"
+              class="merges__search-input"
+              placeholder="按标题 / 来源 / 目标搜索"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+
+        <!-- PR 列表滚动区 -->
+        <ul ref="mergesScrollEl" class="pr-list-scroll">
+          <li
+            v-for="p in pull.filteredItems"
+            :key="p.index"
+            class="pr-card"
+            :class="{
+              'pr-card--selected': selectedPR?.index === p.index,
+              'pr-card--open': p.state === 'open',
+              'pr-card--merged': p.merged,
+              'pr-card--closed': p.state === 'closed' && !p.merged,
+            }"
+            role="button"
+            tabindex="0"
+            @click="selectPR(p)"
+            @keydown.enter="selectPR(p)"
+            @keydown.space.prevent="selectPR(p)"
+          >
+            <!-- 状态图标 -->
+            <div class="pr-card__icon" aria-hidden="true">
+              <GitPullRequestArrow
+                v-if="!p.merged && !p.draft && p.state === 'open'"
+                :size="16" :stroke-width="2"
+                class="pr-card__icon--open"
+              />
+              <GitPullRequestArrow
+                v-else-if="p.merged"
+                :size="16" :stroke-width="2"
+                class="pr-card__icon--merged"
+              />
+              <GitPullRequestArrow
+                v-else-if="p.draft"
+                :size="16" :stroke-width="2"
+                class="pr-card__icon--draft"
+              />
+              <GitPullRequestArrow
+                v-else
+                :size="16" :stroke-width="2"
+                class="pr-card__icon--closed"
+              />
             </div>
-            <!-- 标签 + 里程碑 + 指派人 + 评审人（gitea 合并请求属性块） -->
-            <!-- v2.62：attrs 用 v-if 包裹，空 MR 时不渲染空 div -->
-            <div v-if="(p.labels ?? []).length > 0 || p.milestone || p.assignee || (p.reviewers ?? []).length > 0 || (p.commentsCount ?? 0) > 0" class="merge-item__attrs">
+            <!-- 卡片主体 -->
+            <div class="pr-card__body">
+              <div class="pr-card__title-row">
+                <span class="pr-card__title" :title="p.title">{{ p.title }}</span>
+                <span class="pr-card__num mono">#{{ p.index }}</span>
+              </div>
+              <div class="pr-card__branches">
+                <span class="pr-card__branch mono" :title="p.head.ref">{{ p.head.ref }}</span>
+                <span class="pr-card__branch-arrow">→</span>
+                <span class="pr-card__branch pr-card__branch--dst mono" :title="p.base.ref">{{ p.base.ref }}</span>
+              </div>
+              <div class="pr-card__meta">
+                <span class="pr-card__author">{{ p.author.username }}</span>
+                <span class="pr-card__time">{{ formatRelative(p.createdAt) }}</span>
+                <span :class="badgeClass(p)" class="pr-card__badge">{{ badgeText(p) }}</span>
+                <span v-if="p.hasConflicts && p.state === 'open'" class="pr-card__conflict">有冲突</span>
+                <span v-if="(p.commentsCount ?? 0) > 0" class="pr-card__comments">💬 {{ p.commentsCount }}</span>
+              </div>
+            </div>
+          </li>
+
+          <!-- 滚动加载更多哨兵 -->
+          <li
+            ref="loadMoreSentinel"
+            class="merges__load-more"
+            :data-state="(!pull.hasMore && pull.currentPage >= 1) ? 'end' : 'idle'"
+            aria-live="polite"
+          >
+            <div v-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">
+              <span class="merges__load-more-divider" aria-hidden="true"></span>
+              <span>已到全部合并请求的末尾</span>
+              <span class="merges__load-more-divider" aria-hidden="true"></span>
+            </div>
+            <div v-else class="merges__load-more-idle">
+              <span class="merges__load-more-arrow" aria-hidden="true">↓</span>
+              <span>继续滚动加载更多…</span>
+            </div>
+          </li>
+        </ul>
+      </aside>
+
+      <!-- ===== 右侧：PR 详情面板 ===== -->
+      <section v-if="selectedPR" class="pr-detail-panel" :key="selectedPR.index">
+        <!-- 详情头部：标题 + 状态 -->
+        <div class="pr-detail-header">
+          <div class="pr-detail-header__top">
+            <div class="pr-detail-header__status-icon" aria-hidden="true">
+              <GitPullRequestArrow
+                v-if="!selectedPR.merged && !selectedPR.draft && selectedPR.state === 'open'"
+                :size="22" :stroke-width="2.5"
+                class="pr-card__icon--open"
+              />
+              <GitPullRequestArrow
+                v-else-if="selectedPR.merged"
+                :size="22" :stroke-width="2.5"
+                class="pr-card__icon--merged"
+              />
+              <GitPullRequestArrow
+                v-else
+                :size="22" :stroke-width="2.5"
+                class="pr-card__icon--closed"
+              />
+            </div>
+            <div class="pr-detail-header__title-area">
+              <h2 class="pr-detail-header__title">{{ selectedPR.title }}</h2>
+              <div class="pr-detail-header__subtitle">
+                <span :class="badgeClass(selectedPR)" class="pr-detail-header__badge">{{ badgeText(selectedPR) }}</span>
+                <span><strong style="color: var(--color-text);">{{ selectedPR.author.username }}</strong> 想把
+                  <code class="mono pr-detail__branch">{{ selectedPR.head.ref }}</code> 合并到
+                  <code class="mono pr-detail__branch pr-detail__branch--dst">{{ selectedPR.base.ref }}</code>
+                </span>
+              </div>
+            </div>
+            <div class="pr-detail-header__ext">
+              <button
+                type="button"
+                class="btn-ghost-sm"
+                title="在浏览器打开"
+                @click="openPullExternal(selectedPR)"
+              >
+                <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
+                在浏览器打开
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Meta 信息条 -->
+        <dl class="pr-detail-meta">
+          <div class="pr-detail-meta__item"><dt>创建</dt><dd>{{ formatDate(selectedPR.createdAt) }}</dd></div>
+          <div class="pr-detail-meta__item"><dt>更新</dt><dd>{{ formatRelative(selectedPR.updatedAt) }}</dd></div>
+          <div class="pr-detail-meta__item"><dt>冲突</dt><dd>{{ selectedPR.hasConflicts ? '有冲突' : '无冲突' }}</dd></div>
+          <div class="pr-detail-meta__item"><dt>可合并</dt><dd>{{ selectedPR.mergeable ? '是' : '否' }}</dd></div>
+          <div class="pr-detail-meta__item" v-if="(selectedPR.labels ?? []).length > 0">
+            <dt>标签</dt>
+            <dd>
               <span
-                v-for="label in (p.labels ?? [])"
+                v-for="label in (selectedPR.labels ?? [])"
                 :key="label.id"
-                class="merge-item__label"
+                class="pr-detail__label"
                 :style="{ '--label-color': '#' + label.color, '--label-bg': '#' + label.color + '22' }"
               >{{ label.name }}</span>
-              <span
-                v-if="p.milestone"
-                class="merge-item__milestone"
-                :title="p.milestone.title"
-              >🎯 {{ p.milestone.title }}</span>
-              <span
-                v-if="p.assignee"
-                class="merge-item__assignee"
-              >👤 {{ p.assignee.username }}</span>
-              <span
-                v-for="reviewer in (p.reviewers ?? [])"
-                :key="reviewer.username"
-                class="merge-item__reviewer"
-              >👁 {{ reviewer.username }}</span>
-              <span
-                v-if="(p.commentsCount ?? 0) > 0"
-                class="merge-item__comments"
-              >💬 {{ p.commentsCount }}</span>
-            </div>
+            </dd>
           </div>
-        </div>
-        <!-- trailing: 操作按钮（不展开就能直接看到，符合 gitea 把操作放到行内） -->
-        <div class="merge-item__trailing">
+          <div class="pr-detail-meta__item" v-if="selectedPR.milestone">
+            <dt>里程碑</dt><dd>{{ selectedPR.milestone.title }}</dd>
+          </div>
+          <div class="pr-detail-meta__item" v-if="selectedPR.assignee">
+            <dt>指派人</dt><dd>{{ selectedPR.assignee.username }}</dd>
+          </div>
           <button
-            v-if="p.state === 'open' && !p.draft"
             type="button"
-            class="merge-item__btn merge-item__btn--merge"
-            :disabled="p.hasConflicts || !p.mergeable || merging"
-            :title="p.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !p.mergeable ? '当前不可合并' : '合并此请求'"
-            @click.stop="requestMerge(p)"
+            class="pr-detail__edit-attrs"
+            @click="openAttrEditor(selectedPR)"
+          >
+            <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
+            <span>编辑属性</span>
+          </button>
+        </dl>
+
+        <!-- 操作按钮条 -->
+        <div class="pr-detail-actions">
+          <button
+            v-if="selectedPR.state === 'open' && !selectedPR.draft"
+            type="button"
+            class="btn-primary-sm"
+            :disabled="selectedPR.hasConflicts || !selectedPR.mergeable || merging"
+            :title="selectedPR.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !selectedPR.mergeable ? '当前不可合并' : '合并此请求'"
+            @click="requestMerge(selectedPR)"
           >
             <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
-            <span>{{ merging && mergingPull?.index === p.index ? '合并中…' : '合并' }}</span>
+            <span>{{ merging && mergingPull?.index === selectedPR.index ? '合并中…' : '合并' }}</span>
           </button>
-          <!-- 关闭合并请求（不合并，直接关闭）—— 对应 gitea 关闭操作 -->
+          <template v-if="selectedPR.state === 'open'">
+            <button
+              type="button"
+              class="btn-approve-sm"
+              :disabled="reviewSubmitting"
+              title="批准此合并请求"
+              @click="toggleReviewEditor(selectedPR, 'approve')"
+            ><span>批准</span></button>
+            <button
+              type="button"
+              class="btn-request-changes-sm"
+              :disabled="reviewSubmitting"
+              title="请求修改"
+              @click="toggleReviewEditor(selectedPR, 'request_changes')"
+            ><span>请求修改</span></button>
+            <button
+              type="button"
+              class="btn-ghost-sm"
+              :disabled="reviewSubmitting"
+              title="仅评论（不批准也不请求修改）"
+              @click="toggleReviewEditor(selectedPR, 'comment')"
+            ><span>评论</span></button>
+          </template>
           <button
-            v-if="p.state === 'open'"
+            v-if="selectedPR.state === 'open'"
             type="button"
-            class="merge-item__btn merge-item__btn--close"
+            class="btn-ghost-sm"
             :disabled="closing"
-            :title="'关闭此合并请求（不合并）'"
-            @click.stop="requestClose(p)"
+            title="关闭此合并请求（不合并）"
+            @click="requestClose(selectedPR)"
           >
             <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
-            <span>{{ closing && closingPull?.index === p.index ? '关闭中…' : '关闭' }}</span>
+            <span>{{ closing && closingPull?.index === selectedPR.index ? '关闭中…' : '关闭' }}</span>
           </button>
-          <!-- v0.5.0 M3：评审按钮（仅 open 状态可见） -->
-          <template v-if="p.state === 'open'">
-            <button
-              type="button"
-              class="merge-item__btn merge-item__btn--approve"
-              :disabled="reviewSubmitting"
-              :title="'批准此合并请求'"
-              @click.stop="toggleReviewEditor(p, 'approve')"
-            >
-              <span>批准</span>
-            </button>
-            <button
-              type="button"
-              class="merge-item__btn merge-item__btn--request-changes"
-              :disabled="reviewSubmitting"
-              :title="'请求修改'"
-              @click.stop="toggleReviewEditor(p, 'request_changes')"
-            >
-              <span>请求修改</span>
-            </button>
-            <button
-              type="button"
-              class="merge-item__btn merge-item__btn--review-comment"
-              :disabled="reviewSubmitting"
-              :title="'仅评论（不批准也不请求修改）'"
-              @click.stop="toggleReviewEditor(p, 'comment')"
-            >
-              <span>评论</span>
-            </button>
-          </template>
           <span
-            v-if="p.hasConflicts && p.state === 'open'"
-            class="merge-item__conflict-hint"
-            :title="'此合并请求存在冲突，请先在 gitea 页面解决'"
+            v-if="selectedPR.hasConflicts && selectedPR.state === 'open'"
+            class="pr-detail__conflict-hint"
+            title="此合并请求存在冲突，请先在 gitea 页面解决"
           >有冲突</span>
-          <a
-            :href="giteaPullUrl(p)"
-            class="merge-item__ext-link"
-            :title="'在 gitea 中打开 #' + p.index"
-            @click.stop.prevent="openPullExternal(p)"
-          >
-            <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
-          </a>
+          <div style="flex: 1;"></div>
         </div>
-        <!-- 展开区：左 meta + 右 comments 两栏 grid（左 1 / 右 2）
-             关键：detail 内部所有 click / keydown 必须 stop 冒泡,
-             否则点击 textarea / 输入框 / 滚动评论列表会冒泡到 li 的 click,
-             触发 toggleExpand 收起整张卡片（v1.3.1 bugfix）。 -->
-        <div
-          v-if="expanded.has(p.index)"
-          class="merge-item__detail"
-          @click.stop
-          @keydown.stop
-        >
-          <!-- ===== 详情头部：meta 一行 + 编辑属性按钮（右对齐）=====
-               v1.4 简化：meta 折行紧凑展示 + 编辑按钮同行；评论区独占下面整行 -->
-          <div class="merge-item__detail-meta-row">
-            <dl class="merge-item__meta-inline">
-              <div class="merge-item__meta-chip">
-                <dt>作者</dt>
-                <dd>{{ p.author.username }}</dd>
-              </div>
-              <div class="merge-item__meta-chip">
-                <dt>创建</dt>
-                <dd>{{ formatDate(p.createdAt) }}</dd>
-              </div>
-              <div class="merge-item__meta-chip">
-                <dt>更新</dt>
-                <dd>{{ formatDate(p.updatedAt) }}</dd>
-              </div>
-              <div class="merge-item__meta-chip">
-                <dt>冲突</dt>
-                <dd>{{ p.hasConflicts ? '有冲突' : '无冲突' }}</dd>
-              </div>
-              <div class="merge-item__meta-chip">
-                <dt>可合并</dt>
-                <dd>{{ p.mergeable ? '是' : '否' }}</dd>
-              </div>
-            </dl>
-            <button
-              type="button"
-              class="merge-item__edit-attrs"
-              @click.stop="openAttrEditor(p)"
-            >
-              <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
-              <span>编辑属性</span>
-            </button>
-          </div>
-          <!-- ===== v0.5.0 M4: 三 Tab 切换 ===== -->
-          <div class="merge-item__detail-tabs">
-            <button
-              type="button"
-              class="merge-item__detail-tab"
-              :class="{ 'merge-item__detail-tab--active': detailTab === 'overview' }"
-              @click.stop="detailTab = 'overview'"
-            >
-              概览
-            </button>
-            <button
-              type="button"
-              class="merge-item__detail-tab"
-              :class="{ 'merge-item__detail-tab--active': detailTab === 'files' }"
-              @click.stop="detailTab = 'files'"
-            >
-              文件评论
-              <span v-if="pull.filesByPR.get(p.index)?.length > 0" class="merge-item__detail-tab-count">
-                {{ pull.filesByPR.get(p.index)!.length }}
-              </span>
-            </button>
-            <button
-              type="button"
-              class="merge-item__detail-tab"
-              :class="{ 'merge-item__detail-tab--active': detailTab === 'conversation' }"
-              @click.stop="detailTab = 'conversation'"
-            >
-              对话
-              <span v-if="getPanel(p.index).items.length > 0" class="merge-item__detail-tab-count">
-                {{ getPanel(p.index).items.length }}
-              </span>
-            </button>
-          </div>
 
-          <!-- ===== Tab 内容 ===== -->
+        <!-- 评审编辑器（内联在操作按钮下方） -->
+        <div v-if="reviewEditorOpen.has(selectedPR.index)" class="pr-detail__review-editor">
+          <div class="pr-detail__review-editor-header">
+            <span class="pr-detail__review-editor-label">{{ reviewEventLabel(reviewEditorEvent.get(selectedPR.index) ?? 'comment') }}</span>
+          </div>
+          <textarea
+            class="pr-detail__review-editor-input"
+            rows="3"
+            :value="reviewEditorBody.get(selectedPR.index) ?? ''"
+            @input="reviewEditorBody.set(selectedPR.index, ($event.target as HTMLTextAreaElement).value)"
+            placeholder="评审总结（可选）"
+            spellcheck="false"
+          ></textarea>
+          <div class="pr-detail__review-editor-actions">
+            <button
+              type="button"
+              class="btn-primary-sm"
+              :disabled="reviewSubmitting"
+              @click="submitReview(selectedPR)"
+            >{{ reviewSubmitting ? '提交中…' : '提交评审' }}</button>
+            <button
+              type="button"
+              class="btn-ghost-sm"
+              @click="reviewEditorOpen.delete(selectedPR.index); reviewEditorBody.delete(selectedPR.index)"
+            >取消</button>
+          </div>
+        </div>
 
-          <!-- 概览 Tab: meta + 审查 -->
-          <div v-if="detailTab === 'overview'" class="merge-item__detail-overview">
-            <!-- ===== v0.6.26: PR 描述/正文 ===== -->
-            <div v-if="p.body" class="merge-item__detail-body">
-              <div class="merge-item__detail-body-label">描述</div>
-              <div class="merge-item__detail-body-content md-body" v-html="renderMarkdown(p.body)"></div>
+        <!-- Tab 导航：对话 / 代码提交 / 文件变动（对齐 Gitea） -->
+        <div class="pr-detail-tabs">
+          <button
+            type="button"
+            class="pr-detail-tab"
+            :class="{ 'pr-detail-tab--active': detailTab === 'conversation' }"
+            @click="detailTab = 'conversation'"
+          >
+            对话
+            <span v-if="getPanel(selectedPR.index).items.length > 0" class="pr-detail-tab__count">
+              {{ getPanel(selectedPR.index).items.length }}
+            </span>
+          </button>
+          <button
+            type="button"
+            class="pr-detail-tab"
+            :class="{ 'pr-detail-tab--active': detailTab === 'commits' }"
+            @click="detailTab = 'commits'"
+          >
+            代码提交
+            <span v-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail-tab__count">
+              {{ commitsByPR.get(selectedPR.index)!.length }}
+            </span>
+          </button>
+          <button
+            type="button"
+            class="pr-detail-tab"
+            :class="{ 'pr-detail-tab--active': detailTab === 'files' }"
+            @click="detailTab = 'files'"
+          >
+            文件变动
+            <span v-if="pull.filesByPR.get(selectedPR.index)?.length > 0" class="pr-detail-tab__count">
+              {{ pull.filesByPR.get(selectedPR.index)!.length }}
+            </span>
+          </button>
+        </div>
+
+        <!-- ===== Tab 内容滚动区 ===== -->
+        <div class="pr-detail-body">
+          <!-- 对话 Tab -->
+          <div v-if="detailTab === 'conversation'" class="pr-detail__conversation">
+            <!-- PR 描述（对齐 Gitea：对话流顶部显示） -->
+            <div v-if="selectedPR.body" class="pr-detail__section">
+              <div class="pr-detail__section-label">描述</div>
+              <div class="pr-detail__section-content md-body" v-html="renderMarkdown(selectedPR.body)"></div>
             </div>
-            <!-- ===== v0.5.0 M3: 评审区 ===== -->
-            <div v-if="p.state === 'open'" class="merge-item__reviews">
-              <!-- 评审列表 -->
-              <div v-if="getReviewPanel(p.index).length > 0" class="merge-item__reviews-list">
-                <div
-                  v-for="r in getReviewPanel(p.index)"
-                  :key="r.id"
-                  class="merge-item__review-item"
-                  :class="`merge-item__review-item--${r.state}`"
-                >
-                  <span class="merge-item__review-state-badge">{{ reviewStateLabel(r.state) }}</span>
-                  <span class="merge-item__review-author">{{ r.author.username }}</span>
-                  <span class="merge-item__review-body">{{ r.body }}</span>
-                  <span class="merge-item__review-time">{{ formatRelative(r.submittedAt) }}</span>
-                </div>
+            <!-- 对话标题 + 刷新 -->
+            <div class="pr-detail__conv-header">
+              <div class="pr-detail__conv-header-left">
+                <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
+                <span>对话</span>
+                <span v-if="getPanel(selectedPR.index).items.length > 0" class="pr-detail__conv-count">
+                  {{ getPanel(selectedPR.index).items.length }}
+                </span>
               </div>
-              <!-- 评审编辑器 -->
-              <div v-if="reviewEditorOpen.has(p.index)" class="merge-item__review-editor">
-                <div class="merge-item__review-editor-header">
-                  <span class="merge-item__review-editor-label">{{ reviewEventLabel(reviewEditorEvent.get(p.index) ?? 'comment') }}</span>
-                </div>
+              <button
+                type="button"
+                class="btn-ghost-sm"
+                :disabled="getPanel(selectedPR.index).loading"
+                title="刷新对话"
+                @click="fetchComments(selectedPR)"
+              >
+                <RefreshCw :size="12" :stroke-width="2" aria-hidden="true" />
+                <span>刷新</span>
+              </button>
+            </div>
+
+            <!-- 对话列表 -->
+            <div class="pr-detail__conv-list">
+              <div v-if="getPanel(selectedPR.index).loading && getPanel(selectedPR.index).items.length === 0" class="pr-detail__conv-loading">
+                <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
+                <span>正在加载对话…</span>
+              </div>
+              <div v-else-if="getPanel(selectedPR.index).error && getPanel(selectedPR.index).items.length === 0" class="pr-detail__conv-error" role="alert">
+                <span>{{ getPanel(selectedPR.index).error }}</span>
+                <button type="button" class="btn-ghost-sm" @click="fetchComments(selectedPR)">重试</button>
+              </div>
+              <div v-else-if="getPanel(selectedPR.index).items.length === 0" class="pr-detail__conv-empty">
+                暂无对话，发起第一条评论开始讨论吧
+              </div>
+              <ul v-else class="pr-detail__comment-list">
+                <template v-for="(item, ti) in pull.timelineItems.get(selectedPR.index) ?? []" :key="`${item.source}-${item.id}`">
+                  <!-- 评审事件系统卡片 -->
+                  <li
+                    v-if="item.isReviewEvent"
+                    class="pr-detail__comment pr-detail__comment--review-event"
+                    :class="`pr-detail__comment--review-${item.state}`"
+                  >
+                    <div class="pr-detail__comment-side">
+                      <div class="pr-detail__comment-avatar" :class="`pr-detail__comment-avatar--${item.state}`">
+                        {{ item.state === 'approved' ? '✓' : item.state === 'changes_requested' ? '✗' : '💬' }}
+                      </div>
+                    </div>
+                    <div class="pr-detail__comment-bubble pr-detail__comment-bubble--event">
+                      <div class="pr-detail__comment-meta">
+                        <span class="pr-detail__review-state-badge" :class="`pr-detail__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
+                        <span class="pr-detail__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
+                      </div>
+                      <div v-if="item.body" class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                      <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author.username }}</div>
+                    </div>
+                  </li>
+                  <!-- 普通评论卡片 -->
+                  <li
+                    v-else
+                    class="pr-detail__comment"
+                    :class="{ 'pr-detail__comment--self': currentUsername && item.author.username === currentUsername }"
+                  >
+                    <div class="pr-detail__comment-side">
+                      <div class="pr-detail__comment-avatar" :title="item.author.username" aria-hidden="true">
+                        {{ (item.author.username || '?').charAt(0).toUpperCase() }}
+                      </div>
+                      <div class="pr-detail__comment-name">{{ item.author.username }}</div>
+                    </div>
+                    <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
+                      <div class="pr-detail__comment-meta">
+                        <span v-if="currentUsername && item.author.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
+                        <span class="pr-detail__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
+                      </div>
+                      <!-- 编辑态 -->
+                      <template v-if="editingCommentId === item.id">
+                        <textarea
+                          :ref="el => { if (el) editTextareaRef = el as HTMLTextAreaElement }"
+                          class="pr-detail__comment-edit-input"
+                          rows="3"
+                          :value="editDrafts.get(item.id) ?? ''"
+                          @input="editDrafts.set(item.id, ($event.target as HTMLTextAreaElement).value)"
+                          @keydown.escape.stop="cancelEditComment()"
+                          @keydown.enter.stop.prevent="submitEditComment(selectedPR, item as any)"
+                          spellcheck="false"
+                        ></textarea>
+                        <div class="pr-detail__comment-edit-actions">
+                          <span class="pr-detail__comment-editing-hint">ESC 取消 · Enter 保存</span>
+                          <button type="button" class="btn-ghost-sm" @click.stop="cancelEditComment()">取消</button>
+                          <button
+                            type="button"
+                            class="btn-primary-sm"
+                            :disabled="(editDrafts.get(item.id) ?? '').trim().length === 0"
+                            @click.stop="submitEditComment(selectedPR, item as any)"
+                          >保存</button>
+                        </div>
+                      </template>
+                      <!-- 展示态 -->
+                      <template v-else>
+                        <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                        <span
+                          v-if="item.updatedAt && item.updatedAt !== item.createdAt"
+                          class="pr-detail__comment-edited-mark"
+                          :title="'编辑于 ' + formatDate(item.updatedAt)"
+                        >（已编辑）</span>
+                        <div class="pr-detail__comment-actions">
+                          <button
+                            v-if="currentUsername && item.author.username !== currentUsername"
+                            type="button"
+                            class="pr-detail__comment-quote"
+                            title="引用这条评论"
+                            @click.stop="quoteComment(selectedPR.index, item as any)"
+                          >
+                            <Quote :size="11" :stroke-width="2" aria-hidden="true" />
+                            <span>引用</span>
+                          </button>
+                          <template v-if="currentUsername && item.author.username === currentUsername">
+                            <button type="button" class="pr-detail__comment-edit-btn" title="编辑" @click.stop="startEditComment(item as any)">
+                              <Pencil :size="11" :stroke-width="2" aria-hidden="true" />
+                            </button>
+                            <button type="button" class="pr-detail__comment-delete-btn" title="删除" @click.stop="confirmDeleteComment(selectedPR, item as any)">
+                              <XCircle :size="11" :stroke-width="2" aria-hidden="true" />
+                            </button>
+                          </template>
+                        </div>
+                        <ReactionBar
+                          :project-id="activeProjectId"
+                          :comment-id="item.id"
+                          :editable="selectedPR.state === 'open'"
+                        />
+                      </template>
+                    </div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+
+            <!-- 评论输入区 -->
+            <div class="pr-detail__comment-compose">
+              <div class="pr-detail__comment-input-wrap">
                 <textarea
-                  class="merge-item__review-editor-input"
+                  ref="commentInputRef"
+                  class="pr-detail__comment-input"
+                  :value="getDraft(selectedPR.index)"
+                  @input="onCommentInput(selectedPR, $event)"
+                  @keydown="onCommentKeydown(selectedPR, $event)"
+                  :placeholder="'发条评论给 #' + selectedPR.index + '\n@ 提及成员，Enter 发送'"
+                  :disabled="getPanel(selectedPR.index).posting"
                   rows="3"
-                  :value="reviewEditorBody.get(p.index) ?? ''"
-                  @input="reviewEditorBody.set(p.index, ($event.target as HTMLTextAreaElement).value)"
-                  placeholder="评审总结（可选）"
+                  maxlength="65535"
                   spellcheck="false"
                 ></textarea>
-                <div class="merge-item__review-editor-actions">
+                <button
+                  type="button"
+                  class="pr-detail__comment-send"
+                  :disabled="getPanel(selectedPR.index).posting || getDraft(selectedPR.index).trim().length === 0"
+                  title="发送评论（Enter 也可发送）"
+                  @click.stop="postComment(selectedPR)"
+                >
+                  <Send :size="14" :stroke-width="2" aria-hidden="true" />
+                </button>
+                <div
+                  v-if="isMentionOpen(selectedPR.index) && mentionCandidates(selectedPR.index).length > 0"
+                  class="pr-detail__mention-dropdown"
+                >
                   <button
+                    v-for="(m, i) in mentionCandidates(selectedPR.index)"
+                    :key="m"
                     type="button"
-                    class="merge-item__review-submit"
-                    :disabled="reviewSubmitting"
-                    @click.stop="submitReview(p)"
-                  >{{ reviewSubmitting ? '提交中…' : '提交评审' }}</button>
-                  <button
-                    type="button"
-                    class="merge-item__review-cancel"
-                    @click.stop="reviewEditorOpen.delete(p.index); reviewEditorBody.delete(p.index)"
-                  >取消</button>
+                    class="pr-detail__mention-item"
+                    :class="{ 'pr-detail__mention-item--active': i === mentionActiveIdx(selectedPR.index) }"
+                    @click.stop.prevent="insertMention(selectedPR.index, m)"
+                  >{{ '@' + m }}</button>
                 </div>
               </div>
-            </div>
-            <!-- v0.6.26: 概览空态（无描述 + 无评审） -->
-            <div v-if="!p.body && getReviewPanel(p.index).length === 0" class="merge-item__detail-overview-empty">
-              暂无描述和评审信息
+              <div class="pr-detail__comment-actions">
+                <span v-if="getDraft(selectedPR.index).length > 0" class="muted">
+                  {{ getDraft(selectedPR.index).length }} / 65535
+                </span>
+              </div>
             </div>
           </div>
 
-          <!-- 文件评论 Tab: PullFileComments 组件 -->
-          <div v-if="detailTab === 'files'" class="merge-item__detail-files">
+          <!-- 代码提交 Tab -->
+          <div v-if="detailTab === 'commits'" class="pr-detail__commits">
+            <div v-if="commitsLoading" class="pr-detail__conv-loading">
+              <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
+              <span>正在加载提交列表…</span>
+            </div>
+            <table v-else-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail__commit-table">
+              <thead>
+                <tr>
+                  <th class="pr-detail__commit-th-author">作者</th>
+                  <th class="pr-detail__commit-th-sha">SHA1</th>
+                  <th class="pr-detail__commit-th-subject">备注</th>
+                  <th class="pr-detail__commit-th-date">提交日期</th>
+                  <th class="pr-detail__commit-th-actions">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="c in commitsByPR.get(selectedPR.index)"
+                  :key="c.sha"
+                  class="pr-detail__commit-row"
+                >
+                  <td class="pr-detail__commit-td-author">{{ c.authorName }}</td>
+                  <td class="pr-detail__commit-td-sha">
+                    <code class="pr-detail__commit-sha-code" :title="c.sha">{{ c.shortSha }}</code>
+                  </td>
+                  <td class="pr-detail__commit-td-subject">{{ c.subject }}</td>
+                  <td class="pr-detail__commit-td-date">{{ formatDate(c.authoredAt) }}</td>
+                  <td class="pr-detail__commit-td-actions">
+                    <button
+                      type="button"
+                      class="pr-detail__commit-action-btn"
+                      title="复制完整 SHA"
+                      @click="copySha(c.sha)"
+                    >
+                      <Copy :size="12" :stroke-width="2" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      class="pr-detail__commit-action-btn"
+                      title="在 Git Server 中查看此提交"
+                      @click="openCommitExternal(c.sha)"
+                    >
+                      <ExternalLink :size="12" :stroke-width="2" aria-hidden="true" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="pr-detail__empty-hint">暂无提交信息</div>
+          </div>
+
+          <!-- 文件变动 Tab -->
+          <div v-if="detailTab === 'files'" class="pr-detail__files">
             <PullFileComments
-              :pr="p"
+              :pr="selectedPR"
               :project-id="activeProjectId ?? ''"
             />
           </div>
-
-          <!-- ===== 评论区：v1.5 header 整行 + 左历史/右输入各 50% ===== -->
-            <div v-if="detailTab === 'conversation'" class="merge-item__comments">
-              <!-- 顶部：对话标题 + 刷新按钮（整行铺满） -->
-              <div class="merge-item__comments-header">
-                <div class="merge-item__comments-header-left">
-                  <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
-                  <span class="merge-item__comments-title">对话</span>
-                  <span v-if="getPanel(p.index).items.length > 0" class="merge-item__comments-count">
-                    {{ getPanel(p.index).items.length }}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  class="merge-item__comments-refresh"
-                  :disabled="getPanel(p.index).loading"
-                  :title="'刷新对话'"
-                  @click.stop="fetchComments(p)"
-                >
-                  <RefreshCw :size="12" :stroke-width="2" aria-hidden="true" />
-                  <span>刷新</span>
-                </button>
-              </div>
-
-              <!-- 主体：历史对话 + 发送评论（上下布局，发送区固定 100px） -->
-              <div class="merge-item__comments-body">
-                <!-- 上：加载态 / 错误态 / 空态 / 评论列表 -->
-                <div class="merge-item__comments-history">
-                  <!-- 加载态 -->
-                  <div v-if="getPanel(p.index).loading && getPanel(p.index).items.length === 0" class="merge-item__comments-loading">
-                    <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
-                    <span>正在加载对话…</span>
-                  </div>
-                  <!-- 错误态 -->
-                  <div v-else-if="getPanel(p.index).error && getPanel(p.index).items.length === 0" class="merge-item__comments-error" role="alert">
-                    <span>{{ getPanel(p.index).error }}</span>
-                    <button type="button" class="merge-item__comments-retry" @click.stop="fetchComments(p)">重试</button>
-                  </div>
-                  <!-- 空态：暂无评论 + 提示用户第一条由谁起 -->
-                  <div v-else-if="getPanel(p.index).items.length === 0" class="merge-item__comments-empty">
-                    暂无对话，发起第一条评论开始讨论吧
-                  </div>
-                  <!-- 评论列表：时间线渲染（评审事件系统消息 + 普通评论混合，按时间排序） -->
-                  <ul v-else class="merge-item__comment-list">
-                    <template v-for="(item, ti) in pull.timelineItems.get(p.index) ?? []" :key="`${item.source}-${item.id}`">
-                      <!-- ===== 评审事件系统卡片 ===== -->
-                      <li
-                        v-if="item.isReviewEvent"
-                        class="merge-item__comment merge-item__comment--review-event"
-                        :class="`merge-item__comment--review-${item.state}`"
-                      >
-                        <div class="merge-item__comment-side">
-                          <div class="merge-item__comment-avatar" :class="`merge-item__comment-avatar--${item.state}`">
-                            {{ item.state === 'approved' ? '✓' : item.state === 'changes_requested' ? '✗' : '💬' }}
-                          </div>
-                          <div class="merge-item__comment-name merge-item__comment-name--muted">系统</div>
-                        </div>
-                        <div class="merge-item__comment-bubble merge-item__comment-bubble--event">
-                          <div class="merge-item__comment-meta">
-                            <span class="merge-item__review-state-badge" :class="`merge-item__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
-                            <span class="merge-item__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
-                          </div>
-                          <div v-if="item.body" class="merge-item__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
-                          <div v-if="item.author?.username" class="merge-item__comment-event-author">
-                            — {{ item.author.username }}
-                          </div>
-                        </div>
-                      </li>
-
-                      <!-- ===== 普通评论卡片 ===== -->
-                      <li
-                        v-else
-                        class="merge-item__comment"
-                        :class="{ 'merge-item__comment--self': currentUsername && item.author.username === currentUsername }"
-                      >
-                        <div class="merge-item__comment-side">
-                          <div
-                            class="merge-item__comment-avatar"
-                            :title="item.author.username"
-                            aria-hidden="true"
-                          >{{ (item.author.username || '?').charAt(0).toUpperCase() }}</div>
-                          <div class="merge-item__comment-name">{{ item.author.username }}</div>
-                        </div>
-                        <div
-                          class="merge-item__comment-bubble"
-                          :class="{ 'merge-item__comment-bubble--editing': editingCommentId === item.id }"
-                        >
-                          <div class="merge-item__comment-meta">
-                            <span v-if="currentUsername && item.author.username === currentUsername" class="merge-item__comment-self-tag">我</span>
-                            <span class="merge-item__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
-                          </div>
-                          <!-- 编辑态：textarea 替代渲染后的 markdown (v0.6.26 优化) -->
-                          <template v-if="editingCommentId === item.id">
-                            <textarea
-                              :ref="el => { if (el) editTextareaRef = el as HTMLTextAreaElement }"
-                              class="merge-item__comment-edit-input"
-                              rows="3"
-                              :value="editDrafts.get(item.id) ?? ''"
-                              @input="editDrafts.set(item.id, ($event.target as HTMLTextAreaElement).value)"
-                              @keydown.escape.stop="cancelEditComment()"
-                              @keydown.enter.stop.prevent="submitEditComment(p, item as any)"
-                              spellcheck="false"
-                            ></textarea>
-                            <div class="merge-item__comment-edit-actions">
-                              <span class="merge-item__comment-editing-hint">ESC 取消 · Enter 保存</span>
-                              <button
-                                type="button"
-                                class="merge-item__comment-edit-cancel"
-                                @click.stop="cancelEditComment()"
-                              >取消</button>
-                              <button
-                                type="button"
-                                class="merge-item__comment-edit-save"
-                                :disabled="(editDrafts.get(item.id) ?? '').trim().length === 0"
-                                @click.stop="submitEditComment(p, item as any)"
-                              >保存</button>
-                            </div>
-                          </template>
-                          <!-- 展示态 -->
-                          <template v-else>
-                            <div class="merge-item__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
-                            <!-- v0.5.0 M1：已编辑标记 -->
-                            <span
-                              v-if="item.updatedAt && item.updatedAt !== item.createdAt"
-                              class="merge-item__comment-edited-mark"
-                              :title="'编辑于 ' + formatDate(item.updatedAt)"
-                            >（已编辑）</span>
-                            <!-- v1.5.11：复刻 Gitea 引用评论 -->
-                            <div class="merge-item__comment-actions">
-                              <button
-                                v-if="currentUsername && item.author.username !== currentUsername"
-                                type="button"
-                                class="merge-item__comment-quote"
-                                :title="'引用这条评论'"
-                                @click.stop="quoteComment(p.index, item as any)"
-                              >
-                                <Quote :size="11" :stroke-width="2" aria-hidden="true" />
-                                <span>引用</span>
-                              </button>
-                              <!-- v0.5.0 M1：编辑 / 删除仅作者本人可见 -->
-                              <template v-if="currentUsername && item.author.username === currentUsername">
-                                <button
-                                  type="button"
-                                  class="merge-item__comment-edit-btn"
-                                  :title="'编辑'"
-                                  @click.stop="startEditComment(item as any)"
-                                >
-                                  <Pencil :size="11" :stroke-width="2" aria-hidden="true" />
-                                </button>
-                                <button
-                                  type="button"
-                                  class="merge-item__comment-delete-btn"
-                                  :title="'删除'"
-                                  @click.stop="confirmDeleteComment(p, item as any)"
-                                >
-                                  <XCircle :size="11" :stroke-width="2" aria-hidden="true" />
-                                </button>
-                              </template>
-                            </div>
-                            <!-- v0.5.0 M2：表情反应条 -->
-                            <ReactionBar
-                              :project-id="activeProjectId"
-                              :comment-id="item.id"
-                              :editable="p.state === 'open'"
-                            />
-                          </template>
-                        </div>
-                      </li>
-                    </template>
-                  </ul>
-                </div>
-
-                <!-- 下：发评论输入区（v2.62 · 改为布局在历史对话下方，固定 120px，发送按钮在输入框内右上角） -->
-                <div class="merge-item__comment-compose">
-                  <div class="merge-item__comment-input-wrap">
-                    <textarea
-                      ref="commentInputRef"
-                      class="merge-item__comment-input"
-                      :value="getDraft(p.index)"
-                      @input="onCommentInput(p, $event)"
-                      @keydown="onCommentKeydown(p, $event)"
-                      :placeholder="'发条评论给 #' + p.index + '\n@ 提及成员，Enter 发送，⌘/Ctrl+Enter 也行'"
-                      :disabled="getPanel(p.index).posting"
-                      rows="3"
-                      maxlength="65535"
-                      spellcheck="false"
-                    ></textarea>
-                    <!-- 发送按钮：绝对定位到输入框右上角 -->
-                    <button
-                      type="button"
-                      class="merge-item__comment-send-absolute"
-                      :disabled="getPanel(p.index).posting || getDraft(p.index).trim().length === 0"
-                      :title="'发送评论（Enter 也可发送）'"
-                      @click.stop="postComment(p)"
-                    >
-                      <Send :size="14" :stroke-width="2" aria-hidden="true" />
-                    </button>
-                    <div
-                      v-if="isMentionOpen(p.index) && mentionCandidates(p.index).length > 0"
-                      class="merge-item__mention-dropdown"
-                    >
-                      <button
-                        v-for="(m, i) in mentionCandidates(p.index)"
-                        :key="m"
-                        type="button"
-                        class="merge-item__mention-item"
-                        :class="{ 'merge-item__mention-item--active': i === mentionActiveIdx(p.index) }"
-                        @click.stop.prevent="insertMention(p.index, m)"
-                      >{{ '@' + m }}</button>
-                    </div>
-                  </div>
-                  <div class="merge-item__comment-actions">
-                    <span v-if="getDraft(p.index).length > 0" class="merge-item__comment-counter muted">
-                      {{ getDraft(p.index).length }} / 65535
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        <!-- 属性编辑弹窗 -->
-        <ConfirmDialog
-          :open="attrEditorOpen && editingPull?.index === p.index"
-          title="编辑属性"
-          :description="`编辑 #${p.index} 的标签、指派人、评审人`"
-          confirm-label="保存"
-          @update:open="attrEditorOpen = $event"
-          @confirm="saveAttrs(p)"
-          @cancel="closeAttrEditor"
-        >
-          <div class="attr-editor">
-            <!-- 标签选择 -->
-            <div class="attr-editor__section">
-              <div class="attr-editor__label-row">
-                <label class="attr-editor__label">标签：</label>
-                <button
-                  type="button"
-                  class="attr-editor__add-btn"
-                  @click="showNewLabelInput = !showNewLabelInput"
-                  :title="'新建标签'"
-                >+ 新建</button>
-              </div>
-              <!-- 新建标签输入框（默认隐藏） -->
-              <div v-if="showNewLabelInput" class="attr-editor__new-label">
-                <input
-                  v-model="newLabelName"
-                  type="text"
-                  class="attr-editor__new-label-input"
-                  placeholder="标签名"
-                  autocomplete="off"
-                />
-                <input
-                  v-model="newLabelColor"
-                  type="color"
-                  class="attr-editor__new-label-color"
-                  title="标签颜色"
-                />
-                <button
-                  type="button"
-                  class="attr-editor__new-label-confirm"
-                  :disabled="!newLabelName.trim()"
-                  @click="createNewLabel"
-                >{{ creatingLabel ? '创建中…' : '创建' }}</button>
-              </div>
-              <div class="attr-editor__tags">
-                <label
-                  v-for="label in availableLabels"
-                  :key="label.name"
-                  class="attr-editor__tag"
-                  :class="{ 'attr-editor__tag--selected': editingLabels.includes(label.name) }"
-                  :style="{ '--tag-color': '#' + label.color, '--tag-bg': '#' + label.color + '22' }"
-                >
-                  <input
-                    type="checkbox"
-                    :value="label.name"
-                    :checked="editingLabels.includes(label.name)"
-                    class="attr-editor__checkbox"
-                    @change="toggleLabel(label.name)"
-                  />
-                  <span>{{ label.name }}</span>
-                </label>
-              </div>
-            </div>
-            <!-- 指派人（v0.6.0 多选） -->
-            <div class="attr-editor__section">
-              <label class="attr-editor__label" for="attr-assignee">指派人：</label>
-              <select
-                id="attr-assignee"
-                v-model="editingAssignees"
-                class="attr-editor__select"
-                multiple
-              >
-                <option
-                  v-for="member in availableMembers"
-                  :key="member"
-                  :value="member"
-                >{{ member }}</option>
-              </select>
-              <span class="attr-editor__hint">按住 ⌘/Ctrl 多选</span>
-            </div>
-            <!-- 里程碑（v0.6.0，仅 Gitea） -->
-            <div v-if="currentPlatform.value === 'gitea'" class="attr-editor__section">
-              <label class="attr-editor__label" for="attr-milestone">里程碑：</label>
-              <select
-                id="attr-milestone"
-                v-model="editingMilestone"
-                class="attr-editor__select"
-              >
-                <option value="">无</option>
-                <option
-                  v-for="ms in availableMilestones"
-                  :key="ms.title"
-                  :value="ms.title"
-                >{{ ms.title }}</option>
-              </select>
-            </div>
-            <!-- 评审人 -->
-            <div class="attr-editor__section">
-              <label class="attr-editor__label">评审人：<span class="attr-editor__hint" v-if="nonReviewableMembers.size > 0">（组织账号不可作评审人）</span></label>
-              <div class="attr-editor__tags">
-                <label
-                  v-for="member in availableMembers"
-                  :key="member"
-                  class="attr-editor__tag"
-                  :class="{
-                    'attr-editor__tag--selected': editingReviewers.includes(member),
-                    'attr-editor__tag--disabled': nonReviewableMembers.has(member),
-                  }"
-                  :title="nonReviewableMembers.has(member) ? '组织账号不能作评审人' : ''"
-                >
-                  <input
-                    type="checkbox"
-                    :value="member"
-                    :checked="editingReviewers.includes(member)"
-                    :disabled="nonReviewableMembers.has(member)"
-                    class="attr-editor__checkbox"
-                    @change="toggleReviewer(member)"
-                  />
-                  <span>{{ member }}{{ nonReviewableMembers.has(member) ? ' (组织)' : '' }}</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        </ConfirmDialog>
-      </li>
-
-      <!-- v2.62 滚动到底自动加载哨兵（在 ul 内部，ul 滚动时随之一超超一上滑，能重复触发 observer） -->
-      <!-- v0.6.1+：加载中动画已统一到 StatusBarPulse（底部状态栏心跳脉冲），这里只展示末尾状态 -->
-      <li
-        ref="loadMoreSentinel"
-        class="merges__load-more"
-        :data-state="(!pull.hasMore && pull.currentPage >= 1) ? 'end' : 'idle'"
-        aria-live="polite"
-      >
-        <!-- 末尾：已加载全部 -->
-        <div v-if="!pull.hasMore && pull.currentPage >= 1" class="merges__load-more-end">
-          <span class="merges__load-more-divider" aria-hidden="true"></span>
-          <span>已到全部合并请求的末尾</span>
-          <span class="merges__load-more-divider" aria-hidden="true"></span>
         </div>
-        <!-- idle：占位保持哨兵高度，IntersectionObserver 可检测 -->
-        <div v-else class="merges__load-more-idle">
-          <span class="merges__load-more-arrow" aria-hidden="true">↓</span>
-          <span>继续滚动加载更多…</span>
-        </div>
-      </li>
-    </ul>
+      </section>
+
+      <!-- 未选中 PR 空态 -->
+      <section v-else class="pr-detail-panel pr-detail-panel--empty">
+        <EmptyState title="选择一个合并请求" description="点击左侧列表查看详情、评论和操作" />
+      </section>
+    </div>
 
     <!-- ============== 合并二次确认弹窗 ============== -->
     <ConfirmDialog
@@ -2041,6 +1911,130 @@ function formatRelative(iso: string | undefined): string {
       @confirm="performClose"
       @cancel="cancelClose"
     />
+
+    <!-- ============== 属性编辑弹窗 ============== -->
+    <ConfirmDialog
+      :open="attrEditorOpen"
+      title="编辑属性"
+      :description="editingPull ? `编辑 #${editingPull.index} 的标签、指派人、评审人` : ''"
+      confirm-label="保存"
+      @update:open="attrEditorOpen = $event"
+      @confirm="editingPull && saveAttrs(editingPull)"
+      @cancel="closeAttrEditor"
+    >
+      <div class="attr-editor">
+        <!-- 标签选择 -->
+        <div class="attr-editor__section">
+          <div class="attr-editor__label-row">
+            <label class="attr-editor__label">标签：</label>
+            <button
+              type="button"
+              class="attr-editor__add-btn"
+              @click="showNewLabelInput = !showNewLabelInput"
+              title="新建标签"
+            >+ 新建</button>
+          </div>
+          <div v-if="showNewLabelInput" class="attr-editor__new-label">
+            <input
+              v-model="newLabelName"
+              type="text"
+              class="attr-editor__new-label-input"
+              placeholder="标签名"
+              autocomplete="off"
+            />
+            <input
+              v-model="newLabelColor"
+              type="color"
+              class="attr-editor__new-label-color"
+              title="标签颜色"
+            />
+            <button
+              type="button"
+              class="attr-editor__new-label-confirm"
+              :disabled="!newLabelName.trim()"
+              @click="createNewLabel"
+            >{{ creatingLabel ? '创建中…' : '创建' }}</button>
+          </div>
+          <div class="attr-editor__tags">
+            <label
+              v-for="label in availableLabels"
+              :key="label.name"
+              class="attr-editor__tag"
+              :class="{ 'attr-editor__tag--selected': editingLabels.includes(label.name) }"
+              :style="{ '--tag-color': '#' + label.color, '--tag-bg': '#' + label.color + '22' }"
+            >
+              <input
+                type="checkbox"
+                :value="label.name"
+                :checked="editingLabels.includes(label.name)"
+                class="attr-editor__checkbox"
+                @change="toggleLabel(label.name)"
+              />
+              <span>{{ label.name }}</span>
+            </label>
+          </div>
+        </div>
+        <!-- 指派人 -->
+        <div class="attr-editor__section">
+          <label class="attr-editor__label" for="attr-assignee">指派人：</label>
+          <select
+            id="attr-assignee"
+            v-model="editingAssignees"
+            class="attr-editor__select"
+            multiple
+          >
+            <option
+              v-for="member in availableMembers"
+              :key="member"
+              :value="member"
+            >{{ member }}</option>
+          </select>
+          <span class="attr-editor__hint">按住 ⌘/Ctrl 多选</span>
+        </div>
+        <!-- 里程碑（仅 Gitea） -->
+        <div v-if="currentPlatform === 'gitea'" class="attr-editor__section">
+          <label class="attr-editor__label" for="attr-milestone">里程碑：</label>
+          <select
+            id="attr-milestone"
+            v-model="editingMilestone"
+            class="attr-editor__select"
+          >
+            <option value="">无</option>
+            <option
+              v-for="ms in availableMilestones"
+              :key="ms.title"
+              :value="ms.title"
+            >{{ ms.title }}</option>
+          </select>
+        </div>
+        <!-- 评审人 -->
+        <div class="attr-editor__section">
+          <label class="attr-editor__label">评审人：<span class="attr-editor__hint" v-if="nonReviewableMembers.size > 0">（组织账号不可作评审人）</span></label>
+          <div class="attr-editor__tags">
+            <label
+              v-for="member in availableMembers"
+              :key="member"
+              class="attr-editor__tag"
+              :class="{
+                'attr-editor__tag--selected': editingReviewers.includes(member),
+                'attr-editor__tag--disabled': nonReviewableMembers.has(member),
+              }"
+              :title="nonReviewableMembers.has(member) ? '组织账号不能作评审人' : ''"
+            >
+              <input
+                type="checkbox"
+                :value="member"
+                :checked="editingReviewers.includes(member)"
+                :disabled="nonReviewableMembers.has(member)"
+                class="attr-editor__checkbox"
+                @change="toggleReviewer(member)"
+              />
+              <span>{{ member }}{{ nonReviewableMembers.has(member) ? ' (组织)' : '' }}</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </ConfirmDialog>
   </div>
 </template>
 
@@ -4259,6 +4253,908 @@ function formatRelative(iso: string | undefined): string {
   margin-top: 4px;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
+}
+
+/* ============================================================
+ * v0.7 左右分栏布局（设计稿 merge-split-layout.html）
+ * 左侧 PR 列表 380px + 右侧详情面板自适应
+ * ============================================================ */
+
+/* ===== 分栏容器 ===== */
+.pr-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== 左侧 PR 列表面板 ===== */
+.pr-list-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--color-divider);
+  background: var(--color-shell-main-bg);
+}
+
+/* 左侧工具栏：筛选 + 搜索 */
+.pr-list-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+.pr-list-toolbar .merges__tabs {
+  flex-wrap: wrap;
+}
+
+/* PR 列表滚动区 */
+.pr-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+}
+.pr-list-scroll > li + li {
+  margin-top: 2px;
+}
+
+/* PR 卡片（左侧列表项） */
+.pr-card {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--t-base) var(--ease);
+  border: 1px solid transparent;
+  list-style: none;
+}
+.pr-card:hover {
+  background: var(--color-bg-hover);
+}
+.pr-card--selected {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-primary);
+}
+.pr-card__icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+}
+.pr-card__icon--open { color: var(--color-success); }
+.pr-card__icon--merged { color: var(--color-primary-bright, var(--color-primary)); }
+.pr-card__icon--draft { color: var(--color-warning); }
+.pr-card__icon--closed { color: var(--color-text-muted); }
+
+.pr-card__body {
+  flex: 1;
+  min-width: 0;
+}
+.pr-card__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  margin-bottom: 2px;
+}
+.pr-card__title {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.pr-card__num {
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  font-weight: 400;
+  flex-shrink: 0;
+}
+.pr-card__branches {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: var(--space-1);
+}
+.pr-card__branch {
+  font-size: 10px;
+  padding: 1px 5px;
+  background: var(--color-bg-elevated);
+  border-radius: 3px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-card__branch--dst {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-bright, var(--color-primary));
+  font-weight: 600;
+}
+.pr-card__branch-arrow {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+.pr-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+.pr-card__author {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.pr-card__badge {
+  margin-left: auto;
+}
+.pr-card__conflict {
+  color: var(--color-danger);
+  font-weight: 500;
+}
+
+/* ===== 右侧 PR 详情面板 ===== */
+.pr-detail-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-shell-main-bg);
+  overflow: hidden;
+}
+.pr-detail-panel--empty {
+  align-items: center;
+  justify-content: center;
+}
+
+/* 详情头部 */
+.pr-detail-header {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+.pr-detail-header__top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.pr-detail-header__status-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+}
+.pr-detail-header__title-area {
+  flex: 1;
+  min-width: 0;
+}
+.pr-detail-header__title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0;
+  line-height: 1.3;
+}
+.pr-detail-header__subtitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+.pr-detail-header__badge {
+  font-size: var(--font-xs);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.pr-detail-header__ext {
+  flex-shrink: 0;
+}
+
+/* Meta 信息条 */
+.pr-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  flex-shrink: 0;
+}
+.pr-detail-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pr-detail-meta__item dt {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin: 0;
+}
+.pr-detail-meta__item dd {
+  color: var(--color-text);
+  font-weight: 500;
+  margin: 0;
+}
+.pr-detail__branch {
+  font-size: 10px;
+  padding: 1px 6px;
+  background: var(--color-bg-elevated);
+  border-radius: 3px;
+}
+.pr-detail__branch--dst {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-bright, var(--color-primary));
+  font-weight: 600;
+}
+.pr-detail__label {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  margin-right: 2px;
+  color: var(--label-color);
+  background: var(--label-bg);
+}
+.pr-detail__edit-attrs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.pr-detail__edit-attrs:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* 操作按钮条 */
+.pr-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.pr-detail__conflict-hint {
+  color: var(--color-danger);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  padding: 2px 8px;
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-sm);
+}
+
+/* 按钮样式（复用现有 btn 系统，补充 sm 变体） */
+.btn-primary-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-text-inverse, #fff);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--t-base) var(--ease);
+}
+.btn-primary-sm:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+.btn-primary-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-ghost-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  border: 1px solid var(--color-divider);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.btn-ghost-sm:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.btn-ghost-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-approve-sm {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-soft);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.btn-approve-sm:hover:not(:disabled) {
+  background: var(--color-success);
+  color: #fff;
+}
+.btn-approve-sm:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-request-changes-sm {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.btn-request-changes-sm:hover:not(:disabled) {
+  background: var(--color-warning);
+  color: #1a1a1a;
+}
+.btn-request-changes-sm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 评审编辑器 */
+.pr-detail__review-editor {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+.pr-detail__review-editor-header {
+  margin-bottom: var(--space-2);
+}
+.pr-detail__review-editor-label {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pr-detail__review-editor-input {
+  width: 100%;
+  min-height: 60px;
+  padding: var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+.pr-detail__review-editor-input:focus {
+  border-color: var(--color-primary);
+}
+.pr-detail__review-editor-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Tab 导航 */
+.pr-detail-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+  height: 38px;
+  flex-shrink: 0;
+}
+.pr-detail-tab {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
+  border-bottom: 2px solid transparent;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease);
+}
+.pr-detail-tab:hover { color: var(--color-text); }
+.pr-detail-tab--active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+.pr-detail-tab__count {
+  font-size: var(--font-xs);
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+.pr-detail-tab--active .pr-detail-tab__count {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-bright, var(--color-primary));
+}
+
+/* Tab 内容滚动区 */
+.pr-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  min-height: 0;
+}
+
+/* 概览 Tab */
+.pr-detail__overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.pr-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pr-detail__section-label {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pr-detail__section-content {
+  padding: var(--space-3);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+.pr-detail__review-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pr-detail__review-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--color-divider);
+  font-size: var(--font-sm);
+}
+.pr-detail__review-item--approved { border-color: var(--color-success); background: var(--color-success-soft); }
+.pr-detail__review-item--changes_requested { border-color: var(--color-warning); background: var(--color-warning-soft); }
+.pr-detail__review-item--commented { border-color: var(--color-divider); }
+.pr-detail__review-state-badge {
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  flex-shrink: 0;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+.pr-detail__review-state-badge--approved { background: var(--color-success); color: #fff; }
+.pr-detail__review-state-badge--changes_requested { background: var(--color-warning); color: #1a1a1a; }
+.pr-detail__review-author { font-weight: 600; color: var(--color-text); }
+.pr-detail__review-body { color: var(--color-text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-detail__review-time { color: var(--color-text-muted); font-size: var(--font-xs); flex-shrink: 0; }
+.pr-detail__empty-hint { color: var(--color-text-muted); font-size: var(--font-sm); padding: var(--space-3); }
+
+/* 文件变动 Tab */
+.pr-detail__files {
+  min-height: 0;
+}
+
+/* 代码提交 Tab */
+.pr-detail__commits {
+  min-height: 0;
+  overflow: auto;
+}
+.pr-detail__commit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pr-detail__commit-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg);
+}
+.pr-detail__commit-table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.pr-detail__commit-row {
+  border-bottom: 1px solid var(--color-border);
+  transition: background 0.12s;
+}
+.pr-detail__commit-row:hover {
+  background: var(--color-bg-hover);
+}
+.pr-detail__commit-table td {
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+.pr-detail__commit-td-author {
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pr-detail__commit-td-sha {
+  white-space: nowrap;
+}
+.pr-detail__commit-sha-code {
+  font-family: var(--font-mono, 'SF Mono', monospace);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-bg-secondary, rgba(128, 128, 128, 0.15));
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.pr-detail__commit-td-subject {
+  color: var(--color-text);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-detail__commit-td-date {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-size: 12px;
+}
+.pr-detail__commit-td-actions {
+  white-space: nowrap;
+  display: flex;
+  gap: 4px;
+}
+.pr-detail__commit-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.pr-detail__commit-action-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+
+/* 对话 Tab */
+.pr-detail__conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.pr-detail__conv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+.pr-detail__conv-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pr-detail__conv-count {
+  font-size: var(--font-xs);
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+.pr-detail__conv-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.pr-detail__conv-loading,
+.pr-detail__conv-error,
+.pr-detail__conv-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+.pr-detail__conv-error { color: var(--color-danger); }
+
+/* 评论列表 */
+.pr-detail__comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pr-detail__comment {
+  display: flex;
+  gap: var(--space-3);
+}
+.pr-detail__comment--review-event {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--color-divider);
+  font-size: var(--font-sm);
+  align-items: center;
+}
+.pr-detail__comment--review-approved { border-color: var(--color-success); background: var(--color-success-soft); }
+.pr-detail__comment--review-changes_requested { border-color: var(--color-warning); background: var(--color-warning-soft); }
+.pr-detail__comment--review-commented { border-color: var(--color-divider); }
+.pr-detail__comment-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.pr-detail__comment-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-info);
+}
+.pr-detail__comment-avatar--approved { background: var(--color-success); }
+.pr-detail__comment-avatar--changes_requested { background: var(--color-warning); }
+.pr-detail__comment-avatar--commented { background: var(--color-bg-hover); color: var(--color-text-muted); }
+.pr-detail__comment-name {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  max-width: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-detail__comment-name--muted { color: var(--color-text-muted); }
+.pr-detail__comment-bubble {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+}
+.pr-detail__comment-bubble--event { background: transparent; padding: 0; }
+.pr-detail__comment-bubble--editing { background: var(--color-bg-elevated); }
+.pr-detail__comment-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.pr-detail__comment-self-tag {
+  font-size: var(--font-xs);
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-bright, var(--color-primary));
+  font-weight: 600;
+}
+.pr-detail__comment-time { color: var(--color-text-muted); font-size: var(--font-xs); }
+.pr-detail__comment-body { font-size: var(--font-sm); line-height: 1.6; color: var(--color-text); }
+.pr-detail__comment-event-author { font-size: var(--font-xs); color: var(--color-text-muted); margin-top: 2px; }
+.pr-detail__comment-edited-mark { font-size: var(--font-xs); color: var(--color-text-muted); }
+.pr-detail__comment-actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.pr-detail__comment-quote {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  font-family: inherit;
+}
+.pr-detail__comment-quote:hover { background: var(--color-bg-hover); color: var(--color-text); }
+.pr-detail__comment-edit-btn,
+.pr-detail__comment-delete-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.pr-detail__comment:hover .pr-detail__comment-edit-btn,
+.pr-detail__comment:hover .pr-detail__comment-delete-btn { opacity: 1; }
+.pr-detail__comment-edit-btn:hover { background: var(--color-bg-hover); color: var(--color-text); }
+.pr-detail__comment-delete-btn:hover { background: var(--color-danger-soft); color: var(--color-danger); }
+.pr-detail__comment-edit-input {
+  width: 100%;
+  min-height: 60px;
+  padding: var(--space-2);
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+.pr-detail__comment-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.pr-detail__comment-editing-hint { font-size: var(--font-xs); color: var(--color-text-muted); margin-right: auto; }
+
+/* 评论输入区 */
+.pr-detail__comment-compose {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+.pr-detail__comment-input-wrap {
+  position: relative;
+}
+.pr-detail__comment-input {
+  width: 100%;
+  min-height: 72px;
+  padding: var(--space-3);
+  padding-right: 40px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--t-base) var(--ease);
+}
+.pr-detail__comment-input:focus { border-color: var(--color-primary); }
+.pr-detail__comment-send {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: background var(--t-base) var(--ease);
+}
+.pr-detail__comment-send:hover:not(:disabled) { background: var(--color-primary-hover); }
+.pr-detail__comment-send:disabled { opacity: 0.4; cursor: not-allowed; }
+.pr-detail__comment-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.pr-detail__mention-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 10;
+  max-width: 240px;
+}
+.pr-detail__mention-item {
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.pr-detail__mention-item--active { background: var(--color-primary-soft); }
+
+/* 响应式：窄屏切换为上下布局 */
+@media (max-width: 900px) {
+  .pr-split {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .pr-list-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--color-divider);
+    max-height: 300px;
+  }
 }
 
 </style>

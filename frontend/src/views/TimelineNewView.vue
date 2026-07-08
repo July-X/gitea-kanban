@@ -15,6 +15,7 @@
  */
 
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { GitCommit, RotateCw, GitBranch, Tag, Search } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -56,6 +57,10 @@ import GitCommitHeatmap from '@renderer/components/GitCommitHeatmap.vue';
 // ============================================================
 const auth = useAuthStore();
 const repo = useRepoStore();
+const route = useRoute();
+
+/** 从 PR 页面跳转过来时携带的 focusSha（用于定位到特定 commit） */
+const pendingFocusSha = ref<string | null>(null);
 
 // 初始 graph 上限。
 // v2.x 修复 July-X/UnrealEngine 渲染卡死：UnrealEngine release 分支中段有一段超宽 merge
@@ -176,6 +181,37 @@ function scrollCommitIntoView(sha: string) {
     // row 在视口上方或下方 → 滚到 row 顶部贴视口顶
     const targetScroll = Math.max(0, rowTop - 8);
     scrollContainer.scrollTo({ top: targetScroll, behavior: 'smooth' });
+  });
+}
+
+/**
+ * 定位到指定 commit：滚动到该行 + 展开详情面板
+ * 用于从合并请求页跳转过来时精确定位到 PR 的 head commit。
+ *
+ * 如果该 commit 不在当前已加载的范围内（深层历史），
+ * toast 提示用户手动加载更多。
+ */
+function focusCommit(sha: string) {
+  const scrollContainer = mainScrollEl.value;
+  if (!scrollContainer) return;
+  const row = scrollContainer.querySelector(
+    `.commit-row[data-sha="${sha}"]`,
+  ) as HTMLElement | null;
+  if (!row) {
+    showToast({ type: 'info', message: '该提交不在当前加载范围内，请滚动加载更多历史记录' });
+    return;
+  }
+  // 滚动到该行
+  scrollCommitIntoView(sha);
+  // 展开详情面板
+  nextTick(() => {
+    const rows = allRows.value;
+    for (const r of rows) {
+      if (r.commit && r.commit.sha === sha) {
+        expandedSha.value = sha;
+        break;
+      }
+    }
   });
 }
 
@@ -681,8 +717,15 @@ function onGlobalKeydown(e: KeyboardEvent) {
  * v1.8 KeepAlive：视图进入（含首次挂载 + 从缓存恢复）时执行数据加载
  *   - 已缓存 graphDto 时跳过重复请求（切换回来秒开）
  *   - 仓库列表为空时拉一次，避免首次从 /auth 跳过来时显示空状态
+ *   - 从 PR 页面跳转时检查 query.focusSha，加载后滚动定位到该 commit
  */
 async function activateData() {
+  // 检查 URL query 中的 focusSha（从合并请求页跳转过来）
+  const focusSha = route.query.focusSha;
+  if (typeof focusSha === 'string' && focusSha.length > 0) {
+    pendingFocusSha.value = focusSha;
+  }
+
   if (repo.repos.length === 0) {
     try {
       await repo.loadRepos('', true);
@@ -697,6 +740,13 @@ async function activateData() {
   // 确保重新进入视图后滚动加载功能可用
   if (!loadMoreObserver) {
     await setupLoadMoreObserver();
+  }
+
+  // 如果有待定位的 commit SHA，尝试滚动 + 展开
+  if (pendingFocusSha.value) {
+    await nextTick();
+    focusCommit(pendingFocusSha.value);
+    pendingFocusSha.value = null;
   }
 }
 

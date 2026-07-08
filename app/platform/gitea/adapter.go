@@ -1399,3 +1399,67 @@ func graphResultToDTO(r *graph.GraphResult) *platform.GraphResult {
 func GraphResultToDTOForTest(r *graph.GraphResult) *platform.GraphResult {
 	return graphResultToDTO(r)
 }
+
+// ===== PR 提交列表 =====
+
+// giteaPullCommitRaw Gitea /pulls/{index}/commits 返回的原始 JSON 结构
+type giteaPullCommitRaw struct {
+	SHA    string `json:"sha"`
+	Commit struct {
+		Message string `json:"message"`
+		Author  struct {
+			Name  string `json:"name"`
+			Email string `json:"email"`
+			Date  string `json:"date"`
+		} `json:"author"`
+		Committer struct {
+			Name string `json:"name"`
+			Date string `json:"date"`
+		} `json:"committer"`
+		Verification struct {
+			Verified bool `json:"verified"`
+		} `json:"verification"`
+	} `json:"commit"`
+	HTMLURL string `json:"html_url"`
+}
+
+// ListPullCommits 列出 PR 中包含的提交 (GET /repos/{owner}/{repo}/pulls/{index}/commits)
+func (a *GiteaAdapter) ListPullCommits(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullCommitDTO, error) {
+	var raw []giteaPullCommitRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/commits", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		var ipcErr *ipc.IpcError
+		if errors.As(err, &ipcErr) && ipcErr.Code == "NOT_FOUND" {
+			return nil, platform.ErrNotSupported
+		}
+		return nil, err
+	}
+	out := make([]platform.PullCommitDTO, 0, len(raw))
+	for _, r := range raw {
+		sha := r.SHA
+		shortSha := sha
+		if len(shortSha) > 7 {
+			shortSha = sha[:7]
+		}
+		// subject = message 第一行；body = 剩余行
+		msg := r.Commit.Message
+		subject := msg
+		body := ""
+		if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
+			subject = msg[:idx]
+			body = strings.TrimSpace(msg[idx+1:])
+		}
+		out = append(out, platform.PullCommitDTO{
+			SHA:        sha,
+			ShortSHA:   shortSha,
+			Subject:    subject,
+			Body:       body,
+			AuthorName: r.Commit.Author.Name,
+			AuthorMail: r.Commit.Author.Email,
+			AuthoredAt: r.Commit.Author.Date,
+			Committed:  r.Commit.Committer.Date,
+			Verified:   r.Commit.Verification.Verified,
+		})
+	}
+	return out, nil
+}

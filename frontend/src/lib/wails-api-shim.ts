@@ -971,6 +971,119 @@ const apiShim = {
         );
       },
     },
+
+    /**
+     * pulls.files —— PR 文件变动子命名空间
+     * 转发到 window.go.main.App.ListPullFiles
+     */
+    files: {
+      list: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number };
+        return forwardToWails(
+          () => stubEmpty([]),
+          (app) => {
+            if (!app.ListPullFiles) {
+              return stubEmpty([]);
+            }
+            return app.ListPullFiles({
+              projectId: a.projectId,
+              index: a.index,
+            });
+          },
+        );
+      },
+    },
+
+    /**
+     * pulls.commits —— PR 提交列表子命名空间
+     * 转发到 window.go.main.App.ListPullCommits
+     */
+    commits: {
+      list: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number };
+        return forwardToWails(
+          () => stubEmpty([]),
+          (app) => {
+            if (!app.ListPullCommits) {
+              return stubEmpty([]);
+            }
+            return app.ListPullCommits({
+              projectId: a.projectId,
+              index: a.index,
+            });
+          },
+        );
+      },
+    },
+
+    /**
+     * pulls.reviewComments —— 行内评审评论子命名空间（v0.5.0 M4）
+     * 转发到 window.go.main.App.ListPullReviewComments / CreatePullReviewComment
+     */
+    reviewComments: {
+      list: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number };
+        return forwardToWails(
+          () => stubEmpty([]),
+          (app) => {
+            if (!app.ListPullReviewComments) {
+              return stubEmpty([]);
+            }
+            return app.ListPullReviewComments({
+              projectId: a.projectId,
+              index: a.index,
+            });
+          },
+        );
+      },
+      create: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as {
+          projectId: string;
+          index: number;
+          path?: string;
+          line?: number;
+          body?: string;
+        };
+        return forwardToWails(
+          () => notImplemented('pulls.reviewComments', 'create'),
+          (app) => {
+            if (!app.CreatePullReviewComment) {
+              return notImplemented('pulls.reviewComments', 'create');
+            }
+            return app.CreatePullReviewComment({
+              projectId: a.projectId,
+              index: a.index,
+              path: a.path ?? '',
+              line: a.line ?? 0,
+              body: a.body ?? '',
+            });
+          },
+        );
+      },
+    },
+
+    /**
+     * pulls.fileDiff —— 单文件 diff 子命名空间
+     * 转发到 window.go.main.App.GetPullFileDiff
+     */
+    fileDiff: {
+      get: (args: unknown): Promise<unknown> => {
+        const a = (args ?? {}) as { projectId: string; index: number; filePath: string };
+        return forwardToWails(
+          () => notImplemented('pulls.fileDiff', 'get'),
+          (app) => {
+            if (!app.GetPullFileDiff) {
+              return notImplemented('pulls.fileDiff', 'get');
+            }
+            return app.GetPullFileDiff({
+              projectId: a.projectId,
+              index: a.index,
+              filePath: a.filePath,
+            });
+          },
+        );
+      },
+    },
   },
 
   issues: {

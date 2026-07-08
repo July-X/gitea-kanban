@@ -3,11 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net/url"
-	"os"
-	"os/exec"
-	"strings"
-	"time"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
@@ -15,8 +10,12 @@ import (
 	"gitea-kanban/app/secret"
 	"gitea-kanban/app/store"
 	"github.com/google/uuid"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
 )
-
 
 // ===== 鉴权（步骤 2.x · v2.0 修复：token 接通链路）=====
 
