@@ -1342,9 +1342,66 @@ func (a *GitHubAdapter) ListLabels(ctx context.Context, hostURL, username, token
 	return labels, nil
 }
 
-// ListMembers 首期不支持
+// ListMembers 列出仓库协作者（GET /repos/{owner}/{repo}/collaborators）
+//
+// GitHub collaborators API 行为：
+//   - 需要 owner 鉴权（非 owner/non-admin 调用返回 404）
+//   - 返回与仓库有直接关联的协作者（包含 owner/organization member via team）
+//   - permissions 字段表示该用户在该仓库的权限级别（admin / maintain / push / triage / pull）
+//   - 非 owner 协作者若没有 push 权限，可能不在列表中（GitHub API 行为）
+//
+// 注意：PR assignee 可以是任意仓库可读用户，不限于 collaborators 列表。
+// Members 下拉在 owner 鉴权视角下最完整。
 func (a *GitHubAdapter) ListMembers(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.MemberDTO, error) {
-	return nil, platform.ErrNotSupported
+	var raw []struct {
+		Login       string `json:"login"`
+		Permissions struct {
+			Admin    bool `json:"admin"`
+			Maintain bool `json:"maintain"`
+			Push     bool `json:"push"`
+			Triage   bool `json:"triage"`
+			Pull     bool `json:"pull"`
+		} `json:"permissions,omitempty"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/collaborators?per_page=100", owner, repo)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	members := make([]platform.MemberDTO, 0, len(raw))
+	for _, m := range raw {
+		perm := permissionLevel(m.Permissions)
+		members = append(members, platform.MemberDTO{
+			Login:      m.Login,
+			Permission: perm,
+		})
+	}
+	return members, nil
+}
+
+// permissionLevel 根据 GitHub permissions 对象返回最高权限级别字符串
+func permissionLevel(p struct {
+	Admin    bool `json:"admin"`
+	Maintain bool `json:"maintain"`
+	Push     bool `json:"push"`
+	Triage   bool `json:"triage"`
+	Pull     bool `json:"pull"`
+}) string {
+	if p.Admin {
+		return "admin"
+	}
+	if p.Maintain {
+		return "maintain"
+	}
+	if p.Push {
+		return "push"
+	}
+	if p.Triage {
+		return "triage"
+	}
+	if p.Pull {
+		return "pull"
+	}
+	return ""
 }
 
 // ListMilestones v0.6.0 Gitea only

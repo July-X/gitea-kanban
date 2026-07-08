@@ -95,11 +95,7 @@ func TestGitHubAdapter_NotSupported(t *testing.T) {
 	// ListLabels v0.7.0 已实现（GET /repos/{owner}/{repo}/labels）
 	// 真实测试见 TestGitHubAdapter_ListLabels
 
-	// ListMembers
-	_, err = adapter.ListMembers(ctx, "", "", "", "", "")
-	if err != platform.ErrNotSupported {
-		t.Errorf("ListMembers error = %v, want ErrNotSupported", err)
-	}
+	// ListMembers v0.7.0 已实现（GET /repos/{owner}/{repo}/collaborators），见 TestGitHubAdapter_ListMembers
 }
 
 // TestGitHubAdapter_ListLabels 验证路径 + 字段映射（v0.7.0 Phase 1 Task 1.1）
@@ -1644,5 +1640,46 @@ func TestGitHubAdapter_CreatePullReview_InvalidEvent(t *testing.T) {
 	}
 	if ipcErr.Code != ipc.CodeValidationFailed {
 		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeValidationFailed)
+	}
+}
+
+// TestGitHubAdapter_ListMembers 验证路径 + permissions 映射（v0.7.0 Phase 1 Task 1.2）
+func TestGitHubAdapter_ListMembers(t *testing.T) {
+	var capturedPath, capturedAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedAuth = r.Header.Get("Authorization")
+		if r.URL.RawQuery != "per_page=100" {
+			t.Errorf("query = %q, want per_page=100", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `[{"login":"alice","permissions":{"admin":false,"push":true,"maintain":false,"triage":false,"pull":true}},{"login":"bob","permissions":{"pull":true}},{"login":"carol","permissions":{"admin":true}}]`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	members, err := adapter.ListMembers(context.Background(), server.URL, "alice", "ghp-test-token", "owner-x", "repo-y")
+	if err != nil {
+		t.Fatalf("ListMembers failed: %v", err)
+	}
+
+	if capturedPath != "/repos/owner-x/repo-y/collaborators" {
+		t.Errorf("path = %q, want /repos/owner-x/repo-y/collaborators", capturedPath)
+	}
+	if capturedAuth != "Bearer ghp-test-token" {
+		t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+	}
+	if len(members) != 3 {
+		t.Fatalf("len(members) = %d, want 3", len(members))
+	}
+	if members[0].Login != "alice" || members[0].Permission != "push" {
+		t.Errorf("members[0] = %+v, want {Login:alice Permission:push}", members[0])
+	}
+	if members[1].Login != "bob" || members[1].Permission != "pull" {
+		t.Errorf("members[1] = %+v, want {Login:bob Permission:pull}", members[1])
+	}
+	if members[2].Login != "carol" || members[2].Permission != "admin" {
+		t.Errorf("members[2] = %+v, want {Login:carol Permission:admin}", members[2])
 	}
 }
