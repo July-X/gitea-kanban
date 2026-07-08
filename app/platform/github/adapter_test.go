@@ -92,16 +92,66 @@ func TestGitHubAdapter_NotSupported(t *testing.T) {
 	// ListPulls v0.6+ 已实现（GET /repos/{owner}/{repo}/pulls），不在 NotSupported 范围
 	// 真实测试见 TestGitHubAdapter_ListPulls_Basic
 
-	// ListLabels
-	_, err = adapter.ListLabels(ctx, "", "", "", "", "")
-	if err != platform.ErrNotSupported {
-		t.Errorf("ListLabels error = %v, want ErrNotSupported", err)
-	}
+	// ListLabels v0.7.0 已实现（GET /repos/{owner}/{repo}/labels）
+	// 真实测试见 TestGitHubAdapter_ListLabels
 
 	// ListMembers
 	_, err = adapter.ListMembers(ctx, "", "", "", "", "")
 	if err != platform.ErrNotSupported {
 		t.Errorf("ListMembers error = %v, want ErrNotSupported", err)
+	}
+}
+
+// TestGitHubAdapter_ListLabels 验证路径 + 字段映射（v0.7.0 Phase 1 Task 1.1）
+func TestGitHubAdapter_ListLabels(t *testing.T) {
+	var capturedPath, capturedMethod, capturedAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedMethod = r.Method
+		capturedAuth = r.Header.Get("Authorization")
+		// per_page=100 在 ListLabels 里硬编码
+		if r.URL.RawQuery != "per_page=100" {
+			t.Errorf("query = %q, want per_page=100", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `[
+			{"id":1001,"name":"bug","color":"f29513","description":"Something isn't working"},
+			{"id":1002,"name":"enhancement","color":"84b6eb","description":"New feature or request","default":true},
+			{"id":1003,"name":"docs","color":"0075ca","description":"Documentation only changes","default":false}
+		]`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	labels, err := adapter.ListLabels(context.Background(), server.URL, "alice", "ghp-test-token", "owner-x", "repo-y")
+	if err != nil {
+		t.Fatalf("ListLabels failed: %v", err)
+	}
+
+	if capturedPath != "/repos/owner-x/repo-y/labels" {
+		t.Errorf("path = %q, want /repos/owner-x/repo-y/labels", capturedPath)
+	}
+	if capturedMethod != "GET" {
+		t.Errorf("method = %q, want GET", capturedMethod)
+	}
+	if capturedAuth != "Bearer ghp-test-token" {
+		t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+	}
+
+	if len(labels) != 3 {
+		t.Fatalf("len(labels) = %d, want 3", len(labels))
+	}
+
+	// 验证字段映射
+	if labels[0].ID != 1001 || labels[0].Name != "bug" || labels[0].Color != "f29513" || labels[0].Description != "Something isn't working" {
+		t.Errorf("labels[0] = %+v, want {ID:1001 Name:bug Color:f29513 Description:Something isn't working}", labels[0])
+	}
+	if labels[1].ID != 1002 || labels[1].Name != "enhancement" || labels[1].Color != "84b6eb" {
+		t.Errorf("labels[1] = %+v, want {ID:1002 Name:enhancement Color:84b6eb}", labels[1])
+	}
+	if labels[2].ID != 1003 || labels[2].Name != "docs" || labels[2].Color != "0075ca" {
+		t.Errorf("labels[2] = %+v, want {ID:1003 Name:docs Color:0075ca}", labels[2])
 	}
 }
 

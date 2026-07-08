@@ -1315,9 +1315,31 @@ func (a *GitHubAdapter) ListIssues(ctx context.Context, hostURL, username, token
 	return nil, platform.ErrNotSupported
 }
 
-// ListLabels 首期不支持
+// ListLabels 列出仓库标签（GET /repos/{owner}/{repo}/labels）
+//
+// GitHub labels 与 Gitea LabelDTO 字段完全对齐（id / name / color / description），
+// 直接透传，无须字段映射。
 func (a *GitHubAdapter) ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.LabelDTO, error) {
-	return nil, platform.ErrNotSupported
+	var raw []struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Color       string `json:"color"`
+		Description string `json:"description"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/labels?per_page=100", owner, repo)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	labels := make([]platform.LabelDTO, 0, len(raw))
+	for _, l := range raw {
+		labels = append(labels, platform.LabelDTO{
+			ID:          l.ID,
+			Name:        l.Name,
+			Color:       l.Color,
+			Description: l.Description,
+		})
+	}
+	return labels, nil
 }
 
 // ListMembers 首期不支持
