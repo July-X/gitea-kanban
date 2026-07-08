@@ -1404,9 +1404,34 @@ func permissionLevel(p struct {
 	return ""
 }
 
-// ListMilestones v0.6.0 Gitea only
+// ListMilestones 列出里程碑（GET /repos/{owner}/{repo}/milestones）
+//
+// GitHub milestones 与 Gitea 字段基本对齐（id/title/state/description），
+// state 参数透传（open / closed / all）。
 func (a *GitHubAdapter) ListMilestones(ctx context.Context, hostURL, username, token, owner, repo string, state string) ([]platform.MilestoneDTO, error) {
-	return nil, platform.ErrNotSupported
+	if state == "" {
+		state = "open"
+	}
+	var raw []struct {
+		ID          int64  `json:"id"`
+		Title       string `json:"title"`
+		State       string `json:"state"`
+		Description string `json:"description"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/milestones?state=%s&per_page=100", owner, repo, state)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.MilestoneDTO, 0, len(raw))
+	for _, m := range raw {
+		out = append(out, platform.MilestoneDTO{
+			ID:          m.ID,
+			Title:       m.Title,
+			State:       m.State,
+			Description: m.Description,
+		})
+	}
+	return out, nil
 }
 
 // UpdatePullMilestone v0.6.0 Gitea only

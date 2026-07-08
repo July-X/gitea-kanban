@@ -1683,3 +1683,83 @@ func TestGitHubAdapter_ListMembers(t *testing.T) {
 		t.Errorf("members[2] = %+v, want {Login:carol Permission:admin}", members[2])
 	}
 }
+
+// TestGitHubAdapter_ListMilestones 验证 state 参数 + 字段映射（v0.7.0 Phase 1 Task 1.3）
+func TestGitHubAdapter_ListMilestones(t *testing.T) {
+	// 测试 open/closed/all 三种 state
+	for _, state := range []string{"open", "closed", "all"} {
+		state := state
+		t.Run("state="+state, func(t *testing.T) {
+			var capturedPath, capturedQuery, capturedAuth string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedPath = r.URL.Path
+				capturedQuery = r.URL.RawQuery
+				capturedAuth = r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				if state == "open" {
+					fmt.Fprintln(w, `[{"id":1,"title":"v1.0","state":"open","description":"First release"}]`)
+				} else if state == "closed" {
+					fmt.Fprintln(w, `[{"id":2,"title":"v0.9","state":"closed","description":"Beta"}]`)
+				} else {
+					fmt.Fprintln(w, `[{"id":3,"title":"Backlog","state":"open"}]`)
+				}
+			}))
+			defer server.Close()
+
+			adapter := NewGitHubAdapter()
+			milestones, err := adapter.ListMilestones(context.Background(), server.URL, "alice", "ghp-test-token", "owner-x", "repo-y", state)
+			if err != nil {
+				t.Fatalf("ListMilestones(state=%q) failed: %v", state, err)
+			}
+			if capturedPath != "/repos/owner-x/repo-y/milestones" {
+				t.Errorf("path = %q, want /repos/owner-x/repo-y/milestones", capturedPath)
+			}
+			if capturedAuth != "Bearer ghp-test-token" {
+				t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+			}
+			wantQuery := "state=" + state + "&per_page=100"
+			if capturedQuery != wantQuery {
+				t.Errorf("query = %q, want %q", capturedQuery, wantQuery)
+			}
+			if len(milestones) != 1 {
+				t.Fatalf("len(milestones) = %d, want 1", len(milestones))
+			}
+			m := milestones[0]
+			if state == "open" {
+				if m.ID != 1 || m.Title != "v1.0" || m.State != "open" {
+					t.Errorf("milestone = %+v, want {ID:1 Title:v1.0 State:open}", m)
+				}
+			} else if state == "closed" {
+				if m.ID != 2 || m.Title != "v0.9" || m.State != "closed" {
+					t.Errorf("milestone = %+v, want {ID:2 Title:v0.9 State:closed}", m)
+				}
+			} else {
+				if m.ID != 3 || m.Title != "Backlog" || m.State != "open" {
+					t.Errorf("milestone = %+v, want {ID:3 Title:Backlog State:open}", m)
+				}
+			}
+		})
+	}
+
+	// 默认 state=open
+	t.Run("default-open", func(t *testing.T) {
+		var capturedQuery string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `[{"id":5,"title":"Sprint 1","state":"open"}]`)
+		}))
+		defer server.Close()
+		adapter := NewGitHubAdapter()
+		milestones, err := adapter.ListMilestones(context.Background(), server.URL, "alice", "ghp-test-token", "o", "r", "")
+		if err != nil {
+			t.Fatalf("ListMilestones(default) failed: %v", err)
+		}
+		if capturedQuery != "state=open&per_page=100" {
+			t.Errorf("default query = %q, want state=open&per_page=100", capturedQuery)
+		}
+		if len(milestones) != 1 || milestones[0].Title != "Sprint 1" {
+			t.Errorf("milestones[0] = %+v", milestones[0])
+		}
+	})
+}
