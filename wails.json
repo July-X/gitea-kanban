@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "gitea-kanban",
+  "outputfilename": "gitea-kanban",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm build",
+  "frontend:dev:watcher": "pnpm dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "gitea-kanban",
+    "email": ""
+  },
+  "info": {
+    "productName": "Gitea Kanban",
+    "productVersion": "2.0.0",
+    "copyright": "Copyright © 2026 gitea-kanban",
+    "comments": "基于 Gitea/GitHub 的桌面端看板 + 时间轴工具"
+  },
+  "wailsjsdir": "./frontend/wailsjs",
+  "outputdir": "./build/bin"
+}

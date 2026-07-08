@@ -12,14 +12,23 @@
 > 产生认知负担。**v1.2 落地为 dark / light 2 主题**（dark = C 暗基底 #0F1115；light 保留
 > #E8F1F5），主色 token 提亮到 #74B830（dark）/ 压暗到 #466B16（light）过 WCAG AA 4.5:1。
 > 完整决策摘要见 §"科技感精修（v1.1）" 章节 v1.2 段落，token 矩阵在 `tech-refine.md` §14。
+>
+> **v1.6 更新（2026-06-22 · 重大方向转换）**：从「技术工具科技感 / HUD 装饰」方向
+> 改为 **Minimalism + Functional Density**（Linear / Notion / Vercel Dashboard 风）。
+> 详细决策：v1.1 装饰套（装饰角 / 标题前缀条 / 键帽 / KPI 发光 / 角落点阵）全部移除；
+> 阴影从「深底+冷白 inset+主色外环」三件套改为 4 档单层柔和（--shadow-xs/-sm/-md/-lg）；
+> 边角中等柔化（卡片 8 / 按钮 6 / 标签 4）；KPI 字号 36 → 28（取消强发光超大数字）。
+> **v1.1 章节保留为历史记录**，仅作参考，**不**作为当前设计语言；新工作以 §"Minimalism
+> 设计原则（v1.6）" 为准。`tech-refine.md` 标注"已废弃 · 切到 v1.6"。
 
 ## 适用范围
 
 - 项目：`gitea-kanban`
 - 形态：Electron 桌面应用（不是 SaaS Web 也不是 startup landing）
 - 用户：gitea 用户群，含**开发者** + **非技术人员**（PM / 设计师 / 市场 / 运营）
-- 风格定位：**贴 gitea 风格**（让用户感到这是 gitea 的延伸而不是第三方小工具），
-  **稳健 / 信息密度合适 / 非技术用户友好**
+- 风格定位：**Minimalism + Functional Density**（v1.6 · 2026-06-22）—— Linear / Notion / Vercel Dashboard 风，
+  贴 gitea 风格（让用户感到这是 gitea 的延伸而不是第三方小工具），
+  **稳健 / 信息密度合适 / 非技术用户友好**。**v1.1「技术工具科技感 / HUD 装饰」方向已废弃**，见 §"科技感精修（v1.1）" 章节作为历史参考。
 
 ## 覆盖决策（采纳 / 拒绝）
 
@@ -28,7 +37,7 @@
 | 主色 | `#22C55E` 鲜绿 | **gitea 绿 `#609926`** | 贴 gitea 生态，可识别度强 |
 | 强调色 | （无） | **gitea 橙 `#f76707`** | 贴 gitea 生态，用于警示/重操作 |
 | 背景 | `#0F172A` 深色 | **v1.2 推翻 v1.1.2 → 2 主题切换**——dark `#0F1115`（默认，原 C 暗中性近黑基底）/ light `#E8F1F5`（浅色保留）。主色 token 调档：dark `#74B830`（vs #0F1115 4.74:1）/ light `#466B16`（vs #E8F1F5 5.55:1）过 WCAG AA 4.5:1。**v1.1.2 推翻为 history**：3 主题（A 暗 / C 暗 / Light）A 暗与 C 暗视觉差异仅在冷暖，非技术用户分不清、产生认知负担。**v1.1.2 推翻 v1** 同样保留为 history：v1 单主题暗色 `#134857` 苍蓝四层（v1.1.2 理由：① 灰蒙反馈 → A 暗提饱和到 71% 推色相到 201°；② 非技术用户友好不靠浅色过度收口）。完整 token 矩阵见 `tech-refine.md` §14。**3 入口**（v1.1.2 加 · v1.2 沿用）：StatusBar cycle 按钮 / 设置页"外观" radio / 命令面板 ⌘K "主题"命令。 |
-| 风格 | Vibrant & Block-based（块状/大色块/活泼） | **克制 / 信息密度优先** | 非技术用户要"看得懂"，大色块/活泼风容易显得不专业 |
+| 风格 | Vibrant & Block-based（块状/大色块/活泼） | **Minimalism + Functional Density**（v1.6 · Linear / Notion 风） | 非技术用户要"看得懂"，大色块/活泼风容易显得不专业 |
 | Pattern | Feature-Rich Showcase（Hero > Features > CTA） | **不适用**（这不是 landing） | 我们是工具型应用，没有 marketing 页面 |
 | 标题字体 | Fira Code | **Inter**（Google Fonts 载入） | 桌面应用要中英文混排，Fira Code 中文不行 |
 | 正文字体 | Fira Sans | **Inter**（中文 fallback：Noto Sans SC） | 同上 |
@@ -79,34 +88,53 @@
    - 菜单栏（Menu Bar）走 Electron 原生 + 平台惯例（macOS = 应用名 / Win = File/Edit/...）
    - 窗口可缩放、最小尺寸 800×600、**v1.1.2 推翻 v1 → 3 主题切换**（A 暗 / C 暗 / Light，用户主动选；**不**跟随 OS 系统设置——避免用户切桌面主题时 app 也跟着切，引起认知负担）
 
-5. **暗色模式阴影原则**（v1.1 精修 · v1.2 沿用）
-   - **不能用纯黑阴影**——暗色底上纯黑阴影"消失"
-   - dark 阴影 = `rgba(0,0,0,...)` 中性黑 + **1px 冷白微描边** + **6-12% 主色微光外环**
-   - light 阴影 = `rgba(15,26,36,...)` 冷黑（无 inset / 无外环，glow 在白底糊掉）
-   - 三档：sm 1-2px / md 4-12px + 16px 主色光 / lg 12-40px + 32px 主色光
-   - 主按钮额外有 1px 主色描边 + 12-32% 主色微光（视觉权重↑）
+5. **暗色模式阴影原则（v1.6 推翻 v1.1）**
+   - v1.1 三件套（深底色阴影 + 1px 冷白微描边 + 主色外环 glow）**已废弃** —— glow 在内容密集的工具类应用里是噪音
+   - **v1.6 单层柔和 4 档**（暗色底走中性黑阴影，亮色走冷黑阴影，无 inset 无 glow）：
+     - `--shadow-xs`：1px 浅阴影（控件内嵌 / 按钮按下）
+     - `--shadow-sm`：1-3px 浅双层（卡片 / 列 / chip，**最常用**）
+     - `--shadow-md`：4-8px 双层（浮层 / 抽屉）
+     - `--shadow-lg`：12-24px 双层（模态对话框 / 强浮层）
+   - 2 主题都走 `--shadow-rgb`（dark `0,0,0` / light `15,26,36`），alpha 4-10%（克制不抢戏）
+   - 主按钮**不**带阴影（视觉权重靠 background color + 实色描边，不靠 glow）
 
-6. **滚动条**（v1.2 新增美化 · 以 gitea 绿为视觉锚）
+6. **滚动条**（v1.6 简化 · 跟 Minimalism 对齐）
    - 全部用 `scrollbar-color` + `::-webkit-scrollbar` 主题化
    - 8px 细滚动条 + 4px 圆角，track 透明
-   - thumb 默认态：主色 22-25% alpha 软底（呼应 dot / 装饰角）
-   - thumb hover 态：主色 42-50% alpha + 主色光晕（dark 6px 外环 / light 1px 实色描边）
-   - thumb active 态：主色实色
+   - thumb 默认态：主色 22-25% alpha 软底
+   - thumb hover 态：主色 50-55% alpha（**去掉 v1.2 的 dark glow / light 1px 描边**，v1.6 走纯色变化）
+   - thumb active 态：主色实色（`--scrollbar-thumb-active` token）
    - 避免 WebKit 默认白底撞色；Firefox 兼容走 `scrollbar-width: thin`
 
-7. **lane / 列卡片化原则**（v1.1 精修）
+7. **Minimalism 设计原则（v1.6 新增 · 当前生效）**
+   - **无装饰元素**：装饰角 / 标题前缀条 / 键帽 / 角落点阵 全部移除（v1.1 装饰套废弃）
+   - **阴影单层柔和**：4 档（xs/sm/md/lg），无 inset 无 glow
+   - **边角中等柔化**：卡片 8 / 按钮 6 / 标签 4（不走 v1.1 锐化 6/4/2，也不走 MASTER 12/8/4）
+   - **区域靠 1px 边界线分区**：NavRail 右 / 状态栏上 / view topbar 下都走 `--color-divider-region` / `--color-divider` token
+   - **KPI 数字 ≤28px**：取消 v1.1 36-48px 强发光超大数字（业务 UI 走"专业克制"路线）
+   - **主按钮走 background color + 实色描边，不靠 glow**（v1.1 主色外环 glow 移除）
+   - 状态点 halo 走实色描边或 4-6px 软扩散（**不**用 v1.1 12px primary-glow）
+   - 视觉锚：主色 token 用于"激活 / 选中 / 强调"；非激活态全走中性色（不滥用主色）
+
+8. **lane / 列卡片化原则**（v1.1 沿用 · v1.6 调整投影）
    - 时间轴的每条 lane / 看板的每列 / 合并管理的每张 PR 卡，**都是独立 elevated 卡片**
-   - 卡片特征：bg 比 canvas 提一档（lane-bg `#1F6171` / column 提一档）+ 1px 描边 + 8-20px 投影
+   - 卡片特征：bg = `--color-bg-elevated`（比 canvas 提一档）+ 8px 圆角（`--radius-card`）+ 1px 描边 / `--shadow-sm` 柔和阴影
    - 卡片之间 **14-16px gap**（gap 区域显出 canvas 色作为"分隔"）
+   - v1.1 三件套投影（base + inset + glow）**已废弃** —— 卡片只用 `--shadow-sm` 1 层柔和阴影
    - 这条覆盖"全局去描边"原则——卡片边界例外允许 1px 描边
 
-8. **a11y 加强**（非技术用户友好）
+9. **a11y 加强**（非技术用户友好）
    - 全部交互元素键盘可达（Tab 顺序符合阅读顺序）
    - 关键操作（合并、删除）除了二次确认还要声音/震动反馈
    - 颜色不是唯一信号（用图标 + 文字 + 颜色三重编码状态）
 
-## 科技感精修（v1.1，2026-06-12）
+## 科技感精修（v1.1，2026-06-12）· ⚠️ 已废弃 · 2026-06-22 切到 v1.6 Minimalism
 
+> ⚠️ **本节是历史快照，仅作参考**。v1.1「技术工具科技感 / HUD 装饰」方向在 v1.6（2026-06-22）
+> 被 user 拍板推翻，改为 Minimalism + Functional Density。v1.1 装饰套（装饰角 / 标题前缀条 /
+> 键帽 / KPI 发光 / 角落点阵）**全部移除**。新设计语言以 §"Minimalism 设计原则（v1.6）" 为准。
+> `tech-refine.md` 已标注"已废弃"。
+>
 > 本节是 v1.1 主题精修的**决策摘要 + 索引**。完整 token 落地在
 > **`design-system/pages/tech-refine.md`**（page-level 精修文件，~280 行），
 > 可视化 demo 在 **`docs/design/wireframe/theme-tech.html`**。
@@ -159,6 +187,25 @@
 - ✅ 通过 → 写 `docs/design/wireframe/theme-tech.html` 验证（已包含）→ Phase 1 改 `src/renderer/styles/theme.css` + `hud-decor.css`
 - ⏸ 暂缓 → `tech-refine.md` 留作 reference，落地推迟到 v1.2
 - ❌ 拒绝 → 回 v1 现状（卡片 12px / 按钮 8px / 标签 12px），OVERRIDE 本节标注"已撤回"
+
+### v1.6 推翻对账（2026-06-22 · 当前生效）
+
+> 本表对照 v1.1 决策，标记每个 v1.1 项在 v1.6 里的最终处理（保留 / 废弃 / 调整）。
+
+| v1.1 决策 | v1.6 处理 | 原因 |
+|---|---|---|
+| 卡片 6 / 按钮 4 / 标签 2（锐化） | **调整为 8 / 6 / 4**（中等柔化） | v1.6 走 Linear / Notion 6-8px 主流，不跟 MASTER 12px 也不跟 v1.1 锐化 2-4px |
+| 阴影三件套（base + inset + glow） | **改为 4 档单层柔和**（xs/sm/md/lg） | glow 在内容密集工具里是噪音；单层柔和更克制 |
+| 主按钮 glow（1px 主色 + 12-16px 主色光） | **去掉 glow**，主按钮 = background + `--shadow-sm` | 视觉权重靠 background，不靠 glow |
+| 装饰角 / 标题前缀条 / 键帽 | **全部移除** | 装饰元素跟 Minimalism 冲突 |
+| 主画布 24px grid + 角落点阵 | **全部移除**（v1.5 + v1.6 分两步删） | 工具类应用背景装饰是噪音 |
+| KPI 大数字 36-48px + 主色 text-shadow | **降到 28px**，**去掉 text-shadow** | 业务 UI 走专业克制路线 |
+| 进度条渐变填充 + glow | **去渐变去 glow**，走主色实色 | 进度条用实色足够表达 |
+| 状态点呼吸（1500ms） | **保留** | 等待 / 同步状态点的呼吸是功能性视觉 |
+| mono 字体强制 9 + 推荐 6 | **保留** | 跟 Minimalism 不冲突（mono 是信息层级） |
+| 顶部 StatusBar | **保留**（v1.4 高度从 24 → 33） | 业务需要 |
+| 状态色新增 4 色（红 / 青 / 等待灰 / 离线灰） | **保留** | 三重编码（颜色 + 图标 + 文字）需要 |
+| 过渡时长 150-240ms 分级 | **保留** | 跟 Minimalism 不冲突 |
 
 ---
 

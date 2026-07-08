@@ -1,18 +1,28 @@
 # ADR-0003: 本地存储从 better-sqlite3 迁移到 electron-store + 同步队列
 
-- **Status**: Implemented（2026-06-15 完结，commit `5bae978`）
-- **Date**: 2026-06-14（决策）/ 2026-06-15（完结）
+> ## ⚠️ SUPERSEDED by ADR-0005（2026-06-22）
+>
+> **本 ADR 描述的是 v1 时代的 Electron+better-sqlite3→electron-store 迁移；v2.0 整个客户端已切换到 Go+Wails，业务态走 Go 端 `app/store` + `state.json` + 原子写（tmp+rename）。**
+>
+> - 取代的迁移决策：[ADR-0005 §决策 5](../adr/0005-electron-to-go-wails-migration.md#决策-5业务态存储--json-文件延续-adr-0003-决策)
+> - 当前生效实现：`app/store/store.go`（JSON 文件 + `sync.RWMutex` 并发安全 + 30 天 GC）
+> - 项目**零 SQLite 依赖**（better-sqlite3 / drizzle-orm / electron-store / @napi-rs/native 全部移除）
+>
+> **保留本文件作为 v1 决策历史参考**（不要按本文件实施）。当前业务态结构在 [AGENTS.md §6.4](../../AGENTS.md) 和 `app/store/store.go` 的 `LocalState`。
+>
+> ---
+
+- **Status**: Superseded by ADR-0005（2026-06-22；v1 完结 commit `5bae978` 仍准确）
+- **Date**: 2026-06-14（决策）/ 2026-06-15（v1 完结）/ 2026-06-22（v2.0 supersede）
 - **Deciders**: backend agent (Coder)、orchestrator (Mavis)、verifier 待 review
-- **完结说明**：三个 phase 全部落地。最后一步（Phase 3b）于 2026-06-15 删除 SQLite
-  链路本体（`sqlite.ts` + `cache/schema/` + `better-sqlite3`/`drizzle-orm` 依赖 +
-  native rebuild 工具链）。至此项目**零 SQLite 依赖**：业务态走 `state.json`，
-  Gitea 缓存走 `cache/<resource>/` 文件 KV，离线写走 `queue.jsonl`。包体净减 200+ MB，
-  Electron 大版本升级不再需要 rebuild native binding。
+- **完结说明**：v1 三个 phase 全部落地（commit `5bae978` 删 SQLite 链路本体）。
+- **v2.0 supersede 说明**：ADR-0005 把整个客户端从 Electron 替换为 Go+Wails，零 SQLite 依赖的结论保留，但 storage 实现完全改写为 Go 端 JSON 文件（`app/store`）。
 - **Related**:
-  - `docs/design/02-architecture.md` §4 数据模型、§6 离线降级
-  - `AGENTS.md` §6.3 数据模型、§10 常见陷阱
-  - ADR-0002（board 数据模型 reset，本次延续其"派生不存本地"的方向）
-  - ADR-0001（keychain 选型，沿用）
+  - ~~`docs/design/02-architecture.md` §4 数据模型、§6 离线降级~~（v2.0 已 DEPRECATED）
+  - `AGENTS.md` §6.4 数据模型、§10 常见陷阱
+  - ADR-0002（board 数据模型 reset，本 ADR 延续其"派生不存本地"的方向）
+  - ADR-0001（keychain 选型，v2.0 supersede 后由 ADR-0005 §决策 4 取代）
+  - ADR-0005（v2.0 迁移决策，本 ADR 被其 §决策 5 取代）
 
 ## Context
 

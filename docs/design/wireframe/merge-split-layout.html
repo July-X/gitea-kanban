@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gitea Kanban · 合并请求（左右布局设计稿）</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    /* 设计稿复用 merge.html 的设计系统变量 */
+    :root {
+      --color-primary: #609926; --color-primary-hover: #74B830;
+      --color-primary-soft: rgba(96, 153, 38, 0.22);
+      --color-primary-bright: #95D046;
+      --color-accent: #F76707; --color-accent-soft: rgba(247, 103, 7, 0.18);
+      --color-text: #DCE9F0; --color-text-secondary: #90A4AE; --color-text-muted: #5F7A87;
+      --color-bg: #134857; --color-bg-elevated: #1B5868; --color-bg-hover: #236479; --color-bg-active: #2D7487;
+      --color-bg-subtle: rgba(220, 233, 240, 0.03);
+      --color-border: transparent;
+      --color-divider: rgba(220, 233, 240, 0.08);
+      --color-divider-soft: rgba(220, 233, 240, 0.04);
+      --color-success: #5BC76A; --color-success-soft: rgba(91, 199, 106, 0.18);
+      --color-warning: #E8B954; --color-warning-soft: rgba(232, 185, 84, 0.18);
+      --color-danger: #F47A6B; --color-danger-soft: rgba(244, 122, 107, 0.18);
+      --color-info: #6FB1FF; --color-info-soft: rgba(111, 177, 255, 0.18);
+      --shadow-sm: 0 1px 2px rgba(10, 42, 50, 0.45), 0 0 0 1px rgba(220, 233, 240, 0.04);
+      --shadow-md: 0 4px 12px rgba(10, 42, 50, 0.5), 0 0 0 1px rgba(220, 233, 240, 0.04), 0 0 16px rgba(96, 153, 38, 0.06);
+      --shadow-lg: 0 12px 40px rgba(10, 42, 50, 0.6), 0 0 0 1px rgba(220, 233, 240, 0.06), 0 0 32px rgba(96, 153, 38, 0.08);
+      --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px;
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+      --font-xs: 11px; --font-sm: 13px; --font-md: 14px; --font-lg: 16px; --font-xl: 20px;
+      --t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms;
+      --ease: cubic-bezier(0.2, 0, 0, 1);
+      --titlebar-h: 48px; --navrail-w: 224px;
+      /* 左右面板宽度 */
+      --pr-list-w: 380px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+      font-size: var(--font-md); color: var(--color-text); background: var(--color-bg);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: 'cv11', 'ss01', 'ss03';
+      text-rendering: optimizeLegibility;
+    }
+    code, .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.01em; }
+
+    * { scrollbar-width: thin; scrollbar-color: var(--color-bg-hover) transparent; }
+    *::-webkit-scrollbar { width: 6px; height: 6px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb { background: var(--color-bg-hover); border-radius: 4px; }
+    *::-webkit-scrollbar-thumb:hover { background: var(--color-bg-active); }
+
+    .app { display: grid; grid-template-rows: var(--titlebar-h) 1fr; height: 100vh; }
+    .titlebar { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); background: var(--color-bg-elevated); border-bottom: 1px solid var(--color-divider); }
+    .titlebar__logo { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; color: var(--color-primary); }
+    .titlebar__logo-mark { width: 24px; height: 24px; background: var(--color-primary); color: #fff; border-radius: var(--radius-sm); display: grid; place-items: center; }
+    .titlebar__repo { display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); font-size: var(--font-sm); }
+    .titlebar__spacer { flex: 1; }
+    .titlebar__sync { display: flex; align-items: center; gap: var(--space-2); padding: 4px 8px; border-radius: var(--radius-sm); font-size: var(--font-sm); color: var(--color-text-secondary); }
+    .titlebar__sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); }
+    .icon-btn { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
+    .icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text); }
+    .titlebar__user { width: 28px; height: 28px; border-radius: 50%; background: var(--color-primary); color: #fff; display: grid; place-items: center; font-size: var(--font-sm); font-weight: 600; }
+
+    .main { display: grid; grid-template-columns: var(--navrail-w) 1fr; min-height: 0; }
+    .navrail { background: var(--color-bg-elevated); border-right: 1px solid var(--color-divider); padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+    .navrail__section-label { font-size: var(--font-xs); text-transform: uppercase; color: var(--color-text-muted); padding: var(--space-2) var(--space-3) var(--space-1); letter-spacing: 0.04em; }
+    .navrail__item { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-3); border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text); font-size: var(--font-sm); text-decoration: none; transition: background-color var(--t-base) var(--ease), color var(--t-base) var(--ease); }
+    .navrail__item:hover { background: var(--color-bg-hover); }
+    .navrail__item.is-active { background: var(--color-primary-soft); color: var(--color-primary-bright); font-weight: 600; }
+    .navrail__item .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; color: currentColor; }
+    .navrail__item .badge { margin-left: auto; font-size: var(--font-xs); padding: 1px 6px; border-radius: 10px; background: var(--color-bg-active); color: var(--color-text-secondary); }
+    .navrail__item.is-active .badge { background: var(--color-primary); color: #fff; }
+    .navrail__footer { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--color-divider); }
+
+    .content { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .content__tabs { display: flex; align-items: center; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-divider); gap: var(--space-4); height: 40px; flex-shrink: 0; }
+    .content__tab { height: 100%; display: flex; align-items: center; padding: 0 var(--space-2); border-bottom: 2px solid transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); }
+    .content__tab.is-active { color: var(--color-text); border-bottom-color: var(--color-primary); font-weight: 600; }
+    .content__tab:hover { color: var(--color-text); }
+    .content__tab-actions { margin-left: auto; display: flex; gap: var(--space-2); }
+
+    .btn { height: 32px; padding: 0 var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-hover); color: var(--color-text); font-size: var(--font-sm); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); transition: background-color var(--t-base) var(--ease); border: none; font-family: inherit; }
+    .btn:hover { background: var(--color-bg-active); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn--primary { background: var(--color-primary); color: #fff; font-weight: 600; }
+    .btn--primary:hover { background: var(--color-primary-hover); }
+    .btn--danger { background: var(--color-danger); color: #fff; }
+    .btn--ghost { background: transparent; }
+    .btn--ghost:hover { background: var(--color-bg-hover); }
+    .btn--sm { height: 26px; padding: 0 var(--space-2); font-size: var(--font-xs); }
+    .btn--success { background: var(--color-success); color: #fff; font-weight: 600; }
+    .btn--warn { background: var(--color-warning); color: #1a1a1a; font-weight: 600; }
+
+    /* ===== 核心：左右分栏布局 ===== */
+    .pr-split { display: grid; grid-template-columns: var(--pr-list-w) 1fr; flex: 1; min-height: 0; }
+
+    /* ===== 左侧：PR 列表 ===== */
+    .pr-list-panel { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--color-divider); background: var(--color-bg); }
+
+    /* 左侧工具栏：筛选 chip + 搜索 */
+    .pr-list-toolbar { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-bottom: 1px solid var(--color-divider); flex-shrink: 0; }
+    .pr-list-toolbar__filters { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px; background: var(--color-bg-hover); font-size: var(--font-xs); color: var(--color-text-secondary); cursor: pointer; transition: background-color var(--t-base) var(--ease); border: none; font-family: inherit; }
+    .chip:hover { background: var(--color-bg-active); color: var(--color-text); }
+    .chip.is-active { background: var(--color-primary-soft); color: var(--color-primary-bright); font-weight: 600; }
+    .chip__count { background: var(--color-bg); border-radius: 8px; padding: 0 4px; }
+    .pr-list-toolbar__search { display: flex; align-items: center; gap: var(--space-2); padding: 4px var(--space-2); background: var(--color-bg-elevated); border-radius: var(--radius-sm); }
+    .pr-list-toolbar__search input { flex: 1; background: transparent; border: none; outline: none; color: var(--color-text); font-size: var(--font-sm); font-family: inherit; }
+    .pr-list-toolbar__search input::placeholder { color: var(--color-text-muted); }
+
+    /* PR 列表项 */
+    .pr-list-scroll { flex: 1; overflow-y: auto; padding: var(--space-2); }
+    .pr-card { display: flex; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-md); cursor: pointer; transition: background-color var(--t-base) var(--ease); border: 1px solid transparent; margin-bottom: var(--space-1); }
+    .pr-card:hover { background: var(--color-bg-hover); }
+    .pr-card.is-selected { background: var(--color-bg-elevated); border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary-soft); }
+    .pr-card__icon { flex-shrink: 0; width: 20px; height: 20px; display: grid; place-items: center; margin-top: 1px; }
+    .pr-card__icon--open { color: var(--color-success); }
+    .pr-card__icon--merged { color: var(--color-primary-bright); }
+    .pr-card__icon--closed { color: var(--color-text-muted); }
+    .pr-card__icon--draft { color: var(--color-warning); }
+    .pr-card__icon--conflict { color: var(--color-danger); }
+    .pr-card__body { flex: 1; min-width: 0; }
+    .pr-card__title { font-size: var(--font-sm); font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
+    .pr-card__num { color: var(--color-text-muted); font-family: 'JetBrains Mono', monospace; font-size: var(--font-xs); font-weight: 400; }
+    .pr-card__meta { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); font-size: var(--font-xs); color: var(--color-text-muted); }
+    .pr-card__branch { font-family: 'JetBrains Mono', monospace; padding: 1px 5px; background: var(--color-bg-subtle); border-radius: 3px; font-size: 10px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pr-card__avatar { width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 9px; font-weight: 600; color: #fff; flex-shrink: 0; }
+    .pr-card__badge { font-size: var(--font-xs); padding: 1px 6px; border-radius: 8px; font-weight: 600; flex-shrink: 0; }
+    .pr-card__badge--open { background: var(--color-success-soft); color: var(--color-success); }
+    .pr-card__badge--merged { background: var(--color-primary-soft); color: var(--color-primary-bright); }
+    .pr-card__badge--closed { background: var(--color-bg-hover); color: var(--color-text-muted); }
+    .pr-card__badge--draft { background: var(--color-warning-soft); color: var(--color-warning); }
+
+    /* ===== 右侧：PR 详情面板 ===== */
+    .pr-detail-panel { display: flex; flex-direction: column; min-height: 0; background: var(--color-bg); }
+
+    /* 详情头部 */
+    .pr-detail-header { padding: var(--space-4); border-bottom: 1px solid var(--color-divider); flex-shrink: 0; }
+    .pr-detail-header__top { display: flex; align-items: flex-start; gap: var(--space-3); }
+    .pr-detail-header__status-icon { flex-shrink: 0; width: 24px; height: 24px; display: grid; place-items: center; margin-top: 2px; }
+    .pr-detail-header__status-icon--open { color: var(--color-success); }
+    .pr-detail-header__status-icon--merged { color: var(--color-primary-bright); }
+    .pr-detail-header__status-icon--closed { color: var(--color-text-muted); }
+    .pr-detail-header__title-area { flex: 1; min-width: 0; }
+    .pr-detail-header__title { font-size: var(--font-xl); font-weight: 700; color: var(--color-text); margin: 0; line-height: 1.3; }
+    .pr-detail-header__subtitle { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); font-size: var(--font-sm); color: var(--color-text-secondary); }
+    .pr-detail-header__subtitle .status-badge { font-size: var(--font-xs); padding: 2px 8px; border-radius: 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+    .status-badge--open { background: var(--color-success-soft); color: var(--color-success); }
+    .status-badge--merged { background: var(--color-primary-soft); color: var(--color-primary-bright); }
+    .status-badge--closed { background: var(--color-bg-hover); color: var(--color-text-muted); }
+    .status-badge--draft { background: var(--color-warning-soft); color: var(--color-warning); }
+    .pr-detail-header__ext { flex-shrink: 0; }
+
+    /* 详情 meta 信息条 */
+    .pr-detail-meta { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider); font-size: var(--font-xs); color: var(--color-text-muted); flex-shrink: 0; }
+    .pr-detail-meta__item { display: inline-flex; align-items: center; gap: 4px; }
+    .pr-detail-meta__item dt { color: var(--color-text-muted); font-weight: 500; margin: 0; }
+    .pr-detail-meta__item dd { color: var(--color-text); font-weight: 500; margin: 0; }
+    .pr-detail-meta__branch { font-family: 'JetBrains Mono', monospace; padding: 1px 6px; background: var(--color-bg-elevated); border-radius: 3px; font-size: 10px; }
+    .pr-detail-meta__branch--dst { background: var(--color-primary-soft); color: var(--color-primary-bright); font-weight: 600; }
+    .pr-detail-meta__check { display: inline-flex; align-items: center; gap: 3px; }
+    .pr-detail-meta__check--ok { color: var(--color-success); }
+    .pr-detail-meta__check--bad { color: var(--color-danger); }
+
+    /* 详情操作按钮条 */
+    .pr-detail-actions { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider); flex-shrink: 0; flex-wrap: wrap; }
+
+    /* Tab 导航 */
+    .pr-detail-tabs { display: flex; gap: var(--space-1); padding: 0 var(--space-4); border-bottom: 1px solid var(--color-divider); height: 38px; flex-shrink: 0; }
+    .pr-detail-tab { height: 100%; display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-3); border-bottom: 2px solid transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease); background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; }
+    .pr-detail-tab:hover { color: var(--color-text); }
+    .pr-detail-tab.is-active { color: var(--color-text); border-bottom-color: var(--color-primary); font-weight: 600; }
+    .pr-detail-tab__count { font-size: var(--font-xs); padding: 0 5px; border-radius: 8px; background: var(--color-bg-hover); color: var(--color-text-muted); }
+    .pr-detail-tab.is-active .pr-detail-tab__count { background: var(--color-primary-soft); color: var(--color-primary-bright); }
+
+    /* Tab 内容滚动区 */
+    .pr-detail-body { flex: 1; overflow-y: auto; padding: var(--space-4); }
+
+    /* ===== 概览 Tab ===== */
+    .overview-section { margin-bottom: var(--space-4); }
+    .overview-section__label { font-size: var(--font-xs); font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--space-2); }
+    .overview-body { padding: var(--space-3); background: var(--color-bg-elevated); border-radius: var(--radius-md); font-size: var(--font-sm); line-height: 1.6; color: var(--color-text-secondary); }
+    .review-list { display: flex; flex-direction: column; gap: var(--space-2); }
+    .review-item { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); border: 1px dashed var(--color-divider); font-size: var(--font-sm); }
+    .review-item--approved { border-color: var(--color-success); background: var(--color-success-soft); }
+    .review-item--changes { border-color: var(--color-warning); background: var(--color-warning-soft); }
+    .review-item--commented { border-color: var(--color-divider); background: var(--color-bg-subtle); }
+    .review-item__badge { font-size: var(--font-xs); padding: 1px 6px; border-radius: 8px; font-weight: 600; flex-shrink: 0; }
+    .review-item__badge--approved { background: var(--color-success); color: #fff; }
+    .review-item__badge--changes { background: var(--color-warning); color: #1a1a1a; }
+    .review-item__badge--commented { background: var(--color-bg-hover); color: var(--color-text-muted); }
+    .review-item__author { font-weight: 600; color: var(--color-text); }
+    .review-item__body { color: var(--color-text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .review-item__time { color: var(--color-text-muted); font-size: var(--font-xs); flex-shrink: 0; }
+
+    /* ===== 对话 Tab ===== */
+    .conversation-list { display: flex; flex-direction: column; gap: var(--space-3); }
+    .conv-item { display: flex; gap: var(--space-3); }
+    .conv-item__avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: var(--font-xs); font-weight: 600; color: #fff; flex-shrink: 0; }
+    .conv-item__body { flex: 1; min-width: 0; }
+    .conv-item__head { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-1); }
+    .conv-item__author { font-weight: 600; color: var(--color-text); font-size: var(--font-sm); }
+    .conv-item__time { color: var(--color-text-muted); font-size: var(--font-xs); }
+    .conv-item__content { padding: var(--space-3); background: var(--color-bg-elevated); border-radius: var(--radius-md); font-size: var(--font-sm); line-height: 1.6; color: var(--color-text); }
+    .conv-item--review { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); border: 1px dashed var(--color-divider); font-size: var(--font-sm); display: flex; align-items: center; gap: var(--space-2); }
+    .conv-item--review--approved { border-color: var(--color-success); background: var(--color-success-soft); }
+    .conv-item--review--changes { border-color: var(--color-warning); background: var(--color-warning-soft); }
+    .conv-item--review--commented { border-color: var(--color-divider); }
+
+    /* 评论输入区 */
+    .comment-composer { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-divider); }
+    .comment-composer__textarea { width: 100%; min-height: 72px; padding: var(--space-3); background: var(--color-bg-elevated); border: 1px solid var(--color-divider); border-radius: var(--radius-md); color: var(--color-text); font-size: var(--font-sm); font-family: inherit; resize: vertical; outline: none; transition: border-color var(--t-base) var(--ease); }
+    .comment-composer__textarea:focus { border-color: var(--color-primary); }
+    .comment-composer__actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); justify-content: flex-end; }
+
+    /* ===== 文件评论 Tab ===== */
+    .file-list { display: flex; flex-direction: column; gap: var(--space-2); }
+    .file-item { padding: var(--space-3); background: var(--color-bg-elevated); border-radius: var(--radius-md); }
+    .file-item__head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-sm); }
+    .file-item__name { font-family: 'JetBrains Mono', monospace; font-weight: 500; color: var(--color-text); flex: 1; }
+    .file-item__stats { display: flex; gap: var(--space-2); font-size: var(--font-xs); }
+    .file-item__add { color: var(--color-success); }
+    .file-item__del { color: var(--color-danger); }
+    .file-item__badge { font-size: var(--font-xs); padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+    .file-item__badge--added { background: var(--color-success-soft); color: var(--color-success); }
+    .file-item__badge--modified { background: var(--color-info-soft); color: var(--color-info); }
+    .file-item__badge--deleted { background: var(--color-danger-soft); color: var(--color-danger); }
+    .file-item__badge--renamed { background: var(--color-warning-soft); color: var(--color-warning); }
+
+    /* 合并确认弹窗 */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: grid; place-items: center; z-index: 100; }
+    .modal { width: 520px; background: var(--color-bg-elevated); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; }
+    .modal__head { padding: var(--space-4); display: flex; align-items: center; }
+    .modal__head h3 { margin: 0; font-size: var(--font-lg); flex: 1; }
+    .modal__body { padding: var(--space-4); }
+    .modal__row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; font-size: var(--font-sm); }
+    .modal__row label { color: var(--color-text-muted); min-width: 80px; }
+    .modal__select { flex: 1; height: 32px; padding: 0 var(--space-2); border-radius: var(--radius-sm); background: var(--color-bg-hover); color: var(--color-text); border: none; font-size: var(--font-sm); font-family: inherit; }
+    .modal__foot { padding: var(--space-3) var(--space-4); display: flex; gap: var(--space-2); justify-content: flex-end; }
+    .merge-summary { background: var(--color-primary-soft); border-radius: var(--radius-sm); padding: var(--space-3); margin: var(--space-3) 0; font-size: var(--font-sm); }
+    .merge-summary strong { color: var(--color-primary-bright); }
+    .checklist { padding: 0; margin: var(--space-2) 0; list-style: none; }
+    .checklist li { padding: 4px 0; font-size: var(--font-sm); display: flex; align-items: center; gap: 6px; }
+    .checklist .icon { font-weight: 700; color: var(--color-success); }
+
+    /* 空态 */
+    .pr-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: var(--space-3); color: var(--color-text-muted); }
+    .pr-empty__icon { width: 48px; height: 48px; opacity: 0.4; }
+    .pr-empty__text { font-size: var(--font-md); }
+
+    /* 设计稿注释标记 */
+    .design-note { position: fixed; bottom: var(--space-3); right: var(--space-3); max-width: 320px; padding: var(--space-3); background: var(--color-bg-elevated); border-radius: var(--radius-md); box-shadow: var(--shadow-md); font-size: var(--font-xs); color: var(--color-text-muted); z-index: 50; line-height: 1.5; }
+    .design-note strong { color: var(--color-primary-bright); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <div class="titlebar__logo">
+        <span class="titlebar__logo-mark" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+        </span>
+        <span>Gitea Kanban</span>
+      </div>
+      <div class="titlebar__repo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4"/><path d="M3 17l9 4 9-4"/></svg>
+        <span><strong>my-team</strong> / <strong>web-app</strong></span>
+      </div>
+      <div class="titlebar__spacer"></div>
+      <div class="titlebar__sync"><span class="dot" aria-hidden="true"></span><span>已同步 · 2 分钟前</span></div>
+      <button class="icon-btn" aria-label="通知" title="通知">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      </button>
+      <div class="titlebar__user">ZS</div>
+    </header>
+
+    <div class="main">
+      <nav class="navrail" aria-label="主导航">
+        <div class="navrail__section-label">我的工作</div>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span> 我的卡片<span class="badge">3</span></a>
+        <a class="navrail__item" href="index.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg></span> 看板</a>
+        <div class="navrail__section-label">代码</div>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span> 分支</a>
+        <a class="navrail__item is-active" href="merge-split-layout.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M15 18H9a3 3 0 0 1-3-3V9"/></svg></span> 合并请求<span class="badge">5</span></a>
+        <a class="navrail__item" href="timeline.html"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg></span> 时间轴</a>
+        <div class="navrail__section-label">协作</div>
+        <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> 成员</a>
+        <div class="navrail__footer">
+          <a class="navrail__item" href="#"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> 设置</a>
+        </div>
+      </nav>
+
+      <section class="content">
+        <div class="content__tabs" role="tablist">
+          <a class="content__tab" href="index.html" role="tab">看板</a>
+          <a class="content__tab" href="timeline.html" role="tab">时间轴</a>
+          <div class="content__tab is-active" role="tab" aria-selected="true">合并请求 (5)</div>
+          <div class="content__tab-actions">
+            <button class="btn">+ 新建合并请求</button>
+          </div>
+        </div>
+
+        <!-- ===== 核心：左右分栏 ===== -->
+        <div class="pr-split">
+
+          <!-- ===== 左侧：PR 列表 ===== -->
+          <aside class="pr-list-panel">
+            <!-- 工具栏：筛选 + 搜索 -->
+            <div class="pr-list-toolbar">
+              <div class="pr-list-toolbar__filters">
+                <button class="chip is-active">全部 <span class="chip__count">6</span></button>
+                <button class="chip">待合并 <span class="chip__count">2</span></button>
+                <button class="chip">审核中 <span class="chip__count">1</span></button>
+                <button class="chip">有冲突 <span class="chip__count">1</span></button>
+                <button class="chip">已合并 <span class="chip__count">1</span></button>
+                <button class="chip">已关闭 <span class="chip__count">1</span></button>
+              </div>
+              <div class="pr-list-toolbar__search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-text-muted); flex-shrink: 0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" placeholder="搜索标题或分支…" />
+              </div>
+            </div>
+
+            <!-- PR 列表滚动区 -->
+            <div class="pr-list-scroll">
+              <!-- 选中项 -->
+              <div class="pr-card is-selected">
+                <div class="pr-card__icon pr-card__icon--open">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M15 18H9a3 3 0 0 1-3-3V9"/></svg>
+                </div>
+                <div class="pr-card__body">
+                  <div class="pr-card__title">fix(login): 关闭 iOS 18 下的背景动效 <span class="pr-card__num">#124</span></div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__branch">hotfix/safari</span>
+                    <span>→</span>
+                    <span class="pr-card__branch">主线</span>
+                  </div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__avatar" style="background: #6FB1FF;">CY</span>
+                    <span>陈杨 · 昨天</span>
+                    <span style="margin-left: auto;" class="pr-card__badge pr-card__badge--open">待合并</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pr-card">
+                <div class="pr-card__icon pr-card__icon--open">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M15 18H9a3 3 0 0 1-3-3V9"/></svg>
+                </div>
+                <div class="pr-card__body">
+                  <div class="pr-card__title">把订单状态机的日志改成结构化 JSON <span class="pr-card__num">#128</span></div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__branch">feature/order-log</span>
+                    <span>→</span>
+                    <span class="pr-card__branch">主线</span>
+                  </div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__avatar" style="background: #B294E2;">ZH</span>
+                    <span>周航 · 3 小时前</span>
+                    <span style="margin-left: auto;" class="pr-card__badge pr-card__badge--open">待合并</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pr-card">
+                <div class="pr-card__icon pr-card__icon--open">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M15 18H9a3 3 0 0 1-3-3V9"/></svg>
+                </div>
+                <div class="pr-card__body">
+                  <div class="pr-card__title">把"个人主页"页面的懒加载从图片扩展到组件 <span class="pr-card__num">#131</span></div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__branch">feature/lazyload</span>
+                    <span>→</span>
+                    <span class="pr-card__branch">develop</span>
+                  </div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__avatar" style="background: #6FB1FF;">CY</span>
+                    <span>陈杨 · 今天 09:14</span>
+                    <span style="margin-left: auto;" class="pr-card__badge pr-card__badge--draft">草稿</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pr-card">
+                <div class="pr-card__icon pr-card__icon--conflict">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+                <div class="pr-card__body">
+                  <div class="pr-card__title">/api/v2/users 接口分页 cursor 改造 <span class="pr-card__num">#127</span></div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__branch">feature/user-pagination</span>
+                    <span>→</span>
+                    <span class="pr-card__branch">主线</span>
+                  </div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__avatar" style="background: #B294E2;">ZH</span>
+                    <span>周航 · 5/26</span>
+                    <span style="margin-left: auto; color: var(--color-danger);">有冲突</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pr-card">
+                <div class="pr-card__icon pr-card__icon--merged">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M6 9v6a3 3 0 0 0 3 3h6"/></svg>
+                </div>
+                <div class="pr-card__body">
+                  <div class="pr-card__title">生产 Redis 升级到 7.2 <span class="pr-card__num">#120</span></div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__branch">ops/redis-72</span>
+                    <span>→</span>
+                    <span class="pr-card__branch">主线</span>
+                  </div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__avatar" style="background: #5F7A87;">SY</span>
+                    <span>孙宇 · 5/24</span>
+                    <span style="margin-left: auto;" class="pr-card__badge pr-card__badge--merged">已合并</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pr-card" style="opacity: 0.65;">
+                <div class="pr-card__icon pr-card__icon--closed">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                </div>
+                <div class="pr-card__body">
+                  <div class="pr-card__title">[废弃] 旧版用户中心改造方案 v1 <span class="pr-card__num">#108</span></div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__branch">feature/old-redesign</span>
+                    <span>→</span>
+                    <span class="pr-card__branch">主线</span>
+                  </div>
+                  <div class="pr-card__meta">
+                    <span class="pr-card__avatar" style="background: #F76707;">LY</span>
+                    <span>林雨 · 5/10</span>
+                    <span style="margin-left: auto;" class="pr-card__badge pr-card__badge--closed">已关闭</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <!-- ===== 右侧：PR 详情面板 ===== -->
+          <section class="pr-detail-panel">
+
+            <!-- 详情头部：标题 + 状态 -->
+            <div class="pr-detail-header">
+              <div class="pr-detail-header__top">
+                <div class="pr-detail-header__status-icon pr-detail-header__status-icon--open">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M15 18H9a3 3 0 0 1-3-3V9"/></svg>
+                </div>
+                <div class="pr-detail-header__title-area">
+                  <h1 class="pr-detail-header__title">fix(login): 关闭 iOS 18 下的背景动效</h1>
+                  <div class="pr-detail-header__subtitle">
+                    <span class="status-badge status-badge--open">✓ 待合并</span>
+                    <span><strong style="color: var(--color-text);">陈杨</strong> 想把 <code class="mono pr-detail-meta__branch">hotfix/safari</code> 合并到 <code class="mono pr-detail-meta__branch pr-detail-meta__branch--dst">主线</code></span>
+                  </div>
+                </div>
+                <div class="pr-detail-header__ext">
+                  <button class="btn btn--ghost btn--sm" title="在浏览器打开">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    在浏览器打开
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Meta 信息条 -->
+            <dl class="pr-detail-meta">
+              <div class="pr-detail-meta__item">
+                <dt>作者</dt><dd>陈杨</dd>
+              </div>
+              <div class="pr-detail-meta__item">
+                <dt>创建</dt><dd>昨天 16:20</dd>
+              </div>
+              <div class="pr-detail-meta__item">
+                <dt>更新</dt><dd>2 小时前</dd>
+              </div>
+              <div class="pr-detail-meta__item">
+                <dt>提交</dt><dd>3 次 · +24 / −86</dd>
+              </div>
+              <div class="pr-detail-meta__item">
+                <span class="pr-detail-meta__check pr-detail-meta__check--ok">✓ 无冲突</span>
+              </div>
+              <div class="pr-detail-meta__item">
+                <span class="pr-detail-meta__check pr-detail-meta__check--ok">✓ 可合并</span>
+              </div>
+              <div class="pr-detail-meta__item">
+                <dt>审核</dt><dd>3 人通过</dd>
+              </div>
+            </dl>
+
+            <!-- 操作按钮条 -->
+            <div class="pr-detail-actions">
+              <button class="btn btn--primary" id="mergeBtn">合并到主线</button>
+              <button class="btn btn--success btn--sm">✓ 批准</button>
+              <button class="btn btn--warn btn--sm">请求修改</button>
+              <button class="btn btn--ghost btn--sm">评论</button>
+              <div style="flex: 1;"></div>
+              <button class="btn btn--ghost btn--sm" style="color: var(--color-danger);" title="关闭此合并请求（不合并）">关闭</button>
+            </div>
+
+            <!-- Tab 导航 -->
+            <div class="pr-detail-tabs">
+              <button class="pr-detail-tab" data-tab="overview">概览</button>
+              <button class="pr-detail-tab" data-tab="files">文件评论 <span class="pr-detail-tab__count">3</span></button>
+              <button class="pr-detail-tab is-active" data-tab="conversation">对话 <span class="pr-detail-tab__count">5</span></button>
+            </div>
+
+            <!-- Tab 内容 -->
+            <div class="pr-detail-body" id="tabContent">
+              <!-- ===== 对话 Tab（默认展示）===== -->
+              <div class="conversation-list">
+                <!-- Review 事件：批准 -->
+                <div class="conv-item conv-item--review conv-item--review--approved">
+                  <span class="review-item__badge review-item__badge--approved">已批准</span>
+                  <span class="review-item__author">李明</span>
+                  <span style="color: var(--color-text-secondary);">批准了此合并请求</span>
+                  <span class="review-item__time" style="margin-left: auto;">昨天 17:30</span>
+                </div>
+
+                <!-- 普通评论 -->
+                <div class="conv-item">
+                  <div class="conv-item__avatar" style="background: #6FB1FF;">CY</div>
+                  <div class="conv-item__body">
+                    <div class="conv-item__head">
+                      <span class="conv-item__author">陈杨</span>
+                      <span class="conv-item__time">昨天 16:20</span>
+                    </div>
+                    <div class="conv-item__content">
+                      iOS 18 的 Safari 在处理 <code class="mono">backdrop-filter</code> 动画时有严重的掉帧问题，影响用户体验。这个 PR 把背景动效在 iOS 18 上关掉，改用纯色过渡。
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Review 事件：评论 -->
+                <div class="conv-item conv-item--review conv-item--review--commented">
+                  <span class="review-item__badge review-item__badge--commented">已评论</span>
+                  <span class="review-item__author">王芳</span>
+                  <span style="color: var(--color-text-secondary);">这个改动很清晰，建议加个注释说明为什么 iOS 18 要特殊处理。</span>
+                  <span class="review-item__time" style="margin-left: auto;">今天 10:15</span>
+                </div>
+
+                <!-- 普通评论 -->
+                <div class="conv-item">
+                  <div class="conv-item__avatar" style="background: #5BC76A;">LM</div>
+                  <div class="conv-item__body">
+                    <div class="conv-item__head">
+                      <span class="conv-item__author">李明</span>
+                      <span class="conv-item__time">今天 11:00</span>
+                    </div>
+                    <div class="conv-item__content">
+                      已经加了注释，在 <code class="mono">LoginBackground.vue</code> 第 42 行。审核通过 ✅
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Review 事件：批准 -->
+                <div class="conv-item conv-item--review conv-item--review--approved">
+                  <span class="review-item__badge review-item__badge--approved">已批准</span>
+                  <span class="review-item__author">王芳</span>
+                  <span style="color: var(--color-text-secondary);">批准了此合并请求</span>
+                  <span class="review-item__time" style="margin-left: auto;">今天 11:30</span>
+                </div>
+              </div>
+
+              <!-- 评论输入区 -->
+              <div class="comment-composer">
+                <textarea class="comment-composer__textarea" placeholder="写下你的评论…"></textarea>
+                <div class="comment-composer__actions">
+                  <button class="btn btn--ghost btn--sm">✓ 批准</button>
+                  <button class="btn btn--ghost btn--sm">请求修改</button>
+                  <button class="btn btn--primary btn--sm">发表评论</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- 合并确认弹窗（模拟） -->
+        <div class="modal-backdrop" id="mergeModal" role="presentation" style="display: none;">
+          <div class="modal" role="dialog" aria-labelledby="merge-title" aria-modal="true">
+            <div class="modal__head">
+              <h3 id="merge-title">合并 #124 到主线</h3>
+              <button class="btn btn--ghost btn--sm" aria-label="关闭" onclick="document.getElementById('mergeModal').style.display='none'">✕</button>
+            </div>
+            <div class="modal__body">
+              <div class="modal__row">
+                <label>源分支</label>
+                <code class="mono" style="padding: 1px 6px; background: var(--color-bg); border-radius: var(--radius-sm);">hotfix/safari</code>
+              </div>
+              <div class="modal__row">
+                <label>目标分支</label>
+                <code class="mono" style="padding: 1px 6px; background: var(--color-primary-soft); color: var(--color-primary); border-radius: var(--radius-sm); font-weight: 600;">主线</code>
+              </div>
+              <div class="modal__row">
+                <label>合并方式</label>
+                <select class="modal__select" aria-label="合并方式">
+                  <option>普通合并（保留完整历史，推荐）</option>
+                  <option>压缩并合并（把 3 次提交合成 1 个）</option>
+                  <option>变基并合并（保持线性历史）</option>
+                </select>
+              </div>
+              <div class="merge-summary">
+                <strong>✓ 这次合并预计：</strong><br/>
+                · 不需要解决冲突<br/>
+                · 3 个审核已通过<br/>
+                · 会把 hotfix/safari 的 3 次提交合并进主线<br/>
+                · 合并后 hotfix/safari 仍保留
+              </div>
+              <ul class="checklist">
+                <li><span class="icon">✓</span> 无冲突</li>
+                <li><span class="icon">✓</span> 3 人通过审核</li>
+                <li><span class="icon">✓</span> 所有 CI 检查已通过</li>
+                <li><span class="icon">✓</span> 你有合并权限</li>
+              </ul>
+            </div>
+            <div class="modal__foot">
+              <button class="btn" onclick="document.getElementById('mergeModal').style.display='none'">取消</button>
+              <button class="btn btn--primary">确认合并</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 设计稿注释 -->
+  <div class="design-note">
+    <strong>设计稿说明 · 合并请求左右布局</strong><br/>
+    ① 左侧 380px 固定宽 PR 列表，可滚动；右侧自适应详情面板<br/>
+    ② 点击左侧 PR 卡片 → 右侧加载对应详情（不跳转页面）<br/>
+    ③ 右侧从上到下：标题+状态 → meta 信息条 → 操作按钮条 → Tab 导航 → Tab 内容<br/>
+    ④ 三个 Tab：概览（描述+评审）/ 文件评论（PullFileComments）/ 对话（评论+评审事件时间线）<br/>
+    ⑤ 合并按钮点击 → 弹出二次确认弹窗（复用现有 ConfirmDialog）<br/>
+    ⑥ 复用 merge.html 的设计系统变量（苍蓝底 + gitea 绿主色）
+  </div>
+
+  <script>
+    // 合并按钮 → 弹窗
+    document.getElementById('mergeBtn').addEventListener('click', function() {
+      document.getElementById('mergeModal').style.display = 'grid';
+    });
+
+    // Tab 切换（演示用，实际 Vue 里用 v-if）
+    var tabs = document.querySelectorAll('.pr-detail-tab');
+    var tabContent = document.getElementById('tabContent');
+    tabs.forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        tabs.forEach(function(t) { t.classList.remove('is-active'); });
+        tab.classList.add('is-active');
+        var which = tab.dataset.tab;
+        if (which === 'overview') {
+          tabContent.innerHTML = '\
+            <div class="overview-section">\
+              <div class="overview-section__label">描述</div>\
+              <div class="overview-body">iOS 18 的 Safari 在处理 backdrop-filter 动画时有严重的掉帧问题，影响用户体验。这个 PR 把背景动效在 iOS 18 上关掉，改用纯色过渡。</div>\
+            </div>\
+            <div class="overview-section">\
+              <div class="overview-section__label">评审</div>\
+              <div class="review-list">\
+                <div class="review-item review-item--approved">\
+                  <span class="review-item__badge review-item__badge--approved">已批准</span>\
+                  <span class="review-item__author">李明</span>\
+                  <span class="review-item__body">LGTM</span>\
+                  <span class="review-item__time">昨天 17:30</span>\
+                </div>\
+                <div class="review-item review-item--commented">\
+                  <span class="review-item__badge review-item__badge--commented">已评论</span>\
+                  <span class="review-item__author">王芳</span>\
+                  <span class="review-item__body">建议加注释说明 iOS 18 特殊处理</span>\
+                  <span class="review-item__time">今天 10:15</span>\
+                </div>\
+                <div class="review-item review-item--approved">\
+                  <span class="review-item__badge review-item__badge--approved">已批准</span>\
+                  <span class="review-item__author">王芳</span>\
+                  <span class="review-item__body">已修改，通过</span>\
+                  <span class="review-item__time">今天 11:30</span>\
+                </div>\
+              </div>\
+            </div>';
+        } else if (which === 'files') {
+          tabContent.innerHTML = '\
+            <div class="file-list">\
+              <div class="file-item">\
+                <div class="file-item__head">\
+                  <span class="file-item__badge file-item__badge--modified">修改</span>\
+                  <span class="file-item__name">src/components/LoginBackground.vue</span>\
+                  <span class="file-item__stats"><span class="file-item__add">+18</span><span class="file-item__del">−42</span></span>\
+                </div>\
+              </div>\
+              <div class="file-item">\
+                <div class="file-item__head">\
+                  <span class="file-item__badge file-item__badge--modified">修改</span>\
+                  <span class="file-item__name">src/composables/useDeviceDetect.ts</span>\
+                  <span class="file-item__stats"><span class="file-item__add">+6</span><span class="file-item__del">−4</span></span>\
+                </div>\
+              </div>\
+              <div class="file-item">\
+                <div class="file-item__head">\
+                  <span class="file-item__badge file-item__badge--added">新增</span>\
+                  <span class="file-item__name">src/utils/iosVersion.ts</span>\
+                  <span class="file-item__stats"><span class="file-item__add">+12</span><span class="file-item__del">−0</span></span>\
+                </div>\
+              </div>\
+            </div>';
+        } else {
+          // conversation — 重新加载默认内容
+          location.reload();
+        }
+      });
+    });
+
+    // PR 卡片点击切换选中
+    document.querySelectorAll('.pr-card').forEach(function(card) {
+      card.addEventListener('click', function() {
+        document.querySelectorAll('.pr-card').forEach(function(c) { c.classList.remove('is-selected'); });
+        card.classList.add('is-selected');
+      });
+    });
+  </script>
+</body>
+</html>

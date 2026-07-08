@@ -1,5 +1,23 @@
 # 前端设计：UI/UX + 时间轴可视化 + 静态 wireframe
 
+> ## ⚠️ DEPRECATED（2026-07-01）
+>
+> **本文件描述的是 v1 设计阶段的 React 18 → Vue 3 调研稿（2026-06-10），大量内容已被 v2.0 / v3.0 推翻**：
+>
+> - **技术栈**：本文件提到的 **React 18 + Zustand + Radix UI** 是早期调研方向；实际采纳 **Vue 3 + Pinia + Radix Vue**（v1 末）+ v2.0 切 Go+Wails 后保留
+> - **timeline 库**：本文件提到的 **AntV X6@3.1.7** 已在 v3.0 refactor **整体移除**（commit `71a43f3 refactor(gitgraph): v3.0 严格 1:1 复刻 vscode-git-graph，丢弃 v2.x 历史包袱`），改用 Vue 3 + 自研 SVG lane 渲染 + go-git DAG 输出结构化 `GraphResult`
+> - **IPC 架构**：本文件提到的 **Zod schema → TS 类型自动派生到 `src/shared/ipc-types.ts`** 是 v1 Electron 时代的；v2.0 改用 Wails 自动生成 TS bindings 到 `frontend/wailsjs/`
+> - **凭证**：本文件提到的 **Electron safeStorage / 系统 keychain** 路径在 v2.0 改用 Go 端 [`zalando/go-keyring`](https://github.com/zalando/go-keyring)
+> - **本地存储**：本文件提到的 SQLite/Drizzle 已 v2.0 切为 Go 端 `app/store` + `state.json`（参考 ADR-0005 §决策 5）
+> - **本地缓存**：本文件提到的"SQLite + 文件 KV"已 v2.0 切为 Go 端 `app/cache` 文件 KV
+> - **多平台**：本文件未涉及 GitHub；v2.0 起 GitHub 也纳入（仅 Git Graph）
+>
+> **权威入口**：[AGENTS.md §6 架构要点](../../AGENTS.md) + [ADR-0005](../adr/0005-electron-to-go-wails-migration.md) + [ADR-0006](../adr/0006-v24-iteration-fixes.md) + [docs/design/06-gitgraph.md](./06-gitgraph.md)（当前 Git Graph 设计）
+>
+> **本文件保留作为 v1 设计阶段的历史档案**（不删除）；不要按本文件实施。
+>
+> ---
+
 > 任务编号：frontend-design
 > 输出版本：v4（按 ui-ux-pro-max OVERRIDE 重定 · 撤销 v3 暗色默认）
 > 输出时间：2026-06-10

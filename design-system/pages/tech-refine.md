@@ -1,7 +1,16 @@
-# Tech Refine — 暗色主题「技术工具科技感」精修
+# Tech Refine — 暗色主题「技术工具科技感」精修 · ⚠️ 已废弃
 
-> **范围**：本文件是 `MASTER.md` + `OVERRIDE.md` 之上的 page-level 精修文件，定义 gitea-kanban v1 暗色主题
-> 在「技术工具的科技感」方向上的**具体落地 token**。
+> ⚠️ **本文件已废弃 · 2026-06-22 切到 v1.6 Minimalism + Functional Density**
+>
+> 本文件原定义 v1.1「HUD / Sci-Fi FUI」方向的 token（装饰角 / 标题前缀条 / 键帽 / KPI 发光 /
+> 角落点阵 / 主色外环 glow / 4 层 elevation 三件套阴影）。**所有这些 token 在 v1.6 已被删除**，
+> 代码已切换到 `--shadow-xs/sm/md/lg` 4 档单层柔和阴影 + 1px 边界线分区。
+>
+> 当前生效的设计系统：
+> - **`design-system/gitea-kanban/OVERRIDE.md`** —— §"Minimalism 设计原则（v1.6）"
+> - **`frontend/src/styles/theme.css`** —— 顶部 v1.6 注释块 + 4 档阴影 token
+>
+> 本文件**保留**作为历史快照，仅供回顾 v1.1 决策。请勿再按本文件 token 落地。
 >
 > **硬约束**（不破坏，照搬）：
 >
