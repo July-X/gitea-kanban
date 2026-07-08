@@ -1434,14 +1434,95 @@ func (a *GitHubAdapter) ListMilestones(ctx context.Context, hostURL, username, t
 	return out, nil
 }
 
-// UpdatePullMilestone v0.6.0 Gitea only
+// UpdatePullMilestone 给 PR 关联里程碑（v0.7.0, GitHub）
+//
+// GitHub 用 milestone number（不是 name，Gitea 用 name）。
+// 前端走 store-first: pullStore.updateMilestone(pullId, milestoneTitle)
+// → ipcClient.pullsUpdateMilestone({projectId, index, milestone: title})
+// → App.UpdatePullMilestone → adapter.UpdatePullMilestone(title)
+// adapter 内部 GET milestones?state=all 做 title→number 反查。
+// milestone="" → PATCH {"milestone": null} 清空。
 func (a *GitHubAdapter) UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*platform.PullDetailDTO, error) {
-	return nil, platform.ErrNotSupported
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, index)
+	// 清空 milestone
+	if milestone == "" {
+		reader, err := encodeJSONBody(map[string]any{"milestone": nil})
+		if err != nil {
+			return nil, err
+		}
+		if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, nil); err != nil {
+			return nil, err
+		}
+		return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	}
+	// milestone title → number 反查
+	var raw []struct {
+		Number int64  `json:"number"`
+		Title  string `json:"title"`
+	}
+	mPath := fmt.Sprintf("/repos/%s/%s/milestones?state=all&per_page=100", owner, repo)
+	if err := a.doRequest(ctx, hostURL, token, "GET", mPath, nil, &raw); err != nil {
+		return nil, err
+	}
+	var number int64 = -1
+	for _, m := range raw {
+		if m.Title == milestone {
+			number = m.Number
+			break
+		}
+	}
+	if number < 0 {
+		return nil, ipc.NewValidationFailed(fmt.Sprintf("里程碑 %q 在 %s/%s 中不存在", milestone, owner, repo), "")
+	}
+	reader, err := encodeJSONBody(map[string]any{"milestone": number})
+	if err != nil {
+		return nil, err
+	}
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, nil); err != nil {
+		return nil, err
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
-// ListPullCommits 首期不支持（GitHub 仅 Git Graph）
+// ListPullCommits 列 PR 提交历史（v0.7.0, GitHub）
+// GET /repos/{owner}/{repo}/pulls/{index}/commits
 func (a *GitHubAdapter) ListPullCommits(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullCommitDTO, error) {
-	return nil, platform.ErrNotSupported
+	var raw []struct {
+		SHA    string `json:"sha"`
+		Commit struct {
+			Message string `json:"message"`
+			Author  struct {
+				Name  string `json:"name"`
+				Email string `json:"email"`
+				Date  string `json:"date"`
+			} `json:"author"`
+			Committer struct {
+				Date string `json:"date"`
+			} `json:"committer"`
+		} `json:"commit"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/commits?per_page=100", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullCommitDTO, 0, len(raw))
+	for _, c := range raw {
+		subject := c.Commit.Message
+		if idx := strings.Index(subject, "\n"); idx > 0 {
+			subject = subject[:idx]
+		}
+		out = append(out, platform.PullCommitDTO{
+			SHA:        c.SHA,
+			ShortSHA:   c.SHA,
+			Subject:    subject,
+			Body:       strings.TrimPrefix(c.Commit.Message, subject),
+			AuthorName: c.Commit.Author.Name,
+			AuthorMail: c.Commit.Author.Email,
+			AuthoredAt: c.Commit.Author.Date,
+			Committed:  c.Commit.Committer.Date,
+		})
+	}
+	return out, nil
 }
 
 // ===== HTTP 请求封装 =====
