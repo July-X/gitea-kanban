@@ -485,14 +485,14 @@ async function openAttrEditor(p: PullDto): Promise<void> {
     } catch { /* 忽略 */ }
     // v0.6+ bugfix：复用 loadMembers，避免重复代码
     await loadMembers();
-    // v0.6.0 加载里程碑列表（仅 Gitea 数据源）
-    if (currentPlatform.value === 'gitea') {
-      try {
-        await pullStore.loadAttrEditorData(String(activeProjectId.value));
-        availableMilestones.value = pullStore.availableMilestones;
-        availableMembers.value = pullStore.availableMembers.map(m => m.login);
-      } catch { /* 忽略 */ }
-    }
+    // v0.7.0：加载里程碑 / 成员（gitea state='all' / github state='open'）
+    // loadAttrEditorData 内部按 platform 派发 state，不再需前端 v-if 守护。
+    try {
+      await pullStore.loadAttrEditorData(String(activeProjectId.value));
+      availableMilestones.value = pullStore.availableMilestones;
+      // loadMembers 已设置 availableMembers = string[]；这里覆盖为 rich 对象
+      availableMembers.value = pullStore.availableMembers.map((m) => m.username ?? '');
+    } catch { /* 静默 */ }
   }
 }
 
@@ -1991,8 +1991,8 @@ function formatRelative(iso: string | undefined): string {
           </select>
           <span class="attr-editor__hint">按住 ⌘/Ctrl 多选</span>
         </div>
-        <!-- 里程碑（仅 Gitea） -->
-        <div v-if="currentPlatform === 'gitea'" class="attr-editor__section">
+        <!-- 里程碑：v0.7.0 起 GitHub 数据源也开放（加载 GitHub milestones） -->
+        <div class="attr-editor__section">
           <label class="attr-editor__label" for="attr-milestone">里程碑：</label>
           <select
             id="attr-milestone"
