@@ -297,12 +297,20 @@ async function onRefresh(): Promise<void> {
 /** PR 提交列表缓存（按 PR index 分组） */
 const commitsByPR = ref<Map<number, PullCommitDto[]>>(new Map());
 const commitsLoading = ref(false);
+const filesLoading = ref(false);
+
+const tabLoading = computed(() => ({
+  conversation: getPanel(selectedPR.value?.index ?? -1)?.loading ?? false,
+  commits: commitsLoading.value,
+  files: filesLoading.value,
+}));
 
 function selectPR(p: PullDto): void {
   selectedPR.value = p;
   void loadComments(p);
   void loadReviews(p);
   void loadCommits(p);
+  void loadFilesForPR(p);
 }
 
 /** 加载 PR 提交列表 */
@@ -320,6 +328,21 @@ async function loadCommits(p: PullDto): Promise<void> {
     // 失败不阻断
   } finally {
     commitsLoading.value = false;
+  }
+}
+
+/** 加载 PR 文件变动列表（并发，selectPR 时触发） */
+async function loadFilesForPR(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  if (pull.filesByPR.get(p.index)?.length) return;
+  filesLoading.value = true;
+  try {
+    await pull.loadFiles(activeProjectId.value, p.index);
+    await pull.loadReviewComments(activeProjectId.value, p.index);
+  } catch {
+    // 失败不阻断
+  } finally {
+    filesLoading.value = false;
   }
 }
 
@@ -815,6 +838,87 @@ function setDraft(idx: number, val: string): void {
     commentDrafts.value.delete(idx);
   } else {
     commentDrafts.value.set(idx, val);
+  }
+}
+
+/**
+ * Markdown 工具栏：在光标位置插入格式化标记
+ * 对齐 GitHub 评论编辑器工具栏行为
+ */
+function insertMarkdown(idx: number, type: string): void {
+  const ta = commentInputRef.value;
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const draft = getDraft(idx);
+  const selected = draft.slice(start, end);
+  let insert = '';
+  let cursorOffset = 0;
+  switch (type) {
+    case 'bold':
+      insert = `**${selected || '粗体'}**`;
+      cursorOffset = selected ? insert.length : 2;
+      break;
+    case 'italic':
+      insert = `*${selected || '斜体'}*`;
+      cursorOffset = selected ? insert.length : 1;
+      break;
+    case 'code':
+      insert = selected.includes('\n') ? `\n\`\`\`\n${selected}\n\`\`\`\n` : `\`${selected || '代码'}\``;
+      cursorOffset = selected ? insert.length : 1;
+      break;
+    case 'link':
+      insert = `[${selected || '链接文字'}](https://)`;
+      cursorOffset = insert.length;
+      break;
+    case 'image':
+      insert = `![${selected || '图片描述'}](https://)`;
+      cursorOffset = insert.length;
+      break;
+    case 'quote':
+      insert = `> ${selected || '引用'}`;
+      cursorOffset = insert.length;
+      break;
+    case 'list':
+      insert = `- ${selected || '列表项'}`;
+      cursorOffset = insert.length;
+      break;
+    case 'task':
+      insert = `- [ ] ${selected || '待办事项'}`;
+      cursorOffset = insert.length;
+      break;
+  }
+  const next = draft.slice(0, start) + insert + draft.slice(end);
+  setDraft(idx, next);
+  nextTick(() => {
+    ta.focus();
+    const pos = start + cursorOffset;
+    ta.setSelectionRange(pos, pos);
+  });
+}
+
+/**
+ * 剪贴板贴图：监听 paste 事件，把图片转为 data URI 插入 markdown
+ */
+function onCommentPaste(idx: number, e: ClipboardEvent): void {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUri = reader.result as string;
+        const md = `![贴图](${dataUri})\n`;
+        const draft = getDraft(idx);
+        setDraft(idx, draft + md);
+        showToast({ type: 'success', message: '图片已插入' });
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
   }
 }
 
@@ -1511,6 +1615,9 @@ function formatRelative(iso: string | undefined): string {
             @click="detailTab = 'conversation'"
           >
             对话
+            <span v-if="tabLoading.conversation" class="pr-detail-tab__wave" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
             <span v-if="getPanel(selectedPR.index).items.length > 0" class="pr-detail-tab__count">
               {{ getPanel(selectedPR.index).items.length }}
             </span>
@@ -1522,6 +1629,9 @@ function formatRelative(iso: string | undefined): string {
             @click="detailTab = 'commits'"
           >
             代码提交
+            <span v-if="tabLoading.commits" class="pr-detail-tab__wave" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
             <span v-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail-tab__count">
               {{ commitsByPR.get(selectedPR.index)!.length }}
             </span>
@@ -1533,6 +1643,9 @@ function formatRelative(iso: string | undefined): string {
             @click="detailTab = 'files'"
           >
             文件变动
+            <span v-if="tabLoading.files" class="pr-detail-tab__wave" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
             <span v-if="pull.filesByPR.get(selectedPR.index)?.length > 0" class="pr-detail-tab__count">
               {{ pull.filesByPR.get(selectedPR.index)!.length }}
             </span>
@@ -1686,6 +1799,19 @@ function formatRelative(iso: string | undefined): string {
 
             <!-- 评论输入区 -->
             <div class="pr-detail__comment-compose">
+              <!-- Markdown 工具栏 -->
+              <div class="pr-detail__md-toolbar">
+                <button type="button" class="md-toolbar-btn" title="粗体" @click="insertMarkdown(selectedPR.index, 'bold')"><strong>B</strong></button>
+                <button type="button" class="md-toolbar-btn" title="斜体" @click="insertMarkdown(selectedPR.index, 'italic')"><em>I</em></button>
+                <button type="button" class="md-toolbar-btn" title="行内代码" @click="insertMarkdown(selectedPR.index, 'code')"><code>{ }</code></button>
+                <span class="md-toolbar-divider"></span>
+                <button type="button" class="md-toolbar-btn" title="链接" @click="insertMarkdown(selectedPR.index, 'link')">链接</button>
+                <button type="button" class="md-toolbar-btn" title="图片" @click="insertMarkdown(selectedPR.index, 'image')">图片</button>
+                <span class="md-toolbar-divider"></span>
+                <button type="button" class="md-toolbar-btn" title="引用" @click="insertMarkdown(selectedPR.index, 'quote')">引用</button>
+                <button type="button" class="md-toolbar-btn" title="列表" @click="insertMarkdown(selectedPR.index, 'list')">列表</button>
+                <button type="button" class="md-toolbar-btn" title="待办" @click="insertMarkdown(selectedPR.index, 'task')">待办</button>
+              </div>
               <div class="pr-detail__comment-input-wrap">
                 <textarea
                   ref="commentInputRef"
@@ -1693,6 +1819,7 @@ function formatRelative(iso: string | undefined): string {
                   :value="getDraft(selectedPR.index)"
                   @input="onCommentInput(selectedPR, $event)"
                   @keydown="onCommentKeydown(selectedPR, $event)"
+                  @paste="onCommentPaste(selectedPR.index, $event)"
                   :placeholder="'发条评论给 #' + selectedPR.index + '\n@ 提及成员，Enter 发送'"
                   :disabled="getPanel(selectedPR.index).posting"
                   rows="3"
@@ -1736,7 +1863,8 @@ function formatRelative(iso: string | undefined): string {
               <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
               <span>正在加载提交列表…</span>
             </div>
-            <table v-else-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail__commit-table">
+            <div v-else-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail__commit-scroll">
+            <table class="pr-detail__commit-table">
               <thead>
                 <tr>
                   <th class="pr-detail__commit-th-author">作者</th>
@@ -1779,6 +1907,7 @@ function formatRelative(iso: string | undefined): string {
                 </tr>
               </tbody>
             </table>
+            </div>
             <div v-else class="pr-detail__empty-hint">暂无提交信息</div>
           </div>
 
@@ -4802,6 +4931,35 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-primary-bright, var(--color-primary));
 }
 
+/* Tab 加载波形动画（声纹风格） */
+.pr-detail-tab__wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  height: 14px;
+}
+.pr-detail-tab__wave i {
+  display: block;
+  width: 2px;
+  height: 4px;
+  background: var(--color-primary);
+  border-radius: 1px;
+  animation: tab-wave 0.8s ease-in-out infinite;
+}
+.pr-detail-tab__wave i:nth-child(2) {
+  animation-delay: 0.15s;
+  height: 8px;
+}
+.pr-detail-tab__wave i:nth-child(3) {
+  animation-delay: 0.3s;
+  height: 6px;
+}
+@keyframes tab-wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
 /* Tab 内容滚动区 */
 .pr-detail-body {
   flex: 1;
@@ -4879,6 +5037,21 @@ function formatRelative(iso: string | undefined): string {
   min-height: 0;
   margin: calc(-1 * var(--space-4));
   margin-bottom: 0;
+  /* v0.7.x bugfix：用 flex column 撑满 pr-detail-body 高度，让 table 内部滚动条能正常工作。
+     pr-detail-body 本身有 overflow-y: auto；这里把 pr-detail__commits 改为 flex 容器，
+     把 table 滚动画限在 .pr-detail__commit-scroll 里。 */
+  display: flex;
+  flex-direction: column;
+  height: calc(100% + var(--space-4));
+}
+/* v0.7.x bugfix：table 外包一层独立滚动容器，让 thead sticky 真正在这个容器里生效。
+   直接让 pr-detail-body 滚的话，sticky 会被祖先滚动条的 overflow 屏障淹没，
+   导致部分浏览器表现异常 —— 这也是行内容透出 sticky 表的根因之一。 */
+.pr-detail__commit-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
 }
 .pr-detail__commit-table {
   width: 100%;
@@ -4889,16 +5062,13 @@ function formatRelative(iso: string | undefined): string {
   position: sticky;
   top: 0;
   z-index: 2;
+  /* v0.7.x bugfix：thead background 给 thead 本身还不够，滚动时 tbody 行仍会从 th 间隙透出。
+     background 必须显式标给 th —— th 默认 background: transparent，会透出下方行文字。 */
   background: var(--color-bg);
   box-shadow: inset 0 -1px 0 var(--color-border);
 }
-.pr-detail__commit-table th {
-  text-align: left;
-  padding: 6px 10px;
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
+.pr-detail__commit-table thead th {
+  background: var(--color-bg);
 }
 .pr-detail__commit-row {
   border-bottom: 1px solid var(--color-border);
@@ -5149,6 +5319,44 @@ function formatRelative(iso: string | undefined): string {
 .pr-detail__comment-editing-hint { font-size: var(--font-xs); color: var(--color-text-muted); margin-right: auto; }
 
 /* 评论输入区 */
+.pr-detail__md-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.md-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.md-toolbar-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.md-toolbar-btn code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+.md-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-divider);
+  margin: 0 4px;
+}
 .pr-detail__comment-compose {
   margin-top: var(--space-3);
   padding-top: var(--space-3);
