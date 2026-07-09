@@ -114,11 +114,17 @@ md.renderer.rules.list_item_open = function taskListItemOpen(tokens, idx, option
     if (firstChild && firstChild.type === 'text') {
       const match = firstChild.content.match(/^\[([ xX])\]\s+/);
       if (match) {
-        const token = tokens[idx];
-        token.attrSet('class', 'task-list-item');
+        tokens[idx].attrSet('class', 'task-list-item');
         const checked = match[1].toLowerCase() === 'x';
-        // 用 Unicode 字符替代 checkbox（不创建新 Token，避免运行时崩溃）
-        firstChild.content = `<span class="md-task-checkbox${checked ? ' md-task-checkbox--checked' : ''}"></span> ` + firstChild.content.slice(match[0].length);
+        // v0.7.0+ 修正：注入 html_inline token（markdown-it 原生 type，render 直出 HTML 不 escape）
+        // 旧版错误地把 <span> 塞进 text.content，text token 被 escapeHtml() 实体化，
+        // 页面看到的是 &lt;span&gt;...&lt;/span&gt; 字面文本（用户报告的 bug）。
+        // Token 构造器用上下文实例获取，避开 ESM/CJS Token 直接 import 的差异。
+        const TokenCtor = tokens[idx].constructor as new () => { content: string };
+        const htmlToken = new TokenCtor() as MdToken;
+        htmlToken.content = `<span class="${checked ? 'md-task-checkbox md-task-checkbox--checked' : 'md-task-checkbox'}"></span> `;
+        nextInline.children.unshift(htmlToken);
+        firstChild.content = firstChild.content.slice(match[0].length);
       }
     }
   }
