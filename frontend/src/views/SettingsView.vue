@@ -643,13 +643,8 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
         </button>
       </section>
 
-      <!--
-        v2.x 数据根目录（user 拍板）：只读展示 + "打开应用数据目录"按钮
-        - 数据根目录 (DataRoot) 是用户可感知的"全局路径"，不可修改
-        - workspace 子目录 (git repos) 由应用根据业务自动创建，UI 不暴露
-        - 旧版的 "选择目录" / "重置为默认" / 迁移对话框 全部移除
-      -->
-      <section class="settings__card settings__card--wide">
+      <!-- v0.7.x: 应用数据目录 + 故障排查 同行左右布局 -->
+      <section class="settings__card">
         <h2>应用数据目录</h2>
         <div class="settings__workspace-row">
           <div class="settings__workspace-info">
@@ -679,16 +674,10 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
             </button>
           </div>
         </div>
-        <p class="settings__hint settings__hint--compact">
-          数据根目录不可修改，默认
-          <code>~/.gitea-kanban</code>（macOS/Linux） /
-          <code>%USERPROFILE%\.gitea-kanban</code>（Windows），不存在会自动创建。
-          git 同步下来的仓库会放在数据根目录下的 <code>workspace/repos/&lt;owner&gt;__&lt;repo&gt;</code> 子目录（应用自动管理，不可指定）。
-        </p>
       </section>
 
       <!-- v0.6.0: 故障排查卡片 -->
-      <section class="settings__card settings__card--wide">
+      <section class="settings__card">
         <h2>故障排查</h2>
         <div class="settings__btn-row">
           <button
