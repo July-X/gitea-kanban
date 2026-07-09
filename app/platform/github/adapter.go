@@ -377,6 +377,16 @@ type githubPullRaw struct {
 	MergedBy           *githubUserRaw       `json:"merged_by"`
 	CreatedAt          string               `json:"created_at"`
 	UpdatedAt          string               `json:"updated_at"`
+	// Milestone v0.7.0：GitHub PR 可能挂在某个 milestone 上
+	// 字段：{url, html_url, number, title, description, state, ...}
+	Milestone *githubPullMilestoneRaw `json:"milestone"`
+}
+
+type githubPullMilestoneRaw struct {
+	Number      int64  `json:"number"`
+	Title       string `json:"title"`
+	State       string `json:"state"`
+	Description string `json:"description"`
 }
 
 type githubPullRefRaw struct {
@@ -444,6 +454,15 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		out.Labels = make([]platform.PullLabelDTO, 0, len(p.Labels))
 		for _, l := range p.Labels {
 			out.Labels = append(out.Labels, platform.PullLabelDTO{ID: l.ID, Name: l.Name, Color: l.Color})
+		}
+	}
+	if p.Milestone != nil {
+		// v0.7.0：GitHub milestone 映射到 DTO（id 取 number，与 UpdatePullMilestone 写入对齐）
+		out.Milestone = &platform.MilestoneDTO{
+			ID:          p.Milestone.Number,
+			Title:       p.Milestone.Title,
+			State:       p.Milestone.State,
+			Description: p.Milestone.Description,
 		}
 	}
 	return out
@@ -1250,7 +1269,7 @@ func (a *GitHubAdapter) CreatePullReview(ctx context.Context, hostURL, username,
 		"commit_id": opts.CommitID,
 		"body":      opts.Body,
 		"event":     mapReviewEventToGitHub(opts.Event),
-		"comments":  []interface{}{}, // 暂无行内评审（M4+）
+		"comments":  githubReviewCommentsFromOpts(opts.Comments), // v0.7.0：透传行内 review 评论
 	}
 	reader, err := encodeJSONBody(payload)
 	if err != nil {
@@ -1525,7 +1544,23 @@ func (a *GitHubAdapter) ListPullCommits(ctx context.Context, hostURL, username, 
 	return out, nil
 }
 
-// ===== HTTP 请求封装 =====
+// githubReviewCommentsFromOpts 把 v0.6+ opts.Comments 翻译为 GitHub API 的 line 风格
+func githubReviewCommentsFromOpts(opts []platform.CreateReviewCommentOpts) []map[string]any {
+	if len(opts) == 0 {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(opts))
+	for _, c := range opts {
+		// GitHub `/reviews` 行内评论字段：path/line/body；Gitea 用 `new_position`，这里我们用 line
+		// 注意 GitHub `line` 是 diff hunks 的行号（与 Gitea new_position 同语义）
+		out = append(out, map[string]any{
+			"path": c.Path,
+			"line": c.Position,
+			"body": c.Body,
+		})
+	}
+	return out
+}
 
 // doRequest 发送 GitHub API 请求
 //

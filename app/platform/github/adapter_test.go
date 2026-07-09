@@ -1863,3 +1863,149 @@ func TestGitHubAdapter_ListPullCommits(t *testing.T) {
 		t.Errorf("AuthoredAt = %q, want 2024-06-01T00:00:00Z", c.AuthoredAt)
 	}
 }
+
+// TestGitHubAdapter_CreatePullReview_Comments 验证带行内评论的 CreatePullReview（v0.7.0 Task 2.4）
+func TestGitHubAdapter_CreatePullReview_Comments(t *testing.T) {
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":    90,
+			"state": "COMMENTED",
+			"body":  "Review with inline",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.CreateReviewOpts{
+		Body:  "see inline",
+		Event: "comment",
+		Comments: []platform.CreateReviewCommentOpts{
+			{Body: "fix this typo", Path: "src/main.go", Position: 42},
+			{Body: "and here", Path: "src/util.go", Position: 17},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreatePullReview failed: %v", err)
+	}
+
+	// 验证 comments 字段被翻译为 GitHub API 格式（path/line/body）
+	comments, ok := capturedBody["comments"].([]interface{})
+	if !ok {
+		t.Fatalf("comments field type = %T, want []interface{}", capturedBody["comments"])
+	}
+	if len(comments) != 2 {
+		t.Fatalf("len(comments) = %d, want 2", len(comments))
+	}
+	c0 := comments[0].(map[string]interface{})
+	if c0["path"] != "src/main.go" {
+		t.Errorf("comments[0].path = %v, want src/main.go", c0["path"])
+	}
+	// JSON 把数字反序列化为 float64
+	if c0["line"].(float64) != 42 {
+		t.Errorf("comments[0].line = %v, want 42", c0["line"])
+	}
+	if c0["body"] != "fix this typo" {
+		t.Errorf("comments[0].body = %v", c0["body"])
+	}
+
+	// 验证 event 也被翻译
+	if capturedBody["event"] != "COMMENT" {
+		t.Errorf("event = %v, want COMMENT", capturedBody["event"])
+	}
+}
+
+// TestGitHubAdapter_CreatePullReview_NoComments 验证不传 comments 时传空数组
+func TestGitHubAdapter_CreatePullReview_NoComments(t *testing.T) {
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": 91, "state": "APPROVED"})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.CreateReviewOpts{
+		Body:  "LGTM",
+		Event: "approve",
+	})
+	if err != nil {
+		t.Fatalf("CreatePullReview failed: %v", err)
+	}
+	comments, ok := capturedBody["comments"].([]interface{})
+	if !ok {
+		t.Fatalf("comments field type = %T, want []interface{}", capturedBody["comments"])
+	}
+	if len(comments) != 0 {
+		t.Errorf("len(comments) = %d, want 0", len(comments))
+	}
+}
+
+// TestGitHubAdapter_GetPull_Milestone 验证 milestone 字段映射（v0.7.0 Task 2.3）
+func TestGitHubAdapter_GetPull_Milestone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number":    42,
+			"title":     "feat: dolphin",
+			"state":     "open",
+			"head":      map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+			"base":      map[string]string{"ref": "main", "sha": "def"},
+			"user":      map[string]string{"login": "alice"},
+			"mergeable": false,
+			"milestone": map[string]interface{}{
+				"number":      1,
+				"title":       "v1.0",
+				"state":       "open",
+				"description": "First release",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	p, err := adapter.GetPull(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if p.Milestone == nil {
+		t.Fatal("Milestone = nil, want non-nil")
+	}
+	if p.Milestone.ID != 1 {
+		t.Errorf("Milestone.ID = %d, want 1 (= GitHub number)", p.Milestone.ID)
+	}
+	if p.Milestone.Title != "v1.0" {
+		t.Errorf("Milestone.Title = %q, want v1.0", p.Milestone.Title)
+	}
+	if p.Milestone.State != "open" {
+		t.Errorf("Milestone.State = %q, want open", p.Milestone.State)
+	}
+}
+
+// TestGitHubAdapter_GetPull_NoMilestone 验证未设 milestone 时为 nil
+func TestGitHubAdapter_GetPull_NoMilestone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number":    42,
+			"title":     "feat: dolphin",
+			"state":     "open",
+			"head":      map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+			"base":      map[string]string{"ref": "main", "sha": "def"},
+			"user":      map[string]string{"login": "alice"},
+			"mergeable": false,
+			"milestone": nil,
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	p, err := adapter.GetPull(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if p.Milestone != nil {
+		t.Errorf("Milestone = %+v, want nil", p.Milestone)
+	}
+}
