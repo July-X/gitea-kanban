@@ -3670,26 +3670,29 @@ function formatRelative(iso: string | undefined): string {
    与主题色 token 对齐：勾选用 --color-primary 填充。 */
 .md-body :deep(.md-task-checkbox) {
   display: inline-block;
-  width: 16px;
-  height: 16px;
+  /* v0.7.x bugfix：从 16px 加大到 18px；16px 在 13px 正文里太迷你，
+     用户看不到认为「不显示」。18px + 2px 边框边界更清晰。 */
+  width: 18px;
+  height: 18px;
   position: relative;
-  vertical-align: -2px;
-  margin-right: 8px;
-  border: 1.5px solid var(--color-text-secondary);
+  vertical-align: -3px;
+  margin-right: 10px;
+  border: 2px solid var(--color-text-secondary);
   border-radius: 4px;
   background: transparent;
   transition: background 0.12s ease, border-color 0.12s ease;
   cursor: default;
+  flex-shrink: 0;
 }
 .md-body :deep(.md-task-checkbox::before) {
   content: '';
   position: absolute;
-  left: 4px;
+  left: 5px;
   top: 1px;
-  width: 5px;
-  height: 9px;
-  border-right: 2px solid #fff;
-  border-bottom: 2px solid #fff;
+  width: 6px;
+  height: 11px;
+  border-right: 2.5px solid #fff;
+  border-bottom: 2.5px solid #fff;
   transform: rotate(45deg) scale(0);
   transition: transform 0.12s ease;
 }
