@@ -49,7 +49,11 @@ giteaDemo/
 reasonix.toml
 node_modules/
 .playwright-mcp/
-.github/
+# .github/ 大多是 cache，跑 CI 时让 workflows 仍然生效
+# 端未跟踪 .github/* 文件，但 .github/workflows/ 必须走 git 控制
+.github/*
+!/.github/workflows/
+!/.github/CODEOWNERS
 # .tools/ 是 v3.0 早期 vscode-git-graph 对比工具（已被 tools/vscode-recheck/ 取代）。
 # 当前无物理目录、无 git 引用、无代码引用；保留规则防止未来误引入。
 .tools/

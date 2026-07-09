@@ -92,16 +92,62 @@ func TestGitHubAdapter_NotSupported(t *testing.T) {
 	// ListPulls v0.6+ 已实现（GET /repos/{owner}/{repo}/pulls），不在 NotSupported 范围
 	// 真实测试见 TestGitHubAdapter_ListPulls_Basic
 
-	// ListLabels
-	_, err = adapter.ListLabels(ctx, "", "", "", "", "")
-	if err != platform.ErrNotSupported {
-		t.Errorf("ListLabels error = %v, want ErrNotSupported", err)
+	// ListLabels v0.7.0 已实现（GET /repos/{owner}/{repo}/labels）
+	// 真实测试见 TestGitHubAdapter_ListLabels
+
+	// ListMembers v0.7.0 已实现（GET /repos/{owner}/{repo}/collaborators），见 TestGitHubAdapter_ListMembers
+}
+
+// TestGitHubAdapter_ListLabels 验证路径 + 字段映射（v0.7.0 Phase 1 Task 1.1）
+func TestGitHubAdapter_ListLabels(t *testing.T) {
+	var capturedPath, capturedMethod, capturedAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedMethod = r.Method
+		capturedAuth = r.Header.Get("Authorization")
+		// per_page=100 在 ListLabels 里硬编码
+		if r.URL.RawQuery != "per_page=100" {
+			t.Errorf("query = %q, want per_page=100", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `[
+			{"id":1001,"name":"bug","color":"f29513","description":"Something isn't working"},
+			{"id":1002,"name":"enhancement","color":"84b6eb","description":"New feature or request","default":true},
+			{"id":1003,"name":"docs","color":"0075ca","description":"Documentation only changes","default":false}
+		]`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	labels, err := adapter.ListLabels(context.Background(), server.URL, "alice", "ghp-test-token", "owner-x", "repo-y")
+	if err != nil {
+		t.Fatalf("ListLabels failed: %v", err)
 	}
 
-	// ListMembers
-	_, err = adapter.ListMembers(ctx, "", "", "", "", "")
-	if err != platform.ErrNotSupported {
-		t.Errorf("ListMembers error = %v, want ErrNotSupported", err)
+	if capturedPath != "/repos/owner-x/repo-y/labels" {
+		t.Errorf("path = %q, want /repos/owner-x/repo-y/labels", capturedPath)
+	}
+	if capturedMethod != "GET" {
+		t.Errorf("method = %q, want GET", capturedMethod)
+	}
+	if capturedAuth != "Bearer ghp-test-token" {
+		t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+	}
+
+	if len(labels) != 3 {
+		t.Fatalf("len(labels) = %d, want 3", len(labels))
+	}
+
+	// 验证字段映射
+	if labels[0].ID != 1001 || labels[0].Name != "bug" || labels[0].Color != "f29513" || labels[0].Description != "Something isn't working" {
+		t.Errorf("labels[0] = %+v, want {ID:1001 Name:bug Color:f29513 Description:Something isn't working}", labels[0])
+	}
+	if labels[1].ID != 1002 || labels[1].Name != "enhancement" || labels[1].Color != "84b6eb" {
+		t.Errorf("labels[1] = %+v, want {ID:1002 Name:enhancement Color:84b6eb}", labels[1])
+	}
+	if labels[2].ID != 1003 || labels[2].Name != "docs" || labels[2].Color != "0075ca" {
+		t.Errorf("labels[2] = %+v, want {ID:1003 Name:docs Color:0075ca}", labels[2])
 	}
 }
 
@@ -1594,5 +1640,372 @@ func TestGitHubAdapter_CreatePullReview_InvalidEvent(t *testing.T) {
 	}
 	if ipcErr.Code != ipc.CodeValidationFailed {
 		t.Errorf("Code = %q, want %q", ipcErr.Code, ipc.CodeValidationFailed)
+	}
+}
+
+// TestGitHubAdapter_ListMembers 验证路径 + permissions 映射（v0.7.0 Phase 1 Task 1.2）
+func TestGitHubAdapter_ListMembers(t *testing.T) {
+	var capturedPath, capturedAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedAuth = r.Header.Get("Authorization")
+		if r.URL.RawQuery != "per_page=100" {
+			t.Errorf("query = %q, want per_page=100", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `[{"login":"alice","permissions":{"admin":false,"push":true,"maintain":false,"triage":false,"pull":true}},{"login":"bob","permissions":{"pull":true}},{"login":"carol","permissions":{"admin":true}}]`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	members, err := adapter.ListMembers(context.Background(), server.URL, "alice", "ghp-test-token", "owner-x", "repo-y")
+	if err != nil {
+		t.Fatalf("ListMembers failed: %v", err)
+	}
+
+	if capturedPath != "/repos/owner-x/repo-y/collaborators" {
+		t.Errorf("path = %q, want /repos/owner-x/repo-y/collaborators", capturedPath)
+	}
+	if capturedAuth != "Bearer ghp-test-token" {
+		t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+	}
+	if len(members) != 3 {
+		t.Fatalf("len(members) = %d, want 3", len(members))
+	}
+	if members[0].Login != "alice" || members[0].Permission != "push" {
+		t.Errorf("members[0] = %+v, want {Login:alice Permission:push}", members[0])
+	}
+	if members[1].Login != "bob" || members[1].Permission != "pull" {
+		t.Errorf("members[1] = %+v, want {Login:bob Permission:pull}", members[1])
+	}
+	if members[2].Login != "carol" || members[2].Permission != "admin" {
+		t.Errorf("members[2] = %+v, want {Login:carol Permission:admin}", members[2])
+	}
+}
+
+// TestGitHubAdapter_ListMilestones 验证 state 参数 + 字段映射（v0.7.0 Phase 1 Task 1.3）
+func TestGitHubAdapter_ListMilestones(t *testing.T) {
+	// 测试 open/closed/all 三种 state
+	for _, state := range []string{"open", "closed", "all"} {
+		state := state
+		t.Run("state="+state, func(t *testing.T) {
+			var capturedPath, capturedQuery, capturedAuth string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedPath = r.URL.Path
+				capturedQuery = r.URL.RawQuery
+				capturedAuth = r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				if state == "open" {
+					fmt.Fprintln(w, `[{"id":1,"title":"v1.0","state":"open","description":"First release"}]`)
+				} else if state == "closed" {
+					fmt.Fprintln(w, `[{"id":2,"title":"v0.9","state":"closed","description":"Beta"}]`)
+				} else {
+					fmt.Fprintln(w, `[{"id":3,"title":"Backlog","state":"open"}]`)
+				}
+			}))
+			defer server.Close()
+
+			adapter := NewGitHubAdapter()
+			milestones, err := adapter.ListMilestones(context.Background(), server.URL, "alice", "ghp-test-token", "owner-x", "repo-y", state)
+			if err != nil {
+				t.Fatalf("ListMilestones(state=%q) failed: %v", state, err)
+			}
+			if capturedPath != "/repos/owner-x/repo-y/milestones" {
+				t.Errorf("path = %q, want /repos/owner-x/repo-y/milestones", capturedPath)
+			}
+			if capturedAuth != "Bearer ghp-test-token" {
+				t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+			}
+			wantQuery := "state=" + state + "&per_page=100"
+			if capturedQuery != wantQuery {
+				t.Errorf("query = %q, want %q", capturedQuery, wantQuery)
+			}
+			if len(milestones) != 1 {
+				t.Fatalf("len(milestones) = %d, want 1", len(milestones))
+			}
+			m := milestones[0]
+			if state == "open" {
+				if m.ID != 1 || m.Title != "v1.0" || m.State != "open" {
+					t.Errorf("milestone = %+v, want {ID:1 Title:v1.0 State:open}", m)
+				}
+			} else if state == "closed" {
+				if m.ID != 2 || m.Title != "v0.9" || m.State != "closed" {
+					t.Errorf("milestone = %+v, want {ID:2 Title:v0.9 State:closed}", m)
+				}
+			} else {
+				if m.ID != 3 || m.Title != "Backlog" || m.State != "open" {
+					t.Errorf("milestone = %+v, want {ID:3 Title:Backlog State:open}", m)
+				}
+			}
+		})
+	}
+
+	// 默认 state=open
+	t.Run("default-open", func(t *testing.T) {
+		var capturedQuery string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `[{"id":5,"title":"Sprint 1","state":"open"}]`)
+		}))
+		defer server.Close()
+		adapter := NewGitHubAdapter()
+		milestones, err := adapter.ListMilestones(context.Background(), server.URL, "alice", "ghp-test-token", "o", "r", "")
+		if err != nil {
+			t.Fatalf("ListMilestones(default) failed: %v", err)
+		}
+		if capturedQuery != "state=open&per_page=100" {
+			t.Errorf("default query = %q, want state=open&per_page=100", capturedQuery)
+		}
+		if len(milestones) != 1 || milestones[0].Title != "Sprint 1" {
+			t.Errorf("milestones[0] = %+v", milestones[0])
+		}
+	})
+}
+
+// TestGitHubAdapter_UpdatePullMilestone 验证清空场景（v0.7.0 Phase 1 Task 1.4）
+func TestGitHubAdapter_UpdatePullMilestone(t *testing.T) {
+	var capturedPath, capturedMethod string
+	var patchHits int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/repos/alice/dolphin/issues/42" && r.Method == "PATCH" {
+			patchHits++
+			capturedPath = r.URL.Path
+			capturedMethod = r.Method
+			// 验证 body 中 milestone 是 null
+			var body map[string]interface{}
+			dec := json.NewDecoder(r.Body)
+			_ = dec.Decode(&body)
+			if ms, ok := body["milestone"]; !ok || ms != nil {
+				t.Errorf("milestone = %v, want nil", body["milestone"])
+			}
+			// 204 No Content 即可，GetPull 会单独调
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		// GetPull 调用：GET /repos/{owner}/{repo}/pulls/{index}
+		if r.URL.Path == "/repos/alice/dolphin/pulls/42" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"number":    42,
+				"title":     "test",
+				"state":     "open",
+				"head":      map[string]string{"ref": "fix", "sha": "abc"},
+				"base":      map[string]string{"ref": "main", "sha": "def"},
+				"user":      map[string]string{"login": "alice"},
+				"milestone": nil,
+			})
+			return
+		}
+		w.WriteHeader(400)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.UpdatePullMilestone(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42, "")
+	if err != nil {
+		t.Fatalf("UpdatePullMilestone(clear) failed: %v", err)
+	}
+	if patchHits != 1 {
+		t.Errorf("patchHits = %d, want 1", patchHits)
+	}
+	if capturedPath != "/repos/alice/dolphin/issues/42" {
+		t.Errorf("path = %q, want /repos/alice/dolphin/issues/42", capturedPath)
+	}
+	if capturedMethod != "PATCH" {
+		t.Errorf("method = %q, want PATCH", capturedMethod)
+	}
+}
+
+// TestGitHubAdapter_ListPullCommits 验证字段映射（v0.7.0 Phase 1 Task 1.5）
+func TestGitHubAdapter_ListPullCommits(t *testing.T) {
+	var capturedPath, capturedAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `[
+			{"sha":"abc123def456","commit":{"message":"feat: add dolphin\n\nImplement dolphin feature","author":{"name":"alice","email":"alice@example.com","date":"2024-06-01T00:00:00Z"},"committer":{"date":"2024-06-01T01:00:00Z"}}}
+		]`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	commits, err := adapter.ListPullCommits(context.Background(), server.URL, "alice", "ghp-test-token", "owner-x", "repo-y", 42)
+	if err != nil {
+		t.Fatalf("ListPullCommits failed: %v", err)
+	}
+
+	if capturedPath != "/repos/owner-x/repo-y/pulls/42/commits" {
+		t.Errorf("path = %q, want /repos/owner-x/repo-y/pulls/42/commits", capturedPath)
+	}
+	if capturedAuth != "Bearer ghp-test-token" {
+		t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+	}
+
+	if len(commits) != 1 {
+		t.Fatalf("len(commits) = %d, want 1", len(commits))
+	}
+	c := commits[0]
+	if c.SHA != "abc123def456" || c.ShortSHA != "abc123def456" {
+		t.Errorf("SHA = %q, want abc123def456", c.SHA)
+	}
+	if c.Subject != "feat: add dolphin" {
+		t.Errorf("Subject = %q, want feat: add dolphin", c.Subject)
+	}
+	if c.AuthorName != "alice" || c.AuthorMail != "alice@example.com" {
+		t.Errorf("Author = %q / %q, want alice / alice@example.com", c.AuthorName, c.AuthorMail)
+	}
+	if c.AuthoredAt != "2024-06-01T00:00:00Z" {
+		t.Errorf("AuthoredAt = %q, want 2024-06-01T00:00:00Z", c.AuthoredAt)
+	}
+}
+
+// TestGitHubAdapter_CreatePullReview_Comments 验证带行内评论的 CreatePullReview（v0.7.0 Task 2.4）
+func TestGitHubAdapter_CreatePullReview_Comments(t *testing.T) {
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":    90,
+			"state": "COMMENTED",
+			"body":  "Review with inline",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.CreateReviewOpts{
+		Body:  "see inline",
+		Event: "comment",
+		Comments: []platform.CreateReviewCommentOpts{
+			{Body: "fix this typo", Path: "src/main.go", Position: 42},
+			{Body: "and here", Path: "src/util.go", Position: 17},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreatePullReview failed: %v", err)
+	}
+
+	// 验证 comments 字段被翻译为 GitHub API 格式（path/line/body）
+	comments, ok := capturedBody["comments"].([]interface{})
+	if !ok {
+		t.Fatalf("comments field type = %T, want []interface{}", capturedBody["comments"])
+	}
+	if len(comments) != 2 {
+		t.Fatalf("len(comments) = %d, want 2", len(comments))
+	}
+	c0 := comments[0].(map[string]interface{})
+	if c0["path"] != "src/main.go" {
+		t.Errorf("comments[0].path = %v, want src/main.go", c0["path"])
+	}
+	// JSON 把数字反序列化为 float64
+	if c0["line"].(float64) != 42 {
+		t.Errorf("comments[0].line = %v, want 42", c0["line"])
+	}
+	if c0["body"] != "fix this typo" {
+		t.Errorf("comments[0].body = %v", c0["body"])
+	}
+
+	// 验证 event 也被翻译
+	if capturedBody["event"] != "COMMENT" {
+		t.Errorf("event = %v, want COMMENT", capturedBody["event"])
+	}
+}
+
+// TestGitHubAdapter_CreatePullReview_NoComments 验证不传 comments 时传空数组
+func TestGitHubAdapter_CreatePullReview_NoComments(t *testing.T) {
+	var capturedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": 91, "state": "APPROVED"})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	_, err := adapter.CreatePullReview(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42, platform.CreateReviewOpts{
+		Body:  "LGTM",
+		Event: "approve",
+	})
+	if err != nil {
+		t.Fatalf("CreatePullReview failed: %v", err)
+	}
+	comments, ok := capturedBody["comments"].([]interface{})
+	if !ok {
+		t.Fatalf("comments field type = %T, want []interface{}", capturedBody["comments"])
+	}
+	if len(comments) != 0 {
+		t.Errorf("len(comments) = %d, want 0", len(comments))
+	}
+}
+
+// TestGitHubAdapter_GetPull_Milestone 验证 milestone 字段映射（v0.7.0 Task 2.3）
+func TestGitHubAdapter_GetPull_Milestone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number":    42,
+			"title":     "feat: dolphin",
+			"state":     "open",
+			"head":      map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+			"base":      map[string]string{"ref": "main", "sha": "def"},
+			"user":      map[string]string{"login": "alice"},
+			"mergeable": false,
+			"milestone": map[string]interface{}{
+				"number":      1,
+				"title":       "v1.0",
+				"state":       "open",
+				"description": "First release",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	p, err := adapter.GetPull(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if p.Milestone == nil {
+		t.Fatal("Milestone = nil, want non-nil")
+	}
+	if p.Milestone.ID != 1 {
+		t.Errorf("Milestone.ID = %d, want 1 (= GitHub number)", p.Milestone.ID)
+	}
+	if p.Milestone.Title != "v1.0" {
+		t.Errorf("Milestone.Title = %q, want v1.0", p.Milestone.Title)
+	}
+	if p.Milestone.State != "open" {
+		t.Errorf("Milestone.State = %q, want open", p.Milestone.State)
+	}
+}
+
+// TestGitHubAdapter_GetPull_NoMilestone 验证未设 milestone 时为 nil
+func TestGitHubAdapter_GetPull_NoMilestone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number":    42,
+			"title":     "feat: dolphin",
+			"state":     "open",
+			"head":      map[string]string{"ref": "feature/dolphin", "sha": "abc"},
+			"base":      map[string]string{"ref": "main", "sha": "def"},
+			"user":      map[string]string{"login": "alice"},
+			"mergeable": false,
+			"milestone": nil,
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	p, err := adapter.GetPull(context.Background(), server.URL, "alice", "ghp", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if p.Milestone != nil {
+		t.Errorf("Milestone = %+v, want nil", p.Milestone)
 	}
 }

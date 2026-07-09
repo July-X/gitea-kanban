@@ -297,12 +297,20 @@ async function onRefresh(): Promise<void> {
 /** PR 提交列表缓存（按 PR index 分组） */
 const commitsByPR = ref<Map<number, PullCommitDto[]>>(new Map());
 const commitsLoading = ref(false);
+const filesLoading = ref(false);
+
+const tabLoading = computed(() => ({
+  conversation: getPanel(selectedPR.value?.index ?? -1)?.loading ?? false,
+  commits: commitsLoading.value,
+  files: filesLoading.value,
+}));
 
 function selectPR(p: PullDto): void {
   selectedPR.value = p;
   void loadComments(p);
   void loadReviews(p);
   void loadCommits(p);
+  void loadFilesForPR(p);
 }
 
 /** 加载 PR 提交列表 */
@@ -320,6 +328,21 @@ async function loadCommits(p: PullDto): Promise<void> {
     // 失败不阻断
   } finally {
     commitsLoading.value = false;
+  }
+}
+
+/** 加载 PR 文件变动列表（并发，selectPR 时触发） */
+async function loadFilesForPR(p: PullDto): Promise<void> {
+  if (!activeProjectId.value) return;
+  if (pull.filesByPR.get(p.index)?.length) return;
+  filesLoading.value = true;
+  try {
+    await pull.loadFiles(activeProjectId.value, p.index);
+    await pull.loadReviewComments(activeProjectId.value, p.index);
+  } catch {
+    // 失败不阻断
+  } finally {
+    filesLoading.value = false;
   }
 }
 
@@ -485,14 +508,14 @@ async function openAttrEditor(p: PullDto): Promise<void> {
     } catch { /* 忽略 */ }
     // v0.6+ bugfix：复用 loadMembers，避免重复代码
     await loadMembers();
-    // v0.6.0 加载里程碑列表（仅 Gitea 数据源）
-    if (currentPlatform.value === 'gitea') {
-      try {
-        await pullStore.loadAttrEditorData(String(activeProjectId.value));
-        availableMilestones.value = pullStore.availableMilestones;
-        availableMembers.value = pullStore.availableMembers.map(m => m.login);
-      } catch { /* 忽略 */ }
-    }
+    // v0.7.0：加载里程碑 / 成员（gitea state='all' / github state='open'）
+    // loadAttrEditorData 内部按 platform 派发 state，不再需前端 v-if 守护。
+    try {
+      await pullStore.loadAttrEditorData(String(activeProjectId.value));
+      availableMilestones.value = pullStore.availableMilestones;
+      // loadMembers 已设置 availableMembers = string[]；这里覆盖为 rich 对象
+      availableMembers.value = pullStore.availableMembers.map((m) => m.username ?? '');
+    } catch { /* 静默 */ }
   }
 }
 
@@ -815,6 +838,87 @@ function setDraft(idx: number, val: string): void {
     commentDrafts.value.delete(idx);
   } else {
     commentDrafts.value.set(idx, val);
+  }
+}
+
+/**
+ * Markdown 工具栏：在光标位置插入格式化标记
+ * 对齐 GitHub 评论编辑器工具栏行为
+ */
+function insertMarkdown(idx: number, type: string): void {
+  const ta = commentInputRef.value;
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const draft = getDraft(idx);
+  const selected = draft.slice(start, end);
+  let insert = '';
+  let cursorOffset = 0;
+  switch (type) {
+    case 'bold':
+      insert = `**${selected || '粗体'}**`;
+      cursorOffset = selected ? insert.length : 2;
+      break;
+    case 'italic':
+      insert = `*${selected || '斜体'}*`;
+      cursorOffset = selected ? insert.length : 1;
+      break;
+    case 'code':
+      insert = selected.includes('\n') ? `\n\`\`\`\n${selected}\n\`\`\`\n` : `\`${selected || '代码'}\``;
+      cursorOffset = selected ? insert.length : 1;
+      break;
+    case 'link':
+      insert = `[${selected || '链接文字'}](https://)`;
+      cursorOffset = insert.length;
+      break;
+    case 'image':
+      insert = `![${selected || '图片描述'}](https://)`;
+      cursorOffset = insert.length;
+      break;
+    case 'quote':
+      insert = `> ${selected || '引用'}`;
+      cursorOffset = insert.length;
+      break;
+    case 'list':
+      insert = `- ${selected || '列表项'}`;
+      cursorOffset = insert.length;
+      break;
+    case 'task':
+      insert = `- [ ] ${selected || '待办事项'}`;
+      cursorOffset = insert.length;
+      break;
+  }
+  const next = draft.slice(0, start) + insert + draft.slice(end);
+  setDraft(idx, next);
+  nextTick(() => {
+    ta.focus();
+    const pos = start + cursorOffset;
+    ta.setSelectionRange(pos, pos);
+  });
+}
+
+/**
+ * 剪贴板贴图：监听 paste 事件，把图片转为 data URI 插入 markdown
+ */
+function onCommentPaste(idx: number, e: ClipboardEvent): void {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUri = reader.result as string;
+        const md = `![贴图](${dataUri})\n`;
+        const draft = getDraft(idx);
+        setDraft(idx, draft + md);
+        showToast({ type: 'success', message: '图片已插入' });
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
   }
 }
 
@@ -1426,62 +1530,53 @@ function formatRelative(iso: string | undefined): string {
             <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
             <span>编辑属性</span>
           </button>
-        </dl>
-
-        <!-- 操作按钮条 -->
-        <div class="pr-detail-actions">
-          <button
-            v-if="selectedPR.state === 'open' && !selectedPR.draft"
-            type="button"
-            class="btn-primary-sm"
-            :disabled="selectedPR.hasConflicts || !selectedPR.mergeable || merging"
-            :title="selectedPR.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !selectedPR.mergeable ? '当前不可合并' : '合并此请求'"
-            @click="requestMerge(selectedPR)"
-          >
-            <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
-            <span>{{ merging && mergingPull?.index === selectedPR.index ? '合并中…' : '合并' }}</span>
-          </button>
-          <template v-if="selectedPR.state === 'open'">
+          <!-- 操作按钮（靠右贴边） -->
+          <div class="pr-detail-meta__actions">
+            <span
+              v-if="selectedPR.hasConflicts && selectedPR.state === 'open'"
+              class="pr-detail__conflict-hint"
+              title="此合并请求存在冲突，请先在 gitea 页面解决"
+            >有冲突</span>
             <button
+              v-if="selectedPR.state === 'open' && !selectedPR.draft"
               type="button"
-              class="btn-approve-sm"
-              :disabled="reviewSubmitting"
-              title="批准此合并请求"
-              @click="toggleReviewEditor(selectedPR, 'approve')"
-            ><span>批准</span></button>
+              class="btn-primary-sm"
+              :disabled="selectedPR.hasConflicts || !selectedPR.mergeable || merging"
+              :title="selectedPR.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !selectedPR.mergeable ? '当前不可合并' : '合并此请求'"
+              @click="requestMerge(selectedPR)"
+            >
+              <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
+              <span>{{ merging && mergingPull?.index === selectedPR.index ? '合并中…' : '合并' }}</span>
+            </button>
+            <template v-if="selectedPR.state === 'open'">
+              <button
+                type="button"
+                class="btn-approve-sm"
+                :disabled="reviewSubmitting"
+                title="批准此合并请求"
+                @click="toggleReviewEditor(selectedPR, 'approve')"
+              ><span>批准</span></button>
+              <button
+                type="button"
+                class="btn-request-changes-sm"
+                :disabled="reviewSubmitting"
+                title="请求修改"
+                @click="toggleReviewEditor(selectedPR, 'request_changes')"
+              ><span>请求修改</span></button>
+            </template>
             <button
-              type="button"
-              class="btn-request-changes-sm"
-              :disabled="reviewSubmitting"
-              title="请求修改"
-              @click="toggleReviewEditor(selectedPR, 'request_changes')"
-            ><span>请求修改</span></button>
-            <button
+              v-if="selectedPR.state === 'open'"
               type="button"
               class="btn-ghost-sm"
-              :disabled="reviewSubmitting"
-              title="仅评论（不批准也不请求修改）"
-              @click="toggleReviewEditor(selectedPR, 'comment')"
-            ><span>评论</span></button>
-          </template>
-          <button
-            v-if="selectedPR.state === 'open'"
-            type="button"
-            class="btn-ghost-sm"
-            :disabled="closing"
-            title="关闭此合并请求（不合并）"
-            @click="requestClose(selectedPR)"
-          >
-            <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
-            <span>{{ closing && closingPull?.index === selectedPR.index ? '关闭中…' : '关闭' }}</span>
-          </button>
-          <span
-            v-if="selectedPR.hasConflicts && selectedPR.state === 'open'"
-            class="pr-detail__conflict-hint"
-            title="此合并请求存在冲突，请先在 gitea 页面解决"
-          >有冲突</span>
-          <div style="flex: 1;"></div>
-        </div>
+              :disabled="closing"
+              title="关闭此合并请求（不合并）"
+              @click="requestClose(selectedPR)"
+            >
+              <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
+              <span>{{ closing && closingPull?.index === selectedPR.index ? '关闭中…' : '关闭' }}</span>
+            </button>
+          </div>
+        </dl>
 
         <!-- 评审编辑器（内联在操作按钮下方） -->
         <div v-if="reviewEditorOpen.has(selectedPR.index)" class="pr-detail__review-editor">
@@ -1520,6 +1615,9 @@ function formatRelative(iso: string | undefined): string {
             @click="detailTab = 'conversation'"
           >
             对话
+            <span v-if="tabLoading.conversation" class="pr-detail-tab__wave" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
             <span v-if="getPanel(selectedPR.index).items.length > 0" class="pr-detail-tab__count">
               {{ getPanel(selectedPR.index).items.length }}
             </span>
@@ -1531,6 +1629,9 @@ function formatRelative(iso: string | undefined): string {
             @click="detailTab = 'commits'"
           >
             代码提交
+            <span v-if="tabLoading.commits" class="pr-detail-tab__wave" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
             <span v-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail-tab__count">
               {{ commitsByPR.get(selectedPR.index)!.length }}
             </span>
@@ -1542,6 +1643,9 @@ function formatRelative(iso: string | undefined): string {
             @click="detailTab = 'files'"
           >
             文件变动
+            <span v-if="tabLoading.files" class="pr-detail-tab__wave" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
             <span v-if="pull.filesByPR.get(selectedPR.index)?.length > 0" class="pr-detail-tab__count">
               {{ pull.filesByPR.get(selectedPR.index)!.length }}
             </span>
@@ -1695,6 +1799,19 @@ function formatRelative(iso: string | undefined): string {
 
             <!-- 评论输入区 -->
             <div class="pr-detail__comment-compose">
+              <!-- Markdown 工具栏 -->
+              <div class="pr-detail__md-toolbar">
+                <button type="button" class="md-toolbar-btn" title="粗体" @click="insertMarkdown(selectedPR.index, 'bold')"><strong>B</strong></button>
+                <button type="button" class="md-toolbar-btn" title="斜体" @click="insertMarkdown(selectedPR.index, 'italic')"><em>I</em></button>
+                <button type="button" class="md-toolbar-btn" title="行内代码" @click="insertMarkdown(selectedPR.index, 'code')"><code>{ }</code></button>
+                <span class="md-toolbar-divider"></span>
+                <button type="button" class="md-toolbar-btn" title="链接" @click="insertMarkdown(selectedPR.index, 'link')">链接</button>
+                <button type="button" class="md-toolbar-btn" title="图片" @click="insertMarkdown(selectedPR.index, 'image')">图片</button>
+                <span class="md-toolbar-divider"></span>
+                <button type="button" class="md-toolbar-btn" title="引用" @click="insertMarkdown(selectedPR.index, 'quote')">引用</button>
+                <button type="button" class="md-toolbar-btn" title="列表" @click="insertMarkdown(selectedPR.index, 'list')">列表</button>
+                <button type="button" class="md-toolbar-btn" title="待办" @click="insertMarkdown(selectedPR.index, 'task')">待办</button>
+              </div>
               <div class="pr-detail__comment-input-wrap">
                 <textarea
                   ref="commentInputRef"
@@ -1702,6 +1819,7 @@ function formatRelative(iso: string | undefined): string {
                   :value="getDraft(selectedPR.index)"
                   @input="onCommentInput(selectedPR, $event)"
                   @keydown="onCommentKeydown(selectedPR, $event)"
+                  @paste="onCommentPaste(selectedPR.index, $event)"
                   :placeholder="'发条评论给 #' + selectedPR.index + '\n@ 提及成员，Enter 发送'"
                   :disabled="getPanel(selectedPR.index).posting"
                   rows="3"
@@ -1745,7 +1863,8 @@ function formatRelative(iso: string | undefined): string {
               <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
               <span>正在加载提交列表…</span>
             </div>
-            <table v-else-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail__commit-table">
+            <div v-else-if="commitsByPR.get(selectedPR.index)?.length" class="pr-detail__commit-scroll">
+            <table class="pr-detail__commit-table">
               <thead>
                 <tr>
                   <th class="pr-detail__commit-th-author">作者</th>
@@ -1788,6 +1907,7 @@ function formatRelative(iso: string | undefined): string {
                 </tr>
               </tbody>
             </table>
+            </div>
             <div v-else class="pr-detail__empty-hint">暂无提交信息</div>
           </div>
 
@@ -1991,8 +2111,8 @@ function formatRelative(iso: string | undefined): string {
           </select>
           <span class="attr-editor__hint">按住 ⌘/Ctrl 多选</span>
         </div>
-        <!-- 里程碑（仅 Gitea） -->
-        <div v-if="currentPlatform === 'gitea'" class="attr-editor__section">
+        <!-- 里程碑：v0.7.0 起 GitHub 数据源也开放（加载 GitHub milestones） -->
+        <div class="attr-editor__section">
           <label class="attr-editor__label" for="attr-milestone">里程碑：</label>
           <select
             id="attr-milestone"
@@ -3629,19 +3749,102 @@ function formatRelative(iso: string | undefined): string {
   margin-bottom: 0;
 }
 .md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3), .md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) {
-  margin: var(--space-2) 0 4px 0;
-  font-weight: 600;
+  margin: var(--space-3) 0 6px 0;
+  font-weight: 700;
   line-height: 1.3;
+  /* v0.7.x：让标题在 PR/评论正文里视觉层次明显（之前 h3=sm=13px 与正文同大） */
 }
-.md-body :deep(h1) { font-size: var(--font-lg); }
-.md-body :deep(h2) { font-size: var(--font-md); }
-.md-body :deep(h3) { font-size: var(--font-sm); }
-.md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) { font-size: var(--font-sm); }
+/* 仿 GitHub markdown-body：h1/h2 加顶 line 与 PR 描述区分段对齐 */
+.md-body :deep(h1) { font-size: var(--font-xl); padding-bottom: 4px; border-bottom: 1px solid var(--color-divider); }
+.md-body :deep(h2) { font-size: 18px; padding-bottom: 3px; border-bottom: 1px solid var(--color-divider); }
+.md-body :deep(h3) { font-size: var(--font-lg); }
+.md-body :deep(h4) { font-size: var(--font-md); }
+.md-body :deep(h5), .md-body :deep(h6) { font-size: var(--font-sm); }
+/* v0.7.x：PR 描述里 **Description:**、**Environment:** 等 “mac 伪 section header” */
+.md-body :deep(strong) { font-weight: 700; color: var(--color-text); }
 .md-body :deep(ul), .md-body :deep(ol) {
-  margin: 4px 0;
-  padding-left: var(--space-4);
+  margin: 6px 0;
+  padding-left: 24px;
 }
-.md-body :deep(li) { margin: 2px 0; }
+/* v0.7.x：reset.css 把 ul/ol 的 list-style 全局抹了，需要在 .md-body 内恢复。
+   不动 reset.css 是避免全局反洗（评论 / 看板 依赖 list-style: none 的样式）。
+   GitHub 也是在 .markdown-body 内独立恢复。 */
+.md-body :deep(ul) {
+  list-style-type: disc;
+}
+.md-body :deep(ol) {
+  list-style-type: decimal;
+}
+.md-body :deep(ul ul),
+.md-body :deep(ol ul) {
+  list-style-type: circle;
+  margin: 2px 0;
+}
+.md-body :deep(ol ol),
+.md-body :deep(ul ol) {
+  list-style-type: lower-alpha;
+  margin: 2px 0;
+}
+.md-body :deep(li) { margin: 3px 0; }
+/* v0.7.x：任务列表项（GFM 【- [ 】/- [X]）不应前置 ● bullet，
+   只保留勾选框。GitHub .markdown-body 同款处理。 */
+.md-body :deep(li.task-list-item) {
+  list-style: none;
+  position: relative;
+}
+
+/* v0.7.x：勾选框视觉与 GitHub .markdown-body 对齐
+   markdown.ts 注入了 <span class="md-task-checkbox"></span> 占位 span，
+   下面用 CSS 伪元素画真框（不依赖 emoji 字符大小）。
+   与主题色 token 对齐：勾选用 --color-primary 填充。 */
+.md-body :deep(.md-task-checkbox) {
+  /* v0.7.x bugfix-2：用 inline-block + box-sizing: border-box，明确尺寸边界。
+     之前 16/18px 在 inline 上下文里被父级 line-height 拦了一下，肉眼看不见。
+     改 inline-flex 后尺寸永远 fixed，不受父级文字流约束。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  /* v0.7.x bugfix-2（关键）：不要紧贴基线，不要受 line-height 压扁。
+     把 vertical-align 设回 baseline 配 4px 偏移，让 span 在文本流里也稳。 */
+  vertical-align: middle;
+  margin: 0 8px 0 0;
+  padding: 0;
+  border: 2px solid var(--color-text-secondary);
+  border-radius: 4px;
+  background: transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  cursor: default;
+  flex-shrink: 0;
+  /* v0.7.x 防护：min-w/h 防止 inline-block 在某些浏览器被压成 0 */
+  min-width: 18px;
+  min-height: 18px;
+}
+.md-body :deep(.md-task-checkbox::after) {
+  /* v0.7.x bugfix-2：用 ::after 替代 ::before 画勾选
+     某些浏览器对 inline-flex span 的 first-letter/::before 表现怪异，
+     ::after 在 inline-flex 容器内更稳。 */
+  content: '';
+  width: 5px;
+  height: 9px;
+  border-right: 2.5px solid transparent;
+  border-bottom: 2.5px solid transparent;
+  transform: rotate(45deg) translate(0, -1px) scale(0);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+  margin-top: -2px; /* 让勾选微微上抬对齐 checkbox 中心 */
+}
+.md-body :deep(.md-task-checkbox--checked) {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.md-body :deep(.md-task-checkbox--checked::after) {
+  border-right-color: #fff;
+  border-bottom-color: #fff;
+  transform: rotate(45deg) translate(0, -1px) scale(1);
+}
+.md-body :deep(li > p) { margin: 0; }
 .md-body :deep(blockquote) {
   margin: 4px 0;
   padding: 4px var(--space-3);
@@ -4072,7 +4275,15 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__detail-body-content :deep(ul),
 .merge-item__detail-body-content :deep(ol) {
   padding-left: 20px;
+  list-style-type: revert; /* 恢复 GFM 默认 disc/decimal */
 }
+.merge-item__detail-body-content :deep(ul) {
+  list-style-type: disc;
+}
+.merge-item__detail-body-content :deep(ol) {
+  list-style-type: decimal;
+}
+.merge-item__detail-body-content :deep(li) { margin: 3px 0; }
 
 /* ===== v0.5.0 M3: 评审区 ===== */
 .merge-item__reviews {
@@ -4534,13 +4745,12 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
 }
 
-/* 操作按钮条 */
-.pr-detail-actions {
+/* 操作按钮区（内嵌在 Meta 信息条右侧，靠右贴边） */
+.pr-detail-meta__actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-divider);
+  margin-left: auto;
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -4721,6 +4931,35 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-primary-bright, var(--color-primary));
 }
 
+/* Tab 加载波形动画（声纹风格） */
+.pr-detail-tab__wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  height: 14px;
+}
+.pr-detail-tab__wave i {
+  display: block;
+  width: 2px;
+  height: 4px;
+  background: var(--color-primary);
+  border-radius: 1px;
+  animation: tab-wave 0.8s ease-in-out infinite;
+}
+.pr-detail-tab__wave i:nth-child(2) {
+  animation-delay: 0.15s;
+  height: 8px;
+}
+.pr-detail-tab__wave i:nth-child(3) {
+  animation-delay: 0.3s;
+  height: 6px;
+}
+@keyframes tab-wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
 /* Tab 内容滚动区 */
 .pr-detail-body {
   flex: 1;
@@ -4793,10 +5032,26 @@ function formatRelative(iso: string | undefined): string {
   min-height: 0;
 }
 
-/* 代码提交 Tab */
+/* 代码提交 Tab —— 撑满 body 并用负 margin 抵消 body padding，让 thead sticky 贴顶 */
 .pr-detail__commits {
   min-height: 0;
-  overflow: auto;
+  margin: calc(-1 * var(--space-4));
+  margin-bottom: 0;
+  /* v0.7.x bugfix：用 flex column 撑满 pr-detail-body 高度，让 table 内部滚动条能正常工作。
+     pr-detail-body 本身有 overflow-y: auto；这里把 pr-detail__commits 改为 flex 容器，
+     把 table 滚动画限在 .pr-detail__commit-scroll 里。 */
+  display: flex;
+  flex-direction: column;
+  height: calc(100% + var(--space-4));
+}
+/* v0.7.x bugfix：table 外包一层独立滚动容器，让 thead sticky 真正在这个容器里生效。
+   直接让 pr-detail-body 滚的话，sticky 会被祖先滚动条的 overflow 屏障淹没，
+   导致部分浏览器表现异常 —— 这也是行内容透出 sticky 表的根因之一。 */
+.pr-detail__commit-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
 }
 .pr-detail__commit-table {
   width: 100%;
@@ -4806,17 +5061,14 @@ function formatRelative(iso: string | undefined): string {
 .pr-detail__commit-table thead {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+  /* v0.7.x bugfix：thead background 给 thead 本身还不够，滚动时 tbody 行仍会从 th 间隙透出。
+     background 必须显式标给 th —— th 默认 background: transparent，会透出下方行文字。 */
   background: var(--color-bg);
+  box-shadow: inset 0 -1px 0 var(--color-border);
 }
-.pr-detail__commit-table th {
-  text-align: left;
-  padding: 6px 10px;
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  border-bottom: 1px solid var(--color-border);
-  white-space: nowrap;
+.pr-detail__commit-table thead th {
+  background: var(--color-bg);
 }
 .pr-detail__commit-row {
   border-bottom: 1px solid var(--color-border);
@@ -5067,6 +5319,44 @@ function formatRelative(iso: string | undefined): string {
 .pr-detail__comment-editing-hint { font-size: var(--font-xs); color: var(--color-text-muted); margin-right: auto; }
 
 /* 评论输入区 */
+.pr-detail__md-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.md-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.md-toolbar-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.md-toolbar-btn code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+.md-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-divider);
+  margin: 0 4px;
+}
 .pr-detail__comment-compose {
   margin-top: var(--space-3);
   padding-top: var(--space-3);

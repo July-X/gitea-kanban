@@ -377,6 +377,16 @@ type githubPullRaw struct {
 	MergedBy           *githubUserRaw       `json:"merged_by"`
 	CreatedAt          string               `json:"created_at"`
 	UpdatedAt          string               `json:"updated_at"`
+	// Milestone v0.7.0：GitHub PR 可能挂在某个 milestone 上
+	// 字段：{url, html_url, number, title, description, state, ...}
+	Milestone *githubPullMilestoneRaw `json:"milestone"`
+}
+
+type githubPullMilestoneRaw struct {
+	Number      int64  `json:"number"`
+	Title       string `json:"title"`
+	State       string `json:"state"`
+	Description string `json:"description"`
 }
 
 type githubPullRefRaw struct {
@@ -444,6 +454,15 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		out.Labels = make([]platform.PullLabelDTO, 0, len(p.Labels))
 		for _, l := range p.Labels {
 			out.Labels = append(out.Labels, platform.PullLabelDTO{ID: l.ID, Name: l.Name, Color: l.Color})
+		}
+	}
+	if p.Milestone != nil {
+		// v0.7.0：GitHub milestone 映射到 DTO（id 取 number，与 UpdatePullMilestone 写入对齐）
+		out.Milestone = &platform.MilestoneDTO{
+			ID:          p.Milestone.Number,
+			Title:       p.Milestone.Title,
+			State:       p.Milestone.State,
+			Description: p.Milestone.Description,
 		}
 	}
 	return out
@@ -1250,7 +1269,7 @@ func (a *GitHubAdapter) CreatePullReview(ctx context.Context, hostURL, username,
 		"commit_id": opts.CommitID,
 		"body":      opts.Body,
 		"event":     mapReviewEventToGitHub(opts.Event),
-		"comments":  []interface{}{}, // 暂无行内评审（M4+）
+		"comments":  githubReviewCommentsFromOpts(opts.Comments), // v0.7.0：透传行内 review 评论
 	}
 	reader, err := encodeJSONBody(payload)
 	if err != nil {
@@ -1315,32 +1334,233 @@ func (a *GitHubAdapter) ListIssues(ctx context.Context, hostURL, username, token
 	return nil, platform.ErrNotSupported
 }
 
-// ListLabels 首期不支持
+// ListLabels 列出仓库标签（GET /repos/{owner}/{repo}/labels）
+//
+// GitHub labels 与 Gitea LabelDTO 字段完全对齐（id / name / color / description），
+// 直接透传，无须字段映射。
 func (a *GitHubAdapter) ListLabels(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.LabelDTO, error) {
-	return nil, platform.ErrNotSupported
+	var raw []struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Color       string `json:"color"`
+		Description string `json:"description"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/labels?per_page=100", owner, repo)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	labels := make([]platform.LabelDTO, 0, len(raw))
+	for _, l := range raw {
+		labels = append(labels, platform.LabelDTO{
+			ID:          l.ID,
+			Name:        l.Name,
+			Color:       l.Color,
+			Description: l.Description,
+		})
+	}
+	return labels, nil
 }
 
-// ListMembers 首期不支持
+// ListMembers 列出仓库协作者（GET /repos/{owner}/{repo}/collaborators）
+//
+// GitHub collaborators API 行为：
+//   - 需要 owner 鉴权（非 owner/non-admin 调用返回 404）
+//   - 返回与仓库有直接关联的协作者（包含 owner/organization member via team）
+//   - permissions 字段表示该用户在该仓库的权限级别（admin / maintain / push / triage / pull）
+//   - 非 owner 协作者若没有 push 权限，可能不在列表中（GitHub API 行为）
+//
+// 注意：PR assignee 可以是任意仓库可读用户，不限于 collaborators 列表。
+// Members 下拉在 owner 鉴权视角下最完整。
 func (a *GitHubAdapter) ListMembers(ctx context.Context, hostURL, username, token, owner, repo string) ([]platform.MemberDTO, error) {
-	return nil, platform.ErrNotSupported
+	var raw []struct {
+		Login       string `json:"login"`
+		Permissions struct {
+			Admin    bool `json:"admin"`
+			Maintain bool `json:"maintain"`
+			Push     bool `json:"push"`
+			Triage   bool `json:"triage"`
+			Pull     bool `json:"pull"`
+		} `json:"permissions,omitempty"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/collaborators?per_page=100", owner, repo)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	members := make([]platform.MemberDTO, 0, len(raw))
+	for _, m := range raw {
+		perm := permissionLevel(m.Permissions)
+		members = append(members, platform.MemberDTO{
+			Login:      m.Login,
+			Permission: perm,
+		})
+	}
+	return members, nil
 }
 
-// ListMilestones v0.6.0 Gitea only
+// permissionLevel 根据 GitHub permissions 对象返回最高权限级别字符串
+func permissionLevel(p struct {
+	Admin    bool `json:"admin"`
+	Maintain bool `json:"maintain"`
+	Push     bool `json:"push"`
+	Triage   bool `json:"triage"`
+	Pull     bool `json:"pull"`
+}) string {
+	if p.Admin {
+		return "admin"
+	}
+	if p.Maintain {
+		return "maintain"
+	}
+	if p.Push {
+		return "push"
+	}
+	if p.Triage {
+		return "triage"
+	}
+	if p.Pull {
+		return "pull"
+	}
+	return ""
+}
+
+// ListMilestones 列出里程碑（GET /repos/{owner}/{repo}/milestones）
+//
+// GitHub milestones 与 Gitea 字段基本对齐（id/title/state/description），
+// state 参数透传（open / closed / all）。
 func (a *GitHubAdapter) ListMilestones(ctx context.Context, hostURL, username, token, owner, repo string, state string) ([]platform.MilestoneDTO, error) {
-	return nil, platform.ErrNotSupported
+	if state == "" {
+		state = "open"
+	}
+	var raw []struct {
+		ID          int64  `json:"id"`
+		Title       string `json:"title"`
+		State       string `json:"state"`
+		Description string `json:"description"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/milestones?state=%s&per_page=100", owner, repo, state)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.MilestoneDTO, 0, len(raw))
+	for _, m := range raw {
+		out = append(out, platform.MilestoneDTO{
+			ID:          m.ID,
+			Title:       m.Title,
+			State:       m.State,
+			Description: m.Description,
+		})
+	}
+	return out, nil
 }
 
-// UpdatePullMilestone v0.6.0 Gitea only
+// UpdatePullMilestone 给 PR 关联里程碑（v0.7.0, GitHub）
+//
+// GitHub 用 milestone number（不是 name，Gitea 用 name）。
+// 前端走 store-first: pullStore.updateMilestone(pullId, milestoneTitle)
+// → ipcClient.pullsUpdateMilestone({projectId, index, milestone: title})
+// → App.UpdatePullMilestone → adapter.UpdatePullMilestone(title)
+// adapter 内部 GET milestones?state=all 做 title→number 反查。
+// milestone="" → PATCH {"milestone": null} 清空。
 func (a *GitHubAdapter) UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*platform.PullDetailDTO, error) {
-	return nil, platform.ErrNotSupported
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, index)
+	// 清空 milestone
+	if milestone == "" {
+		reader, err := encodeJSONBody(map[string]any{"milestone": nil})
+		if err != nil {
+			return nil, err
+		}
+		if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, nil); err != nil {
+			return nil, err
+		}
+		return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	}
+	// milestone title → number 反查
+	var raw []struct {
+		Number int64  `json:"number"`
+		Title  string `json:"title"`
+	}
+	mPath := fmt.Sprintf("/repos/%s/%s/milestones?state=all&per_page=100", owner, repo)
+	if err := a.doRequest(ctx, hostURL, token, "GET", mPath, nil, &raw); err != nil {
+		return nil, err
+	}
+	var number int64 = -1
+	for _, m := range raw {
+		if m.Title == milestone {
+			number = m.Number
+			break
+		}
+	}
+	if number < 0 {
+		return nil, ipc.NewValidationFailed(fmt.Sprintf("里程碑 %q 在 %s/%s 中不存在", milestone, owner, repo), "")
+	}
+	reader, err := encodeJSONBody(map[string]any{"milestone": number})
+	if err != nil {
+		return nil, err
+	}
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, nil); err != nil {
+		return nil, err
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
-// ListPullCommits 首期不支持（GitHub 仅 Git Graph）
+// ListPullCommits 列 PR 提交历史（v0.7.0, GitHub）
+// GET /repos/{owner}/{repo}/pulls/{index}/commits
 func (a *GitHubAdapter) ListPullCommits(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullCommitDTO, error) {
-	return nil, platform.ErrNotSupported
+	var raw []struct {
+		SHA    string `json:"sha"`
+		Commit struct {
+			Message string `json:"message"`
+			Author  struct {
+				Name  string `json:"name"`
+				Email string `json:"email"`
+				Date  string `json:"date"`
+			} `json:"author"`
+			Committer struct {
+				Date string `json:"date"`
+			} `json:"committer"`
+		} `json:"commit"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/commits?per_page=100", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.PullCommitDTO, 0, len(raw))
+	for _, c := range raw {
+		subject := c.Commit.Message
+		if idx := strings.Index(subject, "\n"); idx > 0 {
+			subject = subject[:idx]
+		}
+		out = append(out, platform.PullCommitDTO{
+			SHA:        c.SHA,
+			ShortSHA:   c.SHA,
+			Subject:    subject,
+			Body:       strings.TrimPrefix(c.Commit.Message, subject),
+			AuthorName: c.Commit.Author.Name,
+			AuthorMail: c.Commit.Author.Email,
+			AuthoredAt: c.Commit.Author.Date,
+			Committed:  c.Commit.Committer.Date,
+		})
+	}
+	return out, nil
 }
 
-// ===== HTTP 请求封装 =====
+// githubReviewCommentsFromOpts 把 v0.6+ opts.Comments 翻译为 GitHub API 的 line 风格
+func githubReviewCommentsFromOpts(opts []platform.CreateReviewCommentOpts) []map[string]any {
+	if len(opts) == 0 {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(opts))
+	for _, c := range opts {
+		// GitHub `/reviews` 行内评论字段：path/line/body；Gitea 用 `new_position`，这里我们用 line
+		// 注意 GitHub `line` 是 diff hunks 的行号（与 Gitea new_position 同语义）
+		out = append(out, map[string]any{
+			"path": c.Path,
+			"line": c.Position,
+			"body": c.Body,
+		})
+	}
+	return out
+}
 
 // doRequest 发送 GitHub API 请求
 //

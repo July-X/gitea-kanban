@@ -40,11 +40,17 @@ type MdToken = ReturnType<MdInstance['parse']>[number];
 // ===== markdown-it 单例（避免每次渲染都构造） =====
 
 /**
- * 单例 md 实例 —— GFM 风格，链接开启，HTML 标签**不**开启（开了反而绕过 sanitizer 防
- * 线）。v1.2 评论 / 议题正文不需要内嵌 HTML。
+ * 单例 md 实例 —— GFM 风格，链接开启，HTML 标签开启（交给 DOMPurify 防线把关）。
+ *
+ * v0.7.x 变更：html: false → true，让  <!-- 注释 -->  在 DOMPurify 阶段被
+ * 静默吃掉，与 GitHub Markdown 渲染一致。html: false 模式下 <!--...--> 会以
+ * 字面文本（被 escape 后）出现在最终输出里，是 v0.7.x 之前 PR body 里的明显 bug。
+ * 安全防防线未减弱：DOMPurify ALLOWED_TAGS / ALLOWED_URI_REGEXP / FORBID_ATTR 都
+ * 仍然生效 —— <!--comment--> 不在 ALLOWED_TAGS 内，DOMPurify 视为"被剥离
+ * 标签"，KEEP_CONTENT 为 true 也不会保留任何内容。
  */
 const md = new MarkdownIt({
-  html: false, // 不解析原 HTML（防 XSS 突破口；交给 DOMPurify 也行但这里更省）
+  html: true, // v0.7.x：开启 HTML token，依靠 DOMPurify 防线
   linkify: true, // 自动识别 URL 转链接（gitea 也开）
   breaks: true, // 换行 → <br>（gitea 评论习惯）
   typographer: false, // 关闭智能引号 / 破折号（避免和中文排版冲突）
@@ -87,6 +93,37 @@ md.renderer.rules.link_open = function linkOpen(
   }
   return defaultLinkOpen(tokens, idx, options, env, self);
 };
+
+// ===== GFM Task List 后处理（- [ ] / - [x]） =====
+// markdown-it 原生不支持 GFM task list。通过在 renderMarkdown 输出后做正则后处理实现：
+//   <li><p>[ ] text</p></li>  →  <li class="task-list-item"><p><span class="md-task-checkbox"></span> text</p></li>
+//   <li>[x] text</li>         →  <li class="task-list-item"><span class="md-task-checkbox md-task-checkbox--checked"></span> text</li>
+// 这种方式不依赖 markdown-it Token 内部 API，ESM/CJS 通用，不会运行时崩溃。
+
+/**
+ * GFM task list 正则后处理：把 `[ ]` / `[x]` 前缀替换为 CSS checkbox span
+ */
+function postProcessTaskList(html: string): string {
+  // 松散列表（有 <p> 包裹）：<li><p>[ ] text → <li class="task-list-item"><p><span...></span> text
+  html = html.replace(
+    /<li><p>\[([ xX])\]\s+/g,
+    (_, mark) => {
+      const checked = mark.toLowerCase() === 'x';
+      const cls = checked ? 'md-task-checkbox md-task-checkbox--checked' : 'md-task-checkbox';
+      return `<li class="task-list-item"><p><span class="${cls}"></span> `;
+    },
+  );
+  // 紧凑列表（无 <p> 包裹）：<li>[ ] text → <li class="task-list-item"><span...></span> text
+  html = html.replace(
+    /<li>\[([ xX])\]\s+/g,
+    (_, mark) => {
+      const checked = mark.toLowerCase() === 'x';
+      const cls = checked ? 'md-task-checkbox md-task-checkbox--checked' : 'md-task-checkbox';
+      return `<li class="task-list-item"><span class="${cls}"></span> `;
+    },
+  );
+  return html;
+}
 
 // ===== DOMPurify 白名单 =====
 
@@ -160,13 +197,15 @@ export function renderMarkdown(source: string | null | undefined): string {
   if (!source) return '';
   try {
     const html = md.render(source);
+    // GFM Task List 后处理（在 DOMPurify 之前，保证 span 被白名单允许）
+    const taskListHtml = postProcessTaskList(html);
     // DOMPurify 在浏览器环境直接用 window DOM；node 环境会回退到 jsdom（v0.3.0 仍没装）
     // 我们的使用场景只在 renderer（Wails WebView / Chromium）→ 一定有 window
-    const clean = DOMPurify.sanitize(html, {
+    const clean = DOMPurify.sanitize(taskListHtml, {
       ALLOWED_TAGS,
       ALLOWED_ATTR,
-      // 禁掉所有 URL scheme 不是 http/https/mailto/相对路径的
-      ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\-:]|$))/i,
+      // 允许 http/https/mailto/相对路径 + data:image/（贴图用）
+      ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|data:image\/|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\-:]|$))/i,
       // 不允许 style 属性（避免 gitea 评论里塞 CSS 改全局样式）
       FORBID_ATTR: ['style', 'srcdoc'],
       // 标签被禁时保留内部文本（不要剥成空字符串）

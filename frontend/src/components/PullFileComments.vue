@@ -14,7 +14,7 @@
  *   - projectId: string — 项目 ID
  */
 import { computed, ref } from 'vue';
-import { ChevronDown, ChevronRight, Plus, Minus, FileText } from 'lucide-vue-next';
+import { ChevronDown, ChevronRight, Plus, Minus, FileText, Loader2 } from 'lucide-vue-next';
 import { usePullStore } from '@renderer/stores/pull';
 import type { PullDto, PullFileDto, PullReviewCommentDto } from '@renderer/types/dto';
 import { renderMarkdown } from '@renderer/lib/markdown';
@@ -28,6 +28,9 @@ const props = defineProps<{
 
 /** 该 PR 下所有文件的展开 Set */
 const expandedFiles = ref<Set<string>>(new Set());
+
+/** 加载状态 */
+const loading = ref(true);
 
 /** 该 PR 下的文件列表 */
 const files = computed<PullFileDto[]>(() => {
@@ -56,8 +59,13 @@ function toggleFile(path: string): void {
 
 /** 拉取文件评论和文件列表（如果尚未加载） */
 async function ensureLoaded(): Promise<void> {
-  await pullStore.loadFiles(props.projectId, props.pr.index);
-  await pullStore.loadReviewComments(props.projectId, props.pr.index);
+  loading.value = true;
+  try {
+    await pullStore.loadFiles(props.projectId, props.pr.index);
+    await pullStore.loadReviewComments(props.projectId, props.pr.index);
+  } finally {
+    loading.value = false;
+  }
 }
 
 // 加载
@@ -71,6 +79,13 @@ const truncate = (s: string, n = 50): string => {
 
 <template>
   <div class="merge-item__file-comments">
+    <!-- 加载中 -->
+    <div v-if="loading" class="merge-item__file-comments-loading">
+      <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
+      <span>正在加载文件列表…</span>
+    </div>
+
+    <template v-else>
     <!-- 文件评论区 header -->
     <div class="merge-item__file-comments-header">
       <span class="merge-item__file-comments-title">
@@ -148,6 +163,7 @@ const truncate = (s: string, n = 50): string => {
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -190,6 +206,24 @@ const truncate = (s: string, n = 50): string => {
   text-align: center;
   font-size: var(--font-xs);
   color: var(--color-text-muted);
+}
+
+.merge-item__file-comments-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 8px;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+}
+
+.merge-item__file-comments-loading .spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ===== 文件列表 ===== */

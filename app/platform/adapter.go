@@ -493,6 +493,9 @@ type PullDetailDTO struct {
 	Reviewers      []PullUserDTO  `json:"reviewers,omitempty"`
 	MergedBy       *PullUserDTO   `json:"mergedBy,omitempty"`
 	MergeCommitSHA string         `json:"mergeCommitSha,omitempty"` // 合并成功后回填
+	// Milestone v0.6.0：get / patch 后填回（如设置过则填，否则 nil）
+	// Gitea 端 LongPoll 时间充裕（v0.7.0 漏映射，由 github 端补 PullDetailDTO 字段后可在 gitea adapter 也映射）
+	Milestone *MilestoneDTO `json:"milestone,omitempty"`
 }
 
 // PullRefDTO head / base 引用信息
