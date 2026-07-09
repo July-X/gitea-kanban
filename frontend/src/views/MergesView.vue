@@ -3657,7 +3657,12 @@ function formatRelative(iso: string | undefined): string {
   margin: 2px 0;
 }
 .md-body :deep(li) { margin: 3px 0; }
-/* list 内的 <p> 不需要多余上下 margin（GitHub markdown-body 同款样式） */
+/* v0.7.x：任务列表项（GFM 【- [ 】/- [X]）不应前置 ● bullet，
+   只保留勾选框。GitHub .markdown-body 同款处理。 */
+.md-body :deep(li.task-list-item) {
+  list-style: none;
+  position: relative;
+}
 .md-body :deep(li > p) { margin: 0; }
 .md-body :deep(blockquote) {
   margin: 4px 0;

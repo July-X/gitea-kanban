@@ -40,11 +40,17 @@ type MdToken = ReturnType<MdInstance['parse']>[number];
 // ===== markdown-it 单例（避免每次渲染都构造） =====
 
 /**
- * 单例 md 实例 —— GFM 风格，链接开启，HTML 标签**不**开启（开了反而绕过 sanitizer 防
- * 线）。v1.2 评论 / 议题正文不需要内嵌 HTML。
+ * 单例 md 实例 —— GFM 风格，链接开启，HTML 标签开启（交给 DOMPurify 防线把关）。
+ *
+ * v0.7.x 变更：html: false → true，让  <!-- 注释 -->  在 DOMPurify 阶段被
+ * 静默吃掉，与 GitHub Markdown 渲染一致。html: false 模式下 <!--...--> 会以
+ * 字面文本（被 escape 后）出现在最终输出里，是 v0.7.x 之前 PR body 里的明显 bug。
+ * 安全防防线未减弱：DOMPurify ALLOWED_TAGS / ALLOWED_URI_REGEXP / FORBID_ATTR 都
+ * 仍然生效 —— <!--comment--> 不在 ALLOWED_TAGS 内，DOMPurify 视为"被剥离
+ * 标签"，KEEP_CONTENT 为 true 也不会保留任何内容。
  */
 const md = new MarkdownIt({
-  html: false, // 不解析原 HTML（防 XSS 突破口；交给 DOMPurify 也行但这里更省）
+  html: true, // v0.7.x：开启 HTML token，依靠 DOMPurify 防线
   linkify: true, // 自动识别 URL 转链接（gitea 也开）
   breaks: true, // 换行 → <br>（gitea 评论习惯）
   typographer: false, // 关闭智能引号 / 破折号（避免和中文排版冲突）
@@ -86,6 +92,34 @@ md.renderer.rules.link_open = function linkOpen(
     token.attrs![relIndex] = ['rel', 'noopener noreferrer nofollow'];
   }
   return defaultLinkOpen(tokens, idx, options, env, self);
+};
+
+// ===== GFM Task List 支持（- [ ] / - [x]） =====
+// markdown-it 原生不支持 GFM task list，通过自定义 list_item_open 规则实现：
+// 检测 list_item 的第一个子 token（inline）是否以 [ ] 或 [x] 开头，
+// 如果是则在 <li> 上加 class="task-list-item"，并用 Unicode 字符替代 checkbox。
+// 不创建新 Token（避免 markdown-it ESM/CJS Token 导出差异导致运行时崩溃）。
+const defaultListItemOpen = md.renderer.rules.list_item_open ??
+  function defaultListItemOpen(tokens: MdToken[], idx: number, options: MdOptions, _env: unknown, self: MdRenderer): string {
+    return self.renderToken(tokens, idx, options);
+  };
+
+md.renderer.rules.list_item_open = function taskListItemOpen(tokens, idx, options, env, self): string {
+  const nextInline = tokens[idx + 2]; // list_item_open → paragraph_open → inline
+  if (nextInline && nextInline.type === 'inline' && nextInline.children) {
+    const firstChild = nextInline.children[0];
+    if (firstChild && firstChild.type === 'text') {
+      const match = firstChild.content.match(/^\[([ xX])\]\s+/);
+      if (match) {
+        const token = tokens[idx];
+        token.attrSet('class', 'task-list-item');
+        const checked = match[1].toLowerCase() === 'x';
+        // 用 Unicode 字符替代 checkbox（不创建新 Token，避免运行时崩溃）
+        firstChild.content = (checked ? '☑ ' : '☐ ') + firstChild.content.slice(match[0].length);
+      }
+    }
+  }
+  return defaultListItemOpen(tokens, idx, options, env, self);
 };
 
 // ===== DOMPurify 白名单 =====
