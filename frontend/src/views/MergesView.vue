@@ -1426,62 +1426,53 @@ function formatRelative(iso: string | undefined): string {
             <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
             <span>编辑属性</span>
           </button>
-        </dl>
-
-        <!-- 操作按钮条 -->
-        <div class="pr-detail-actions">
-          <button
-            v-if="selectedPR.state === 'open' && !selectedPR.draft"
-            type="button"
-            class="btn-primary-sm"
-            :disabled="selectedPR.hasConflicts || !selectedPR.mergeable || merging"
-            :title="selectedPR.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !selectedPR.mergeable ? '当前不可合并' : '合并此请求'"
-            @click="requestMerge(selectedPR)"
-          >
-            <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
-            <span>{{ merging && mergingPull?.index === selectedPR.index ? '合并中…' : '合并' }}</span>
-          </button>
-          <template v-if="selectedPR.state === 'open'">
+          <!-- 操作按钮（靠右贴边） -->
+          <div class="pr-detail-meta__actions">
+            <span
+              v-if="selectedPR.hasConflicts && selectedPR.state === 'open'"
+              class="pr-detail__conflict-hint"
+              title="此合并请求存在冲突，请先在 gitea 页面解决"
+            >有冲突</span>
             <button
+              v-if="selectedPR.state === 'open' && !selectedPR.draft"
               type="button"
-              class="btn-approve-sm"
-              :disabled="reviewSubmitting"
-              title="批准此合并请求"
-              @click="toggleReviewEditor(selectedPR, 'approve')"
-            ><span>批准</span></button>
+              class="btn-primary-sm"
+              :disabled="selectedPR.hasConflicts || !selectedPR.mergeable || merging"
+              :title="selectedPR.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !selectedPR.mergeable ? '当前不可合并' : '合并此请求'"
+              @click="requestMerge(selectedPR)"
+            >
+              <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
+              <span>{{ merging && mergingPull?.index === selectedPR.index ? '合并中…' : '合并' }}</span>
+            </button>
+            <template v-if="selectedPR.state === 'open'">
+              <button
+                type="button"
+                class="btn-approve-sm"
+                :disabled="reviewSubmitting"
+                title="批准此合并请求"
+                @click="toggleReviewEditor(selectedPR, 'approve')"
+              ><span>批准</span></button>
+              <button
+                type="button"
+                class="btn-request-changes-sm"
+                :disabled="reviewSubmitting"
+                title="请求修改"
+                @click="toggleReviewEditor(selectedPR, 'request_changes')"
+              ><span>请求修改</span></button>
+            </template>
             <button
-              type="button"
-              class="btn-request-changes-sm"
-              :disabled="reviewSubmitting"
-              title="请求修改"
-              @click="toggleReviewEditor(selectedPR, 'request_changes')"
-            ><span>请求修改</span></button>
-            <button
+              v-if="selectedPR.state === 'open'"
               type="button"
               class="btn-ghost-sm"
-              :disabled="reviewSubmitting"
-              title="仅评论（不批准也不请求修改）"
-              @click="toggleReviewEditor(selectedPR, 'comment')"
-            ><span>评论</span></button>
-          </template>
-          <button
-            v-if="selectedPR.state === 'open'"
-            type="button"
-            class="btn-ghost-sm"
-            :disabled="closing"
-            title="关闭此合并请求（不合并）"
-            @click="requestClose(selectedPR)"
-          >
-            <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
-            <span>{{ closing && closingPull?.index === selectedPR.index ? '关闭中…' : '关闭' }}</span>
-          </button>
-          <span
-            v-if="selectedPR.hasConflicts && selectedPR.state === 'open'"
-            class="pr-detail__conflict-hint"
-            title="此合并请求存在冲突，请先在 gitea 页面解决"
-          >有冲突</span>
-          <div style="flex: 1;"></div>
-        </div>
+              :disabled="closing"
+              title="关闭此合并请求（不合并）"
+              @click="requestClose(selectedPR)"
+            >
+              <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
+              <span>{{ closing && closingPull?.index === selectedPR.index ? '关闭中…' : '关闭' }}</span>
+            </button>
+          </div>
+        </dl>
 
         <!-- 评审编辑器（内联在操作按钮下方） -->
         <div v-if="reviewEditorOpen.has(selectedPR.index)" class="pr-detail__review-editor">
@@ -3629,19 +3620,45 @@ function formatRelative(iso: string | undefined): string {
   margin-bottom: 0;
 }
 .md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3), .md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) {
-  margin: var(--space-2) 0 4px 0;
-  font-weight: 600;
+  margin: var(--space-3) 0 6px 0;
+  font-weight: 700;
   line-height: 1.3;
+  /* v0.7.x：让标题在 PR/评论正文里视觉层次明显（之前 h3=sm=13px 与正文同大） */
 }
-.md-body :deep(h1) { font-size: var(--font-lg); }
-.md-body :deep(h2) { font-size: var(--font-md); }
-.md-body :deep(h3) { font-size: var(--font-sm); }
-.md-body :deep(h4), .md-body :deep(h5), .md-body :deep(h6) { font-size: var(--font-sm); }
+/* 仿 GitHub markdown-body：h1/h2 加顶 line 与 PR 描述区分段对齐 */
+.md-body :deep(h1) { font-size: var(--font-xl); padding-bottom: 4px; border-bottom: 1px solid var(--color-divider); }
+.md-body :deep(h2) { font-size: 18px; padding-bottom: 3px; border-bottom: 1px solid var(--color-divider); }
+.md-body :deep(h3) { font-size: var(--font-lg); }
+.md-body :deep(h4) { font-size: var(--font-md); }
+.md-body :deep(h5), .md-body :deep(h6) { font-size: var(--font-sm); }
+/* v0.7.x：PR 描述里 **Description:**、**Environment:** 等 “mac 伪 section header” */
+.md-body :deep(strong) { font-weight: 700; color: var(--color-text); }
 .md-body :deep(ul), .md-body :deep(ol) {
-  margin: 4px 0;
-  padding-left: var(--space-4);
+  margin: 6px 0;
+  padding-left: 24px;
 }
-.md-body :deep(li) { margin: 2px 0; }
+/* v0.7.x：reset.css 把 ul/ol 的 list-style 全局抹了，需要在 .md-body 内恢复。
+   不动 reset.css 是避免全局反洗（评论 / 看板 依赖 list-style: none 的样式）。
+   GitHub 也是在 .markdown-body 内独立恢复。 */
+.md-body :deep(ul) {
+  list-style-type: disc;
+}
+.md-body :deep(ol) {
+  list-style-type: decimal;
+}
+.md-body :deep(ul ul),
+.md-body :deep(ol ul) {
+  list-style-type: circle;
+  margin: 2px 0;
+}
+.md-body :deep(ol ol),
+.md-body :deep(ul ol) {
+  list-style-type: lower-alpha;
+  margin: 2px 0;
+}
+.md-body :deep(li) { margin: 3px 0; }
+/* list 内的 <p> 不需要多余上下 margin（GitHub markdown-body 同款样式） */
+.md-body :deep(li > p) { margin: 0; }
 .md-body :deep(blockquote) {
   margin: 4px 0;
   padding: 4px var(--space-3);
@@ -4072,7 +4089,15 @@ function formatRelative(iso: string | undefined): string {
 .merge-item__detail-body-content :deep(ul),
 .merge-item__detail-body-content :deep(ol) {
   padding-left: 20px;
+  list-style-type: revert; /* 恢复 GFM 默认 disc/decimal */
 }
+.merge-item__detail-body-content :deep(ul) {
+  list-style-type: disc;
+}
+.merge-item__detail-body-content :deep(ol) {
+  list-style-type: decimal;
+}
+.merge-item__detail-body-content :deep(li) { margin: 3px 0; }
 
 /* ===== v0.5.0 M3: 评审区 ===== */
 .merge-item__reviews {
@@ -4534,13 +4559,12 @@ function formatRelative(iso: string | undefined): string {
   color: var(--color-text);
 }
 
-/* 操作按钮条 */
-.pr-detail-actions {
+/* 操作按钮区（内嵌在 Meta 信息条右侧，靠右贴边） */
+.pr-detail-meta__actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-divider);
+  margin-left: auto;
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -4793,10 +4817,11 @@ function formatRelative(iso: string | undefined): string {
   min-height: 0;
 }
 
-/* 代码提交 Tab */
+/* 代码提交 Tab —— 撑满 body 并用负 margin 抵消 body padding，让 thead sticky 贴顶 */
 .pr-detail__commits {
   min-height: 0;
-  overflow: auto;
+  margin: calc(-1 * var(--space-4));
+  margin-bottom: 0;
 }
 .pr-detail__commit-table {
   width: 100%;
@@ -4806,8 +4831,9 @@ function formatRelative(iso: string | undefined): string {
 .pr-detail__commit-table thead {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   background: var(--color-bg);
+  box-shadow: inset 0 -1px 0 var(--color-border);
 }
 .pr-detail__commit-table th {
   text-align: left;
@@ -4815,7 +4841,6 @@ function formatRelative(iso: string | undefined): string {
   font-weight: 600;
   font-size: 12px;
   color: var(--color-text-muted);
-  border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }
 .pr-detail__commit-row {
