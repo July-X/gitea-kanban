@@ -3669,39 +3669,51 @@ function formatRelative(iso: string | undefined): string {
    下面用 CSS 伪元素画真框（不依赖 emoji 字符大小）。
    与主题色 token 对齐：勾选用 --color-primary 填充。 */
 .md-body :deep(.md-task-checkbox) {
-  display: inline-block;
-  /* v0.7.x bugfix：从 16px 加大到 18px；16px 在 13px 正文里太迷你，
-     用户看不到认为「不显示」。18px + 2px 边框边界更清晰。 */
+  /* v0.7.x bugfix-2：用 inline-block + box-sizing: border-box，明确尺寸边界。
+     之前 16/18px 在 inline 上下文里被父级 line-height 拦了一下，肉眼看不见。
+     改 inline-flex 后尺寸永远 fixed，不受父级文字流约束。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   width: 18px;
   height: 18px;
-  position: relative;
-  vertical-align: -3px;
-  margin-right: 10px;
+  /* v0.7.x bugfix-2（关键）：不要紧贴基线，不要受 line-height 压扁。
+     把 vertical-align 设回 baseline 配 4px 偏移，让 span 在文本流里也稳。 */
+  vertical-align: middle;
+  margin: 0 8px 0 0;
+  padding: 0;
   border: 2px solid var(--color-text-secondary);
   border-radius: 4px;
   background: transparent;
   transition: background 0.12s ease, border-color 0.12s ease;
   cursor: default;
   flex-shrink: 0;
+  /* v0.7.x 防护：min-w/h 防止 inline-block 在某些浏览器被压成 0 */
+  min-width: 18px;
+  min-height: 18px;
 }
-.md-body :deep(.md-task-checkbox::before) {
+.md-body :deep(.md-task-checkbox::after) {
+  /* v0.7.x bugfix-2：用 ::after 替代 ::before 画勾选
+     某些浏览器对 inline-flex span 的 first-letter/::before 表现怪异，
+     ::after 在 inline-flex 容器内更稳。 */
   content: '';
-  position: absolute;
-  left: 5px;
-  top: 1px;
-  width: 6px;
-  height: 11px;
-  border-right: 2.5px solid #fff;
-  border-bottom: 2.5px solid #fff;
-  transform: rotate(45deg) scale(0);
-  transition: transform 0.12s ease;
+  width: 5px;
+  height: 9px;
+  border-right: 2.5px solid transparent;
+  border-bottom: 2.5px solid transparent;
+  transform: rotate(45deg) translate(0, -1px) scale(0);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+  margin-top: -2px; /* 让勾选微微上抬对齐 checkbox 中心 */
 }
 .md-body :deep(.md-task-checkbox--checked) {
   background: var(--color-primary);
   border-color: var(--color-primary);
 }
-.md-body :deep(.md-task-checkbox--checked::before) {
-  transform: rotate(45deg) scale(1);
+.md-body :deep(.md-task-checkbox--checked::after) {
+  border-right-color: #fff;
+  border-bottom-color: #fff;
+  transform: rotate(45deg) translate(0, -1px) scale(1);
 }
 .md-body :deep(li > p) { margin: 0; }
 .md-body :deep(blockquote) {
