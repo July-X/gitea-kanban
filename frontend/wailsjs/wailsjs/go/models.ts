@@ -1859,6 +1859,7 @@ export namespace platform {
 	    reviewers?: PullUserDTO[];
 	    mergedBy?: PullUserDTO;
 	    mergeCommitSha?: string;
+	    milestone?: MilestoneDTO;
 	
 	    static createFrom(source: any = {}) {
 	        return new PullDetailDTO(source);
@@ -1886,6 +1887,7 @@ export namespace platform {
 	        this.reviewers = this.convertValues(source["reviewers"], PullUserDTO);
 	        this.mergedBy = this.convertValues(source["mergedBy"], PullUserDTO);
 	        this.mergeCommitSha = source["mergeCommitSha"];
+	        this.milestone = this.convertValues(source["milestone"], MilestoneDTO);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

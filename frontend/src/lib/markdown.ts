@@ -94,42 +94,36 @@ md.renderer.rules.link_open = function linkOpen(
   return defaultLinkOpen(tokens, idx, options, env, self);
 };
 
-// ===== GFM Task List 支持（- [ ] / - [x]） =====
-// markdown-it 原生不支持 GFM task list，通过自定义 list_item_open 规则实现：
-// 检测 list_item 的第一个子 token（inline）是否以 [ ] 或 [x] 开头，
-// 如果是则在 <li> 上加 class="task-list-item"，并注入 <span class="md-task-checkbox">
-// 由 CSS 伪元素绘制真框 + 勾选（Unicode 字符已被 span 替换走）。
-// 不创建新 Token（避免 markdown-it ESM/CJS Token 导出差异导致运行时崩溃）。
-// v0.7.x：旧版用 ☐/☑ Unicode 字符直接插，13px 正文里太小。这次走
-// span 占位 + CSS 伪元素方案，与 GitHub .markdown-body checkbox 视觉对齐。
-const defaultListItemOpen = md.renderer.rules.list_item_open ??
-  function defaultListItemOpen(tokens: MdToken[], idx: number, options: MdOptions, _env: unknown, self: MdRenderer): string {
-    return self.renderToken(tokens, idx, options);
-  };
+// ===== GFM Task List 后处理（- [ ] / - [x]） =====
+// markdown-it 原生不支持 GFM task list。通过在 renderMarkdown 输出后做正则后处理实现：
+//   <li><p>[ ] text</p></li>  →  <li class="task-list-item"><p><span class="md-task-checkbox"></span> text</p></li>
+//   <li>[x] text</li>         →  <li class="task-list-item"><span class="md-task-checkbox md-task-checkbox--checked"></span> text</li>
+// 这种方式不依赖 markdown-it Token 内部 API，ESM/CJS 通用，不会运行时崩溃。
 
-md.renderer.rules.list_item_open = function taskListItemOpen(tokens, idx, options, env, self): string {
-  const nextInline = tokens[idx + 2]; // list_item_open → paragraph_open → inline
-  if (nextInline && nextInline.type === 'inline' && nextInline.children) {
-    const firstChild = nextInline.children[0];
-    if (firstChild && firstChild.type === 'text') {
-      const match = firstChild.content.match(/^\[([ xX])\]\s+/);
-      if (match) {
-        tokens[idx].attrSet('class', 'task-list-item');
-        const checked = match[1].toLowerCase() === 'x';
-        // v0.7.0+ 修正：注入 html_inline token（markdown-it 原生 type，render 直出 HTML 不 escape）
-        // 旧版错误地把 <span> 塞进 text.content，text token 被 escapeHtml() 实体化，
-        // 页面看到的是 &lt;span&gt;...&lt;/span&gt; 字面文本（用户报告的 bug）。
-        // Token 构造器用上下文实例获取，避开 ESM/CJS Token 直接 import 的差异。
-        const TokenCtor = tokens[idx].constructor as new () => { content: string };
-        const htmlToken = new TokenCtor() as MdToken;
-        htmlToken.content = `<span class="${checked ? 'md-task-checkbox md-task-checkbox--checked' : 'md-task-checkbox'}"></span> `;
-        nextInline.children.unshift(htmlToken);
-        firstChild.content = firstChild.content.slice(match[0].length);
-      }
-    }
-  }
-  return defaultListItemOpen(tokens, idx, options, env, self);
-};
+/**
+ * GFM task list 正则后处理：把 `[ ]` / `[x]` 前缀替换为 CSS checkbox span
+ */
+function postProcessTaskList(html: string): string {
+  // 松散列表（有 <p> 包裹）：<li><p>[ ] text → <li class="task-list-item"><p><span...></span> text
+  html = html.replace(
+    /<li><p>\[([ xX])\]\s+/g,
+    (_, mark) => {
+      const checked = mark.toLowerCase() === 'x';
+      const cls = checked ? 'md-task-checkbox md-task-checkbox--checked' : 'md-task-checkbox';
+      return `<li class="task-list-item"><p><span class="${cls}"></span> `;
+    },
+  );
+  // 紧凑列表（无 <p> 包裹）：<li>[ ] text → <li class="task-list-item"><span...></span> text
+  html = html.replace(
+    /<li>\[([ xX])\]\s+/g,
+    (_, mark) => {
+      const checked = mark.toLowerCase() === 'x';
+      const cls = checked ? 'md-task-checkbox md-task-checkbox--checked' : 'md-task-checkbox';
+      return `<li class="task-list-item"><span class="${cls}"></span> `;
+    },
+  );
+  return html;
+}
 
 // ===== DOMPurify 白名单 =====
 
@@ -203,13 +197,15 @@ export function renderMarkdown(source: string | null | undefined): string {
   if (!source) return '';
   try {
     const html = md.render(source);
+    // GFM Task List 后处理（在 DOMPurify 之前，保证 span 被白名单允许）
+    const taskListHtml = postProcessTaskList(html);
     // DOMPurify 在浏览器环境直接用 window DOM；node 环境会回退到 jsdom（v0.3.0 仍没装）
     // 我们的使用场景只在 renderer（Wails WebView / Chromium）→ 一定有 window
-    const clean = DOMPurify.sanitize(html, {
+    const clean = DOMPurify.sanitize(taskListHtml, {
       ALLOWED_TAGS,
       ALLOWED_ATTR,
-      // 禁掉所有 URL scheme 不是 http/https/mailto/相对路径的
-      ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\-:]|$))/i,
+      // 允许 http/https/mailto/相对路径 + data:image/（贴图用）
+      ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|data:image\/|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\-:]|$))/i,
       // 不允许 style 属性（避免 gitea 评论里塞 CSS 改全局样式）
       FORBID_ATTR: ['style', 'srcdoc'],
       // 标签被禁时保留内部文本（不要剥成空字符串）
