@@ -31,12 +31,13 @@ import {
   pullsUpdateAssignee,
   pullsUpdateReviewers,
   pullsUpdateMilestone,
+  labelsList,
   membersList,
   milestonesList,
 } from '@renderer/lib/ipc-client';
 import { normalizeError } from '@renderer/lib/ipc-client';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
-import type { ListPullsResp, PullDto, PullState, MergeMethod, IssueCommentDto, PullReviewCommentDto, PullFileDto, PullFileDiffDto, PullReviewDto } from '@renderer/types/dto';
+import type { ListPullsResp, PullDto, PullState, MergeMethod, IssueCommentDto, PullReviewCommentDto, PullFileDto, PullFileDiffDto, PullReviewDto, MilestoneDto, CollaboratorDto } from '@renderer/types/dto';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import { useRepoStore } from '@renderer/stores/repo';
 
@@ -518,6 +519,109 @@ export const usePullStore = defineStore('pull', () => {
     error.value = null;
   }
 
+  // ===== 属性编辑器状态（v0.6.0 PR 属性编辑） =====
+
+  /** 可用里程碑列表（v0.6.0: Gitea 全量 + GitHub state=all） */
+  const availableMilestones = ref<MilestoneDto[]>([]);
+  /** 可用仓库成员列表（v0.6.0 + v0.7.0 GitHub collaborators） */
+  const availableMembers = ref<CollaboratorDto[]>([]);
+
+  /**
+   * 加载属性编辑器需要的数据（标签 / 成员 / 里程碑）。
+   *
+   * v0.6+：labelsList / membersList 走 pulls.* IPC（namespaced），
+   *       milestonesList 走 general milestonesList IPC。
+   * v0.7.0+：GitHub 数据源下也调用；GitHub 端 milestone 用 number 显示 title
+   *          （ListMilestones 已实现 title→number 反查）。
+   */
+  async function loadAttrEditorData(_projectId: string): Promise<void> {
+    const repo = useRepoStore();
+    try {
+      // 标签（labels.list IPC，供 store 内部备用；MergesView 也可直接走 labelsList）
+      const labelsResp = await labelsList({ projectId: _projectId, page: 1, limit: 100 });
+      if (Array.isArray(labelsResp.items)) {
+        // 仅写入供 store 内部备用；编辑器的 availableLabels 由 MergesView 直接写。
+      }
+      // 成员（members.list IPC）
+      const membersResp = await membersList({ projectId: _projectId });
+      availableMembers.value = (membersResp.items ?? []) as CollaboratorDto[];
+      // 里程碑（按平台默认 state：gitea='all' / github='open'）
+      const state = repo.currentProject?.platform === 'github' ? 'open' : 'all';
+      const milestonesResp = await milestonesList({ projectId: _projectId, state });
+      availableMilestones.value = (milestonesResp.items ?? []) as MilestoneDto[];
+    } catch {
+      // 静默失败，不应中断 PR 列表加载
+    }
+  }
+
+  /** 清空属性编辑器数据（关闭 attr-editor 时调用，避免 stale 数据） */
+  function clearAttrEditor(): void {
+    availableMilestones.value = [];
+    availableMembers.value = [];
+  }
+
+  // ===== 属性编辑器 save 动作（v0.6.0 起包走 store-first） =====
+
+  /**
+   * 提交标签变更（merge 前 / 后均可用）
+   * 走 pulls.updateLabels IPC（vite bindings 自动转 Wails 绑定）
+   */
+  async function updateLabels(
+    projectId: string,
+    index: number,
+    labels: string[],
+  ): Promise<PullDto> {
+    const updated = await pullsUpdateLabels({ projectId, index, labels });
+    // 本地乐观更新（避免列表现状与服务器不一致）
+    const item = items.value.find((x) => x.index === index);
+    if (item) {
+      item.labels = updated.labels ?? item.labels;
+    }
+    return updated;
+  }
+
+  /** 提交指派人变更（多选支持，v0.6.0） */
+  async function updateAssignees(
+    projectId: string,
+    index: number,
+    assignees: string[],
+  ): Promise<PullDto> {
+    const updated = await pullsUpdateAssignee({ projectId, index, assignees });
+    const item = items.value.find((x) => x.index === index);
+    if (item) {
+      item.assignees = updated.assignees ?? item.assignees;
+    }
+    return updated;
+  }
+
+  /** 提交评审人变更 */
+  async function updateReviewers(
+    projectId: string,
+    index: number,
+    reviewers: string[],
+  ): Promise<PullDto> {
+    const updated = await pullsUpdateReviewers({ projectId, index, reviewers });
+    const item = items.value.find((x) => x.index === index);
+    if (item) {
+      item.reviewers = updated.reviewers ?? item.reviewers;
+    }
+    return updated;
+  }
+
+  /** 提交里程碑变更（v0.6.0） */
+  async function updateMilestone(
+    projectId: string,
+    index: number,
+    milestone: string,
+  ): Promise<PullDto> {
+    const updated = await pullsUpdateMilestone({ projectId, index, milestone });
+    const item = items.value.find((x) => x.index === index);
+    if (item) {
+      item.milestone = updated.milestone ?? item.milestone;
+    }
+    return updated;
+  }
+
   return {
     // state
     items,
@@ -574,6 +678,16 @@ export const usePullStore = defineStore('pull', () => {
     loadReviewComments,
     loadFiles,
     loadFileDiff,
+    // 属性编辑器（v0.6.0 + v0.7.0 补全 store action）
+    availableMilestones,
+    availableMembers,
+    loadAttrEditorData,
+    clearAttrEditor,
+    // 属性编辑器 save 动作（v0.6.0 store-first 封装，v0.7.0 补全）
+    updateLabels,
+    updateAssignees,
+    updateReviewers,
+    updateMilestone,
   };
 });
 
