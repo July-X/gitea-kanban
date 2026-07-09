@@ -3663,6 +3663,43 @@ function formatRelative(iso: string | undefined): string {
   list-style: none;
   position: relative;
 }
+
+/* v0.7.x：勾选框视觉与 GitHub .markdown-body 对齐
+   markdown.ts 注入了 <span class="md-task-checkbox"></span> 占位 span，
+   下面用 CSS 伪元素画真框（不依赖 emoji 字符大小）。
+   与主题色 token 对齐：勾选用 --color-primary 填充。 */
+.md-body :deep(.md-task-checkbox) {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  position: relative;
+  vertical-align: -2px;
+  margin-right: 8px;
+  border: 1.5px solid var(--color-text-secondary);
+  border-radius: 4px;
+  background: transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  cursor: default;
+}
+.md-body :deep(.md-task-checkbox::before) {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(45deg) scale(0);
+  transition: transform 0.12s ease;
+}
+.md-body :deep(.md-task-checkbox--checked) {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.md-body :deep(.md-task-checkbox--checked::before) {
+  transform: rotate(45deg) scale(1);
+}
 .md-body :deep(li > p) { margin: 0; }
 .md-body :deep(blockquote) {
   margin: 4px 0;

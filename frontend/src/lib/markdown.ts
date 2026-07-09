@@ -97,8 +97,11 @@ md.renderer.rules.link_open = function linkOpen(
 // ===== GFM Task List 支持（- [ ] / - [x]） =====
 // markdown-it 原生不支持 GFM task list，通过自定义 list_item_open 规则实现：
 // 检测 list_item 的第一个子 token（inline）是否以 [ ] 或 [x] 开头，
-// 如果是则在 <li> 上加 class="task-list-item"，并用 Unicode 字符替代 checkbox。
+// 如果是则在 <li> 上加 class="task-list-item"，并注入 <span class="md-task-checkbox">
+// 由 CSS 伪元素绘制真框 + 勾选（Unicode 字符已被 span 替换走）。
 // 不创建新 Token（避免 markdown-it ESM/CJS Token 导出差异导致运行时崩溃）。
+// v0.7.x：旧版用 ☐/☑ Unicode 字符直接插，13px 正文里太小。这次走
+// span 占位 + CSS 伪元素方案，与 GitHub .markdown-body checkbox 视觉对齐。
 const defaultListItemOpen = md.renderer.rules.list_item_open ??
   function defaultListItemOpen(tokens: MdToken[], idx: number, options: MdOptions, _env: unknown, self: MdRenderer): string {
     return self.renderToken(tokens, idx, options);
@@ -115,7 +118,7 @@ md.renderer.rules.list_item_open = function taskListItemOpen(tokens, idx, option
         token.attrSet('class', 'task-list-item');
         const checked = match[1].toLowerCase() === 'x';
         // 用 Unicode 字符替代 checkbox（不创建新 Token，避免运行时崩溃）
-        firstChild.content = (checked ? '☑ ' : '☐ ') + firstChild.content.slice(match[0].length);
+        firstChild.content = `<span class="md-task-checkbox${checked ? ' md-task-checkbox--checked' : ''}"></span> ` + firstChild.content.slice(match[0].length);
       }
     }
   }
