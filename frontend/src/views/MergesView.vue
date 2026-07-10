@@ -944,8 +944,19 @@ async function onCommentPaste(idx: number, e: ClipboardEvent): Promise<void> {
         setDraft(idx, draft + md);
         showToast({ type: 'success', message: '图片已上传并插入' });
       } catch (err) {
+        // v0.7.0 修复：catch 处理 fallback chain。Error.message（plain Error）、
+        // messageText（UserFacingError）、cause 详情都要试试，不要只读 messageText。
+        //
+        // 之前只读 e2.messageText 会有“未知错误”货柜：plain Error 走 uploadPastedImage
+        // 内部的 `throw new Error('未选中项目')` 这种路径，没被 ipc-client.normalizeError
+        // 包装，messageText undefined，fallback 到“未知错误”迷失用户。
+        //
+        // 回归证据：用户 PR #74 粘图 23:52:40 toast “未知错误”，无法排查是哪个 throw。
+        // eslint-disable-next-line no-console
+        console.error('[onCommentPaste] upload failed:', err);
+        const e2 = err as { messageText?: string; message?: string; cause?: unknown };
+        const detail = e2.messageText || e2.message || (e2.cause ? String(e2.cause) : '未知错误');
         // 上传失败：降级 data URI（用户至少能看见图片，不丢失）
-        const e2 = err as { messageText?: string };
         const reader = new FileReader();
         reader.onload = () => {
           const dataUri = reader.result as string;
@@ -954,7 +965,7 @@ async function onCommentPaste(idx: number, e: ClipboardEvent): Promise<void> {
           setDraft(idx, draft + md);
           showToast({
             type: 'warn',
-            message: `图片上传失败，已降级为本地引用: ${e2.messageText ?? '未知错误'}`,
+            message: `图片上传失败，已降级为本地引用: ${detail}`,
             persistent: true,
           });
         };
