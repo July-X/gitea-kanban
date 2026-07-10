@@ -64,3 +64,4 @@ node_modules/
 /debug
 /tools/*/debug
 .qoder
+.reasonix-commit-msg.txt
