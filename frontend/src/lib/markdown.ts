@@ -191,9 +191,12 @@ const ALLOWED_ATTR = ['href', 'src', 'alt', 'title', 'class', 'target', 'rel'];
  *   3. 永不抛错（任何解析失败都 fallback 到 sanitize 后的原文）
  *
  * @param source 原始 markdown / 纯文本
+ * @param baseUrl 可选，当前项目 giteaUrl。传入后会把评论里的相对路径
+ *   （`/attachments/<uuid>`、`/avatars/<hash>` 等）改写为绝对 URL `<baseUrl>/...`，
+ *   避免 Wails WebView base URL 是 `wails://wails/` 时相对路径解析到错误位置。
  * @returns 可直接塞进 v-html 的安全 HTML 字符串
  */
-export function renderMarkdown(source: string | null | undefined): string {
+export function renderMarkdown(source: string | null | undefined, baseUrl?: string): string {
   if (!source) return '';
   try {
     const html = md.render(source);
@@ -201,7 +204,7 @@ export function renderMarkdown(source: string | null | undefined): string {
     const taskListHtml = postProcessTaskList(html);
     // DOMPurify 在浏览器环境直接用 window DOM；node 环境会回退到 jsdom（v0.3.0 仍没装）
     // 我们的使用场景只在 renderer（Wails WebView / Chromium）→ 一定有 window
-    const clean = DOMPurify.sanitize(taskListHtml, {
+    let clean = DOMPurify.sanitize(taskListHtml, {
       ALLOWED_TAGS,
       ALLOWED_ATTR,
       // 允许 http/https/mailto/相对路径 + data:image/（贴图用）
@@ -211,6 +214,22 @@ export function renderMarkdown(source: string | null | undefined): string {
       // 标签被禁时保留内部文本（不要剥成空字符串）
       KEEP_CONTENT: true,
     });
+    // v0.7.0 bugfix：Gitea web 评论里图片 / 头像用相对路径（`/attachments/<uuid>`、
+    // `/avatars/<hash>`）表达，Wails WebView 的 base URL 是 `wails://wails/`，相对
+    // 路径会被解析到 `wails://wails/attachments/...` → 404 拉不到。修复：在 DOMPurify
+    // 后处理把常见的 Gitea 相对路径改写为绝对 URL。
+    //
+    // 回归证据：用户 PR #74 反馈"Gitea web 提交的带图片评论，应用拉下来之后
+    // 看不到图片"——评论 body 包含 `![贴图](/attachments/<uuid>)`（Gitea web
+    // 默认行为），但 Wails WebView 加载后图片路径变成 `wails://wails/attachments/...`，
+    // Gitea 服务端 404。
+    if (baseUrl) {
+      const base = baseUrl.replace(/\/+$/, '');
+      // 改写 img src 与 a href 里的 Gitea 相对路径为绝对 URL
+      clean = clean
+        .replace(/(<img\s[^>]*src=")(\/(?:attachments|avatars|user-content)\/[^"]*")/g, `$1${base}$2`)
+        .replace(/(<a\s[^>]*href=")(\/(?:attachments|avatars|user-content)\/[^"]*")/g, `$1${base}$2`);
+    }
     return clean;
   } catch {
     // fallback：sanitize 原文本（转 < > &）

@@ -16,15 +16,29 @@
 import { computed, ref } from 'vue';
 import { ChevronDown, ChevronRight, Plus, Minus, FileText, Loader2 } from 'lucide-vue-next';
 import { usePullStore } from '@renderer/stores/pull';
+import { useRepoStore } from '@renderer/stores/repo';
+import { useAuthStore } from '@renderer/stores/auth';
 import type { PullDto, PullFileDto, PullReviewCommentDto } from '@renderer/types/dto';
 import { renderMarkdown } from '@renderer/lib/markdown';
 
 const pullStore = usePullStore();
+const repo = useRepoStore();
+const auth = useAuthStore();
 
 const props = defineProps<{
   pr: PullDto;
   projectId: string;
 }>();
+
+/** 评论 markdown 渲染 base URL（与 MergesView 同逻辑）。v0.7.0 加：
+ * Gitea web 行内 review comment body 里的 `![](attachment)` 相对路径在 Wails WebView
+ * 会被解析为 wails://wails/... → 404。传入 giteaUrl / github.com 后把
+ * /attachments/<uuid> / /avatars/<hash> 改写为绝对 URL。 */
+const markdownBaseUrl = computed<string | undefined>(() => {
+  const platform = (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github';
+  const url = auth.getAccountUrlByPlatform(platform);
+  return url ? url.replace(/\/+$/, '') : undefined;
+});
 
 /** 该 PR 下所有文件的展开 Set */
 const expandedFiles = ref<Set<string>>(new Set());
@@ -157,7 +171,7 @@ const truncate = (s: string, n = 50): string => {
                 <span class="file-item__comment-line">第 {{ c.line }} 行</span>
                 <span class="file-item__comment-time">{{ c.createdAt }}</span>
               </div>
-              <div class="file-item__comment-body md-body" v-html="renderMarkdown(c.body || '')"></div>
+              <div class="file-item__comment-body md-body" v-html="renderMarkdown(c.body || '', markdownBaseUrl)"></div>
             </div>
           </div>
         </div>

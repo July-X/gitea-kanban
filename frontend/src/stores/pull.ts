@@ -453,6 +453,19 @@ export const usePullStore = defineStore('pull', () => {
     } catch { /* 静默 */ }
   }
 
+  /**
+   * 外部代码（如 MergesView.loadReviews）拉到了 review 列表后,同步写入 store
+   * 端的 reviewPanels,触发响应式重算。
+   *
+   * v0.7.0 加：因为 ref(new Map()) 的 .set 不会触发响应,而 triggerRef 只能
+   * 作用在 ref 包裹的值上、不能直接传 Map,暴露这个 setter 内部包好 trigger。
+   * MergesView 不应该 import 'vue' 的 triggerRef,也不应该直接写 store 内部 Map。
+   */
+  function setReviewsForIndex(p: PullDto, reviews: PullReviewDto[]): void {
+    reviewPanels.value.set(p.index, reviews);
+    triggerRef(reviewPanels);
+  }
+
   /** 提交 PR 评审 */
   async function submitReview(p: PullDto, event: string, body: string): Promise<void> {
     reviewSubmitting.value = true;
@@ -700,6 +713,7 @@ export const usePullStore = defineStore('pull', () => {
     removeComment,
     // 评审
     fetchReviews,
+    setReviewsForIndex,
     submitReview,
     // 文件评论
     loadReviewComments,

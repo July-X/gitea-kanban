@@ -74,6 +74,18 @@ const activeRepo = computed<RepoDto | null>(() => {
   return fn ? (repo.repos.find((r) => r.fullName === fn) ?? null) : null;
 });
 
+/** 评论/描述 markdown 渲染时用的 base URL。v0.7.0 加：把 Gitea web 评论里
+ * `[/attachments/...]`、`[/avatars/...]` 这种相对路径改写为绝对 URL，
+ * 避免 Wails WebView 的 `wails://wails/` base URL 拼出来请求不到。
+ * 取 auth.getAccountUrlByPlatform 走与「在 GitHub 中打开」同逻辑：
+ *   Gitea 走 account.giteaUrl，GitHub 自动把 api.github.com → github.com。
+ */
+const markdownBaseUrl = computed<string | undefined>(() => {
+  const platform = (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github';
+  const url = auth.getAccountUrlByPlatform(platform);
+  return url ? url.replace(/\/+$/, '') : undefined;
+});
+
 /** 当前选中的合并请求（左右布局：左列表点击 → 右侧详情，null = 未选中显示空态） */
 const selectedPR = ref<PullDto | null>(null);
 
@@ -730,10 +742,11 @@ async function loadReviews(p: PullDto): Promise<void> {
     reviewPanels.value.set(p.index, reviews);
     // v0.5.0 bugfix: 同步写入 store 的 reviewPanels,让 pull.timelineItems computed 能拿到数据
     // (timelineItems 把 review 事件 + 普通评论合并,按时间排序用于对话 Tab 渲染)
-    pull.reviewPanels.set(p.index, reviews);
-    // 关键:ref(new Map()) 的 .set 不触发响应,手动 triggerRef 让 timelineItems
-    // 重算看到新增的 review 列表。Map 内部不是 reactive proxy,Vue 不会自动追踪。
-    triggerRef(pull.reviewPanels);
+    //
+    // v0.7.0: 走 setReviewsForIndex action 内部 triggerRef。ref(new Map()).set
+    // 不触发响应，triggerRef 只能 ref-unwrapped;直接 set + triggerRef 走 store
+    // 端包好的 action 避免 view 层依赖 vue 内部 triggerRef API。
+    pull.setReviewsForIndex(p, reviews);
   } catch {
     // 不阻断主流程
   }
@@ -940,7 +953,7 @@ async function onCommentPaste(idx: number, e: ClipboardEvent): Promise<void> {
           const draft = getDraft(idx);
           setDraft(idx, draft + md);
           showToast({
-            type: 'warning',
+            type: 'warn',
             message: `图片上传失败，已降级为本地引用: ${e2.messageText ?? '未知错误'}`,
             persistent: true,
           });
@@ -1727,7 +1740,7 @@ function formatRelative(iso: string | undefined): string {
             <!-- PR 描述（对齐 Gitea：对话流顶部显示） -->
             <div v-if="selectedPR.body" class="pr-detail__section">
               <div class="pr-detail__section-label">描述</div>
-              <div class="pr-detail__section-content md-body" v-html="renderMarkdown(selectedPR.body)"></div>
+              <div class="pr-detail__section-content md-body" v-html="renderMarkdown(selectedPR.body, markdownBaseUrl)"></div>
             </div>
             <!-- 合并检查警告区（对齐 Gitea web：显示在描述下方、对话上方） -->
             <div
@@ -1801,7 +1814,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         <span class="pr-detail__review-state-badge" :class="`pr-detail__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
                       </div>
-                      <div v-if="item.body" class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                      <div v-if="item.body" class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
                       <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author.username }}</div>
                     </div>
                   </li>
@@ -1847,7 +1860,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                       </template>
                       <!-- 展示态 -->
                       <template v-else>
-                        <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body)"></div>
+                        <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
                         <span
                           v-if="item.updatedAt && item.updatedAt !== item.createdAt"
                           class="pr-detail__comment-edited-mark"

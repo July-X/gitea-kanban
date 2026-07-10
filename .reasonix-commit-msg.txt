@@ -1,0 +1,45 @@
+fix(v0.7.x): Gitea 评论相对路径改写为绝对 URL —— 图片/头像在 Wails WebView 能渲染
+
+用户反馈：Gitea web 提交的带图片评论，在 app 拉下来之后看不到图片。
+根因：评论 body 里的 markdown 图片是相对路径 `![贴图](/attachments/<uuid>)`，
+但 Wails v2.12 WebView 的 base URL 是 `wails://wails/`，相对路径被解析为
+`wails://wails/attachments/<uuid>` → 404。Gitea web 之所以能渲染是因为它本身的
+base URL 就是 Gitea server，相对路径直接拼成 `https://gitea/attachments/...`。
+
+回归证据：本地 node 跑 markdown.ts 模拟：
+  renderMarkdown('![贴图](/attachments/abc-uuid)', 'http://127.0.0.1:3000')
+  → <p><img src="http://127.0.0.1:3000/attachments/abc-uuid" alt="贴图"></p>
+正确改写。如果不传 baseUrl：旧行为，相对路径保留，Wails WebView 解析失败。
+
+修复：renderMarkdown 接收可选 baseUrl 参数，DOMPurify 之后做正则改写常见的 Gitea
+相对路径为绝对 URL（不改写已经是绝对 URL 的，避免双重重写）。支持改写的路径：
+  - /attachments/<uuid>  ← 评论图片、贴图
+  - /avatars/<hash>      ← 用户头像
+  - /user-content/<...>  ← 某些 Gitea 主题图片
+
+baseUrl 取自当前 project 的 giteaUrl（或 GitHub 时用 getAccountUrlByPlatform 自动
+把 api.github.com 转 github.com），新增 computed `markdownBaseUrl` 给所有
+renderMarkdown 调用方共享：
+  - MergesView: PR 描述 / review body / comment body
+  - PullFileComments: 行内 review comment body
+
+附加修复：把 `triggerRef(pull.reviewPanels)` 改成走 store 端新增 action
+`setReviewsForIndex(p, reviews)`，因为 triggerRef 只能 ref-unwrapped 传值，
+不能直接传 Map；store 端包好 trigger 后 view 层就不需要 import vue 的 triggerRef。
+
+改动：
+- frontend/src/lib/markdown.ts: renderMarkdown 接受 baseUrl 参数
+- frontend/src/views/MergesView.vue: 加 markdownBaseUrl computed + 3 处 renderMarkdown 调用都传入
+- frontend/src/components/PullFileComments.vue: 加 markdownBaseUrl computed + 传入
+- frontend/src/stores/pull.ts: 新增 setReviewsForIndex(p, reviews) action，包装 set + triggerRef
+- frontend/src/views/MergesView.vue loadReviews: 改用 setReviewsForIndex 替代直接 set + triggerRef
+
+测试：用 node 跑 markdown.ts 模拟（jsdom 环境），覆盖：
+  - 不传 baseUrl（旧行为）
+  - 传 Gitea baseUrl
+  - 传 GitHub baseUrl（avatars.githubusercontent.com 已经是绝对 URL 不被重写）
+  - 多种相对路径混在同一条 markdown
+  - 已经是绝对 URL 的不被双重重写
+  - javascript: XSS 仍被剥
+
+后端 go test ./app/... 全过；前端 typecheck 预先存在的旧错误与本 fix 无关。
