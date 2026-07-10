@@ -49,7 +49,7 @@
 | Focus 状态 | 可见 | **✅ 采纳且加强** | 非技术用户要清楚看到当前焦点 |
 | `prefers-reduced-motion` | 尊重 | **✅ 采纳** | 跟 MASTER 一致 |
 | 响应式断点 | 375/768/1024/1440 | **桌面应用窗口断点**：最小 800×600、推荐 1280×800、可拖拽至 4K | 桌面窗口不是 mobile-first |
-| 无 emoji 图标 | 必须 | **⚠️ v1.4 推翻** —— 全局加载动画海豚 `GlobalLoadingOverlay.vue` 用 emoji `🐬`（user 拍板 2026-06-16）。**只**在"装饰性吉祥物"场景豁免，业务图标 / 操作图标 / 状态图标**仍**必须 SVG。跨平台渲染差异（Apple/Google 彩色 · Windows Segoe UI Emoji · Linux Noto Color Emoji）接受，font-family 不强制 → 走系统默认。`pnpm check:no-jargon` 不拦截 emoji 字符（仅拦截禁用术语原词）。 | **仅**"装饰吉祥物"豁免；功能图标不引 emoji |
+| 无 emoji 图标 | 必须 | **✅ 采纳**（v1.4 曾豁免 🐬 海豚，已在 commit `b58fdf2` 2026-07-03 彻底删除 `GlobalLoadingOverlay.vue`，替换为 `StatusBarPulse` CSS 脉冲动画；当前无 emoji 豁免项）。业务图标 / 操作图标 / 状态图标必须 SVG。`pnpm check:no-jargon` 不拦截 emoji 字符（仅拦截禁用术语原词）。 | 无豁免；全部 SVG |
 
 ## 本项目专属规则（在 MASTER 之上**新增**）
 
