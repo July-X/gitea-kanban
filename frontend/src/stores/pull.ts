@@ -149,11 +149,20 @@ export const usePullStore = defineStore('pull', () => {
     for (const [prIdx, reviews] of reviewPanels.value.entries()) {
       const items = result.get(prIdx) ?? [];
       for (const r of reviews) {
+        // v0.7.0 修复：评审卡不携带 body。Gitea 服务端提交 review 时已同时
+        // 插入一条 CommentTypeReview 类型的 issue comment（关联到 review.id），
+        // 该 comment 出现在 /issues/{index}/comments 端点，在上面 commentPanels
+        // 迭代里已经作为 source: 'comment' 进时间线。
+        //
+        // 之前设计把 r.body 复制到 review 事件卡内文，导致对话区出现「一张卡」，
+        // 与 Gitea web UI 的「系统事件 + 留下一条评论」两张独立卡不一致。
+        // 用户反馈 PR #74 期望跟 Gitea web 一样拆开显示，修复后 timelineItems
+        // 拆为 2 条：review 事件卡（无内文）+ 下面紧跟的 review body comment 卡。
         items.push({
           source: 'review',
           id: r.id,
           state: r.state,
-          body: r.body ?? '',
+          body: '',
           author: { username: r.author?.username ?? '匿名' },
           submittedAt: r.submittedAt,
           isReviewEvent: true,

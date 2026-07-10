@@ -1729,6 +1729,26 @@ function formatRelative(iso: string | undefined): string {
               <div class="pr-detail__section-label">描述</div>
               <div class="pr-detail__section-content md-body" v-html="renderMarkdown(selectedPR.body)"></div>
             </div>
+            <!-- 合并检查警告区（对齐 Gitea web：显示在描述下方、对话上方） -->
+            <div
+              v-if="selectedPR.state === 'open' && !selectedPR.mergeable"
+              class="pr-detail__merge-warning"
+              role="alert"
+            >
+              <GitBranch :size="16" :stroke-width="2" aria-hidden="true" />
+              <div class="pr-detail__merge-warning-body">
+                <div class="pr-detail__merge-warning-title">此分支已经包含在目标分支中，没有什么可以合并。</div>
+                <details class="pr-detail__merge-warning-details">
+                  <summary>查看命令行提示</summary>
+                  <div class="pr-detail__merge-warning-help">
+                    <div class="pr-detail__merge-warning-step">检出</div>
+                    <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
+                    <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ selectedPR.head.ref }}:{{ selectedPR.head.ref }}
+git checkout {{ selectedPR.head.ref }}</pre>
+                  </div>
+                </details>
+              </div>
+            </div>
             <!-- 对话标题 + 刷新 -->
             <div class="pr-detail__conv-header">
               <div class="pr-detail__conv-header-left">
@@ -5061,6 +5081,66 @@ function formatRelative(iso: string | undefined): string {
   font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--color-text-secondary);
+}
+/* 合并检查警告区（v0.7.0：对齐 Gitea web 的「此分支已包含」红框） */
+.pr-detail__merge-warning {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  margin: var(--space-3) 0;
+  color: var(--color-danger);
+}
+.pr-detail__merge-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.pr-detail__merge-warning-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pr-detail__merge-warning-title {
+  font-weight: 600;
+  color: var(--color-danger);
+}
+.pr-detail__merge-warning-details {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+.pr-detail__merge-warning-details summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--color-text-secondary);
+}
+.pr-detail__merge-warning-help {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+}
+.pr-detail__merge-warning-step {
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+.pr-detail__merge-warning-desc {
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  margin-bottom: var(--space-2);
+}
+.pr-detail__merge-warning-cmd {
+  margin: 0;
+  padding: var(--space-2);
+  background: var(--color-code-bg, #0d1117);
+  color: var(--color-code-text, #c9d1d9);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: var(--font-sm);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  white-space: pre;
 }
 .pr-detail__review-list {
   display: flex;
