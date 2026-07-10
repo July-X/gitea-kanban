@@ -443,6 +443,10 @@ export const usePullStore = defineStore('pull', () => {
       reviewEditorOpen.value.delete(p.index);
       reviewEditorBody.value.delete(p.index);
       await fetchReviews(p);
+      // 关键：Gitea 在 POST /pulls/{index}/reviews 时,若 body 非空,会同时插入一条
+      // CommentTypeReview 类型的 issue comment 出现在 /issues/{index}/comments。
+      // 不重拉的话,对话 Tab 的 comment 部分是陈旧的（用户填的正文不见了）。
+      await fetchComments(p);
     } catch (e) {
       const err = e as { messageText?: string };
       throw new Error(err.messageText ?? '提交审查失败');

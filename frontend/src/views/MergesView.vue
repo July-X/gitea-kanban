@@ -759,8 +759,13 @@ async function submitReview(p: PullDto): Promise<void> {
       body: body.trim(),
       event,
     });
-    // 刷新评审列表
+    // 刷新评审列表（让 review 事件卡片进 timelineItems）
     await loadReviews(p);
+    // 关键：Gitea 在 POST /pulls/{index}/reviews 时,若 body 非空,会同时插入一条
+    // CommentTypeReview 类型的 issue comment,该 comment 出现在 /issues/{index}/comments
+    // 端点；不重拉的话,对话 Tab 的 comment 部分是陈旧的（用户填的正文不见了）。
+    // 同步 store.commentPanels,让 pull.timelineItems 实时反映新内容。
+    await fetchComments(p);
     reviewEditorOpen.value.delete(p.index);
     reviewEditorBody.value.delete(p.index);
     showToast({ type: 'success', message: '评审已提交' });
