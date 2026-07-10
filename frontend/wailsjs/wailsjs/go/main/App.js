@@ -253,3 +253,7 @@ export function UpdatePullMilestone(arg1) {
 export function UpdatePullReviewers(arg1) {
   return window['go']['main']['App']['UpdatePullReviewers'](arg1);
 }
+
+export function UploadPullAttachment(arg1) {
+  return window['go']['main']['App']['UploadPullAttachment'](arg1);
+}

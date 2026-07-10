@@ -1683,6 +1683,24 @@ export namespace main {
 	        this.reviewers = source["reviewers"];
 	    }
 	}
+	export class UploadPullAttachmentArgs {
+	    projectId: string;
+	    index: number;
+	    fileName: string;
+	    fileBase64: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UploadPullAttachmentArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.fileName = source["fileName"];
+	        this.fileBase64 = source["fileBase64"];
+	    }
+	}
 	
 	
 	export class WorkspaceInfo {
@@ -1708,6 +1726,26 @@ export namespace main {
 
 export namespace platform {
 	
+	export class AttachmentDTO {
+	    id: number;
+	    name: string;
+	    size: number;
+	    uuid: string;
+	    browserDownloadUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AttachmentDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.uuid = source["uuid"];
+	        this.browserDownloadUrl = source["browserDownloadUrl"];
+	    }
+	}
 	export class PullUserDTO {
 	    username: string;
 	    avatarUrl?: string;

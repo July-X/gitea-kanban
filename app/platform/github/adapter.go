@@ -16,12 +16,14 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -1506,6 +1508,52 @@ func (a *GitHubAdapter) UpdatePullMilestone(ctx context.Context, hostURL, userna
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
+// githubAttachmentRaw GitHub /repos/.../issues/{issue_number}/assets 原始响应
+type githubAttachmentRaw struct {
+	ID                 int64  `json:"id"`
+	Name               string `json:"name"`
+	Size               int64  `json:"size"`
+	UUID               string `json:"uuid"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+func githubAttachmentToDTO(a githubAttachmentRaw) platform.AttachmentDTO {
+	return platform.AttachmentDTO{
+		ID:                 a.ID,
+		Name:               a.Name,
+		Size:               a.Size,
+		UUID:               a.UUID,
+		BrowserDownloadURL: a.BrowserDownloadURL,
+	}
+}
+
+// UploadIssueAttachment 上传 PR/issue 附件（v0.7.0 贴图支持）
+//
+// GitHub 端点：POST /repos/{owner}/{repo}/issues/{issue_number}/assets
+//   - multipart/form-data，form field: file（注意 GitHub 用 'file'，Gitea 用 'attachment'）
+//   - 响应：GitHub Attachment (id/name/size/uuid/browser_download_url)
+//   - browser_download_url 形如 https://github-cloud.s3.amazonaws.com/...
+//     或 https://api.github.com/... — 都可直接塞到 markdown `![](url)` 渲染。
+//
+// GitHub helper:复用 Gitea 的 multipart 构造方式（字段名 'file' 替换 'attachment'）。
+func (a *GitHubAdapter) UploadIssueAttachment(ctx context.Context, hostURL, username, token, owner, repo string, index int, fileName string, fileContent []byte) (*platform.AttachmentDTO, error) {
+	if len(fileContent) == 0 {
+		return nil, ipc.NewValidationFailed("附件内容不能为空", "")
+	}
+	var raw githubAttachmentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/assets", owner, repo, index)
+	if err := a.doMultipartRequest(
+		ctx, hostURL, token, "POST", path,
+		nil,                           // 普通 form 字段
+		"file", fileName, fileContent, // GitHub 用 'file',Gitea 用 'attachment'
+		&raw,
+	); err != nil {
+		return nil, err
+	}
+	dto := githubAttachmentToDTO(raw)
+	return &dto, nil
+}
+
 // ListPullCommits 列 PR 提交历史（v0.7.0, GitHub）
 // GET /repos/{owner}/{repo}/pulls/{index}/commits
 func (a *GitHubAdapter) ListPullCommits(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullCommitDTO, error) {
@@ -1641,6 +1689,69 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 		}
 	}
 
+	return nil
+}
+
+// doMultipartRequest 走 multipart/form-data 的 GitHub 请求（v0.7.0 贴图支持）
+//
+// doRequest 默认 Content-Type: application/json，multipart 需要另一条路。
+// GitHub attachment API (POST /repos/.../issues/{issue_number}/assets) 要求 multipart/form-data
+// 字段名是 'file'，与 Gitea 的 'attachment' 字段名不同——字段名翻译在调用方 UploadIssueAttachment 内部处理。
+func (a *GitHubAdapter) doMultipartRequest(
+	ctx context.Context, hostURL, token, method, path string,
+	formFields map[string]string, fileField, fileName string, fileContent []byte,
+	out interface{},
+) error {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for k, v := range formFields {
+		if err := writer.WriteField(k, v); err != nil {
+			return ipc.NewInternal("构造 multipart form 失败: " + err.Error())
+		}
+	}
+	if fileContent != nil {
+		part, err := writer.CreateFormFile(fileField, fileName)
+		if err != nil {
+			return ipc.NewInternal("构造 multipart 文件字段失败: " + err.Error())
+		}
+		if _, err := part.Write(fileContent); err != nil {
+			return ipc.NewInternal("写 multipart 文件内容失败: " + err.Error())
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return ipc.NewInternal("关闭 multipart writer 失败: " + err.Error())
+	}
+
+	base := strings.TrimRight(hostURL, "/")
+	fullURL := base + path
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
+	if err != nil {
+		return ipc.NewInternal("构造 GitHub multipart 请求失败: " + err.Error())
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	start := time.Now()
+	resp, err := a.httpClient.Do(req)
+	duration := time.Since(start)
+	if err != nil {
+		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
+		return ipc.NewNetworkOffline(fmt.Sprintf("GitHub multipart %s %s: %s", method, fullURL, err.Error()))
+	}
+	defer resp.Body.Close()
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return mapHTTPError(resp.StatusCode, string(bodyBytes))
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return ipc.NewInternal("解析 GitHub multipart 响应失败: " + err.Error())
+	}
 	return nil
 }
 

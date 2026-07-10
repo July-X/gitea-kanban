@@ -130,3 +130,5 @@ export function UpdatePullLabels(arg1:main.UpdatePullLabelsArgs):Promise<platfor
 export function UpdatePullMilestone(arg1:main.UpdatePullMilestoneArgs):Promise<platform.PullDetailDTO>;
 
 export function UpdatePullReviewers(arg1:main.UpdatePullReviewersArgs):Promise<platform.PullDetailDTO>;
+
+export function UploadPullAttachment(arg1:main.UploadPullAttachmentArgs):Promise<platform.AttachmentDTO>;

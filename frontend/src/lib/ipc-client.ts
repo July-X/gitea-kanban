@@ -794,6 +794,29 @@ export function pullsUpdateMilestone(args: {
   return getIpcClient().invoke('pulls', 'updateMilestone', args);
 }
 
+/**
+ * 上传 PR/issue 附件（v0.7.0 贴图支持）
+ *
+ * 端点：Gitea POST /repos/{owner}/{repo}/issues/{index}/assets（form field: attachment）
+ *       GitHub POST /repos/{owner}/{repo}/issues/{issue_number}/assets（form field: file）
+ * 返回 browserDownloadUrl，可直接塞到 markdown `![](url)` 让 Gitea/GitHub 渲染。
+ *
+ * 设计：前端把 File 转 base64 通过 Wails binding 传过去，Go 端解码还原成 []byte
+ * 再走 multipart 提交。Wails 2.x 不支持 binary 字段在 binding 上直接传（TS 端类型
+ * 系统限制），所以走 base64 字符串这条稳妥的路。
+ *
+ * 回归证据：v0.7.0 之前 PR 评论贴图走前端 FileReader.readAsDataURL 转 data URI
+ * 嵌入 markdown，Gitea 不存图片，渲染时只看到"贴图"占位符。
+ */
+export function pullsUploadAttachment(args: {
+  projectId: string;
+  index: number;
+  fileName: string;
+  fileBase64: string;
+}): Promise<{ id: number; name: string; size: number; uuid: string; browserDownloadUrl: string }> {
+  return getIpcClient().invoke('pulls', 'uploadAttachment', args);
+}
+
 
 
 // ============================================================

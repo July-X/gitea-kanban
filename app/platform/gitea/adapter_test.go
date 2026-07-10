@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	appgit "gitea-kanban/app/git"
@@ -747,5 +749,107 @@ func TestGiteaAdapter_ListPullReviews_UppercaseStates(t *testing.T) {
 		if items[i].State != w {
 			t.Errorf("items[%d].State = %q, want %q (Gitea 大写 state 必须归一化)", i, items[i].State, w)
 		}
+	}
+}
+
+// TestGiteaAdapter_UploadIssueAttachment 验证 multipart/form-data 上传附件到
+// POST /repos/{owner}/{repo}/issues/{index}/assets。form field 必须是 'attachment'
+// （不是 'file'），Gitea 才认。返回 browser_download_url（形如 /attachments/<uuid>）。
+//
+// 回归证据：v0.7.0 之前 PR 评论贴图走前端 FileReader.readAsDataURL 转 data URI，
+// Gitea 不存图片，渲染时只看到"贴图"占位符。修复后走这条上传到 Gitea 的
+// attachments 表，markdown 引用真 url。
+func TestGiteaAdapter_UploadIssueAttachment(t *testing.T) {
+	const fakePng = "fake-png-bytes-v0.7.0"
+	var capturedMethod, capturedPath, capturedContentType string
+	var capturedFormField string
+	var capturedFileName string
+	var capturedFileContent []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedContentType = r.Header.Get("Content-Type")
+		// 解析 multipart
+		reader, err := r.MultipartReader()
+		if err != nil {
+			t.Errorf("MultipartReader failed: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		for {
+			part, err := reader.NextPart()
+			if err != nil {
+				break
+			}
+			if part.FormName() == "attachment" {
+				capturedFormField = "attachment"
+				capturedFileName = part.FileName()
+				buf, _ := io.ReadAll(part)
+				capturedFileContent = buf
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":                   42,
+			"name":                 "screenshot.png",
+			"size":                 len(fakePng),
+			"uuid":                 "abc-123-uuid",
+			"browser_download_url": "https://gitea.example/attachments/abc-123-uuid",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	dto, err := adapter.UploadIssueAttachment(
+		context.Background(),
+		server.URL, "alice", "test-token", "alice", "dolphin", 74,
+		"screenshot.png", []byte(fakePng),
+	)
+	if err != nil {
+		t.Fatalf("UploadIssueAttachment failed: %v", err)
+	}
+	if capturedMethod != "POST" {
+		t.Errorf("method = %q, want POST", capturedMethod)
+	}
+	if capturedPath != "/api/v1/repos/alice/dolphin/issues/74/assets" {
+		t.Errorf("path = %q, want /api/v1/repos/alice/dolphin/issues/74/assets", capturedPath)
+	}
+	if !strings.HasPrefix(capturedContentType, "multipart/form-data; boundary=") {
+		t.Errorf("Content-Type = %q, want multipart/form-data; boundary=...", capturedContentType)
+	}
+	if capturedFormField != "attachment" {
+		t.Errorf("form field = %q, want 'attachment' (Gitea 端点强制要求这个字段名)", capturedFormField)
+	}
+	if capturedFileName != "screenshot.png" {
+		t.Errorf("file name = %q, want screenshot.png", capturedFileName)
+	}
+	if string(capturedFileContent) != fakePng {
+		t.Errorf("file content mismatch")
+	}
+	if dto.BrowserDownloadURL != "https://gitea.example/attachments/abc-123-uuid" {
+		t.Errorf("BrowserDownloadURL = %q", dto.BrowserDownloadURL)
+	}
+	if dto.UUID != "abc-123-uuid" {
+		t.Errorf("UUID = %q", dto.UUID)
+	}
+}
+
+// TestGiteaAdapter_UploadIssueAttachment_EmptyContent 验证空内容直接返回 validation error,
+// 不发 HTTP 请求（防御性设计，避免浪费网络往返）。
+func TestGiteaAdapter_UploadIssueAttachment_EmptyContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("empty content 不应发 HTTP 请求")
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	_, err := adapter.UploadIssueAttachment(
+		context.Background(),
+		server.URL, "alice", "test-token", "alice", "dolphin", 74,
+		"screenshot.png", nil, // 空内容
+	)
+	if err == nil {
+		t.Fatal("expected validation error for empty content")
 	}
 }

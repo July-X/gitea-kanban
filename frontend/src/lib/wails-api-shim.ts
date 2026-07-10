@@ -250,6 +250,13 @@ type WailsApp = {
   // v0.6+ PR 评论（issue 评论另起 v0.7）
   ListPullComments?: (args: { projectId: string; index: number }) => Promise<unknown>;
   CreatePullComment?: (args: { projectId: string; index: number; body: string }) => Promise<unknown>;
+  // v0.7.0 PR/issue 附件上传（贴图支持）
+  UploadPullAttachment?: (args: {
+    projectId: string;
+    index: number;
+    fileName: string;
+    fileBase64: string;
+  }) => Promise<unknown>;
 };
 
 /** 拿到 window.go.main.App（Wails 在启动期注入） */
@@ -788,6 +795,37 @@ const apiShim = {
             projectId: a.projectId,
             index: a.index,
             reviewers: a.reviewers,
+          });
+        },
+      );
+    },
+    /**
+     * pulls.uploadAttachment —— 上传 PR/issue 附件（v0.7.0 贴图支持）
+     *
+     * 端点：Gitea POST /repos/{owner}/{repo}/issues/{index}/assets（form field: attachment）
+     *       GitHub POST /repos/{owner}/{repo}/issues/{issue_number}/assets（form field: file）
+     * 返回 AttachmentDTO（含 browserDownloadUrl，可直接塞到 markdown ![](url)）。
+     *
+     * 关键：前端把 File 转 base64 通过 Wails binding 传过去，Go 端解码还原成 []byte
+     * 再走 multipart 提交。Wails 2.x TS 类型系统对 binary 字段在 binding 上支持差，
+     * base64 字符串是稳妥的路。
+     *
+     * 回归证据：v0.7.0 之前 PR 评论贴图走前端 FileReader.readAsDataURL 转 data URI
+     * 嵌入 markdown，Gitea 不存图片，渲染时只看到"贴图"占位符。
+     */
+    uploadAttachment: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; fileName: string; fileBase64: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'uploadAttachment'),
+        (app) => {
+          if (!app.UploadPullAttachment) {
+            return notImplemented('pulls', 'uploadAttachment');
+          }
+          return app.UploadPullAttachment({
+            projectId: a.projectId,
+            index: a.index,
+            fileName: a.fileName,
+            fileBase64: a.fileBase64,
           });
         },
       );

@@ -252,6 +252,33 @@ type PlatformAdapter interface {
 	// Gitea:  PATCH /repos/{owner}/{repo}/pulls/{index} {"milestone": <title>|""}（title 查找或 404）
 	// GitHub: PATCH /repos/{owner}/{repo}/pulls/{pull_number} {"milestone": <number>|null}
 	UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*PullDetailDTO, error)
+
+	// UploadIssueAttachment 上传 PR/issue 附件（v0.7.0 贴图支持）
+	//
+	// Gitea:  POST /repos/{owner}/{repo}/issues/{index}/assets multipart/form-data
+	//         form field: attachment (required) — 注意不是 "file"
+	//         返回 Gitea Attachment（id/name/size/uuid/browser_download_url）
+	// GitHub: POST /repos/{owner}/{repo}/issues/{issue_number}/assets multipart/form-data
+	//         form field: file (required) — 与 Gitea 字段名不同，adapter 层翻译
+	//
+	// fileName 仅作日志/debug 用，真正写到 multipart body 的是 fileContent
+	// (调用方把 File 转 base64 通过 Wails binding 传过来，Go 端解码)。
+	// browserDownloadURL 形如 https://<host>/attachments/<uuid>，可直接塞到
+	// markdown `![](url)` 里让 Gitea 渲染。
+	UploadIssueAttachment(ctx context.Context, hostURL, username, token, owner, repo string, index int, fileName string, fileContent []byte) (*AttachmentDTO, error)
+}
+
+// AttachmentDTO 平台中性附件 DTO（v0.7.0 贴图支持）
+//
+// BrowserDownloadURL 形如 https://<host>/attachments/<uuid>，可直接塞到
+// markdown `![](url)` 里让 Gitea/GitHub 渲染。也可省略 host 用相对路径
+// `![](/attachments/<uuid>)` — Gitea 渲染器会处理 /attachments/* 路由的鉴权。
+type AttachmentDTO struct {
+	ID                 int64  `json:"id"`
+	Name               string `json:"name"`
+	Size               int64  `json:"size"`
+	UUID               string `json:"uuid"`
+	BrowserDownloadURL string `json:"browserDownloadUrl"`
 }
 
 // PullCommitDTO PR 提交列表项

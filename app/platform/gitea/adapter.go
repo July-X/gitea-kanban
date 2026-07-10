@@ -6,11 +6,13 @@
 package gitea
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -1216,6 +1218,121 @@ func encodeJSONBody(v any) (io.Reader, error) {
 // doRequest 发送 Gitea API 请求
 //
 // 鉴权：Authorization: token <pat>（Gitea 习惯）
+// doMultipartRequest 走 multipart/form-data 的 Gitea 请求（v0.7.0 贴图支持）
+//
+// doRequest 默认 Content-Type: application/json,multipart 需要另一条路。
+// Gitea attachment API (POST /repos/.../issues/{index}/assets) 要求 multipart/form-data
+// 字段名是 'attachment'（不是 'file'），与 GitHub 的 'file' 字段名不同——
+// 字段名翻译在调用方 UploadIssueAttachment 内部处理，helper 只负责构造 multipart body。
+func (a *GiteaAdapter) doMultipartRequest(
+	ctx context.Context, hostURL, token, method, path string,
+	formFields map[string]string, fileField, fileName string, fileContent []byte,
+	out interface{},
+) error {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	// 先写普通 form 字段
+	for k, v := range formFields {
+		if err := writer.WriteField(k, v); err != nil {
+			return ipc.NewInternal("构造 multipart form 失败: " + err.Error())
+		}
+	}
+	// 写文件字段
+	if fileContent != nil {
+		part, err := writer.CreateFormFile(fileField, fileName)
+		if err != nil {
+			return ipc.NewInternal("构造 multipart 文件字段失败: " + err.Error())
+		}
+		if _, err := part.Write(fileContent); err != nil {
+			return ipc.NewInternal("写 multipart 文件内容失败: " + err.Error())
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return ipc.NewInternal("关闭 multipart writer 失败: " + err.Error())
+	}
+
+	base := strings.TrimRight(hostURL, "/")
+	fullURL := base + "/api/v1" + path
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
+	if err != nil {
+		return ipc.NewInternal("构造 Gitea multipart 请求失败: " + err.Error())
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	start := time.Now()
+	resp, err := a.httpClient.Do(req)
+	duration := time.Since(start)
+	if err != nil {
+		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
+		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea multipart %s %s: %s", method, fullURL, err.Error()))
+	}
+	defer resp.Body.Close()
+	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return mapHTTPError(resp.StatusCode, string(bodyBytes), fullURL)
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return ipc.NewInternal("解析 Gitea multipart 响应失败: " + err.Error())
+	}
+	return nil
+}
+
+// giteaAttachmentRaw Gitea /repos/.../issues/{index}/assets 原始响应
+type giteaAttachmentRaw struct {
+	ID                 int64  `json:"id"`
+	Name               string `json:"name"`
+	Size               int64  `json:"size"`
+	UUID               string `json:"uuid"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+// giteaAttachmentToDTO 映射为平台中性 AttachmentDTO
+func giteaAttachmentToDTO(a giteaAttachmentRaw) platform.AttachmentDTO {
+	return platform.AttachmentDTO{
+		ID:                 a.ID,
+		Name:               a.Name,
+		Size:               a.Size,
+		UUID:               a.UUID,
+		BrowserDownloadURL: a.BrowserDownloadURL,
+	}
+}
+
+// UploadIssueAttachment 上传 PR/issue 附件（v0.7.0 贴图支持）
+//
+// Gitea 端点：POST /repos/{owner}/{repo}/issues/{index}/assets
+//   - multipart/form-data，form field: attachment（注意不是 'file'）
+//   - 响应：Gitea Attachment (id/name/size/uuid/browser_download_url)
+//   - browser_download_url 形如 https://<host>/attachments/<uuid>，可直接塞到
+//     markdown `![](url)` 让 Gitea 渲染。
+//
+// 回归证据：v0.7.0 之前 PR 评论贴图走前端 FileReader.readAsDataURL 转 data URI
+// 嵌入 markdown，Gitea 服务端不存图片，渲染时只看到"贴图"占位符。
+// 修复后走这条上传到 Gitea 的 attachments 表，markdown 引用真 url。
+func (a *GiteaAdapter) UploadIssueAttachment(ctx context.Context, hostURL, username, token, owner, repo string, index int, fileName string, fileContent []byte) (*platform.AttachmentDTO, error) {
+	if len(fileContent) == 0 {
+		return nil, ipc.NewValidationFailed("附件内容不能为空", "")
+	}
+	var raw giteaAttachmentRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/assets", owner, repo, index)
+	if err := a.doMultipartRequest(
+		ctx, hostURL, token, "POST", path,
+		nil,                                 // 普通 form 字段
+		"attachment", fileName, fileContent, // 文件字段
+		&raw,
+	); err != nil {
+		return nil, err
+	}
+	dto := giteaAttachmentToDTO(raw)
+	return &dto, nil
+}
+
 // URL：${hostURL}/api/v1${path}
 func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, path string, body io.Reader, out interface{}) error {
 	base := strings.TrimRight(hostURL, "/")

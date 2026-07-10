@@ -10,7 +10,7 @@
  */
 
 import { defineStore } from 'pinia';
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, triggerRef } from 'vue';
 import {
   pullsList,
   pullsGet,
@@ -166,7 +166,12 @@ export const usePullStore = defineStore('pull', () => {
       items.sort((a, b) => {
         const dateA = a.source === 'comment' ? a.createdAt : a.submittedAt;
         const dateB = b.source === 'comment' ? b.createdAt : b.submittedAt;
-        return dateA.localeCompare(dateB);
+        // 必须用 epoch ms 比较,不能用 localeCompare：Gitea 1.22+ 返回的 createdAt /
+        // submittedAt 是带时区的 RFC3339（'+08:00' 或 'Z'）,字典序 'Z'(0x5A) > '+'(0x2B)
+        // 会把同一时刻的不同 offset 表达排错序。Date 解析器能正确识别所有 offset。
+        // 回归证据：用户 PR #74 反馈"评论顺序不正确"——review 事件与 review body
+        // comment 在时间正序下应相邻,但被 Gitea 的带 offset 时间字符串字典序排开。
+        return new Date(dateA).getTime() - new Date(dateB).getTime();
       });
     }
     return result;
@@ -205,6 +210,12 @@ export const usePullStore = defineStore('pull', () => {
         error: null as string | null,
       });
       commentPanels.value.set(index, p);
+      // 关键:ref(new Map()) 的 .set 不触发响应(Map 内部不是 reactive proxy),
+      // 手动 triggerRef 让已订阅 commentPanels.value 的 computed(timelineItems)
+      // 重算看到新增的 panel。
+      // 回归证据:用户 PR #74 反馈"提交请求修改后对话区仍显示'暂无对话'",根因之一
+      // 是首次 getPanel 时 Map.set 没触发 timelineItems 重算。
+      triggerRef(commentPanels);
     }
     return p;
   }
@@ -427,6 +438,9 @@ export const usePullStore = defineStore('pull', () => {
         index: p.index,
       })) as unknown as PullReviewDto[];
       reviewPanels.value.set(p.index, items);
+      // 关键:ref(new Map()) 的 .set 不触发响应,手动 triggerRef 让 timelineItems
+      // 重算看到新增的 review 列表。
+      triggerRef(reviewPanels);
     } catch { /* 静默 */ }
   }
 

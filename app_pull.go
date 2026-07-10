@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"errors"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
@@ -603,6 +604,59 @@ func (a *App) CreatePullReviewComment(args CreatePullReviewCommentArgs) (platfor
 	}
 	if d == nil {
 		return platformAdapter.PullReviewCommentDto{}, nil
+	}
+	return *d, nil
+}
+
+// ===== PR 附件上传 (v0.7.0 贴图支持) =====
+
+// UploadPullAttachmentArgs 上传 PR/issue 附件参数
+//
+// FileName 仅作日志 + multipart filename 头用，真正传到服务端的是 FileBase64。
+// 前端把 File 转 base64 通过 Wails binding 传过来，Go 端解码还原成 []byte
+// 再走 multipart 提交。
+type UploadPullAttachmentArgs struct {
+	ProjectID  string `json:"projectId"`
+	Index      int    `json:"index"`
+	FileName   string `json:"fileName"`
+	FileBase64 string `json:"fileBase64"`
+}
+
+// UploadPullAttachment 上传 PR/issue 附件（v0.7.0 贴图支持）
+//
+// 端点：Gitea POST /repos/{owner}/{repo}/issues/{index}/assets
+//
+//	GitHub POST /repos/{owner}/{repo}/issues/{issue_number}/assets
+//
+// 返回 AttachmentDTO，含 browserDownloadUrl（可直接塞到 markdown ![](url)）。
+//
+// 回归证据：v0.7.0 之前 PR 评论贴图走前端 FileReader.readAsDataURL 转 data URI
+// 嵌入 markdown，Gitea 不存图片，渲染时只看到"贴图"占位符。修复后走这条
+// 上传到 Gitea 的 attachments 表，markdown 引用真 url。
+func (a *App) UploadPullAttachment(args UploadPullAttachmentArgs) (platformAdapter.AttachmentDTO, error) {
+	if strings.TrimSpace(args.FileName) == "" {
+		return platformAdapter.AttachmentDTO{}, ipc.NewValidationFailed("文件名不能为空", "")
+	}
+	if strings.TrimSpace(args.FileBase64) == "" {
+		return platformAdapter.AttachmentDTO{}, ipc.NewValidationFailed("附件内容不能为空", "")
+	}
+	content, err := base64.StdEncoding.DecodeString(args.FileBase64)
+	if err != nil {
+		return platformAdapter.AttachmentDTO{}, ipc.NewValidationFailed("附件 base64 解码失败: "+err.Error(), "")
+	}
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return platformAdapter.AttachmentDTO{}, err
+	}
+	if a.logger != nil {
+		a.logger.Info("UploadPullAttachment", "projectId", args.ProjectID, "index", args.Index, "fileName", args.FileName, "size", len(content))
+	}
+	d, err := adapter.UploadIssueAttachment(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.FileName, content)
+	if err != nil {
+		return platformAdapter.AttachmentDTO{}, err
+	}
+	if d == nil {
+		return platformAdapter.AttachmentDTO{}, nil
 	}
 	return *d, nil
 }

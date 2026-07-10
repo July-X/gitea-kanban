@@ -41,6 +41,7 @@ import {
   pullsReviewCreate,
   pullsReviewsList,
   pullsCommitsList,
+  pullsUploadAttachment,
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ReactionBar from '@renderer/components/ReactionBar.vue';
@@ -730,6 +731,9 @@ async function loadReviews(p: PullDto): Promise<void> {
     // v0.5.0 bugfix: 同步写入 store 的 reviewPanels,让 pull.timelineItems computed 能拿到数据
     // (timelineItems 把 review 事件 + 普通评论合并,按时间排序用于对话 Tab 渲染)
     pull.reviewPanels.set(p.index, reviews);
+    // 关键:ref(new Map()) 的 .set 不触发响应,手动 triggerRef 让 timelineItems
+    // 重算看到新增的 review 列表。Map 内部不是 reactive proxy,Vue 不会自动追踪。
+    triggerRef(pull.reviewPanels);
   } catch {
     // 不阻断主流程
   }
@@ -903,9 +907,16 @@ function insertMarkdown(idx: number, type: string): void {
 }
 
 /**
- * 剪贴板贴图：监听 paste 事件，把图片转为 data URI 插入 markdown
+ * 剪贴板贴图：监听 paste 事件，把图片上传到 Gitea/GitHub 拿到真 url 后插入 markdown
+ *
+ * v0.7.0 修复：旧版把 File 转 data URI 嵌进 markdown，Gitea 不存图片，渲染时只看到
+ * "贴图"占位符。修复后走 App.UploadPullAttachment 上传到 issue attachments，
+ * 拿到 browserDownloadUrl 插到 markdown `![](url)` 让 Gitea 渲染。
+ *
+ * 失败降级：如果服务端不支持附件上传（GitHub 老仓库 / Gitea 1.20 之前没 attachments unit），
+ * 回退到 data URI，至少不让用户失去图片。
  */
-function onCommentPaste(idx: number, e: ClipboardEvent): void {
+async function onCommentPaste(idx: number, e: ClipboardEvent): Promise<void> {
   const items = e.clipboardData?.items;
   if (!items) return;
   for (const item of items) {
@@ -913,18 +924,70 @@ function onCommentPaste(idx: number, e: ClipboardEvent): void {
       e.preventDefault();
       const file = item.getAsFile();
       if (!file) continue;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUri = reader.result as string;
-        const md = `![贴图](${dataUri})\n`;
+      try {
+        const url = await uploadPastedImage(file);
+        const md = `![贴图](${url})\n`;
         const draft = getDraft(idx);
         setDraft(idx, draft + md);
-        showToast({ type: 'success', message: '图片已插入' });
-      };
-      reader.readAsDataURL(file);
+        showToast({ type: 'success', message: '图片已上传并插入' });
+      } catch (err) {
+        // 上传失败：降级 data URI（用户至少能看见图片，不丢失）
+        const e2 = err as { messageText?: string };
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUri = reader.result as string;
+          const md = `![贴图](${dataUri})\n`;
+          const draft = getDraft(idx);
+          setDraft(idx, draft + md);
+          showToast({
+            type: 'warning',
+            message: `图片上传失败，已降级为本地引用: ${e2.messageText ?? '未知错误'}`,
+            persistent: true,
+          });
+        };
+        reader.readAsDataURL(file);
+      }
       return;
     }
   }
+}
+
+/**
+ * 把粘贴的 File 上传到当前 PR 的 issue attachments，返回可渲染的 url
+ *
+ * Wails 2.x TS 类型对 binary 字段在 binding 上支持差，前端转 base64 字符串传过去，
+ * Go 端解码还原成 []byte 再走 multipart。
+ */
+async function uploadPastedImage(file: File): Promise<string> {
+  if (!activeProjectId.value) {
+    throw new Error('未选中项目');
+  }
+  // FileReader.readAsDataURL 返回 data:image/png;base64,iVBORw0... 截掉前缀
+  const dataUri = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+  const base64 = dataUri.split(',', 2)[1] ?? '';
+  if (!base64) {
+    throw new Error('文件为空');
+  }
+  const selectedPR = pull.currentSelectedItem;
+  if (!selectedPR) {
+    throw new Error('未选中合并请求');
+  }
+  const fileName = file.name || `pasted-${Date.now()}.${(file.type.split('/')[1] || 'png')}`;
+  const result = await pullsUploadAttachment({
+    projectId: String(activeProjectId.value),
+    index: selectedPR.index,
+    fileName,
+    fileBase64: base64,
+  });
+  if (!result || !result.browserDownloadUrl) {
+    throw new Error('服务端未返回附件 URL');
+  }
+  return result.browserDownloadUrl;
 }
 
 /**
@@ -1824,7 +1887,7 @@ function formatRelative(iso: string | undefined): string {
                   :value="getDraft(selectedPR.index)"
                   @input="onCommentInput(selectedPR, $event)"
                   @keydown="onCommentKeydown(selectedPR, $event)"
-                  @paste="onCommentPaste(selectedPR.index, $event)"
+                  @paste="void onCommentPaste(selectedPR.index, $event)"
                   :placeholder="'发条评论给 #' + selectedPR.index + '\n@ 提及成员，Enter 发送'"
                   :disabled="getPanel(selectedPR.index).posting"
                   rows="3"

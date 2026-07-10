@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -2039,5 +2040,84 @@ func TestGitHubAdapter_GetPull_NoMilestone(t *testing.T) {
 	}
 	if p.Milestone != nil {
 		t.Errorf("Milestone = %+v, want nil", p.Milestone)
+	}
+}
+
+// TestGitHubAdapter_UploadIssueAttachment 验证 multipart/form-data 上传到
+// POST /repos/{owner}/{repo}/issues/{issue_number}/assets。form field 必须是 'file'
+// （与 Gitea 的 'attachment' 不同——adapter 层翻译）。
+//
+// 回归证据：v0.7.0 之前 PR 评论贴图走前端 FileReader.readAsDataURL 转 data URI，
+// GitHub 不存图片（其实 GitHub 也不渲染 data: URI 引用）。
+// 修复后走这条上传到 GitHub 的 attachments 表，markdown 引用真 url。
+func TestGitHubAdapter_UploadIssueAttachment(t *testing.T) {
+	const fakePng = "fake-png-bytes-v0.7.0-github"
+	var capturedMethod, capturedPath, capturedContentType, capturedAuth string
+	var capturedFormField, capturedFileName string
+	var capturedFileContent []byte
+	_ = capturedFileName // 保留作调试用
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedContentType = r.Header.Get("Content-Type")
+		capturedAuth = r.Header.Get("Authorization")
+		reader, err := r.MultipartReader()
+		if err != nil {
+			t.Errorf("MultipartReader failed: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		for {
+			part, err := reader.NextPart()
+			if err != nil {
+				break
+			}
+			if part.FormName() == "file" {
+				capturedFormField = "file"
+				capturedFileName = part.FileName()
+				buf, _ := io.ReadAll(part)
+				capturedFileContent = buf
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":                   99,
+			"name":                 "screenshot.png",
+			"size":                 len(fakePng),
+			"uuid":                 "github-uuid-xyz",
+			"browser_download_url": "https://github-cloud.s3.amazonaws.com/screenshot.png",
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	dto, err := adapter.UploadIssueAttachment(
+		context.Background(),
+		server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42,
+		"screenshot.png", []byte(fakePng),
+	)
+	if err != nil {
+		t.Fatalf("UploadIssueAttachment failed: %v", err)
+	}
+	if capturedMethod != "POST" {
+		t.Errorf("method = %q, want POST", capturedMethod)
+	}
+	if capturedPath != "/repos/alice/dolphin/issues/42/assets" {
+		t.Errorf("path = %q, want /repos/alice/dolphin/issues/42/assets", capturedPath)
+	}
+	if capturedAuth != "Bearer ghp-test-token" {
+		t.Errorf("Authorization = [redacted], want 'Bearer ghp-test-token'")
+	}
+	if !strings.HasPrefix(capturedContentType, "multipart/form-data; boundary=") {
+		t.Errorf("Content-Type = %q, want multipart/form-data; boundary=...", capturedContentType)
+	}
+	if capturedFormField != "file" {
+		t.Errorf("form field = %q, want 'file' (GitHub 端点用 'file'，与 Gitea 'attachment' 不同)", capturedFormField)
+	}
+	if string(capturedFileContent) != fakePng {
+		t.Errorf("file content mismatch")
+	}
+	if dto.BrowserDownloadURL == "" {
+		t.Errorf("BrowserDownloadURL should not be empty")
 	}
 }
