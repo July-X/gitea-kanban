@@ -1202,10 +1202,13 @@ type githubReviewRaw struct {
 }
 
 // githubReviewToDTO 映射为平台中性 PullReviewDTO
+//
+// 关键：GitHub 返回 state 是大写（APPROVED / CHANGES_REQUESTED / COMMENTED / PENDING / DISMISSED），
+// 必须归一化到前端约定的小写 3 种值,避免 reviewStateLabel fallthrough / CSS class 不匹配。
 func githubReviewToDTO(r githubReviewRaw) platform.PullReviewDTO {
 	out := platform.PullReviewDTO{
 		ID:          r.ID,
-		State:       r.State,
+		State:       platform.NormalizeReviewState(r.State),
 		Body:        r.Body,
 		CommitID:    r.CommitID,
 		SubmittedAt: r.SubmittedAt,

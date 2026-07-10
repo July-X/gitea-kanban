@@ -1546,8 +1546,8 @@ func TestGitHubAdapter_ListPullReviews(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("len(items) = %d, want 1", len(items))
 	}
-	if items[0].State != "APPROVED" {
-		t.Errorf("State = %q, want APPROVED", items[0].State)
+	if items[0].State != "approved" {
+		t.Errorf("State = %q, want approved (GitHub 大写 state 必须归一化)", items[0].State)
 	}
 	if items[0].Body != "Ship it!" {
 		t.Errorf("Body = %q", items[0].Body)
@@ -1590,8 +1590,40 @@ func TestGitHubAdapter_CreatePullReview_Approve(t *testing.T) {
 	if capturedBody["event"] != "APPROVE" {
 		t.Errorf("event = %v, want APPROVE (GitHub uses uppercase)", capturedBody["event"])
 	}
-	if d.State != "APPROVED" {
-		t.Errorf("State = %q, want APPROVED", d.State)
+	if d.State != "approved" {
+		t.Errorf("State = %q, want approved (归一化后)", d.State)
+	}
+}
+
+// TestGitHubAdapter_ListPullReviews_UppercaseStates 验证 GitHub 真实 API
+// 返回的 state 是大写（APPROVED / CHANGES_REQUESTED / COMMENTED / PENDING / DISMISSED），
+// adapter 必须归一化到前端约定的小写 3 种值（approved / changes_requested / commented）。
+// 字段名差异：GitHub 用 CHANGES_REQUESTED / COMMENTED,与 Gitea 的 REQUEST_CHANGES / COMMENT 都不一致。
+func TestGitHubAdapter_ListPullReviews_UppercaseStates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{"id": 1, "state": "APPROVED", "body": "LGTM", "user": map[string]interface{}{"login": "alice"}, "commit_id": "abc", "submitted_at": "2024-06-05T10:00:00Z"},
+			{"id": 2, "state": "CHANGES_REQUESTED", "body": "改一下", "user": map[string]interface{}{"login": "bob"}, "commit_id": "abc", "submitted_at": "2024-06-05T11:00:00Z"},
+			{"id": 3, "state": "COMMENTED", "body": "提个建议", "user": map[string]interface{}{"login": "carol"}, "commit_id": "abc", "submitted_at": "2024-06-05T12:00:00Z"},
+			{"id": 4, "state": "PENDING", "body": "等人审", "user": map[string]interface{}{"login": "dave"}, "commit_id": "abc", "submitted_at": "2024-06-05T13:00:00Z"},
+			{"id": 5, "state": "DISMISSED", "body": "撤回", "user": map[string]interface{}{"login": "eve"}, "commit_id": "abc", "submitted_at": "2024-06-05T14:00:00Z"},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullReviews(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullReviews failed: %v", err)
+	}
+	if len(items) != 5 {
+		t.Fatalf("len(items) = %d, want 5", len(items))
+	}
+	want := []string{"approved", "changes_requested", "commented", "commented", "commented"}
+	for i, w := range want {
+		if items[i].State != w {
+			t.Errorf("items[%d].State = %q, want %q (GitHub 大写 state 必须归一化)", i, items[i].State, w)
+		}
 	}
 }
 

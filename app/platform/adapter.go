@@ -543,11 +543,41 @@ type ReactionDTO struct {
 // PullReviewDTO 合并请求评审（v0.5.0 M3）
 type PullReviewDTO struct {
 	ID          int64        `json:"id"`
-	State       string       `json:"state"` // "approved" / "changes_requested" / "commented"
+	State       string       `json:"state"` // 前端约定小写: "approved" / "changes_requested" / "commented"
 	Body        string       `json:"body"`  // 评审总结文
 	Author      *PullUserDTO `json:"author"`
 	CommitID    string       `json:"commitId"`    // 评审针对的 commit SHA
 	SubmittedAt string       `json:"submittedAt"` // 评审时间（Gitea: submitted; GitHub: submitted_at）
+}
+
+// NormalizeReviewState 把上游平台返回的 review state 归一化到前端约定的小写值。
+//
+// 上游差异（实测）:
+//   - Gitea 1.22+ /pulls/{index}/reviews 返回: APPROVED / PENDING / COMMENT / REQUEST_CHANGES / REQUEST_REVIEW
+//   - GitHub /repos/{owner}/{repo}/pulls/{number}/reviews 返回: APPROVED / CHANGES_REQUESTED / COMMENTED / PENDING / DISMISSED
+//
+// 前端 union type 期望: 'approved' | 'changes_requested' | 'commented'（见 dto.ts ReviewState）
+// 大小写不一致 + 字段名不同（REQUEST_CHANGES vs CHANGES_REQUESTED, COMMENT vs COMMENTED）会
+// 导致 reviewStateLabel fallthrough、CSS class 不匹配、review 头像永远显示 💬。必须归一化。
+//
+// 不可识别的值原样回传,留待后续版本或前端处理。
+func NormalizeReviewState(raw string) string {
+	switch raw {
+	// 已批准
+	case "APPROVED", "approved":
+		return "approved"
+	// 请求修改
+	case "REQUEST_CHANGES", "request_changes", "CHANGES_REQUESTED", "changes_requested":
+		return "changes_requested"
+	// 仅评论（Gitea 与 GitHub 字段名不一致）
+	case "COMMENT", "COMMENTED", "commented":
+		return "commented"
+	// 待定（Gitea "REQUEST_REVIEW" 也归为待定,前端用 'commented' 兜底显示）
+	case "PENDING", "REQUEST_REVIEW", "DISMISSED":
+		return "commented"
+	default:
+		return raw
+	}
 }
 
 // CreatePullReviewOpts 创建评审参数（v0.5.0 M3 + v0.6.0 补 comments）

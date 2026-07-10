@@ -867,10 +867,14 @@ type giteaReviewRaw struct {
 }
 
 // giteaReviewToDTO 映射为平台中性 PullReviewDTO
+//
+// 关键：Gitea 1.22+ 返回 state 是大写（APPROVED / PENDING / COMMENT / REQUEST_CHANGES / REQUEST_REVIEW），
+// 必须归一化到前端约定的小写 3 种值（approved / changes_requested / commented），
+// 否则 reviewStateLabel 会 fallthrough 显示原文、CSS class 不匹配、review 头像永远显示 💬。
 func giteaReviewToDTO(r giteaReviewRaw) platform.PullReviewDTO {
 	out := platform.PullReviewDTO{
 		ID:          r.ID,
-		State:       r.State,
+		State:       platform.NormalizeReviewState(r.State),
 		Body:        r.Body,
 		CommitID:    r.CommitID,
 		SubmittedAt: r.Submitted,
