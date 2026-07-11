@@ -167,16 +167,18 @@ const confirmDeleteOpen = ref(false);
 /** 待删除的评论信息 */
 const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
 
-/** 合并检查警告区展开状态——v0.7.x 修订
+/** 合并检查警告区展开状态（v0.7.x）
  *
- * 最早（commit 349734b）学了 Gitea web 的一个 "查看命令行提示" <details> 折叠块，
- * 但 Gitea web 实际是永远展开的，不是折叠。折叠是多余的交互，
- * 与 Gitea web 行为不一致，造成用户困惑。
- *
- * v0.7.x 修订：去掉 <details>/<summary>、去掉“查看命令行提示”按钮，
- * 命令行块直接永久显示。
- * mergeWarningOpen 这个 ref 不再使用、删除，避免后续误调。
+ * 为什么不用 <details> native toggle：Wails WebView 复现二次点击 summary
+ * 不能正常收起（macOS WKWebView 路径下 <details> native click toggle
+ * 间歇性失效，与 WebKit 在嵌套 display:flex 容器里的事件处理有关）。
+ * 走 Vue 受控 open 状态 100% 可靠：click → toggle ref → DOM 重新渲染
+ * 走 native toggle 路径。
  */
+const mergeWarningOpen = ref(false);
+function toggleMergeWarning(): void {
+  mergeWarningOpen.value = !mergeWarningOpen.value;
+}
 
 const detailTab = ref<'conversation' | 'commits' | 'files'>('conversation');
 
@@ -1825,12 +1827,19 @@ function formatRelative(iso: string | undefined): string {
               <div class="pr-detail__merge-warning-body">
                 <div class="pr-detail__merge-warning-title">此分支已经包含在目标分支中，没有什么可以合并。</div>
                 <!--
-                  v0.7.x 修订：去 "查看命令行提示" 折叠按钮与 v-if、命令行块
-                  直接永久显示。对齐 Gitea web 行为：Gitea web 上面这个红框
-                  本身是不可折叠的，命令行块始终可见。
-                  mergeWarningOpen / toggleMergeWarning 也已删除。
+                  v0.7.x 修复：不用 <details> native toggle，因为 Wails WebView (macOS WKWebView)
+                  复现二次点击 summary 不能正常收起。走 Vue 受控的 v-if：点击 toggle 后
+                  Vue 重新渲染内容区，100% 可靠。
+                  角色处理：<button type="button"> 原生按钮焦点 / 键盘可访问；aria-expanded
+                  让屏幕阅读器知状态。
                 -->
-                <div class="pr-detail__merge-warning-help">
+                <button
+                  type="button"
+                  class="pr-detail__merge-warning-toggle"
+                  :aria-expanded="mergeWarningOpen"
+                  @click="toggleMergeWarning"
+                >查看命令行提示</button>
+                <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
                   <div class="pr-detail__merge-warning-step">检出</div>
                   <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
                   <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ selectedPR.head.ref }}:{{ selectedPR.head.ref }}
@@ -5199,6 +5208,31 @@ git checkout {{ selectedPR.head.ref }}</pre>
 .pr-detail__merge-warning-title {
   font-weight: 600;
   color: var(--color-danger);
+}
+/* v0.7.x: 受控 toggle 按钮 (代替原 <details>/<summary>，绕过 Wails WebView
+   二次点击不收起的 bug) */
+.pr-detail__merge-warning-toggle {
+  display: inline-block;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  font: inherit;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+  /* 可点区与原 <summary> 高度一致 */
+  padding: 2px 0;
+}
+.pr-detail__merge-warning-toggle:hover {
+  color: var(--color-text);
+}
+.pr-detail__merge-warning-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 .pr-detail__merge-warning-help {
   margin-top: var(--space-2);
