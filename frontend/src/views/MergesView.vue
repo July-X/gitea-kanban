@@ -1905,17 +1905,26 @@ function formatRelative(iso: string | undefined): string {
                   收起时：标题 + 图标 + ChevronDown（没有文字链接，视觉上更简洁）
                   100% Vue 受控，避免 WebKit details 二次点击不响应的问题。
                 -->
-                <div class="pr-detail__merge-warning-title">
+                <!--
+                  v0.7.x: 标题行整体作为 toggle 入口。
+                  - 鼠标指针变手型，Chevron 按钮显示 toggle 状态
+                  - 点击标题行任何地方都能展开/收起
+                  - 点击只是 toggle，不做其他操作
+                -->
+                <div
+                  class="pr-detail__merge-warning-title"
+                  role="button"
+                  tabindex="0"
+                  :aria-expanded="mergeWarningOpen"
+                  :title="mergeWarningOpen ? '点击收起命令行提示' : '点击展开命令行提示'"
+                  @click="toggleMergeWarning"
+                  @keydown.enter.prevent="toggleMergeWarning"
+                  @keydown.space.prevent="toggleMergeWarning"
+                >
                   <span>此分支已经包含在目标分支中，没有什么可以合并。</span>
-                  <button
-                    type="button"
-                    class="pr-detail__merge-warning-toggle"
-                    :aria-expanded="mergeWarningOpen"
-                    :title="mergeWarningOpen ? '隐藏命令行提示' : '查看命令行提示'"
-                    @click="toggleMergeWarning"
-                  >
-                    <component :is="mergeWarningOpen ? ChevronUp : ChevronDown" :size="14" :stroke-width="2" aria-hidden="true" />
-                  </button>
+                  <span class="pr-detail__merge-warning-toggle" aria-hidden="true">
+                    <component :is="mergeWarningOpen ? ChevronUp : ChevronDown" :size="14" :stroke-width="2" />
+                  </span>
                 </div>
                 <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
                   <div class="pr-detail__merge-warning-step">检出</div>
@@ -5331,27 +5340,27 @@ git checkout {{ selectedPR.head.ref }}</pre>
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  cursor: pointer; /* v0.7.x: 标题行整体作为 toggle 入口，鼠标变手型 */
+  user-select: none;
+}
+.pr-detail__merge-warning-title:hover {
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
+  margin: calc(-1 * var(--space-1)); /* 抵消 padding，避免外框抖动 */
+}
+.pr-detail__merge-warning-title:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 .pr-detail__merge-warning-toggle {
+  /* Chevron 图标装饰元素 */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
-  margin: 0;
-  background: transparent;
-  border: none;
   color: var(--color-text-secondary);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
   flex-shrink: 0;
-}
-.pr-detail__merge-warning-toggle:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text);
-}
-.pr-detail__merge-warning-toggle:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
 }
 .pr-detail__merge-warning-help {
   margin-top: var(--space-2);
