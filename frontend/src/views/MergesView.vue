@@ -1894,6 +1894,7 @@ function formatRelative(iso: string | undefined): string {
               v-if="selectedPR.state === 'open' && !selectedPR.mergeable"
               class="pr-detail__merge-warning"
               role="alert"
+              :class="{ 'pr-detail__merge-warning--collapsed': !mergeWarningOpen }"
             >
               <GitBranch :size="16" :stroke-width="2" aria-hidden="true" />
               <div class="pr-detail__merge-warning-body">
@@ -5304,6 +5305,14 @@ git checkout {{ selectedPR.head.ref }}</pre>
   border-radius: var(--radius-md);
   margin: var(--space-3) 0;
   color: var(--color-danger);
+  transition: padding 0.15s ease;
+}
+/* 收起态：红框整体变矮 — padding 缩小，让外框跟着内容收缩 */
+.pr-detail__merge-warning--collapsed {
+  padding: var(--space-2) var(--space-3);
+}
+.pr-detail__merge-warning--collapsed .pr-detail__merge-warning-title {
+  font-size: var(--font-sm);
 }
 .pr-detail__merge-warning svg {
   flex-shrink: 0;
