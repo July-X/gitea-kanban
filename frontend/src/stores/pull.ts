@@ -225,6 +225,43 @@ export const usePullStore = defineStore('pull', () => {
     } catch { availableMilestones.value = []; availableMembers.value = []; }
   }
 
+  // ===== 属性编辑器 save 动作（v0.6.0 起包走 store-first） =====
+  //
+  // 这些是 v0.6.0 潜伏 store action 缺失 bug 的修复：MergesView.saveAttrs 调
+  // pullStore.updateLabels / updateAssignees / updateReviewers / updateMilestone
+  // 三参形式（projectId, index, value），但 pullsUpdateXxx IPC 函数只接受单
+  // args object。这里 wrap 一次，内部调 IPC + 乐观更新本地 list。
+
+  /** 乐观更新 items 里某 PR 的指定字段（v0.6+） */
+  function patchItem(index: number, patch: Partial<PullDto>): void {
+    const i = items.value.findIndex(p => p.index === index);
+    if (i >= 0) items.value[i] = { ...items.value[i], ...patch } as PullDto;
+  }
+
+  /** 更新标签（替换所有标签） */
+  async function updateLabels(projectId: string, index: number, labels: string[]): Promise<void> {
+    const updated = await pullsUpdateLabels({ projectId, index, labels });
+    patchItem(index, { labels: updated.labels });
+  }
+
+  /** 更新指派人（多选，空数组 = 清除）—— store 暴露复数名对齐 MergesView 调用 */
+  async function updateAssignees(projectId: string, index: number, assignees: string[]): Promise<void> {
+    const updated = await pullsUpdateAssignee({ projectId, index, assignees });
+    patchItem(index, { assignees: updated.assignees });
+  }
+
+  /** 更新评审人（空数组 = 清除） */
+  async function updateReviewers(projectId: string, index: number, reviewers: string[]): Promise<void> {
+    const updated = await pullsUpdateReviewers({ projectId, index, reviewers });
+    patchItem(index, { reviewers: updated.reviewers });
+  }
+
+  /** 关联里程碑（空串 = 清除；v0.6.0 Gitea / v0.7.0 GitHub） */
+  async function updateMilestone(projectId: string, index: number, milestone: string): Promise<void> {
+    const updated = await pullsUpdateMilestone({ projectId, index, milestone });
+    patchItem(index, { milestone: updated.milestone });
+  }
+
   return {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
@@ -238,8 +275,7 @@ export const usePullStore = defineStore('pull', () => {
     fetchReviews, submitReview, loadReviewComments, loadFiles, fetchFileDiff,
     fetchCommentReactions, addCommentReaction, removeCommentReaction,
     loadAttrEditorData,
-    updateLabels: pullsUpdateLabels, updateAssignee: pullsUpdateAssignee,
-    updateReviewers: pullsUpdateReviewers, updateMilestone: pullsUpdateMilestone,
+    updateLabels, updateAssignees, updateReviewers, updateMilestone,
     labels: labelsList, members: membersList, milestones: milestonesList,
   };
 });
