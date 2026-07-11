@@ -52,9 +52,6 @@ export const usePullStore = defineStore('pull', () => {
   // 评审面板 (仅用于提交评审)
   const reviewPanels = ref<Map<number, PullReviewDto[]>>(new Map());
   const reviewSubmitting = ref(false);
-  const reviewEditorOpen = ref<Set<number>>(new Set());
-  const reviewEditorEvent = ref<Map<number, string>>(new Map());
-  const reviewEditorBody = ref<Map<number, string>>(new Map());
 
   const reviewCommentsByPR = ref<Map<number, PullReviewCommentDto[]>>(new Map());
   const filesByPR = ref<Map<number, PullFileDto[]>>(new Map());
@@ -338,7 +335,6 @@ export const usePullStore = defineStore('pull', () => {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
     timelinePanels, reviewPanels, reviewSubmitting,
-    reviewEditorOpen, reviewEditorEvent, reviewEditorBody,
     reviewCommentsByPR, filesByPR, fileDiffByPath,
     availableMilestones, availableMembers,
     total, counts, filteredItems, reviewCommentsGrouped,
