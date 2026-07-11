@@ -28,6 +28,8 @@ import {
   RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, Type, Calendar,
   Lock, Key, Eye, ArrowLeftRight, GitPullRequest, ArrowUp, Folder, Pin,
   MessageCircle,
+  // v0.7.3: 评审事件状态图标
+  CheckCircle2,
 } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
@@ -944,14 +946,15 @@ function systemEventColor(type: string): SystemEventColor {
 }
 
 /**
- * v0.7.2：判断 system event item 是否需要渲染二级详情块
+ * v0.7.3：判断 system event item 是否需要渲染二级详情
  *
- * 不是所有 system event 都有 detail 字段 —— 比如 reopen / close / merge / push
- * 头部一行已经讲清楚了，不需要再加 detail。
- * 需要 detail 的是有"附加信息"的：label / milestone / assignees / title 变化 /
- * branch 变化 / commit ref / issue 引用 / 依赖 issue。
+ * 拆成 inline + block 两类：
+ *   - inline：单行内嵌的小信息（label chip / milestone 名 / branch ref / assignee / title 旧新）
+ *     Gitea web 里这些都是 inline 在 timeline-item event 同一行
+ *   - block：换行展示的（ref issue 链接 + 标题 / dependency 链接 + 标题）
+ *     因为带外部链接 + 标题会拉长，单独一行更清晰
  */
-function hasSystemEventDetail(item: TimelineItemDto): boolean {
+function hasSystemEventInlineDetail(item: TimelineItemDto): boolean {
   if (item.type === 'label') return !!item.label;
   if (item.type === 'milestone') return !!(item.oldMilestone || item.milestone);
   if (item.type === 'assignees') return !!item.assignee;
@@ -959,6 +962,10 @@ function hasSystemEventDetail(item: TimelineItemDto): boolean {
   if (item.type === 'delete_branch') return !!item.oldRef;
   if (item.type === 'change_target_branch') return !!(item.oldRef || item.newRef);
   if (item.type === 'commit_ref') return !!item.refCommitSha;
+  return false;
+}
+
+function hasSystemEventBlockDetail(item: TimelineItemDto): boolean {
   if (item.type === 'issue_ref' || item.type === 'pull_ref' || item.type === 'comment_ref' || item.type === 'change_issue_ref') return !!item.refIssue;
   if (item.type === 'add_dependency' || item.type === 'remove_dependency') return !!item.dependentIssue;
   return false;
@@ -1954,45 +1961,50 @@ git checkout {{ selectedPR.head.ref }}</pre>
               <div v-else-if="getTimelinePanel().items.length === 0" class="pr-detail__conv-empty">
                 暂无对话，发起第一条评论开始讨论吧
               </div>
-              <ul v-else class="pr-detail__comment-list">
+              <ul v-else class="pr-detail__timeline">
                 <template v-for="(item) in getTimelinePanel().items ?? []">
-                  <!-- 评审事件 (不显示 body, body 由 type=21 评论卡渲染) -->
+                  <!-- 评审事件 (v0.7.3：紧凑单行 —— 对齐 Gitea web .timeline-item.event) -->
                   <li
                     v-if="item.type === 'review'"
                     :key="`${item.type}-${item.id}`"
-                    class="pr-detail__comment pr-detail__comment--review-event"
-                    :class="`pr-detail__comment--review-${item.state}`"
+                    class="pr-detail__timeline-item pr-detail__timeline-item--event pr-detail__timeline-item--review"
+                    :class="`pr-detail__timeline-item--review-${item.state}`"
                   >
-                    <div class="pr-detail__comment-side">
-                      <div class="pr-detail__comment-avatar" :class="`pr-detail__comment-avatar--${item.state}`">
-                        {{ item.state === 'approved' ? '✓' : item.state === 'changes_requested' ? '✗' : '💬' }}
+                    <div class="pr-detail__timeline-rail">
+                      <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--review-${item.state}`">
+                        <component
+                          :is="item.state === 'approved' ? CheckCircle2 : item.state === 'changes_requested' ? XCircle : MessageCircle"
+                          :size="13"
+                          :stroke-width="2.5"
+                          aria-hidden="true"
+                        />
                       </div>
                     </div>
-                    <div class="pr-detail__comment-bubble pr-detail__comment-bubble--event">
-                      <div class="pr-detail__comment-meta">
-                        <span class="pr-detail__review-state-badge" :class="`pr-detail__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
-                      </div>
-                      <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author?.username }}</div>
+                    <div class="pr-detail__event-line">
+                      <span class="pr-detail__event-text">
+                        <span class="pr-detail__event-author">{{ item.author?.username || '匿名' }}</span>
+                        <span class="pr-detail__event-verb">{{ reviewStateLabel(item.state) }}</span>
+                      </span>
+                      <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                     </div>
                   </li>
 
-                  <!-- 普通评论卡片 (含 type=21 评审 body) -->
+                  <!-- 普通评论卡片 (v0.7.3：左 avatar 移到 timeline rail 位置，bubble 不变) -->
                   <li
                     v-else-if="item.type === 'comment'"
                     :key="`${item.type}-${item.id}`"
-                    class="pr-detail__comment"
-                    :class="{ 'pr-detail__comment--self': currentUsername && item.author?.username === currentUsername }"
+                    class="pr-detail__timeline-item pr-detail__timeline-item--comment"
+                    :class="{ 'pr-detail__timeline-item--self': currentUsername && item.author?.username === currentUsername }"
                   >
-                    <div class="pr-detail__comment-side">
-                      <div class="pr-detail__comment-avatar" :title="item.author?.username" aria-hidden="true">
+                    <div class="pr-detail__timeline-rail">
+                      <div class="pr-detail__timeline-avatar" :title="item.author?.username" aria-hidden="true">
                         {{ (item.author?.username || '?').charAt(0).toUpperCase() }}
                       </div>
-                      <div class="pr-detail__comment-name">{{ item.author?.username }}</div>
                     </div>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
                         <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
+                        <span class="pr-detail__comment-author">{{ item.author?.username }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <!-- 编辑态 -->
@@ -2055,43 +2067,42 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     </div>
                   </li>
 
-                  <!-- 系统事件卡 (type=1/2/4/7/8/9/10/27/28/29)
-                       对齐 Gitea web comments.tmpl 的非 COMMENT/REVIEW 分支,
-                       简单 badge + author + locale 文案 + 二级详情块
-                       (label/milestone/assignee/title/branch/ref/dependency 等) -->
+                  <!-- 系统事件 (v0.7.3：紧凑单行 —— 对齐 Gitea web .timeline-item.event)
+                       行内：username + event verb + 时间 + 小图标
+                       行内附加 (event-inline)：label chip / milestone name / branch ref / assignee 等
+                       块级 (event-block)：ref issue 链接 + 标题 / dependency 链接 + 标题
+                  -->
                   <li
                     v-else-if="!['review', 'comment', 'code'].includes(item.type)"
                     :key="`${item.type}-${item.id}`"
-                    class="pr-detail__comment pr-detail__comment--system-event"
+                    class="pr-detail__timeline-item pr-detail__timeline-item--event pr-detail__timeline-item--system"
                     :class="[
-                      `pr-detail__comment--system-type-${item.type}`,
-                      `pr-detail__comment--system-color-${systemEventColor(item.type)}`,
+                      `pr-detail__timeline-item--system-type-${item.type}`,
+                      `pr-detail__timeline-item--system-color-${systemEventColor(item.type)}`,
                     ]"
                   >
-                    <div class="pr-detail__comment-side">
-                      <div class="pr-detail__comment-avatar pr-detail__comment-avatar--system" :title="systemEventLabel(item.type)">
-                        <component :is="systemEventIcon(item.type)" :size="14" :stroke-width="2" aria-hidden="true" />
+                    <div class="pr-detail__timeline-rail">
+                      <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`">
+                        <component :is="systemEventIcon(item.type)" :size="13" :stroke-width="2.5" aria-hidden="true" />
                       </div>
                     </div>
-                    <div class="pr-detail__comment-bubble pr-detail__comment-bubble--event">
-                      <div class="pr-detail__comment-meta">
-                        <span class="pr-detail__system-event-badge">{{ systemEventLabel(item.type) }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                    <div class="pr-detail__event-content">
+                      <div class="pr-detail__event-line">
+                        <span class="pr-detail__event-author">{{ item.author?.username || '匿名' }}</span>
+                        <span class="pr-detail__event-verb">{{ systemEventLabel(item.type) }}</span>
+                        <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
-                      <div class="pr-detail__comment-event-author">{{ item.author?.username || '匿名' }}</div>
-                      <!-- 二级详情块：按 type 分支渲染（对齐 Gitea web .detail flex-text-block） -->
+                      <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
                       <div
-                        v-if="hasSystemEventDetail(item)"
-                        class="pr-detail__comment-event-detail"
+                        v-if="hasSystemEventInlineDetail(item)"
+                        class="pr-detail__event-inline"
                       >
-                        <!-- type=7 label: 单个 label chip -->
                         <span
                           v-if="item.type === 'label' && item.label"
                           class="pr-detail__event-label"
                           :style="labelStyle(item.label.color)"
                         >{{ item.label.name }}</span>
 
-                        <!-- type=8 milestone: 旧 → 新 -->
                         <span v-else-if="item.type === 'milestone'">
                           <template v-if="item.oldMilestone && item.milestone">
                             <span class="pr-detail__event-strike">{{ item.oldMilestone.title }}</span>
@@ -2106,30 +2117,24 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           </template>
                         </span>
 
-                        <!-- type=9 assignees: +user / -user -->
                         <span v-else-if="item.type === 'assignees' && item.assignee">
                           <span :class="item.removedAssignee ? 'pr-detail__event-minus' : 'pr-detail__event-plus'">
                             {{ item.removedAssignee ? '−' : '+' }}
                           </span>
                           <span class="pr-detail__event-username">{{ item.assignee.username }}</span>
-                          <span v-if="item.removedAssignee" class="pr-detail__event-hint">移除了指派</span>
-                          <span v-else class="pr-detail__event-hint">添加了指派</span>
                         </span>
 
-                        <!-- type=10 change_title: 旧 → 新 -->
                         <span v-else-if="item.type === 'title' || item.type === 'change_title'">
                           <span class="pr-detail__event-strike">{{ item.oldTitle }}</span>
                           <span class="pr-detail__event-arrow">→</span>
                           <span class="pr-detail__event-emphasis">{{ item.newTitle }}</span>
                         </span>
 
-                        <!-- type=11 delete_branch: 旧 ref -->
                         <span v-else-if="item.type === 'delete_branch' && item.oldRef">
                           <GitBranch :size="12" :stroke-width="2" aria-hidden="true" />
                           <code class="pr-detail__event-branch">{{ item.oldRef }}</code>
                         </span>
 
-                        <!-- type=25 change_target_branch: 旧 → 新 -->
                         <span v-else-if="item.type === 'change_target_branch'">
                           <GitBranch :size="12" :stroke-width="2" aria-hidden="true" />
                           <code class="pr-detail__event-branch">{{ item.oldRef }}</code>
@@ -2137,13 +2142,16 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           <code class="pr-detail__event-branch">{{ item.newRef }}</code>
                         </span>
 
-                        <!-- type=4 commit_ref: commit SHA 链接 -->
                         <span v-else-if="item.type === 'commit_ref' && item.refCommitSha">
                           <code class="pr-detail__event-branch">{{ item.refCommitSha.slice(0, 7) }}</code>
                         </span>
-
-                        <!-- type=3/5/6/33 issue_ref: 引用 issue 标题 -->
-                        <span v-else-if="(item.type === 'issue_ref' || item.type === 'pull_ref' || item.type === 'comment_ref' || item.type === 'change_issue_ref') && item.refIssue">
+                      </div>
+                      <!-- 块级：ref issue / dependency 等需要换行展示的 (对齐 Gitea web .detail) -->
+                      <div
+                        v-if="hasSystemEventBlockDetail(item)"
+                        class="pr-detail__event-block"
+                      >
+                        <span v-if="(item.type === 'issue_ref' || item.type === 'pull_ref' || item.type === 'comment_ref' || item.type === 'change_issue_ref') && item.refIssue">
                           <span v-if="item.refAction === 'close'" class="pr-detail__event-hint">关闭了</span>
                           <span v-else-if="item.refAction === 'reopen'" class="pr-detail__event-hint">重开了</span>
                           <span v-else class="pr-detail__event-hint">引用了</span>
@@ -2160,7 +2168,6 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           <span class="pr-detail__event-emphasis">{{ item.refIssue.title }}</span>
                         </span>
 
-                        <!-- type=19/20 dependency: 依赖 issue 标题 -->
                         <span v-else-if="(item.type === 'add_dependency' || item.type === 'remove_dependency') && item.dependentIssue">
                           <component
                             :is="item.dependentIssue.isPull ? GitPullRequestArrow : MessageSquare"
@@ -2184,23 +2191,22 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     </div>
                   </li>
 
-                  <!-- v0.7.2：dismiss_review 拆 2 卡 —— Gitea web Type 32 在 body 非空时
-                       渲染 event 卡 + reason comment 卡。event 卡已在上面 system-event 块渲染，
-                       这里只补 reason comment 卡。 -->
+                  <!-- v0.7.3：dismiss_review 拆 2 卡 —— event 卡已在上面 system-event 块渲染，
+                       这里补 reason comment 卡（独立 timeline item，按 comment 卡样式渲染） -->
                   <li
                     v-if="item.type === 'dismiss_review' && item.body"
                     :key="`${item.type}-${item.id}-reason`"
-                    class="pr-detail__comment pr-detail__comment--dismiss-reason"
+                    class="pr-detail__timeline-item pr-detail__timeline-item--comment pr-detail__timeline-item--dismiss-reason"
                   >
-                    <div class="pr-detail__comment-side">
-                      <div class="pr-detail__comment-avatar pr-detail__comment-avatar--dismiss" aria-hidden="true">
-                        <MessageSquare :size="12" :stroke-width="2" />
+                    <div class="pr-detail__timeline-rail">
+                      <div class="pr-detail__timeline-avatar pr-detail__timeline-avatar--dismiss" :title="item.author?.username" aria-hidden="true">
+                        <MessageSquare :size="13" :stroke-width="2" />
                       </div>
-                      <div class="pr-detail__comment-name">{{ item.author?.username || '匿名' }}</div>
                     </div>
                     <div class="pr-detail__comment-bubble">
                       <div class="pr-detail__comment-meta">
                         <span class="pr-detail__comment-dismiss-reason-tag">驳回原因</span>
+                        <span class="pr-detail__comment-author">{{ item.author?.username }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
@@ -5528,92 +5534,16 @@ git checkout {{ selectedPR.head.ref }}</pre>
 .pr-detail__review-time { color: var(--color-text-muted); font-size: var(--font-xs); flex-shrink: 0; }
 .pr-detail__empty-hint { color: var(--color-text-muted); font-size: var(--font-sm); padding: var(--space-3); }
 
-/* v0.7.x: 系统事件卡 (对齐 Gitea web timeline-item event) */
-.pr-detail__comment--system-event {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  padding: 6px var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
-  margin: var(--space-1) 0;
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
-  border-left: 2px solid var(--color-divider);
-}
-/* v0.7.2：系统事件颜色档 —— 对齐 Gitea web timeline-item event badge
-   success (绿) = reopen / push
-   danger  (红) = close
-   merge   (紫) = merge_pull
-   warn    (橙) = due_date / time tracking
-   neutral (灰) = 其他系统事件 */
-.pr-detail__comment--system-color-success { border-left-color: var(--color-success, #2da44e); }
-.pr-detail__comment--system-color-danger  { border-left-color: var(--color-danger,  #cf222e); }
-.pr-detail__comment--system-color-merge   { border-left-color: #8250df; }
-.pr-detail__comment--system-color-warn    { border-left-color: #d4a72c; }
-.pr-detail__comment--system-color-neutral { border-left-color: var(--color-divider); }
-
-.pr-detail__comment--system-color-success .pr-detail__comment-avatar--system { color: var(--color-success, #2da44e); }
-.pr-detail__comment--system-color-danger  .pr-detail__comment-avatar--system { color: var(--color-danger,  #cf222e); }
-.pr-detail__comment--system-color-merge   .pr-detail__comment-avatar--system { color: #8250df; }
-.pr-detail__comment--system-color-warn    .pr-detail__comment-avatar--system { color: #d4a72c; }
-
-.pr-detail__comment--system-color-success .pr-detail__system-event-badge { background: rgba(45, 164, 78, 0.15);  color: var(--color-success, #2da44e); }
-.pr-detail__comment--system-color-danger  .pr-detail__system-event-badge { background: rgba(207, 34, 46, 0.15);  color: var(--color-danger,  #cf222e); }
-.pr-detail__comment--system-color-merge   .pr-detail__system-event-badge { background: rgba(130, 80, 223, 0.15); color: #8250df; }
-.pr-detail__comment--system-color-warn    .pr-detail__system-event-badge { background: rgba(212, 167, 44, 0.15); color: #d4a72c; }
-
-.pr-detail__comment--system-event .pr-detail__comment-side {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.pr-detail__comment-avatar--system {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--color-bg-hover);
-  color: var(--color-text-muted);
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.pr-detail__comment-bubble--event {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-.pr-detail__system-event-badge {
+/* ===== v0.7.3：dismiss_review reason comment 卡（拆 2 卡） =====
+   复用 .pr-detail__timeline-avatar + .pr-detail__comment-bubble 通用样式，
+   这里只调特定 sub-modifier：avatar 灰底 + "驳回原因" tag */
+.pr-detail__comment-dismiss-reason-tag {
   font-size: var(--font-xs);
   padding: 1px 6px;
   border-radius: 8px;
   font-weight: 600;
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-/* ===== v0.7.2：dismiss_review reason comment 卡（拆 2 卡） =====
-   Gitea web Type 32 在 body 非空时拆 2 卡：event 卡 + reason comment 卡。
-   reason 卡视觉跟普通评论卡一样：左 avatar + 气泡（带左箭头） + 顶部小 tag + body。
-   复用 .pr-detail__comment flex layout（外层 li 已经是 flex + gap）。 */
-.pr-detail__comment-avatar--dismiss {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--color-bg-hover);
-  color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
 }
 .pr-detail__comment-dismiss-reason-tag {
@@ -5704,20 +5634,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
   color: var(--label-color, var(--color-text));
 }
 
-/* v0.7.x: 评审事件卡收紧样式
-   之前 review event 卡有 body 渲染, 高度大; 现在 body 移到独立 comment 卡,
-   event 卡高度变小, 跟 Gitea web 一样紧凑 */
-.pr-detail__comment--review-event .pr-detail__comment-bubble--event {
-  background: transparent;
-  border: 1px dashed var(--color-divider);
-  padding: var(--space-2) var(--space-3);
-}
-.pr-detail__comment--review-approved .pr-detail__comment-bubble--event {
-  border-color: var(--color-success);
-}
-.pr-detail__comment--review-changes_requested .pr-detail__comment-bubble--event {
-  border-color: var(--color-warning);
-}
+/* v0.7.3：review event 不再需要独立的虚线边框样式（avatar 节点颜色档已表达 review state） */
 
 /* 文件变动 Tab */
 .pr-detail__files {
@@ -5872,35 +5789,165 @@ git checkout {{ selectedPR.head.ref }}</pre>
 }
 .pr-detail__conv-error { color: var(--color-danger); }
 
-/* 评论列表 */
-.pr-detail__comment-list {
+/* ===== v0.7.3：PR timeline —— 对齐 Gitea web .comment-list timeline 视觉 =====
+   关键视觉：
+   1. .pr-detail__timeline::before 在 ul 上画左侧贯穿灰色竖线（2px，颜色 --color-timeline）
+   2. 每个 timeline-item 用绝对定位把 avatar/icon 节点放到竖线上
+   3. avatar/icon 节点是圆形，背景与卡片背景同色，把竖线"切断"在节点处
+   4. system event / review event 是单行紧凑布局 —— 不像 comment 那样有大块气泡
+   5. comment 卡保持原 bubble 布局（header + body + actions） */
+.pr-detail__timeline {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 32px;       /* 左侧留 32px 给 avatar/icon 节点 */
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
-.pr-detail__comment {
+.pr-detail__timeline::before {
+  content: "";
+  position: absolute;
+  top: 14px;                  /* 第一个 avatar 中心对齐 */
+  bottom: 14px;               /* 最后一个 avatar 中心对齐 */
+  left: 14px;                 /* 竖线在 padding 32px 的中间 */
+  width: 2px;
+  background: var(--color-divider);
+  border-radius: 1px;
+  z-index: 0;
+}
+.pr-detail__timeline-item {
+  position: relative;         /* 让 .pr-detail__timeline-rail 绝对定位生效 */
+  padding: 2px 0;
+  min-height: 28px;
+}
+/* 普通评论卡 (timeline-item--comment) —— 用大块气泡布局 */
+.pr-detail__timeline-item--comment {
+  padding: 6px 0;
+}
+/* 评审事件 / 系统事件 (timeline-item--event) —— 单行紧凑 */
+.pr-detail__timeline-item--event {
   display: flex;
-  gap: var(--space-3);
-}
-.pr-detail__comment--review-event {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  border: 1px dashed var(--color-divider);
-  font-size: var(--font-sm);
   align-items: center;
+  gap: 0;                     /* gap 在 rail / event-content 内各自定义 */
+  min-height: 26px;
+  padding: 4px 0;
 }
-.pr-detail__comment--review-approved { border-color: var(--color-success); background: var(--color-success-soft); }
-.pr-detail__comment--review-changes_requested { border-color: var(--color-warning); background: var(--color-warning-soft); }
-.pr-detail__comment--review-commented { border-color: var(--color-divider); }
-.pr-detail__comment-side {
+
+/* ===== Avatar (comment) / Dot (event) 节点 —— 定位在 timeline 竖线上 ===== */
+.pr-detail__timeline-rail {
+  position: absolute;
+  left: -32px;                /* 对齐 ul 的 padding-left: 32px */
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  z-index: 1;                 /* 盖住竖线 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* comment avatar：圆形 + 边框（边框色 == ul 背景色 = 切断竖线） */
+.pr-detail__timeline-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  border: 2px solid var(--color-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+.pr-detail__timeline-avatar--dismiss {
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+}
+/* event dot：圆形 + 1.5px 边框（边框色 = 当前色 = 颜色档决定） */
+.pr-detail__timeline-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  border: 1.5px solid var(--color-divider);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
   flex-shrink: 0;
+}
+/* 5 档颜色 —— 对齐 Gitea web .badge 语义色 */
+.pr-detail__timeline-dot--success { color: var(--color-success); border-color: var(--color-success); }
+.pr-detail__timeline-dot--danger  { color: var(--color-danger);  border-color: var(--color-danger); }
+.pr-detail__timeline-dot--merge   { color: #8250df;             border-color: #8250df; }
+.pr-detail__timeline-dot--warn    { color: #d4a72c;             border-color: #d4a72c; }
+.pr-detail__timeline-dot--neutral { color: var(--color-text-muted); border-color: var(--color-divider); }
+/* 评审事件 dot 颜色按 state */
+.pr-detail__timeline-dot--review-approved { color: var(--color-success); border-color: var(--color-success); }
+.pr-detail__timeline-dot--review-changes_requested { color: var(--color-danger); border-color: var(--color-danger); }
+.pr-detail__timeline-dot--review-commented { color: var(--color-text-muted); border-color: var(--color-divider); }
+
+/* ===== System Event 紧凑单行（对齐 Gitea web .timeline-item event） ===== */
+.pr-detail__timeline-item--system .pr-detail__event-content {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 2px;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+}
+.pr-detail__event-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pr-detail__event-author {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pr-detail__event-verb {
+  color: var(--color-text-secondary);
+}
+.pr-detail__event-time {
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.pr-detail__event-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: var(--font-sm);
+}
+.pr-detail__event-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+.pr-detail__event-block > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ===== 评审事件（review_event，单行） ===== */
+.pr-detail__timeline-item--review {
+  font-size: var(--font-sm);
+}
+.pr-detail__event-line .pr-detail__event-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .pr-detail__comment-avatar {
   width: 28px;
@@ -5913,28 +5960,22 @@ git checkout {{ selectedPR.head.ref }}</pre>
   color: #fff;
   background: var(--color-info);
 }
-.pr-detail__comment-avatar--approved { background: var(--color-success); }
-.pr-detail__comment-avatar--changes_requested { background: var(--color-warning); }
-.pr-detail__comment-avatar--commented { background: var(--color-bg-hover); color: var(--color-text-muted); }
-.pr-detail__comment-name {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  max-width: 36px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* v0.7.3：pr-detail__comment-author —— username 在 comment bubble 的 meta header 里
+   不再独立成 pr-detail__comment-name（独立列在 avatar 下方） */
+.pr-detail__comment-author {
+  font-weight: 600;
+  font-size: var(--font-sm);
+  color: var(--color-text);
 }
-.pr-detail__comment-name--muted { color: var(--color-text-muted); }
 .pr-detail__comment-bubble {
   flex: 1;
   min-width: 0;
   padding: var(--space-3);
   background: var(--color-bg-elevated);
   border-radius: var(--radius-md);
-  /* v0.7.2：左箭头 —— 对齐 Gitea web .avatar-content-left-arrow。
-     三角形 ::before 指向左侧 avatar，模拟气泡箭头。event 卡（system-event）
-     不需要箭头，所以只对评论卡 + dismiss-reason 卡生效。
-     event 卡通过覆盖 .pr-detail__comment-bubble--event 显式隐藏箭头（见下）。 */
+  /* v0.7.3：左箭头 —— 对齐 Gitea web .avatar-content-left-arrow。
+     三角形 ::before 指向左侧 timeline-rail 节点，模拟气泡箭头。
+     event（review / system）通过 timeline-item--event 不用 bubble，没箭头。 */
   position: relative;
 }
 .pr-detail__comment-bubble::before {
@@ -5948,12 +5989,6 @@ git checkout {{ selectedPR.head.ref }}</pre>
   border-width: 6px 6px 6px 0;
   border-color: transparent var(--color-bg-elevated) transparent transparent;
 }
-/* system event 卡：bubble 是透明，不需要箭头 */
-.pr-detail__comment-bubble--event {
-  background: transparent;
-  padding: 0;
-}
-.pr-detail__comment-bubble--event::before { display: none; }
 .pr-detail__comment-bubble--editing { background: var(--color-bg-elevated); }
 .pr-detail__comment-meta {
   display: flex;
