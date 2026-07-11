@@ -726,6 +726,21 @@ func (a *GiteaAdapter) UpdatePullMilestone(ctx context.Context, hostURL, usernam
 //
 // 旧 db84089 版本在服务端过滤 type != 0，导致 Gitea web 显示的 review body
 // (type=21 评论) 和评审事件 (type=22 跟 reviews 端点组合) 都丢失, 与 Gitea web 行为不一致。
+func (a *GiteaAdapter) ListPullTimeline(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.TimelineItem, error) {
+	var raw []giteaTimelineRaw
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/timeline", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]platform.TimelineItem, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, giteaTimelineToItem(r))
+	}
+	return out, nil
+}
+
+// ListPullComments 列合并请求评论（GET /repos/{owner}/{repo}/issues/{index}/comments）
+// 只返回 type=0 普通评论。系统事件走 ListPullTimeline。
 func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.CommentDTO, error) {
 	var raw []giteaCommentRaw
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
@@ -734,11 +749,44 @@ func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, 
 	}
 	out := make([]platform.CommentDTO, 0, len(raw))
 	for _, c := range raw {
-		// v0.7.x: 不过滤 type, 全部返回, 前端按 type 分类渲染
-		// (普通评论 / 评审 body / 评审事件 / 系统事件)
 		out = append(out, giteaCommentToDTO(c))
 	}
 	return out, nil
+}
+
+// giteaTimelineRaw Gitea /issues/{index}/timeline 端点原始响应
+type giteaTimelineRaw struct {
+	ID        int64         `json:"id"`
+	Type      string        `json:"type"`
+	Body      string        `json:"body"`
+	User      *giteaUserRaw `json:"user"`
+	Created   string        `json:"created_at"`
+	Updated   string        `json:"updated_at"`
+	State     string        `json:"state,omitempty"`
+	CommitID  string        `json:"commit_id,omitempty"`
+	Official  bool          `json:"official,omitempty"`
+	CommitSHA string        `json:"commit_sha,omitempty"`
+}
+
+func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
+	item := platform.TimelineItem{
+		ID:        r.ID,
+		Type:      r.Type,
+		Body:      r.Body,
+		Created:   r.Created,
+		Updated:   r.Updated,
+		State:     r.State,
+		CommitID:  r.CommitID,
+		Official:  r.Official,
+		CommitSHA: r.CommitSHA,
+	}
+	if r.User != nil {
+		item.Author = &platform.PullUserDTO{
+			Username:  r.User.Login,
+			AvatarURL: r.User.AvatarURL,
+		}
+	}
+	return item
 }
 
 // CreatePullComment 发合并请求评论（POST /repos/{owner}/{repo}/issues/{index}/comments）

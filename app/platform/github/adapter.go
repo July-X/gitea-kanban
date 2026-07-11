@@ -1051,6 +1051,12 @@ func (a *GitHubAdapter) ListPullComments(ctx context.Context, hostURL, username,
 	return out, nil
 }
 
+// ListPullTimeline 列 PR 时间轴（v0.7.x 对齐 Gitea web）
+// GitHub 首期不支持（GitHub REST API 没有对等聚合端点）
+func (a *GitHubAdapter) ListPullTimeline(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.TimelineItem, error) {
+	return nil, platform.ErrNotSupported
+}
+
 // CreatePullComment 发 PR 评论（POST /repos/{owner}/{repo}/issues/{index}/comments）
 //
 // body: {body: "..."}

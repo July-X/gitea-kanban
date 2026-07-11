@@ -310,6 +310,26 @@ func (a *App) UpdatePullReviewers(args UpdatePullReviewersArgs) (PullDetailAppDT
 // 与评论场景 1:1 对齐。若后续需要 PR review / inline review comment，可以拆出独立类型。
 type PullCommentDTO = platformAdapter.CommentDTO
 
+// ListPullTimelineArgs 列 PR 时间轴参数
+type ListPullTimelineArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+}
+
+// ListPullTimeline 列 PR 时间轴（对齐 Gitea web）
+//
+// 错误码：
+//   - 401/403 → token_invalid / permission_denied
+//   - 404 → not_found（项目/仓库不存在）
+//   - GitHub: 返 ErrNotSupported
+func (a *App) ListPullTimeline(args ListPullTimelineArgs) ([]platformAdapter.TimelineItem, error) {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return adapter.ListPullTimeline(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
+}
+
 // ListPullCommentsArgs 列 PR 评论参数
 type ListPullCommentsArgs struct {
 	ProjectID string `json:"projectId"`

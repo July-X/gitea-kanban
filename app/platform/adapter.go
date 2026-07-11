@@ -126,12 +126,19 @@ type PlatformAdapter interface {
 	// UpdatePullReviewers 替换合并请求的审查者（空切片 = 清空；Gitea 走 requested_reviewers，GitHub 等价）
 	UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*PullDetailDTO, error)
 
+	// ListPullTimeline 列合并请求时间轴（v0.7.x 对齐 Gitea web）
+	//
+	// 时间轴包含所有 type: 普通评论 + 评审事件 + 系统事件 + 推送事件,
+	// 是 Gitea web 时间轴的 1:1 还原。
+	//
+	// 底层调 Gitea /repos/{owner}/{repo}/issues/{index}/timeline (TimelineComment),
+	// 或 GitHub 对应的 issues events 端点组合。
+	ListPullTimeline(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]TimelineItem, error)
+
 	// ListPullComments 列合并请求评论（v0.6+ PR 评论，按 createdAt 升序）
 	//
-	// Gitea 与 GitHub 都把 PR 评论 / issue 评论放在同一端点
-	// （/repos/{owner}/{repo}/issues/{index}/comments —— GitHub 上 PR 是 issue 的一种），
-	// 所以 issue 评论和 PR 评论其实是同一份数据。这里走 PR 接口纯粹是为了命名清晰，
-	// 避免上层业务方混用。
+	// 底层调 Gitea /repos/{owner}/{repo}/issues/{index}/comments，只返回 type=0 普通评论。
+	// 系统事件 (REOPEN/CLOSE/LABEL/MILESTONE/...) 走 ListPullTimeline。
 	ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]CommentDTO, error)
 
 	// CreatePullComment 在合并请求下发评论（v0.6+ PR 评论）
@@ -546,11 +553,8 @@ type PullLabelDTO struct {
 
 // CommentDTO 合并请求 / 议题评论（v0.6+ 共享）
 //
-// 字段对齐 Gitea Comment + GitHub Issue Comment，两端字段命名一致：
-//   - id / body / author / createdAt / updatedAt
-//
-// v0.6+ 不引入"评论系统评论"（PR review / inline review comment）——
-// 只支持顶层 issue-style 评论，等需要 review 评论时再加新 DTO。
+// v0.7.x 备注：仅 ListPullComments (走 /issues/{index}/comments) 使用此 DTO,
+// 该端点只返回 type=0 普通评论。系统事件走 ListPullTimeline DTO。
 type CommentDTO struct {
 	ID        int64        `json:"id"`
 	Body      string       `json:"body"`
@@ -558,30 +562,43 @@ type CommentDTO struct {
 	CreatedAt string       `json:"createdAt"`
 	UpdatedAt string       `json:"updatedAt,omitempty"`
 	UserID    int64        `json:"userId,omitempty"`
-
-	// Type 评论类型，对齐 Gitea CommentType 枚举值（v0.7.x）：
-	//   0 = COMMENT 普通评论
-	//   1 = REOPEN 重新开启
-	//   2 = CLOSE 关闭
-	//   3,5,6 = ISSUE_REF 引用其它 issue/PR
-	//   4 = COMMIT_REF 引用 commit
-	//   7 = COMMENT_LABEL 标签变更
-	//   8 = MILESTONE_CHANGE 里程碑变更
-	//   9 = ASSIGNEES_CHANGE 指派人变更
-	//   10 = TITLE_CHANGE 标题变更
-	//   11 = DELETE_BRANCH 删除分支
-	//   16-20 = 时间/deadline/dependency
-	//   21 = CODE 行内代码评论
-	//   22 = REVIEW 评审 (event 在 reviews 端点, body 落在该 comment 记录)
-	//   23/24 = LOCK/UNLOCK
-	//   25 = TARGET_BRANCH_CHANGED
-	//   27 = REVIEW_REQUEST 请求评审
-	//   28 = MERGE_PULL_REQUEST 合并
-	//   29 = PULL_PUSH_EVENT 推送
-	//   30 = PROJECT_CHANGED 项目变更
-	//   32 = DISMISSED_REVIEW
-	//   GitHub 后端所有评论 type=0 (普通评论), GitHub 不返回事件评论到 issues/comments 端点
+	// Type 评论类型（0=COMMENT 普通评论）
 	Type int `json:"type"`
+}
+
+// TimelineItem 时间线条目（v0.7.x 对齐 Gitea web）
+//
+// Gitea web 的时间轴是 50+ 种 CommentType 统一走 /issues/{index}/timeline 端点,
+// 返回所有评论 + 评审事件 + 系统事件, 前端按 Type 分类渲染不同卡片。
+//
+// Type 取值（对应 Gitea CommentType.String()）:
+//
+//	"comment"=0 普通评论 | "review"=22 评审事件 | "code"=21 行内代码评论
+//	"reopen"=1 | "close"=2 | "issue_ref"=3 | "commit_ref"=4 | "comment_ref"=5 | "pull_ref"=6
+//	"label"=7 | "milestone"=8 | "assignees"=9 | "change_title"=10 | "delete_branch"=11
+//	"start_tracking"=12 | "stop_tracking"=13 | "add_time_manual"=14 | "cancel_tracking"=15
+//	"added_deadline"=16 | "modified_deadline"=17 | "removed_deadline"=18
+//	"add_dependency"=19 | "remove_dependency"=20
+//	"lock"=23 | "unlock"=24 | "change_target_branch"=25 | "delete_time_manual"=26
+//	"review_request"=27 | "merge_pull"=28 | "pull_request_push"=29
+//	"project"=30 | "project_column"=31 | "dismiss_review"=32 | "change_issue_ref"=33
+//	"pr_scheduled_to_auto_merge"=34 | "pr_unscheduled_to_auto_merge"=35
+//	"pin"=36 | "unpin"=37 | "change_time_estimate"=38
+type TimelineItem struct {
+	ID      int64        `json:"id"`
+	Type    string       `json:"type"`
+	Body    string       `json:"body"`
+	Author  *PullUserDTO `json:"author,omitempty"`
+	Created string       `json:"created"`
+	Updated string       `json:"updated,omitempty"`
+
+	// type=22 评审事件专属字段
+	State    string `json:"state,omitempty"`     // "approved" / "changes_requested" / "commented"
+	CommitID string `json:"commit_id,omitempty"` // 评审针对的 commit SHA
+	Official bool   `json:"official,omitempty"`  // 是否是官方评审（有写权限）
+
+	// type=29 推送事件专属
+	CommitSHA string `json:"commit_sha,omitempty"` // 推送后 head 的最新 commit SHA
 }
 
 // ReactionDTO 单条表情反应（v0.5.0 M2）
