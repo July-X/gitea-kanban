@@ -25,7 +25,7 @@ import {
   GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
   // v0.7.2: 系统事件图标（对齐 Gitea web octicon-* 体系）
-  RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, Type, Calendar,
+  RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, UserMinus, Type, Calendar,
   Lock, Key, Eye, ArrowLeftRight, GitPullRequest, ArrowUp, Folder, Pin,
   MessageCircle,
   // v0.7.3: 评审事件状态图标
@@ -830,6 +830,28 @@ function reviewEventLabel(event: ReviewEvent): string {
 }
 
 /**
+ * v0.7.4：系统事件 verb 文本（item 级别）
+ *
+ * 相比 systemEventLabel(type) 只看 type，这个函数看整个 item，
+ * 可以根据 item.removedAssignee / item.body 等字段返回更精确的 verb。
+ *
+ * 例：
+ *   type='assignees' + removedAssignee=true  → '移除了指派'
+ *   type='assignees' + removedAssignee=false → '添加了指派'
+ *   type='merge'                             → '合并了合并请求'
+ *   其他类型 → fallthrough 到 systemEventLabel(type)
+ */
+function systemEventVerb(item: TimelineItemDto): string {
+  if (item.type === 'assignees') {
+    return item.removedAssignee ? '移除了指派' : '添加了指派';
+  }
+  if (item.type === 'review_request') {
+    return item.removedAssignee ? '移除了评审请求' : '请求评审';
+  }
+  return systemEventLabel(item.type);
+}
+
+/**
  * v0.7.4：用户显示名
  *
  * Gitea web 的 shared/user/authorlink.tmpl 优先用 User.FullName（display name，
@@ -842,6 +864,23 @@ function reviewEventLabel(event: ReviewEvent): string {
 function displayName(user: { fullName?: string; username: string } | null | undefined): string {
   if (!user) return '匿名';
   return user.fullName || user.username || '匿名';
+}
+
+/**
+ * v0.7.4：合并事件 commit SHA 短码（7 位）
+ *
+ * Gitea /timeline 端点对 type=28 (merge_pull) 不直接返回 commit_id，
+ * 但评论 body 格式固定为 "merged commit {sha} into {branch}"。
+ * 用 regex 抠 SHA 短码（7 位），跟 Gitea web 渲染的 `<b>{ShortSha}</b>` 对齐。
+ *
+ * 不抛错：body 格式不匹配时返回 null，模板 v-if 跳过渲染。
+ */
+function mergeCommitSha(item: TimelineItemDto): string | null {
+  if (!item.body) return null;
+  // Gitea 端生成的 body: "merged commit {full_sha} into {branch}" 或
+  // "manually merged commit {full_sha} into {branch}"（手动合并）
+  const m = /merged commit ([0-9a-f]{40})/i.exec(item.body);
+  return m ? (m[1] ?? '').slice(0, 7) : null;
 }
 
 /**
@@ -861,6 +900,8 @@ function systemEventLabel(type: string): string {
     review_request: '请求评审', merge: '合并了合并请求', push: '推送了新提交',
     move: '移动了项目', dismiss_review: '驳回了评审', pin: '置顶了议题', unpin: '取消了置顶',
   };
+  // v0.7.4：assignees 事件区分"添加/移除"语义，verb 显示更精确
+  // （实际 verb 由 event-inline 块根据 removedAssignee 渲染，systemEventLabel 仅作 fallback）
   return m[type] ?? '事件';
 }
 
@@ -973,10 +1014,12 @@ function hasSystemEventInlineDetail(item: TimelineItemDto): boolean {
   if (item.type === 'label') return !!item.label;
   if (item.type === 'milestone') return !!(item.oldMilestone || item.milestone);
   if (item.type === 'assignees') return !!item.assignee;
+  if (item.type === 'review_request') return !!item.assignee;
   if (item.type === 'title' || item.type === 'change_title') return !!(item.oldTitle || item.newTitle);
   if (item.type === 'delete_branch') return !!item.oldRef;
   if (item.type === 'change_target_branch') return !!(item.oldRef || item.newRef);
   if (item.type === 'commit_ref') return !!item.refCommitSha;
+  if (item.type === 'merge') return !!selectedPR.value?.base?.ref;
   return false;
 }
 
@@ -2020,7 +2063,12 @@ git checkout {{ selectedPR.head.ref }}</pre>
                       <div class="pr-detail__comment-meta">
                         <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
                         <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <span class="pr-detail__comment-verb">评论于</span>
+                        <a
+                          class="pr-detail__comment-time"
+                          :title="formatDate(item.created)"
+                          @click.prevent
+                        >{{ formatRelative(item.created) }}</a>
                       </div>
                       <!-- 编辑态 -->
                       <template v-if="editingCommentId === item.id">
@@ -2104,7 +2152,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
                         <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__event-verb">{{ systemEventLabel(item.type) }}</span>
+                        <span class="pr-detail__event-verb">{{ systemEventVerb(item) }}</span>
                         <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
@@ -2136,7 +2184,33 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           <span :class="item.removedAssignee ? 'pr-detail__event-minus' : 'pr-detail__event-plus'">
                             {{ item.removedAssignee ? '−' : '+' }}
                           </span>
-                          <span class="pr-detail__event-username">{{ item.assignee.username }}</span>
+                          <span class="pr-detail__event-username">{{ displayName(item.assignee) }}</span>
+                          <span class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了指派' : '添加了指派' }}</span>
+                        </span>
+
+                        <!-- v0.7.4：review_request 评审请求详情
+                             Gitea web: "X 请求 Y 评审" / "X 移除了 Y 评审请求"
+                             X = actor (item.author), Y = requested reviewer (item.assignee) -->
+                        <span v-else-if="item.type === 'review_request' && item.assignee">
+                          <UserPlus v-if="!item.removedAssignee" :size="12" :stroke-width="2" aria-hidden="true" />
+                          <UserMinus v-else :size="12" :stroke-width="2" aria-hidden="true" />
+                          <span class="pr-detail__event-username">{{ displayName(item.assignee) }}</span>
+                          <span class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了评审请求' : '请求评审' }}</span>
+                        </span>
+
+                        <!-- v0.7.4：merge 合并事件详情
+                             Gitea web: "X 合并 commit {sha_short} 到 {branch}"
+                             本实现：base ref 从 selectedPR 拿（PR.base.ref 是目标分支），
+                             短 SHA 从 item.body 解析（type 28 合并评论 body 格式：
+                             "merged commit {sha} into {branch}"） -->
+                        <span v-else-if="item.type === 'merge' && selectedPR?.base?.ref">
+                          <GitMerge :size="12" :stroke-width="2" aria-hidden="true" />
+                          <span class="pr-detail__event-hint">到</span>
+                          <code class="pr-detail__event-branch">{{ selectedPR.base.ref }}</code>
+                          <span v-if="mergeCommitSha(item)" class="pr-detail__event-merge-sha">
+                            <span class="pr-detail__event-hint">·</span>
+                            <code class="pr-detail__event-branch">{{ mergeCommitSha(item) }}</code>
+                          </span>
                         </span>
 
                         <span v-else-if="item.type === 'title' || item.type === 'change_title'">
@@ -2222,7 +2296,12 @@ git checkout {{ selectedPR.head.ref }}</pre>
                       <div class="pr-detail__comment-meta">
                         <span class="pr-detail__comment-dismiss-reason-tag">驳回原因</span>
                         <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <span class="pr-detail__comment-verb">评论于</span>
+                        <a
+                          class="pr-detail__comment-time"
+                          :title="formatDate(item.created)"
+                          @click.prevent
+                        >{{ formatRelative(item.created) }}</a>
                       </div>
                       <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
                     </div>
@@ -5983,6 +6062,29 @@ git checkout {{ selectedPR.head.ref }}</pre>
   font-weight: 600;
   font-size: var(--font-sm);
   color: var(--color-text);
+}
+/* v0.7.4：'评论于' 动词 —— 对齐 Gitea web 评论头 'X 评论于 {时间}' 格式 */
+.pr-detail__comment-verb {
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+.pr-detail__comment-time {
+  /* 提升为链接样式，Gitea web 风格（'X 评论于 <a href="...">2小时前</a>'） */
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  text-decoration: none;
+  cursor: default;
+}
+.pr-detail__comment-time:hover {
+  color: var(--color-link, var(--color-primary));
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* merge event 短 SHA 显示（去掉左右空白） */
+.pr-detail__event-merge-sha {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .pr-detail__comment-bubble {
   flex: 1;
