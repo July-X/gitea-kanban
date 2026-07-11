@@ -408,6 +408,22 @@ export interface IssueCommentDto {
   type: number;
 }
 
+// v0.7.x: TimelineItemDto — Gitea /timeline 端点返回的统一时间轴 DTO
+export interface TimelineItemDto {
+  id: number;
+  type: string; // "comment" | "review" | "code" | "reopen" | "close" | "label" | ...
+  body: string;
+  author?: IssueAuthorDto;
+  created: string;
+  updated?: string;
+  // type="review" 评审事件专属
+  state?: string; // "approved" | "changes_requested" | "commented"
+  commitId?: string;
+  official?: boolean;
+  // type="pull_request_push" 推送事件专属
+  commitSha?: string;
+}
+
 
 // ============================================================
 // ===== inline review comments 命名空间（v0.5.0 文件评论） =====

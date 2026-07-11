@@ -33,6 +33,7 @@ import type {
   ListMilestonesResp,
   CommitDetailDTO,
   IssueCommentDto,
+  TimelineItemDto,
   LabelDto,
   PullDto,
   PullFileDto,
@@ -831,11 +832,11 @@ export function pullsUploadAttachment(args: {
 // Gitea 与 GitHub 都支持。
 // 端点：/repos/{owner}/{repo}/issues/{index}/comments（PR 与 issue 共享编号空间）。
 
-/** 列合并请求评论 */
+/** 列合并请求时间轴 (v0.7.x 走 /issues/{index}/timeline) */
 export function pullsCommentList(args: {
   projectId: string;
   index: number;
-}): Promise<IssueCommentDto[]> {
+}): Promise<TimelineItemDto[]> {
   return getIpcClient().invokeNested('pulls', 'comment', 'list', args);
 }
 

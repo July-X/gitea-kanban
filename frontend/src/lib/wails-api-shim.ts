@@ -248,7 +248,7 @@ type WailsApp = {
   UpdatePullAssignee?: (args: { projectId: string; index: number; assignee: string }) => Promise<unknown>;
   UpdatePullReviewers?: (args: { projectId: string; index: number; reviewers: string[] }) => Promise<unknown>;
   // v0.6+ PR 评论（issue 评论另起 v0.7）
-  ListPullComments?: (args: { projectId: string; index: number }) => Promise<unknown>;
+  ListPullTimeline?: (args: { projectId: string; index: number }) => Promise<unknown>;
   CreatePullComment?: (args: { projectId: string; index: number; body: string }) => Promise<unknown>;
   // v0.7.0 PR/issue 附件上传（贴图支持）
   UploadPullAttachment?: (args: {
@@ -835,7 +835,7 @@ const apiShim = {
      *
      * 背景：v0.6+ 修复 issues.comment.create → notImplemented bug。
      * 评论是 issue / PR 共享同一端点，但 Wails binding 需分开（issue 评论待 v0.7）。
-     * 转发到 window.go.main.App.ListPullComments({projectId, index})
+     * 转发到 window.go.main.App.ListPullTimeline({projectId, index})
      */
     comment: {
       list: (args: unknown): Promise<unknown> => {
@@ -843,10 +843,10 @@ const apiShim = {
         return forwardToWails(
           () => stubEmpty([]),
           (app) => {
-            if (!app.ListPullComments) {
+            if (!app.ListPullTimeline) {
               return stubEmpty([]);
             }
-            return app.ListPullComments({ projectId: a.projectId, index: a.index });
+            return app.ListPullTimeline({ projectId: a.projectId, index: a.index });
           },
         );
       },
