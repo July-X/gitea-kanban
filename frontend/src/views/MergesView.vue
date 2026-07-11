@@ -168,22 +168,21 @@ const confirmDeleteOpen = ref(false);
 const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
 
 /**
- * 合并检查警告区展开状态（v0.7.x 修复）
+ * 合并检查警告区展开状态（v0.7.x 修正）
  *
- * 复现的 bug：Wails 2.12 + macOS WKWebView 下 <details>/<summary> 点一次展开正常，
- * 但二次点击 summary 不触发 native toggle——状态停留在 open=true，用户看不到收起。
+ * 历史：之前想用 <details>/<summary> 对齐 Gitea web，但用户实际反馈是
+ * "点击后只有命令行文字隐藏，外框、图标没有恢复到展开前状态"。
+ * 用户明确拍板："收起后只保留标题和图标，连'查看命令行提示'文字链接也隐藏"。
  *
- * 修复思路（对齐 Gitea web 1:1）：
- *   1. 保留 <details>/<summary> 原生元素（不是改为 <button>），Gitea web 走的就是 details
- *   2. 关键 trick：@click.prevent 拦截 summary 的 click + 阻止 default action
- *      （WebKit 处理 default action = 切换 details.open），代以 Vue state 同步
- *   3. :open="mergeWarningOpen" 把 Vue state 同步回 DOM open attribute，
- *      让 WebKit 重新渲染 ▼ / ▶ 三角箭头
- *   4. 内部内容 <div v-if="mergeWarningOpen"> 由 Vue state 决定显隐——不依赖
- *      WebKit 的 [open] 属性选择器（WebKit 二次点击路径下不重画子元素）
+ * 当前实现（用户自定义 UX）：
+ *   - 标题行永远在，右侧放一个 Chevron 图标按钮作为 toggle 入口
+ *   - 收起时：GitBranch 图标 + 红色标题 + ChevronDown（没有文字链接）
+ *   - 展开时：GitBranch 图标 + 红色标题 + ChevronUp + 命令行 help 块
+ *   - 完全由 Vue state 控制 v-if 显隐，红框高度跟随内容自适应
  *
- * jsdom + 8 click 模拟测试结果：toggle 5+次都 100% 准确，NATIVE TOGGLE 一次都不触发
- * （被 @click.prevent 拦截），完全由 Vue state 控制，100% 可靠。
+ * 这不再是 Gitea web 1:1，而是用户根据实际使用场景拍板的 UX。
+ * Gitea web 是把命令行块作为 details 子内容，用户这里是把命令行块作为
+ * 标题行下方的可选展开区域，入口换成图标按钮以节省空间。
  */
 const mergeWarningOpen = ref(false);
 function toggleMergeWarning(): void {
@@ -1898,29 +1897,31 @@ function formatRelative(iso: string | undefined): string {
             >
               <GitBranch :size="16" :stroke-width="2" aria-hidden="true" />
               <div class="pr-detail__merge-warning-body">
-                <div class="pr-detail__merge-warning-title">此分支已经包含在目标分支中，没有什么可以合并。</div>
-                <details
-                  class="pr-detail__merge-warning-details"
-                  :open="mergeWarningOpen"
-                >
-                  <!--
-                    @click.prevent 拦截 summary click + 阻止 default action (WebKit 切 open)
-                    → 让 Vue state 100% 掌控，避免 WKWebView 二次点击不响应的 bug
-                    Space/Enter 在 summary focus 状态下也会触发 click 事件
-
-                    关键：不用 v-if 控制子元素显隐——让 WebKit 根据 [open] 属性自动隐藏
-                    details:not([open]) > *:not(summary) { display: none }。
-                    双层处理（v-if + :open）会破坏 details 整体收缩视觉，
-                    单一走 :open 就能让 WebKit 完整收拢 details 高度。
-                  -->
-                  <summary @click.prevent="toggleMergeWarning">查看命令行提示</summary>
-                  <div class="pr-detail__merge-warning-help">
-                    <div class="pr-detail__merge-warning-step">检出</div>
-                    <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
-                    <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ selectedPR.head.ref }}:{{ selectedPR.head.ref }}
+                <!--
+                  v0.7.x 修正：用户明确需要“收起后只保留标题和图标，连‘查看命令行提示’文字链接也隐藏”。
+                  因此放弃 <details>/<summary>，改用标题行右侧的一个 Chevron 图标按钮作为 toggle 入口。
+                  展开时：标题 + 图标 + ChevronUp + 命令行内容
+                  收起时：标题 + 图标 + ChevronDown（没有文字链接，视觉上更简洁）
+                  100% Vue 受控，避免 WebKit details 二次点击不响应的问题。
+                -->
+                <div class="pr-detail__merge-warning-title">
+                  <span>此分支已经包含在目标分支中，没有什么可以合并。</span>
+                  <button
+                    type="button"
+                    class="pr-detail__merge-warning-toggle"
+                    :aria-expanded="mergeWarningOpen"
+                    :title="mergeWarningOpen ? '隐藏命令行提示' : '查看命令行提示'"
+                    @click="toggleMergeWarning"
+                  >
+                    <component :is="mergeWarningOpen ? ChevronUp : ChevronDown" :size="14" :stroke-width="2" aria-hidden="true" />
+                  </button>
+                </div>
+                <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
+                  <div class="pr-detail__merge-warning-step">检出</div>
+                  <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
+                  <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ selectedPR.head.ref }}:{{ selectedPR.head.ref }}
 git checkout {{ selectedPR.head.ref }}</pre>
-                  </div>
-                </details>
+                </div>
               </div>
             </div>
             <!-- 对话标题 + 刷新 -->
@@ -5317,15 +5318,31 @@ git checkout {{ selectedPR.head.ref }}</pre>
 .pr-detail__merge-warning-title {
   font-weight: 600;
   color: var(--color-danger);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
 }
-.pr-detail__merge-warning-details {
-  font-size: var(--font-sm);
+.pr-detail__merge-warning-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  margin: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.pr-detail__merge-warning-toggle:hover {
+  background: var(--color-bg-hover);
   color: var(--color-text);
 }
-.pr-detail__merge-warning-details summary {
-  cursor: pointer;
-  user-select: none;
-  color: var(--color-text-secondary);
+.pr-detail__merge-warning-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 .pr-detail__merge-warning-help {
   margin-top: var(--space-2);
