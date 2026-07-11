@@ -943,6 +943,43 @@ function systemEventColor(type: string): SystemEventColor {
   return SYSTEM_EVENT_COLOR[type] ?? 'neutral';
 }
 
+/**
+ * v0.7.2：判断 system event item 是否需要渲染二级详情块
+ *
+ * 不是所有 system event 都有 detail 字段 —— 比如 reopen / close / merge / push
+ * 头部一行已经讲清楚了，不需要再加 detail。
+ * 需要 detail 的是有"附加信息"的：label / milestone / assignees / title 变化 /
+ * branch 变化 / commit ref / issue 引用 / 依赖 issue。
+ */
+function hasSystemEventDetail(item: TimelineItemDto): boolean {
+  if (item.type === 'label') return !!item.label;
+  if (item.type === 'milestone') return !!(item.oldMilestone || item.milestone);
+  if (item.type === 'assignees') return !!item.assignee;
+  if (item.type === 'title' || item.type === 'change_title') return !!(item.oldTitle || item.newTitle);
+  if (item.type === 'delete_branch') return !!item.oldRef;
+  if (item.type === 'change_target_branch') return !!(item.oldRef || item.newRef);
+  if (item.type === 'commit_ref') return !!item.refCommitSha;
+  if (item.type === 'issue_ref' || item.type === 'pull_ref' || item.type === 'comment_ref' || item.type === 'change_issue_ref') return !!item.refIssue;
+  if (item.type === 'add_dependency' || item.type === 'remove_dependency') return !!item.dependentIssue;
+  return false;
+}
+
+/**
+ * v0.7.2：生成 timeline 内引用 issue / 依赖 issue 的 web 链接
+ *
+ * 三步：
+ *   1. 用 auth.getAccountUrlByPlatform 拿当前账号的 baseUrl（自动处理 GitHub api.github.com → github.com）
+ *   2. 拼 ref.repoFullName (owner/repo)
+ *   3. 按 isPull 走 /pulls/N 或 /issues/N
+ */
+function refIssueWebUrl(refIssue: { repoFullName?: string; index: number; isPull: boolean }): string {
+  const platform = (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github';
+  const baseUrl = (auth.getAccountUrlByPlatform(platform) || '').replace(/\/+$/, '');
+  if (!baseUrl || !refIssue.repoFullName) return '#';
+  const path = refIssue.isPull ? 'pulls' : 'issues';
+  return `${baseUrl}/${refIssue.repoFullName}/${path}/${refIssue.index}`;
+}
+
 /** @ 提及下拉是否打开 */
 function isMentionOpen(idx: number): boolean {
   const s = mentionState.value.get(idx);
@@ -2018,7 +2055,8 @@ git checkout {{ selectedPR.head.ref }}</pre>
 
                   <!-- 系统事件卡 (type=1/2/4/7/8/9/10/27/28/29)
                        对齐 Gitea web comments.tmpl 的非 COMMENT/REVIEW 分支,
-                       简单 badge + author + locale 文案 -->
+                       简单 badge + author + locale 文案 + 二级详情块
+                       (label/milestone/assignee/title/branch/ref/dependency 等) -->
                   <li
                     v-else-if="!['review', 'comment', 'code'].includes(item.type)"
                     class="pr-detail__comment pr-detail__comment--system-event"
@@ -2038,6 +2076,108 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <div class="pr-detail__comment-event-author">{{ item.author?.username || '匿名' }}</div>
+                      <!-- 二级详情块：按 type 分支渲染（对齐 Gitea web .detail flex-text-block） -->
+                      <div
+                        v-if="hasSystemEventDetail(item)"
+                        class="pr-detail__comment-event-detail"
+                      >
+                        <!-- type=7 label: 单个 label chip -->
+                        <span
+                          v-if="item.type === 'label' && item.label"
+                          class="pr-detail__event-label"
+                          :style="labelStyle(item.label.color)"
+                        >{{ item.label.name }}</span>
+
+                        <!-- type=8 milestone: 旧 → 新 -->
+                        <span v-else-if="item.type === 'milestone'">
+                          <template v-if="item.oldMilestone && item.milestone">
+                            <span class="pr-detail__event-strike">{{ item.oldMilestone.title }}</span>
+                            <span class="pr-detail__event-arrow">→</span>
+                            <span class="pr-detail__event-emphasis">{{ item.milestone.title }}</span>
+                          </template>
+                          <template v-else-if="item.milestone">
+                            <span class="pr-detail__event-emphasis">{{ item.milestone.title }}</span>
+                          </template>
+                          <template v-else-if="item.oldMilestone">
+                            <span class="pr-detail__event-strike">{{ item.oldMilestone.title }}</span>
+                          </template>
+                        </span>
+
+                        <!-- type=9 assignees: +user / -user -->
+                        <span v-else-if="item.type === 'assignees' && item.assignee">
+                          <span :class="item.removedAssignee ? 'pr-detail__event-minus' : 'pr-detail__event-plus'">
+                            {{ item.removedAssignee ? '−' : '+' }}
+                          </span>
+                          <span class="pr-detail__event-username">{{ item.assignee.username }}</span>
+                          <span v-if="item.removedAssignee" class="pr-detail__event-hint">移除了指派</span>
+                          <span v-else class="pr-detail__event-hint">添加了指派</span>
+                        </span>
+
+                        <!-- type=10 change_title: 旧 → 新 -->
+                        <span v-else-if="item.type === 'title' || item.type === 'change_title'">
+                          <span class="pr-detail__event-strike">{{ item.oldTitle }}</span>
+                          <span class="pr-detail__event-arrow">→</span>
+                          <span class="pr-detail__event-emphasis">{{ item.newTitle }}</span>
+                        </span>
+
+                        <!-- type=11 delete_branch: 旧 ref -->
+                        <span v-else-if="item.type === 'delete_branch' && item.oldRef">
+                          <GitBranch :size="12" :stroke-width="2" aria-hidden="true" />
+                          <code class="pr-detail__event-branch">{{ item.oldRef }}</code>
+                        </span>
+
+                        <!-- type=25 change_target_branch: 旧 → 新 -->
+                        <span v-else-if="item.type === 'change_target_branch'">
+                          <GitBranch :size="12" :stroke-width="2" aria-hidden="true" />
+                          <code class="pr-detail__event-branch">{{ item.oldRef }}</code>
+                          <span class="pr-detail__event-arrow">→</span>
+                          <code class="pr-detail__event-branch">{{ item.newRef }}</code>
+                        </span>
+
+                        <!-- type=4 commit_ref: commit SHA 链接 -->
+                        <span v-else-if="item.type === 'commit_ref' && item.refCommitSha">
+                          <code class="pr-detail__event-branch">{{ item.refCommitSha.slice(0, 7) }}</code>
+                        </span>
+
+                        <!-- type=3/5/6/33 issue_ref: 引用 issue 标题 -->
+                        <span v-else-if="(item.type === 'issue_ref' || item.type === 'pull_ref' || item.type === 'comment_ref' || item.type === 'change_issue_ref') && item.refIssue">
+                          <span v-if="item.refAction === 'close'" class="pr-detail__event-hint">关闭了</span>
+                          <span v-else-if="item.refAction === 'reopen'" class="pr-detail__event-hint">重开了</span>
+                          <span v-else class="pr-detail__event-hint">引用了</span>
+                          <a
+                            v-if="item.refIssue.repoFullName"
+                            :href="refIssueWebUrl(item.refIssue)"
+                            class="pr-detail__event-link"
+                            target="_blank"
+                            rel="noopener"
+                          >
+                            {{ item.refIssue.repoFullName }}#{{ item.refIssue.index }}
+                          </a>
+                          <span v-else class="pr-detail__event-link">#{{ item.refIssue.index }}</span>
+                          <span class="pr-detail__event-emphasis">{{ item.refIssue.title }}</span>
+                        </span>
+
+                        <!-- type=19/20 dependency: 依赖 issue 标题 -->
+                        <span v-else-if="(item.type === 'add_dependency' || item.type === 'remove_dependency') && item.dependentIssue">
+                          <component
+                            :is="item.dependentIssue.isPull ? GitPullRequestArrow : MessageSquare"
+                            :size="12"
+                            :stroke-width="2"
+                            aria-hidden="true"
+                          />
+                          <a
+                            v-if="item.dependentIssue.repoFullName"
+                            :href="refIssueWebUrl(item.dependentIssue)"
+                            class="pr-detail__event-link"
+                            target="_blank"
+                            rel="noopener"
+                          >
+                            {{ item.dependentIssue.repoFullName }}#{{ item.dependentIssue.index }}
+                          </a>
+                          <span v-else class="pr-detail__event-link">#{{ item.dependentIssue.index }}</span>
+                          <span class="pr-detail__event-emphasis">{{ item.dependentIssue.title }}</span>
+                        </span>
+                      </div>
                     </div>
                   </li>
                 </template>
@@ -5433,6 +5573,86 @@ git checkout {{ selectedPR.head.ref }}</pre>
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
   flex-shrink: 0;
+}
+
+/* ===== v0.7.2：系统事件二级详情块（对齐 Gitea web .detail flex-text-block） ===== */
+.pr-detail__comment-event-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  width: 100%;
+}
+.pr-detail__comment-event-detail > span,
+.pr-detail__comment-event-detail > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pr-detail__event-strike {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+.pr-detail__event-arrow {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  margin: 0 2px;
+}
+.pr-detail__event-emphasis {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pr-detail__event-username {
+  font-family: var(--font-mono);
+  color: var(--color-text);
+}
+.pr-detail__event-plus,
+.pr-detail__event-minus {
+  font-weight: 700;
+  font-size: 13px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.pr-detail__event-plus { background: var(--color-success, #2da44e); }
+.pr-detail__event-minus { background: var(--color-danger,  #cf222e); }
+.pr-detail__event-hint {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.pr-detail__event-branch {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 4px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider-soft);
+  border-radius: 3px;
+  color: var(--color-text);
+}
+.pr-detail__event-link {
+  color: var(--color-link, var(--color-primary));
+  text-decoration: none;
+  font-weight: 500;
+}
+.pr-detail__event-link:hover {
+  text-decoration: underline;
+}
+/* Label chip —— 复用属性编辑器的 labelStyle 颜色逻辑（hex + 22 透明 + 文字色） */
+.pr-detail__event-label {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  border: 1px solid var(--label-border, var(--color-divider));
+  background: var(--label-bg, var(--color-bg-hover));
+  color: var(--label-color, var(--color-text));
 }
 
 /* v0.7.x: 评审事件卡收紧样式
