@@ -692,6 +692,17 @@ func (a *GiteaAdapter) ListMilestones(ctx context.Context, hostURL, username, to
 	return out, nil
 }
 
+// giteaMilestoneToDTO 把 giteaMilestoneRaw 映射到 platform.MilestoneDTO
+// （v0.7.2 timeline 解析复用）
+func giteaMilestoneToDTO(r giteaMilestoneRaw) platform.MilestoneDTO {
+	return platform.MilestoneDTO{
+		ID:          r.ID,
+		Title:       r.Title,
+		State:       r.State,
+		Description: r.Description,
+	}
+}
+
 // UpdatePullMilestone 给合并请求关联里程碑（PATCH /repos/{owner}/{repo}/pulls/{index} {"milestone": <title>|""}）
 func (a *GiteaAdapter) UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*platform.PullDetailDTO, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
@@ -755,30 +766,86 @@ func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, 
 }
 
 // giteaTimelineRaw Gitea /issues/{index}/timeline 端点原始响应
+//
+// v0.7.2 增量：把 Gitea /timeline 暴露的二级详情字段都加上，对齐 Gitea web
+// `services/convert/issue_comment.go:ToTimelineComment` 输出的结构。
+// 这些字段在不同 type 下含义不同（前缀 OldXxx 表示"变化前"，无前缀的是"变化后/当前"）：
+//
+//   - type=7 (label):        Label
+//   - type=8 (milestone):    OldMilestone / Milestone
+//   - type=9 (assignees):    Assignee + RemovedAssignee（true=移除，false=添加）
+//   - type=10 (change_title): OldTitle / NewTitle
+//   - type=11/25/33:         OldRef / NewRef
+//   - type=3/5/6/33:         RefIssue + RefAction
+//   - type=4 (commit_ref):   RefCommitSHA
+//   - type=19/20:            DependentIssue
+//
+// 不暴露字段：AddedLabels / RemovedLabels（每次只一个 Label）、Commits 列表（xorm:"-" 服务端字段）、
+// IsForcePush（同样是 xorm:"-"），这些是 Gitea web 端模板直渲染用，API 没暴露，
+// 对应系统事件卡显示完整 detail 有数据缺口（Push 只能显示"N 提交"文案，没有列表）。
 type giteaTimelineRaw struct {
-	ID        int64         `json:"id"`
-	Type      string        `json:"type"`
-	Body      string        `json:"body"`
-	User      *giteaUserRaw `json:"user"`
-	Created   string        `json:"created_at"`
-	Updated   string        `json:"updated_at"`
-	State     string        `json:"state,omitempty"`
-	CommitID  string        `json:"commit_id,omitempty"`
-	Official  bool          `json:"official,omitempty"`
-	CommitSHA string        `json:"commit_sha,omitempty"`
+	ID           int64              `json:"id"`
+	Type         string             `json:"type"`
+	Body         string             `json:"body"`
+	User         *giteaUserRaw      `json:"user"`
+	Created      string             `json:"created_at"`
+	Updated      string             `json:"updated_at"`
+	State        string             `json:"state,omitempty"`
+	CommitID     string             `json:"commit_id,omitempty"`
+	Official     bool               `json:"official,omitempty"`
+	CommitSHA    string             `json:"commit_sha,omitempty"`
+	OldTitle     string             `json:"old_title,omitempty"`
+	NewTitle     string             `json:"new_title,omitempty"`
+	OldRef       string             `json:"old_ref,omitempty"`
+	NewRef       string             `json:"new_ref,omitempty"`
+	Label        *giteaPullLabelRaw `json:"label,omitempty"`
+	OldMilestone *giteaMilestoneRaw `json:"old_milestone,omitempty"`
+	Milestone    *giteaMilestoneRaw `json:"milestone,omitempty"`
+	Assignee     *giteaUserRaw      `json:"assignee,omitempty"`
+	// AssigneeTeam: Gitea 有，但 platform 包当前没有 TeamDTO，v0.7.2 不暴露（保留扩展位）
+	RemovedAssignee bool              `json:"removed_assignee,omitempty"`
+	RefIssue        *giteaIssueRefRaw `json:"ref_issue,omitempty"`
+	RefAction       string            `json:"ref_action,omitempty"`
+	RefCommitSHA    string            `json:"ref_commit_sha,omitempty"`
+	DependentIssue  *giteaIssueRefRaw `json:"dependent_issue,omitempty"`
+}
+
+// giteaIssueRefRaw timeline 上下文里的 issue 引用（type=3/5/6/19/20/33 都用）
+//
+// 对应 Gitea api.Issue 结构的子集。is_pull 字段不存在，由 PullRequest 字段 != nil 推导。
+// RepoID / RepoFullName 从嵌套的 RepositoryMeta 拿（json: "repository"），前端用
+// platform.IssueDTO.RepoID / RepoFullName 表达。
+type giteaIssueRefRaw struct {
+	ID    int64  `json:"id"`
+	Index int64  `json:"number"`
+	Title string `json:"title"`
+	State string `json:"state"`
+	// PullRequest 字段为 nil → issue，!= nil → PR
+	PullRequest *struct{} `json:"pull_request,omitempty"`
+	Repository  *struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+	} `json:"repository,omitempty"`
 }
 
 func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 	item := platform.TimelineItem{
-		ID:        r.ID,
-		Type:      r.Type,
-		Body:      r.Body,
-		Created:   r.Created,
-		Updated:   r.Updated,
-		State:     r.State,
-		CommitID:  r.CommitID,
-		Official:  r.Official,
-		CommitSHA: r.CommitSHA,
+		ID:              r.ID,
+		Type:            r.Type,
+		Body:            r.Body,
+		Created:         r.Created,
+		Updated:         r.Updated,
+		State:           r.State,
+		CommitID:        r.CommitID,
+		Official:        r.Official,
+		CommitSHA:       r.CommitSHA,
+		OldTitle:        r.OldTitle,
+		NewTitle:        r.NewTitle,
+		OldRef:          r.OldRef,
+		NewRef:          r.NewRef,
+		RefAction:       r.RefAction,
+		RefCommitSHA:    r.RefCommitSHA,
+		RemovedAssignee: r.RemovedAssignee,
 	}
 	if r.User != nil {
 		item.Author = &platform.PullUserDTO{
@@ -786,7 +853,51 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 			AvatarURL: r.User.AvatarURL,
 		}
 	}
+	if r.Label != nil {
+		item.Label = &platform.PullLabelDTO{
+			ID:    r.Label.ID,
+			Name:  r.Label.Name,
+			Color: r.Label.Color,
+		}
+	}
+	if r.OldMilestone != nil {
+		dto := giteaMilestoneToDTO(*r.OldMilestone)
+		item.OldMilestone = &dto
+	}
+	if r.Milestone != nil {
+		dto := giteaMilestoneToDTO(*r.Milestone)
+		item.Milestone = &dto
+	}
+	if r.Assignee != nil {
+		item.Assignee = &platform.PullUserDTO{
+			Username:  r.Assignee.Login,
+			AvatarURL: r.Assignee.AvatarURL,
+		}
+	}
+	if r.RefIssue != nil {
+		item.RefIssue = giteaIssueRefToDTO(r.RefIssue)
+	}
+	if r.DependentIssue != nil {
+		item.DependentIssue = giteaIssueRefToDTO(r.DependentIssue)
+	}
 	return item
+}
+
+// giteaIssueRefToDTO 把 giteaIssueRefRaw 映射到 platform.IssueDTO
+func giteaIssueRefToDTO(r *giteaIssueRefRaw) *platform.IssueDTO {
+	dto := &platform.IssueDTO{
+		Index: int(r.Index),
+		Title: r.Title,
+		State: r.State,
+	}
+	if r.PullRequest != nil {
+		dto.IsPull = true
+	}
+	if r.Repository != nil {
+		dto.RepoID = r.Repository.ID
+		dto.RepoFullName = r.Repository.FullName
+	}
+	return dto
 }
 
 // CreatePullComment 发合并请求评论（POST /repos/{owner}/{repo}/issues/{index}/comments）

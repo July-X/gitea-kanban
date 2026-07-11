@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.1)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.2)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.1 发版** — PR 对话区对齐 Gitea web；Timeline 数据源切换；pnpm typecheck 0 错）
+> 最后更新：2026-07-12（**v0.7.2 发版** — 视觉 1:1 对齐 Gitea web：5 档颜色 + lucide 图标体系 + 7 类系统事件详情块 + 气泡左箭头 + Dismiss 拆 2 卡）
 
 >
 
@@ -18,6 +18,21 @@
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
 
+> - **v0.7.2** (2026-07-12)：视觉 1:1 对齐 Gitea web（接续 v0.7.1 结构层对齐，把视觉/细节层做实）。
+>   1. **5 档颜色 token**（对齐 Gitea web `.badge` 语义色）：`success` (绿: reopen/push) / `danger` (红: close) / `merge` (紫: merge_pull) / `warn` (橙: due_date / time tracking) / `neutral` (灰: 其他系统事件 + dismiss_review + 评审请求 + 锁/解锁/引脚)。系统事件卡左 border + 头像色 + badge 背景/文字 三个层次都按颜色档走。
+>   2. **lucide-vue-next icon 体系**（21 个 octicon 全部对齐映射）：从 Unicode 字符（↻ ✕ ⚐ 🔒）迁到 lucide（RotateCcw / X / Tag / Lock ...），对齐 Gitea web `octicon-*` SVG 视觉风格。
+>   3. **7 类系统事件二级详情块**（对齐 Gitea web `.detail flex-text-block`）：
+>      - type=7 label:        label chip（hex 颜色 + 22 透明底）
+>      - type=8 milestone:    oldMilestone → milestone（带删除线 + 箭头）
+>      - type=9 assignees:    +/− 圆点徽章 + username + 提示语
+>      - type=10 change_title: oldTitle → newTitle（删除线 + 箭头）
+>      - type=11 delete_branch: GitBranch 图标 + ref 名 code chip
+>      - type=25 change_target_branch: oldRef → newRef
+>      - type=3/5/6/33 issue_ref + type=19/20 dependency: 跨仓 issue 链接（走 `auth.getAccountUrlByPlatform` 自动处理 GitHub `api.github.com` → `github.com`）+ 标题 + PR/Issue 图标
+>   4. **气泡左箭头 CSS**（对齐 Gitea web `.avatar-content-left-arrow`）：`.pr-detail__comment-bubble::before` 加 6px CSS 三角形，指向左侧 avatar；event / system-event 卡 `--event` variant 显式 `display: none` 隐藏。
+>   5. **Dismiss review 拆 2 卡**（Gitea web Type=32 在 body 非空时拆）：event 卡 + 独立 reason comment 卡（独立 avatar + bubble + "驳回原因" tag + body markdown 渲染）。v0.7.1 单卡时 reason 内容被吞了。
+>   6. **后端 DTO 扩展**：`platform.TimelineItem` 加 12 个二级详情字段；`IssueDTO` 加 3 个字段支持跨仓 ref 引用；`giteaTimelineRaw` 解析这些字段；新增 `giteaIssueRefRaw` 子结构解析跨仓 issue 引用。`TestGiteaAdapter_ListPullTimeline_DetailFields` 覆盖 7 类解析。
+>
 > - **v0.7.1** (2026-07-12)：v0.7.0 收尾 patch——PR 对话区对齐 Gitea web + Timeline 数据源切换 + pnpm typecheck 全清（60 → 0 错）。
 >   1. **PR 对话区对齐 Gitea web**：调研 Gitea 1.26 源码（templates/repo/issue/view_content/comments.tmpl + routers/web/repo/issue_view.go）后发现 3 处关键差异——
 >      - server 端不再按 type 过滤（旧版 `c.Type != 0` 过滤把 type=21/22/1/2/28/4/7/8/9/10/27/29 等系统事件全丢），改为透传 type 字段给前端
@@ -140,7 +155,7 @@
 | 平台 API | **Go net/http**（手写，替代旧版 gitea-js） | Gitea REST API + GitHub REST API，统一走 `app/platform` 抽象层 |
 | UUID | **google/uuid** | id 生成 |
 | 日志 | **log/slog** + 文件 transport | 写 `${dataRoot}/logs/main/main-YYYY-MM-DD.log` |
-| 测试 | **Go testing** + httptest | 9 个 Go 包测试（config/git/git-graph/platform/platform-gitea/platform-github/secret/store/sync），共 50+ 测试用例 |
+| 测试 | **Go testing** + httptest | 12 个 Go 包测试（config/git/git-graph/gitbinary/ipc/logexport/logx/platform-gitea/platform-github/secret/store/sync），共 60+ 测试用例（v0.7.2 +1 `TestGiteaAdapter_ListPullTimeline_DetailFields`）|
 | 前端语言 | **TypeScript 5.7.2** | ESM (`"type": "module"`) |
 | 前端构建 | **Vite 6.0** | 产物输出到 `frontend/dist/`，由 `main.go` 的 `//go:embed` 嵌入二进制 |
 | 前端框架 | **Vue 3.5.35** + Composition API + `<script setup>` | 保留 v1 Vue 3 全部 9 视图 + 10 store |

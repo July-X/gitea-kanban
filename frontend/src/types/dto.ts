@@ -422,6 +422,57 @@ export interface TimelineItemDto {
   official?: boolean;
   // type="pull_request_push" 推送事件专属
   commitSha?: string;
+
+  // ===== v0.7.2：系统事件 detail 字段 =====
+  // 对齐 Gitea web templates/repo/issue/view_content/comments.tmpl 渲染的二级详情块。
+  // 前端按 type 决定哪些字段参与渲染，不用的 type 字段保持 undefined。
+  //
+  //   type=7 (label):        label
+  //   type=8 (milestone):    oldMilestone / milestone
+  //   type=9 (assignees):    assignee + removedAssignee
+  //   type=10 (change_title): oldTitle / newTitle
+  //   type=11/25/33:         oldRef / newRef
+  //   type=3/5/6/33:         refIssue + refAction
+  //   type=4 (commit_ref):   refCommitSha
+  //   type=19/20:            dependentIssue
+
+  // type=10 标题变化
+  oldTitle?: string;
+  newTitle?: string;
+
+  // type=11 (delete_branch) / 25 (change_target_branch) / 33 (change_issue_ref)
+  oldRef?: string;
+  newRef?: string;
+
+  // type=7 (label) —— 单个 label
+  label?: { id: number; name: string; color: string };
+
+  // type=8 (milestone) —— 里程碑变化
+  oldMilestone?: MilestoneDto;
+  milestone?: MilestoneDto;
+
+  // type=9 (assignees) —— 指派人变化
+  assignee?: PullAuthorDto;
+  removedAssignee?: boolean; // true=移除，false=添加
+
+  // type=3/5/6/33 跨引用
+  refIssue?: TimelineRefIssueDto;
+  refAction?: string;     // "close" | "reopen" | "cross"
+  refCommitSha?: string;  // type=4 commit ref
+
+  // type=19/20 依赖
+  dependentIssue?: TimelineRefIssueDto;
+}
+
+// v0.7.2：timeline 内 issue 引用（ref_issue / dependent_issue）
+// 是 IssueCardDto 的子集，避免 timeline 渲染时去读不存在的字段。
+export interface TimelineRefIssueDto {
+  index: number;
+  title: string;
+  state: string;          // "open" | "closed"（gitea 还可能返回 "all" 但 timeline 不会）
+  isPull: boolean;
+  repoId?: number;
+  repoFullName?: string;  // "owner/repo"，跨仓库引用时显示
 }
 
 
