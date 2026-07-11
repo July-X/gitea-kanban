@@ -146,6 +146,10 @@ export function ListPullReviews(arg1) {
   return window['go']['main']['App']['ListPullReviews'](arg1);
 }
 
+export function ListPullTimeline(arg1) {
+  return window['go']['main']['App']['ListPullTimeline'](arg1);
+}
+
 export function ListPulls(arg1) {
   return window['go']['main']['App']['ListPulls'](arg1);
 }

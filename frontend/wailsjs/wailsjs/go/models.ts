@@ -1199,6 +1199,20 @@ export namespace main {
 	        this.index = source["index"];
 	    }
 	}
+	export class ListPullTimelineArgs {
+	    projectId: string;
+	    index: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListPullTimelineArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	    }
+	}
 	export class ListPullsArgs {
 	    projectId: string;
 	    state: string;
@@ -2197,6 +2211,55 @@ export namespace platform {
 	        this.projectId = source["projectId"];
 	        this.isProject = source["isProject"];
 	        this.lastSyncAt = source["lastSyncAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class TimelineItem {
+	    id: number;
+	    type: string;
+	    body: string;
+	    author?: PullUserDTO;
+	    created: string;
+	    updated?: string;
+	    state?: string;
+	    commit_id?: string;
+	    official?: boolean;
+	    commit_sha?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TimelineItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.body = source["body"];
+	        this.author = this.convertValues(source["author"], PullUserDTO);
+	        this.created = source["created"];
+	        this.updated = source["updated"];
+	        this.state = source["state"];
+	        this.commit_id = source["commit_id"];
+	        this.official = source["official"];
+	        this.commit_sha = source["commit_sha"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -20,7 +20,7 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
@@ -34,32 +34,22 @@ import {
   labelsCreate,
   labelsList,
   membersList,
-  pullsCommentCreate,
-  pullsCommentDelete,
-  pullsCommentList,
-  pullsCommentUpdate,
   pullsReviewCreate,
-  pullsReviewsList,
   pullsCommitsList,
   pullsUploadAttachment,
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import ReactionBar from '@renderer/components/ReactionBar.vue';
 import PullFileComments from '@renderer/components/PullFileComments.vue';
-import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import ConfirmDialog from '@renderer/components/ConfirmDialog.vue';
-import type { CollaboratorDto, PullDto, RepoDto, MergeMethod } from '@renderer/types/dto';
-import type { CreateReviewArgs, IssueCommentDto, PullReviewDto, ReviewEvent } from '@renderer/types/dto';
-import type { PullFileDto, PullCommitDto } from '@renderer/types/dto';
+import type { CollaboratorDto, PullDto, RepoDto, MergeMethod, IssueCommentDto, PullCommitDto, ReviewEvent, TimelineItemDto } from '@renderer/types/dto';
 
 const repo = useRepoStore();
 const pullStore = usePullStore();
 const pull = pullStore;
 const auth = useAuthStore();
 /** 当前平台（gitea / github）v0.6.0 */
-const currentPlatform = computed<'gitea' | 'github'>(
-  () => (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github'
-);
+// v0.7.x: currentPlatform 不再使用
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
 // v0.6+ 滚动到底自动加载分页：哨兵 + IntersectionObserver
@@ -362,7 +352,7 @@ const commitsLoading = ref(false);
 const filesLoading = ref(false);
 
 const tabLoading = computed(() => ({
-  conversation: getPanel(selectedPR.value?.index ?? -1)?.loading ?? false,
+  conversation: getTimelinePanel()?.loading ?? false,
   commits: commitsLoading.value,
   files: filesLoading.value,
 }));
@@ -370,7 +360,7 @@ const tabLoading = computed(() => ({
 function selectPR(p: PullDto): void {
   selectedPR.value = p;
   void loadComments(p);
-  void loadReviews(p);
+  // v0.7.x: loadReviews -> store
   void loadCommits(p);
   void loadFilesForPR(p);
 }
@@ -742,16 +732,7 @@ const closeConfirmDescription = computed(() => {
 //   - 当前用户评论高亮：拿到 auth.currentUsername 后做 author === self 判断（v1.2 best-effort）
 
 /** 每合并请求一份评论 state */
-interface CommentPanelState {
-  items: IssueCommentDto[];
-  loading: boolean;
-  posting: boolean;
-  error: string | null;
-  /** 上一次成功拉取的毫秒时间戳（"刚刚刷新"提示用） */
-  lastLoadedAt: number | null;
-}
-
-const commentPanels = ref<Map<number, CommentPanelState>>(new Map());
+// v0.7.x
 
 /** 新评论输入草稿（每个合并请求一份，避免切到别的合并请求输入框被清空） */
 const commentDrafts = ref<Map<number, string>>(new Map());
@@ -767,8 +748,7 @@ const currentUsername = computed<string | null>(() => auth.currentUser?.login ??
 
 // ===== 评审（v0.5.0 M3） =====
 
-/** 每个合并请求的评审列表 */
-const reviewPanels = ref<Map<number, PullReviewDto[]>>(new Map());
+// v0.7.x: reviewPanels 移到 store
 
 /** 每个合并请求的评审编辑器开关 + 选中的 event */
 const reviewEditorOpen = ref<Set<number>>(new Set());
@@ -776,27 +756,7 @@ const reviewEditorEvent = ref<Map<number, ReviewEvent>>(new Map());
 const reviewEditorBody = ref<Map<number, string>>(new Map());
 const reviewSubmitting = ref(false);
 
-function getReviewPanel(idx: number): PullReviewDto[] {
-  return reviewPanels.value.get(idx) ?? [];
-}
-
-async function loadReviews(p: PullDto): Promise<void> {
-  if (!activeProjectId.value) return;
-  try {
-    const list = await pullsReviewsList({
-      projectId: activeProjectId.value,
-      index: p.index,
-    });
-    const reviews = (list ?? []) as PullReviewDto[];
-    reviewPanels.value.set(p.index, reviews);
-    // 同步写入 store 的 reviewPanels,让 pull.timelineItems computed 能拿到数据。
-    // setReviewsForIndex 内部用新 Map 替换 ref.value 确保 100% 触发响应式重算。
-    pull.setReviewsForIndex(p, reviews);
-  } catch {
-    // 评审加载失败不阻断主流程（评论/提交/文件等 Tab 仍可用）
-    // 评审 Tab 会显示空态而不是报错，避免打断用户阅读评论
-  }
-}
+// v0.7.x: getReviewPanel/loadReviews 移到 store
 
 function toggleReviewEditor(p: PullDto, event: ReviewEvent): void {
   if (reviewEditorOpen.value.has(p.index)) {
@@ -823,7 +783,7 @@ async function submitReview(p: PullDto): Promise<void> {
       event,
     });
     // 刷新评审列表（让 review 事件卡片进 timelineItems）
-    await loadReviews(p);
+    await pull.fetchReviews(p);
     // 关键：Gitea 在 POST /pulls/{index}/reviews 时,若 body 非空,会同时插入一条
     // CommentTypeReview 类型的 issue comment,该 comment 出现在 /issues/{index}/comments
     // 端点；不重拉的话,对话 Tab 的 comment 部分是陈旧的（用户填的正文不见了）。
@@ -909,16 +869,12 @@ function mentionActiveIdx(idx: number): number {
   return s?.activeIdx ?? 0;
 }
 
-/** 拿某合并请求的 panel state（没有就初始化一个空的） */
-function getPanel(idx: number): CommentPanelState {
-  let p = commentPanels.value.get(idx);
-  if (!p) {
-    // v0.6.26: 用 reactive() 包装 panel,让 panel.items = items 这种直接赋值
-    // 能触发模板重新渲染(否则对话 Tab 评论列表不更新)
-    p = reactive({ items: [] as IssueCommentDto[], loading: false, posting: false, error: null as string | null, lastLoadedAt: null as number | null });
-    commentPanels.value.set(idx, p);
-  }
-  return p;
+/** v0.7.x: 拿时间轴面板 (对齐 Gitea web) */
+function getTimelinePanel(): { items: TimelineItemDto[]; loading: boolean; error: string | null } {
+  const idx = selectedPR.value?.index ?? -1;
+  if (idx < 0) return { items: [], loading: false, error: null };
+  const panel = pull.getTimelinePanel(idx);
+  return { items: panel.items, loading: panel.loading, error: panel.error };
 }
 
 /** 拿某合并请求的评论草稿 */
@@ -1194,38 +1150,15 @@ function insertMention(idx: number, member: string): void {
  */
 async function loadComments(p: PullDto): Promise<void> {
   if (!activeProjectId.value) return;
-  const panel = getPanel(p.index);
+  const panel = getTimelinePanel();
   // 已加载过且非空，跳过（用户切 tab / 列表 refresh 也不会清空，保留上下文）
-  if (panel.lastLoadedAt !== null) return;
-  await fetchComments(p);
+  if (panel.items.length > 0) return;
+  await pull.fetchTimeline(p);
 }
 
 /** 强制重拉评论（发送评论后用 —— 保证看到自己刚发的，带权威 id / 时间戳） */
 async function fetchComments(p: PullDto): Promise<void> {
-  if (!activeProjectId.value) return;
-  const panel = getPanel(p.index);
-  panel.loading = true;
-  panel.error = null;
-  // 评论加载也接 globalLoading（panel 二级加载，多 pr 并发 active 时合并）
-  useGlobalLoadingStore().show('merges');
-  try {
-    const list = (await pullsCommentList({
-      projectId: String(activeProjectId.value),
-      index: p.index,
-    })) as IssueCommentDto[];
-    const items = Array.isArray(list) ? list : [];
-    panel.items = items;
-    panel.lastLoadedAt = Date.now();
-    // v0.5.0 bugfix: 同步写入 store 的 commentPanels,让 pull.timelineItems computed 能拿到数据
-    // (timelineItems 是 store 端的合并时间线,被对话 Tab 渲染使用)
-    pull.getPanel(p.index).items = items;
-  } catch (e) {
-    const err = e as { messageText?: string };
-    panel.error = err.messageText ?? '加载评论失败';
-  } finally {
-    panel.loading = false;
-    useGlobalLoadingStore().hide('merges');
-  }
+  await pull.fetchTimeline(p);
 }
 
 /**
@@ -1241,29 +1174,13 @@ async function postComment(p: PullDto): Promise<void> {
   if (!activeProjectId.value) return;
   const body = getDraft(p.index).trim();
   if (!body) return;
-  const panel = getPanel(p.index);
-  panel.posting = true;
-  panel.error = null;
   try {
-    await pullsCommentCreate({
-      projectId: String(activeProjectId.value),
-      index: p.index,
-      body,
-    });
+    await pull.postComment(p, body);
     setDraft(p.index, '');
-    // 发送成功后重拉：拿到权威评论（带 gitea 给的 id / createdAt）
-    await fetchComments(p);
     showToast({ type: 'success', message: `评论已发送到 #${p.index}` });
   } catch (e) {
     const err = e as { messageText?: string; hint?: string };
-    panel.error = err.messageText ?? '发送失败';
-    showToast({
-      type: 'error',
-      message: err.messageText ?? '发送失败',
-      persistent: true,
-    });
-  } finally {
-    panel.posting = false;
+    showToast({ type: 'error', message: err.messageText ?? '发送失败', persistent: true });
   }
 }
 
@@ -1309,31 +1226,14 @@ async function submitEditComment(p: PullDto, c: IssueCommentDto): Promise<void> 
   if (!activeProjectId.value) return;
   const draft = (editDrafts.value.get(c.id) ?? '').trim();
   if (!draft) return;
-  if (draft === c.body.trim()) {
-    editingCommentId.value = null;
-    return;
-  }
-  const panel = getPanel(p.index);
-  panel.error = null;
+  if (draft === c.body.trim()) { editingCommentId.value = null; return; }
   try {
-    const updated = (await pullsCommentUpdate({
-      projectId: String(activeProjectId.value),
-      commentId: c.id,
-      body: draft,
-    })) as IssueCommentDto;
-    // 本地更新对应评论（避免全量刷新）
-    const idx = panel.items.findIndex((x) => x.id === c.id);
-    if (idx >= 0) {
-      panel.items[idx] = updated;
-      // v0.5.0 bugfix: 同步 store 的 commentPanels,让 timelineItems 实时反映编辑结果
-      pull.getPanel(p.index).items = [...panel.items];
-    }
+    await pull.editComment(p, c.id, draft);
     editingCommentId.value = null;
     editDrafts.value.delete(c.id);
     showToast({ type: 'success', message: '评论已更新' });
   } catch (e) {
     const err = e as { messageText?: string };
-    panel.error = err.messageText ?? '编辑失败';
     showToast({ type: 'error', message: err.messageText ?? '编辑失败', persistent: true });
   }
 }
@@ -1343,22 +1243,11 @@ async function submitEditComment(p: PullDto, c: IssueCommentDto): Promise<void> 
  */
 async function deleteComment(p: PullDto, c: IssueCommentDto): Promise<void> {
   if (!activeProjectId.value) return;
-  const panel = getPanel(p.index);
-  panel.error = null;
   try {
-    await pullsCommentDelete({
-      projectId: String(activeProjectId.value),
-      commentId: c.id,
-    });
-    // 本地过滤掉被删除的评论
-    const nextItems = panel.items.filter((x) => x.id !== c.id);
-    panel.items = nextItems;
-    // v0.5.0 bugfix: 同步 store 的 commentPanels,让 timelineItems 实时反映删除结果
-    pull.getPanel(p.index).items = nextItems;
+    await pull.removeComment(p, c.id);
     showToast({ type: 'success', message: '评论已删除' });
   } catch (e) {
     const err = e as { messageText?: string };
-    panel.error = err.messageText ?? '删除失败';
     showToast({ type: 'error', message: err.messageText ?? '删除失败', persistent: true });
   }
 }
@@ -1809,8 +1698,8 @@ function formatRelative(iso: string | undefined): string {
             <span v-if="tabLoading.conversation" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
-            <span v-if="getPanel(selectedPR.index).items.length > 0" class="pr-detail-tab__count">
-              {{ getPanel(selectedPR.index).items.length }}
+            <span v-if="getTimelinePanel().items.length > 0" class="pr-detail-tab__count">
+              {{ getTimelinePanel().items.length }}
             </span>
           </button>
           <button
@@ -1902,14 +1791,14 @@ git checkout {{ selectedPR.head.ref }}</pre>
               <div class="pr-detail__conv-header-left">
                 <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
                 <span>对话</span>
-                <span v-if="getPanel(selectedPR.index).items.length > 0" class="pr-detail__conv-count">
-                  {{ getPanel(selectedPR.index).items.length }}
+                <span v-if="getTimelinePanel().items.length > 0" class="pr-detail__conv-count">
+                  {{ getTimelinePanel().items.length }}
                 </span>
               </div>
               <button
                 type="button"
                 class="btn-ghost-sm"
-                :disabled="getPanel(selectedPR.index).loading"
+                :disabled="getTimelinePanel().loading"
                 title="刷新对话"
                 @click="fetchComments(selectedPR)"
               >
@@ -1920,22 +1809,22 @@ git checkout {{ selectedPR.head.ref }}</pre>
 
             <!-- 对话列表 -->
             <div class="pr-detail__conv-list">
-              <div v-if="getPanel(selectedPR.index).loading && getPanel(selectedPR.index).items.length === 0" class="pr-detail__conv-loading">
+              <div v-if="getTimelinePanel().loading && getTimelinePanel().items.length === 0" class="pr-detail__conv-loading">
                 <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
                 <span>正在加载对话…</span>
               </div>
-              <div v-else-if="getPanel(selectedPR.index).error && getPanel(selectedPR.index).items.length === 0" class="pr-detail__conv-error" role="alert">
-                <span>{{ getPanel(selectedPR.index).error }}</span>
+              <div v-else-if="getTimelinePanel().error && getTimelinePanel().items.length === 0" class="pr-detail__conv-error" role="alert">
+                <span>{{ getTimelinePanel().error }}</span>
                 <button type="button" class="btn-ghost-sm" @click="fetchComments(selectedPR)">重试</button>
               </div>
-              <div v-else-if="getPanel(selectedPR.index).items.length === 0" class="pr-detail__conv-empty">
+              <div v-else-if="getTimelinePanel().items.length === 0" class="pr-detail__conv-empty">
                 暂无对话，发起第一条评论开始讨论吧
               </div>
               <ul v-else class="pr-detail__comment-list">
-                <template v-for="(item, ti) in pull.timelineItems.get(selectedPR.index) ?? []" :key="`${item.source}-${item.id}`">
+                <template v-for="(item, ti) in getTimelinePanel().items ?? []" :key="`${item.type}-${item.id}`">
                   <!-- 评审事件 (不显示 body, body 由 type=21 评论卡渲染) -->
                   <li
-                    v-if="item.source === 'review_event'"
+                    v-if="item.type === 'review'"
                     class="pr-detail__comment pr-detail__comment--review-event"
                     :class="`pr-detail__comment--review-${item.state}`"
                   >
@@ -1947,7 +1836,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     <div class="pr-detail__comment-bubble pr-detail__comment-bubble--event">
                       <div class="pr-detail__comment-meta">
                         <span class="pr-detail__review-state-badge" :class="`pr-detail__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
+                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author.username }}</div>
                     </div>
@@ -1955,7 +1844,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
 
                   <!-- 普通评论卡片 (含 type=21 评审 body) -->
                   <li
-                    v-else-if="item.source === 'comment'"
+                    v-else-if="item.type === 'comment'"
                     class="pr-detail__comment"
                     :class="{ 'pr-detail__comment--self': currentUsername && item.author.username === currentUsername }"
                   >
@@ -1968,7 +1857,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
                         <span v-if="currentUsername && item.author.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
+                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <!-- 编辑态 -->
                       <template v-if="editingCommentId === item.id">
@@ -1997,9 +1886,9 @@ git checkout {{ selectedPR.head.ref }}</pre>
                       <template v-else>
                         <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
                         <span
-                          v-if="item.updatedAt && item.updatedAt !== item.createdAt"
+                          v-if="item.updated && item.updated !== item.created"
                           class="pr-detail__comment-edited-mark"
-                          :title="'编辑于 ' + formatDate(item.updatedAt)"
+                          :title="'编辑于 ' + formatDate(item.updated)"
                         >（已编辑）</span>
                         <div class="pr-detail__comment-actions">
                           <button
@@ -2034,7 +1923,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                        对齐 Gitea web comments.tmpl 的非 COMMENT/REVIEW 分支,
                        简单 badge + author + locale 文案 -->
                   <li
-                    v-else-if="item.source === 'system_event'"
+                    v-else-if="!['review', 'comment', 'code'].includes(item.type)"
                     class="pr-detail__comment pr-detail__comment--system-event"
                     :class="`pr-detail__comment--system-type-${item.type}`"
                   >
@@ -2046,7 +1935,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     <div class="pr-detail__comment-bubble pr-detail__comment-bubble--event">
                       <div class="pr-detail__comment-meta">
                         <span class="pr-detail__system-event-badge">{{ systemEventLabel(item.type) }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
+                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <div class="pr-detail__comment-event-author">{{ item.author?.username || '匿名' }}</div>
                     </div>
@@ -2081,7 +1970,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                   @drop="void onCommentDrop(selectedPR.index, $event)"
                   @dragover.prevent
                   :placeholder="'发条评论给 #' + selectedPR.index + '\n@ 提及成员，Enter 发送'"
-                  :disabled="getPanel(selectedPR.index).posting"
+                  :disabled="getTimelinePanel().posting"
                   rows="3"
                   maxlength="65535"
                   spellcheck="false"
@@ -2089,7 +1978,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                 <button
                   type="button"
                   class="pr-detail__comment-send"
-                  :disabled="getPanel(selectedPR.index).posting || getDraft(selectedPR.index).trim().length === 0"
+                  :disabled="getTimelinePanel().posting || getDraft(selectedPR.index).trim().length === 0"
                   title="发送评论（Enter 也可发送）"
                   @click.stop="postComment(selectedPR)"
                 >

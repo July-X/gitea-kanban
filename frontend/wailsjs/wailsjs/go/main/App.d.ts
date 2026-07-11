@@ -77,6 +77,8 @@ export function ListPullReviewComments(arg1:main.ListPullReviewCommentsArgs):Pro
 
 export function ListPullReviews(arg1:main.ListPullReviewsArgs):Promise<Array<platform.PullReviewDTO>>;
 
+export function ListPullTimeline(arg1:main.ListPullTimelineArgs):Promise<Array<platform.TimelineItem>>;
+
 export function ListPulls(arg1:main.ListPullsArgs):Promise<main.PullListAppResp>;
 
 export function ListRepos(arg1:main.ListReposArgs):Promise<main.ListReposResp>;
