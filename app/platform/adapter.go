@@ -564,7 +564,7 @@ type CommentDTO struct {
 type ReactionDTO struct {
 	ID      int64        `json:"id"`
 	Content string       `json:"content"` // "+1" / "-1" / "laugh" / "confused" / "heart" / "hooray" / "eyes" / "rocket"
-	User    *PullUserDTO `json:"user"`
+	User    *PullUserDTO `json:"user,omitempty"`
 }
 
 // PullReviewDTO 合并请求评审（v0.5.0 M3）

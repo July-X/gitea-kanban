@@ -149,20 +149,18 @@ export const usePullStore = defineStore('pull', () => {
     for (const [prIdx, reviews] of reviewPanels.value.entries()) {
       const items = result.get(prIdx) ?? [];
       for (const r of reviews) {
-        // v0.7.0 修复：评审卡不携带 body。Gitea 服务端提交 review 时已同时
-        // 插入一条 CommentTypeReview 类型的 issue comment（关联到 review.id），
-        // 该 comment 出现在 /issues/{index}/comments 端点，在上面 commentPanels
-        // 迭代里已经作为 source: 'comment' 进时间线。
+        // 对齐 Gitea web 时间轴：评审事件卡携带评审总结文（body）。
         //
-        // 之前设计把 r.body 复制到 review 事件卡内文，导致对话区出现「一张卡」，
-        // 与 Gitea web UI 的「系统事件 + 留下一条评论」两张独立卡不一致。
-        // 用户反馈 PR #74 期望跟 Gitea web 一样拆开显示，修复后 timelineItems
-        // 拆为 2 条：review 事件卡（无内文）+ 下面紧跟的 review body comment 卡。
+        // Gitea 后端已在 ListPullComments 中过滤掉 type=21 (CommentTypeReview) 的评论，
+        // 所以 commentPanels 不再包含评审总结文的重复副本。评审总结文只出现在这里。
+        //
+        // GitHub 后端不创建 type=21 评论（GitHub issue comments 端点不含 review body），
+        // 所以评审总结文也只出现在这里。两端逻辑统一。
         items.push({
           source: 'review',
           id: r.id,
           state: r.state,
-          body: '',
+          body: r.body,
           author: { username: r.author?.username ?? '匿名' },
           submittedAt: r.submittedAt,
           isReviewEvent: true,
@@ -218,13 +216,11 @@ export const usePullStore = defineStore('pull', () => {
         posting: false,
         error: null as string | null,
       });
-      commentPanels.value.set(index, p);
-      // 关键:ref(new Map()) 的 .set 不触发响应(Map 内部不是 reactive proxy),
-      // 手动 triggerRef 让已订阅 commentPanels.value 的 computed(timelineItems)
-      // 重算看到新增的 panel。
-      // 回归证据:用户 PR #74 反馈"提交请求修改后对话区仍显示'暂无对话'",根因之一
-      // 是首次 getPanel 时 Map.set 没触发 timelineItems 重算。
-      triggerRef(commentPanels);
+      // 关键: 用新 Map 替换 ref.value 而不是 Map.set + triggerRef。
+      // 替换整个 Map 对象是一致且可靠的响应式触发方式。
+      const newMap = new Map(commentPanels.value);
+      newMap.set(index, p);
+      commentPanels.value = newMap;
     }
     return p;
   }
@@ -454,16 +450,19 @@ export const usePullStore = defineStore('pull', () => {
   }
 
   /**
+  /**
    * 外部代码（如 MergesView.loadReviews）拉到了 review 列表后,同步写入 store
    * 端的 reviewPanels,触发响应式重算。
    *
-   * v0.7.0 加：因为 ref(new Map()) 的 .set 不会触发响应,而 triggerRef 只能
-   * 作用在 ref 包裹的值上、不能直接传 Map,暴露这个 setter 内部包好 trigger。
-   * MergesView 不应该 import 'vue' 的 triggerRef,也不应该直接写 store 内部 Map。
+   * 关键：用新 Map 替换 ref.value 而不是 Map.set + triggerRef。
+   * 原因：triggerRef 对 ref(Map) 的可靠性依赖 Vue 内部实现细节，在某些场景下
+   * （如 computed 依赖链较深、Map 被多处引用）可能不触发重算。替换整个 Map
+   * 对象是一致且可靠的响应式触发方式。
    */
   function setReviewsForIndex(p: PullDto, reviews: PullReviewDto[]): void {
-    reviewPanels.value.set(p.index, reviews);
-    triggerRef(reviewPanels);
+    const newMap = new Map(reviewPanels.value);
+    newMap.set(p.index, reviews);
+    reviewPanels.value = newMap;
   }
 
   /** 提交 PR 评审 */

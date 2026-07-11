@@ -9,7 +9,7 @@
  *   - 服务端数据驱动：初始化 pullsCommentReactionsList 拉取
  *   - toggle 乐观更新：先改 UI 再发请求，失败回滚
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useAuthStore } from '@renderer/stores/auth';
 import { showToast } from '@renderer/lib/toast';
 import {
@@ -47,7 +47,12 @@ const toggling = ref(false);
 
 const currentUsername = computed<string | null>(() => auth.currentUser?.login ?? null);
 
-/** 按表情类型聚合 */
+/** 按表情类型聚合
+ *
+ * 防御性处理 r.user 可能为 null/undefined 的情况（Gitea ReactionDTO.User 是指针，
+ * 理论上始终非 nil，但 Wails JSON 序列化在网络异常或低版本 Gitea 下可能产出 null）。
+ * 如果不防御，r.user.username 直接 TypeError → computed 崩溃 → 整条 ReactionBar 不显示。
+ */
 const groupedReactions = computed<ReactionGroupDto[]>(() => {
   const map = new Map<ReactionContent, ReactionGroupDto>();
   for (const c of REACTIONS) {
@@ -63,9 +68,10 @@ const groupedReactions = computed<ReactionGroupDto[]>(() => {
   for (const r of reactions.value) {
     const g = map.get(r.content);
     if (!g) continue;
+    const username = r?.user?.username ?? '';
     g.count++;
-    g.usernames.push(r.user.username);
-    if (currentUsername.value && r.user.username === currentUsername.value) {
+    g.usernames.push(username);
+    if (currentUsername.value && username === currentUsername.value) {
       g.viewerReacted = true;
     }
   }
@@ -77,7 +83,8 @@ const groupedReactions = computed<ReactionGroupDto[]>(() => {
 const viewerReactedContents = computed<Set<ReactionContent>>(() => {
   const set = new Set<ReactionContent>();
   for (const r of reactions.value) {
-    if (currentUsername.value && r.user.username === currentUsername.value) {
+    const username = r?.user?.username ?? '';
+    if (currentUsername.value && username === currentUsername.value) {
       set.add(r.content);
     }
   }
@@ -85,6 +92,8 @@ const viewerReactedContents = computed<Set<ReactionContent>>(() => {
 });
 
 async function loadReactions(): Promise<void> {
+  // 防御：projectId 为空时直接跳过（activeProjectId 在 PR 列表加载完前可能为 null）
+  if (!props.projectId || props.commentId <= 0) return;
   loading.value = true;
   try {
     const list = await pullsCommentReactionsList({
@@ -108,7 +117,7 @@ async function toggleReaction(content: ReactionContent): Promise<void> {
   const snapshot = [...reactions.value];
   if (hasReacted) {
     reactions.value = reactions.value.filter(
-      (r) => !(r.content === content && r.user.username === currentUsername.value),
+      (r) => !(r.content === content && (r?.user?.username ?? '') === currentUsername.value),
     );
   } else {
     reactions.value = [
@@ -165,6 +174,12 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', onPickerClickOutside);
 });
+
+// projectId / commentId 变化时重新加载（切换仓库或 PR 时组件可能被复用）
+watch(
+  () => [props.projectId, props.commentId],
+  () => { void loadReactions(); },
+);
 </script>
 
 <template>

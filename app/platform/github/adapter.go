@@ -1250,9 +1250,11 @@ func validateGitHubReviewEvent(event string) error {
 }
 
 // ListPullReviews 列评审（GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews）
+//
+// per_page=100 确保不因 GitHub 默认分页（30 条/页）丢失评审记录。
 func (a *GitHubAdapter) ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewDTO, error) {
 	var raw []githubReviewRaw
-	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews?per_page=100", owner, repo, index)
 	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
 		return nil, err
 	}

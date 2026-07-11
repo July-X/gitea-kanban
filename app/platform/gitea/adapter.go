@@ -723,6 +723,12 @@ func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, 
 	}
 	out := make([]platform.CommentDTO, 0, len(raw))
 	for _, c := range raw {
+		// 过滤非普通评论：Gitea 评审提交时自动创建 type=21 (CommentTypeReview) 的评论，
+		// 其 body 与 review.body 重复。对齐 Gitea web 时间轴：评审总结文由评审事件卡携带，
+		// 不在评论列表中重复出现。其它系统事件类型（rebase/commit/title change 等）也不渲染。
+		if c.Type != 0 {
+			continue
+		}
 		out = append(out, giteaCommentToDTO(c))
 	}
 	return out, nil
@@ -786,17 +792,25 @@ func (a *GiteaAdapter) DeletePullComment(ctx context.Context, hostURL, username,
 // Gitea 字段：reaction 字段名（不是 content）; DELETE 必须带 body: {content: "..."}
 
 // giteaReactionRaw Gitea reactions 端点原始响应
+//
+// ⚠️ Gitea 1.26.2 实际返回的 JSON 字段是 `content`（不是 `reaction`），
+// 且不包含 `id` 字段。旧版代码误用 `reaction` 作为 JSON key，导致
+// Reaction.Content 始终为空字符串 → 前端 groupedReactions 匹配不到
+// 任何表情 → ReactionBar 不显示任何表情。
+//
+// 实测 Gitea 1.26.2 响应格式：
+//   [{"user":{...},"content":"rocket","created_at":"..."}]
 type giteaReactionRaw struct {
 	ID       int64         `json:"id"`
 	User     *giteaUserRaw `json:"user"`
-	Reaction string        `json:"reaction"` // Gitea 字段名（非 content）
+	Content  string        `json:"content"`  // Gitea 1.26.2 实际字段名
 }
 
 // giteaReactionToDTO 映射为平台中性 ReactionDTO
 func giteaReactionToDTO(r giteaReactionRaw) platform.ReactionDTO {
 	out := platform.ReactionDTO{
 		ID:      r.ID,
-		Content: r.Reaction,
+		Content: r.Content,
 	}
 	if r.User != nil {
 		out.User = &platform.PullUserDTO{
@@ -859,13 +873,17 @@ func (a *GiteaAdapter) RemovePullCommentReaction(ctx context.Context, hostURL, u
 // event 值: "approve" / "request_changes" / "comment"（小写，与前端统一）
 
 // giteaReviewRaw Gitea /pulls/{index}/reviews 原始响应
+//
+// ⚠️ Gitea 1.26.2 实际返回的 JSON 日期字段名是 `submitted_at`（不是 `submitted`）。
+// 旧版代码用 `submitted` 导致 SubmittedAt 始终为空字符串 →
+// timelineItems 排序时 new Date('') = Invalid Date → 评审卡片排在错误位置。
 type giteaReviewRaw struct {
-	ID        int64         `json:"id"`
-	State     string        `json:"state"`
-	Body      string        `json:"body"`
-	User      *giteaUserRaw `json:"user"`
-	CommitID  string        `json:"commit_id"`
-	Submitted string        `json:"submitted"`
+	ID         int64         `json:"id"`
+	State      string        `json:"state"`
+	Body       string        `json:"body"`
+	User       *giteaUserRaw `json:"user"`
+	CommitID   string        `json:"commit_id"`
+	SubmittedAt string       `json:"submitted_at"` // Gitea 1.26.2 实际字段名
 }
 
 // giteaReviewToDTO 映射为平台中性 PullReviewDTO
@@ -879,7 +897,7 @@ func giteaReviewToDTO(r giteaReviewRaw) platform.PullReviewDTO {
 		State:       platform.NormalizeReviewState(r.State),
 		Body:        r.Body,
 		CommitID:    r.CommitID,
-		SubmittedAt: r.Submitted,
+		SubmittedAt: r.SubmittedAt,
 	}
 	if r.User != nil {
 		out.Author = &platform.PullUserDTO{
@@ -908,9 +926,12 @@ func giteaReviewCommentFromOpts(opts platform.CreateReviewCommentOpts) map[strin
 }
 
 // ListPullReviews 列评审列表（GET /repos/{owner}/{repo}/pulls/{index}/reviews）
+//
+// limit=50 确保不因 Gitea 默认分页（30 条/页）丢失评审记录。
+// 单 PR 评审数通常 < 20，50 足够覆盖；超大批量场景待后续按需分页。
 func (a *GiteaAdapter) ListPullReviews(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.PullReviewDTO, error) {
 	var raw []giteaReviewRaw
-	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, index)
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews?limit=50", owner, repo, index)
 	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
 		return nil, err
 	}
@@ -955,15 +976,27 @@ func (a *GiteaAdapter) CreatePullReview(ctx context.Context, hostURL, username, 
 // giteaCommentRaw Gitea /repos/.../issues/{index}/comments 原始响应
 //
 // swagger: https://try.gitea.io/swagger#/issueissueComment
-// 字段只取必要项：id / body / user / created / updated。
+// 字段只取必要项：id / body / user / created_at / updated_at / type。
+//
+// ⚠️ Gitea 1.26.2 实际返回的 JSON 日期字段名是 `created_at` / `updated_at`
+// （不是 `created` / `updated`）。旧版代码用错误字段名导致日期始终为空 →
+// timelineItems 排序时 new Date('') = Invalid Date → 评论顺序乱。
+//
+// type 字段：Gitea CommentType 常量（API 不返回此字段，默认 0）
+//
+//	0  = CommentTypePlain（普通评论）
+//	21 = CommentTypeReview（评审总结文，提交 review 时自动创建）
+//	22 = CommentTypeReviewComment（行内代码评审评论）
+//	其它类型：系统事件（rebase / commit / title change 等），不渲染
 //
 // 复用上面已定义的 giteaUserRaw（line 338），不在这里重复定义。
 type giteaCommentRaw struct {
-	ID      int64         `json:"id"`
-	Body    string        `json:"body"`
-	User    *giteaUserRaw `json:"user"`
-	Created string        `json:"created"`
-	Updated string        `json:"updated"`
+	ID        int64         `json:"id"`
+	Body      string        `json:"body"`
+	User      *giteaUserRaw `json:"user"`
+	CreatedAt string        `json:"created_at"` // Gitea 1.26.2 实际字段名
+	UpdatedAt string        `json:"updated_at"` // Gitea 1.26.2 实际字段名
+	Type      int           `json:"type"`
 }
 
 // giteaCommentToDTO 映射为平台中性 CommentDTO
@@ -971,8 +1004,8 @@ func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
 	out := platform.CommentDTO{
 		ID:        c.ID,
 		Body:      c.Body,
-		CreatedAt: c.Created,
-		UpdatedAt: c.Updated,
+	CreatedAt: c.CreatedAt,
+	UpdatedAt: c.UpdatedAt,
 	}
 	if c.User != nil {
 		out.Author = &platform.PullUserDTO{

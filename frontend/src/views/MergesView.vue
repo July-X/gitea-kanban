@@ -86,6 +86,33 @@ const markdownBaseUrl = computed<string | undefined>(() => {
   return url ? url.replace(/\/+$/, '') : undefined;
 });
 
+/**
+ * 标签颜色样式：对齐 Gitea web 标签渲染
+ *
+ * Gitea / GitHub API 返回 color 为 6 位 hex 字符串（不含 #）。
+ * 防御性处理：如果 color 已带 # 或为空，做归一化避免 ## 前缀或空值。
+ *
+ * 对齐 Gitea web 的 label 渲染：文字色根据背景亮度自动选择黑/白，
+ * 背景色用 color + '22'（13% 透明度）做柔和底色。
+ */
+function labelStyle(color: string | undefined): Record<string, string> {
+  const hex = (color ?? '').replace(/^#/, '');
+  if (!hex || hex.length < 6) {
+    return { '--label-color': '#888', '--label-bg': '#88888822' };
+  }
+  // 计算亮度：Gitea web 用 Y = 0.299R + 0.587G + 0.114B
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  const textColor = brightness > 140 ? '#1a1a1a' : '#fff';
+  return {
+    '--label-color': textColor,
+    '--label-bg': `#${hex}22`,
+    '--label-border': `#${hex}`,
+  };
+}
+
 /** 当前选中的合并请求（左右布局：左列表点击 → 右侧详情，null = 未选中显示空态） */
 const selectedPR = ref<PullDto | null>(null);
 
@@ -740,15 +767,12 @@ async function loadReviews(p: PullDto): Promise<void> {
     });
     const reviews = (list ?? []) as PullReviewDto[];
     reviewPanels.value.set(p.index, reviews);
-    // v0.5.0 bugfix: 同步写入 store 的 reviewPanels,让 pull.timelineItems computed 能拿到数据
-    // (timelineItems 把 review 事件 + 普通评论合并,按时间排序用于对话 Tab 渲染)
-    //
-    // v0.7.0: 走 setReviewsForIndex action 内部 triggerRef。ref(new Map()).set
-    // 不触发响应，triggerRef 只能 ref-unwrapped;直接 set + triggerRef 走 store
-    // 端包好的 action 避免 view 层依赖 vue 内部 triggerRef API。
+    // 同步写入 store 的 reviewPanels,让 pull.timelineItems computed 能拿到数据。
+    // setReviewsForIndex 内部用新 Map 替换 ref.value 确保 100% 触发响应式重算。
     pull.setReviewsForIndex(p, reviews);
   } catch {
-    // 不阻断主流程
+    // 评审加载失败不阻断主流程（评论/提交/文件等 Tab 仍可用）
+    // 评审 Tab 会显示空态而不是报错，避免打断用户阅读评论
   }
 }
 
@@ -920,14 +944,53 @@ function insertMarkdown(idx: number, type: string): void {
 }
 
 /**
- * 剪贴板贴图：监听 paste 事件，把图片上传到 Gitea/GitHub 拿到真 url 后插入 markdown
+ * 处理图片文件上传（paste 和 drop 共用）
  *
- * v0.7.0 修复：旧版把 File 转 data URI 嵌进 markdown，Gitea 不存图片，渲染时只看到
- * "贴图"占位符。修复后走 App.UploadPullAttachment 上传到 issue attachments，
- * 拿到 browserDownloadUrl 插到 markdown `![](url)` 让 Gitea 渲染。
+ * 对齐 Gitea 官方 handleUploadFiles（EditorUpload.ts）：
+ *   插入 [name](uploading ...) 占位符 → 上传 → 替换为 ![name](/attachments/{uuid})
+ */
+async function handleImageFile(idx: number, file: File): Promise<void> {
+  const altText = file.name.replace(/\.[^.]+$/, '') || '贴图';
+  const placeholder = `[${altText}](uploading ...)`;
+  const draftBefore = getDraft(idx);
+  setDraft(idx, draftBefore + placeholder + '\n');
+  try {
+    const url = await uploadPastedImage(file);
+    const md = `![${altText}](${url})\n`;
+    const draftAfter = getDraft(idx);
+    setDraft(idx, draftAfter.replace(placeholder + '\n', md));
+    showToast({ type: 'success', message: '图片已上传并插入' });
+  } catch (err) {
+    const draftAfter = getDraft(idx);
+    setDraft(idx, draftAfter.replace(placeholder + '\n', ''));
+    // eslint-disable-next-line no-console
+    console.error('[handleImageFile] upload failed:', err);
+    const e2 = err as { messageText?: string; message?: string; cause?: unknown };
+    const detail = e2.messageText || e2.message || (e2.cause ? String(e2.cause) : '未知错误');
+    showToast({ type: 'error', message: `图片上传失败：${detail}`, persistent: true });
+  }
+}
+
+/**
+ * 剪贴板贴图：对齐 Gitea 官方做法
  *
- * 失败降级：如果服务端不支持附件上传（GitHub 老仓库 / Gitea 1.20 之前没 attachments unit），
- * 回退到 data URI，至少不让用户失去图片。
+ * Gitea 官方流程（web_src/js/features/comp/EditorUpload.ts + dropzone.ts）：
+ *  1. 监听 paste 事件，提取 image 类型的 File
+ *  2. 通过 Dropzone 上传到 issue attachments 端点
+ *  3. 拿到 uuid 后生成 markdown：![filename](/attachments/{uuid})
+ *  4. 上传失败 → Dropzone error toast，不降级 data URI
+ *
+ * 我们的流程（对齐 Gitea）：
+ *  1. 监听 paste 事件，提取 image 类型的 File
+ *  2. 走 App.UploadPullAttachment → Gitea API POST /repos/.../issues/{index}/assets
+ *  3. 拿到 uuid 后生成 markdown：![filename](/attachments/{uuid})
+ *  4. 上传失败 → toast 报错，不降级 data URI
+ *
+ * 关键：用 /attachments/{uuid} 相对路径（Gitea 官方格式），不用 browser_download_url。
+ * Gitea markdown 渲染器会把 /attachments/{uuid} 解析为正确的附件 URL。
+ *
+ * 不降级 data URI 的原因：data URI 只有我们的 app 能渲染（DOMPurify 允许），
+ * Gitea web 端不渲染 data URI → 用户看到「贴图」占位符 → 图片丢失。
  */
 async function onCommentPaste(idx: number, e: ClipboardEvent): Promise<void> {
   const items = e.clipboardData?.items;
@@ -937,47 +1000,34 @@ async function onCommentPaste(idx: number, e: ClipboardEvent): Promise<void> {
       e.preventDefault();
       const file = item.getAsFile();
       if (!file) continue;
-      try {
-        const url = await uploadPastedImage(file);
-        const md = `![贴图](${url})\n`;
-        const draft = getDraft(idx);
-        setDraft(idx, draft + md);
-        showToast({ type: 'success', message: '图片已上传并插入' });
-      } catch (err) {
-        // v0.7.0 修复：catch 处理 fallback chain。Error.message（plain Error）、
-        // messageText（UserFacingError）、cause 详情都要试试，不要只读 messageText。
-        //
-        // 之前只读 e2.messageText 会有“未知错误”货柜：plain Error 走 uploadPastedImage
-        // 内部的 `throw new Error('未选中项目')` 这种路径，没被 ipc-client.normalizeError
-        // 包装，messageText undefined，fallback 到“未知错误”迷失用户。
-        //
-        // 回归证据：用户 PR #74 粘图 23:52:40 toast “未知错误”，无法排查是哪个 throw。
-        // eslint-disable-next-line no-console
-        console.error('[onCommentPaste] upload failed:', err);
-        const e2 = err as { messageText?: string; message?: string; cause?: unknown };
-        const detail = e2.messageText || e2.message || (e2.cause ? String(e2.cause) : '未知错误');
-        // 上传失败：降级 data URI（用户至少能看见图片，不丢失）
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUri = reader.result as string;
-          const md = `![贴图](${dataUri})\n`;
-          const draft = getDraft(idx);
-          setDraft(idx, draft + md);
-          showToast({
-            type: 'warn',
-            message: `图片上传失败，已降级为本地引用: ${detail}`,
-            persistent: true,
-          });
-        };
-        reader.readAsDataURL(file);
-      }
+      await handleImageFile(idx, file);
       return;
     }
   }
 }
 
 /**
- * 把粘贴的 File 上传到当前 PR 的 issue attachments，返回可渲染的 url
+ * 拖拽上传图片：对齐 Gitea 官方 initTextareaEvents 的 drop 事件处理
+ */
+async function onCommentDrop(idx: number, e: DragEvent): Promise<void> {
+  if (!e.dataTransfer?.files.length) return;
+  for (const file of e.dataTransfer.files) {
+    if (file.type.startsWith('image/')) {
+      e.preventDefault();
+      await handleImageFile(idx, file);
+    }
+  }
+}
+
+/**
+ * 把粘贴的 File 上传到当前 PR 的 issue attachments，返回 /attachments/{uuid} 格式 URL
+ *
+ * 对齐 Gitea 官方 dropzone.ts:generateMarkdownLinkForAttachment：
+ *   用 /attachments/{uuid} 相对路径，不用 browser_download_url 完整 URL。
+ *
+ * 原因：browser_download_url 依赖 Gitea 的 ROOT_URL 配置，如果配置不对
+ * （反向代理 / 子路径部署），URL 会指向错误地址。/attachments/{uuid} 由
+ * Gitea markdown 渲染器解析为正确的附件 URL，更健壮。
  *
  * Wails 2.x TS 类型对 binary 字段在 binding 上支持差，前端转 base64 字符串传过去，
  * Go 端解码还原成 []byte 再走 multipart。
@@ -997,21 +1047,22 @@ async function uploadPastedImage(file: File): Promise<string> {
   if (!base64) {
     throw new Error('文件为空');
   }
-  const selectedPR = pull.currentSelectedItem;
-  if (!selectedPR) {
+  const currentPR = selectedPR.value;
+  if (!currentPR) {
     throw new Error('未选中合并请求');
   }
   const fileName = file.name || `pasted-${Date.now()}.${(file.type.split('/')[1] || 'png')}`;
   const result = await pullsUploadAttachment({
     projectId: String(activeProjectId.value),
-    index: selectedPR.index,
+    index: currentPR.index,
     fileName,
     fileBase64: base64,
   });
-  if (!result || !result.browserDownloadUrl) {
-    throw new Error('服务端未返回附件 URL');
+  if (!result || !result.uuid) {
+    throw new Error('服务端未返回附件 UUID');
   }
-  return result.browserDownloadUrl;
+  // 对齐 Gitea 官方：用 /attachments/{uuid} 相对路径
+  return `/attachments/${result.uuid}`;
 }
 
 /**
@@ -1604,15 +1655,15 @@ function formatRelative(iso: string | undefined): string {
                 v-for="label in (selectedPR.labels ?? [])"
                 :key="label.id"
                 class="pr-detail__label"
-                :style="{ '--label-color': '#' + label.color, '--label-bg': '#' + label.color + '22' }"
+                :style="labelStyle(label.color)"
               >{{ label.name }}</span>
             </dd>
           </div>
           <div class="pr-detail-meta__item" v-if="selectedPR.milestone">
             <dt>里程碑</dt><dd>{{ selectedPR.milestone.title }}</dd>
           </div>
-          <div class="pr-detail-meta__item" v-if="selectedPR.assignee">
-            <dt>指派人</dt><dd>{{ selectedPR.assignee.username }}</dd>
+          <div class="pr-detail-meta__item" v-if="(selectedPR.assignees ?? []).length > 0">
+            <dt>指派人</dt><dd>{{ (selectedPR.assignees ?? []).map(a => a.username).join('、') }}</dd>
           </div>
           <button
             type="button"
@@ -1898,7 +1949,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           </template>
                         </div>
                         <ReactionBar
-                          :project-id="activeProjectId"
+                          :project-id="activeProjectId ?? ''"
                           :comment-id="item.id"
                           :editable="selectedPR.state === 'open'"
                         />
@@ -1932,6 +1983,8 @@ git checkout {{ selectedPR.head.ref }}</pre>
                   @input="onCommentInput(selectedPR, $event)"
                   @keydown="onCommentKeydown(selectedPR, $event)"
                   @paste="void onCommentPaste(selectedPR.index, $event)"
+                  @drop="void onCommentDrop(selectedPR.index, $event)"
+                  @dragover.prevent
                   :placeholder="'发条评论给 #' + selectedPR.index + '\n@ 提及成员，Enter 发送'"
                   :disabled="getPanel(selectedPR.index).posting"
                   rows="3"
@@ -4838,6 +4891,8 @@ git checkout {{ selectedPR.head.ref }}</pre>
   margin-right: 2px;
   color: var(--label-color);
   background: var(--label-bg);
+  border: 1px solid var(--label-border, transparent);
+  font-weight: 500;
 }
 .pr-detail__edit-attrs {
   display: inline-flex;
