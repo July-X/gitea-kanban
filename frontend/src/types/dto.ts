@@ -400,6 +400,12 @@ export interface IssueCommentDto {
   author: IssueAuthorDto;
   createdAt: string;
   updatedAt: string;
+  // v0.7.x: 评论类型 (Gitea CommentType 枚举值)
+  //   0=COMMENT 普通评论 | 21=REVIEW 评审总结文 | 22=REVIEW 评审事件
+  //   1=REOPEN | 2=CLOSE | 4=COMMIT_REF | 7=LABEL | 8=MILESTONE | 9=ASSIGNEE
+  //   10=TITLE_CHANGE | 27=REVIEW_REQUEST | 28=MERGE | 29=PUSH 等
+  // GitHub 后端所有评论 type=0 (普通评论, GitHub 不返回 system events)
+  type: number;
 }
 
 

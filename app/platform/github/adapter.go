@@ -1294,6 +1294,9 @@ func (a *GitHubAdapter) CreatePullReview(ctx context.Context, hostURL, username,
 // githubCommentRaw GitHub /repos/.../issues/{index}/comments 原始响应
 //
 // 字段与上面 githubPullRaw 里的 user 部分对齐，复用不上不是问题但为可读性独立定义。
+//
+// v0.7.x: GitHub issues/comments 端点只返回普通评论（不返回 system events / review bodies
+// 等），所以 raw 结构不带 type 字段。githubCommentToDTO 硬编码 type=0，标记为普通评论。
 type githubCommentRaw struct {
 	ID        int64          `json:"id"`
 	Body      string         `json:"body"`
@@ -1309,6 +1312,7 @@ func githubCommentToDTO(c githubCommentRaw) platform.CommentDTO {
 		Body:      c.Body,
 		CreatedAt: c.CreatedAt,
 		UpdatedAt: c.UpdatedAt,
+		Type:      0, // v0.7.x: GitHub issues/comments 端点只返回普通评论, type=0
 	}
 	if c.User != nil {
 		out.Author = &platform.PullUserDTO{

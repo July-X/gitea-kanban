@@ -1767,6 +1767,7 @@ export namespace platform {
 	    createdAt: string;
 	    updatedAt?: string;
 	    userId?: number;
+	    type: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CommentDTO(source);
@@ -1780,6 +1781,7 @@ export namespace platform {
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	        this.userId = source["userId"];
+	        this.type = source["type"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

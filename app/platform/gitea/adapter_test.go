@@ -251,11 +251,15 @@ func TestGraphResultToDTO_PropagatesIsCommitted(t *testing.T) {
 //
 // 设计原则：复用现有的 httptest mock server 模式。
 
-// TestGiteaAdapter_ListPullComments 验证路径 + 字段映射 + type 过滤
+// TestGiteaAdapter_ListPullComments 验证路径 + 字段映射 + 不再过滤 type
 //
-// v0.7.x 修复：Gitea 评审提交时自动创建 type=21 (CommentTypeReview) 的评论，
-// 其 body 与 review.body 重复。ListPullComments 过滤掉非 type=0 的评论，
-// 对齐 Gitea web 时间轴：评审总结文由评审事件卡携带，不在评论列表中重复。
+// v0.7.x 重构：对齐 Gitea web 行为——返回所有 type 的评论（包括 type=21 review body、
+// type=22 review event、type=1/2 REOPEN/CLOSE、type=28 MERGE 等）。前端按 type 分类渲染。
+//
+// 旧 db84089 版本在服务端过滤 type != 0,导致 Gitea web 显示的 review body
+// 和评审事件都丢失, 与 Gitea web 行为不一致。回归证据:用户 PR #74 反馈
+// "提交请求修改后对话区只有评审事件卡, 没有 review body 内容"——根本原因
+// 是 db84089 错误过滤 type=21。
 func TestGiteaAdapter_ListPullComments(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/alice/dolphin/issues/42/comments" {
@@ -270,20 +274,28 @@ func TestGiteaAdapter_ListPullComments(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode([]map[string]interface{}{
 			{
-				"id":      100,
-				"body":    "looks good to me!",
-				"user":    map[string]string{"login": "bob", "avatar_url": "https://gitea/bob.png"},
-"created_at": "2024-06-01T10:00:00Z",
-			"updated_at": "2024-06-01T10:00:00Z",
-			"type":    0, // CommentTypePlain
+				"id":         100,
+				"body":       "looks good to me!",
+				"user":       map[string]string{"login": "bob", "avatar_url": "https://gitea/bob.png"},
+				"created_at": "2024-06-01T10:00:00Z",
+				"updated_at": "2024-06-01T10:00:00Z",
+				"type":       0, // CommentTypePlain
 			},
 			{
-				"id":      101,
-				"body":    "review body should be filtered",
-				"user":    map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
-"created_at": "2024-06-01T11:00:00Z",
-			"updated_at": "2024-06-01T11:00:00Z",
-			"type":    21, // CommentTypeReview — 应被过滤
+				"id":         101,
+				"body":       "review body content (type=21 评审总结文)",
+				"user":       map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+				"created_at": "2024-06-01T11:00:00Z",
+				"updated_at": "2024-06-01T11:00:00Z",
+				"type":       21, // CommentTypeReview 评审总结文 (v0.7.x 不再过滤, 前端走普通评论卡渲染)
+			},
+			{
+				"id":         102,
+				"body":       "reopened this pull request",
+				"user":       map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+				"created_at": "2024-06-01T12:00:00Z",
+				"updated_at": "2024-06-01T12:00:00Z",
+				"type":       1, // CommentTypeReopen 系统事件
 			},
 		})
 	}))
@@ -294,12 +306,25 @@ func TestGiteaAdapter_ListPullComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPullComments failed: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("len(items) = %d, want 1 (type=21 review comment should be filtered)", len(items))
+	// v0.7.x: 应该返回所有 3 条评论, 不过滤 type
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3 (v0.7.x 不过滤 type, 返回所有评论)", len(items))
 	}
-	if items[0].ID != 100 {
-		t.Errorf("ID = %d, want 100", items[0].ID)
+	// 验证 type 字段正确透传
+	typeMap := map[int64]int{}
+	for _, item := range items {
+		typeMap[item.ID] = item.Type
 	}
+	if typeMap[100] != 0 {
+		t.Errorf("item 100 type = %d, want 0 (COMMENT)", typeMap[100])
+	}
+	if typeMap[101] != 21 {
+		t.Errorf("item 101 type = %d, want 21 (REVIEW)", typeMap[101])
+	}
+	if typeMap[102] != 1 {
+		t.Errorf("item 102 type = %d, want 1 (REOPEN)", typeMap[102])
+	}
+	// 验证普通评论字段映射
 	if items[0].Body != "looks good to me!" {
 		t.Errorf("Body = %q", items[0].Body)
 	}
@@ -329,9 +354,9 @@ func TestGiteaAdapter_CreatePullComment(t *testing.T) {
 			t.Fatalf("decode body: %v", err)
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"id":      200,
-			"body":    capturedBody["body"],
-			"user":    map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+			"id":         200,
+			"body":       capturedBody["body"],
+			"user":       map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
 			"created_at": "2024-06-02T12:00:00Z",
 		})
 	}))
@@ -398,9 +423,9 @@ func TestGiteaAdapter_UpdatePullComment(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"id":      100,
-			"body":    capturedBody["body"],
-			"user":    map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+			"id":         100,
+			"body":       capturedBody["body"],
+			"user":       map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
 			"created_at": "2024-06-01T10:00:00Z",
 			"updated_at": "2024-06-02T15:30:00Z",
 		})
@@ -520,11 +545,11 @@ func TestGiteaAdapter_ListPullCommentReactions(t *testing.T) {
 		json.NewEncoder(w).Encode([]map[string]interface{}{
 			{
 				"content": "+1",
-				"user":   map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+				"user":    map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
 			},
 			{
 				"content": "heart",
-				"user":   map[string]string{"login": "bob", "avatar_url": "https://gitea/bob.png"},
+				"user":    map[string]string{"login": "bob", "avatar_url": "https://gitea/bob.png"},
 			},
 		})
 	}))
@@ -561,7 +586,7 @@ func TestGiteaAdapter_AddPullCommentReaction(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"content": capturedBody["content"],
-			"user":   map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+			"user":    map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
 		})
 	}))
 	defer server.Close()
@@ -632,13 +657,13 @@ func TestGiteaAdapter_ListPullReviews(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode([]map[string]interface{}{
 			{
-				"id":        50,
-				"state":     "approved",
-				"body":      "LGTM!",
-				"user":      map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
-				"commit_id": "abc123",
-"submitted_at": "2024-06-05T10:00:00Z",
-		},
+				"id":           50,
+				"state":        "approved",
+				"body":         "LGTM!",
+				"user":         map[string]string{"login": "alice", "avatar_url": "https://gitea/alice.png"},
+				"commit_id":    "abc123",
+				"submitted_at": "2024-06-05T10:00:00Z",
+			},
 		})
 	}))
 	defer server.Close()
@@ -675,11 +700,11 @@ func TestGiteaAdapter_CreatePullReview_Approve(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"id":        60,
-			"state":     "approved",
-			"body":      "Looks good!",
-			"user":      map[string]string{"login": "alice"},
-			"commit_id": "abc123",
+			"id":           60,
+			"state":        "approved",
+			"body":         "Looks good!",
+			"user":         map[string]string{"login": "alice"},
+			"commit_id":    "abc123",
 			"submitted_at": "2024-06-05T12:00:00Z",
 		})
 	}))

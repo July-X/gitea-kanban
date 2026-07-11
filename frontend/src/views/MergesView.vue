@@ -861,6 +861,69 @@ function reviewEventLabel(event: ReviewEvent): string {
   }
 }
 
+/**
+ * 系统事件标签（v0.7.x 对齐 Gitea web）
+ * 对应 Gitea CommentType 枚举（除 0=COMMENT / 21=REVIEW body / 22=REVIEW event 之外）。
+ * 简体中文文案 + 零术语, 让 PM/设计师/市场/运营也能看懂。
+ */
+function systemEventLabel(type: number): string {
+  switch (type) {
+    case 1:  return '重新开启';
+    case 2:  return '关闭';
+    case 3:
+    case 5:
+    case 6:  return '引用了其它议题';
+    case 4:  return '引用了提交';
+    case 7:  return '修改了标签';
+    case 8:  return '修改了里程碑';
+    case 9:  return '修改了指派人';
+    case 10: return '修改了标题';
+    case 11: return '删除了分支';
+    case 16: return '设置了截止时间';
+    case 17: return '修改了截止时间';
+    case 18: return '移除了截止时间';
+    case 23: return '锁定了议题';
+    case 24: return '解锁了议题';
+    case 25: return '修改了目标分支';
+    case 27: return '请求评审';
+    case 28: return '合并了合并请求';
+    case 29: return '推送了新提交';
+    case 30: return '移动了项目';
+    case 32: return '驳回了评审';
+    case 36: return '置顶了议题';
+    case 37: return '取消了置顶';
+    default: return '事件';
+  }
+}
+
+/** 系统事件图标（跟 Gitea octicon 对应, 简化 emoji 替代） */
+function systemEventIcon(type: number): string {
+  switch (type) {
+    case 1:  return '↻';
+    case 2:  return '✕';
+    case 4:  return '●';
+    case 7:  return '⚐';
+    case 8:  return '◐';
+    case 9:  return '☻';
+    case 10: return '✎';
+    case 11: return '⌫';
+    case 16:
+    case 17:
+    case 18: return '⏰';
+    case 23:
+    case 24: return '🔒';
+    case 25: return '⇄';
+    case 27: return '◉';
+    case 28: return '⤓';
+    case 29: return '⇧';
+    case 30: return '◫';
+    case 32: return '⊘';
+    case 36:
+    case 37: return '◆';
+    default: return '•';
+  }
+}
+
 /** @ 提及下拉是否打开 */
 function isMentionOpen(idx: number): boolean {
   const s = mentionState.value.get(idx);
@@ -1896,9 +1959,17 @@ git checkout {{ selectedPR.head.ref }}</pre>
               </div>
               <ul v-else class="pr-detail__comment-list">
                 <template v-for="(item, ti) in pull.timelineItems.get(selectedPR.index) ?? []" :key="`${item.source}-${item.id}`">
-                  <!-- 评审事件系统卡片 -->
+                  <!--
+                    v0.7.x 重构: 对齐 Gitea web 行为 (templates/repo/issue/view_content/comments.tmpl)
+                    - 评审事件卡 source: 'review_event' (从 ListPullReviews 拿 state, 不显示 body)
+                    - 普通评论 + 评审 body 卡 source: 'comment' (type=0/21, 包含 review body)
+                    - 系统事件卡 source: 'system_event' (type=1/2/4/7/8/9/10/27/28/29)
+                    - 评审 event 紧跟 comment (review body) 渲染, 视觉上聚合
+                  -->
+
+                  <!-- 评审事件系统卡片 (state: approved/changes_requested/commented) -->
                   <li
-                    v-if="item.isReviewEvent"
+                    v-if="item.source === 'review_event'"
                     class="pr-detail__comment pr-detail__comment--review-event"
                     :class="`pr-detail__comment--review-${item.state}`"
                   >
@@ -1912,13 +1983,16 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         <span class="pr-detail__review-state-badge" :class="`pr-detail__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
                       </div>
-                      <div v-if="item.body" class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
+                      <!-- v0.7.x: 评审事件卡不显示 body
+                           (Gitea web 实际行为: body 由 type=21 评论作为普通评论卡渲染)
+                           不渲染 body 避免跟下方紧跟的 review body 卡重复显示 -->
                       <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author.username }}</div>
                     </div>
                   </li>
-                  <!-- 普通评论卡片 -->
+
+                  <!-- 普通评论卡片 (含 type=21 评审 body) -->
                   <li
-                    v-else
+                    v-else-if="item.source === 'comment'"
                     class="pr-detail__comment"
                     :class="{ 'pr-detail__comment--self': currentUsername && item.author.username === currentUsername }"
                   >
@@ -1990,6 +2064,28 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           :editable="selectedPR.state === 'open'"
                         />
                       </template>
+                    </div>
+                  </li>
+
+                  <!-- 系统事件卡 (type=1/2/4/7/8/9/10/27/28/29)
+                       对齐 Gitea web comments.tmpl 的非 COMMENT/REVIEW 分支,
+                       简单 badge + author + locale 文案 -->
+                  <li
+                    v-else-if="item.source === 'system_event'"
+                    class="pr-detail__comment pr-detail__comment--system-event"
+                    :class="`pr-detail__comment--system-type-${item.type}`"
+                  >
+                    <div class="pr-detail__comment-side">
+                      <div class="pr-detail__comment-avatar pr-detail__comment-avatar--system" :title="systemEventLabel(item.type)">
+                        {{ systemEventIcon(item.type) }}
+                      </div>
+                    </div>
+                    <div class="pr-detail__comment-bubble pr-detail__comment-bubble--event">
+                      <div class="pr-detail__comment-meta">
+                        <span class="pr-detail__system-event-badge">{{ systemEventLabel(item.type) }}</span>
+                        <span class="pr-detail__comment-time" :title="formatDate(item.createdAt)">{{ formatRelative(item.createdAt) }}</span>
+                      </div>
+                      <div class="pr-detail__comment-event-author">{{ item.author?.username || '匿名' }}</div>
                     </div>
                   </li>
                 </template>
@@ -5289,6 +5385,72 @@ git checkout {{ selectedPR.head.ref }}</pre>
 .pr-detail__review-body { color: var(--color-text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pr-detail__review-time { color: var(--color-text-muted); font-size: var(--font-xs); flex-shrink: 0; }
 .pr-detail__empty-hint { color: var(--color-text-muted); font-size: var(--font-sm); padding: var(--space-3); }
+
+/* v0.7.x: 系统事件卡 (对齐 Gitea web timeline-item event) */
+.pr-detail__comment--system-event {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  margin: var(--space-1) 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  border-left: 2px solid var(--color-divider);
+}
+.pr-detail__comment--system-event .pr-detail__comment-side {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pr-detail__comment-avatar--system {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.pr-detail__comment-bubble--event {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.pr-detail__system-event-badge {
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+/* v0.7.x: 评审事件卡收紧样式
+   之前 review event 卡有 body 渲染, 高度大; 现在 body 移到独立 comment 卡,
+   event 卡高度变小, 跟 Gitea web 一样紧凑 */
+.pr-detail__comment--review-event .pr-detail__comment-bubble--event {
+  background: transparent;
+  border: 1px dashed var(--color-divider);
+  padding: var(--space-2) var(--space-3);
+}
+.pr-detail__comment--review-approved .pr-detail__comment-bubble--event {
+  border-color: var(--color-success);
+}
+.pr-detail__comment--review-changes_requested .pr-detail__comment-bubble--event {
+  border-color: var(--color-warning);
+}
 
 /* 文件变动 Tab */
 .pr-detail__files {

@@ -558,6 +558,30 @@ type CommentDTO struct {
 	CreatedAt string       `json:"createdAt"`
 	UpdatedAt string       `json:"updatedAt,omitempty"`
 	UserID    int64        `json:"userId,omitempty"`
+
+	// Type 评论类型，对齐 Gitea CommentType 枚举值（v0.7.x）：
+	//   0 = COMMENT 普通评论
+	//   1 = REOPEN 重新开启
+	//   2 = CLOSE 关闭
+	//   3,5,6 = ISSUE_REF 引用其它 issue/PR
+	//   4 = COMMIT_REF 引用 commit
+	//   7 = COMMENT_LABEL 标签变更
+	//   8 = MILESTONE_CHANGE 里程碑变更
+	//   9 = ASSIGNEES_CHANGE 指派人变更
+	//   10 = TITLE_CHANGE 标题变更
+	//   11 = DELETE_BRANCH 删除分支
+	//   16-20 = 时间/deadline/dependency
+	//   21 = CODE 行内代码评论
+	//   22 = REVIEW 评审 (event 在 reviews 端点, body 落在该 comment 记录)
+	//   23/24 = LOCK/UNLOCK
+	//   25 = TARGET_BRANCH_CHANGED
+	//   27 = REVIEW_REQUEST 请求评审
+	//   28 = MERGE_PULL_REQUEST 合并
+	//   29 = PULL_PUSH_EVENT 推送
+	//   30 = PROJECT_CHANGED 项目变更
+	//   32 = DISMISSED_REVIEW
+	//   GitHub 后端所有评论 type=0 (普通评论), GitHub 不返回事件评论到 issues/comments 端点
+	Type int `json:"type"`
 }
 
 // ReactionDTO 单条表情反应（v0.5.0 M2）

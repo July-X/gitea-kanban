@@ -715,6 +715,17 @@ func (a *GiteaAdapter) UpdatePullMilestone(ctx context.Context, hostURL, usernam
 // （与 GitHub 习惯一致 —— GitHub 上 PR 就是 issue）。
 
 // ListPullComments 列合并请求评论（GET /repos/{owner}/{repo}/issues/{index}/comments）
+//
+// v0.7.x 重构：对齐 Gitea web 行为——返回所有 type 的评论（含 type=21 review body、
+// type=22 review event record、type=1/2 REOPEN/CLOSE、type=28 MERGE、type=4 COMMIT_REF 等）。
+//
+// Gitea web 在 `templates/repo/issue/view_content/comments.tmpl` 端遍历所有 comments
+// 并按 type 渲染不同卡片（普通评论 / 评审事件 / 系统事件等），不在服务端过滤。
+// 前端用 comments[i].Type 字段决定如何渲染：type=0/21 渲染普通评论卡，type=22
+// 跟 reviews 端点配合渲染评审 event+body，type=其他渲染对应系统事件卡。
+//
+// 旧 db84089 版本在服务端过滤 type != 0，导致 Gitea web 显示的 review body
+// (type=21 评论) 和评审事件 (type=22 跟 reviews 端点组合) 都丢失, 与 Gitea web 行为不一致。
 func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.CommentDTO, error) {
 	var raw []giteaCommentRaw
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, index)
@@ -723,12 +734,8 @@ func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, 
 	}
 	out := make([]platform.CommentDTO, 0, len(raw))
 	for _, c := range raw {
-		// 过滤非普通评论：Gitea 评审提交时自动创建 type=21 (CommentTypeReview) 的评论，
-		// 其 body 与 review.body 重复。对齐 Gitea web 时间轴：评审总结文由评审事件卡携带，
-		// 不在评论列表中重复出现。其它系统事件类型（rebase/commit/title change 等）也不渲染。
-		if c.Type != 0 {
-			continue
-		}
+		// v0.7.x: 不过滤 type, 全部返回, 前端按 type 分类渲染
+		// (普通评论 / 评审 body / 评审事件 / 系统事件)
 		out = append(out, giteaCommentToDTO(c))
 	}
 	return out, nil
@@ -799,11 +806,12 @@ func (a *GiteaAdapter) DeletePullComment(ctx context.Context, hostURL, username,
 // 任何表情 → ReactionBar 不显示任何表情。
 //
 // 实测 Gitea 1.26.2 响应格式：
-//   [{"user":{...},"content":"rocket","created_at":"..."}]
+//
+//	[{"user":{...},"content":"rocket","created_at":"..."}]
 type giteaReactionRaw struct {
-	ID       int64         `json:"id"`
-	User     *giteaUserRaw `json:"user"`
-	Content  string        `json:"content"`  // Gitea 1.26.2 实际字段名
+	ID      int64         `json:"id"`
+	User    *giteaUserRaw `json:"user"`
+	Content string        `json:"content"` // Gitea 1.26.2 实际字段名
 }
 
 // giteaReactionToDTO 映射为平台中性 ReactionDTO
@@ -876,14 +884,14 @@ func (a *GiteaAdapter) RemovePullCommentReaction(ctx context.Context, hostURL, u
 //
 // ⚠️ Gitea 1.26.2 实际返回的 JSON 日期字段名是 `submitted_at`（不是 `submitted`）。
 // 旧版代码用 `submitted` 导致 SubmittedAt 始终为空字符串 →
-// timelineItems 排序时 new Date('') = Invalid Date → 评审卡片排在错误位置。
+// timelineItems 排序时 new Date(”) = Invalid Date → 评审卡片排在错误位置。
 type giteaReviewRaw struct {
-	ID         int64         `json:"id"`
-	State      string        `json:"state"`
-	Body       string        `json:"body"`
-	User       *giteaUserRaw `json:"user"`
-	CommitID   string        `json:"commit_id"`
-	SubmittedAt string       `json:"submitted_at"` // Gitea 1.26.2 实际字段名
+	ID          int64         `json:"id"`
+	State       string        `json:"state"`
+	Body        string        `json:"body"`
+	User        *giteaUserRaw `json:"user"`
+	CommitID    string        `json:"commit_id"`
+	SubmittedAt string        `json:"submitted_at"` // Gitea 1.26.2 实际字段名
 }
 
 // giteaReviewToDTO 映射为平台中性 PullReviewDTO
@@ -980,7 +988,7 @@ func (a *GiteaAdapter) CreatePullReview(ctx context.Context, hostURL, username, 
 //
 // ⚠️ Gitea 1.26.2 实际返回的 JSON 日期字段名是 `created_at` / `updated_at`
 // （不是 `created` / `updated`）。旧版代码用错误字段名导致日期始终为空 →
-// timelineItems 排序时 new Date('') = Invalid Date → 评论顺序乱。
+// timelineItems 排序时 new Date(”) = Invalid Date → 评论顺序乱。
 //
 // type 字段：Gitea CommentType 常量（API 不返回此字段，默认 0）
 //
@@ -1004,8 +1012,9 @@ func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
 	out := platform.CommentDTO{
 		ID:        c.ID,
 		Body:      c.Body,
-	CreatedAt: c.CreatedAt,
-	UpdatedAt: c.UpdatedAt,
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+		Type:      c.Type, // v0.7.x: 透传 type 字段供前端分类渲染
 	}
 	if c.User != nil {
 		out.Author = &platform.PullUserDTO{
