@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-08（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -10,7 +10,7 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1）
 
 > **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
 >
@@ -19,6 +19,12 @@
 > **v2.6 增量**：StatusBar 同步进度条（go-git sideband → EventsEmit → 前端 UI）
 >
 > **v0.5.0 增量**：PR 评论模块 M1-M4 完整交付。文件评论（PullFileComments.vue + 4 个 platform adapter 方法 + 4 个 bindings）、对话流融合 Review 事件系统消息、三 Tab PR 详情布局（概览/文件评论/对话），TS DTO + store + ipc-client 扩展。docs/adr/0008 + docs/releases/v0.5.0.md。
+>
+> **v0.6.0 增量**：app.go 9 文件拆分（主文件 226 行）+ MergesView 三 Tab 重构 + PR 属性编辑器（Milestone / Review 行内评论 / Assignee 多选）+ store-first 封装（`updateLabels / updateAssignees / updateReviewers / updateMilestone` actions）+ 提交签名验证 9 种状态 + commit 计数 badge + GitHub PR 闭环。docs/releases/v0.6.0.md。
+>
+> **v0.7.0 增量**：GitHub adapter 5 方法补全（`ListLabels` / `ListMembers` / `ListMilestones` / `UpdatePullMilestone` / `ListPullCommits`）+ 属性编辑器对 GitHub 数据源可用（放开 v-if）+ GitHub milestone 进入 PR 详情 + `CreatePullReview` 行内评论 + 跨平台 build CI。docs/releases/v0.7.0.md。
+>
+> **v0.7.1 增量**：PR 对话区对齐 Gitea web（评审拆 2 卡 / 合并检查警告区 toggle / 系统事件卡独立渲染）+ Timeline 数据源切换（`/issues/{index}/timeline` 端点 + TimelinePanel store）+ pnpm typecheck 60 → 0 错。docs/releases/v0.7.1.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
@@ -38,7 +44,7 @@
 | 平台 | 鉴权 | 首期支持 |
 |---|---|---|
 | **Gitea** | `Authorization: token <pat>` | 完整：仓库/分支/Git Graph/议题/合并/标签/成员 |
-| **GitHub** | `Authorization: Bearer [redacted]` | **PR 闭环已完成**（VerifyToken + CloneRepo + LogGraph + ListRepos + ListPulls + GetPull + MergePull + ClosePull + Comments + Reviews + Files + Diff + Reactions）；**待补**：Labels / Members / Milestones（v0.7.0） |
+| **GitHub** | `Authorization: Bearer [redacted]` | **PR 闭环 + 属性编辑器已完成**（v0.7.0 补 5 方法：ListLabels / ListMembers / ListMilestones / UpdatePullMilestone / ListPullCommits） |
 
 GitHub Issue 暂不做（等 v0.7.x）；GitHub 看板暂不做。
 

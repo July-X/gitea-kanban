@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.6.0)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.1)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-08（**v0.6.0 发版** — GitHub PR 闭环完整实现；Gitea 功能深化；app.go 9 文件拆分）
+> 最后更新：2026-07-12（**v0.7.1 发版** — PR 对话区对齐 Gitea web；Timeline 数据源切换；pnpm typecheck 0 错）
 
 >
 
@@ -17,6 +17,34 @@
 >   7. **GitHub PR 闭环已完整实现**：v0.5.0 ADR-0008 计划内做，后端 + 前端全链路打通（ListPulls / GetPull / Merge / Close / Comments / Reviews / Files / Diff / Reactions）；README/CLAUDE 已同步更新产品文档对齐现状。
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
+
+> - **v0.7.1** (2026-07-12)：v0.7.0 收尾 patch——PR 对话区对齐 Gitea web + Timeline 数据源切换 + pnpm typecheck 全清（60 → 0 错）。
+>   1. **PR 对话区对齐 Gitea web**：调研 Gitea 1.26 源码（templates/repo/issue/view_content/comments.tmpl + routers/web/repo/issue_view.go）后发现 3 处关键差异——
+>      - server 端不再按 type 过滤（旧版 `c.Type != 0` 过滤把 type=21/22/1/2/28/4/7/8/9/10/27/29 等系统事件全丢），改为透传 type 字段给前端
+>      - 评审拆 2 卡：review 事件卡 + body 评论卡独立渲染（Gitea 端同时落 `/pulls/{index}/reviews` + `/issues/{index}/comments` 两条记录）
+>      - 系统事件卡独立：20+ type（reopen/close/label/milestone/assignee/title/delete_branch/due_date/lock/change_target_branch/review_request/merge/push/move/dismiss_review/pin/unpin...）按零术语 + 中文 + emoji 图标渲染
+>   2. **Timeline 数据源切换**：`Gitea /comments` 端点只返 `type=0` 普通评论；新增 `PlatformAdapter.ListPullTimeline` 调 `/issues/{index}/timeline` 端点拿全 type。后端 `app_pull.go` 加 `App.ListPullTimeline` binding；前端 store 去 `commentPanels + reviewPanels` 双 Map，改为 `timelinePanels: Map<index, TimelinePanel>` 单一数据源 + `fetchTimeline(p)`。
+>   3. **合并检查警告区 toggle**（Wails WebView 痛点）：`<details>` 在系统 WebView 下二次点击不响应，**4 次 revert** 后最终方案是标题行整体作为 toggle 入口 + Vue 受控 toggle + `@click.prevent` 拦截 WebKit default + 收起时红框整体变矮（`collapsed` class 缩小 padding + 标题字号）。
+>   4. **类型契约收尾**：v0.7.0 (49f0172) TimelineItemDto 重构后残留 60 个 TS 错，本版 5 个 fix 提交全清——
+>      - shim `WailsApp` interface 补 v0.5.0+ 13 个 PR 评论/评审方法（`UpdatePullComment` / `DeletePullComment` / `ListPullCommentReactions` / `AddPullCommentReaction` / `RemovePullCommentReaction` / `ListPullReviews` / `CreatePullReview` 补 `commitId` 字段 / `ListPullFiles` / `ListPullCommits` / `ListPullReviewComments` / `CreatePullReviewComment` / `GetPullFileDiff` / `OpenDesktopFolder`）
+>      - 4 个属性编辑器 store action 重构为三参 wrap + 乐观更新（v0.7.0 49f0172 修得不彻底，IPC 引用直传导致 MergesView 三参调用报 TS2554）
+>      - MergesView `systemEventLabel / systemEventIcon` 接收 string 映射表（对齐 TimelineItemDto.type 字面量）
+>      - TimelineNewView 删 64 行死代码（`springScrollTo` Q 弹 spring 滚动函数 / `svgMaskGradient` computed / `clampColWidth` 函数）
+>      - `waitForDeepenAndRetry` 用 `(client as any).on` + `(off as () => void)()` 强转兜底 vue-tsc 跨 try/finally 控制流分析 bug
+>      - CommitDetailPanel `CommitDetail.files` 类型从内嵌 interface 改为引用 DTO 的 `CommitFileChangeDto[]`（vue-tsc 内嵌类型推断 never 的 bug）
+>      - `env.d.ts` 把 `window.api` 类型放开允许顶层 `on()` 事件订阅方法
+>   5. **TimelinePanel.posting 字段**：store 新增 `posting: boolean` 控制 textarea + send 按钮 disabled 态，`postComment` 改为设置 `posting`。
+>   6. **PR 评论 3 个 bug**（v0.7.x 早期）：对话区首次进入不显示（`ref(Map)` 需 `triggerRef`）/ 时间排序错乱 / 图片上传失败，全部修复。
+>   7. **Gitea 提交评审后同步刷新 issue comments**：避免 review event + body 评论卡显示 stale 数据。
+>   8. **评审 state 大小写归一化**：Gitea 用小写（approved / changes_requested / commented），GitHub 用大写（APPROVED / CHANGES_REQUESTED / COMMENTED），adapter 归一化为小写。
+>   9. **Gitea 评论相对路径改写为绝对 URL**：图片/头像在 Wails WebView 能渲染（评论 markdown 里 `![avatar](/avatars/xx.png)` 改为 `https://gitea.example.com/avatars/xx.png`）。
+>   10. **macOS 本地 build 验证**：`wails build` 出 amd64 .app 21MB / 37s。
+>   相关 commit：`e6b4d7f`（ListPullTimeline 后端）/ `e06b693`（v0.7.0 发版合入）/ `b988472` + `49f0172`（store TimelinePanel 重构）/ `09a3571`（Gitea web 对齐——type 透传 + 系统事件卡）/ `349734b`（评审拆 2 卡）/ `8bb900e` + `2611fb9` + `6478f5f`（合并检查警告区 toggle 收尾）/ `105e0d0`（PR 评论 3 bug）/ `1dc86a3`（Gitea 评论相对路径）/ `c7f3def`（review state 归一化）/ `bcb9d63` + `ff0ffa8` + `3c50040` + `eb528bd` + `955772d`（v0.7.1 typecheck 收尾 5 commit）。
+>   发版 notes：`docs/releases/v0.7.1.md`（176 行 / 9 段 / 验证清单 + 红线维持 + 改动统计 + 关键 commit 列表 + 不做清单）。
+
+> - **v0.7.0** (2026-07-09)：GitHub PR 属性编辑器数据补全。GitHub adapter 后端补全 5 个方法——`ListLabels` / `ListMembers` / `ListMilestones` / `UpdatePullMilestone` / `ListPullCommits`；放开 MergesView.vue:477 的 `v-if="currentPlatform === 'gitea'"` 锁；修复 v0.6.0 Phase 3 (commit `61b1464`) 潜伏的 5 个 store action 缺失 bug（`d0957b2` 必修，但本版 v0.7.1 才发现 49f0172 修得不彻底，再修一次）；GitHub milestone 进入 PR 详情显示（`PullDetailDTO.Milestone` 字段 + `Milestone.Number → DTO.ID` 映射）；`CreatePullReview` 透传 `opts.Comments` 支持行内评论；`.github/workflows/build.yml` 跨平台 build CI（macOS / Windows / Linux 三并行 jobs）。
+>   相关 commit：`86f9caf`（ListLabels）/ `94e93a1`（ListMembers）/ `06f7d63`（ListMilestones）/ `72f4197`（UpdatePullMilestone + ListPullCommits）/ `d0957b2`（修 v0.6.0 潜伏 bug）/ `b6a5550`（放开 attr-editor v-if + GitHub 数据加载）/ `9539ea8`（GitHub Milestone + 行内评论）/ `4be51d4`（跨平台 build CI）/ `0ef6cec`（重写 v0.7.0-plan.md）。
+>   发版 notes：`docs/releases/v0.7.0.md`（GitHub adapter 5 方法 + 属性编辑器 v-if 放开 + GitHub milestone + 行内评论 + 跨平台 CI）。
 
 > - **v0.6.4** (2026-07-04)：滚动按需 deepen，替代 v0.6.3 的全量 unshallow。
 
