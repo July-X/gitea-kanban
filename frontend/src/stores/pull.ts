@@ -123,74 +123,23 @@ export const usePullStore = defineStore('pull', () => {
   });
 
   /**
-   * 对话时间线：把评论 + 评审事件 + 系统事件按时间合并，用于对话 Tab 渲染
-   *
-   * v0.7.x 重构：对齐 Gitea web 行为（templates/repo/issue/view_content/comments.tmpl）。
-   * 之前的实现把 review 事件卡 (source: 'review') 跟 comment (source: 'comment')
-   * 合并成 timeline，但评审事件卡里**错误地**显示了 review body，且 review body
-   * 来自 ListPullReviews (跟 ListPullComments type=21 重复)。Gitea web 实际行为:
-   *
-   *   - ListPullReviews 返回评审事件（state: approved/changes_requested/commented）
-   *   - ListPullComments 返回所有 type 的评论:
-   *       type=0  → 普通评论卡
-   *       type=21 → 评审 body (Gitea 评审提交时同时插入 1 条 type=21 评论)
-   *       type=22 → 评审事件 record (跟 ListPullReviews 一一对应, body 可能为空)
-   *       type=1/2/4/7/8/9/10/27/28/29/... → 系统事件 (REOPEN/CLOSE/COMMIT_REF/LABEL/MILESTONE/ASSIGNEE/TITLE/REVIEW_REQUEST/MERGE/PUSH 等)
-   *
-   * Gitea web 渲染:
-   *   - 评审事件卡 (timeline-item event) 显示 author + state + "审批了" + 时间, **没有 body**
-   *   - 评审 body 走普通评论卡 (timeline-item comment) 显示
-   *   - 评审 event + body 包在 timeline-item-group 容器里, 视觉上紧贴显示
-   *   - 其他 type 渲染对应的系统事件卡 (badge + author + locale 文案)
-   *
-   * 本实现:
-   *   - ListPullReviews 拿评审事件, 渲染评审事件卡 (不显示 body)
-   *   - ListPullComments 拿所有评论, 按 type 分类:
-   *       type=0/21 → source: 'comment' (普通评论卡)
-   *       type=22 → 跟对应 review 匹配, body 作为评审 body 卡 (跟 event 一起渲染)
-   *       其他 type → source: 'system_event' (系统事件卡, 简单 badge + 文案)
-   *   - 全部按时间升序合并
+   * 对话时间线 (对齐 Gitea web): 评论 (type=0/21) + 评审事件 + 系统事件 按时间合并
    */
   const timelineItems = computed(() => {
     const result = new Map<number, Array<
-      | { source: 'review_event'; id: number; state: string; body: string; author: { username: string }; submittedAt: string; reviewId?: number }
-      | { source: 'comment'; id: number; body: string; author: { username: string }; createdAt: string; updatedAt?: string; type: number; reviewId?: number }
-      | { source: 'system_event'; id: number; type: number; body: string; author: { username: string }; createdAt: string }
+      | { source: 'review_event'; id: number; state: string; author: { username: string }; submittedAt: string }
+      | { source: 'comment'; id: number; body: string; author: { username: string }; createdAt: string; updatedAt?: string }
+      | { source: 'system_event'; id: number; type: number; author: { username: string }; createdAt: string }
     >>();
     for (const [prIdx, panel] of commentPanels.value.entries()) {
       const items = result.get(prIdx) ?? [];
       for (const c of panel.items) {
-        // v0.7.x: 按 type 分类, 全部 1:1 透传, 前端按 type 渲染
-        //   type=0 (COMMENT) / type=21 (REVIEW) 走普通评论卡
-        //   type=22 (REVIEW) 走评审 body 卡 (跟 review event 一起包 group 渲染)
-        //   其他 type 走系统事件卡
         const cType = c.type ?? 0;
-        if (cType === 22) {
-          // type=22 是 Gitea 的 REVIEW event record 本身 (跟 ListPullReviews 一一对应)
-          // 渲染时跟 review event 卡配对, body 一般为空, 跳过独立渲染
-          continue;
-        }
+        if (cType === 22) continue;
         if (cType === 0 || cType === 21) {
-          // 普通评论 / 评审 body
-          items.push({
-            source: 'comment',
-            id: c.id,
-            body: c.body,
-            author: { username: c.author?.username ?? '匿名' },
-            createdAt: c.createdAt,
-            updatedAt: c.updatedAt,
-            type: cType,
-          });
+          items.push({ source: 'comment', id: c.id, body: c.body, author: { username: c.author?.username ?? '匿名' }, createdAt: c.createdAt, updatedAt: c.updatedAt });
         } else {
-          // 系统事件 (REOPEN/CLOSE/COMMIT_REF/LABEL/MILESTONE/ASSIGNEE/TITLE/REVIEW_REQUEST/MERGE/PUSH/...)
-          items.push({
-            source: 'system_event',
-            id: c.id,
-            type: cType,
-            body: c.body,
-            author: { username: c.author?.username ?? '匿名' },
-            createdAt: c.createdAt,
-          });
+          items.push({ source: 'system_event', id: c.id, type: cType, author: { username: c.author?.username ?? '匿名' }, createdAt: c.createdAt });
         }
       }
       result.set(prIdx, items);
@@ -198,27 +147,14 @@ export const usePullStore = defineStore('pull', () => {
     for (const [prIdx, reviews] of reviewPanels.value.entries()) {
       const items = result.get(prIdx) ?? [];
       for (const r of reviews) {
-        // 评审事件卡: 只显示 state + author + 时间, 不显示 body
-        // (body 由 type=21 评论作为普通评论卡渲染, 这是 Gitea web 实际行为)
-        items.push({
-          source: 'review_event',
-          id: r.id,
-          state: r.state,
-          body: r.body, // 保留字段以备将来需要, 模板不渲染
-          author: { username: r.author?.username ?? '匿名' },
-          submittedAt: r.submittedAt,
-        });
+        items.push({ source: 'review_event', id: r.id, state: r.state, author: { username: r.author?.username ?? '匿名' }, submittedAt: r.submittedAt });
       }
       result.set(prIdx, items);
     }
-    // Sort each PR's items by date (ascending)
     for (const items of result.values()) {
       items.sort((a, b) => {
         const dateA = a.source === 'review_event' ? a.submittedAt : a.createdAt;
         const dateB = b.source === 'review_event' ? b.submittedAt : b.createdAt;
-        // 必须用 epoch ms 比较,不能用 localeCompare：Gitea 1.22+ 返回的 createdAt /
-        // submittedAt 是带时区的 RFC3339（'+08:00' 或 'Z'）,字典序 'Z'(0x5A) > '+'(0x2B)
-        // 会把同一时刻的不同 offset 表达排错序。Date 解析器能正确识别所有 offset。
         return new Date(dateA).getTime() - new Date(dateB).getTime();
       });
     }

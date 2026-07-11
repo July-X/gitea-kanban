@@ -866,61 +866,24 @@ function reviewEventLabel(event: ReviewEvent): string {
  * 简体中文文案 + 零术语, 让 PM/设计师/市场/运营也能看懂。
  */
 function systemEventLabel(type: number): string {
-  switch (type) {
-    case 1:  return '重新开启';
-    case 2:  return '关闭';
-    case 3:
-    case 5:
-    case 6:  return '引用了其它议题';
-    case 4:  return '引用了提交';
-    case 7:  return '修改了标签';
-    case 8:  return '修改了里程碑';
-    case 9:  return '修改了指派人';
-    case 10: return '修改了标题';
-    case 11: return '删除了分支';
-    case 16: return '设置了截止时间';
-    case 17: return '修改了截止时间';
-    case 18: return '移除了截止时间';
-    case 23: return '锁定了议题';
-    case 24: return '解锁了议题';
-    case 25: return '修改了目标分支';
-    case 27: return '请求评审';
-    case 28: return '合并了合并请求';
-    case 29: return '推送了新提交';
-    case 30: return '移动了项目';
-    case 32: return '驳回了评审';
-    case 36: return '置顶了议题';
-    case 37: return '取消了置顶';
-    default: return '事件';
-  }
+  const m: Record<number, string> = {
+    1: '重新开启', 2: '关闭', 4: '引用了提交',
+    7: '修改了标签', 8: '修改了里程碑', 9: '修改了指派人', 10: '修改了标题',
+    11: '删除了分支', 16: '设置了截止时间', 17: '修改了截止时间', 18: '移除了截止时间',
+    23: '锁定了议题', 24: '解锁了议题', 25: '修改了目标分支',
+    27: '请求评审', 28: '合并了合并请求', 29: '推送了新提交', 30: '移动了项目',
+    32: '驳回了评审', 36: '置顶了议题', 37: '取消了置顶',
+  };
+  return m[type] ?? (type === 3 || type === 5 || type === 6 ? '引用了其它议题' : '事件');
 }
 
-/** 系统事件图标（跟 Gitea octicon 对应, 简化 emoji 替代） */
 function systemEventIcon(type: number): string {
-  switch (type) {
-    case 1:  return '↻';
-    case 2:  return '✕';
-    case 4:  return '●';
-    case 7:  return '⚐';
-    case 8:  return '◐';
-    case 9:  return '☻';
-    case 10: return '✎';
-    case 11: return '⌫';
-    case 16:
-    case 17:
-    case 18: return '⏰';
-    case 23:
-    case 24: return '🔒';
-    case 25: return '⇄';
-    case 27: return '◉';
-    case 28: return '⤓';
-    case 29: return '⇧';
-    case 30: return '◫';
-    case 32: return '⊘';
-    case 36:
-    case 37: return '◆';
-    default: return '•';
-  }
+  const m: Record<number, string> = {
+    1: '↻', 2: '✕', 4: '●', 7: '⚐', 8: '◐', 9: '☻', 10: '✎', 11: '⌫',
+    16: '⏰', 17: '⏰', 18: '⏰', 23: '🔒', 24: '🔒', 25: '⇄', 27: '◉',
+    28: '⤓', 29: '⇧', 30: '◫', 32: '⊘', 36: '◆', 37: '◆',
+  };
+  return m[type] ?? '•';
 }
 
 /** @ 提及下拉是否打开 */
@@ -1970,15 +1933,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
               </div>
               <ul v-else class="pr-detail__comment-list">
                 <template v-for="(item, ti) in pull.timelineItems.get(selectedPR.index) ?? []" :key="`${item.source}-${item.id}`">
-                  <!--
-                    v0.7.x 重构: 对齐 Gitea web 行为 (templates/repo/issue/view_content/comments.tmpl)
-                    - 评审事件卡 source: 'review_event' (从 ListPullReviews 拿 state, 不显示 body)
-                    - 普通评论 + 评审 body 卡 source: 'comment' (type=0/21, 包含 review body)
-                    - 系统事件卡 source: 'system_event' (type=1/2/4/7/8/9/10/27/28/29)
-                    - 评审 event 紧跟 comment (review body) 渲染, 视觉上聚合
-                  -->
-
-                  <!-- 评审事件系统卡片 (state: approved/changes_requested/commented) -->
+                  <!-- 评审事件 (不显示 body, body 由 type=21 评论卡渲染) -->
                   <li
                     v-if="item.source === 'review_event'"
                     class="pr-detail__comment pr-detail__comment--review-event"
@@ -1994,9 +1949,6 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         <span class="pr-detail__review-state-badge" :class="`pr-detail__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.submittedAt)">{{ formatRelative(item.submittedAt) }}</span>
                       </div>
-                      <!-- v0.7.x: 评审事件卡不显示 body
-                           (Gitea web 实际行为: body 由 type=21 评论作为普通评论卡渲染)
-                           不渲染 body 避免跟下方紧跟的 review body 卡重复显示 -->
                       <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author.username }}</div>
                     </div>
                   </li>
