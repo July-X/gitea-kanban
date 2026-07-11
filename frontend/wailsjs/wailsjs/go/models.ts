@@ -1816,6 +1816,32 @@ export namespace platform {
 		    return a;
 		}
 	}
+	export class IssueDTO {
+	    index: number;
+	    title: string;
+	    state: string;
+	    body?: string;
+	    author: string;
+	    repo_id?: number;
+	    repo_full_name?: string;
+	    is_pull?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new IssueDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.index = source["index"];
+	        this.title = source["title"];
+	        this.state = source["state"];
+	        this.body = source["body"];
+	        this.author = source["author"];
+	        this.repo_id = source["repo_id"];
+	        this.repo_full_name = source["repo_full_name"];
+	        this.is_pull = source["is_pull"];
+	    }
+	}
 	export class MilestoneDTO {
 	    id: number;
 	    title: string;
@@ -2243,6 +2269,19 @@ export namespace platform {
 	    commit_id?: string;
 	    official?: boolean;
 	    commit_sha?: string;
+	    old_title?: string;
+	    new_title?: string;
+	    old_ref?: string;
+	    new_ref?: string;
+	    label?: PullLabelDTO;
+	    old_milestone?: MilestoneDTO;
+	    milestone?: MilestoneDTO;
+	    assignee?: PullUserDTO;
+	    removed_assignee?: boolean;
+	    ref_issue?: IssueDTO;
+	    ref_action?: string;
+	    ref_commit_sha?: string;
+	    dependent_issue?: IssueDTO;
 	
 	    static createFrom(source: any = {}) {
 	        return new TimelineItem(source);
@@ -2260,6 +2299,19 @@ export namespace platform {
 	        this.commit_id = source["commit_id"];
 	        this.official = source["official"];
 	        this.commit_sha = source["commit_sha"];
+	        this.old_title = source["old_title"];
+	        this.new_title = source["new_title"];
+	        this.old_ref = source["old_ref"];
+	        this.new_ref = source["new_ref"];
+	        this.label = this.convertValues(source["label"], PullLabelDTO);
+	        this.old_milestone = this.convertValues(source["old_milestone"], MilestoneDTO);
+	        this.milestone = this.convertValues(source["milestone"], MilestoneDTO);
+	        this.assignee = this.convertValues(source["assignee"], PullUserDTO);
+	        this.removed_assignee = source["removed_assignee"];
+	        this.ref_issue = this.convertValues(source["ref_issue"], IssueDTO);
+	        this.ref_action = source["ref_action"];
+	        this.ref_commit_sha = source["ref_commit_sha"];
+	        this.dependent_issue = this.convertValues(source["dependent_issue"], IssueDTO);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

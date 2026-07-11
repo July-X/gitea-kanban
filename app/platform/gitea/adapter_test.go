@@ -891,3 +891,212 @@ func TestGiteaAdapter_UploadIssueAttachment_EmptyContent(t *testing.T) {
 		t.Fatal("expected validation error for empty content")
 	}
 }
+
+// TestGiteaAdapter_ListPullTimeline_DetailFields 验证 v0.7.2 timeline 端点二级详情字段解析
+//
+// 覆盖 7 个 system event 类型的 detail 字段映射：
+//   - type=7 (label):        Label
+//   - type=8 (milestone):    OldMilestone / Milestone
+//   - type=9 (assignees):    Assignee + RemovedAssignee
+//   - type=10 (change_title): OldTitle / NewTitle
+//   - type=11 (delete_branch): OldRef
+//   - type=3 (issue_ref):    RefIssue + RefAction
+//   - type=19 (add_dependency): DependentIssue
+func TestGiteaAdapter_ListPullTimeline_DetailFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/alice/dolphin/issues/42/timeline" {
+			t.Errorf("path = %q, want /timeline", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			// type=7 label
+			{
+				"id":         200,
+				"type":       "label",
+				"body":       "",
+				"user":       map[string]string{"login": "bob"},
+				"created_at": "2024-06-01T10:00:00Z",
+				"label":      map[string]interface{}{"id": 1, "name": "bug", "color": "fbca04"},
+			},
+			// type=8 milestone (加)
+			{
+				"id":         201,
+				"type":       "milestone",
+				"body":       "",
+				"user":       map[string]string{"login": "bob"},
+				"created_at": "2024-06-01T10:01:00Z",
+				"milestone":  map[string]interface{}{"id": 5, "title": "v1.0", "state": "open"},
+			},
+			// type=8 milestone (换: old + new)
+			{
+				"id":            202,
+				"type":          "milestone",
+				"body":          "",
+				"user":          map[string]string{"login": "alice"},
+				"created_at":    "2024-06-01T10:02:00Z",
+				"old_milestone": map[string]interface{}{"id": 5, "title": "v1.0", "state": "open"},
+				"milestone":     map[string]interface{}{"id": 6, "title": "v2.0", "state": "open"},
+			},
+			// type=9 assignees (加)
+			{
+				"id":         203,
+				"type":       "assignees",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-01T10:03:00Z",
+				"assignee":   map[string]string{"login": "bob", "avatar_url": "https://gitea/bob.png"},
+			},
+			// type=9 assignees (移除)
+			{
+				"id":               204,
+				"type":             "assignees",
+				"body":             "",
+				"user":             map[string]string{"login": "alice"},
+				"created_at":       "2024-06-01T10:04:00Z",
+				"assignee":         map[string]string{"login": "bob", "avatar_url": "https://gitea/bob.png"},
+				"removed_assignee": true,
+			},
+			// type=10 change_title
+			{
+				"id":         205,
+				"type":       "change_title",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-01T10:05:00Z",
+				"old_title":  "old title",
+				"new_title":  "new title",
+			},
+			// type=11 delete_branch
+			{
+				"id":         206,
+				"type":       "delete_branch",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-01T10:06:00Z",
+				"old_ref":    "feature/old-branch",
+			},
+			// type=3 issue_ref (引用)
+			{
+				"id":         207,
+				"type":       "issue_ref",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-01T10:07:00Z",
+				"ref_action": "close",
+				"ref_issue": map[string]interface{}{
+					"id":     100,
+					"number": 7,
+					"title":  "related issue",
+					"state":  "open",
+					"repository": map[string]interface{}{
+						"id":        1,
+						"full_name": "alice/dolphin",
+					},
+				},
+			},
+			// type=19 add_dependency
+			{
+				"id":         208,
+				"type":       "add_dependency",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-01T10:08:00Z",
+				"dependent_issue": map[string]interface{}{
+					"id":           200,
+					"number":       8,
+					"title":        "blocker issue",
+					"state":        "open",
+					"pull_request": map[string]interface{}{}, // 存在 = 是 PR
+					"repository": map[string]interface{}{
+						"id":        2,
+						"full_name": "alice/seahorse",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 9 {
+		t.Fatalf("len(items) = %d, want 9", len(items))
+	}
+
+	// 200: label
+	if items[0].Label == nil || items[0].Label.Name != "bug" || items[0].Label.Color != "fbca04" {
+		t.Errorf("items[0] Label = %+v, want bug/fbca04", items[0].Label)
+	}
+
+	// 201: milestone (加)
+	if items[1].Milestone == nil || items[1].Milestone.Title != "v1.0" {
+		t.Errorf("items[1] Milestone = %+v, want v1.0", items[1].Milestone)
+	}
+	if items[1].OldMilestone != nil {
+		t.Errorf("items[1] OldMilestone should be nil, got %+v", items[1].OldMilestone)
+	}
+
+	// 202: milestone (换)
+	if items[2].OldMilestone == nil || items[2].OldMilestone.Title != "v1.0" {
+		t.Errorf("items[2] OldMilestone = %+v, want v1.0", items[2].OldMilestone)
+	}
+	if items[2].Milestone == nil || items[2].Milestone.Title != "v2.0" {
+		t.Errorf("items[2] Milestone = %+v, want v2.0", items[2].Milestone)
+	}
+
+	// 203: assignees (加)
+	if items[3].Assignee == nil || items[3].Assignee.Username != "bob" {
+		t.Errorf("items[3] Assignee = %+v, want bob", items[3].Assignee)
+	}
+	if items[3].RemovedAssignee {
+		t.Errorf("items[3] RemovedAssignee = true, want false")
+	}
+
+	// 204: assignees (移除)
+	if items[4].Assignee == nil || items[4].Assignee.Username != "bob" {
+		t.Errorf("items[4] Assignee = %+v, want bob", items[4].Assignee)
+	}
+	if !items[4].RemovedAssignee {
+		t.Errorf("items[4] RemovedAssignee = false, want true")
+	}
+
+	// 205: change_title
+	if items[5].OldTitle != "old title" || items[5].NewTitle != "new title" {
+		t.Errorf("items[5] title = %q/%q, want old title/new title", items[5].OldTitle, items[5].NewTitle)
+	}
+
+	// 206: delete_branch
+	if items[6].OldRef != "feature/old-branch" {
+		t.Errorf("items[6] OldRef = %q, want feature/old-branch", items[6].OldRef)
+	}
+
+	// 207: issue_ref
+	if items[7].RefAction != "close" {
+		t.Errorf("items[7] RefAction = %q, want close", items[7].RefAction)
+	}
+	if items[7].RefIssue == nil || items[7].RefIssue.Index != 7 {
+		t.Errorf("items[7] RefIssue = %+v, want index 7", items[7].RefIssue)
+	}
+	if items[7].RefIssue == nil || items[7].RefIssue.RepoFullName != "alice/dolphin" {
+		t.Errorf("items[7] RefIssue.RepoFullName = %+v, want alice/dolphin", items[7].RefIssue)
+	}
+	if items[7].RefIssue != nil && items[7].RefIssue.IsPull {
+		t.Errorf("items[7] RefIssue.IsPull = true, want false (issue not PR)")
+	}
+
+	// 208: add_dependency (dependent_issue 是 PR, 不是普通 issue)
+	if items[8].DependentIssue == nil {
+		t.Fatal("items[8] DependentIssue = nil, want 8")
+	}
+	if items[8].DependentIssue.Index != 8 {
+		t.Errorf("items[8] DependentIssue.Index = %d, want 8", items[8].DependentIssue.Index)
+	}
+	if items[8].DependentIssue.RepoFullName != "alice/seahorse" {
+		t.Errorf("items[8] DependentIssue.RepoFullName = %q, want alice/seahorse", items[8].DependentIssue.RepoFullName)
+	}
+	if !items[8].DependentIssue.IsPull {
+		t.Errorf("items[8] DependentIssue.IsPull = false, want true (pull_request 字段存在)")
+	}
+}

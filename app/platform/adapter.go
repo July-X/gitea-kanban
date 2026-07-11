@@ -490,6 +490,11 @@ type IssueDTO struct {
 	State  string `json:"state"`
 	Body   string `json:"body,omitempty"`
 	Author string `json:"author"`
+
+	// v0.7.2：timeline ref 字段（ref_issue / dependent_issue 用），ListIssues 端点不填
+	RepoID       int64  `json:"repo_id,omitempty"`
+	RepoFullName string `json:"repo_full_name,omitempty"` // "owner/repo"
+	IsPull       bool   `json:"is_pull,omitempty"`
 }
 
 // PullDTO 合并请求信息（首期简化）
@@ -599,6 +604,38 @@ type TimelineItem struct {
 
 	// type=29 推送事件专属
 	CommitSHA string `json:"commit_sha,omitempty"` // 推送后 head 的最新 commit SHA
+
+	// v0.7.2：Gitea /timeline 端点暴露的二级详情字段。
+	// 前端用这些字段渲染"系统事件卡"下方的 detail 块（对齐 Gitea web）。
+	// 不是所有平台都暴露同样字段（GitHub /timeline 只返 type=0 评论，事件类型都是 stub），
+	// 所以用 omitempty 让缺失时不出现在 JSON 里，前端按需读。
+
+	// type=10 (change_title) —— 标题变化
+	OldTitle string `json:"old_title,omitempty"`
+	NewTitle string `json:"new_title,omitempty"`
+
+	// type=11 (delete_branch) / 25 (change_target_branch) / 33 (change_issue_ref) —— 分支/引用名
+	OldRef string `json:"old_ref,omitempty"`
+	NewRef string `json:"new_ref,omitempty"`
+
+	// type=7 (label) —— 单个 label（Gitea API 一次只暴露一个 label，不暴露 added/removed 数组）
+	Label *PullLabelDTO `json:"label,omitempty"`
+
+	// type=8 (milestone) —— 里程碑变化
+	OldMilestone *MilestoneDTO `json:"old_milestone,omitempty"`
+	Milestone    *MilestoneDTO `json:"milestone,omitempty"`
+
+	// type=9 (assignees) —— 指派人变化
+	Assignee        *PullUserDTO `json:"assignee,omitempty"`
+	RemovedAssignee bool         `json:"removed_assignee,omitempty"` // true=移除，false=添加
+
+	// type=3 (issue_ref) / 5 (comment_ref) / 6 (pull_ref) / 33 (change_issue_ref) —— 跨引用
+	RefIssue     *IssueDTO `json:"ref_issue,omitempty"`
+	RefAction    string    `json:"ref_action,omitempty"`     // "close" / "reopen" / "cross" 之一
+	RefCommitSHA string    `json:"ref_commit_sha,omitempty"` // type=4 commit ref 时引用到的 commit SHA
+
+	// type=19 (add_dependency) / 20 (remove_dependency) —— 依赖 issue
+	DependentIssue *IssueDTO `json:"dependent_issue,omitempty"`
 }
 
 // ReactionDTO 单条表情反应（v0.5.0 M2）

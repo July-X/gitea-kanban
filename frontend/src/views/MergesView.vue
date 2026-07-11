@@ -20,8 +20,15 @@
  *   - 合并到主线分支额外警告
  *   - 有冲突时禁用合并按钮 + 提示去 gitea 处理
  */
-import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
-import { GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink, XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy } from 'lucide-vue-next';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
+import {
+  GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink,
+  XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
+  // v0.7.2: 系统事件图标（对齐 Gitea web octicon-* 体系）
+  RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, Type, Calendar,
+  Lock, Key, Eye, ArrowLeftRight, GitPullRequest, ArrowUp, Folder, Pin,
+  MessageCircle,
+} from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -840,14 +847,100 @@ function systemEventLabel(type: string): string {
   return m[type] ?? '事件';
 }
 
-function systemEventIcon(type: string): string {
-  const m: Record<string, string> = {
-    reopen: '↻', close: '✕', commit_ref: '●', label: '⚐', milestone: '◐', assignee: '☻',
-    title: '✎', delete_branch: '⌫', due_date: '⏰', change_due_date: '⏰', remove_due_date: '⏰',
-    lock: '🔒', unlock: '🔒', change_target_branch: '⇄', review_request: '◉', merge: '⤓',
-    push: '⇧', move: '◫', dismiss_review: '⊘', pin: '◆', unpin: '◆',
-  };
-  return m[type] ?? '•';
+/**
+ * v0.7.2：系统事件图标 —— 从 Unicode 字符迁到 lucide-vue-next，
+ * 视觉上对齐 Gitea web 的 octicon-* 体系（GitHub Primer Icons 风格）。
+ *
+ * 关键映射：
+ *   - reopen (octicon-dot-fill)        → RotateCcw（顺时针回旋）
+ *   - close (octicon-issue-closed)     → X（方头 X）
+ *   - merge (octicon-git-merge)        → GitPullRequest（PR 已合图标）
+ *   - commit_ref (octicon-bookmark)    → Bookmark
+ *   - label (octicon-tag)              → Tag
+ *   - milestone (octicon-milestone)    → Milestone
+ *   - assignee (octicon-person)        → UserPlus/UserMinus
+ *   - title (octicon-pencil)           → Type
+ *   - delete_branch (octicon-git-branch)→ GitBranch (同 change_target_branch)
+ *   - due_date (octicon-clock)         → Calendar
+ *   - lock (octicon-lock)              → Lock
+ *   - unlock (octicon-key)             → Key
+ *   - review_request (octicon-eye)     → Eye
+ *   - push (octicon-repo-push)         → ArrowUp
+ *   - dismiss_review (octicon-x)       → XCircle
+ *   - pin (octicon-pin)                → Pin
+ *   - move (octicon-project)           → Folder
+ *
+ * 返回 lucide Vue component（VNode），模板用 <component :is="..."> 渲染。
+ */
+const SYSTEM_EVENT_ICON: Record<string, Component> = {
+  reopen: RotateCcw,
+  close: XIcon,
+  commit_ref: Bookmark,
+  label: Tag,
+  milestone: Milestone,
+  assignee: UserPlus,
+  title: Type,
+  delete_branch: GitBranch,
+  due_date: Calendar,
+  change_due_date: Calendar,
+  remove_due_date: Calendar,
+  lock: Lock,
+  unlock: Key,
+  change_target_branch: ArrowLeftRight,
+  review_request: Eye,
+  merge: GitPullRequest,
+  push: ArrowUp,
+  move: Folder,
+  dismiss_review: XCircle,
+  pin: Pin,
+  unpin: Pin,
+};
+function systemEventIcon(type: string): Component {
+  return SYSTEM_EVENT_ICON[type] ?? MessageCircle;
+}
+
+/**
+ * v0.7.2：系统事件颜色档（对齐 Gitea web `.badge` 颜色 token）
+ *
+ * Gitea web 用语义色编码：
+ *   - success (tw-bg-green):  reopen / review_approved / push
+ *   - danger  (tw-bg-red):    close / review_rejected
+ *   - merge   (tw-bg-purple): merge_pull
+ *   - warn    (tw-bg-orange): due_date / time tracking 类
+ *   - neutral (tw-bg-grey):   其他系统事件 + dismiss_review
+ *
+ * CSS 变量在 :root 主题 token 里定义（见 styles.css v0.7.2）。
+ * 返回 className 模板里用：`:class="systemEventColor(item.type)"`
+ */
+type SystemEventColor = 'success' | 'danger' | 'merge' | 'warn' | 'neutral';
+const SYSTEM_EVENT_COLOR: Record<string, SystemEventColor> = {
+  reopen: 'success',
+  close: 'danger',
+  merge: 'merge',
+  dismiss_review: 'neutral',
+  review_request: 'neutral',
+  push: 'success',
+  // 时间类（orange warn）
+  due_date: 'warn',
+  change_due_date: 'warn',
+  remove_due_date: 'warn',
+  // 锁/解锁/引脚类（neutral）
+  lock: 'neutral',
+  unlock: 'neutral',
+  pin: 'neutral',
+  unpin: 'neutral',
+  // 修改类（neutral）
+  label: 'neutral',
+  milestone: 'neutral',
+  assignee: 'neutral',
+  title: 'neutral',
+  delete_branch: 'neutral',
+  change_target_branch: 'neutral',
+  commit_ref: 'neutral',
+  move: 'neutral',
+};
+function systemEventColor(type: string): SystemEventColor {
+  return SYSTEM_EVENT_COLOR[type] ?? 'neutral';
 }
 
 /** @ 提及下拉是否打开 */
@@ -1929,11 +2022,14 @@ git checkout {{ selectedPR.head.ref }}</pre>
                   <li
                     v-else-if="!['review', 'comment', 'code'].includes(item.type)"
                     class="pr-detail__comment pr-detail__comment--system-event"
-                    :class="`pr-detail__comment--system-type-${item.type}`"
+                    :class="[
+                      `pr-detail__comment--system-type-${item.type}`,
+                      `pr-detail__comment--system-color-${systemEventColor(item.type)}`,
+                    ]"
                   >
                     <div class="pr-detail__comment-side">
                       <div class="pr-detail__comment-avatar pr-detail__comment-avatar--system" :title="systemEventLabel(item.type)">
-                        {{ systemEventIcon(item.type) }}
+                        <component :is="systemEventIcon(item.type)" :size="14" :stroke-width="2" aria-hidden="true" />
                       </div>
                     </div>
                     <div class="pr-detail__comment-bubble pr-detail__comment-bubble--event">
@@ -5279,6 +5375,28 @@ git checkout {{ selectedPR.head.ref }}</pre>
   color: var(--color-text-secondary);
   border-left: 2px solid var(--color-divider);
 }
+/* v0.7.2：系统事件颜色档 —— 对齐 Gitea web timeline-item event badge
+   success (绿) = reopen / push
+   danger  (红) = close
+   merge   (紫) = merge_pull
+   warn    (橙) = due_date / time tracking
+   neutral (灰) = 其他系统事件 */
+.pr-detail__comment--system-color-success { border-left-color: var(--color-success, #2da44e); }
+.pr-detail__comment--system-color-danger  { border-left-color: var(--color-danger,  #cf222e); }
+.pr-detail__comment--system-color-merge   { border-left-color: #8250df; }
+.pr-detail__comment--system-color-warn    { border-left-color: #d4a72c; }
+.pr-detail__comment--system-color-neutral { border-left-color: var(--color-divider); }
+
+.pr-detail__comment--system-color-success .pr-detail__comment-avatar--system { color: var(--color-success, #2da44e); }
+.pr-detail__comment--system-color-danger  .pr-detail__comment-avatar--system { color: var(--color-danger,  #cf222e); }
+.pr-detail__comment--system-color-merge   .pr-detail__comment-avatar--system { color: #8250df; }
+.pr-detail__comment--system-color-warn    .pr-detail__comment-avatar--system { color: #d4a72c; }
+
+.pr-detail__comment--system-color-success .pr-detail__system-event-badge { background: rgba(45, 164, 78, 0.15);  color: var(--color-success, #2da44e); }
+.pr-detail__comment--system-color-danger  .pr-detail__system-event-badge { background: rgba(207, 34, 46, 0.15);  color: var(--color-danger,  #cf222e); }
+.pr-detail__comment--system-color-merge   .pr-detail__system-event-badge { background: rgba(130, 80, 223, 0.15); color: #8250df; }
+.pr-detail__comment--system-color-warn    .pr-detail__system-event-badge { background: rgba(212, 167, 44, 0.15); color: #d4a72c; }
+
 .pr-detail__comment--system-event .pr-detail__comment-side {
   width: 28px;
   height: 28px;
