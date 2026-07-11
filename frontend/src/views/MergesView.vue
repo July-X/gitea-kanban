@@ -1955,10 +1955,11 @@ git checkout {{ selectedPR.head.ref }}</pre>
                 暂无对话，发起第一条评论开始讨论吧
               </div>
               <ul v-else class="pr-detail__comment-list">
-                <template v-for="(item) in getTimelinePanel().items ?? []" :key="`${item.type}-${item.id}`">
+                <template v-for="(item) in getTimelinePanel().items ?? []">
                   <!-- 评审事件 (不显示 body, body 由 type=21 评论卡渲染) -->
                   <li
                     v-if="item.type === 'review'"
+                    :key="`${item.type}-${item.id}`"
                     class="pr-detail__comment pr-detail__comment--review-event"
                     :class="`pr-detail__comment--review-${item.state}`"
                   >
@@ -1979,6 +1980,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                   <!-- 普通评论卡片 (含 type=21 评审 body) -->
                   <li
                     v-else-if="item.type === 'comment'"
+                    :key="`${item.type}-${item.id}`"
                     class="pr-detail__comment"
                     :class="{ 'pr-detail__comment--self': currentUsername && item.author?.username === currentUsername }"
                   >
@@ -2059,6 +2061,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                        (label/milestone/assignee/title/branch/ref/dependency 等) -->
                   <li
                     v-else-if="!['review', 'comment', 'code'].includes(item.type)"
+                    :key="`${item.type}-${item.id}`"
                     class="pr-detail__comment pr-detail__comment--system-event"
                     :class="[
                       `pr-detail__comment--system-type-${item.type}`,
@@ -2178,6 +2181,29 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           <span class="pr-detail__event-emphasis">{{ item.dependentIssue.title }}</span>
                         </span>
                       </div>
+                    </div>
+                  </li>
+
+                  <!-- v0.7.2：dismiss_review 拆 2 卡 —— Gitea web Type 32 在 body 非空时
+                       渲染 event 卡 + reason comment 卡。event 卡已在上面 system-event 块渲染，
+                       这里只补 reason comment 卡。 -->
+                  <li
+                    v-if="item.type === 'dismiss_review' && item.body"
+                    :key="`${item.type}-${item.id}-reason`"
+                    class="pr-detail__comment pr-detail__comment--dismiss-reason"
+                  >
+                    <div class="pr-detail__comment-side">
+                      <div class="pr-detail__comment-avatar pr-detail__comment-avatar--dismiss" aria-hidden="true">
+                        <MessageSquare :size="12" :stroke-width="2" />
+                      </div>
+                      <div class="pr-detail__comment-name">{{ item.author?.username || '匿名' }}</div>
+                    </div>
+                    <div class="pr-detail__comment-bubble">
+                      <div class="pr-detail__comment-meta">
+                        <span class="pr-detail__comment-dismiss-reason-tag">驳回原因</span>
+                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                      </div>
+                      <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
                     </div>
                   </li>
                 </template>
@@ -5575,7 +5601,30 @@ git checkout {{ selectedPR.head.ref }}</pre>
   flex-shrink: 0;
 }
 
-/* ===== v0.7.2：系统事件二级详情块（对齐 Gitea web .detail flex-text-block） ===== */
+/* ===== v0.7.2：dismiss_review reason comment 卡（拆 2 卡） =====
+   Gitea web Type 32 在 body 非空时拆 2 卡：event 卡 + reason comment 卡。
+   reason 卡视觉跟普通评论卡一样：左 avatar + 气泡（带左箭头） + 顶部小 tag + body。
+   复用 .pr-detail__comment flex layout（外层 li 已经是 flex + gap）。 */
+.pr-detail__comment-avatar--dismiss {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.pr-detail__comment-dismiss-reason-tag {
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
 .pr-detail__comment-event-detail {
   display: flex;
   align-items: center;
@@ -5882,8 +5931,29 @@ git checkout {{ selectedPR.head.ref }}</pre>
   padding: var(--space-3);
   background: var(--color-bg-elevated);
   border-radius: var(--radius-md);
+  /* v0.7.2：左箭头 —— 对齐 Gitea web .avatar-content-left-arrow。
+     三角形 ::before 指向左侧 avatar，模拟气泡箭头。event 卡（system-event）
+     不需要箭头，所以只对评论卡 + dismiss-reason 卡生效。
+     event 卡通过覆盖 .pr-detail__comment-bubble--event 显式隐藏箭头（见下）。 */
+  position: relative;
 }
-.pr-detail__comment-bubble--event { background: transparent; padding: 0; }
+.pr-detail__comment-bubble::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 12px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 6px 6px 0;
+  border-color: transparent var(--color-bg-elevated) transparent transparent;
+}
+/* system event 卡：bubble 是透明，不需要箭头 */
+.pr-detail__comment-bubble--event {
+  background: transparent;
+  padding: 0;
+}
+.pr-detail__comment-bubble--event::before { display: none; }
 .pr-detail__comment-bubble--editing { background: var(--color-bg-elevated); }
 .pr-detail__comment-meta {
   display: flex;
