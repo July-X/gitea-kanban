@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -10,7 +10,7 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3）
 
 > **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
 >
@@ -27,6 +27,8 @@
 > **v0.7.1 增量**：PR 对话区对齐 Gitea web（评审拆 2 卡 / 合并检查警告区 toggle / 系统事件卡独立渲染）+ Timeline 数据源切换（`/issues/{index}/timeline` 端点 + TimelinePanel store）+ pnpm typecheck 60 → 0 错。docs/releases/v0.7.1.md。
 >
 > **v0.7.2 增量**：视觉 1:1 对齐 Gitea web —— 5 档颜色（success/danger/merge/warn/neutral）+ 21 个 lucide icon 替代 Unicode + 7 类系统事件二级详情块（label/milestone/assignees/title/branch/ref/dependency）+ 气泡左箭头 CSS 三角形 + Dismiss review 拆 2 卡。后端 `platform.TimelineItem` 加 12 个二级详情字段 + `IssueDTO` 加 3 个跨仓 ref 字段 + `TestGiteaAdapter_ListPullTimeline_DetailFields` 7 类系统事件解析测试。docs/releases/v0.7.2.md。
+>
+> **v0.7.3 增量**：Timeline 视觉对齐 Gitea web —— 系统事件紧凑单行布局（去掉 bubble 框，纯 icon + 单行文字）+ 左侧贯穿 timeline 竖线（2px 灰色垂直线，圆点节点切断）+ 5 档颜色应用到 dot 边框 + 评审 state 独立 dot 颜色 + 二级详情拆 inline/block 两层。docs/releases/v0.7.3.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
