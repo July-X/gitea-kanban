@@ -1118,7 +1118,9 @@ export interface CopyRecentLogsResult {
  * 文件名：gitea-kanban-logs-YYYY-MM-DD-HHMMSS.zip
  */
 export function exportLogs(args: ExportLogsArgs = {}): Promise<ExportLogsResult> {
-  return getIpcClient().invoke('logs', 'export', args);
+  // Wails 自动生成的 ExportLogsArgs 是 class，无 index signature；cast 到 Record
+  // 兼容 invoke 签名。运行时 Wails 端按 class 字段读取。
+  return getIpcClient().invoke('logs', 'export', args as unknown as Record<string, unknown>);
 }
 
 /**
@@ -1128,7 +1130,7 @@ export function exportLogs(args: ExportLogsArgs = {}): Promise<ExportLogsResult>
  * 前端拿到 content 后调剪贴板 API 复制。
  */
 export function copyRecentLogs(args: CopyRecentLogsArgs = {}): Promise<CopyRecentLogsResult> {
-  return getIpcClient().invoke('logs', 'copyRecent', args);
+  return getIpcClient().invoke('logs', 'copyRecent', args as unknown as Record<string, unknown>);
 }
 
 // Re-export types used by ReactionBar component

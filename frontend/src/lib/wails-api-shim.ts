@@ -257,6 +257,50 @@ type WailsApp = {
     fileName: string;
     fileBase64: string;
   }) => Promise<unknown>;
+
+  // ===== v0.5.0+ PR 评论 / 评审 / 文件 / 反应（Wails bindings 同步）=====
+  /** 编辑 PR 评论（已删除评论重复编辑返 404） */
+  UpdatePullComment?: (args: { projectId: string; commentId: number; body: string }) => Promise<unknown>;
+  /** 删除 PR 评论（幂等：已删评论再删返成功） */
+  DeletePullComment?: (args: { projectId: string; commentId: number }) => Promise<void>;
+  /** 列 PR 评论表情反应 */
+  ListPullCommentReactions?: (args: { projectId: string; commentId: number }) => Promise<unknown[]>;
+  /** 添 PR 评论表情反应 */
+  AddPullCommentReaction?: (args: { projectId: string; commentId: number; content: string }) => Promise<unknown>;
+  /** 删 PR 评论表情反应 */
+  RemovePullCommentReaction?: (args: { projectId: string; commentId: number; content: string }) => Promise<void>;
+  /** 列 PR 评审（含 review event + body，v0.7.x 起对话区直接走 /timeline 不再走这里） */
+  ListPullReviews?: (args: { projectId: string; index: number }) => Promise<unknown[]>;
+  /** 提交 PR 评审（v0.6+ 支持行内评论，GitHub 端 v0.7.0 起透传 opts.Comments） */
+  CreatePullReview?: (args: {
+    projectId: string;
+    index: number;
+    /** 评审指向的 commit SHA（Gitea 端必填，GitHub 端忽略） */
+    commitId: string;
+    event: string;
+    body?: string;
+    comments?: unknown[];
+  }) => Promise<unknown>;
+  /** 列 PR 变更文件（含 patch / +/- 统计） */
+  ListPullFiles?: (args: { projectId: string; index: number }) => Promise<unknown[]>;
+  /** 列 PR 提交历史（GitHub 端 v0.7.0 补全） */
+  ListPullCommits?: (args: { projectId: string; index: number; page?: number; limit?: number }) => Promise<unknown[]>;
+  /** 列 PR 行内评审评论 */
+  ListPullReviewComments?: (args: { projectId: string; index: number }) => Promise<unknown[]>;
+  /** 发行内评审评论（GitHub 端 v0.7.0 起支持） */
+  CreatePullReviewComment?: (args: {
+    projectId: string;
+    index: number;
+    body: string;
+    path: string;
+    /** Gitea 用 new_position，GitHub 用 line（adapter 内部翻译） */
+    line?: number;
+    newPosition?: number;
+  }) => Promise<unknown>;
+  /** 取单文件 unified diff（含 hunks） */
+  GetPullFileDiff?: (args: { projectId: string; index: number; filePath: string }) => Promise<unknown>;
+  /** 打开桌面文件夹（v0.5.x 故障排查按钮） */
+  OpenDesktopFolder?: () => Promise<void>;
 };
 
 /** 拿到 window.go.main.App（Wails 在启动期注入） */
@@ -478,18 +522,48 @@ const apiShim = {
         // loadingMore spinner、永远看不到「已是末尾」提示）
         offset?: number;
       };
+      // 显式给 fallback 类型参数（不用 `never[]` 默认推断，否则 callback 实际返回的
+      // 具体 node 对象数组赋值不进去）。GraphResultDTO 的结构对齐 Wails bindings。
+      type GraphResultShape = {
+        nodes: Array<{
+          row: number;
+          lane: number;
+          color: number;
+          sha: string;
+          shortSha: string;
+          subject: string;
+          authorName: string;
+          authorEmail: string;
+          date: string;
+          isMerge: boolean;
+          parents: string[];
+          refs?: string[];
+          refTypes?: string[];
+          isCurrent?: boolean;
+          isStash?: boolean;
+          isCommitted?: boolean;
+        }>;
+        edges: Array<{ fromRow: number; toRow: number; fromLane: number; toLane: number; color: number; type: number }>;
+        branches?: Array<{
+          color: number;
+          end: number;
+          lines: Array<{ x1: number; y1: number; x2: number; y2: number; lockedFirst: boolean; isCommitted?: boolean }>;
+        }>;
+        maxLane: number;
+        truncated: boolean;
+      };
       return forwardToWails(
-        () => stubEmpty({ nodes: [], edges: [], maxLane: 0, truncated: false }),
+        () => stubEmpty<GraphResultShape>({ nodes: [], edges: [], maxLane: 0, truncated: false }),
         (app) => {
           if (!app.GetGitGraph) {
-            return stubEmpty({ nodes: [], edges: [], maxLane: 0, truncated: false });
+            return stubEmpty<GraphResultShape>({ nodes: [], edges: [], maxLane: 0, truncated: false });
           }
           return app.GetGitGraph({
             projectId: a.projectId ?? '',
             branches: a.branches,
             maxCount: a.limit,
             offset: a.offset ?? 0,
-          });
+          }) as Promise<GraphResultShape>;
         },
       );
     },
