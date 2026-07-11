@@ -397,8 +397,10 @@ type githubPullRefRaw struct {
 }
 
 type githubUserRaw struct {
-	ID        int64  `json:"id"`
-	Login     string `json:"login"`
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+	// v0.7.4 增量：GitHub 返回的 name（display name）—— Gitea 对齐
+	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
 }
 
@@ -435,21 +437,21 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		UpdatedAt:     p.UpdatedAt,
 	}
 	if p.User != nil {
-		out.Author = &platform.PullUserDTO{Username: p.User.Login, AvatarURL: p.User.AvatarURL}
+		out.Author = &platform.PullUserDTO{Username: p.User.Login, FullName: p.User.Name, AvatarURL: p.User.AvatarURL}
 	}
 	if p.MergedBy != nil {
-		out.MergedBy = &platform.PullUserDTO{Username: p.MergedBy.Login, AvatarURL: p.MergedBy.AvatarURL}
+		out.MergedBy = &platform.PullUserDTO{Username: p.MergedBy.Login, FullName: p.MergedBy.Name, AvatarURL: p.MergedBy.AvatarURL}
 	}
 	if len(p.Assignees) > 0 {
 		out.Assignees = make([]platform.PullUserDTO, 0, len(p.Assignees))
 		for _, u := range p.Assignees {
-			out.Assignees = append(out.Assignees, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+			out.Assignees = append(out.Assignees, platform.PullUserDTO{Username: u.Login, FullName: u.Name, AvatarURL: u.AvatarURL})
 		}
 	}
 	if len(p.RequestedReviewers) > 0 {
 		out.Reviewers = make([]platform.PullUserDTO, 0, len(p.RequestedReviewers))
 		for _, u := range p.RequestedReviewers {
-			out.Reviewers = append(out.Reviewers, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+			out.Reviewers = append(out.Reviewers, platform.PullUserDTO{Username: u.Login, FullName: u.Name, AvatarURL: u.AvatarURL})
 		}
 	}
 	if len(p.Labels) > 0 {
@@ -511,6 +513,7 @@ func githubReviewCommentToDTO(r githubReviewCommentRaw) platform.PullReviewComme
 	if r.User != nil {
 		out.Author = &platform.PullUserDTO{
 			Username:  r.User.Login,
+			FullName:  r.User.Name,
 			AvatarURL: r.User.AvatarURL,
 		}
 	}
@@ -1131,6 +1134,7 @@ func githubReactionToDTO(r githubReactionRaw) platform.ReactionDTO {
 	if r.User != nil {
 		out.User = &platform.PullUserDTO{
 			Username:  r.User.Login,
+			FullName:  r.User.Name,
 			AvatarURL: r.User.AvatarURL,
 		}
 	}
@@ -1224,6 +1228,7 @@ func githubReviewToDTO(r githubReviewRaw) platform.PullReviewDTO {
 	if r.User != nil {
 		out.Author = &platform.PullUserDTO{
 			Username:  r.User.Login,
+			FullName:  r.User.Name,
 			AvatarURL: r.User.AvatarURL,
 		}
 	}

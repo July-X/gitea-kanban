@@ -830,6 +830,21 @@ function reviewEventLabel(event: ReviewEvent): string {
 }
 
 /**
+ * v0.7.4：用户显示名
+ *
+ * Gitea web 的 shared/user/authorlink.tmpl 优先用 User.FullName（display name，
+ * 用户在 web 显示成 "M4JAVA" 这种大写），回退到 User.Login（@username）。
+ * 之前前端只显示 username（@login），display name 用户看到 "m4java" 小写，
+ * 跟 Gitea web 不一致。
+ *
+ * 本函数：优先 fullName（display name），空时回退 username。
+ */
+function displayName(user: { fullName?: string; username: string } | null | undefined): string {
+  if (!user) return '匿名';
+  return user.fullName || user.username || '匿名';
+}
+
+/**
  * 系统事件标签（v0.7.x 对齐 Gitea web）
  * 对应 Gitea CommentType 枚举（除 0=COMMENT / 21=REVIEW body / 22=REVIEW event 之外）。
  * 简体中文文案 + 零术语, 让 PM/设计师/市场/运营也能看懂。
@@ -1982,7 +1997,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     </div>
                     <div class="pr-detail__event-line">
                       <span class="pr-detail__event-text">
-                        <span class="pr-detail__event-author">{{ item.author?.username || '匿名' }}</span>
+                        <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
                         <span class="pr-detail__event-verb">{{ reviewStateLabel(item.state) }}</span>
                       </span>
                       <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
@@ -1997,14 +2012,14 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     :class="{ 'pr-detail__timeline-item--self': currentUsername && item.author?.username === currentUsername }"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-avatar" :title="item.author?.username" aria-hidden="true">
+                      <div class="pr-detail__timeline-avatar" :title="displayName(item.author)" aria-hidden="true">
                         {{ (item.author?.username || '?').charAt(0).toUpperCase() }}
                       </div>
                     </div>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
                         <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
-                        <span class="pr-detail__comment-author">{{ item.author?.username }}</span>
+                        <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <!-- 编辑态 -->
@@ -2088,7 +2103,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     </div>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
-                        <span class="pr-detail__event-author">{{ item.author?.username || '匿名' }}</span>
+                        <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
                         <span class="pr-detail__event-verb">{{ systemEventLabel(item.type) }}</span>
                         <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
@@ -2199,14 +2214,14 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     class="pr-detail__timeline-item pr-detail__timeline-item--comment pr-detail__timeline-item--dismiss-reason"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-avatar pr-detail__timeline-avatar--dismiss" :title="item.author?.username" aria-hidden="true">
+                      <div class="pr-detail__timeline-avatar pr-detail__timeline-avatar--dismiss" :title="displayName(item.author)" aria-hidden="true">
                         <MessageSquare :size="13" :stroke-width="2" />
                       </div>
                     </div>
                     <div class="pr-detail__comment-bubble">
                       <div class="pr-detail__comment-meta">
                         <span class="pr-detail__comment-dismiss-reason-tag">驳回原因</span>
-                        <span class="pr-detail__comment-author">{{ item.author?.username }}</span>
+                        <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
@@ -5812,7 +5827,9 @@ git checkout {{ selectedPR.head.ref }}</pre>
   bottom: 14px;               /* 最后一个 avatar 中心对齐 */
   left: 14px;                 /* 竖线在 padding 32px 的中间 */
   width: 2px;
-  background: var(--color-divider);
+  /* v0.7.4：用 --color-timeline（专门 token，比 --color-divider 略亮）——
+     暗色 18% / 亮色 16% alpha，确保 timeline 序列感可见但不喧宾夺主 */
+  background: var(--color-timeline, var(--color-divider));
   border-radius: 1px;
   z-index: 0;
 }

@@ -294,6 +294,7 @@ export interface PullRefDto {
 
 export interface PullAuthorDto {
   username: string;
+  fullName?: string;
   avatarUrl?: string;
 }
 
