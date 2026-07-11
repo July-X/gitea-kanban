@@ -915,7 +915,7 @@ onUnmounted(() => {
  *
  * @param offset 保留参数（兼容旧调用），实际对外只传 0 或 INITIAL_GRAPH_LIMIT 的增量
  */
-async function loadGraph(offset = 0): Promise<void> {
+async function loadGraph(_offset = 0): Promise<void> {
   if (!activeProjectId.value) {
     return;
   }
@@ -1054,69 +1054,6 @@ async function loadMoreGraph(): Promise<void> {
 }
 
 /**
- * v0.7.0：Q弹 spring 滚动到指定 scrollTop
- *  - 用 requestAnimationFrame 自定义动画曲线，绕开浏览器 scroll-behavior: smooth 的固定缓动
- *  - easeOutBack：t 接近 1 时有过冲（overshoot），再回落，类弹簧手感
- *    公式：1 + c3 * (t - 1)^3 + c1 * (t - 1)^2，c1=1.55, c3=c1+1=2.55
- *  - 距离 < 8px 时直接跳到目标，避免微小滚动触发完整动画
- *  - 用户手动滚动（滚轮/触摸）会触发 scroll 事件，此时取消动画（避免冲突）
- *
- *  @param el 滚动容器
- *  @param targetTop 目标 scrollTop（CSS px）
- *  @param duration 动画时长（ms），默认 560
- */
-function springScrollTo(
-  el: HTMLElement,
-  targetTop: number,
-  duration = 560,
-): void {
-  const startTop = el.scrollTop;
-  const distance = targetTop - startTop;
-  if (Math.abs(distance) < 8) {
-    el.scrollTop = targetTop;
-    return;
-  }
-  // easeOutBack: c1=1.55 → 过冲约 10%，Q弹但不夸张
-  const c1 = 1.55;
-  const c3 = c1 + 1;
-  const easeOutBack = (t: number): number => {
-    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-  };
-  let rafId = 0;
-  let cancelled = false;
-  const onUserScroll = (): void => {
-    // 用户中途手动滚 → 取消动画，避免 spring 跟用户抢控制权
-    cancelled = true;
-    cancelAnimationFrame(rafId);
-    el.removeEventListener('wheel', onUserScroll);
-    el.removeEventListener('touchstart', onUserScroll);
-    el.removeEventListener('keydown', onUserScroll);
-  };
-  // 用户主动输入源：wheel（鼠标滚轮）+ touchstart（移动端触摸）+ keydown（PgDn/Space 等）
-  el.addEventListener('wheel', onUserScroll, { passive: true, once: true });
-  el.addEventListener('touchstart', onUserScroll, { passive: true, once: true });
-  el.addEventListener('keydown', onUserScroll, { once: true });
-
-  const startTime = performance.now();
-  const tick = (now: number): void => {
-    if (cancelled) return;
-    const elapsed = now - startTime;
-    const t = Math.min(1, elapsed / duration);
-    const eased = easeOutBack(t);
-    el.scrollTop = startTop + distance * eased;
-    if (t < 1) {
-      rafId = requestAnimationFrame(tick);
-    } else {
-      // 动画结束 → 清理用户输入监听器
-      el.removeEventListener('wheel', onUserScroll);
-      el.removeEventListener('touchstart', onUserScroll);
-      el.removeEventListener('keydown', onUserScroll);
-    }
-  };
-  rafId = requestAnimationFrame(tick);
-}
-
-/**
  * v0.6.2 滚动按需 deepen：loadGraph 返 localExhausted=true + deepenTriggered=true 时调用。
  * 监听 wails runtime EventsEmit("git:sync:progress") 事件，Stage=done 后自动重试 loadMoreGraph。
  *
@@ -1135,7 +1072,8 @@ async function waitForDeepenAndRetry(_offset: number): Promise<void> {
     const client = getIpcClient();
     await Promise.race([
       new Promise<void>((resolve) => {
-        off = client.on(GitSyncProgressEvent, (payload: unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        off = (client as any).on(GitSyncProgressEvent, (payload: unknown) => {
           const p = payload as { repoKey?: string; stage?: string };
           if (p?.repoKey === repoKey && p?.stage === 'done') resolve();
         });
@@ -1145,7 +1083,9 @@ async function waitForDeepenAndRetry(_offset: number): Promise<void> {
       }),
     ]);
   } finally {
-    if (off) off();
+    // TS 跨 try/finally 控制流分析:在 finally 块内 off 仍推断为 null,
+    // off?.() 应该 OK 但 vue-tsc 仍报 never(可能 client.on 返回类型推断有 bug)
+    if (off) (off as () => void)();
     if (deepenRetryTimer) { clearTimeout(deepenRetryTimer); deepenRetryTimer = null; }
     deepenInProgress.value = false;
     localExhausted.value = false;
@@ -1401,24 +1341,6 @@ const svgWidth = computed(() => {
   return `${w}px`;
 });
 
-/**
- * v3.3：SVG mask 渐变（动态计算）
- *  对齐 vscode-git-graph graph.ts:691-694 applyMaxWidth()
- *  当 contentWidth > maxWidth 时，右侧 12px 渐变淡出
- *  offset1 = (maxWidth - 12) / contentWidth
- *  offset2 = maxWidth / contentWidth
- */
-const svgMaskGradient = computed(() => {
-  const r = svgRender.value;
-  if (!r) return 'none';
-  const contentW = r.contentWidth;
-  const maxW = svgMaxWidth.value;
-  if (maxW <= 0 || contentW <= maxW) return 'none'; // 不需要 mask
-  // vscode 渐变：(maxW-12)/contentW → maxW/contentW
-  const offset1 = ((maxW - 12) / contentW) * 100;
-  const offset2 = (maxW / contentW) * 100;
-  return `linear-gradient(to right, black 0%, black ${offset1}%, transparent ${offset2}%)`;
-});
 const svgHeight = computed(() => {
   const r = svgRender.value;
   return r ? `${r.height}px` : '0px';
@@ -1960,17 +1882,6 @@ let colDragRafId = 0;
  */
 const colDragPreviewWidths = ref<ColumnWidth[] | null>(null);
 
-/**
- * v3.2：列宽 clamp —— 区分 Graph 列 vs 其他列
- *  Graph 列 [60, 715]（vscode 实际边界，user 指引）
- *  其他列 [40, ∞)（vscode COLUMN_MIN_WIDTH=40 通用下限，无上限）
- */
-function clampColWidth(col: ColIndex, w: number): number {
-  if (col === 0) {
-    return Math.max(MIN_GRAPH_COL_WIDTH, Math.min(MAX_GRAPH_COL_WIDTH, w));
-  }
-  return Math.max(COLUMN_MIN_WIDTH, w);
-}
 
 /** 列分隔手柄 mousedown —— 通用 5 列拖动入口 */
 function onColDragStart(col: ColIndex, e: MouseEvent): void {

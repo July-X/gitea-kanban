@@ -376,7 +376,9 @@ export class IpcClient {
 
   /**通用事件监听（main → renderer推送） */
   on(event: string, cb: (payload: unknown) => void): () => void {
-    return this.api.on(event, cb);
+    const fn = this.api.on;
+    if (fn) return fn(event, cb);
+    return () => undefined;
   }
 }
 
