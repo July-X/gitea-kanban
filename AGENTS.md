@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.2)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.3)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.2 发版** — 视觉 1:1 对齐 Gitea web：5 档颜色 + lucide 图标体系 + 7 类系统事件详情块 + 气泡左箭头 + Dismiss 拆 2 卡）
+> 最后更新：2026-07-12（**v0.7.3 发版** — Timeline 视觉对齐 Gitea web：系统事件紧凑单行 + 左侧贯穿 timeline 竖线 + 圆点节点切断 + 5 档颜色应用到 dot 边框）
 
 >
 
@@ -18,6 +18,13 @@
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
 
+> - **v0.7.3** (2026-07-12)：Timeline 视觉对齐 Gitea web（接续 v0.7.2 静态视觉，把动态 timeline 视觉做实）。
+>   1. **系统事件紧凑单行布局**（v0.7.2 套了跟 comment 一样的 flex side + bubble 框，看上又大又重；Gitea web 截图对比显示 system event 是**单行紧凑**）：去掉 bubble 框，纯 icon + 单行文字（作者 + 事件 + 时间）。5 档颜色从文字色升级到 **dot 边框色 + icon 色**（更明显）。
+>   2. **左侧贯穿 timeline 竖线**（Gitea web `web_src/css/repo.css: .repository.view.issue .comment-list::before` 的 2px vertical line 模式）：`.pr-detail__timeline::before` 画 2px 灰色竖线（top: 14px; bottom: 14px; left: 14px），avatar/dot 节点用 `position: absolute; left: -32px` 定位到竖线上 + 圆形背景把竖线"切断"在节点位置。
+>   3. **评审 state 独立 dot 颜色**（v0.7.2 用了 border card + 3 个 state class；v0.7.3 改用 dot 颜色）：approved → 绿 / changes_requested → 红 / commented → 灰。
+>   4. **二级详情拆 inline / block 两层**（v0.7.2 是单一 `.comment-event-detail` 混合）：inline（小信息同行：label chip / milestone / branch / assignees / title 旧新）+ block（链接换行：ref issue / dependency 链接 + 标题）。
+>   5. **4 个分支结构大改**：`<ul class="pr-detail__timeline">` 替代 `pr-detail__comment-list`，每个 li 改用 `pr-detail__timeline-item {--comment | --event --system | --event --review}` 修饰。
+>
 > - **v0.7.2** (2026-07-12)：视觉 1:1 对齐 Gitea web（接续 v0.7.1 结构层对齐，把视觉/细节层做实）。
 >   1. **5 档颜色 token**（对齐 Gitea web `.badge` 语义色）：`success` (绿: reopen/push) / `danger` (红: close) / `merge` (紫: merge_pull) / `warn` (橙: due_date / time tracking) / `neutral` (灰: 其他系统事件 + dismiss_review + 评审请求 + 锁/解锁/引脚)。系统事件卡左 border + 头像色 + badge 背景/文字 三个层次都按颜色档走。
 >   2. **lucide-vue-next icon 体系**（21 个 octicon 全部对齐映射）：从 Unicode 字符（↻ ✕ ⚐ 🔒）迁到 lucide（RotateCcw / X / Tag / Lock ...），对齐 Gitea web `octicon-*` SVG 视觉风格。
