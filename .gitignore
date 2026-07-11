@@ -65,3 +65,4 @@ node_modules/
 /tools/*/debug
 .qoder
 .reasonix-commit-msg.txt
+.worktrees/
