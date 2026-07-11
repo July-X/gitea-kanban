@@ -41,7 +41,8 @@ export const usePullStore = defineStore('pull', () => {
   const loadingMore = ref(false);
   const PAGE_SIZE = 30;
 
-  // v0.7.x: 时间轴面板 — 单一数据源, 包含所有 type 的评论/事件
+  // ===== 时间轴面板状态 (v0.7.x 新) =====
+  // 每个 PR index 对应一个 TimelinePanel, 包含从 /timeline 回来的所有 type
   interface TimelinePanel {
     items: TimelineItemDto[];
     loading: boolean;
@@ -49,7 +50,7 @@ export const usePullStore = defineStore('pull', () => {
   }
   const timelinePanels = ref<Map<number, TimelinePanel>>(new Map());
 
-  // 评审面板 (仅用于提交评审)
+  // 评审面板 (仅用于提交评审后的刷新)
   const reviewPanels = ref<Map<number, PullReviewDto[]>>(new Map());
   const reviewSubmitting = ref(false);
 
