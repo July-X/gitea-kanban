@@ -801,12 +801,12 @@ async function submitReview(p: PullDto): Promise<void> {
 }
 
 /** 评审状态标签（人话，零术语） */
-function reviewStateLabel(state: string): string {
+function reviewStateLabel(state: string | undefined): string {
   switch (state) {
     case 'approved': return '已批准';
     case 'changes_requested': return '请求修改';
     case 'commented': return '已评论';
-    default: return state;
+    default: return state ?? '已评论';
   }
 }
 
@@ -825,23 +825,27 @@ function reviewEventLabel(event: ReviewEvent): string {
  * 对应 Gitea CommentType 枚举（除 0=COMMENT / 21=REVIEW body / 22=REVIEW event 之外）。
  * 简体中文文案 + 零术语, 让 PM/设计师/市场/运营也能看懂。
  */
-function systemEventLabel(type: number): string {
-  const m: Record<number, string> = {
-    1: '重新开启', 2: '关闭', 4: '引用了提交',
-    7: '修改了标签', 8: '修改了里程碑', 9: '修改了指派人', 10: '修改了标题',
-    11: '删除了分支', 16: '设置了截止时间', 17: '修改了截止时间', 18: '移除了截止时间',
-    23: '锁定了议题', 24: '解锁了议题', 25: '修改了目标分支',
-    27: '请求评审', 28: '合并了合并请求', 29: '推送了新提交', 30: '移动了项目',
-    32: '驳回了评审', 36: '置顶了议题', 37: '取消了置顶',
+function systemEventLabel(type: string): string {
+  // v0.7.x TimelineItemDto.type 是 Gitea /timeline 端点的 string 标识符
+  // (review/comment/code/...) 而非老数字 CommentType 枚举
+  const m: Record<string, string> = {
+    reopen: '重新开启', close: '关闭', commit_ref: '引用了提交',
+    label: '修改了标签', milestone: '修改了里程碑', assignee: '修改了指派人',
+    title: '修改了标题', delete_branch: '删除了分支',
+    due_date: '设置了截止时间', change_due_date: '修改了截止时间', remove_due_date: '移除了截止时间',
+    lock: '锁定了议题', unlock: '解锁了议题', change_target_branch: '修改了目标分支',
+    review_request: '请求评审', merge: '合并了合并请求', push: '推送了新提交',
+    move: '移动了项目', dismiss_review: '驳回了评审', pin: '置顶了议题', unpin: '取消了置顶',
   };
-  return m[type] ?? (type === 3 || type === 5 || type === 6 ? '引用了其它议题' : '事件');
+  return m[type] ?? '事件';
 }
 
-function systemEventIcon(type: number): string {
-  const m: Record<number, string> = {
-    1: '↻', 2: '✕', 4: '●', 7: '⚐', 8: '◐', 9: '☻', 10: '✎', 11: '⌫',
-    16: '⏰', 17: '⏰', 18: '⏰', 23: '🔒', 24: '🔒', 25: '⇄', 27: '◉',
-    28: '⤓', 29: '⇧', 30: '◫', 32: '⊘', 36: '◆', 37: '◆',
+function systemEventIcon(type: string): string {
+  const m: Record<string, string> = {
+    reopen: '↻', close: '✕', commit_ref: '●', label: '⚐', milestone: '◐', assignee: '☻',
+    title: '✎', delete_branch: '⌫', due_date: '⏰', change_due_date: '⏰', remove_due_date: '⏰',
+    lock: '🔒', unlock: '🔒', change_target_branch: '⇄', review_request: '◉', merge: '⤓',
+    push: '⇧', move: '◫', dismiss_review: '⊘', pin: '◆', unpin: '◆',
   };
   return m[type] ?? '•';
 }
@@ -870,11 +874,11 @@ function mentionActiveIdx(idx: number): number {
 }
 
 /** v0.7.x: 拿时间轴面板 (对齐 Gitea web) */
-function getTimelinePanel(): { items: TimelineItemDto[]; loading: boolean; error: string | null } {
+function getTimelinePanel(): { items: TimelineItemDto[]; loading: boolean; posting: boolean; error: string | null } {
   const idx = selectedPR.value?.index ?? -1;
-  if (idx < 0) return { items: [], loading: false, error: null };
+  if (idx < 0) return { items: [], loading: false, posting: false, error: null };
   const panel = pull.getTimelinePanel(idx);
-  return { items: panel.items, loading: panel.loading, error: panel.error };
+  return { items: panel.items, loading: panel.loading, posting: panel.posting, error: panel.error };
 }
 
 /** 拿某合并请求的评论草稿 */
@@ -1726,8 +1730,8 @@ function formatRelative(iso: string | undefined): string {
             <span v-if="tabLoading.files" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
-            <span v-if="pull.filesByPR.get(selectedPR.index)?.length > 0" class="pr-detail-tab__count">
-              {{ pull.filesByPR.get(selectedPR.index)!.length }}
+            <span v-if="pull.filesByPR.get(selectedPR?.index ?? -1)?.length" class="pr-detail-tab__count">
+              {{ pull.filesByPR.get(selectedPR?.index ?? -1)?.length ?? 0 }}
             </span>
           </button>
         </div>
@@ -1821,7 +1825,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                 暂无对话，发起第一条评论开始讨论吧
               </div>
               <ul v-else class="pr-detail__comment-list">
-                <template v-for="(item, ti) in getTimelinePanel().items ?? []" :key="`${item.type}-${item.id}`">
+                <template v-for="(item) in getTimelinePanel().items ?? []" :key="`${item.type}-${item.id}`">
                   <!-- 评审事件 (不显示 body, body 由 type=21 评论卡渲染) -->
                   <li
                     v-if="item.type === 'review'"
@@ -1838,7 +1842,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         <span class="pr-detail__review-state-badge" :class="`pr-detail__review-state-badge--${item.state}`">{{ reviewStateLabel(item.state) }}</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
-                      <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author.username }}</div>
+                      <div v-if="item.author?.username" class="pr-detail__comment-event-author">— {{ item.author?.username }}</div>
                     </div>
                   </li>
 
@@ -1846,17 +1850,17 @@ git checkout {{ selectedPR.head.ref }}</pre>
                   <li
                     v-else-if="item.type === 'comment'"
                     class="pr-detail__comment"
-                    :class="{ 'pr-detail__comment--self': currentUsername && item.author.username === currentUsername }"
+                    :class="{ 'pr-detail__comment--self': currentUsername && item.author?.username === currentUsername }"
                   >
                     <div class="pr-detail__comment-side">
-                      <div class="pr-detail__comment-avatar" :title="item.author.username" aria-hidden="true">
-                        {{ (item.author.username || '?').charAt(0).toUpperCase() }}
+                      <div class="pr-detail__comment-avatar" :title="item.author?.username" aria-hidden="true">
+                        {{ (item.author?.username || '?').charAt(0).toUpperCase() }}
                       </div>
-                      <div class="pr-detail__comment-name">{{ item.author.username }}</div>
+                      <div class="pr-detail__comment-name">{{ item.author?.username }}</div>
                     </div>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
-                        <span v-if="currentUsername && item.author.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
+                        <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
                         <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <!-- 编辑态 -->
@@ -1892,7 +1896,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         >（已编辑）</span>
                         <div class="pr-detail__comment-actions">
                           <button
-                            v-if="currentUsername && item.author.username !== currentUsername"
+                            v-if="currentUsername && item.author?.username !== currentUsername"
                             type="button"
                             class="pr-detail__comment-quote"
                             title="引用这条评论"
@@ -1901,7 +1905,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                             <Quote :size="11" :stroke-width="2" aria-hidden="true" />
                             <span>引用</span>
                           </button>
-                          <template v-if="currentUsername && item.author.username === currentUsername">
+                          <template v-if="currentUsername && item.author?.username === currentUsername">
                             <button type="button" class="pr-detail__comment-edit-btn" title="编辑" @click.stop="startEditComment(item as any)">
                               <Pencil :size="11" :stroke-width="2" aria-hidden="true" />
                             </button>

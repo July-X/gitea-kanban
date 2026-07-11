@@ -44,6 +44,8 @@ export const usePullStore = defineStore('pull', () => {
   interface TimelinePanel {
     items: TimelineItemDto[];
     loading: boolean;
+    /** 正在发评论/编辑评论 —— 用于禁用 textarea + send 按钮 */
+    posting: boolean;
     error: string | null;
   }
   const timelinePanels = ref<Map<number, TimelinePanel>>(new Map());
@@ -95,7 +97,7 @@ export const usePullStore = defineStore('pull', () => {
   function getTimelinePanel(index: number): TimelinePanel {
     let p = timelinePanels.value.get(index);
     if (!p) {
-      p = reactive({ items: [], loading: false, error: null });
+      p = reactive({ items: [], loading: false, posting: false, error: null });
       const newMap = new Map(timelinePanels.value); newMap.set(index, p); timelinePanels.value = newMap;
     }
     return p;
@@ -171,9 +173,10 @@ export const usePullStore = defineStore('pull', () => {
 
   async function postComment(p: PullDto, body: string): Promise<void> {
     const panel = getTimelinePanel(p.index);
+    panel.posting = true;
     try { await pullsCommentCreate({ projectId: currentProjectId.value!, index: p.index, body }); await fetchTimeline(p); }
     catch (e) { const err = e as { messageText?: string }; throw new Error(err.messageText ?? '发布失败'); }
-    finally { panel.loading = false; }
+    finally { panel.posting = false; }
   }
 
   async function editComment(p: PullDto, commentId: number, body: string): Promise<void> {
