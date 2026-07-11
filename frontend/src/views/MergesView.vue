@@ -1844,9 +1844,14 @@ function formatRelative(iso: string | undefined): string {
                     @click.prevent 拦截 summary click + 阻止 default action (WebKit 切 open)
                     → 让 Vue state 100% 掌控，避免 WKWebView 二次点击不响应的 bug
                     Space/Enter 在 summary focus 状态下也会触发 click 事件
+
+                    关键：不用 v-if 控制子元素显隐——让 WebKit 根据 [open] 属性自动隐藏
+                    details:not([open]) > *:not(summary) { display: none }。
+                    双层处理（v-if + :open）会破坏 details 整体收缩视觉，
+                    单一走 :open 就能让 WebKit 完整收拢 details 高度。
                   -->
                   <summary @click.prevent="toggleMergeWarning">查看命令行提示</summary>
-                  <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
+                  <div class="pr-detail__merge-warning-help">
                     <div class="pr-detail__merge-warning-step">检出</div>
                     <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
                     <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ selectedPR.head.ref }}:{{ selectedPR.head.ref }}
