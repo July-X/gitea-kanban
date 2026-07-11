@@ -44,6 +44,8 @@ export const usePullStore = defineStore('pull', () => {
   interface TimelinePanel {
     items: TimelineItemDto[];
     loading: boolean;
+    /** 正在发评论/编辑评论 —— 用于禁用 textarea + send 按钮 */
+    posting: boolean;
     error: string | null;
   }
   const timelinePanels = ref<Map<number, TimelinePanel>>(new Map());
@@ -95,7 +97,7 @@ export const usePullStore = defineStore('pull', () => {
   function getTimelinePanel(index: number): TimelinePanel {
     let p = timelinePanels.value.get(index);
     if (!p) {
-      p = reactive({ items: [], loading: false, error: null });
+      p = reactive({ items: [], loading: false, posting: false, error: null });
       const newMap = new Map(timelinePanels.value); newMap.set(index, p); timelinePanels.value = newMap;
     }
     return p;
@@ -171,9 +173,10 @@ export const usePullStore = defineStore('pull', () => {
 
   async function postComment(p: PullDto, body: string): Promise<void> {
     const panel = getTimelinePanel(p.index);
+    panel.posting = true;
     try { await pullsCommentCreate({ projectId: currentProjectId.value!, index: p.index, body }); await fetchTimeline(p); }
     catch (e) { const err = e as { messageText?: string }; throw new Error(err.messageText ?? '发布失败'); }
-    finally { panel.loading = false; }
+    finally { panel.posting = false; }
   }
 
   async function editComment(p: PullDto, commentId: number, body: string): Promise<void> {
@@ -225,6 +228,43 @@ export const usePullStore = defineStore('pull', () => {
     } catch { availableMilestones.value = []; availableMembers.value = []; }
   }
 
+  // ===== 属性编辑器 save 动作（v0.6.0 起包走 store-first） =====
+  //
+  // 这些是 v0.6.0 潜伏 store action 缺失 bug 的修复：MergesView.saveAttrs 调
+  // pullStore.updateLabels / updateAssignees / updateReviewers / updateMilestone
+  // 三参形式（projectId, index, value），但 pullsUpdateXxx IPC 函数只接受单
+  // args object。这里 wrap 一次，内部调 IPC + 乐观更新本地 list。
+
+  /** 乐观更新 items 里某 PR 的指定字段（v0.6+） */
+  function patchItem(index: number, patch: Partial<PullDto>): void {
+    const i = items.value.findIndex(p => p.index === index);
+    if (i >= 0) items.value[i] = { ...items.value[i], ...patch } as PullDto;
+  }
+
+  /** 更新标签（替换所有标签） */
+  async function updateLabels(projectId: string, index: number, labels: string[]): Promise<void> {
+    const updated = await pullsUpdateLabels({ projectId, index, labels });
+    patchItem(index, { labels: updated.labels });
+  }
+
+  /** 更新指派人（多选，空数组 = 清除）—— store 暴露复数名对齐 MergesView 调用 */
+  async function updateAssignees(projectId: string, index: number, assignees: string[]): Promise<void> {
+    const updated = await pullsUpdateAssignee({ projectId, index, assignees });
+    patchItem(index, { assignees: updated.assignees });
+  }
+
+  /** 更新评审人（空数组 = 清除） */
+  async function updateReviewers(projectId: string, index: number, reviewers: string[]): Promise<void> {
+    const updated = await pullsUpdateReviewers({ projectId, index, reviewers });
+    patchItem(index, { reviewers: updated.reviewers });
+  }
+
+  /** 关联里程碑（空串 = 清除；v0.6.0 Gitea / v0.7.0 GitHub） */
+  async function updateMilestone(projectId: string, index: number, milestone: string): Promise<void> {
+    const updated = await pullsUpdateMilestone({ projectId, index, milestone });
+    patchItem(index, { milestone: updated.milestone });
+  }
+
   return {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
@@ -238,8 +278,7 @@ export const usePullStore = defineStore('pull', () => {
     fetchReviews, submitReview, loadReviewComments, loadFiles, fetchFileDiff,
     fetchCommentReactions, addCommentReaction, removeCommentReaction,
     loadAttrEditorData,
-    updateLabels: pullsUpdateLabels, updateAssignee: pullsUpdateAssignee,
-    updateReviewers: pullsUpdateReviewers, updateMilestone: pullsUpdateMilestone,
+    updateLabels, updateAssignees, updateReviewers, updateMilestone,
     labels: labelsList, members: membersList, milestones: milestonesList,
   };
 });

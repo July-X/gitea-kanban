@@ -34,7 +34,7 @@ import {
   KeyRound,
 } from 'lucide-vue-next';
 import { commitsGet } from '@renderer/lib/ipc-client';
-import type { CommitGpgDto } from '@renderer/types/dto';
+import type { CommitGpgDto, CommitFileChangeDto } from '@renderer/types/dto';
 import { showToast } from '@renderer/lib/toast';
 // Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL（window.open 在 Wails
 // WebView 下不可靠——v1 Electron 时代的 setWindowOpenHandler 拦截已不存在）。
@@ -82,15 +82,10 @@ interface CommitDetail {
   additions?: number;
   deletions?: number;
   filesChanged?: number;
-  files?: Array<{
-    filename: string;
-    status?: string;
-    additions?: number;
-    deletions?: number;
-    binary?: boolean;
-    previousFilename?: string;
-    functions?: string[];
-  }>;
+  // v0.7.1：用 frontend DTO 的 CommitFileChangeDto 引用（Wails 生成的 main.FileChangeDTO
+  // 跟 DTO 字段有差异，会导致 dto.files 赋值时类型不兼容；interface 内嵌类型
+  // 还会被 vue-tsc 推成 never → v-for f in detail.files 报 f is never）
+  files?: CommitFileChangeDto[];
   linkedCards?: Array<{ cardId: string; columnName: string }>;
   /** GPG 签名状态（commitsGet 单条详情才有） */
   gpg?: CommitGpgDto;
@@ -233,7 +228,7 @@ async function copyFilePath(path: string): Promise<void> {
 }
 
 /** v3.7：点击文件行（目前 placeholder；后期可扩展"在平台打开文件"等功能） */
-function handleFileClick(_file: CommitDetail['files'] extends Array<infer T> ? T : never): void {
+function handleFileClick(_file: CommitFileChangeDto): void {
   // vscode main.ts:2960 triggerOpenFile —— 当前先留空
 }
 

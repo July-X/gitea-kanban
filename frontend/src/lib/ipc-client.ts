@@ -376,7 +376,9 @@ export class IpcClient {
 
   /**通用事件监听（main → renderer推送） */
   on(event: string, cb: (payload: unknown) => void): () => void {
-    return this.api.on(event, cb);
+    const fn = this.api.on;
+    if (fn) return fn(event, cb);
+    return () => undefined;
   }
 }
 
@@ -1118,7 +1120,9 @@ export interface CopyRecentLogsResult {
  * 文件名：gitea-kanban-logs-YYYY-MM-DD-HHMMSS.zip
  */
 export function exportLogs(args: ExportLogsArgs = {}): Promise<ExportLogsResult> {
-  return getIpcClient().invoke('logs', 'export', args);
+  // Wails 自动生成的 ExportLogsArgs 是 class，无 index signature；cast 到 Record
+  // 兼容 invoke 签名。运行时 Wails 端按 class 字段读取。
+  return getIpcClient().invoke('logs', 'export', args as unknown as Record<string, unknown>);
 }
 
 /**
@@ -1128,7 +1132,7 @@ export function exportLogs(args: ExportLogsArgs = {}): Promise<ExportLogsResult>
  * 前端拿到 content 后调剪贴板 API 复制。
  */
 export function copyRecentLogs(args: CopyRecentLogsArgs = {}): Promise<CopyRecentLogsResult> {
-  return getIpcClient().invoke('logs', 'copyRecent', args);
+  return getIpcClient().invoke('logs', 'copyRecent', args as unknown as Record<string, unknown>);
 }
 
 // Re-export types used by ReactionBar component

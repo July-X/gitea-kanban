@@ -14,7 +14,7 @@
  *   - projectId: string — 项目 ID
  */
 import { computed, ref } from 'vue';
-import { ChevronDown, ChevronRight, Plus, Minus, FileText, Loader2 } from 'lucide-vue-next';
+import { ChevronDown, ChevronRight, FileText, Loader2 } from 'lucide-vue-next';
 import { usePullStore } from '@renderer/stores/pull';
 import { useRepoStore } from '@renderer/stores/repo';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -84,11 +84,6 @@ async function ensureLoaded(): Promise<void> {
 
 // 加载
 ensureLoaded();
-
-/** 文本字数截断 */
-const truncate = (s: string, n = 50): string => {
-  return s.length > n ? s.slice(0, n) + '…' : s;
-};
 </script>
 
 <template>
@@ -156,7 +151,7 @@ const truncate = (s: string, n = 50): string => {
 
           <!-- Review comments list -->
           <div
-            v-for="(c, ci) in commentsByPath.get(f.filename) ?? []"
+            v-for="(c) in commentsByPath.get(f.filename) ?? []"
             :key="c.id"
             class="file-item__comment"
           >
