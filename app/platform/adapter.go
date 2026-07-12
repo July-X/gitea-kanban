@@ -542,9 +542,22 @@ type PullDetailDTO struct {
 }
 
 // PullRefDTO head / base 引用信息
+//
+// v0.7.9 增量：加 Label 字段（真实分支名显示用）。
+// 背景：Gitea `/pulls/{index}` 端点 head.ref 返的是 git ref 全路径
+// （如 `refs/pull/72/head`），不是真实分支名（`pr-with-labels-366575`）。
+// Gitea 端额外返 `head.label` 字段（真实分支名，掉 `refs/heads/` 前缀），
+// Gitea web 模板用 label 字段渲染分支名（Gitea web 端 PR header
+// "X 请求将 N 次提交从 {head.label} 合并至 {base.label}"）。
+// 我们 v0.7.6 改 PR header 格式时只用了 `selectedPR.head.ref`，
+// 导致显示成 "refs/pull/72/head" 这种 ref id（user 反馈 "缺少明确的分支记录"）。
+//
+// v0.7.9 修：加 Label 字段映射，模板用 `head.label || head.ref` 兜底
+// （Gitea < 1.20 / GitHub API 都没有 label 字段，回退到 ref）。
 type PullRefDTO struct {
-	Ref string `json:"ref"` // 分支名
-	SHA string `json:"sha"` // 分支顶端 commit hash
+	Ref   string `json:"ref"`             // git ref 全路径（`refs/pull/N/head` / `refs/heads/main`）
+	Label string `json:"label,omitempty"` // 真实分支名（`pr-with-labels-366575`），Gitea 1.20+ / GitHub 无此字段
+	SHA   string `json:"sha"`             // 分支顶端 commit hash
 }
 
 // PullUserDTO 嵌套用户信息（author / assignees / reviewers / mergedBy / assignee / assigner / poster）

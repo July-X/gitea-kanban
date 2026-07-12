@@ -441,6 +441,24 @@ function commitDetails(sha: string): PullCommitDto | null {
   return list.find((c) => c.sha === sha || c.sha.startsWith(short) || sha.startsWith(c.shortSha)) ?? null;
 }
 
+/**
+ * v0.7.9：head ref 显示文本 —— 优先用 label（真实分支名 `pr-with-labels-366575`），
+ * 兜底用 ref（git ref 全路径 `refs/pull/72/head`）。
+ *
+ * 根因：v0.7.6 改 PR header 格式时只用了 `head.ref` 字段，渲染出 ref id（看着像
+ * 一串 ref 路径而不是分支名，user 反馈 "缺少明确的分支记录"）。Gitea 1.20+ API
+ * 在 head/base 嵌套对象里额外返 label 字段（真实分支名），Gitea web 端模板用
+ * label 渲染，我们对齐这个行为。
+ *
+ * 兜底场景：GitHub API label == ref / 老 Gitea（< 1.20）没 label 字段 → 用 ref。
+ */
+function headLabel(p: PullDto): string {
+  return p.head.label || p.head.ref;
+}
+function baseLabel(p: PullDto): string {
+  return p.base.label || p.base.ref;
+}
+
 /** 在系统浏览器打开 commit 页面 */
 function openCommitExternal(sha: string): void {
   const url = commitWebUrl(sha);
@@ -1743,7 +1761,7 @@ const confirmDescription = computed(() => {
   const methodInfo = mergeMethods.find((m) => m.value === selectedMethod.value);
   const methodLabel = methodInfo?.label ?? selectedMethod.value;
   const methodHint = methodInfo?.hint ?? '';
-  let desc = `将把 #${p.index}「${p.title}」以「${methodLabel}」方式合并到 ${p.base.ref}。`;
+  let desc = `将把 #${p.index}「${p.title}」以「${methodLabel}」方式合并到 ${baseLabel(p)}。`;
   if (methodHint) desc += `\n\n方式说明：${methodHint}`;
   if (isMainBranch(p.base.ref)) {
     desc += '\n\n⚠️ 目标是主线分支，将影响所有协作者的工作流。';
@@ -1935,9 +1953,9 @@ function formatRelative(iso: string | undefined): string {
                 <span class="pr-card__num mono">#{{ p.index }}</span>
               </div>
               <div class="pr-card__branches">
-                <span class="pr-card__branch mono" :title="p.head.ref">{{ p.head.ref }}</span>
+                <span class="pr-card__branch mono" :title="p.head.label || p.head.ref">{{ headLabel(p) }}</span>
                 <span class="pr-card__branch-arrow">→</span>
-                <span class="pr-card__branch pr-card__branch--dst mono" :title="p.base.ref">{{ p.base.ref }}</span>
+                <span class="pr-card__branch pr-card__branch--dst mono" :title="p.base.label || p.base.ref">{{ baseLabel(p) }}</span>
               </div>
               <div class="pr-card__meta">
                 <span class="pr-card__author">{{ p.author.username }}</span>
@@ -2003,22 +2021,22 @@ function formatRelative(iso: string | undefined): string {
                   <a
                     v-if="activeRepo"
                     class="mono pr-detail__branch pr-detail__branch--link"
-                    :href="branchWebUrl(selectedPR.head.ref)"
+                    :href="branchWebUrl(headLabel(selectedPR))"
                     target="_blank"
                     rel="noopener"
-                    :title="`在 Gitea 打开 ${selectedPR.head.ref} 分支`"
-                  >{{ selectedPR.head.ref }}</a>
-                  <code v-else class="mono pr-detail__branch">{{ selectedPR.head.ref }}</code>
+                    :title="`在 Gitea 打开 ${headLabel(selectedPR)} 分支`"
+                  >{{ headLabel(selectedPR) }}</a>
+                  <code v-else class="mono pr-detail__branch">{{ headLabel(selectedPR) }}</code>
                   合并至
                   <a
                     v-if="activeRepo"
                     class="mono pr-detail__branch pr-detail__branch--dst pr-detail__branch--link"
-                    :href="branchWebUrl(selectedPR.base.ref)"
+                    :href="branchWebUrl(baseLabel(selectedPR))"
                     target="_blank"
                     rel="noopener"
-                    :title="`在 Gitea 打开 ${selectedPR.base.ref} 分支`"
-                  >{{ selectedPR.base.ref }}</a>
-                  <code v-else class="mono pr-detail__branch pr-detail__branch--dst">{{ selectedPR.base.ref }}</code>
+                    :title="`在 Gitea 打开 ${baseLabel(selectedPR)} 分支`"
+                  >{{ baseLabel(selectedPR) }}</a>
+                  <code v-else class="mono pr-detail__branch pr-detail__branch--dst">{{ baseLabel(selectedPR) }}</code>
                 </span>
               </div>
             </div>
@@ -2238,8 +2256,8 @@ function formatRelative(iso: string | undefined): string {
                 <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
                   <div class="pr-detail__merge-warning-step">检出</div>
                   <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
-                  <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ selectedPR.head.ref }}:{{ selectedPR.head.ref }}
-git checkout {{ selectedPR.head.ref }}</pre>
+                  <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ headLabel(selectedPR) }}:{{ headLabel(selectedPR) }}
+git checkout {{ headLabel(selectedPR) }}</pre>
                 </div>
               </div>
             </div>
@@ -2605,7 +2623,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         <span v-else-if="item.type === 'merge' && selectedPR?.mergeCommitSha && selectedPR?.base?.ref">
                           <GitMerge :size="12" :stroke-width="2" aria-hidden="true" />
                           <span class="pr-detail__event-hint">到</span>
-                          <code class="pr-detail__event-branch">{{ selectedPR.base.ref }}</code>
+                          <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
                           <a
                             class="mono pr-detail__event-branch pr-detail__branch--link"
                             :href="commitWebUrl(selectedPR.mergeCommitSha)"
@@ -2957,10 +2975,10 @@ git checkout {{ selectedPR.head.ref }}</pre>
               type="checkbox"
               class="merge-confirm__delete-branch-checkbox"
             />
-            <span>合并后删除源分支 <code>{{ mergingPull.head.ref }}</code></span>
+            <span>合并后删除源分支 <code>{{ headLabel(mergingPull) }}</code></span>
           </label>
           <p class="merge-confirm__delete-branch-hint">
-            勾选后：合并成功时删除 <code>{{ mergingPull.head.ref }}</code>。
+            勾选后：合并成功时删除 <code>{{ headLabel(mergingPull) }}</code>。
             GitHub 合并成功后会调 DELETE /git/refs/heads/&lt;ref&gt;；Gitea 直接走 /pulls/{index}/merge 内置参数。
           </p>
         </div>

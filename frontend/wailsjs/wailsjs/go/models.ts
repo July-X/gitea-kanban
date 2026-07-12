@@ -1908,6 +1908,7 @@ export namespace platform {
 	}
 	export class PullRefDTO {
 	    ref: string;
+	    label?: string;
 	    sha: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1917,6 +1918,7 @@ export namespace platform {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ref = source["ref"];
+	        this.label = source["label"];
 	        this.sha = source["sha"];
 	    }
 	}

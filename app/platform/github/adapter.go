@@ -399,8 +399,12 @@ type githubPullMilestoneRaw struct {
 }
 
 type githubPullRefRaw struct {
-	Ref string `json:"ref"`
-	SHA string `json:"sha"`
+	// v0.7.9：Label 字段 —— GitHub API 在 head/base 嵌套对象里也返 label 字段
+	// （与 ref 相同，都是 `refs/heads/main` 这种完整路径，去掉前缀后是分支名）
+	// GitHub 端 label == ref（不像 Gitea label 是真实分支名）
+	Label string `json:"label,omitempty"`
+	Ref   string `json:"ref"`
+	SHA   string `json:"sha"`
 }
 
 type githubUserRaw struct {
@@ -434,8 +438,8 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		State:         p.State,
 		Draft:         p.Draft,
 		Merged:        p.Merged,
-		Head:          platform.PullRefDTO{Ref: p.Head.Ref, SHA: p.Head.SHA},
-		Base:          platform.PullRefDTO{Ref: p.Base.Ref, SHA: p.Base.SHA},
+		Head:          platform.PullRefDTO{Ref: p.Head.Ref, Label: p.Head.Label, SHA: p.Head.SHA},
+		Base:          platform.PullRefDTO{Ref: p.Base.Ref, Label: p.Base.Label, SHA: p.Base.SHA},
 		Mergeable:     mergeable,
 		HasConflicts:  !mergeable,
 		Body:          p.Body,

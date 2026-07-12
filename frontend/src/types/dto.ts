@@ -289,6 +289,14 @@ export interface GetCommitArgs {
 
 export interface PullRefDto {
   ref: string;
+  // v0.7.9：真实分支名（去掉 refs/heads/ 前缀）。Gitea 1.20+ 在 head/base 嵌套
+  // 对象里返 label 字段（与 ref 不同），Gitea web 用 label 渲染 PR header 分支名
+  // （"X 请求将 N 次提交从 {head.label} 合并至 {base.label}"）。我们 v0.7.6
+  // 改 PR header 格式时只用了 ref，导致显示成 ref id（"refs/pull/72/head"）
+  // 而不是真实分支名（user 反馈 "缺少明确的分支记录"）。
+  // GitHub API 端 label == ref；老 Gitea 端（< 1.20）没 label 字段 → 模板
+  // 兜底用 ref 渲染。
+  label?: string;
   sha: string;
 }
 
