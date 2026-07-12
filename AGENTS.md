@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.10)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.11)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.10 发版** — PR 对话区 UI 微调：① 移除 `pr-detail__conv-header` 对话标题 div（user 反馈"不需要展示出来"）② timeline dot 22px → 26px（"大一点点"）+ 内部 icon size 13 → 15 ③ timeline 文字升一档（event-line 14px + event-prep 14px + event-time 12px + event-inline 14px）—— v0.7.9 修 PR header 用 `head.label || head.ref` 显示真实分支名 + v0.7.8 修 push/merge 事件类型归一化 + body JSON 解析后，本版本做 UI 微调收尾）
+> 最后更新：2026-07-12（**v0.7.11 发版** — 指派自指派判断 + delete_branch verb 对齐 Gitea web：① `systemEventVerb` assignees 分支补 `isSelfAssign` 判断（`assignee.username === author.username` → "自指派"/"取消自指派"，否则"指派给"/"取消了指派"，对齐 Gitea web 中文 locale，v0.7.5 注释里规划但代码漏判）② `systemEventVerb` delete_branch 分支：'删除了分支' → '删除分支'（去掉"了"字对齐 Gitea web "删除分支 ex-same-057405"，分支名走 inline 块 GitBranch icon + `<code>{{ item.oldRef }}</code>`，v0.7.4 已有）—— v0.7.10 移 conv-header 标题 + timeline icon/字号调整后，本版本修事件文案对齐）
 
 >
 
