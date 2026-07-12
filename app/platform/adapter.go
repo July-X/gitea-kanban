@@ -628,43 +628,53 @@ type TimelineItem struct {
 
 	// type=22 评审事件专属字段
 	State    string `json:"state,omitempty"`     // "approved" / "changes_requested" / "commented"
-	CommitID string `json:"commit_id,omitempty"` // 评审针对的 commit SHA
+	CommitID string `json:"commitId,omitempty"`  // 评审针对的 commit SHA
 	Official bool   `json:"official,omitempty"`  // 是否是官方评审（有写权限）
 
 	// type=29 推送事件专属
-	CommitSHA string `json:"commit_sha,omitempty"` // 推送后 head 的最新 commit SHA
+	CommitSHA string `json:"commitSha,omitempty"` // 推送后 head 的最新 commit SHA
 
 	// v0.7.2：Gitea /timeline 端点暴露的二级详情字段。
 	// 前端用这些字段渲染"系统事件卡"下方的 detail 块（对齐 Gitea web）。
 	// 不是所有平台都暴露同样字段（GitHub /timeline 只返 type=0 评论，事件类型都是 stub），
 	// 所以用 omitempty 让缺失时不出现在 JSON 里，前端按需读。
+	//
+	// v0.7.18 根因修复：json tag 全部改 camelCase（之前是 snake_case，跟 PullDetailDTO
+	// 风格不一致）。Wails binding generator 用 Go struct json tag 生成 TS 字段名——
+	// PullDetailDTO 用 camelCase 所以 Wails 生成 camelCase；TimelineItem 用 snake_case
+	// 所以 Wails 生成 snake_case。前端 dto.ts 统一 camelCase（`commitIds` / `isWipToggle` /
+	// `addedLabels` 等），store 把 Wails TimelineItem 强转成 TimelineItemDto 后所有
+	// camelCase 访问都拿到 undefined（push 事件 block 块不渲染、merge event verb
+	// 走 WIP toggle 兜底、label 合并走不到、assignees isSelfAssign 永远 false 等）。
+	// 修法：改 Go 端 json tag 跟 PullDetailDTO 保持 camelCase，wails build 重新生成
+	// models.ts，store 强转后字段直接对齐。
 
 	// type=10 (change_title) —— 标题变化
-	OldTitle string `json:"old_title,omitempty"`
-	NewTitle string `json:"new_title,omitempty"`
+	OldTitle string `json:"oldTitle,omitempty"`
+	NewTitle string `json:"newTitle,omitempty"`
 
 	// type=11 (delete_branch) / 25 (change_target_branch) / 33 (change_issue_ref) —— 分支/引用名
-	OldRef string `json:"old_ref,omitempty"`
-	NewRef string `json:"new_ref,omitempty"`
+	OldRef string `json:"oldRef,omitempty"`
+	NewRef string `json:"newRef,omitempty"`
 
 	// type=7 (label) —— 单个 label（Gitea API 一次只暴露一个 label，不暴露 added/removed 数组）
 	Label *PullLabelDTO `json:"label,omitempty"`
 
 	// type=8 (milestone) —— 里程碑变化
-	OldMilestone *MilestoneDTO `json:"old_milestone,omitempty"`
+	OldMilestone *MilestoneDTO `json:"oldMilestone,omitempty"`
 	Milestone    *MilestoneDTO `json:"milestone,omitempty"`
 
 	// type=9 (assignees) —— 指派人变化
 	Assignee        *PullUserDTO `json:"assignee,omitempty"`
-	RemovedAssignee bool         `json:"removed_assignee,omitempty"` // true=移除，false=添加
+	RemovedAssignee bool         `json:"removedAssignee,omitempty"` // true=移除，false=添加
 
 	// type=3 (issue_ref) / 5 (comment_ref) / 6 (pull_ref) / 33 (change_issue_ref) —— 跨引用
-	RefIssue     *IssueDTO `json:"ref_issue,omitempty"`
-	RefAction    string    `json:"ref_action,omitempty"`     // "close" / "reopen" / "cross" 之一
-	RefCommitSHA string    `json:"ref_commit_sha,omitempty"` // type=4 commit ref 时引用到的 commit SHA
+	RefIssue     *IssueDTO `json:"refIssue,omitempty"`
+	RefAction    string    `json:"refAction,omitempty"`     // "close" / "reopen" / "cross" 之一
+	RefCommitSHA string    `json:"refCommitSha,omitempty"` // type=4 commit ref 时引用到的 commit SHA
 
 	// type=19 (add_dependency) / 20 (remove_dependency) —— 依赖 issue
-	DependentIssue *IssueDTO `json:"dependent_issue,omitempty"`
+	DependentIssue *IssueDTO `json:"dependentIssue,omitempty"`
 
 	// v0.7.6：WIP toggle 标记（仅 type=10 change_title 事件可能命中）
 	//
@@ -681,8 +691,8 @@ type TimelineItem struct {
 	// 前端 systemEventVerb 在 type='change_title' + IsWipToggle 时返回
 	// "已将合并请求标记为进行中" / "已将合并请求标记为可评审"，对齐 Gitea web
 	// `repo.pulls.marked_as_work_in_progress_at` / `marked_as_ready_for_review_at` 中文 locale。
-	IsWipToggle bool `json:"is_wip_toggle,omitempty"`
-	IsWip       bool `json:"is_wip,omitempty"`
+	IsWipToggle bool `json:"isWipToggle,omitempty"`
+	IsWip       bool `json:"isWip,omitempty"`
 
 	// v0.7.6：label 事件聚合（对齐 Gitea web `routers/web/repo/issue_view.go:mergeLabels` 逻辑）
 	//
@@ -694,11 +704,11 @@ type TimelineItem struct {
 	//
 	// Content 字段含义：Gitea `issues.Comment.Content` 在 type=7 时存 "1"=添加 / 其他=移除。
 	// 解析时把单数 Label + Content 判断填到 AddedLabels 或 RemovedLabels 数组里。
-	AddedLabels   []*PullLabelDTO `json:"added_labels,omitempty"`
-	RemovedLabels []*PullLabelDTO `json:"removed_labels,omitempty"`
+	AddedLabels   []*PullLabelDTO `json:"addedLabels,omitempty"`
+	RemovedLabels []*PullLabelDTO `json:"removedLabels,omitempty"`
 	// LabelAction 标记单条 label 事件的 add/remove 方向（前端合并用）：
 	//   "add" = Content == "1"（添加），"remove" = Content != "1"（移除）
-	LabelAction string `json:"label_action,omitempty"`
+	LabelAction string `json:"labelAction,omitempty"`
 
 	// v0.7.8：type=29 (push) 事件专属字段 —— 重新对齐 Gitea 端实际 API。
 	//
@@ -721,13 +731,13 @@ type TimelineItem struct {
 	// v0.7.7 还存在的字段：MergeCommitSHA，merge 事件专用。Gitea 1.26+ timeline
 	// 端点 merge_pull 事件 body 是空字符串（**没有** merge commit SHA），必须从
 	// PR 详情端点 /pulls/{index} 的 `merge_commit_sha` 字段拿（v0.7.8 修 giteaPullRaw 映射）。
-	CommitIDs   []string `json:"commit_ids,omitempty"`
-	IsForcePush bool     `json:"is_force_push,omitempty"`
+	CommitIDs   []string `json:"commitIds,omitempty"`
+	IsForcePush bool     `json:"isForcePush,omitempty"`
 	// MergeCommitSHA：v0.7.7 加的，v0.7.8 修来源 —— Gitea 1.26+ timeline 不返回，
 	// 由 PR 详情 GetPull 端点 `merge_commit_sha` 字段映射过来。TimelineItem 这个字段保留
 	// 是为 v0.7.5 之前的 type 字符串表（"merge"）的渲染，模板里 inline 块可拿
 	// selectedPR.mergeCommitSha 兜底（PullDetailDTO 已加 MergeCommitSHA 字段，v0.7.8 修 raw 映射）。
-	MergeCommitSHA string `json:"merge_commit_sha,omitempty"`
+	MergeCommitSHA string `json:"mergeCommitSha,omitempty"`
 }
 
 // ReactionDTO 单条表情反应（v0.5.0 M2）

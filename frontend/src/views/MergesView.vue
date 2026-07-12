@@ -2576,6 +2576,32 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                           class="pr-detail__event-label"
                           :style="labelStyle(item.label.color)"
                         >{{ item.label.name }}</span>
+                        <!-- v0.7.18 根因修复：merge 事件 SHA + branch 真正搬到主行
+                             （v0.7.15 注释说要搬但实际没动代码——inline 块作为子 div
+                             必然另起一行，从 UI 看就是 2 行 "合并提交" + "7db04cd 到 main"）。
+                             现在跟 v0.7.14 label chip 一样，主行 v-else-if 链渲染。
+                             user 反馈 "kanban_bot 于 27 天前 合并提交 7db04cd 到 main"
+                             必须 1 行显示，跟 Gitea web 一致。
+                             主行 pr-detail__event-merge span 加 class="pr-detail__event-merge"
+                             （v0.7.16 white-space: nowrap）保证整段 1 行不换行。
+                             SHA 来源仍是 selectedPR.mergeCommitSha（v0.7.8 修的
+                             PR 详情端点字段映射，PullDetailDTO camelCase 字段），
+                             不是 TimelineItemDto.mergeCommitSha（Gitea 1.26+ timeline
+                             端点不返 SHA）。 -->
+                        <span
+                          v-else-if="item.type === 'merge' && selectedPR?.mergeCommitSha && selectedPR?.base?.ref"
+                          class="pr-detail__event-merge"
+                        >
+                          <a
+                            class="mono pr-detail__event-branch pr-detail__branch--link"
+                            :href="commitWebUrl(selectedPR.mergeCommitSha)"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`在 Gitea 打开 ${selectedPR.mergeCommitSha.slice(0, 7)} 合并提交`"
+                          >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
+                          <span class="pr-detail__event-hint">到</span>
+                          <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
+                        </span>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
                       <div
@@ -2682,19 +2708,12 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                              实际效果："X 于 Y 合并提交 f30ece070c 到 main"  同一行。
                              注：merge SHA 来源仍是 selectedPR.mergeCommitSha（v0.7.8
                              修的 PR 详情端点字段映射），不是 TimelineItemDto.mergeCommitSha
-                             （Gitea 1.26+ timeline 端点不返 SHA）。 -->
-                        <span v-else-if="item.type === 'merge' && selectedPR?.mergeCommitSha && selectedPR?.base?.ref"
-                              class="pr-detail__event-merge">
-                          <a
-                            class="mono pr-detail__event-branch pr-detail__branch--link"
-                            :href="commitWebUrl(selectedPR.mergeCommitSha)"
-                            target="_blank"
-                            rel="noopener"
-                            :title="`在 Gitea 打开 ${selectedPR.mergeCommitSha.slice(0, 7)} 合并提交`"
-                          >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
-                          <span class="pr-detail__event-hint">到</span>
-                          <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
-                        </span>
+                             （Gitea 1.26+ timeline 端点不返 SHA）。
+                             v0.7.18 备注：v0.7.15 注释说要搬主行但**实际没动代码**——
+                             span 还留在 inline 块里（子 div 必然另起一行），导致 user
+                             反馈"分支信息还是换行了"。v0.7.18 把 v-else-if span 真正
+                             搬到主行 pr-detail__event-line（紧跟 verb 后），inline 块
+                             那个 span 删掉。 -->
 
                         <!-- v0.7.6：WIP toggle 时不显示 oldTitle → newTitle（标题内容没意义） -->
                         <span v-else-if="(item.type === 'title' || item.type === 'change_title') && !item.isWipToggle">
