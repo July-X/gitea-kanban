@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.7)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.8)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.7 发版** — push 事件 commit 列表 + merge 事件 commit 链接（user 反馈 ⑥ "带分支信息的评论没正确还原"）：① push 事件 inline 块显示 7 位短 SHA 链接 + force push 提示 ② push 事件 block 块渲染 commit 列表（缩进 + 短 SHA 链接 + commit 消息 + 提交者，对齐 Gitea web `commits_list_small.tmpl`）③ merge 事件 SHA 改成链接到 Gitea web `/commit/{sha}` ④ 新增 `commitsByPR` 缓存 + `loadCommits()` helper ⑤ 新增 `fullMergeSha` / `pushEventCommits` / `commitWebUrl` 3 个 helper）
+> 最后更新：2026-07-12（**v0.7.8 发版** — push/merge 事件详情 根因修复（user 反馈 ⑦ "对话事件中的 commit 信息还是看不到"）：v0.7.5/v0.7.7 写 push/merge 事件**没实测过 Gitea 1.26+ API**凭印象假设 4 个独立顶层字段（OldCommit/NewCommit/CommitsNum/IsForcePush）+ type 字符串 "push"/"merge"，实际是 snake_case `pull_push`/`merge_pull` + 真实 commit_ids 在 body JSON 字符串里 + merge_pull event body 是空字符串。v0.7.8 全部重写：① 后端 `giteaTimelineToItem` 类型归一化 + push event 解析 body JSON → `CommitIDs []string` ② `giteaPullRaw` 补 `MergeCommitSHA` 字段映射（v0.7.7 加 DTO 字段但 adapter 漏 raw 字段）③ 前端删 v0.7.7 双 Map bug 的 commitsByPR / pushEventCommits helper ④ push event 渲染直接用 `item.commitIds` 数组 + commitDetails() 补 subject ⑤ merge event 从 `selectedPR.value?.mergeCommitSha` 拼 SHA 链接（PR 详情端点字段，store `fetchPullDetail(p)` 新增）⑥ Wails binding 自动重生成）
 
 >
 
@@ -18,7 +18,7 @@
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
 
-> - **v0.7.7** (2026-07-12)：push 事件 commit 列表 + merge 事件 commit 链接（接续 v0.7.6 反馈收尾，处理 user 反馈 ⑥ "带分支信息的评论没正确还原"）。
+> - **v0.7.8** (2026-07-12)：push/merge 事件详情 根因修复（接续 v0.7.7 反馈收尾，处理 user 反馈 ⑦ "对话事件中的 commit 信息还是看不到"）。
 >   1. **后端 push / merge 字段扩展**：`platform.TimelineItem` 加 `OldCommit / NewCommit / CommitsNum / IsForcePush` 4 字段（push 事件）+ `MergeCommitSHA` 1 字段（merge 事件）。`giteaTimelineRaw` 加 `old_commit_id / new_commit_id / commits_num / is_force_push` 4 字段。`giteaTimelineToItem` 映射 4 字段。
 >   2. **DTO 同步**：`TimelineItemDto` 加 5 字段（`oldCommit / newCommit / commitsNum / isForcePush / mergeCommitSha`）。Wails bindings 重新生成。
 >   3. **commitsByPR 缓存**：`Map<index, PullCommitDto[]>` 缓存 PR 全量 commit 列表（`/pulls/{index}/commits` 端点）。`loadCommits(projectId, index)` helper：缓存命中直接返。`loadComments` 调完 `fetchTimeline` 后并行 `loadCommits`（push 事件渲染用）。
