@@ -2544,6 +2544,38 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                         <span class="pr-detail__event-prep">于</span>
                         <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                         <span class="pr-detail__event-verb">{{ systemEventVerb(item) }}</span>
+                        <!-- v0.7.14：label 事件 chip 移到主行（跟 push/merge/delete_branch
+                             一致），不单独换 div 块 —— user 反馈 ⑬"修改了标签" 后面 chip
+                             不要单独换一行显示。Gitea web 渲染 "X 于 Y 修改了标签
+                             [bug] [feature] [needs-review]" 同一行，我们对齐。
+                             之前 v0.7.6 把 label chip 放在独立 <div pr-detail__event-inline>
+                             块（缩进显示），跟 push/merge 的"verb 同 span"风格不一致。
+                             保留 v-else-if="item.type === 'label' && item.label" 单 chip
+                             兜底（合并前单条 label event 仍走单 chip 渲染）。
+                             注意：这里不能 inline 整段（verb 后直接接 chip），v-else-if
+                             链里其他 type（push/merge）也用同样模式。 -->
+                        <span
+                          v-if="item.type === 'label' && (item.addedLabels?.length || item.removedLabels?.length)"
+                          class="pr-detail__event-labels"
+                        >
+                          <span
+                            v-for="lbl in item.addedLabels"
+                            :key="`add-${lbl.id}`"
+                            class="pr-detail__event-label pr-detail__event-label--add"
+                            :style="labelStyle(lbl.color)"
+                          >{{ lbl.name }}</span>
+                          <span
+                            v-for="lbl in item.removedLabels"
+                            :key="`rm-${lbl.id}`"
+                            class="pr-detail__event-label pr-detail__event-label--remove"
+                            :style="labelStyle(lbl.color)"
+                          >{{ lbl.name }}</span>
+                        </span>
+                        <span
+                          v-else-if="item.type === 'label' && item.label"
+                          class="pr-detail__event-label"
+                          :style="labelStyle(item.label.color)"
+                        >{{ item.label.name }}</span>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
                       <div
@@ -2568,12 +2600,10 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                             :style="labelStyle(lbl.color)"
                           >{{ lbl.name }}</span>
                         </span>
-                        <!-- v0.7.6 兼容：合并前的单条 label event 仍走单 chip 渲染（store 合并时只对连续有效） -->
-                        <span
-                          v-else-if="item.type === 'label' && item.label"
-                          class="pr-detail__event-label"
-                          :style="labelStyle(item.label.color)"
-                        >{{ item.label.name }}</span>
+                        <!-- v0.7.14：label 事件 chip 已在主行 pr-detail__event-line 内
+                             渲染（紧跟 verb "修改了标签" 后面），不再用 inline 块缩进显示。
+                             保留 v-else-if="item.type === 'label' && item.label" 单 chip
+                             兜底已搬到主行（见上），这里删整段避免重复。 -->
 
                         <span v-else-if="item.type === 'milestone'">
                           <template v-if="item.oldMilestone && item.milestone">
