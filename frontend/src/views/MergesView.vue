@@ -2261,26 +2261,12 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                 </div>
               </div>
             </div>
-            <!-- 对话标题 + 刷新 -->
-            <div class="pr-detail__conv-header">
-              <div class="pr-detail__conv-header-left">
-                <MessageSquare :size="14" :stroke-width="2" aria-hidden="true" />
-                <span>对话</span>
-                <span v-if="getTimelinePanel().items.length > 0" class="pr-detail__conv-count">
-                  {{ getTimelinePanel().items.length }}
-                </span>
-              </div>
-              <button
-                type="button"
-                class="btn-ghost-sm"
-                :disabled="getTimelinePanel().loading"
-                title="刷新对话"
-                @click="fetchComments(selectedPR)"
-              >
-                <RefreshCw :size="12" :stroke-width="2" aria-hidden="true" />
-                <span>刷新</span>
-              </button>
-            </div>
+            <!-- v0.7.10：移除对话标题 div（user 反馈 "pr-detail__conv-header 对话标题这个
+                 div 移除，不需要展示出来"）。原本的"对话"+计数 badge + 刷新按钮整块
+                 一起删，下方 timeline 列表直接显示。刷新按钮如果需要可以走 tab 切换
+                 或后续加到 PR header 工具栏，不影响 timeline 渲染逻辑。
+                 同步删 .pr-detail__conv-header / .pr-detail__conv-header-left /
+                 .pr-detail__conv-count CSS（不再被引用）。 -->
 
             <!-- 对话列表 -->
             <div class="pr-detail__conv-list">
@@ -2309,7 +2295,7 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                       <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--review-${item.state}`">
                         <component
                           :is="item.state === 'approved' ? CheckCircle2 : item.state === 'changes_requested' ? XCircle : MessageCircle"
-                          :size="13"
+                          :size="15"
                           :stroke-width="2.5"
                           aria-hidden="true"
                         />
@@ -2521,7 +2507,7 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                   >
                     <div class="pr-detail__timeline-rail">
                       <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`">
-                        <component :is="systemEventIcon(item.type)" :size="13" :stroke-width="2.5" aria-hidden="true" />
+                        <component :is="systemEventIcon(item.type)" :size="15" :stroke-width="2.5" aria-hidden="true" />
                       </div>
                     </div>
                     <div class="pr-detail__event-content">
@@ -6373,27 +6359,8 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   flex-direction: column;
   min-height: 0;
 }
-.pr-detail__conv-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-3);
-}
-.pr-detail__conv-header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-sm);
-  font-weight: 600;
-  color: var(--color-text);
-}
-.pr-detail__conv-count {
-  font-size: var(--font-xs);
-  padding: 0 6px;
-  border-radius: 8px;
-  background: var(--color-bg-hover);
-  color: var(--color-text-muted);
-}
+/* v0.7.10：删 .pr-detail__conv-header / .pr-detail__conv-header-left /
+   .pr-detail__conv-count —— 对话标题 div 整块移除（user 反馈），CSS 同步删。 */
 .pr-detail__conv-list {
   flex: 1;
   min-height: 0;
@@ -6490,10 +6457,11 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
 }
-/* event dot：圆形 + 1.5px 边框（边框色 = 当前色 = 颜色档决定） */
+/* v0.7.10：event dot 22px → 26px（user 反馈"下方时间轴的 icon 大一点点"），
+   内部 icon size 13 → 15 同步放大（保持视觉比例） */
 .pr-detail__timeline-dot {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   background: var(--color-bg-elevated);
   border: 1.5px solid var(--color-divider);
@@ -6524,11 +6492,16 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
 }
+/* v0.7.10：timeline 文字字号升一档（user 反馈"文字可以再增加一个字号"）——
+   event-line 显式 14px（之前 author/verb 继承默认 13px），
+   event-prep 14px（之前 13px）、event-time 12px（之前 11px）、
+   event-inline 14px（之前 13px）。 */
 .pr-detail__event-line {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
+  font-size: var(--font-body);
 }
 .pr-detail__event-author {
   font-weight: 600;
@@ -6538,14 +6511,14 @@ git checkout {{ headLabel(selectedPR) }}</pre>
    （之前是 'X verb' 独立在右，'Y 天前' 时间独立） */
 .pr-detail__event-prep {
   color: var(--color-text-muted);
-  font-size: var(--font-sm);
+  font-size: var(--font-body);
 }
 .pr-detail__event-verb {
   color: var(--color-text-secondary);
 }
 .pr-detail__event-time {
   color: var(--color-text-muted);
-  font-size: var(--font-xs);
+  font-size: 12px; /* v0.7.10：11px → 12px（time 字号升一档）；用 inline 值不引 --font-mono（mono 字体不适合中文） */
   flex-shrink: 0;
 }
 .pr-detail__event-inline {
@@ -6553,7 +6526,7 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-  font-size: var(--font-sm);
+  font-size: var(--font-body);
 }
 .pr-detail__event-block {
   display: flex;
