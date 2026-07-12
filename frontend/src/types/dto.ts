@@ -324,6 +324,12 @@ export interface PullDto {
   mergedBy?: { username: string } | null;
   commentsCount?: number;
   body?: string;
+  // v0.7.6：PR 头部分支显示 "请求将 N 次代码提交从 {head} 合并至 {base}" 用
+  // Gitea / GitHub /pulls/{index} 返回的 commits 字段（0 兜底"1 次"）。
+  commits?: number;
+  // v0.7.6：用于 PR 头部分支链接（/src/branch/{ref}），ListPulls resp 不返回
+  // repoFullName，前端用 projectId 反查 LocalState.repoPath 后拼。
+  // 不存到 DTO 里（避免污染），用项目级 helper `branchWebUrl()` 处理。
 }
 
 export interface ListPullsArgs {
@@ -463,6 +469,34 @@ export interface TimelineItemDto {
 
   // type=19/20 依赖
   dependentIssue?: TimelineRefIssueDto;
+
+  // ===== v0.7.6：WIP toggle 标记 =====
+  // 仅 type="change_title" 改标题事件可能命中。
+  //
+  // 对齐 Gitea web `modules/templates/util_render_comment.go: commentTimelineEventIsWipToggle`。
+  // 当用户在 PR 详情页拖"标记为 WIP / 标记为可评审"按钮时，Gitea 端会改标题
+  // 加/去掉 "WIP:" / "Draft:" 前缀，并触发一条 change_title 事件。
+  // 后端检测到这种特殊改标题会设 isWipToggle=true，前端 systemEventVerb
+  // 走 "已将合并请求标记为进行中" / "已将合并请求标记为可评审" 文案，
+  // 而不是普通 "修改了标题" + 标题对比。
+  isWipToggle?: boolean;
+  isWip?: boolean; // isWipToggle=true 时才有意义：true=进入 WIP / false=退出 WIP
+
+  // ===== v0.7.6：label 事件聚合字段 =====
+  // Gitea /timeline 端点每个 label 变化返回 1 条独立 type="label" 事件。
+  // 前端 timeline store 按"同作者 + 60s 内连续 label 事件"合并为 1 条
+  // 带 addedLabels/removedLabels 数组的事件（对齐 Gitea web 行为）。
+  //
+  // labelAction 标记单条 label 事件的 add/remove 方向（仅前端合并前用）：
+  //   "add" = content=="1" / "remove" = content!="1"
+  addedLabels?: Array<{ id: number; name: string; color: string }>;
+  removedLabels?: Array<{ id: number; name: string; color: string }>;
+  labelAction?: 'add' | 'remove';
+
+  // v0.7.6：label 事件合并标记 —— mergeLabelEvents() 把连续 label 事件合并后，
+  // 被合并掉的事件设 merged=true，模板用 v-if="!item.merged" 跳过渲染
+  // （避免重复显示 "添加了标签 bug" / "添加了标签 enhancement"）。
+  merged?: boolean;
 }
 
 // v0.7.2：timeline 内 issue 引用（ref_issue / dependent_issue）

@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -33,6 +33,8 @@
 > **v0.7.4 增量**：Timeline 细节补全 —— DisplayName 全链路（`PullUserDTO.FullName` + gitea/github 双 adapter 解析 + `displayName()` helper）+ "评论于" 动词 + 时间链接样式 + 系统事件 verb item 级别化（`systemEventVerb(item)` 区分添加/移除）+ 3 类系统事件 inline 详情（review_request 评审人 / assignees 指派人 / merge commit SHA）+ 评论 header 右侧 [所有者] 角色标签 + Smile 表情按钮 + 8 emoji popover + MoreHorizontal ... 菜单（按权限动态显示：引用/复制链接/编辑/删除）+ 新增 `--color-timeline` token（暗色 18% alpha，比 `--color-divider` 亮 80%）。docs/releases/v0.7.4.md。
 >
 > **v0.7.5 增量**：系统事件 UX 文案 + 时间格式对齐 Gitea web —— `systemEventVerb(item)` 字典重写覆盖 22+ 种 Gitea CommentType 全部 case（之前 18 种 + "事件" fallback → 现在全部具体 verb）+ PR 动作加 "此合并请求" 限定词（"关闭了此合并请求"/"重新开启了此合并请求"/"置顶了此合并请求" 等）+ 时间格式从 `X verb · Y 天前`（独立在右）改成 `X 于 Y verb`（融进行内 + "于" 介词）+ push event 数量解析（regex 抠 body 里的 commit 数量，输出 "推送了 N 个提交"）+ 移除 v0.7.x "事件" 通用 fallback（未识别 type 返回空字符串）+ CSS：新增 `.pr-detail__event-prep`（"于" 介词样式）。docs/releases/v0.7.5.md。
+
+> **v0.7.6 增量**：4 个 user 反馈问题修复 + label 全背景色 —— ① 评论 body 缺失时 `v-if="item.body"` 防御 + "（无内容）" 占位（避免 v-html='' 渲染空 div 让用户误以为评论内容缺失）② WIP toggle 改标题事件识别：`TimelineItem.IsWipToggle/IsWip` 字段（后端仿 Gitea `commentTimelineEventIsWipToggle` 检测"加/去 WIP: 前缀"特殊事件），前端 `systemEventVerb` 走 2 个分支（"已将合并请求标记为进行中"/"可评审"，对齐 Gitea web 中文 locale）③ PR header 改格式 `<author> 请求将 <N> 次代码提交从 <head> 合并至 <base>`（对齐 Gitea web `templates/repo/issue/view_title.tmpl`）+ 分支名加链接（Gitea `/src/branch/{ref}` / GitHub `/tree/{ref}`）+ 新增 `branchWebUrl(ref)` helper + `PullDetailDTO.Commits` 字段（N 从 Gitea `/pulls/{index}` `commits` 字段）④ label 事件按 Gitea web 行为合并：`pull.ts` 新增 `mergeLabelEvents()` helper（仿 Gitea `routers/web/repo/issue_view.go: mergeLabels`，同作者 + 时间间隔 < 60s 连续 label 事件合并到第一条，标点 add/remove 互转，后一条设 merged=true）+ 后端 `giteaTimelineToItem` 拆分 Content=`"1"` → AddedLabels / 其他 → RemovedLabels + `TimelineItem` 加 AddedLabels/RemovedLabels/LabelAction 字段 + `systemEventVerb` 加 label 三态文案 + CSS `.pr-detail__event-labels` flex 容器 + `--add/--remove` + / − 圆点 ⑤ label chip 全背景色：`labelStyle()` 之前 `color + '22'` (13% alpha) + 边框 → 暗色主题看不清，改 `color` 实心 + WCAG 相对亮度 `(0.2126R + 0.7152G + 0.0722B) / 255` 阈值 0.453 决定白字/黑字（对齐 Gitea `modules/util/color.go: ContrastColor`）+ 边框 transparent + `.merge-item__label` 同步去掉边框 + CSS 新增 `.pr-detail__branch--link` / `.pr-detail__comment-body--empty`。docs/releases/v0.7.6.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 

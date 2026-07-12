@@ -335,6 +335,9 @@ type giteaPullRaw struct {
 	Labels             []giteaPullLabelRaw `json:"labels"`
 	Mergeable          bool                `json:"mergeable"`
 	Comments           int                 `json:"comments"`
+	// v0.7.6：PR 头部分支显示 "请求将 N 次代码提交从 {head} 合并至 {base}" 用
+	// 对齐 Gitea web `templates/repo/issue/view_title.tmpl` 渲染。
+	Commits            int                 `json:"commits"`
 	Body               string              `json:"body"`
 	MergedBy           *giteaUserRaw       `json:"merged_by"`
 	CreatedAt          string              `json:"created_at"`
@@ -377,6 +380,7 @@ func giteaPullToDetail(p giteaPullRaw) platform.PullDetailDTO {
 		HasConflicts:  !p.Mergeable,
 		Body:          p.Body,
 		CommentsCount: p.Comments,
+		Commits:       p.Commits, // v0.7.6：PR header "请求将 N 次代码提交从 {head} 合并至 {base}" 用
 		CreatedAt:     p.CreatedAt,
 		UpdatedAt:     p.UpdatedAt,
 	}
@@ -791,21 +795,25 @@ type giteaTimelineRaw struct {
 	ID           int64              `json:"id"`
 	Type         string             `json:"type"`
 	Body         string             `json:"body"`
-	User         *giteaUserRaw      `json:"user"`
-	Created      string             `json:"created_at"`
-	Updated      string             `json:"updated_at"`
-	State        string             `json:"state,omitempty"`
-	CommitID     string             `json:"commit_id,omitempty"`
-	Official     bool               `json:"official,omitempty"`
-	CommitSHA    string             `json:"commit_sha,omitempty"`
-	OldTitle     string             `json:"old_title,omitempty"`
-	NewTitle     string             `json:"new_title,omitempty"`
-	OldRef       string             `json:"old_ref,omitempty"`
-	NewRef       string             `json:"new_ref,omitempty"`
-	Label        *giteaPullLabelRaw `json:"label,omitempty"`
-	OldMilestone *giteaMilestoneRaw `json:"old_milestone,omitempty"`
-	Milestone    *giteaMilestoneRaw `json:"milestone,omitempty"`
-	Assignee     *giteaUserRaw      `json:"assignee,omitempty"`
+	// v0.7.6：type=7 (label) 事件时存 "1"=add / 其他=remove（用于前端聚合）
+	// 对应 Gitea 源码 `models/issues/comment.go: Content` 字段在 label change 时
+	// 写 "1" 表示添加，写 label name 表示移除（罕见，用其他值兜底）。
+	Content       string             `json:"content"`
+	User          *giteaUserRaw      `json:"user"`
+	Created       string             `json:"created_at"`
+	Updated       string             `json:"updated_at"`
+	State         string             `json:"state,omitempty"`
+	CommitID      string             `json:"commit_id,omitempty"`
+	Official      bool               `json:"official,omitempty"`
+	CommitSHA     string             `json:"commit_sha,omitempty"`
+	OldTitle      string             `json:"old_title,omitempty"`
+	NewTitle      string             `json:"new_title,omitempty"`
+	OldRef        string             `json:"old_ref,omitempty"`
+	NewRef        string             `json:"new_ref,omitempty"`
+	Label         *giteaPullLabelRaw `json:"label,omitempty"`
+	OldMilestone  *giteaMilestoneRaw `json:"old_milestone,omitempty"`
+	Milestone     *giteaMilestoneRaw `json:"milestone,omitempty"`
+	Assignee      *giteaUserRaw      `json:"assignee,omitempty"`
 	// AssigneeTeam: Gitea 有，但 platform 包当前没有 TeamDTO，v0.7.2 不暴露（保留扩展位）
 	RemovedAssignee bool              `json:"removed_assignee,omitempty"`
 	RefIssue        *giteaIssueRefRaw `json:"ref_issue,omitempty"`
@@ -864,6 +872,20 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 			Name:  r.Label.Name,
 			Color: r.Label.Color,
 		}
+		// v0.7.6：label 事件按 add/remove 方向填到 AddedLabels/RemovedLabels 单元素数组
+		// （前端 timeline store 会按"同作者 + 60s 内连续 label 事件"聚合对齐 Gitea web）
+		label := platform.PullLabelDTO{
+			ID:    r.Label.ID,
+			Name:  r.Label.Name,
+			Color: r.Label.Color,
+		}
+		if r.Content == "1" {
+			item.AddedLabels = []*platform.PullLabelDTO{&label}
+			item.LabelAction = "add"
+		} else {
+			item.RemovedLabels = []*platform.PullLabelDTO{&label}
+			item.LabelAction = "remove"
+		}
 	}
 	if r.OldMilestone != nil {
 		dto := giteaMilestoneToDTO(*r.OldMilestone)
@@ -872,6 +894,15 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 	if r.Milestone != nil {
 		dto := giteaMilestoneToDTO(*r.Milestone)
 		item.Milestone = &dto
+	}
+	// v0.7.6：WIP toggle 检测 —— type=10 (change_title) 改标题事件可能是
+	// "拖 draft toggle 按钮" 触发的特殊事件，需要单独标记让前端渲染不同文案。
+	// 对齐 Gitea 源码 `models/issues/pull.go: CutWorkInProgressPrefix` +
+	// `modules/templates/util_render_comment.go: commentTimelineEventIsWipToggle`。
+	if r.Type == "change_title" {
+		isToggle, isWip := isWipToggleEvent(r.OldTitle, r.NewTitle)
+		item.IsWipToggle = isToggle
+		item.IsWip = isWip
 	}
 	if r.Assignee != nil {
 		item.Assignee = &platform.PullUserDTO{
@@ -887,6 +918,47 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 		item.DependentIssue = giteaIssueRefToDTO(r.DependentIssue)
 	}
 	return item
+}
+
+// WIP 前缀列表 —— 对齐 Gitea `setting.Repository.PullRequest.WorkInProgressPrefixes` 默认值
+//
+// v0.7.6 注：Gitea 服务端默认 ["WIP:", "Draft:"]，但用户可在 app.ini 改。
+// 我们客户端没法动态知道服务端的 custom 列表，只能用默认两份做兼容。
+// 若用户配置了自定义前缀（如 "[WIP]"），WIP toggle 会降级到普通"修改了标题"渲染
+// —— 视觉上能区分（修改标题会显示 oldTitle → newTitle；WIP toggle 不会），
+// 但文案会错。v0.7.6 接受这个 limitation，v0.7.7 计划从 Gitea /api/v1/settings
+// 拉服务端 prefix 列表（需要 admin 权限，应用层用 mock 兜底）。
+var giteaWipPrefixes = []string{"WIP:", "Draft:"}
+
+// cutWipPrefix 模仿 Gitea `CutWorkInProgressPrefix` 行为：
+// 返回 (去掉前缀的标题, 是否有前缀)
+func cutWipPrefix(title string) (string, bool) {
+	for _, prefix := range giteaWipPrefixes {
+		if len(title) >= len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
+			return title[len(prefix):], true
+		}
+	}
+	return title, false
+}
+
+// isWipToggleEvent 判断改标题事件是否是"切换 WIP / Ready for review"操作
+//
+// 返回：
+//   - isToggle: 是否命中 WIP toggle 特殊渲染
+//     （OldTitle/NewTitle 一边有前缀一边没，且去掉前缀后内容相同）
+//   - isWip: 切换后是否是 WIP 状态（NewTitle 有前缀）
+//
+// 对齐 Gitea `modules/templates/util_render_comment.go: commentTimelineEventIsWipToggle` 行为。
+func isWipToggleEvent(oldTitle, newTitle string) (isToggle, isWip bool) {
+	title1, ok1 := cutWipPrefix(oldTitle)
+	title2, ok2 := cutWipPrefix(newTitle)
+	if ok1 == ok2 {
+		return false, false // 两边都带或都不带 → 普通标题修改
+	}
+	if strings.TrimSpace(title1) != strings.TrimSpace(title2) {
+		return false, false // 去掉前缀后内容不同 → 普通标题修改（不是单纯 toggle）
+	}
+	return true, ok2 // 切换后 NewTitle 有前缀 = 进入 WIP 状态
 }
 
 // giteaIssueRefToDTO 把 giteaIssueRefRaw 映射到 platform.IssueDTO

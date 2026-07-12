@@ -527,6 +527,10 @@ type PullDetailDTO struct {
 	HasConflicts   bool           `json:"hasConflicts"` // = !Mergeable（前端视图字段对齐）
 	Body           string         `json:"body,omitempty"`
 	CommentsCount  int            `json:"commentsCount"`
+	// v0.7.6：PR 头部分支信息显示 "请求将 N 次代码提交从 {head} 合并至 {base}" 用
+	// （对齐 Gitea web `templates/repo/issue/view_title.tmpl` 渲染）。
+	// Gitea 端 /repos/{owner}/{repo}/pulls/{index} 返回的 `commits` 字段（N=0 兜底"1 次"）。
+	Commits        int            `json:"commits,omitempty"`
 	Labels         []PullLabelDTO `json:"labels,omitempty"`
 	Assignees      []PullUserDTO  `json:"assignees,omitempty"`
 	Reviewers      []PullUserDTO  `json:"reviewers,omitempty"`
@@ -643,6 +647,40 @@ type TimelineItem struct {
 
 	// type=19 (add_dependency) / 20 (remove_dependency) —— 依赖 issue
 	DependentIssue *IssueDTO `json:"dependent_issue,omitempty"`
+
+	// v0.7.6：WIP toggle 标记（仅 type=10 change_title 事件可能命中）
+	//
+	// 根因：Gitea web 的 `modules/templates/util_render_comment.go:commentTimelineEventIsWipToggle`
+	// 把"标题加了/去掉 WIP: 前缀"识别为特殊事件（用户拖 draft toggle 按钮的效果），
+	// 渲染 "marked the pull request as work in progress / ready for review" 文案，
+	// 而不是 "change_title_at" 文案。
+	//
+	// 后端检测规则（对齐 Gitea 源码 CutWorkInProgressPrefix）：
+	//   - OldTitle / NewTitle 中一个带 WIP 前缀另一个不带（ok1 != ok2）
+	//   - 去掉前缀后两个标题 TrimSpace 相等
+	// → IsWipToggle=true；IsWip 表示"切换后是 WIP 状态"（NewTitle 有前缀）
+	//
+	// 前端 systemEventVerb 在 type='change_title' + IsWipToggle 时返回
+	// "已将合并请求标记为进行中" / "已将合并请求标记为可评审"，对齐 Gitea web
+	// `repo.pulls.marked_as_work_in_progress_at` / `marked_as_ready_for_review_at` 中文 locale。
+	IsWipToggle bool `json:"is_wip_toggle,omitempty"`
+	IsWip       bool `json:"is_wip,omitempty"`
+
+	// v0.7.6：label 事件聚合（对齐 Gitea web `routers/web/repo/issue_view.go:mergeLabels` 逻辑）
+	//
+	// Gitea /timeline 端点每个 label 变化返回 1 条独立 type=7 事件（单数 Label 字段），
+	// Gitea web 在 web 端按"同作者 + 60s 内连续 label 事件"合并为 1 条带 AddedLabels /
+	// RemovedLabels 数组的事件。我们 app 没 web 端的"修改后渲染"环节，需要在
+	// 前端 timeline store fetchTimeline 后做同样的合并处理，结果写到 AddedLabels /
+	// RemovedLabels 字段。
+	//
+	// Content 字段含义：Gitea `issues.Comment.Content` 在 type=7 时存 "1"=添加 / 其他=移除。
+	// 解析时把单数 Label + Content 判断填到 AddedLabels 或 RemovedLabels 数组里。
+	AddedLabels   []*PullLabelDTO `json:"added_labels,omitempty"`
+	RemovedLabels []*PullLabelDTO `json:"removed_labels,omitempty"`
+	// LabelAction 标记单条 label 事件的 add/remove 方向（前端合并用）：
+	//   "add" = Content == "1"（添加），"remove" = Content != "1"（移除）
+	LabelAction string `json:"label_action,omitempty"`
 }
 
 // ReactionDTO 单条表情反应（v0.5.0 M2）

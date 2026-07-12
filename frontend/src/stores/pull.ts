@@ -28,6 +28,97 @@ import { useRepoStore } from '@renderer/stores/repo';
 
 export type PullFilter = 'all' | 'open' | 'merged' | 'closed';
 
+/**
+ * v0.7.6：合并连续 type="label" 事件 —— 对齐 Gitea web 行为
+ *
+ * 根因：Gitea /timeline 端点每个 label 变化返回 1 条独立事件（每条带单数 label +
+ * labelAction=add/remove），但 Gitea web 在 web 端按"同作者 + 60s 内连续 label 事件"
+ * 合并为 1 条带 addedLabels/removedLabels 数组的事件，再渲染
+ * `repo.issues.add_label` / `remove_label` / `add_remove_labels` 三态文案。
+ *
+ * 我们 app 没 web 端的"修改后渲染"环节，需要在前端 store fetchTimeline 后做同样合并。
+ * 算法（对齐 `routers/web/repo/issue_view.go: mergeLabels`）：
+ *   1. 遍历 items，找到 type="label" 的事件
+ *   2. 与前一条 label 事件比较：
+ *      - 同作者 (author.username 相同)
+ *      - 时间间隔 < 60s (用 created 字符串 Date.parse 比较)
+ *   3. 满足则把当前事件的 addedLabels/removedLabels 累加到前一条，
+ *      并把当前事件标记 merged=true（v-for 用 :key 跳过）
+ *   4. 边界：标点 add/remove 互转也要正确 —— 比如先 add "bug" 再 remove "bug"
+ *      会把"bug"从 AddedLabels 移到 RemovedLabels（与 Gitea web 行为一致）
+ *
+ * 复杂度：O(n)，最多遍历 2 次（一次累加，一次标 merged）。
+ *
+ * @returns 新的 TimelineItemDto 数组（不修改原数组）
+ */
+function mergeLabelEvents(items: TimelineItemDto[]): TimelineItemDto[] {
+  const out: TimelineItemDto[] = [];
+  // 时间窗 60s —— 对齐 Gitea web `cur.CreatedUnix - prev.CreatedUnix >= 60` 边界
+  const LABEL_MERGE_WINDOW_MS = 60 * 1000;
+
+  for (const item of items) {
+    if (item.type !== 'label') {
+      out.push(item);
+      continue;
+    }
+    // 找前一条 label 事件（最后入 out 列表的）
+    const prev = out.length > 0 ? out[out.length - 1] : null;
+    const canMerge =
+      prev !== null &&
+      prev.type === 'label' &&
+      !prev.merged &&
+      prev.author?.username !== undefined &&
+      prev.author.username === item.author?.username &&
+      Math.abs(new Date(item.created).getTime() - new Date(prev.created).getTime()) < LABEL_MERGE_WINDOW_MS;
+
+    if (!canMerge) {
+      out.push(item);
+      continue;
+    }
+
+    // 累加 addedLabels / removedLabels 到 prev
+    const newAdded = item.addedLabels ?? (item.labelAction === 'add' && item.label ? [item.label] : []);
+    const newRemoved = item.removedLabels ?? (item.labelAction === 'remove' && item.label ? [item.label] : []);
+
+    // 标点互转：add X 后 remove X → 把 X 从 AddedLabels 移到 RemovedLabels
+    const addedAfterMove: Array<{ id: number; name: string; color: string }> = [];
+    const removedAfterMove: Array<{ id: number; name: string; color: string }> = [];
+    for (const r of newRemoved) {
+      const idx = (prev.addedLabels ?? []).findIndex((a) => a.id === r.id);
+      if (idx >= 0) {
+        // 从 AddedLabels 移到 RemovedLabels
+        const moved = prev.addedLabels![idx];
+        prev.addedLabels = prev.addedLabels!.filter((_, i) => i !== idx);
+        if (!removedAfterMove.find((x) => x.id === moved.id)) removedAfterMove.push(moved);
+      } else if (!removedAfterMove.find((x) => x.id === r.id)) {
+        removedAfterMove.push(r);
+      }
+    }
+    for (const a of newAdded) {
+      const idx = (prev.removedLabels ?? []).findIndex((r) => r.id === a.id);
+      if (idx >= 0) {
+        // 从 RemovedLabels 移到 AddedLabels
+        const moved = prev.removedLabels![idx];
+        prev.removedLabels = prev.removedLabels!.filter((_, i) => i !== idx);
+        if (!addedAfterMove.find((x) => x.id === moved.id)) addedAfterMove.push(moved);
+      } else if (!addedAfterMove.find((x) => x.id === a.id)) {
+        addedAfterMove.push(a);
+      }
+    }
+    prev.addedLabels = [...(prev.addedLabels ?? []), ...addedAfterMove];
+    prev.removedLabels = [...(prev.removedLabels ?? []), ...removedAfterMove];
+    // 把单数 label 字段清掉，避免渲染 fallback 到 v0.7.2 旧逻辑
+    prev.label = undefined;
+    prev.labelAction = undefined;
+    // 更新 created 为最新事件的时间（与 Gitea web `prev.CreatedUnix = cur.CreatedUnix` 行为一致）
+    prev.created = item.created;
+    // 当前事件标记 merged，模板用 v-if="item.merged" 跳过渲染
+    item.merged = true;
+    out.push(item);
+  }
+  return out;
+}
+
 export const usePullStore = defineStore('pull', () => {
   const items = ref<PullDto[]>([]);
   const loading = ref(false);
@@ -166,7 +257,12 @@ export const usePullStore = defineStore('pull', () => {
     const panel = getTimelinePanel(p.index); panel.loading = true; panel.error = null;
     try {
       const items = (await pullsCommentList({ projectId: currentProjectId.value!, index: p.index })) as unknown as TimelineItemDto[];
-      panel.items = items;
+      // v0.7.6：合并连续 type="label" 事件 —— 对齐 Gitea web
+      // `routers/web/repo/issue_view.go: mergeLabels` 行为：
+      //   - 同作者 + 时间间隔 < 60s
+      //   - 把后一条 addedLabels/removedLabels 累加到前一条
+      //   - 后一条标记 merged=true，模板里隐藏
+      panel.items = mergeLabelEvents(items);
     } catch (e) { const err = e as { messageText?: string }; panel.error = err.messageText ?? '加载时间轴失败'; }
     finally { panel.loading = false; }
   }

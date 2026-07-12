@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.5)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.6)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.5 发版** — 系统事件 UX 文案对齐 Gitea web：22+ 种 CommentType 全部有具体 verb、PR 动作加 "此合并请求" 限定词、时间格式从 "X verb  ·  Y 天前" 改成 "X 于 Y verb"、移除 v0.7.x "事件" 通用 fallback、push event 数量解析 "推送了 N 个提交"）
+> 最后更新：2026-07-12（**v0.7.6 发版** — 4 个 user 反馈问题修复 + label 全背景色：① 评论 body 缺失时 v-if 防御 + "（无内容）" 占位 ② WIP toggle 改标题事件走特殊 verb（"已将合并请求标记为进行中" / "可评审"）③ PR header 改 "请求将 N 次代码提交从 head 合并至 base" 格式 + 分支加链接 ④ label 事件按 Gitea web 行为合并（"添加标签 A、B、C" 三态）⑤ label chip 暗色主题下全背景色 + 自动白字）
 
 >
 
@@ -17,6 +17,16 @@
 >   7. **GitHub PR 闭环已完整实现**：v0.5.0 ADR-0008 计划内做，后端 + 前端全链路打通（ListPulls / GetPull / Merge / Close / Comments / Reviews / Files / Diff / Reactions）；README/CLAUDE 已同步更新产品文档对齐现状。
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
+
+> - **v0.7.6** (2026-07-12)：4 个 user 反馈问题修复 + label 全背景色（接续 v0.7.5 UX 文案收尾，把 user 实际使用反馈做实）。
+>   1. **后端 timeline / PR 字段扩展**：`platform.TimelineItem` 加 `IsWipToggle` / `IsWip` / `AddedLabels` / `RemovedLabels` / `LabelAction` 字段（5 字段，WIP toggle + label 事件数组化）。`platform.PullDetailDTO` 加 `Commits int` 字段。`giteaTimelineRaw` 加 `Content string` 字段（Gitea `issues.Comment.Content` 在 type=7 时存 `"1"`=add / 其他=remove）。`giteaTimelineToItem` 加 WIP toggle 检测（`isWipToggleEvent` 仿 Gitea `commentTimelineEventIsWipToggle`）+ label 拆分（Content 决定 AddedLabels / RemovedLabels）。新增 helpers：`giteaWipPrefixes`（Gitea 默认 `["WIP:", "Draft:"]`） / `cutWipPrefix`（仿 Gitea `CutWorkInProgressPrefix`） / `isWipToggleEvent`。`giteaPullRaw` + `githubPullRaw` 加 `Commits` 字段 + PullDetailDTO 映射。`gitea/adapter_test.go` 加 3 个新测试（`TestGiteaAdapter_isWipToggleEvent` 9 case + `TestGiteaAdapter_ListPullTimeline_WipToggle` + `TestGiteaAdapter_ListPullTimeline_LabelAction`）。
+>   2. **前端 timeline 渲染**：`systemEventVerb(item)` 加 change_title + isWipToggle 分支（"已将合并请求标记为进行中" / "可评审"） + label 三态文案（"添加了标签" / "移除了标签" / "修改了标签"）。timeline 模板：v-for 过滤 merged=true / change_title 模板 `&& !item.isWipToggle` 条件（避免显示无意义的 oldTitle → newTitle） / label 模板用 addedLabels/removedLabels 数组渲染多 chip。`pull.ts` 新增 `mergeLabelEvents()` helper 对齐 Gitea web `routers/web/repo/issue_view.go: mergeLabels` 行为（同作者 + 时间间隔 < 60s 连续 label 事件合并到第一条，标点 add/remove 互转，后一条设 merged=true）。
+>   3. **PR header 改格式**：`<author> 请求将 <N> 次代码提交从 <head> 合并至 <base>`（对齐 Gitea web `templates/repo/issue/view_title.tmpl`）。分支名加链接：Gitea `/src/branch/{ref}` / GitHub `/tree/{ref}`。N 从 `PullDto.commits`（0 兜底 1）。新增 `branchWebUrl(ref)` helper。
+>   4. **评论 body 防御渲染**：`v-if="item.body"` 条件 + body 缺失时显示 `<div>（无内容）</div>` italic muted 占位（避免 v-html='' 渲染空 div 让用户误以为评论内容缺失）。
+>   5. **label chip 全背景色**（user 反馈暗色主题体验）：`labelStyle()` 之前 `color + '22'` (13% alpha) + 边框 → 暗色背景 + 13% 透明彩色 ≈ 看不到。改为 `color` 实心 + WCAG 相对亮度 `(0.2126R + 0.7152G + 0.0722B) / 255` 阈值 0.453 决定白字/黑字（对齐 Gitea `modules/util/color.go: ContrastColor` + `web_src/js/utils/color.js`）。边框 transparent（实心 + 文字色已够清晰）。`.merge-item__label` 边框同步去掉。
+>   6. **CSS 新增 4 处**：`.pr-detail__branch--link`（hover 下划线 + 变亮） / `.pr-detail__event-labels`（横向 flex 容器） / `.pr-detail__event-label--add/--remove`（+ / − 圆点 + line-through 区分） / `.pr-detail__comment-body--empty`（italic muted 占位）。
+>   7. **Wails bindings 重新生成**：`frontend/wailsjs/wailsjs/go/models.ts` 加 `is_wip_toggle` / `is_wip` / `added_labels` / `removed_labels` / `label_action` / `commits` 字段。
+>   相关 commit：`e3e8007`（后端字段扩展 + 3 测试）/ `9864e82`（前端渲染 + 样式）。
 
 > - **v0.7.5** (2026-07-12)：系统事件 UX 文案 + 时间格式对齐 Gitea web（接续 v0.7.4 Timeline 细节补全，把"事件/时间表述"做实）。
 >   1. **systemEventVerb 字典重写**：覆盖 22+ 种 Gitea CommentType 全部 case（之前 18 种 + "事件" fallback → 现在全部具体 verb）。PR 动作加 "此合并请求" 限定词："关闭了此合并请求" / "重新开启了此合并请求" / "置顶了此合并请求" / "锁定了此合并请求" 等。Time tracking / project / auto merge / ref 类 4 个之前缺失的 type 补全具体 verb。
