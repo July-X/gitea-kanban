@@ -2291,6 +2291,11 @@ export namespace platform {
 	    added_labels?: PullLabelDTO[];
 	    removed_labels?: PullLabelDTO[];
 	    label_action?: string;
+	    old_commit?: string;
+	    new_commit?: string;
+	    commits_num?: number;
+	    is_force_push?: boolean;
+	    merge_commit_sha?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TimelineItem(source);
@@ -2326,6 +2331,11 @@ export namespace platform {
 	        this.added_labels = this.convertValues(source["added_labels"], PullLabelDTO);
 	        this.removed_labels = this.convertValues(source["removed_labels"], PullLabelDTO);
 	        this.label_action = source["label_action"];
+	        this.old_commit = source["old_commit"];
+	        this.new_commit = source["new_commit"];
+	        this.commits_num = source["commits_num"];
+	        this.is_force_push = source["is_force_push"];
+	        this.merge_commit_sha = source["merge_commit_sha"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -681,6 +681,28 @@ type TimelineItem struct {
 	// LabelAction 标记单条 label 事件的 add/remove 方向（前端合并用）：
 	//   "add" = Content == "1"（添加），"remove" = Content != "1"（移除）
 	LabelAction string `json:"label_action,omitempty"`
+
+	// v0.7.7：type=29 (push) 事件专属字段 —— 对齐 Gitea 端
+	// `models/issues/comment.go: Comment.OldCommit / NewCommit / CommitsNum / IsForcePush`。
+	//
+	// 背景：Gitea web 渲染 push event 用 `commits_list_small` 模板显示该次 push 的 commit 列表
+	// + 短 SHA + commit 消息。`Comment.Commits` 数组是 xorm:"-" 服务端字段，API 不暴露。
+	// 我们 app 走 API 拿不到完整 commit 列表，需要客户端从
+	// `/repos/{owner}/{repo}/pulls/{index}/commits` 拉全量 commits + 按时间窗分组
+	// （v0.7.7 计划做）。
+	//
+	// 字段含义：
+	//   - OldCommit / NewCommit: 推送前/后的 head SHA（force push 时 Gitea web 渲染
+	//     compare 链接 "{OldCommit}..{NewCommit}"）
+	//   - CommitsNum: 本次 push 的 commit 数量（API 返回，跟 body 里的 "added N commits" 一致）
+	//   - IsForcePush: 是否强制推送（true → 模板走 force push 渲染分支）
+	OldCommit   string `json:"old_commit,omitempty"`
+	NewCommit   string `json:"new_commit,omitempty"`
+	CommitsNum  int    `json:"commits_num,omitempty"`
+	IsForcePush bool   `json:"is_force_push,omitempty"`
+	// v0.7.7：type=28 (merge) 事件 commit 链接用的完整 SHA（v0.7.6 模板里
+	// mergeCommitSha(item) 从 body regex 抠短码；这里直接用 CommitSHA 字段更稳）
+	MergeCommitSHA string `json:"merge_commit_sha,omitempty"`
 }
 
 // ReactionDTO 单条表情反应（v0.5.0 M2）

@@ -820,6 +820,17 @@ type giteaTimelineRaw struct {
 	RefAction       string            `json:"ref_action,omitempty"`
 	RefCommitSHA    string            `json:"ref_commit_sha,omitempty"`
 	DependentIssue  *giteaIssueRefRaw `json:"dependent_issue,omitempty"`
+	// v0.7.7：type=29 (push) 事件专属 —— 对齐 Gitea `models/issues/comment.go` 字段
+	//   - OldCommit / NewCommit: 推送前/后的 head SHA（force push 时用 OldCommit..NewCommit 跳到 compare 链接）
+	//   - CommitsNum: 推送的 commit 数量（API 端返，跟 body 里 "added N commits" 一致）
+	//   - IsForcePush: 是否强制推送
+	// Gitea `Comment.Commits` 数组是 xorm:"-" 服务端字段，API 不暴露；
+	// 前端要从 /repos/{owner}/{repo}/pulls/{index}/commits 端点拉全量 commits +
+	// 按时间窗分组到 push 事件（v0.7.7 计划做）。
+	OldCommit   string `json:"old_commit_id,omitempty"`
+	NewCommit   string `json:"new_commit_id,omitempty"`
+	CommitsNum  int    `json:"commits_num,omitempty"`
+	IsForcePush bool   `json:"is_force_push,omitempty"`
 }
 
 // giteaIssueRefRaw timeline 上下文里的 issue 引用（type=3/5/6/19/20/33 都用）
@@ -858,6 +869,11 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 		RefAction:       r.RefAction,
 		RefCommitSHA:    r.RefCommitSHA,
 		RemovedAssignee: r.RemovedAssignee,
+		// v0.7.7：type=29 (push) 事件专属字段
+		OldCommit:   r.OldCommit,
+		NewCommit:   r.NewCommit,
+		CommitsNum:  r.CommitsNum,
+		IsForcePush: r.IsForcePush,
 	}
 	if r.User != nil {
 		item.Author = &platform.PullUserDTO{

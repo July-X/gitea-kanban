@@ -11,7 +11,7 @@ import {
   pullsList, pullsGet, pullsMerge, pullsClose,
   pullsCommentList, pullsCommentCreate, pullsCommentUpdate, pullsCommentDelete,
   pullsReviewsList, pullsReviewCreate,
-  pullsReviewCommentsList, pullsFilesList, pullsFileDiffGet,
+  pullsReviewCommentsList, pullsFilesList, pullsFileDiffGet, pullsCommitsList,
   pullsCommentReactionsList, pullsCommentReactionAdd, pullsCommentReactionRemove,
   pullsUpdateLabels, pullsUpdateAssignee, pullsUpdateReviewers, pullsUpdateMilestone,
   labelsList, membersList, milestonesList,
@@ -21,6 +21,7 @@ import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type {
   ListPullsResp, PullDto, PullState, MergeMethod,
   TimelineItemDto, PullReviewCommentDto, PullFileDto, PullFileDiffDto, PullReviewDto,
+  PullCommitDto,
   MilestoneDto, CollaboratorDto,
 } from '@renderer/types/dto';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
@@ -145,6 +146,10 @@ export const usePullStore = defineStore('pull', () => {
   const reviewSubmitting = ref(false);
   const reviewCommentsByPR = ref<Map<number, PullReviewCommentDto[]>>(new Map());
   const filesByPR = ref<Map<number, PullFileDto[]>>(new Map());
+  // v0.7.7：PR 全量 commit 列表（head..base 范围，按 head 端时间倒序）—— 用于
+  // type=29 push 事件的 inline commit 列表渲染（按 OldCommit..NewCommit 范围过滤）。
+  // 缓存按 PR index 索引，跟 reviewCommentsByPR / filesByPR 一样的模式。
+  const commitsByPR = ref<Map<number, PullCommitDto[]>>(new Map());
   const fileDiffByPath = ref<Map<string, PullFileDiffDto>>(new Map());
   const availableMilestones = ref<MilestoneDto[]>([]);
   const availableMembers = ref<CollaboratorDto[]>([]);
@@ -299,6 +304,28 @@ export const usePullStore = defineStore('pull', () => {
     try { const items = await pullsReviewCommentsList({ projectId, index }); reviewCommentsByPR.value.set(index, items); return items; } catch { return []; }
   }
 
+  /**
+   * v0.7.7：加载 PR 全量 commit 列表（按 head..base 范围，从 head 端时间倒序）——
+   * 用于 type=29 push 事件的 inline commit 列表渲染。
+   *
+   * 实现简化：直接返 commitsByPR.get(index) 缓存，不做 push event 范围分组。
+   * 模板渲染时全部列出来（用户看 commit 列表 + 跳到 Gitea web 看分组），跟 Gitea web
+   * 严格 1:1 分组留给 v0.7.7.1（需要按 OldCommit..NewCommit 范围精确切分）。
+   *
+   * 复杂度：O(1)（缓存），首次拉一次后续都用缓存。
+   */
+  async function loadCommits(projectId: string, index: number): Promise<PullCommitDto[]> {
+    const cached = commitsByPR.value.get(index);
+    if (cached) return cached;
+    try {
+      const items = await pullsCommitsList({ projectId, index });
+      commitsByPR.value.set(index, items);
+      return items;
+    } catch {
+      return [];
+    }
+  }
+
   async function loadFiles(projectId: string, index: number): Promise<PullFileDto[]> {
     try { const items = await pullsFilesList({ projectId, index }); filesByPR.value.set(index, items); return items; } catch { return []; }
   }
@@ -365,13 +392,13 @@ export const usePullStore = defineStore('pull', () => {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
     timelinePanels, reviewPanels, reviewSubmitting,
-    reviewCommentsByPR, filesByPR, fileDiffByPath,
+    reviewCommentsByPR, filesByPR, fileDiffByPath, commitsByPR,
     availableMilestones, availableMembers,
     total, counts, filteredItems, reviewCommentsGrouped,
     list, loadMore, refresh, setFilter, select, get, mergePull, closePull,
     getTimelinePanel, getReviewPanel,
     fetchTimeline, postComment, editComment, removeComment,
-    fetchReviews, submitReview, loadReviewComments, loadFiles, fetchFileDiff,
+    fetchReviews, submitReview, loadReviewComments, loadFiles, fetchFileDiff, loadCommits,
     fetchCommentReactions, addCommentReaction, removeCommentReaction,
     loadAttrEditorData,
     updateLabels, updateAssignees, updateReviewers, updateMilestone,

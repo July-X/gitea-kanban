@@ -497,6 +497,18 @@ export interface TimelineItemDto {
   // 被合并掉的事件设 merged=true，模板用 v-if="!item.merged" 跳过渲染
   // （避免重复显示 "添加了标签 bug" / "添加了标签 enhancement"）。
   merged?: boolean;
+
+  // ===== v0.7.7：type=29 (push) 事件专属字段 =====
+  // 对齐 Gitea 端 `models/issues/comment.go: Comment.OldCommit / NewCommit /
+  // CommitsNum / IsForcePush`。前端 push 事件模板用 NewCommit 短码显示 + 跳到
+  // Gitea web compare 链接（force push 时 OldCommit..NewCommit）。
+  oldCommit?: string;
+  newCommit?: string;
+  commitsNum?: number;
+  isForcePush?: boolean;
+  // v0.7.7：type=28 (merge) 事件完整 commit SHA（v0.7.6 用 body regex 抠短码；
+  // 现在后端 TimelineItem 加 MergeCommitSHA 字段更稳）。
+  mergeCommitSha?: string;
 }
 
 // v0.7.2：timeline 内 issue 引用（ref_issue / dependent_issue）
