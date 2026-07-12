@@ -25,11 +25,13 @@ import {
   GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
   // v0.7.2: 系统事件图标（对齐 Gitea web octicon-* 体系）
-  RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, Type, Calendar,
+  RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, UserMinus, Type, Calendar,
   Lock, Key, Eye, ArrowLeftRight, GitPullRequest, ArrowUp, Folder, Pin,
   MessageCircle,
   // v0.7.3: 评审事件状态图标
   CheckCircle2,
+  // v0.7.4: 评论 header 右侧图标 (smile 表情 / more-horizontal ... 菜单)
+  Smile, MoreHorizontal, Link as LinkIcon,
 } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
@@ -830,6 +832,60 @@ function reviewEventLabel(event: ReviewEvent): string {
 }
 
 /**
+ * v0.7.4：系统事件 verb 文本（item 级别）
+ *
+ * 相比 systemEventLabel(type) 只看 type，这个函数看整个 item，
+ * 可以根据 item.removedAssignee / item.body 等字段返回更精确的 verb。
+ *
+ * 例：
+ *   type='assignees' + removedAssignee=true  → '移除了指派'
+ *   type='assignees' + removedAssignee=false → '添加了指派'
+ *   type='merge'                             → '合并了合并请求'
+ *   其他类型 → fallthrough 到 systemEventLabel(type)
+ */
+function systemEventVerb(item: TimelineItemDto): string {
+  if (item.type === 'assignees') {
+    return item.removedAssignee ? '移除了指派' : '添加了指派';
+  }
+  if (item.type === 'review_request') {
+    return item.removedAssignee ? '移除了评审请求' : '请求评审';
+  }
+  return systemEventLabel(item.type);
+}
+
+/**
+ * v0.7.4：用户显示名
+ *
+ * Gitea web 的 shared/user/authorlink.tmpl 优先用 User.FullName（display name，
+ * 用户在 web 显示成 "M4JAVA" 这种大写），回退到 User.Login（@username）。
+ * 之前前端只显示 username（@login），display name 用户看到 "m4java" 小写，
+ * 跟 Gitea web 不一致。
+ *
+ * 本函数：优先 fullName（display name），空时回退 username。
+ */
+function displayName(user: { fullName?: string; username: string } | null | undefined): string {
+  if (!user) return '匿名';
+  return user.fullName || user.username || '匿名';
+}
+
+/**
+ * v0.7.4：合并事件 commit SHA 短码（7 位）
+ *
+ * Gitea /timeline 端点对 type=28 (merge_pull) 不直接返回 commit_id，
+ * 但评论 body 格式固定为 "merged commit {sha} into {branch}"。
+ * 用 regex 抠 SHA 短码（7 位），跟 Gitea web 渲染的 `<b>{ShortSha}</b>` 对齐。
+ *
+ * 不抛错：body 格式不匹配时返回 null，模板 v-if 跳过渲染。
+ */
+function mergeCommitSha(item: TimelineItemDto): string | null {
+  if (!item.body) return null;
+  // Gitea 端生成的 body: "merged commit {full_sha} into {branch}" 或
+  // "manually merged commit {full_sha} into {branch}"（手动合并）
+  const m = /merged commit ([0-9a-f]{40})/i.exec(item.body);
+  return m ? (m[1] ?? '').slice(0, 7) : null;
+}
+
+/**
  * 系统事件标签（v0.7.x 对齐 Gitea web）
  * 对应 Gitea CommentType 枚举（除 0=COMMENT / 21=REVIEW body / 22=REVIEW event 之外）。
  * 简体中文文案 + 零术语, 让 PM/设计师/市场/运营也能看懂。
@@ -846,6 +902,8 @@ function systemEventLabel(type: string): string {
     review_request: '请求评审', merge: '合并了合并请求', push: '推送了新提交',
     move: '移动了项目', dismiss_review: '驳回了评审', pin: '置顶了议题', unpin: '取消了置顶',
   };
+  // v0.7.4：assignees 事件区分"添加/移除"语义，verb 显示更精确
+  // （实际 verb 由 event-inline 块根据 removedAssignee 渲染，systemEventLabel 仅作 fallback）
   return m[type] ?? '事件';
 }
 
@@ -958,10 +1016,12 @@ function hasSystemEventInlineDetail(item: TimelineItemDto): boolean {
   if (item.type === 'label') return !!item.label;
   if (item.type === 'milestone') return !!(item.oldMilestone || item.milestone);
   if (item.type === 'assignees') return !!item.assignee;
+  if (item.type === 'review_request') return !!item.assignee;
   if (item.type === 'title' || item.type === 'change_title') return !!(item.oldTitle || item.newTitle);
   if (item.type === 'delete_branch') return !!item.oldRef;
   if (item.type === 'change_target_branch') return !!(item.oldRef || item.newRef);
   if (item.type === 'commit_ref') return !!item.refCommitSha;
+  if (item.type === 'merge') return !!selectedPR.value?.base?.ref;
   return false;
 }
 
@@ -1331,6 +1391,111 @@ async function postComment(p: PullDto): Promise<void> {
 const editingCommentId = ref<number | null>(null);
 /** 编辑中的评论草稿（与新增评论的草稿分开，互不干扰） */
 const editDrafts = ref<Map<number, string>>(new Map());
+
+/**
+ * v0.7.4：评论 header 右侧 popover 状态
+ *
+ * commentSmileOpen: 哪个 commentId 的表情选择器打开（null = 全部关闭）
+ * commentMenuOpen: 哪个 commentId 的 ... 菜单打开（null = 全部关闭）
+ *
+ * 用 ref<number | null> 而不是 ref<Set<number>> 是因为 UX 上同一时刻只
+ * 期望 1 个评论的 popover/menu 打开（点别处关闭时 1 个就够了），
+ * 也避免多 popover 重叠的视觉混乱。
+ */
+const commentSmileOpen = ref<number | null>(null);
+const commentMenuOpen = ref<number | null>(null);
+
+/** 8 种可选表情（对齐 Gitea / GitHub 体系 + ReactionBar 复用） */
+const COMMENT_EMOJI_CHOICES = [
+  { content: '+1', emoji: '👍', label: '赞同' },
+  { content: '-1', emoji: '👎', label: '反对' },
+  { content: 'laugh', emoji: '😄', label: '笑脸' },
+  { content: 'confused', emoji: '😕', label: '困惑' },
+  { content: 'heart', emoji: '❤️', label: '喜爱' },
+  { content: 'hooray', emoji: '🎉', label: '庆祝' },
+  { content: 'eyes', emoji: '👀', label: '关注' },
+  { content: 'rocket', emoji: '🚀', label: '火箭' },
+] as const;
+
+/**
+ * v0.7.4：判断评论作者是否是 PR 作者（用于显示 [所有者] label）
+ *
+ * Gitea web 的 shared/user/authorlink 模板配合 show_role role 模板使用，
+ * 最简版本：评论作者 == PR 作者 → 显示"所有者"角色标签。
+ */
+function isPRAuthor(comment: TimelineItemDto): boolean {
+  return !!(selectedPR.value?.author?.username && comment.author?.username === selectedPR.value.author.username);
+}
+
+/** 切换表情选择器显示状态 */
+function toggleSmilePicker(commentId: number): void {
+  commentSmileOpen.value = commentSmileOpen.value === commentId ? null : commentId;
+  // 互斥：打开表情时关闭 ... 菜单
+  if (commentSmileOpen.value !== null) commentMenuOpen.value = null;
+}
+
+/** 切换 ... 菜单显示状态 */
+function toggleCommentMenu(commentId: number): void {
+  commentMenuOpen.value = commentMenuOpen.value === commentId ? null : commentId;
+  // 互斥：打开 ... 菜单时关闭表情选择器
+  if (commentMenuOpen.value !== null) commentSmileOpen.value = null;
+}
+
+/**
+ * 添加表情到评论（简化版：直接调 reaction add）
+ *
+ * v0.7.4 简化：只支持 add reaction（toggle 移除表情在 ReactionBar 已有）。
+ * 完整 toggle 留给 v0.7.5（需要 viewerReacted 状态联动 + ReactionBar 重构）。
+ */
+async function addCommentReaction(p: PullDto, commentId: number, content: string): Promise<void> {
+  if (!activeProjectId.value) return;
+  try {
+    await pull.addCommentReaction(p, commentId, content);
+    showToast({ type: 'success', message: '已添加表情' });
+    commentSmileOpen.value = null;
+  } catch (e) {
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: err.messageText ?? '添加表情失败', persistent: true });
+  }
+}
+
+/** 复制评论链接到剪贴板 */
+async function copyCommentLink(commentId: number): Promise<void> {
+  if (!activeRepo.value) return;
+  const url = giteaPullUrl(selectedPR.value!).split('/pulls/').join('/issues/') + `#issuecomment-${commentId}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast({ type: 'success', message: '已复制评论链接' });
+  } catch {
+    showToast({ type: 'error', message: '复制失败' });
+  }
+  commentMenuOpen.value = null;
+}
+
+/**
+ * v0.7.4：点击外部关闭 popover / 菜单
+ *
+ * 用 document 监听 mousedown，命中 action-btn / popover 元素则忽略，
+ * 否则关闭所有打开的表情选择器 + 菜单。
+ */
+function onDocumentClick(_e: MouseEvent): void {
+  const target = _e.target as HTMLElement | null;
+  if (!target) {
+    commentSmileOpen.value = null;
+    commentMenuOpen.value = null;
+    return;
+  }
+  if (target.closest('.pr-detail__comment-action-wrap')) return;
+  commentSmileOpen.value = null;
+  commentMenuOpen.value = null;
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocumentClick);
+});
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocumentClick);
+});
 
 /**
  * 进入编辑态
@@ -1982,7 +2147,7 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     </div>
                     <div class="pr-detail__event-line">
                       <span class="pr-detail__event-text">
-                        <span class="pr-detail__event-author">{{ item.author?.username || '匿名' }}</span>
+                        <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
                         <span class="pr-detail__event-verb">{{ reviewStateLabel(item.state) }}</span>
                       </span>
                       <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
@@ -1997,15 +2162,108 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     :class="{ 'pr-detail__timeline-item--self': currentUsername && item.author?.username === currentUsername }"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-avatar" :title="item.author?.username" aria-hidden="true">
+                      <div class="pr-detail__timeline-avatar" :title="displayName(item.author)" aria-hidden="true">
                         {{ (item.author?.username || '?').charAt(0).toUpperCase() }}
                       </div>
                     </div>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
-                        <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
-                        <span class="pr-detail__comment-author">{{ item.author?.username }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <div class="pr-detail__comment-meta-left">
+                          <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
+                          <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
+                          <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" title="合并请求作者">所有者</span>
+                          <span class="pr-detail__comment-verb">评论于</span>
+                          <a
+                            class="pr-detail__comment-time"
+                            :title="formatDate(item.created)"
+                            @click.prevent
+                          >{{ formatRelative(item.created) }}</a>
+                        </div>
+                        <!-- v0.7.4：comment header 右侧 actions —— 对齐 Gitea web show_role + add_reaction + context_menu
+                             表情选择器 + ... 菜单在外部渲染（避免 popover 嵌套在 comment-meta 里影响布局） -->
+                        <div v-if="editingCommentId !== item.id" class="pr-detail__comment-meta-right">
+                          <!-- 表情添加按钮（点击展开 emoji 选择器） -->
+                          <div class="pr-detail__comment-action-wrap">
+                            <button
+                              type="button"
+                              class="pr-detail__comment-action-btn"
+                              :class="{ 'pr-detail__comment-action-btn--active': commentSmileOpen === item.id }"
+                              title="添加表情"
+                              aria-label="添加表情"
+                              @click.stop="toggleSmilePicker(item.id)"
+                            >
+                              <Smile :size="14" :stroke-width="2" aria-hidden="true" />
+                            </button>
+                            <div
+                              v-if="commentSmileOpen === item.id"
+                              class="pr-detail__comment-popover pr-detail__comment-popover--emoji"
+                              @click.stop
+                            >
+                              <button
+                                v-for="e in COMMENT_EMOJI_CHOICES"
+                                :key="e.content"
+                                type="button"
+                                class="pr-detail__comment-emoji-btn"
+                                :title="e.label"
+                                @click="addCommentReaction(selectedPR!, item.id, e.content)"
+                              >{{ e.emoji }}</button>
+                            </div>
+                          </div>
+                          <!-- ... 菜单（引用 / 复制链接 / 编辑 / 删除） -->
+                          <div class="pr-detail__comment-action-wrap">
+                            <button
+                              type="button"
+                              class="pr-detail__comment-action-btn"
+                              :class="{ 'pr-detail__comment-action-btn--active': commentMenuOpen === item.id }"
+                              title="更多操作"
+                              aria-label="更多操作"
+                              @click.stop="toggleCommentMenu(item.id)"
+                            >
+                              <MoreHorizontal :size="14" :stroke-width="2" aria-hidden="true" />
+                            </button>
+                            <div
+                              v-if="commentMenuOpen === item.id"
+                              class="pr-detail__comment-popover pr-detail__comment-popover--menu"
+                              @click.stop
+                            >
+                              <button
+                                v-if="currentUsername && item.author?.username !== currentUsername"
+                                type="button"
+                                class="pr-detail__comment-menu-item"
+                                @click="quoteComment(selectedPR.index, item as any); commentMenuOpen = null"
+                              >
+                                <Quote :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>引用</span>
+                              </button>
+                              <button
+                                type="button"
+                                class="pr-detail__comment-menu-item"
+                                @click="copyCommentLink(item.id)"
+                              >
+                                <LinkIcon :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>复制链接</span>
+                              </button>
+                              <button
+                                v-if="currentUsername && item.author?.username === currentUsername"
+                                type="button"
+                                class="pr-detail__comment-menu-item"
+                                @click="startEditComment(item as any); commentMenuOpen = null"
+                              >
+                                <Pencil :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>编辑</span>
+                              </button>
+                              <button
+                                v-if="currentUsername && item.author?.username === currentUsername"
+                                type="button"
+                                class="pr-detail__comment-menu-item pr-detail__comment-menu-item--danger"
+                                @click="confirmDeleteComment(selectedPR, item as any); commentMenuOpen = null"
+                              >
+                                <XCircle :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>删除</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       <!-- 编辑态 -->
                       <template v-if="editingCommentId === item.id">
@@ -2088,8 +2346,8 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     </div>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
-                        <span class="pr-detail__event-author">{{ item.author?.username || '匿名' }}</span>
-                        <span class="pr-detail__event-verb">{{ systemEventLabel(item.type) }}</span>
+                        <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
+                        <span class="pr-detail__event-verb">{{ systemEventVerb(item) }}</span>
                         <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
@@ -2121,7 +2379,33 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           <span :class="item.removedAssignee ? 'pr-detail__event-minus' : 'pr-detail__event-plus'">
                             {{ item.removedAssignee ? '−' : '+' }}
                           </span>
-                          <span class="pr-detail__event-username">{{ item.assignee.username }}</span>
+                          <span class="pr-detail__event-username">{{ displayName(item.assignee) }}</span>
+                          <span class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了指派' : '添加了指派' }}</span>
+                        </span>
+
+                        <!-- v0.7.4：review_request 评审请求详情
+                             Gitea web: "X 请求 Y 评审" / "X 移除了 Y 评审请求"
+                             X = actor (item.author), Y = requested reviewer (item.assignee) -->
+                        <span v-else-if="item.type === 'review_request' && item.assignee">
+                          <UserPlus v-if="!item.removedAssignee" :size="12" :stroke-width="2" aria-hidden="true" />
+                          <UserMinus v-else :size="12" :stroke-width="2" aria-hidden="true" />
+                          <span class="pr-detail__event-username">{{ displayName(item.assignee) }}</span>
+                          <span class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了评审请求' : '请求评审' }}</span>
+                        </span>
+
+                        <!-- v0.7.4：merge 合并事件详情
+                             Gitea web: "X 合并 commit {sha_short} 到 {branch}"
+                             本实现：base ref 从 selectedPR 拿（PR.base.ref 是目标分支），
+                             短 SHA 从 item.body 解析（type 28 合并评论 body 格式：
+                             "merged commit {sha} into {branch}"） -->
+                        <span v-else-if="item.type === 'merge' && selectedPR?.base?.ref">
+                          <GitMerge :size="12" :stroke-width="2" aria-hidden="true" />
+                          <span class="pr-detail__event-hint">到</span>
+                          <code class="pr-detail__event-branch">{{ selectedPR.base.ref }}</code>
+                          <span v-if="mergeCommitSha(item)" class="pr-detail__event-merge-sha">
+                            <span class="pr-detail__event-hint">·</span>
+                            <code class="pr-detail__event-branch">{{ mergeCommitSha(item) }}</code>
+                          </span>
                         </span>
 
                         <span v-else-if="item.type === 'title' || item.type === 'change_title'">
@@ -2199,15 +2483,20 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     class="pr-detail__timeline-item pr-detail__timeline-item--comment pr-detail__timeline-item--dismiss-reason"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-avatar pr-detail__timeline-avatar--dismiss" :title="item.author?.username" aria-hidden="true">
+                      <div class="pr-detail__timeline-avatar pr-detail__timeline-avatar--dismiss" :title="displayName(item.author)" aria-hidden="true">
                         <MessageSquare :size="13" :stroke-width="2" />
                       </div>
                     </div>
                     <div class="pr-detail__comment-bubble">
                       <div class="pr-detail__comment-meta">
                         <span class="pr-detail__comment-dismiss-reason-tag">驳回原因</span>
-                        <span class="pr-detail__comment-author">{{ item.author?.username }}</span>
-                        <span class="pr-detail__comment-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
+                        <span class="pr-detail__comment-verb">评论于</span>
+                        <a
+                          class="pr-detail__comment-time"
+                          :title="formatDate(item.created)"
+                          @click.prevent
+                        >{{ formatRelative(item.created) }}</a>
                       </div>
                       <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
                     </div>
@@ -5812,7 +6101,9 @@ git checkout {{ selectedPR.head.ref }}</pre>
   bottom: 14px;               /* 最后一个 avatar 中心对齐 */
   left: 14px;                 /* 竖线在 padding 32px 的中间 */
   width: 2px;
-  background: var(--color-divider);
+  /* v0.7.4：用 --color-timeline（专门 token，比 --color-divider 略亮）——
+     暗色 18% / 亮色 16% alpha，确保 timeline 序列感可见但不喧宾夺主 */
+  background: var(--color-timeline, var(--color-divider));
   border-radius: 1px;
   z-index: 0;
 }
@@ -5966,6 +6257,162 @@ git checkout {{ selectedPR.head.ref }}</pre>
   font-weight: 600;
   font-size: var(--font-sm);
   color: var(--color-text);
+}
+/* v0.7.4：'评论于' 动词 —— 对齐 Gitea web 评论头 'X 评论于 {时间}' 格式 */
+.pr-detail__comment-verb {
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+.pr-detail__comment-time {
+  /* 提升为链接样式，Gitea web 风格（'X 评论于 <a href="...">2小时前</a>'） */
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  text-decoration: none;
+  cursor: default;
+}
+.pr-detail__comment-time:hover {
+  color: var(--color-link, var(--color-primary));
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* merge event 短 SHA 显示（去掉左右空白） */
+.pr-detail__event-merge-sha {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ===== v0.7.4：comment header 右侧 actions ===== */
+.pr-detail__comment-meta {
+  /* 改用 flex space-between，让左侧（author + time）和右侧（actions）撑满 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  min-height: 24px;
+}
+.pr-detail__comment-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.pr-detail__comment-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;                 /* 默认隐藏，hover comment 时显示（Gitea web 行为） */
+  transition: opacity 0.15s ease;
+}
+.pr-detail__comment-bubble:hover .pr-detail__comment-meta-right,
+.pr-detail__comment-meta-right:has(.pr-detail__comment-action-btn--active) {
+  opacity: 1;
+}
+.pr-detail__comment-action-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.pr-detail__comment-action-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--t-fast, 0.12s) ease, border-color var(--t-fast, 0.12s) ease, color var(--t-fast, 0.12s) ease;
+}
+.pr-detail__comment-action-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: var(--color-divider);
+}
+.pr-detail__comment-action-btn--active {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: var(--color-divider);
+}
+.pr-detail__comment-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  min-width: max-content;
+}
+.pr-detail__comment-popover--emoji {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  max-width: 240px;
+}
+.pr-detail__comment-popover--menu {
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pr-detail__comment-emoji-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--t-fast, 0.12s) ease, transform var(--t-fast, 0.12s) ease;
+}
+.pr-detail__comment-emoji-btn:hover {
+  background: var(--color-bg-hover);
+  transform: scale(1.15);
+}
+.pr-detail__comment-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background var(--t-fast, 0.12s) ease;
+}
+.pr-detail__comment-menu-item:hover {
+  background: var(--color-bg-hover);
+}
+.pr-detail__comment-menu-item--danger {
+  color: var(--color-danger, #cf222e);
+}
+.pr-detail__comment-menu-item--danger:hover {
+  background: rgba(207, 34, 46, 0.1);
+}
+/* v0.7.4：[所有者] 角色标签 —— 对齐 Gitea web show_role.tmpl 的 Owner 标签 */
+.pr-detail__comment-role-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  background: var(--color-primary-soft, rgba(9, 105, 218, 0.15));
+  color: var(--color-primary, #0969da);
+  flex-shrink: 0;
 }
 .pr-detail__comment-bubble {
   flex: 1;

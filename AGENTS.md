@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.3)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.4)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.3 发版** — Timeline 视觉对齐 Gitea web：系统事件紧凑单行 + 左侧贯穿 timeline 竖线 + 圆点节点切断 + 5 档颜色应用到 dot 边框）
+> 最后更新：2026-07-12（**v0.7.4 发版** — Timeline 细节补全：DisplayName 全链路 + "评论于" 动词 + 系统事件详情（评审人/合并 SHA/指派人）+ 评论 header 右侧 [所有者] / 表情 / ... 菜单 + timeline 竖线颜色提亮）
 
 >
 
@@ -18,6 +18,21 @@
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
 
+> - **v0.7.4** (2026-07-12)：Timeline 细节补全（接续 v0.7.3 动态视觉，把 7 处细节做实）。
+>   1. **DisplayName 全链路**：后端 `platform.PullUserDTO` 加 `FullName` 字段；`giteaUserRaw` 解析 `full_name`；`githubUserRaw` 解析 `name`；11 处 `PullUserDTO` 构造同步。前端新增 `displayName(user)` helper（优先 fullName，回退 username）。对齐 Gitea web `shared/user/authorlink` 模板的 display name 优先显示。
+>   2. **"评论于" 动词 + 时间链接**：评论 header 改成 `username 评论于 时间` 格式（Gitea web `repo.issues.commented_at` 中文翻译）；时间变成 `<a>` 链接，hover 变主色 + underline。
+>   3. **系统事件 verb item 级别化**：新增 `systemEventVerb(item)` helper，根据 `item.removedAssignee` 区分 "添加了指派" / "移除了指派"；review_request 同理 "请求评审" / "移除了评审请求"。之前是通用 verb（"修改了指派人"），不精确。
+>   4. **系统事件 inline 详情 3 类**：
+>      - `review_request` (27): `UserPlus/UserMinus icon + assignee displayName + "请求评审"`
+>      - `assignees` (9): `+ / - 圆点 + assignee displayName + "添加了/移除了指派"`
+>      - `merge` (28): `GitMerge icon + "到" + base ref + 7 位短 SHA`（从 body regex 抠 "merged commit {sha}" 格式）
+>   5. **评论 header 右侧 3 件套**（Gitea web 标准元素）：
+>      - `[所有者]` 角色标签（PR 作者评论时显示，浅蓝底 + 主色字）
+>      - `Smile` 表情按钮 + 8 emoji popover（对齐 Gitea / GitHub 体系）
+>      - `MoreHorizontal` ... 按钮 + dropdown 菜单（按权限动态：引用/复制链接/编辑/删除）
+>   6. **timeline 竖线颜色提亮**：新增 `--color-timeline` token（暗色 18% / 亮色 16% alpha），比 `--color-divider` 亮 80%，确保暗色背景下序列感可见。
+>   7. **互斥 + click-outside**：表情选择器 / ... 菜单互斥打开（开一个关另一个）；全局 document mousedown 监听点击非 action-wrap 区域时关闭所有 popover。
+>
 > - **v0.7.3** (2026-07-12)：Timeline 视觉对齐 Gitea web（接续 v0.7.2 静态视觉，把动态 timeline 视觉做实）。
 >   1. **系统事件紧凑单行布局**（v0.7.2 套了跟 comment 一样的 flex side + bubble 框，看上又大又重；Gitea web 截图对比显示 system event 是**单行紧凑**）：去掉 bubble 框，纯 icon + 单行文字（作者 + 事件 + 时间）。5 档颜色从文字色升级到 **dot 边框色 + icon 色**（更明显）。
 >   2. **左侧贯穿 timeline 竖线**（Gitea web `web_src/css/repo.css: .repository.view.issue .comment-list::before` 的 2px vertical line 模式）：`.pr-detail__timeline::before` 画 2px 灰色竖线（top: 14px; bottom: 14px; left: 14px），avatar/dot 节点用 `position: absolute; left: -32px` 定位到竖线上 + 圆形背景把竖线"切断"在节点位置。

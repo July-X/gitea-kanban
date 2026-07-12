@@ -543,9 +543,16 @@ type PullRefDTO struct {
 	SHA string `json:"sha"` // 分支顶端 commit hash
 }
 
-// PullUserDTO 嵌套用户信息（author / assignees / reviewers / mergedBy）
+// PullUserDTO 嵌套用户信息（author / assignees / reviewers / mergedBy / assignee / assigner / poster）
+//
+// v0.7.4 增量：加 FullName 字段，对齐 Gitea web 显示习惯。
+// Gitea web 的 `shared/user/authorlink` 优先用 User.FullName，回退到 User.Login。
+// 之前前端只用 Username（@login），导致用户用 DisplayName 注册时评论/事件里显示小写 login，
+// 跟 Gitea web 的 "M4JAVA" 大写 display name 不一致。FullName 用 omitempty，
+// Gitea / GitHub 没返回时不影响老 DTO 兼容性。
 type PullUserDTO struct {
 	Username  string `json:"username"`
+	FullName  string `json:"fullName,omitempty"`
 	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 

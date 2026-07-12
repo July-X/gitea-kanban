@@ -152,6 +152,8 @@ html[data-theme='dark'] {
   --color-divider: rgba(220, 233, 240, 0.1);              /* 8% → 10% */
   --color-divider-strong: rgba(220, 233, 240, 0.2);      /* 16% → 20% · 区域边界 */
   --color-divider-region: rgba(220, 233, 240, 0.16);     /* 12% → 16% · 区域边界 */
+  /* v0.7.4：timeline 竖线（PR 对话区对齐 Gitea web）—— 比 divider 略亮，确保暗色下可见 */
+  --color-timeline: rgba(220, 233, 240, 0.18);           /* 18% alpha 冷白 · Gitea web 同色档 */
 
   /* === 阴影（v1.6.1 暗色专属提档） ===
    * v1.6 共用 4 档在暗色下太弱（0.06-0.10 alpha 黑 vs #0F1115 几乎不可见）
@@ -392,6 +394,8 @@ html[data-theme='light'] {
   --color-divider: rgba(15, 26, 36, 0.08);              /* 冷黑 8% · 极浅分隔 */
   --color-divider-strong: rgba(15, 26, 36, 0.14);      /* 冷黑 14% · 区域边界 */
   --color-divider-region: rgba(15, 26, 36, 0.1);       /* 冷黑 10% · 区域边界 */
+  /* v0.7.4：timeline 竖线 —— 亮色下用 16% alpha 冷黑，比 divider 略深 */
+  --color-timeline: rgba(15, 26, 36, 0.16);
 
   /* === 阴影（v1.6 单层柔和 · 4 档 · 冷黑） === */
   --shadow-rgb: 15, 26, 36;

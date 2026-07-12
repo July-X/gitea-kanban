@@ -347,8 +347,12 @@ type giteaPullRefRaw struct {
 }
 
 type giteaUserRaw struct {
-	ID        int64  `json:"id"`
-	Login     string `json:"login"`
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+	// FullName 是 Gitea 的 DisplayName（用户在 Gitea web 显示成 M4JAVA 这种）。
+	// Gitea web shared/user/authorlink.tmpl 优先用 .FullName 渲染用户名，
+	// 我们 v0.7.4 也对齐这个行为（之前只用 Login，display name 用户看着不一样）。
+	FullName  string `json:"full_name"`
 	AvatarURL string `json:"avatar_url"`
 }
 
@@ -377,21 +381,21 @@ func giteaPullToDetail(p giteaPullRaw) platform.PullDetailDTO {
 		UpdatedAt:     p.UpdatedAt,
 	}
 	if p.User != nil {
-		out.Author = &platform.PullUserDTO{Username: p.User.Login, AvatarURL: p.User.AvatarURL}
+		out.Author = &platform.PullUserDTO{Username: p.User.Login, FullName: p.User.FullName, AvatarURL: p.User.AvatarURL}
 	}
 	if p.MergedBy != nil {
-		out.MergedBy = &platform.PullUserDTO{Username: p.MergedBy.Login, AvatarURL: p.MergedBy.AvatarURL}
+		out.MergedBy = &platform.PullUserDTO{Username: p.MergedBy.Login, FullName: p.MergedBy.FullName, AvatarURL: p.MergedBy.AvatarURL}
 	}
 	if len(p.Assignees) > 0 {
 		out.Assignees = make([]platform.PullUserDTO, 0, len(p.Assignees))
 		for _, u := range p.Assignees {
-			out.Assignees = append(out.Assignees, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+			out.Assignees = append(out.Assignees, platform.PullUserDTO{Username: u.Login, FullName: u.FullName, AvatarURL: u.AvatarURL})
 		}
 	}
 	if len(p.RequestedReviewers) > 0 {
 		out.Reviewers = make([]platform.PullUserDTO, 0, len(p.RequestedReviewers))
 		for _, u := range p.RequestedReviewers {
-			out.Reviewers = append(out.Reviewers, platform.PullUserDTO{Username: u.Login, AvatarURL: u.AvatarURL})
+			out.Reviewers = append(out.Reviewers, platform.PullUserDTO{Username: u.Login, FullName: u.FullName, AvatarURL: u.AvatarURL})
 		}
 	}
 	if len(p.Labels) > 0 {
@@ -850,6 +854,7 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 	if r.User != nil {
 		item.Author = &platform.PullUserDTO{
 			Username:  r.User.Login,
+			FullName:  r.User.FullName,
 			AvatarURL: r.User.AvatarURL,
 		}
 	}
@@ -871,6 +876,7 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 	if r.Assignee != nil {
 		item.Assignee = &platform.PullUserDTO{
 			Username:  r.Assignee.Login,
+			FullName:  r.Assignee.FullName,
 			AvatarURL: r.Assignee.AvatarURL,
 		}
 	}
@@ -982,6 +988,7 @@ func giteaReactionToDTO(r giteaReactionRaw) platform.ReactionDTO {
 	if r.User != nil {
 		out.User = &platform.PullUserDTO{
 			Username:  r.User.Login,
+			FullName:  r.User.FullName,
 			AvatarURL: r.User.AvatarURL,
 		}
 	}
@@ -1069,6 +1076,7 @@ func giteaReviewToDTO(r giteaReviewRaw) platform.PullReviewDTO {
 	if r.User != nil {
 		out.Author = &platform.PullUserDTO{
 			Username:  r.User.Login,
+			FullName:  r.User.FullName,
 			AvatarURL: r.User.AvatarURL,
 		}
 	}
@@ -1178,6 +1186,7 @@ func giteaCommentToDTO(c giteaCommentRaw) platform.CommentDTO {
 	if c.User != nil {
 		out.Author = &platform.PullUserDTO{
 			Username:  c.User.Login,
+			FullName:  c.User.FullName,
 			AvatarURL: c.User.AvatarURL,
 		}
 		out.UserID = c.User.ID
@@ -1358,6 +1367,7 @@ func giteaReviewCommentToDTO(r giteaReviewCommentRaw) platform.PullReviewComment
 	if r.User != nil {
 		out.Author = &platform.PullUserDTO{
 			Username:  r.User.Login,
+			FullName:  r.User.FullName,
 			AvatarURL: r.User.AvatarURL,
 		}
 	}

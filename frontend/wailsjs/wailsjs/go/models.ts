@@ -1762,6 +1762,7 @@ export namespace platform {
 	}
 	export class PullUserDTO {
 	    username: string;
+	    fullName?: string;
 	    avatarUrl?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1771,6 +1772,7 @@ export namespace platform {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.username = source["username"];
+	        this.fullName = source["fullName"];
 	        this.avatarUrl = source["avatarUrl"];
 	    }
 	}
