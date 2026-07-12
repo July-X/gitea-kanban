@@ -596,10 +596,15 @@ type CommentDTO struct {
 //	"added_deadline"=16 | "modified_deadline"=17 | "removed_deadline"=18
 //	"add_dependency"=19 | "remove_dependency"=20
 //	"lock"=23 | "unlock"=24 | "change_target_branch"=25 | "delete_time_manual"=26
-//	"review_request"=27 | "merge_pull"=28 | "pull_request_push"=29
+//	"review_request"=27 | "merge_pull"=28 | "pull_push"=29
 //	"project"=30 | "project_column"=31 | "dismiss_review"=32 | "change_issue_ref"=33
 //	"pr_scheduled_to_auto_merge"=34 | "pr_unscheduled_to_auto_merge"=35
 //	"pin"=36 | "unpin"=37 | "change_time_estimate"=38
+//
+// **v0.7.8 类型归一化**：Gitea 端 `merge_pull` / `pull_push` 是 snake_case 字符串，
+// 前端 type 字典表之前用 `merge` / `push` 假设 —— v0.7.5/v0.7.7 凭印象写的没实测，
+// 导致所有 push / merge 事件模板都不渲染。`giteaTimelineToItem` 在适配层做归一化：
+// `pull_push` → `push`、`merge_pull` → `merge`，前端 type 字符串保持稳定。
 type TimelineItem struct {
 	ID      int64        `json:"id"`
 	Type    string       `json:"type"`
@@ -682,26 +687,33 @@ type TimelineItem struct {
 	//   "add" = Content == "1"（添加），"remove" = Content != "1"（移除）
 	LabelAction string `json:"label_action,omitempty"`
 
-	// v0.7.7：type=29 (push) 事件专属字段 —— 对齐 Gitea 端
-	// `models/issues/comment.go: Comment.OldCommit / NewCommit / CommitsNum / IsForcePush`。
+	// v0.7.8：type=29 (push) 事件专属字段 —— 重新对齐 Gitea 端实际 API。
 	//
-	// 背景：Gitea web 渲染 push event 用 `commits_list_small` 模板显示该次 push 的 commit 列表
-	// + 短 SHA + commit 消息。`Comment.Commits` 数组是 xorm:"-" 服务端字段，API 不暴露。
-	// 我们 app 走 API 拿不到完整 commit 列表，需要客户端从
-	// `/repos/{owner}/{repo}/pulls/{index}/commits` 拉全量 commits + 按时间窗分组
-	// （v0.7.7 计划做）。
+	// 根因（v0.7.7 错假设修复）：
+	//   v0.7.7 假设 Gitea /issues/{index}/timeline 端点顶层会返回
+	//   `old_commit_id / new_commit_id / commits_num / is_force_push` 4 个独立字段，
+	//   实际 Gitea 1.26+ API 这 4 个字段**全部不返回**。
+	//   真实数据在 `body` JSON 字符串里：`{"is_force_push":false,"commit_ids":["sha1","sha2"]}`。
+	//   旧版（<= 1.25）返回 `commit_id` 单字段，新版改 body JSON，Gitea web 端模板
+	//   `repo/issue/view_content/comments.tmpl` 是用 `commit_ids` 数组渲染 commit 列表。
 	//
 	// 字段含义：
-	//   - OldCommit / NewCommit: 推送前/后的 head SHA（force push 时 Gitea web 渲染
-	//     compare 链接 "{OldCommit}..{NewCommit}"）
-	//   - CommitsNum: 本次 push 的 commit 数量（API 返回，跟 body 里的 "added N commits" 一致）
+	//   - CommitIDs: 本次 push 的所有 commit SHA 数组（full 40 位 SHA，按 push 顺序）
+	//     前端直接拿这个数组渲染 commit 列表（短 SHA 链接 + 提交消息可选从
+	//     /pulls/{index}/commits 二次拉取）。**不再需要调 /pulls/{index}/commits 端点
+	//     做时间窗分组**（v0.7.7 简化版算法已弃用）。
 	//   - IsForcePush: 是否强制推送（true → 模板走 force push 渲染分支）
-	OldCommit   string `json:"old_commit,omitempty"`
-	NewCommit   string `json:"new_commit,omitempty"`
-	CommitsNum  int    `json:"commits_num,omitempty"`
-	IsForcePush bool   `json:"is_force_push,omitempty"`
-	// v0.7.7：type=28 (merge) 事件 commit 链接用的完整 SHA（v0.7.6 模板里
-	// mergeCommitSha(item) 从 body regex 抠短码；这里直接用 CommitSHA 字段更稳）
+	//   - 删 v0.7.7 假设的 OldCommit / NewCommit / CommitsNum 3 个字段 —— Gitea API 不返回。
+	//
+	// v0.7.7 还存在的字段：MergeCommitSHA，merge 事件专用。Gitea 1.26+ timeline
+	// 端点 merge_pull 事件 body 是空字符串（**没有** merge commit SHA），必须从
+	// PR 详情端点 /pulls/{index} 的 `merge_commit_sha` 字段拿（v0.7.8 修 giteaPullRaw 映射）。
+	CommitIDs   []string `json:"commit_ids,omitempty"`
+	IsForcePush bool     `json:"is_force_push,omitempty"`
+	// MergeCommitSHA：v0.7.7 加的，v0.7.8 修来源 —— Gitea 1.26+ timeline 不返回，
+	// 由 PR 详情 GetPull 端点 `merge_commit_sha` 字段映射过来。TimelineItem 这个字段保留
+	// 是为 v0.7.5 之前的 type 字符串表（"merge"）的渲染，模板里 inline 块可拿
+	// selectedPR.mergeCommitSha 兜底（PullDetailDTO 已加 MergeCommitSHA 字段，v0.7.8 修 raw 映射）。
 	MergeCommitSHA string `json:"merge_commit_sha,omitempty"`
 }
 

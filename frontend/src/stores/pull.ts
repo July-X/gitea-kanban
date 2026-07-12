@@ -149,7 +149,15 @@ export const usePullStore = defineStore('pull', () => {
   // v0.7.7：PR 全量 commit 列表（head..base 范围，按 head 端时间倒序）—— 用于
   // type=29 push 事件的 inline commit 列表渲染（按 OldCommit..NewCommit 范围过滤）。
   // 缓存按 PR index 索引，跟 reviewCommentsByPR / filesByPR 一样的模式。
+  //
+  // v0.7.8：commitIds 字段（后端 giteaTimelineToItem 从 body JSON 解析）已能直接
+  // 渲染 push event 列表，commitsByPR 缓存主要做"二次匹配 subject / author"用
+  // （commitDetails() helper 按 SHA 短码从缓存匹配 PullCommitDto 拿 subject）。
+  // 保留缓存 + loadCommits 行为不变，只是渲染逻辑改成"commitIds 数组 + 缓存补全"。
   const commitsByPR = ref<Map<number, PullCommitDto[]>>(new Map());
+  // v0.7.8：commitsLoading 状态，tab loading indicator 用（之前组件本地有
+  // commitsLoading ref，v0.7.8 删了组件本地版改用 store 这个）
+  const commitsLoading = ref(false);
   const fileDiffByPath = ref<Map<string, PullFileDiffDto>>(new Map());
   const availableMilestones = ref<MilestoneDto[]>([]);
   const availableMembers = ref<CollaboratorDto[]>([]);
@@ -272,6 +280,29 @@ export const usePullStore = defineStore('pull', () => {
     finally { panel.loading = false; }
   }
 
+  /**
+   * v0.7.8：拉 PR 详情（PullDetailAppDTO）补到 currentSelectedItem / patchItem
+   *
+   * 背景：merge event inline 块渲染需要 mergeCommitSha 字段（Gitea 1.26+ timeline
+   * 端点 merge_pull body 是空字符串，SHA 只能从 /pulls/{index} detail 端点拿）。
+   * 列表接口 `ListPulls` 不返这个字段，selectPR 时只有轻量 PullDto，没 mergeCommitSha。
+   * fetchPullDetail() 调 `pullsGet` IPC（Wails 绑到 `GetPull`），拿到 detail 后用
+   * patchItem 浅 patch 列表项 + currentSelectedItem。
+   *
+   * 缓存：detail 不缓存（PR 状态变化时及时刷新），调用方按需调。
+   */
+  async function fetchPullDetail(p: PullDto): Promise<void> {
+    try {
+      const detail = (await pullsGet({ projectId: currentProjectId.value!, index: p.index })) as PullDto & { mergeCommitSha?: string; commits?: number };
+      patchItem(p.index, detail);
+      if (currentSelectedItem.value?.index === p.index) {
+        currentSelectedItem.value = { ...currentSelectedItem.value, ...detail } as PullDto;
+      }
+    } catch {
+      // 失败不阻断（merge 事件 SHA 链接不显示，但 timeline 仍可渲染）
+    }
+  }
+
   async function postComment(p: PullDto, body: string): Promise<void> {
     const panel = getTimelinePanel(p.index);
     panel.posting = true;
@@ -317,12 +348,15 @@ export const usePullStore = defineStore('pull', () => {
   async function loadCommits(projectId: string, index: number): Promise<PullCommitDto[]> {
     const cached = commitsByPR.value.get(index);
     if (cached) return cached;
+    commitsLoading.value = true;
     try {
       const items = await pullsCommitsList({ projectId, index });
       commitsByPR.value.set(index, items);
       return items;
     } catch {
       return [];
+    } finally {
+      commitsLoading.value = false;
     }
   }
 
@@ -392,13 +426,15 @@ export const usePullStore = defineStore('pull', () => {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
     timelinePanels, reviewPanels, reviewSubmitting,
-    reviewCommentsByPR, filesByPR, fileDiffByPath, commitsByPR,
+    reviewCommentsByPR, filesByPR, fileDiffByPath, commitsByPR, commitsLoading,
     availableMilestones, availableMembers,
     total, counts, filteredItems, reviewCommentsGrouped,
     list, loadMore, refresh, setFilter, select, get, mergePull, closePull,
     getTimelinePanel, getReviewPanel,
     fetchTimeline, postComment, editComment, removeComment,
     fetchReviews, submitReview, loadReviewComments, loadFiles, fetchFileDiff, loadCommits,
+    // v0.7.8：补 PR 详情（mergeCommitSha 字段）—— 供 timeline merge 事件 SHA 链接用
+    fetchPullDetail,
     fetchCommentReactions, addCommentReaction, removeCommentReaction,
     loadAttrEditorData,
     updateLabels, updateAssignees, updateReviewers, updateMilestone,
