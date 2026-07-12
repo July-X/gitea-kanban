@@ -30,6 +30,8 @@ import {
   MessageCircle,
   // v0.7.3: 评审事件状态图标
   CheckCircle2,
+  // v0.7.4: 评论 header 右侧图标 (smile 表情 / more-horizontal ... 菜单)
+  Smile, MoreHorizontal, Link as LinkIcon,
 } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
@@ -1391,6 +1393,111 @@ const editingCommentId = ref<number | null>(null);
 const editDrafts = ref<Map<number, string>>(new Map());
 
 /**
+ * v0.7.4：评论 header 右侧 popover 状态
+ *
+ * commentSmileOpen: 哪个 commentId 的表情选择器打开（null = 全部关闭）
+ * commentMenuOpen: 哪个 commentId 的 ... 菜单打开（null = 全部关闭）
+ *
+ * 用 ref<number | null> 而不是 ref<Set<number>> 是因为 UX 上同一时刻只
+ * 期望 1 个评论的 popover/menu 打开（点别处关闭时 1 个就够了），
+ * 也避免多 popover 重叠的视觉混乱。
+ */
+const commentSmileOpen = ref<number | null>(null);
+const commentMenuOpen = ref<number | null>(null);
+
+/** 8 种可选表情（对齐 Gitea / GitHub 体系 + ReactionBar 复用） */
+const COMMENT_EMOJI_CHOICES = [
+  { content: '+1', emoji: '👍', label: '赞同' },
+  { content: '-1', emoji: '👎', label: '反对' },
+  { content: 'laugh', emoji: '😄', label: '笑脸' },
+  { content: 'confused', emoji: '😕', label: '困惑' },
+  { content: 'heart', emoji: '❤️', label: '喜爱' },
+  { content: 'hooray', emoji: '🎉', label: '庆祝' },
+  { content: 'eyes', emoji: '👀', label: '关注' },
+  { content: 'rocket', emoji: '🚀', label: '火箭' },
+] as const;
+
+/**
+ * v0.7.4：判断评论作者是否是 PR 作者（用于显示 [所有者] label）
+ *
+ * Gitea web 的 shared/user/authorlink 模板配合 show_role role 模板使用，
+ * 最简版本：评论作者 == PR 作者 → 显示"所有者"角色标签。
+ */
+function isPRAuthor(comment: TimelineItemDto): boolean {
+  return !!(selectedPR.value?.author?.username && comment.author?.username === selectedPR.value.author.username);
+}
+
+/** 切换表情选择器显示状态 */
+function toggleSmilePicker(commentId: number): void {
+  commentSmileOpen.value = commentSmileOpen.value === commentId ? null : commentId;
+  // 互斥：打开表情时关闭 ... 菜单
+  if (commentSmileOpen.value !== null) commentMenuOpen.value = null;
+}
+
+/** 切换 ... 菜单显示状态 */
+function toggleCommentMenu(commentId: number): void {
+  commentMenuOpen.value = commentMenuOpen.value === commentId ? null : commentId;
+  // 互斥：打开 ... 菜单时关闭表情选择器
+  if (commentMenuOpen.value !== null) commentSmileOpen.value = null;
+}
+
+/**
+ * 添加表情到评论（简化版：直接调 reaction add）
+ *
+ * v0.7.4 简化：只支持 add reaction（toggle 移除表情在 ReactionBar 已有）。
+ * 完整 toggle 留给 v0.7.5（需要 viewerReacted 状态联动 + ReactionBar 重构）。
+ */
+async function addCommentReaction(p: PullDto, commentId: number, content: string): Promise<void> {
+  if (!activeProjectId.value) return;
+  try {
+    await pull.addCommentReaction(p, commentId, content);
+    showToast({ type: 'success', message: '已添加表情' });
+    commentSmileOpen.value = null;
+  } catch (e) {
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: err.messageText ?? '添加表情失败', persistent: true });
+  }
+}
+
+/** 复制评论链接到剪贴板 */
+async function copyCommentLink(commentId: number): Promise<void> {
+  if (!activeRepo.value) return;
+  const url = giteaPullUrl(selectedPR.value!).split('/pulls/').join('/issues/') + `#issuecomment-${commentId}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast({ type: 'success', message: '已复制评论链接' });
+  } catch {
+    showToast({ type: 'error', message: '复制失败' });
+  }
+  commentMenuOpen.value = null;
+}
+
+/**
+ * v0.7.4：点击外部关闭 popover / 菜单
+ *
+ * 用 document 监听 mousedown，命中 action-btn / popover 元素则忽略，
+ * 否则关闭所有打开的表情选择器 + 菜单。
+ */
+function onDocumentClick(_e: MouseEvent): void {
+  const target = _e.target as HTMLElement | null;
+  if (!target) {
+    commentSmileOpen.value = null;
+    commentMenuOpen.value = null;
+    return;
+  }
+  if (target.closest('.pr-detail__comment-action-wrap')) return;
+  commentSmileOpen.value = null;
+  commentMenuOpen.value = null;
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocumentClick);
+});
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocumentClick);
+});
+
+/**
  * 进入编辑态
  * - 仅评论作者本人可调（调用方已做权限检查）
  * - 自动把原 body 装进编辑草稿
@@ -2061,14 +2168,102 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     </div>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
-                        <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
-                        <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__comment-verb">评论于</span>
-                        <a
-                          class="pr-detail__comment-time"
-                          :title="formatDate(item.created)"
-                          @click.prevent
-                        >{{ formatRelative(item.created) }}</a>
+                        <div class="pr-detail__comment-meta-left">
+                          <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
+                          <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
+                          <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" title="合并请求作者">所有者</span>
+                          <span class="pr-detail__comment-verb">评论于</span>
+                          <a
+                            class="pr-detail__comment-time"
+                            :title="formatDate(item.created)"
+                            @click.prevent
+                          >{{ formatRelative(item.created) }}</a>
+                        </div>
+                        <!-- v0.7.4：comment header 右侧 actions —— 对齐 Gitea web show_role + add_reaction + context_menu
+                             表情选择器 + ... 菜单在外部渲染（避免 popover 嵌套在 comment-meta 里影响布局） -->
+                        <div v-if="editingCommentId !== item.id" class="pr-detail__comment-meta-right">
+                          <!-- 表情添加按钮（点击展开 emoji 选择器） -->
+                          <div class="pr-detail__comment-action-wrap">
+                            <button
+                              type="button"
+                              class="pr-detail__comment-action-btn"
+                              :class="{ 'pr-detail__comment-action-btn--active': commentSmileOpen === item.id }"
+                              title="添加表情"
+                              aria-label="添加表情"
+                              @click.stop="toggleSmilePicker(item.id)"
+                            >
+                              <Smile :size="14" :stroke-width="2" aria-hidden="true" />
+                            </button>
+                            <div
+                              v-if="commentSmileOpen === item.id"
+                              class="pr-detail__comment-popover pr-detail__comment-popover--emoji"
+                              @click.stop
+                            >
+                              <button
+                                v-for="e in COMMENT_EMOJI_CHOICES"
+                                :key="e.content"
+                                type="button"
+                                class="pr-detail__comment-emoji-btn"
+                                :title="e.label"
+                                @click="addCommentReaction(selectedPR!, item.id, e.content)"
+                              >{{ e.emoji }}</button>
+                            </div>
+                          </div>
+                          <!-- ... 菜单（引用 / 复制链接 / 编辑 / 删除） -->
+                          <div class="pr-detail__comment-action-wrap">
+                            <button
+                              type="button"
+                              class="pr-detail__comment-action-btn"
+                              :class="{ 'pr-detail__comment-action-btn--active': commentMenuOpen === item.id }"
+                              title="更多操作"
+                              aria-label="更多操作"
+                              @click.stop="toggleCommentMenu(item.id)"
+                            >
+                              <MoreHorizontal :size="14" :stroke-width="2" aria-hidden="true" />
+                            </button>
+                            <div
+                              v-if="commentMenuOpen === item.id"
+                              class="pr-detail__comment-popover pr-detail__comment-popover--menu"
+                              @click.stop
+                            >
+                              <button
+                                v-if="currentUsername && item.author?.username !== currentUsername"
+                                type="button"
+                                class="pr-detail__comment-menu-item"
+                                @click="quoteComment(selectedPR.index, item as any); commentMenuOpen = null"
+                              >
+                                <Quote :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>引用</span>
+                              </button>
+                              <button
+                                type="button"
+                                class="pr-detail__comment-menu-item"
+                                @click="copyCommentLink(item.id)"
+                              >
+                                <LinkIcon :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>复制链接</span>
+                              </button>
+                              <button
+                                v-if="currentUsername && item.author?.username === currentUsername"
+                                type="button"
+                                class="pr-detail__comment-menu-item"
+                                @click="startEditComment(item as any); commentMenuOpen = null"
+                              >
+                                <Pencil :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>编辑</span>
+                              </button>
+                              <button
+                                v-if="currentUsername && item.author?.username === currentUsername"
+                                type="button"
+                                class="pr-detail__comment-menu-item pr-detail__comment-menu-item--danger"
+                                @click="confirmDeleteComment(selectedPR, item as any); commentMenuOpen = null"
+                              >
+                                <XCircle :size="13" :stroke-width="2" aria-hidden="true" />
+                                <span>删除</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       <!-- 编辑态 -->
                       <template v-if="editingCommentId === item.id">
@@ -6085,6 +6280,139 @@ git checkout {{ selectedPR.head.ref }}</pre>
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* ===== v0.7.4：comment header 右侧 actions ===== */
+.pr-detail__comment-meta {
+  /* 改用 flex space-between，让左侧（author + time）和右侧（actions）撑满 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  min-height: 24px;
+}
+.pr-detail__comment-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.pr-detail__comment-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;                 /* 默认隐藏，hover comment 时显示（Gitea web 行为） */
+  transition: opacity 0.15s ease;
+}
+.pr-detail__comment-bubble:hover .pr-detail__comment-meta-right,
+.pr-detail__comment-meta-right:has(.pr-detail__comment-action-btn--active) {
+  opacity: 1;
+}
+.pr-detail__comment-action-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.pr-detail__comment-action-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--t-fast, 0.12s) ease, border-color var(--t-fast, 0.12s) ease, color var(--t-fast, 0.12s) ease;
+}
+.pr-detail__comment-action-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: var(--color-divider);
+}
+.pr-detail__comment-action-btn--active {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: var(--color-divider);
+}
+.pr-detail__comment-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  min-width: max-content;
+}
+.pr-detail__comment-popover--emoji {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  max-width: 240px;
+}
+.pr-detail__comment-popover--menu {
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pr-detail__comment-emoji-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--t-fast, 0.12s) ease, transform var(--t-fast, 0.12s) ease;
+}
+.pr-detail__comment-emoji-btn:hover {
+  background: var(--color-bg-hover);
+  transform: scale(1.15);
+}
+.pr-detail__comment-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  color: var(--color-text);
+  font-size: var(--font-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background var(--t-fast, 0.12s) ease;
+}
+.pr-detail__comment-menu-item:hover {
+  background: var(--color-bg-hover);
+}
+.pr-detail__comment-menu-item--danger {
+  color: var(--color-danger, #cf222e);
+}
+.pr-detail__comment-menu-item--danger:hover {
+  background: rgba(207, 34, 46, 0.1);
+}
+/* v0.7.4：[所有者] 角色标签 —— 对齐 Gitea web show_role.tmpl 的 Owner 标签 */
+.pr-detail__comment-role-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  background: var(--color-primary-soft, rgba(9, 105, 218, 0.15));
+  color: var(--color-primary, #0969da);
+  flex-shrink: 0;
 }
 .pr-detail__comment-bubble {
   flex: 1;
