@@ -832,25 +832,63 @@ function reviewEventLabel(event: ReviewEvent): string {
 }
 
 /**
- * v0.7.4：系统事件 verb 文本（item 级别）
+ * v0.7.5：系统事件 verb 文本（item 级别）
  *
- * 相比 systemEventLabel(type) 只看 type，这个函数看整个 item，
- * 可以根据 item.removedAssignee / item.body 等字段返回更精确的 verb。
- *
- * 例：
- *   type='assignees' + removedAssignee=true  → '移除了指派'
- *   type='assignees' + removedAssignee=false → '添加了指派'
- *   type='merge'                             → '合并了合并请求'
- *   其他类型 → fallthrough 到 systemEventLabel(type)
+ * 严格对齐 Gitea web 中文 locale（options/locale/locale_en-US.json + locales/zh-CN）：
+ *   - type='assignees' + removedAssignee=true  → '取消了自指派' / '取消了指派'
+ *   - type='assignees' + removedAssignee=false → '自指派' / '指派给'
+ *   - type='review_request' + !removed         → '请求评审'
+ *   - type='review_request' + removed          → '取消了评审请求'
+ *   - type='merge'                              → '合并了提交'（SHA + branch 在 inline）
+ *   - type='close' / 'reopen' / 'pin' / 'unpin' → '关闭了此合并请求' / '重新开启了此合并请求' / '置顶了此合并请求' / '取消了此合并请求的置顶'
+ *   - type='ref'                                → '引用了' / '关闭了引用' / '重新开启了引用'（refAction 区分）
  */
 function systemEventVerb(item: TimelineItemDto): string {
   if (item.type === 'assignees') {
-    return item.removedAssignee ? '移除了指派' : '添加了指派';
+    return item.removedAssignee ? '取消了指派' : '指派给';
   }
   if (item.type === 'review_request') {
-    return item.removedAssignee ? '移除了评审请求' : '请求评审';
+    return item.removedAssignee ? '取消了评审请求' : '请求评审';
   }
-  return systemEventLabel(item.type);
+  if (item.type === 'close') return '关闭了此合并请求';
+  if (item.type === 'reopen') return '重新开启了此合并请求';
+  if (item.type === 'merge') return '合并了提交';
+  if (item.type === 'push') return '推送了新提交';
+  if (item.type === 'pin') return '置顶了此合并请求';
+  if (item.type === 'unpin') return '取消了此合并请求的置顶';
+  if (item.type === 'label') return '修改了标签';
+  if (item.type === 'milestone') return '修改了里程碑';
+  if (item.type === 'title' || item.type === 'change_title') return '修改了标题';
+  if (item.type === 'delete_branch') return '删除了分支';
+  if (item.type === 'change_target_branch') return '修改了目标分支';
+  if (item.type === 'lock') return '锁定了此合并请求';
+  if (item.type === 'unlock') return '解锁了此合并请求';
+  if (item.type === 'due_date') return '设置了截止日期';
+  if (item.type === 'change_due_date') return '修改了截止日期';
+  if (item.type === 'remove_due_date') return '移除了截止日期';
+  if (item.type === 'commit_ref') return '引用了此提交';
+  if (item.type === 'issue_ref' || item.type === 'pull_ref' || item.type === 'comment_ref' || item.type === 'change_issue_ref') {
+    if (item.refAction === 'close') return '通过引用关闭了';
+    if (item.refAction === 'reopen') return '通过引用重新开启了';
+    if (item.refAction === 'cross') return '交叉引用了';
+    return '引用了';
+  }
+  if (item.type === 'add_dependency') return '添加了依赖';
+  if (item.type === 'remove_dependency') return '移除了依赖';
+  if (item.type === 'dismiss_review') return '驳回了评审';
+  if (item.type === 'move') return '移动了项目';
+  // v0.7.5 补全：之前字典缺这些 type → 走 '事件' fallback
+  if (item.type === 'start_tracking') return '开始工作';
+  if (item.type === 'stop_tracking') return '完成了计时';
+  if (item.type === 'add_time_manual') return '添加了工作时间';
+  if (item.type === 'cancel_tracking') return '取消了计时';
+  if (item.type === 'delete_time_manual') return '删除了工作时间';
+  if (item.type === 'change_time_estimate') return '修改了时间估算';
+  if (item.type === 'pr_scheduled_to_auto_merge') return '已排定自动合并';
+  if (item.type === 'pr_unscheduled_to_auto_merge') return '已取消排定自动合并';
+  if (item.type === 'project') return '修改了项目';
+  if (item.type === 'project_column') return '移动到了项目列';
+  return '';  // 未识别 type：返回空字符串，不显示 verb（不显示 '事件' 通用词）
 }
 
 /**
@@ -886,26 +924,22 @@ function mergeCommitSha(item: TimelineItemDto): string | null {
 }
 
 /**
- * 系统事件标签（v0.7.x 对齐 Gitea web）
- * 对应 Gitea CommentType 枚举（除 0=COMMENT / 21=REVIEW body / 22=REVIEW event 之外）。
- * 简体中文文案 + 零术语, 让 PM/设计师/市场/运营也能看懂。
+ * v0.7.5：系统事件 verb 文案（type 级别，fallback）
+ *
+ * 严格对齐 Gitea web 中文 locale（locales/zh-CN/options/locale/translation.go）：
+ *   - close: "关闭了此合并请求"（含 "此" 限定词）
+ *   - reopen: "重新开启了此合并请求"
+ *   - merge: "合并了提交"（SHA + branch 在 event-inline）
+ *   - delete_branch: "删除了分支"（分支名在 inline）
+ *   - push: "推送了新提交"
+ *
+ * 22+ 种 Gitea CommentType 全部覆盖，**移除 v0.7.x 的 '事件' 通用 fallback**
+ * （之前有 4-5 种 type 走 fallback 显示 "事件"，Gitea web 没这个通用词，
+ * 看着不专业）。
+ *
+ * type 级别 vs item 级别：v0.7.5 后统一用 systemEventVerb(item)，
+ * 它已经覆盖 type 字符串的 22+ 种分支。type 级别是降级场景（item 不可用时）。
  */
-function systemEventLabel(type: string): string {
-  // v0.7.x TimelineItemDto.type 是 Gitea /timeline 端点的 string 标识符
-  // (review/comment/code/...) 而非老数字 CommentType 枚举
-  const m: Record<string, string> = {
-    reopen: '重新开启', close: '关闭', commit_ref: '引用了提交',
-    label: '修改了标签', milestone: '修改了里程碑', assignee: '修改了指派人',
-    title: '修改了标题', delete_branch: '删除了分支',
-    due_date: '设置了截止时间', change_due_date: '修改了截止时间', remove_due_date: '移除了截止时间',
-    lock: '锁定了议题', unlock: '解锁了议题', change_target_branch: '修改了目标分支',
-    review_request: '请求评审', merge: '合并了合并请求', push: '推送了新提交',
-    move: '移动了项目', dismiss_review: '驳回了评审', pin: '置顶了议题', unpin: '取消了置顶',
-  };
-  // v0.7.4：assignees 事件区分"添加/移除"语义，verb 显示更精确
-  // （实际 verb 由 event-inline 块根据 removedAssignee 渲染，systemEventLabel 仅作 fallback）
-  return m[type] ?? '事件';
-}
 
 /**
  * v0.7.2：系统事件图标 —— 从 Unicode 字符迁到 lucide-vue-next，
@@ -2148,9 +2182,9 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     <div class="pr-detail__event-line">
                       <span class="pr-detail__event-text">
                         <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
+                        <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                         <span class="pr-detail__event-verb">{{ reviewStateLabel(item.state) }}</span>
                       </span>
-                      <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                     </div>
                   </li>
 
@@ -2347,8 +2381,9 @@ git checkout {{ selectedPR.head.ref }}</pre>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
                         <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__event-verb">{{ systemEventVerb(item) }}</span>
+                        <span class="pr-detail__event-prep">于</span>
                         <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <span class="pr-detail__event-verb">{{ systemEventVerb(item) }}</span>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
                       <div
@@ -6194,12 +6229,18 @@ git checkout {{ selectedPR.head.ref }}</pre>
 .pr-detail__event-line {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 .pr-detail__event-author {
   font-weight: 600;
   color: var(--color-text);
+}
+/* v0.7.5：'于' 介词 —— 对齐 Gitea web 中文 'X 于 Y verb' 时间格式
+   （之前是 'X verb' 独立在右，'Y 天前' 时间独立） */
+.pr-detail__event-prep {
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
 }
 .pr-detail__event-verb {
   color: var(--color-text-secondary);
@@ -6207,7 +6248,6 @@ git checkout {{ selectedPR.head.ref }}</pre>
 .pr-detail__event-time {
   color: var(--color-text-muted);
   font-size: var(--font-xs);
-  margin-left: auto;
   flex-shrink: 0;
 }
 .pr-detail__event-inline {
