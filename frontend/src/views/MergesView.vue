@@ -968,7 +968,17 @@ function systemEventVerb(item: TimelineItemDto): string {
     }
     return '修改了标题';
   }
-  if (item.type === 'delete_branch') return '删除分支'; // v0.7.11 去掉"了"字 —— 对齐 Gitea web "删除分支"（分支名在 inline 块）
+  // v0.7.12 根因修复：delete_branch 事件分支名从 inline 块移到主行 verb，
+  // 保证显示（user 反馈 ⑨ / ⑪ "分支信息还是有缺失"——v0.7.4 加的 inline 块
+  // 代码逻辑对，但 v0.7.10 改 CSS 后 user 实际看不到 inline 块）。
+  // verb 直接拼接分支名（去掉 refs/heads/ 前缀兜底）：
+  //   - Gitea: 通常返 "cx-same-057405" 短码
+  //   - 老 Gitea / GitHub: 返 "refs/heads/branch" 全路径 → strip 掉前缀
+  // 对齐 Gitea web "kanban_bot 于 3 周前 删除分支 cx-same-057405" 渲染。
+  if (item.type === 'delete_branch' && item.oldRef) {
+    return `删除分支 ${item.oldRef.replace(/^refs\/heads\//, '')}`;
+  }
+  if (item.type === 'delete_branch') return '删除分支'; // v0.7.11 去掉"了"字（无 oldRef fallback）
   if (item.type === 'change_target_branch') return '修改了目标分支';
   if (item.type === 'lock') return '锁定了此合并请求';
   if (item.type === 'unlock') return '解锁了此合并请求';
@@ -2571,13 +2581,23 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                           </template>
                         </span>
 
-                        <span v-else-if="item.type === 'assignees' && item.assignee">
-                          <span :class="item.removedAssignee ? 'pr-detail__event-minus' : 'pr-detail__event-plus'">
-                            {{ item.removedAssignee ? '−' : '+' }}
-                          </span>
-                          <span class="pr-detail__event-username">{{ displayName(item.assignee) }}</span>
-                          <span class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了指派' : '添加了指派' }}</span>
-                        </span>
+                        <!-- v0.7.12 根因修复：assignees 事件 v0.7.4 加的 inline 块
+                             （"X 添加了指派 / 移除了指派" 缩进）跟 Gitea web 渲染不一致
+                             —— Gitea web 把所有 assignee 信息合并到主行 verb 文案
+                             （"X 于 Y 指派给自己" / "X 于 Y 取消指派"），不显示
+                             缩进的 "X 添加了指派" 块。
+                             实际渲染对比：
+                             Gitea web:        "kanban_bot 于 上个月 指派给自己"
+                             v0.7.4-v0.7.11: "kanban_bot 于 27 天前 自指派"
+                                                + "kanban_bot 添加了指派"  (缩进块)
+                             v0.7.12 改：去掉整块 inline 渲染（v-if 条件 false），
+                             主行 systemEventVerb 已经有完整文案（"自指派" / "取消自指派" /
+                             "指派给" / "取消了指派"），selfAssign 判断由 v0.7.11 修。
+                             注：assignee 用户名仍通过 v-if="item.type === 'assignees' && item.assignee"
+                             在 hasSystemEventInlineDetail 里返回 true，但实际模板不再
+                             渲染这段 block。改 hasSystemEventInlineDetail 同步返 false。 -->
+                        <!-- v0.7.12: assignees 事件不再有 inline 块，verb 在主行完整 -->
+
 
                         <!-- v0.7.4：review_request 评审请求详情
                              Gitea web: "X 请求 Y 评审" / "X 移除了 Y 评审请求"
@@ -2636,10 +2656,12 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                           <span class="pr-detail__event-emphasis">{{ item.newTitle }}</span>
                         </span>
 
-                        <span v-else-if="item.type === 'delete_branch' && item.oldRef">
-                          <GitBranch :size="12" :stroke-width="2" aria-hidden="true" />
-                          <code class="pr-detail__event-branch">{{ item.oldRef }}</code>
-                        </span>
+                        <!-- v0.7.12 根因修复：delete_branch 事件分支名从 inline 块移到主行 verb
+                             （见 systemEventVerb delete_branch 分支），保证显示。
+                             这里不再有 delete_branch inline 块（v0.7.4 加的 inline 块
+                             代码逻辑对但 user 反馈 v0.7.10 后看不到，原因可能是
+                             v0.7.10 dot 22→26 + 主行字号 13→14 后 layout 变化
+                             引起 inline 块被遮盖。v0.7.12 走 verb 拼接方案兜底）。 -->
 
                         <span v-else-if="item.type === 'change_target_branch'">
                           <GitBranch :size="12" :stroke-width="2" aria-hidden="true" />
