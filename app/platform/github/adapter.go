@@ -375,6 +375,9 @@ type githubPullRaw struct {
 	Labels             []githubPullLabelRaw `json:"labels"`
 	Mergeable          *bool                `json:"mergeable"`
 	Comments           int                  `json:"comments"`
+	// v0.7.6：PR header "请求将 N 次代码提交从 {head} 合并至 {base}" 用
+	// GitHub /repos/{owner}/{repo}/pulls/{number} 返回 `commits` 字段。
+	Commits            int                  `json:"commits"`
 	Body               string               `json:"body"`
 	MergedBy           *githubUserRaw       `json:"merged_by"`
 	CreatedAt          string               `json:"created_at"`
@@ -433,6 +436,7 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		HasConflicts:  !mergeable,
 		Body:          p.Body,
 		CommentsCount: p.Comments,
+		Commits:       p.Commits, // v0.7.6：PR header 用
 		CreatedAt:     p.CreatedAt,
 		UpdatedAt:     p.UpdatedAt,
 	}

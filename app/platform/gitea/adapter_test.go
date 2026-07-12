@@ -1100,3 +1100,161 @@ func TestGiteaAdapter_ListPullTimeline_DetailFields(t *testing.T) {
 		t.Errorf("items[8] DependentIssue.IsPull = false, want true (pull_request 字段存在)")
 	}
 }
+
+// TestGiteaAdapter_isWipToggleEvent 验证 WIP toggle 检测逻辑
+//
+// 4 种 case 覆盖 Gitea 端 `commentTimelineEventIsWipToggle` 等价行为：
+//   - 普通标题修改（两边都没/都有 WIP 前缀）→ false, false
+//   - toggle to WIP（OldTitle 没前缀 → NewTitle 加 WIP:）→ true, true
+//   - toggle to ready（OldTitle 有 WIP: → NewTitle 去掉）→ true, false
+//   - 加前缀但内容变化（不是 toggle）→ false, false
+func TestGiteaAdapter_isWipToggleEvent(t *testing.T) {
+	cases := []struct {
+		name     string
+		oldTitle string
+		newTitle string
+		wantTog  bool
+		wantWip  bool
+	}{
+		{"普通修改", "old", "new", false, false},
+		{"两侧都有WIP前缀", "WIP: a", "WIP: b", false, false},
+		{"两侧都无WIP前缀", "a", "b", false, false},
+		{"toggle to WIP", "feat: add foo", "WIP: feat: add foo", true, true},
+		{"toggle to ready (大小写不敏感)", "WIP: fix bug", "fix bug", true, false},
+		{"toggle to WIP (Draft: 前缀)", "fix bug", "Draft: fix bug", true, true},
+		{"加前缀但内容变化", "feat: a", "WIP: feat: b", false, false},
+		{"去前缀但内容变化", "WIP: feat: a", "feat: b", false, false},
+		{"前后加空格 (TrimSpace 容忍)", "WIP:  feat  ", "  feat", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotTog, gotWip := isWipToggleEvent(tc.oldTitle, tc.newTitle)
+			if gotTog != tc.wantTog || gotWip != tc.wantWip {
+				t.Errorf("isWipToggleEvent(%q, %q) = (%v, %v), want (%v, %v)",
+					tc.oldTitle, tc.newTitle, gotTog, gotWip, tc.wantTog, tc.wantWip)
+			}
+		})
+	}
+}
+
+// TestGiteaAdapter_ListPullTimeline_WipToggle 验证 type=10 (change_title) 事件
+// WIP toggle 标记是否被正确识别
+func TestGiteaAdapter_ListPullTimeline_WipToggle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"id":         300,
+				"type":       "change_title",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-02T10:00:00Z",
+				"old_title":  "feat: add foo",
+				"new_title":  "WIP: feat: add foo",
+			},
+			{
+				"id":         301,
+				"type":       "change_title",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-02T10:01:00Z",
+				"old_title":  "WIP: fix bug",
+				"new_title":  "fix bug",
+			},
+			{
+				"id":         302,
+				"type":       "change_title",
+				"body":       "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-02T10:02:00Z",
+				"old_title":  "old",
+				"new_title":  "new",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3", len(items))
+	}
+
+	// 300: toggle to WIP
+	if !items[0].IsWipToggle || !items[0].IsWip {
+		t.Errorf("items[0] IsWipToggle=%v IsWip=%v, want true/true", items[0].IsWipToggle, items[0].IsWip)
+	}
+
+	// 301: toggle to ready
+	if !items[1].IsWipToggle || items[1].IsWip {
+		t.Errorf("items[1] IsWipToggle=%v IsWip=%v, want true/false", items[1].IsWipToggle, items[1].IsWip)
+	}
+
+	// 302: 普通标题修改
+	if items[2].IsWipToggle || items[2].IsWip {
+		t.Errorf("items[2] IsWipToggle=%v IsWip=%v, want false/false", items[2].IsWipToggle, items[2].IsWip)
+	}
+}
+
+// TestGiteaAdapter_ListPullTimeline_LabelAction 验证 type=7 (label) 事件
+// 根据 Content 字段填到 AddedLabels/RemovedLabels 数组
+func TestGiteaAdapter_ListPullTimeline_LabelAction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			// 添加 label
+			{
+				"id":         400,
+				"type":       "label",
+				"body":       "",
+				"content":    "1",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-03T10:00:00Z",
+				"label":      map[string]interface{}{"id": 1, "name": "bug", "color": "fbca04"},
+			},
+			// 移除 label
+			{
+				"id":         401,
+				"type":       "label",
+				"body":       "",
+				"content":    "",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-03T10:01:00Z",
+				"label":      map[string]interface{}{"id": 2, "name": "wontfix", "color": "cccccc"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+
+	// 400: 添加 → AddedLabels=[bug], RemovedLabels=nil
+	if items[0].LabelAction != "add" {
+		t.Errorf("items[0] LabelAction = %q, want add", items[0].LabelAction)
+	}
+	if len(items[0].AddedLabels) != 1 || items[0].AddedLabels[0].Name != "bug" {
+		t.Errorf("items[0] AddedLabels = %+v, want [bug]", items[0].AddedLabels)
+	}
+	if len(items[0].RemovedLabels) != 0 {
+		t.Errorf("items[0] RemovedLabels = %+v, want nil", items[0].RemovedLabels)
+	}
+
+	// 401: 移除 → AddedLabels=nil, RemovedLabels=[wontfix]
+	if items[1].LabelAction != "remove" {
+		t.Errorf("items[1] LabelAction = %q, want remove", items[1].LabelAction)
+	}
+	if len(items[1].AddedLabels) != 0 {
+		t.Errorf("items[1] AddedLabels = %+v, want nil", items[1].AddedLabels)
+	}
+	if len(items[1].RemovedLabels) != 1 || items[1].RemovedLabels[0].Name != "wontfix" {
+		t.Errorf("items[1] RemovedLabels = %+v, want [wontfix]", items[1].RemovedLabels)
+	}
+}
