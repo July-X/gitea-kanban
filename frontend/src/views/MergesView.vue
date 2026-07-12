@@ -898,17 +898,25 @@ function reviewEventLabel(event: ReviewEvent): string {
  */
 function systemEventVerb(item: TimelineItemDto): string {
   if (item.type === 'assignees') {
-    // v0.7.11 根因修复：v0.7.5 写注释时就有"自指派 vs 指派给"分支规划，但实际代码
-    // 只判 removedAssignee 没判 assignee == author（user 反馈 ⑩"指派给自己的事件
-    // 没有对齐"——Gitea web 显示"指派给自己"）。补全判断：
-    //   - assignee.login == user.login（自指派）
-    //   - 否则指派给其他人
+    // v0.7.13 根因修复：assignees verb 文案对齐 Gitea web 中文 locale
+    // （user 反馈 ⑫"自指派应该改成指派给自己，指派给其他人应该是指派给X"）：
+    //   - assignee.login == user.login（自指派）：
+    //     - add → '指派给自己'
+    //     - remove → '取消指派给自己'
+    //   - 否则指派给其他人（带 assignee 用户名）：
+    //     - add → '指派给 {X}'
+    //     - remove → '取消指派给 {X}'
+    // v0.7.11 写"自指派" + "指派给" + "取消自指派" + "取消了指派" 4 字符串，
+    // v0.7.13 改成"指派给自己" + "指派给 X" + "取消指派给自己" + "取消指派给 X"，
+    // 对齐 Gitea web `repo.issues.self_assigned` / `assigned_to` / `unassigned` /
+    // `unassigned_from` 中文 locale。
     const isSelfAssign = item.assignee?.username && item.author?.username
       && item.assignee.username === item.author.username;
+    const assigneeName = displayName(item.assignee);
     if (isSelfAssign) {
-      return item.removedAssignee ? '取消自指派' : '自指派';
+      return item.removedAssignee ? '取消指派给自己' : '指派给自己';
     }
-    return item.removedAssignee ? '取消了指派' : '指派给';
+    return item.removedAssignee ? `取消指派给 ${assigneeName}` : `指派给 ${assigneeName}`;
   }
   if (item.type === 'review_request') {
     return item.removedAssignee ? '取消了评审请求' : '请求评审';
