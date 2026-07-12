@@ -807,10 +807,23 @@ type giteaTimelineRaw struct {
 	ID           int64              `json:"id"`
 	Type         string             `json:"type"`
 	Body         string             `json:"body"`
-	// v0.7.6：type=7 (label) 事件时存 "1"=add / 其他=remove（用于前端聚合）
+	// v0.7.6：type=7 (label) 事件时存 "1"=add / 其他=remove（用于前端聚合）。
 	// 对应 Gitea 源码 `models/issues/comment.go: Content` 字段在 label change 时
 	// 写 "1" 表示添加，写 label name 表示移除（罕见，用其他值兜底）。
-	Content       string             `json:"content"`
+	//
+	// v0.7.19 根因修复：Gitea 1.26+ timeline 端点 (`/issues/{index}/timeline`)
+	// label 事件**没有 `content` 字段**——label add/remove 信息在 `body` 字段
+	//（值为 "1" 表示 add，其他值/空串表示 remove）。实测 pr72/pr81 timeline 数据：
+	//   type="label", body="1", label={bug, feature, needs-review, 测试tag, 进行中}
+	// v0.7.6 写代码时把字段名搞错了（`r.Content` 永远空串，因为 API 没 content 字段），
+	// 导致判断走 else 分支永远填 RemovedLabels + LabelAction="remove"，前端 verb
+	// 显示"移除了标签"，跟 Gitea web "添加了标签" 相反。
+	//
+	// 修法 v0.7.19：直接用上面已定义的 `r.Body` 字段判断（不要新加 Content 字段——
+	// 加 Content 字段 json tag 改 "body" 会跟 Body 字段冲突，Go json.Unmarshal
+	// 同一 tag 多个字段会全部不填值，实测 /tmp/test_json.go 确认）。把 label 判断
+	// 改成 `r.Body == "1"` 即可。如果未来 Gitea 版本改字段名，跟踪 gitea 源码
+	// `models/issues/comment.go` 即可。
 	User          *giteaUserRaw      `json:"user"`
 	Created       string             `json:"created_at"`
 	Updated       string             `json:"updated_at"`
@@ -928,7 +941,7 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 			Name:  r.Label.Name,
 			Color: r.Label.Color,
 		}
-		if r.Content == "1" {
+		if r.Body == "1" {
 			item.AddedLabels = []*platform.PullLabelDTO{&label}
 			item.LabelAction = "add"
 		} else {

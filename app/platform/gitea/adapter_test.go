@@ -1199,7 +1199,12 @@ func TestGiteaAdapter_ListPullTimeline_WipToggle(t *testing.T) {
 }
 
 // TestGiteaAdapter_ListPullTimeline_LabelAction 验证 type=7 (label) 事件
-// 根据 Content 字段填到 AddedLabels/RemovedLabels 数组
+// 根据 body 字段填到 AddedLabels/RemovedLabels 数组
+//
+// v0.7.19 根因修复：Gitea 1.26+ timeline 端点 label 事件 add/remove 信息在
+// `body` 字段（值为 "1" 表示 add，其他值/空串表示 remove），不是 `content` 字段。
+// v0.7.6 当时按 Gitea 源码注释写 `content` 字段是错的，实测 pr72/pr81 timeline
+// 数据 label event body="1"、无 content 字段。修法：测试 input 改用 `body` 字段。
 func TestGiteaAdapter_ListPullTimeline_LabelAction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]interface{}{
@@ -1207,8 +1212,7 @@ func TestGiteaAdapter_ListPullTimeline_LabelAction(t *testing.T) {
 			{
 				"id":         400,
 				"type":       "label",
-				"body":       "",
-				"content":    "1",
+				"body":       "1",
 				"user":       map[string]string{"login": "alice"},
 				"created_at": "2024-06-03T10:00:00Z",
 				"label":      map[string]interface{}{"id": 1, "name": "bug", "color": "fbca04"},
@@ -1218,7 +1222,6 @@ func TestGiteaAdapter_ListPullTimeline_LabelAction(t *testing.T) {
 				"id":         401,
 				"type":       "label",
 				"body":       "",
-				"content":    "",
 				"user":       map[string]string{"login": "alice"},
 				"created_at": "2024-06-03T10:01:00Z",
 				"label":      map[string]interface{}{"id": 2, "name": "wontfix", "color": "cccccc"},

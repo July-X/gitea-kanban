@@ -2602,6 +2602,14 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                           <span class="pr-detail__event-hint">到</span>
                           <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
                         </span>
+                        <!-- v0.7.19 根因修复：force push 提示搬到主行（v0.7.8 加的 inline 块
+                             跟 block 块 v-for 重复，v0.7.19 删 inline 块后 force 提示
+                             搬主行："kanban_demo 于 28 天前 推送了 1 个提交 (强制推送)" 1 行
+                             + 下面 commits_list_small 块。 -->
+                        <span
+                          v-else-if="item.type === 'push' && item.isForcePush"
+                          class="pr-detail__event-hint"
+                        >(强制推送)</span>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
                       <div
@@ -2682,17 +2690,21 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                              不返回，inline 块永远不渲染。
                              push event 的完整 commit 列表在下方 block 块单独渲染
                              （Gitea web `commits_list_small` 模板风格：缩进 + GitCommit
-                             icon + 短 SHA 链接 + 提交消息可选）。 -->
-                        <span v-else-if="item.type === 'push' && item.commitIds && item.commitIds.length > 0">
-                          <a
-                            class="mono pr-detail__event-branch pr-detail__branch--link"
-                            :href="commitWebUrl(item.commitIds[item.commitIds.length - 1] ?? '')"
-                            target="_blank"
-                            rel="noopener"
-                            :title="`在 Gitea 打开 ${(item.commitIds[item.commitIds.length - 1] ?? '').slice(0, 7)} 提交`"
-                          >{{ (item.commitIds[item.commitIds.length - 1] ?? '').slice(0, 7) }}</a>
-                          <span v-if="item.isForcePush" class="pr-detail__event-hint">(强制推送)</span>
-                        </span>
+                             icon + 短 SHA 链接 + 提交消息可选）。
+                             v0.7.19 根因修复：v0.7.8 加的 inline 块 head commit 短码
+                             链接（"91d5126"）跟下面 block 块 v-for 渲染的 commit 列表
+                             重复——同一个 push event 在 UI 上看到 2 个 commit 行：
+                             inline 块的 1 个 head commit 短码链接 + block 块的 1 个
+                             commit 列表行（短 SHA + subject + author）。Gitea web
+                             端 block 块只有 1 个 commit 行（"feat: branch line-4 (057405)"）
+                             不显示短 SHA。我们 v0.7.8 把 inline 块的 head commit 短码
+                             链接留作"主行 head commit 链接"用，但跟 block 块 v-for
+                             重复了。
+                             修法：v0.7.19 删 inline 块的 head commit 短码链接（block
+                             块已经渲染完整 commit 列表，inline 块冗余），跟 v0.7.18
+                             merge 事件搬主行同理。force push 提示也一并搬主行：
+                             "kanban_demo 于 28 天前 推送了 1 个提交 (强制推送)" 1 行
+                             + 下面 commits_list_small 块。 -->
 
                         <!-- v0.7.15 根因修复：merge 事件 SHA + branch 移到主行（跟 v0.7.14
                              label chip 移到主行同理）—— user 反馈"文本说明中合并提交 X 到 Y"
@@ -2806,17 +2818,30 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                           class="pr-detail__event-commit-row"
                         >
                           <GitCommit :size="12" :stroke-width="2" aria-hidden="true" class="pr-detail__event-commit-icon" />
+                          <!-- v0.7.19 根因修复：按 Gitea web 1:1 对齐
+                               `templates/repo/commits_list_small.tmpl` 渲染 —— Gitea web
+                               commit 列表只显示 commit 消息（带链接到 commit 页）+ author，
+                               **没有短 SHA 前缀**。v0.7.8 加的短 SHA 前缀是冗余的
+                               （commit 消息本身是链接，user 点击跳转 Gitea web 不需要
+                               单独短 SHA 链接）。修法：把 short SHA 链接改成链接
+                               commit 消息（跟 Gitea web RenderCommitMessageLinkSubject
+                               helper 一致），保留 commitDetails(sha)?.subject 渲染。 -->
                           <a
+                            v-if="commitDetails(sha)?.subject"
+                            class="pr-detail__event-commit-subject pr-detail__branch--link"
+                            :href="commitWebUrl(sha)"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`在 Gitea 打开 ${sha.slice(0, 7)} 提交`"
+                          >{{ commitDetails(sha)?.subject }}</a>
+                          <a
+                            v-else
                             class="mono pr-detail__event-commit-sha pr-detail__branch--link"
                             :href="commitWebUrl(sha)"
                             target="_blank"
                             rel="noopener"
-                            :title="`在 Gitea 打开 ${sha.slice(0, 7)} 提交（点击查看完整信息）`"
+                            :title="`在 Gitea 打开 ${sha.slice(0, 7)} 提交`"
                           >{{ sha.slice(0, 7) }}</a>
-                          <span
-                            v-if="commitDetails(sha)?.subject"
-                            class="pr-detail__event-commit-subject"
-                          >{{ commitDetails(sha)?.subject }}</span>
                           <span
                             v-if="commitDetails(sha)?.authorName"
                             class="pr-detail__event-commit-author"
