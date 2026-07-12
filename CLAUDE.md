@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -10,7 +10,7 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5）
 
 > **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
 >
@@ -31,6 +31,8 @@
 > **v0.7.3 增量**：Timeline 视觉对齐 Gitea web —— 系统事件紧凑单行布局（去掉 bubble 框，纯 icon + 单行文字）+ 左侧贯穿 timeline 竖线（2px 灰色垂直线，圆点节点切断）+ 5 档颜色应用到 dot 边框 + 评审 state 独立 dot 颜色 + 二级详情拆 inline/block 两层。docs/releases/v0.7.3.md。
 >
 > **v0.7.4 增量**：Timeline 细节补全 —— DisplayName 全链路（`PullUserDTO.FullName` + gitea/github 双 adapter 解析 + `displayName()` helper）+ "评论于" 动词 + 时间链接样式 + 系统事件 verb item 级别化（`systemEventVerb(item)` 区分添加/移除）+ 3 类系统事件 inline 详情（review_request 评审人 / assignees 指派人 / merge commit SHA）+ 评论 header 右侧 [所有者] 角色标签 + Smile 表情按钮 + 8 emoji popover + MoreHorizontal ... 菜单（按权限动态显示：引用/复制链接/编辑/删除）+ 新增 `--color-timeline` token（暗色 18% alpha，比 `--color-divider` 亮 80%）。docs/releases/v0.7.4.md。
+>
+> **v0.7.5 增量**：系统事件 UX 文案 + 时间格式对齐 Gitea web —— `systemEventVerb(item)` 字典重写覆盖 22+ 种 Gitea CommentType 全部 case（之前 18 种 + "事件" fallback → 现在全部具体 verb）+ PR 动作加 "此合并请求" 限定词（"关闭了此合并请求"/"重新开启了此合并请求"/"置顶了此合并请求" 等）+ 时间格式从 `X verb · Y 天前`（独立在右）改成 `X 于 Y verb`（融进行内 + "于" 介词）+ push event 数量解析（regex 抠 body 里的 commit 数量，输出 "推送了 N 个提交"）+ 移除 v0.7.x "事件" 通用 fallback（未识别 type 返回空字符串）+ CSS：新增 `.pr-detail__event-prep`（"于" 介词样式）。docs/releases/v0.7.5.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
