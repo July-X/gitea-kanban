@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.14)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.15)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.14 发版** — label 事件 chip 移到主行：v0.7.6 把 label chip 渲染在独立 `<div pr-detail__event-inline>` 块（缩进显示）跟 push/merge 在主行 v-else-if 链里渲染风格不一致，v0.7.14 改把 label chip 搬到主行 `<div pr-detail__event-line>` 内紧跟 verb span 后，跟 push/merge 一致同 div 渲染，删除 inline 块内 label chip 重复渲染；user 反馈"修改了标签"后面 chip 不要单独换一行显示，对齐 Gitea web "X 于 Y 修改了标签 [bug] [feature] [needs-review]" 一行渲染——v0.7.13 改 assignees verb 文案后，本版本按 user 反馈把 label chip 渲染位置改一致）
+> 最后更新：2026-07-12（**v0.7.15 发版** — merge 事件对齐 Gitea web "合并提交 X 到 Y"：① systemEventVerb merge 分支去"了"字 "合并了提交" → "合并提交"（对齐 Gitea web "merged commit" 无"了"字）② merge 事件 v-else-if 链调整渲染顺序为 `ShortSha 链接 + 到 + branch`，删 v0.7.8 加的 GitMerge icon（icon 已通过主行 timeline-dot 渲染，去重），对齐 Gitea web "X 于 Y 合并提交 f30ece070c 到 main" 一行渲染——v0.7.14 label chip 移到主行后，本版本按 user 反馈把 merge 事件渲染顺序也对齐 Gitea web）
 
 >
 
