@@ -2683,7 +2683,8 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                              注：merge SHA 来源仍是 selectedPR.mergeCommitSha（v0.7.8
                              修的 PR 详情端点字段映射），不是 TimelineItemDto.mergeCommitSha
                              （Gitea 1.26+ timeline 端点不返 SHA）。 -->
-                        <span v-else-if="item.type === 'merge' && selectedPR?.mergeCommitSha && selectedPR?.base?.ref">
+                        <span v-else-if="item.type === 'merge' && selectedPR?.mergeCommitSha && selectedPR?.base?.ref"
+                              class="pr-detail__event-merge">
                           <a
                             class="mono pr-detail__event-branch pr-detail__branch--link"
                             :href="commitWebUrl(selectedPR.mergeCommitSha)"
@@ -6580,6 +6581,18 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   gap: 4px;
   flex-wrap: wrap;
   font-size: var(--font-body);
+}
+/* v0.7.16 根因修复：merge 事件整段（verb "合并提交" + ShortSha + 到 + branch）
+   加 white-space: nowrap，强制 1 行渲染 —— 之前 v0.7.10 加的 flex-wrap: wrap
+   让长内容（"X 于 Y 合并提交 f30ece070c 到 main"）在主行宽度不够时换行
+   成 2 行（"X 于 Y 合并提交" 主行 + "f30ece070c 到 main" 下一行）。
+   Gitea web 实际 1 行渲染。merge / push / label 等核心事件用 nowrap，
+   时间 / 用户名太长可换行（v0.7.10 行为）。 */
+.pr-detail__event-merge {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .pr-detail__event-author {
   font-weight: 600;
