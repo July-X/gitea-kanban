@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.6)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.7)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.6 发版** — 4 个 user 反馈问题修复 + label 全背景色：① 评论 body 缺失时 v-if 防御 + "（无内容）" 占位 ② WIP toggle 改标题事件走特殊 verb（"已将合并请求标记为进行中" / "可评审"）③ PR header 改 "请求将 N 次代码提交从 head 合并至 base" 格式 + 分支加链接 ④ label 事件按 Gitea web 行为合并（"添加标签 A、B、C" 三态）⑤ label chip 暗色主题下全背景色 + 自动白字）
+> 最后更新：2026-07-12（**v0.7.7 发版** — push 事件 commit 列表 + merge 事件 commit 链接（user 反馈 ⑥ "带分支信息的评论没正确还原"）：① push 事件 inline 块显示 7 位短 SHA 链接 + force push 提示 ② push 事件 block 块渲染 commit 列表（缩进 + 短 SHA 链接 + commit 消息 + 提交者，对齐 Gitea web `commits_list_small.tmpl`）③ merge 事件 SHA 改成链接到 Gitea web `/commit/{sha}` ④ 新增 `commitsByPR` 缓存 + `loadCommits()` helper ⑤ 新增 `fullMergeSha` / `pushEventCommits` / `commitWebUrl` 3 个 helper）
 
 >
 
@@ -17,6 +17,18 @@
 >   7. **GitHub PR 闭环已完整实现**：v0.5.0 ADR-0008 计划内做，后端 + 前端全链路打通（ListPulls / GetPull / Merge / Close / Comments / Reviews / Files / Diff / Reactions）；README/CLAUDE 已同步更新产品文档对齐现状。
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
+
+> - **v0.7.7** (2026-07-12)：push 事件 commit 列表 + merge 事件 commit 链接（接续 v0.7.6 反馈收尾，处理 user 反馈 ⑥ "带分支信息的评论没正确还原"）。
+>   1. **后端 push / merge 字段扩展**：`platform.TimelineItem` 加 `OldCommit / NewCommit / CommitsNum / IsForcePush` 4 字段（push 事件）+ `MergeCommitSHA` 1 字段（merge 事件）。`giteaTimelineRaw` 加 `old_commit_id / new_commit_id / commits_num / is_force_push` 4 字段。`giteaTimelineToItem` 映射 4 字段。
+>   2. **DTO 同步**：`TimelineItemDto` 加 5 字段（`oldCommit / newCommit / commitsNum / isForcePush / mergeCommitSha`）。Wails bindings 重新生成。
+>   3. **commitsByPR 缓存**：`Map<index, PullCommitDto[]>` 缓存 PR 全量 commit 列表（`/pulls/{index}/commits` 端点）。`loadCommits(projectId, index)` helper：缓存命中直接返。`loadComments` 调完 `fetchTimeline` 后并行 `loadCommits`（push 事件渲染用）。
+>   4. **push 事件 inline 块**：7 位短 SHA 链接到 Gitea web `/commit/{full_sha}`（Gitea / GitHub 通用 `commitWebUrl(sha)` helper）。force push 时加 "(强制推送)" 提示。
+>   5. **push 事件 block 块**（独立于 `hasSystemEventBlockDetail` 链）：缩进 22px + 左侧 2px 分隔线（对齐 Gitea web `commits_list_small`）+ 每行 `GitCommit` icon + 短 SHA 链接 + commit 消息 + 提交者。
+>   6. **merge 事件 inline 块**：SHA 改成 `<a>` 链接到 Gitea web `/commit/{sha}`。优先用 `item.mergeCommitSha`（v0.7.7 新字段），fallback 用 body regex 抠的 7 位短码（兼容 v0.7.6 老数据）。
+>   7. **新 helpers**：`fullMergeSha(item)` / `pushEventCommits(item)` / `commitWebUrl(sha)`。`pushEventCommits` v0.7.7 简化版按 NewCommit 位置 + CommitsNum 从 commitsByPR 过滤；v0.7.7.1 计划用 Gitea `/compare/{OldCommit}...{NewCommit}` 端点拿精确范围。
+>   8. **CSS 8 处新增**：`.pr-detail__event-block--commits` / `.pr-detail__event-commit-row` / 4 个子元素样式。
+>   9. **lucide GitCommit icon** 引入。
+>   相关 commit：`a328e5a`（后端字段扩展）/ `81ec199`（前端渲染 + 样式）。
 
 > - **v0.7.6** (2026-07-12)：4 个 user 反馈问题修复 + label 全背景色（接续 v0.7.5 UX 文案收尾，把 user 实际使用反馈做实）。
 >   1. **后端 timeline / PR 字段扩展**：`platform.TimelineItem` 加 `IsWipToggle` / `IsWip` / `AddedLabels` / `RemovedLabels` / `LabelAction` 字段（5 字段，WIP toggle + label 事件数组化）。`platform.PullDetailDTO` 加 `Commits int` 字段。`giteaTimelineRaw` 加 `Content string` 字段（Gitea `issues.Comment.Content` 在 type=7 时存 `"1"`=add / 其他=remove）。`giteaTimelineToItem` 加 WIP toggle 检测（`isWipToggleEvent` 仿 Gitea `commentTimelineEventIsWipToggle`）+ label 拆分（Content 决定 AddedLabels / RemovedLabels）。新增 helpers：`giteaWipPrefixes`（Gitea 默认 `["WIP:", "Draft:"]`） / `cutWipPrefix`（仿 Gitea `CutWorkInProgressPrefix`） / `isWipToggleEvent`。`giteaPullRaw` + `githubPullRaw` 加 `Commits` 字段 + PullDetailDTO 映射。`gitea/adapter_test.go` 加 3 个新测试（`TestGiteaAdapter_isWipToggleEvent` 9 case + `TestGiteaAdapter_ListPullTimeline_WipToggle` + `TestGiteaAdapter_ListPullTimeline_LabelAction`）。
