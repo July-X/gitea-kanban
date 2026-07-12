@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.8)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.10)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.8 发版** — push/merge 事件详情 根因修复（user 反馈 ⑦ "对话事件中的 commit 信息还是看不到"）：v0.7.5/v0.7.7 写 push/merge 事件**没实测过 Gitea 1.26+ API**凭印象假设 4 个独立顶层字段（OldCommit/NewCommit/CommitsNum/IsForcePush）+ type 字符串 "push"/"merge"，实际是 snake_case `pull_push`/`merge_pull` + 真实 commit_ids 在 body JSON 字符串里 + merge_pull event body 是空字符串。v0.7.8 全部重写：① 后端 `giteaTimelineToItem` 类型归一化 + push event 解析 body JSON → `CommitIDs []string` ② `giteaPullRaw` 补 `MergeCommitSHA` 字段映射（v0.7.7 加 DTO 字段但 adapter 漏 raw 字段）③ 前端删 v0.7.7 双 Map bug 的 commitsByPR / pushEventCommits helper ④ push event 渲染直接用 `item.commitIds` 数组 + commitDetails() 补 subject ⑤ merge event 从 `selectedPR.value?.mergeCommitSha` 拼 SHA 链接（PR 详情端点字段，store `fetchPullDetail(p)` 新增）⑥ Wails binding 自动重生成）
+> 最后更新：2026-07-12（**v0.7.10 发版** — PR 对话区 UI 微调：① 移除 `pr-detail__conv-header` 对话标题 div（user 反馈"不需要展示出来"）② timeline dot 22px → 26px（"大一点点"）+ 内部 icon size 13 → 15 ③ timeline 文字升一档（event-line 14px + event-prep 14px + event-time 12px + event-inline 14px）—— v0.7.9 修 PR header 用 `head.label || head.ref` 显示真实分支名 + v0.7.8 修 push/merge 事件类型归一化 + body JSON 解析后，本版本做 UI 微调收尾）
 
 >
 
