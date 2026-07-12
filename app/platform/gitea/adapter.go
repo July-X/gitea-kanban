@@ -340,6 +340,11 @@ type giteaPullRaw struct {
 	Commits            int                 `json:"commits"`
 	Body               string              `json:"body"`
 	MergedBy           *giteaUserRaw       `json:"merged_by"`
+	// v0.7.8：merge commit SHA —— Gitea 1.26+ timeline 端点 `merge_pull` 事件
+	// body 是空字符串（不像 v0.7.6 假设的 "merged commit {sha} into {branch}"），
+	// 拿 merge commit SHA 只能从 PR 详情端点 `/repos/{owner}/{repo}/pulls/{index}`
+	// 的 `merge_commit_sha` 字段。前端 timeline 渲染 merge 事件 inline 块时拿这个字段。
+	MergeCommitSHA     string              `json:"merge_commit_sha,omitempty"`
 	CreatedAt          string              `json:"created_at"`
 	UpdatedAt          string              `json:"updated_at"`
 }
@@ -381,6 +386,9 @@ func giteaPullToDetail(p giteaPullRaw) platform.PullDetailDTO {
 		Body:          p.Body,
 		CommentsCount: p.Comments,
 		Commits:       p.Commits, // v0.7.6：PR header "请求将 N 次代码提交从 {head} 合并至 {base}" 用
+		// v0.7.8：merge 事件 commit SHA 链接用 —— timeline 端点 merge_pull body 是空，
+		// 拿这个字段兜底。PR 未合并时为空字符串（omitempty），前端模板 v-if 跳过。
+		MergeCommitSHA: p.MergeCommitSHA,
 		CreatedAt:     p.CreatedAt,
 		UpdatedAt:     p.UpdatedAt,
 	}
@@ -820,17 +828,12 @@ type giteaTimelineRaw struct {
 	RefAction       string            `json:"ref_action,omitempty"`
 	RefCommitSHA    string            `json:"ref_commit_sha,omitempty"`
 	DependentIssue  *giteaIssueRefRaw `json:"dependent_issue,omitempty"`
-	// v0.7.7：type=29 (push) 事件专属 —— 对齐 Gitea `models/issues/comment.go` 字段
-	//   - OldCommit / NewCommit: 推送前/后的 head SHA（force push 时用 OldCommit..NewCommit 跳到 compare 链接）
-	//   - CommitsNum: 推送的 commit 数量（API 端返，跟 body 里 "added N commits" 一致）
-	//   - IsForcePush: 是否强制推送
-	// Gitea `Comment.Commits` 数组是 xorm:"-" 服务端字段，API 不暴露；
-	// 前端要从 /repos/{owner}/{repo}/pulls/{index}/commits 端点拉全量 commits +
-	// 按时间窗分组到 push 事件（v0.7.7 计划做）。
-	OldCommit   string `json:"old_commit_id,omitempty"`
-	NewCommit   string `json:"new_commit_id,omitempty"`
-	CommitsNum  int    `json:"commits_num,omitempty"`
-	IsForcePush bool   `json:"is_force_push,omitempty"`
+	// v0.7.8：删 4 个无用独立字段。
+	// v0.7.7 假设 Gitea 端会返回 old_commit_id / new_commit_id / commits_num / is_force_push
+	// 4 个顶层独立字段，实际 Gitea 1.26+ API 这 4 个字段**全部不返回**：
+	//   - OldCommit / NewCommit / CommitsNum: Gitea timeline 端点根本不返回
+	//   - IsForcePush: 实际在 body JSON 字符串里（见下方 `giteaTimelineToItem` 解析）
+	// 真实 commit 数据从 body JSON 解析（"commit_ids" 数组 + "is_force_push" 布尔）。
 }
 
 // giteaIssueRefRaw timeline 上下文里的 issue 引用（type=3/5/6/19/20/33 都用）
@@ -869,12 +872,38 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 		RefAction:       r.RefAction,
 		RefCommitSHA:    r.RefCommitSHA,
 		RemovedAssignee: r.RemovedAssignee,
-		// v0.7.7：type=29 (push) 事件专属字段
-		OldCommit:   r.OldCommit,
-		NewCommit:   r.NewCommit,
-		CommitsNum:  r.CommitsNum,
-		IsForcePush: r.IsForcePush,
 	}
+
+	// v0.7.8：类型归一化 —— Gitea 1.26+ timeline 端点 push / merge 事件 type 字符串
+	// 是 snake_case（"pull_push" / "merge_pull"），前端 type 字典表用的是
+	// "push" / "merge"（v0.7.5/v0.7.7 凭印象写的没实测过 API）。归一化在适配层做，
+	// 前端 type 字符串保持稳定（不需要改 systemEventVerb / 模板 / systemEventIcon 等）。
+	if r.Type == "pull_push" {
+		item.Type = "push"
+	} else if r.Type == "merge_pull" {
+		item.Type = "merge"
+	}
+
+	// v0.7.8：push 事件 commit 信息从 body JSON 字符串解析。
+	// 根因：v0.7.7 假设 Gitea timeline 端点顶层会返 old_commit_id / new_commit_id /
+	// commits_num / is_force_push 4 个独立字段，实际 Gitea 1.26+ API 这 4 个字段全不返回，
+	// 真实数据在 `body` JSON 字符串里（`{"is_force_push":false,"commit_ids":["sha1"]}`）。
+	// Gitea web 端模板 `repo/issue/view_content/comments.tmpl` 就是用 `commit_ids` 数组
+	// 渲染 commit 列表的，我们对齐这个行为。
+	if item.Type == "push" && r.Body != "" {
+		var pushPayload struct {
+			IsForcePush bool     `json:"is_force_push"`
+			CommitIDs   []string `json:"commit_ids"`
+		}
+		// 解析失败（如 body 不是合法 JSON）静默忽略 —— 旧 Gitea 版本（<= 1.25）push event
+		// body 可能是 "added N commits {time}" 文本格式（type 字符串也是 "push" 不是 "pull_push"），
+		// 走不到这条路径。如果未来需要兼容旧版，可以加更宽松的解析。
+		if err := json.Unmarshal([]byte(r.Body), &pushPayload); err == nil {
+			item.IsForcePush = pushPayload.IsForcePush
+			item.CommitIDs = pushPayload.CommitIDs
+		}
+	}
+
 	if r.User != nil {
 		item.Author = &platform.PullUserDTO{
 			Username:  r.User.Login,

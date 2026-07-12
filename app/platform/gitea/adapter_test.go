@@ -1258,3 +1258,165 @@ func TestGiteaAdapter_ListPullTimeline_LabelAction(t *testing.T) {
 		t.Errorf("items[1] RemovedLabels = %+v, want [wontfix]", items[1].RemovedLabels)
 	}
 }
+
+// TestGiteaAdapter_ListPullTimeline_PushMergeTypeNormalization 验证 v0.7.8 根因修复
+//
+// 根因：v0.7.5/v0.7.7 凭印象假设 Gitea /timeline 端点 type 字符串是 "push" / "merge"，
+// 实际 Gitea 1.26+ 返回 snake_case 命名 "pull_push" / "merge_pull"，导致前端模板
+// 永远不进 push/merge 渲染分支。同时 commit 信息在 body JSON 字符串里
+//（{"is_force_push":false,"commit_ids":["sha1"]}），不在顶层独立字段。
+//
+// 修复：giteaTimelineToItem 做两层归一化 ——
+//   1. type 字符串：pull_push → push / merge_pull → merge
+//   2. push 事件 body JSON 解析：commit_ids → CommitIDs 数组 / is_force_push → IsForcePush
+//   3. 删 v0.7.7 假设的 4 个独立顶层字段（OldCommit / NewCommit / CommitsNum / IsForcePush
+//      在 API 里都不存在）
+func TestGiteaAdapter_ListPullTimeline_PushMergeTypeNormalization(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			// type=pull_push + body JSON 含 1 个 commit —— v0.7.8 应归一化为 type=push + CommitIDs=[sha]
+			{
+				"id":         500,
+				"type":       "pull_push",
+				"body":       `{"is_force_push":false,"commit_ids":["aabbccddeeff00112233445566778899aabbccdd"]}`,
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-04T10:00:00Z",
+			},
+			// type=pull_push + body JSON 含 2 个 commit + is_force_push=true —— force push
+			{
+				"id":         501,
+				"type":       "pull_push",
+				"body":       `{"is_force_push":true,"commit_ids":["1111111111111111111111111111111111111111","2222222222222222222222222222222222222222"]}`,
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-04T10:05:00Z",
+			},
+			// type=merge_pull + 空 body —— v0.7.8 应归一化为 type=merge
+			{
+				"id":         502,
+				"type":       "merge_pull",
+				"body":       "",
+				"user":       map[string]string{"login": "bob"},
+				"created_at": "2024-06-04T10:10:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3", len(items))
+	}
+
+	// 500: type 归一化 + 1 个 commit
+	if items[0].Type != "push" {
+		t.Errorf("items[0].Type = %q, want push (normalized from pull_push)", items[0].Type)
+	}
+	if items[0].IsForcePush {
+		t.Errorf("items[0].IsForcePush = true, want false")
+	}
+	if len(items[0].CommitIDs) != 1 || items[0].CommitIDs[0] != "aabbccddeeff00112233445566778899aabbccdd" {
+		t.Errorf("items[0].CommitIDs = %+v, want [aabbccddeeff00112233445566778899aabbccdd]", items[0].CommitIDs)
+	}
+	// v0.7.8 删了 v0.7.7 加的 4 个无用字段（OldCommit / NewCommit / CommitsNum
+	// / 顶层 IsForcePush），编译期就不存在 —— CommitIDs 数组 + IsForcePush 才是
+	// push 事件的权威来源。v0.7.8 删了这些字段后 timeline 模板渲染也能进 push 分支
+	// （type 归一化 + CommitIDs 有值）
+
+	// 501: type 归一化 + 2 个 commit + force push
+	if items[1].Type != "push" {
+		t.Errorf("items[1].Type = %q, want push", items[1].Type)
+	}
+	if !items[1].IsForcePush {
+		t.Errorf("items[1].IsForcePush = false, want true")
+	}
+	if len(items[1].CommitIDs) != 2 {
+		t.Errorf("items[1].CommitIDs = %+v, want 2 entries", items[1].CommitIDs)
+	}
+
+	// 502: type 归一化 merge
+	if items[2].Type != "merge" {
+		t.Errorf("items[2].Type = %q, want merge (normalized from merge_pull)", items[2].Type)
+	}
+	if len(items[2].CommitIDs) != 0 {
+		t.Errorf("items[2].CommitIDs = %+v, want nil (merge_pull body is empty)", items[2].CommitIDs)
+	}
+}
+
+// TestGiteaAdapter_ListPullTimeline_PushBodyInvalid 验证 push event body 不是
+// 合法 JSON 时静默忽略（兼容老 Gitea 版本 body 格式 "added N commits {time}"）
+func TestGiteaAdapter_ListPullTimeline_PushBodyInvalid(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]interface{}{
+			// 旧 Gitea（<= 1.25）push event body 是文本格式，type 字符串也是 "push"
+			// —— v0.7.8 不会走这条路径（type 字符串是 "push" 不是 "pull_push"），
+			// 但万一某天有混合 / proxy 场景 body 不是 JSON，应静默忽略
+			{
+				"id":         600,
+				"type":       "pull_push",
+				"body":       "added 2 commits 5 minutes ago",
+				"user":       map[string]string{"login": "alice"},
+				"created_at": "2024-06-04T10:00:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	// type 归一化 OK
+	if items[0].Type != "push" {
+		t.Errorf("items[0].Type = %q, want push", items[0].Type)
+	}
+	// body 解析失败 → CommitIDs 留空 + IsForcePush 留 false（不报错）
+	if len(items[0].CommitIDs) != 0 {
+		t.Errorf("items[0].CommitIDs = %+v, want nil (body parse failed)", items[0].CommitIDs)
+	}
+	if items[0].IsForcePush {
+		t.Errorf("items[0].IsForcePush = true, want false (body parse failed)")
+	}
+}
+
+// TestGiteaAdapter_GetPull_MergeCommitSHA 验证 v0.7.8 新增 merge_commit_sha 字段映射
+//
+// 背景：v0.7.7 加了 PullDetailDTO.MergeCommitSHA 字段但 Gitea adapter 漏了 raw struct
+// 字段 + 映射，PR 详情拿不到 merge commit SHA，timeline 渲染 merge 事件没有 SHA 链接。
+// v0.7.8 修：giteaPullRaw 加 MergeCommitSHA 字段，giteaPullToDetail 映射到 DTO。
+func TestGiteaAdapter_GetPull_MergeCommitSHA(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 模拟 PR 已合并场景
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number":           42,
+			"title":            "test merged PR",
+			"state":            "closed",
+			"merged":           true,
+			"merge_commit_sha": "deadbeef1234567890abcdef1234567890abcdef",
+			"mergeable":        false, // 已合并 PR mergeable=false
+			"comments":         0,
+			"commits":          3,
+			"merged_by":        map[string]string{"login": "bob"},
+			"head":             map[string]string{"ref": "feat-x", "sha": "aaaa"},
+			"base":             map[string]string{"ref": "main", "sha": "bbbb"},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	pull, err := adapter.GetPull(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if pull.MergeCommitSHA != "deadbeef1234567890abcdef1234567890abcdef" {
+		t.Errorf("MergeCommitSHA = %q, want deadbeef1234567890abcdef1234567890abcdef",
+			pull.MergeCommitSHA)
+	}
+}

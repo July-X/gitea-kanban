@@ -380,6 +380,10 @@ type githubPullRaw struct {
 	Commits            int                  `json:"commits"`
 	Body               string               `json:"body"`
 	MergedBy           *githubUserRaw       `json:"merged_by"`
+	// v0.7.8：merge commit SHA —— GitHub /repos/{owner}/{repo}/pulls/{number}
+	// 返回 `merge_commit_sha` 字段（PR 合并后才有值，否则空）。
+	// 跟 Gitea 端同源：timeline 端点 merge 事件 body 不一定带 SHA，从 PR 详情兜底拿。
+	MergeCommitSHA     string               `json:"merge_commit_sha,omitempty"`
 	CreatedAt          string               `json:"created_at"`
 	UpdatedAt          string               `json:"updated_at"`
 	// Milestone v0.7.0：GitHub PR 可能挂在某个 milestone 上
@@ -437,6 +441,9 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		Body:          p.Body,
 		CommentsCount: p.Comments,
 		Commits:       p.Commits, // v0.7.6：PR header 用
+		// v0.7.8：merge 事件 commit SHA 链接用 —— timeline 端点 merge 事件 body 不一定带 SHA，
+		// 拿 PR 详情 `merge_commit_sha` 字段兜底。PR 未合并时为空字符串。
+		MergeCommitSHA: p.MergeCommitSHA,
 		CreatedAt:     p.CreatedAt,
 		UpdatedAt:     p.UpdatedAt,
 	}
