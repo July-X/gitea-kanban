@@ -1420,3 +1420,58 @@ func TestGiteaAdapter_GetPull_MergeCommitSHA(t *testing.T) {
 			pull.MergeCommitSHA)
 	}
 }
+
+// TestGiteaAdapter_GetPull_RefLabel 验证 v0.7.9 新增 head/base ref Label 字段映射
+//
+// 背景：Gitea 1.20+ /pulls/{index} 端点 head/base 嵌套对象里返 Label 字段
+// （真实分支名，去掉 refs/heads/ 前缀），跟 ref 字段（git ref 全路径）不同。
+// 比如 PR 头部 ref = "refs/pull/72/head"，Label = "pr-with-labels-366575"。
+// v0.7.6 改 PR header 格式时只用了 ref 字段，导致显示成 ref id 而不是真实分支名
+// （user 反馈 "缺少明确的分支记录"）。
+//
+// 修复：giteaPullRefRaw 加 Label 字段，giteaPullToDetail 映射到 PullRefDTO.Label。
+// 前端 PR header 模板用 `selectedPR.head.label || selectedPR.head.ref` 渲染。
+func TestGiteaAdapter_GetPull_RefLabel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 模拟 Gitea 实际行为：head ref 是 git ref 全路径，label 是真实分支名
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number": 72,
+			"title":  "test ref label",
+			"state":  "closed",
+			"merged": false,
+			"head": map[string]interface{}{
+				"label": "pr-with-labels-366575", // 真实分支名
+				"ref":   "refs/pull/72/head",     // git ref 全路径
+				"sha":   "aaaa",
+			},
+			"base": map[string]interface{}{
+				"label": "main",  // base 通常 label == ref
+				"ref":   "main",  // Gitea base 不带 refs/heads/ 前缀（已对齐）
+				"sha":   "bbbb",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	pull, err := adapter.GetPull(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", 72)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+
+	// head label = 真实分支名
+	if pull.Head.Label != "pr-with-labels-366575" {
+		t.Errorf("Head.Label = %q, want pr-with-labels-366575", pull.Head.Label)
+	}
+	if pull.Head.Ref != "refs/pull/72/head" {
+		t.Errorf("Head.Ref = %q, want refs/pull/72/head", pull.Head.Ref)
+	}
+
+	// base label/ref 都应该 = main
+	if pull.Base.Label != "main" {
+		t.Errorf("Base.Label = %q, want main", pull.Base.Label)
+	}
+	if pull.Base.Ref != "main" {
+		t.Errorf("Base.Ref = %q, want main", pull.Base.Ref)
+	}
+}

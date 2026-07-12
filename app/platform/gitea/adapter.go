@@ -350,8 +350,12 @@ type giteaPullRaw struct {
 }
 
 type giteaPullRefRaw struct {
-	Ref string `json:"ref"`
-	SHA string `json:"sha"`
+	// v0.7.9：Label 字段 —— 真实分支名（去掉 refs/heads/ 前缀）
+	// Gitea web PR header 用这个字段渲染分支名（对齐 `templates/repo/issue/view_title.tmpl`）
+	// Ref 字段保留（git ref 全路径），Label 缺失时模板用 Ref 兜底
+	Label string `json:"label,omitempty"`
+	Ref   string `json:"ref"`
+	SHA   string `json:"sha"`
 }
 
 type giteaUserRaw struct {
@@ -379,8 +383,8 @@ func giteaPullToDetail(p giteaPullRaw) platform.PullDetailDTO {
 		State:         p.State,
 		Draft:         p.Draft,
 		Merged:        p.Merged,
-		Head:          platform.PullRefDTO{Ref: p.Head.Ref, SHA: p.Head.SHA},
-		Base:          platform.PullRefDTO{Ref: p.Base.Ref, SHA: p.Base.SHA},
+		Head:          platform.PullRefDTO{Ref: p.Head.Ref, Label: p.Head.Label, SHA: p.Head.SHA},
+		Base:          platform.PullRefDTO{Ref: p.Base.Ref, Label: p.Base.Label, SHA: p.Base.SHA},
 		Mergeable:     p.Mergeable,
 		HasConflicts:  !p.Mergeable,
 		Body:          p.Body,
