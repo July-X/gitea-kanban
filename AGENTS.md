@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.4)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.5)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.4 发版** — Timeline 细节补全：DisplayName 全链路 + "评论于" 动词 + 系统事件详情（评审人/合并 SHA/指派人）+ 评论 header 右侧 [所有者] / 表情 / ... 菜单 + timeline 竖线颜色提亮）
+> 最后更新：2026-07-12（**v0.7.5 发版** — 系统事件 UX 文案对齐 Gitea web：22+ 种 CommentType 全部有具体 verb、PR 动作加 "此合并请求" 限定词、时间格式从 "X verb  ·  Y 天前" 改成 "X 于 Y verb"、移除 v0.7.x "事件" 通用 fallback、push event 数量解析 "推送了 N 个提交"）
 
 >
 
@@ -18,6 +18,12 @@
 >   8. **wails-api-shim 兼容层**：window.api 桥接到 Wails bindings；ipc-client.ts 底层调用；不可删除。
 >   相关 commit：`cbf4dda`（Phase 1 board 清理+Milestones）/ `11a6454`（Phase 2 Review 完整化）/ `18a9f11`（Phase 2 收尾 Assignee 多选）/ `61b1464`（Phase 3 store 封装）/ `6e1069f`（app.go 拆分）/ `8009720`（提交签名+commit 计数）/ `855122f`（review 5 项修复）/ `b977906`（v0.6.0 发版聚合 commit）。
 
+> - **v0.7.5** (2026-07-12)：系统事件 UX 文案 + 时间格式对齐 Gitea web（接续 v0.7.4 Timeline 细节补全，把"事件/时间表述"做实）。
+>   1. **systemEventVerb 字典重写**：覆盖 22+ 种 Gitea CommentType 全部 case（之前 18 种 + "事件" fallback → 现在全部具体 verb）。PR 动作加 "此合并请求" 限定词："关闭了此合并请求" / "重新开启了此合并请求" / "置顶了此合并请求" / "锁定了此合并请求" 等。Time tracking / project / auto merge / ref 类 4 个之前缺失的 type 补全具体 verb。
+>   2. **移除 "事件" 通用 fallback**：未识别 type 返回空字符串（不显示 verb），不再有 "kanban_demo 事件" 这种不专业的回退。
+>   3. **时间格式重构**：`X verb  ·  Y 天前`（时间独立在右 + "于" 介词缺失）改成 `X 于 Y verb`（时间融进行内）。评审事件 + 系统事件两种 timeline-item 都调整。CSS：新增 `.pr-detail__event-prep`（"于" 介词样式），去掉 `.pr-detail__event-time` 的 `margin-left: auto`。
+>   4. **push event 数量解析**：`systemEventVerb(item)` 处理 `push` (29) type 时正则抠 body 里的 commit 数量（regex `/(\d+)\s*(commits?|个?提交|个?个提交)/i`），输出 "推送了 1 个提交" / "推送了 3 个提交" / fallback "推送了新提交"。
+>
 > - **v0.7.4** (2026-07-12)：Timeline 细节补全（接续 v0.7.3 动态视觉，把 7 处细节做实）。
 >   1. **DisplayName 全链路**：后端 `platform.PullUserDTO` 加 `FullName` 字段；`giteaUserRaw` 解析 `full_name`；`githubUserRaw` 解析 `name`；11 处 `PullUserDTO` 构造同步。前端新增 `displayName(user)` helper（优先 fullName，回退 username）。对齐 Gitea web `shared/user/authorlink` 模板的 display name 优先显示。
 >   2. **"评论于" 动词 + 时间链接**：评论 header 改成 `username 评论于 时间` 格式（Gitea web `repo.issues.commented_at` 中文翻译）；时间变成 `<a>` 链接，hover 变主色 + underline。
