@@ -923,7 +923,7 @@ function systemEventVerb(item: TimelineItemDto): string {
   }
   if (item.type === 'close') return '关闭了此合并请求';
   if (item.type === 'reopen') return '重新开启了此合并请求';
-  if (item.type === 'merge') return '合并了提交';
+  if (item.type === 'merge') return '合并提交'; // v0.7.15：去掉"了"字 —— 对齐 Gitea web "合并提交 {sha} 到 {branch}" 渲染（SHA + branch 在主行）
   if (item.type === 'push') {
     // v0.7.8 根因修复：v0.7.5 写的 body regex `/(\d+)\s*(commits?|个?提交|...)/i`
     // 抠数字 —— 实际 Gitea 1.26+ body 是 JSON 字符串 `{"is_force_push":false,
@@ -2668,16 +2668,22 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                           <span v-if="item.isForcePush" class="pr-detail__event-hint">(强制推送)</span>
                         </span>
 
-                        <!-- v0.7.8 根因修复：merge 合并事件详情
-                             Gitea 1.26+ timeline 端点 merge_pull event body 是空字符串，
-                             拿不到 merge commit SHA。v0.7.8 改：从 PR 详情端点
-                             `PullDetailDTO.MergeCommitSha` 字段拿（giteaPullRaw
-                             v0.7.8 补 `merge_commit_sha` 字段 + giteaPullToDetail 映射）。
-                             Gitea web 渲染 "X 合并 commit {sha_short} 到 {branch}"。 -->
+                        <!-- v0.7.15 根因修复：merge 事件 SHA + branch 移到主行（跟 v0.7.14
+                             label chip 移到主行同理）—— user 反馈"文本说明中合并提交 X 到 Y"
+                             要按 Gitea web 1:1 一行渲染。Gitea web 实际：
+                             "X 于 Y 合并 commit f30ece070c 到 main"  （X = actor，Y = time，
+                             "合并 commit {sha}" verb 段，"到 {branch}" 介词段，SHA 是 7 位短码）
+                             我们 v0.7.14 改前：主行 "X 于 Y 合并了提交" + 缩进块 "到 main f30ece070c"
+                             跨 2 div 块显示，user 看到是 2 行。
+                             v0.7.15 改：verb "合并了提交" → "合并提交"（去"了"字对齐 Gitea web
+                             "合并 commit" 无"了"字），SHA + branch 拼到主行 verb 后
+                             （紧跟 `<span class="pr-detail__event-verb">合并提交</span>` 后面），
+                             跟 label / push / delete_branch 一样主行 v-else-if 链渲染。
+                             实际效果："X 于 Y 合并提交 f30ece070c 到 main"  同一行。
+                             注：merge SHA 来源仍是 selectedPR.mergeCommitSha（v0.7.8
+                             修的 PR 详情端点字段映射），不是 TimelineItemDto.mergeCommitSha
+                             （Gitea 1.26+ timeline 端点不返 SHA）。 -->
                         <span v-else-if="item.type === 'merge' && selectedPR?.mergeCommitSha && selectedPR?.base?.ref">
-                          <GitMerge :size="12" :stroke-width="2" aria-hidden="true" />
-                          <span class="pr-detail__event-hint">到</span>
-                          <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
                           <a
                             class="mono pr-detail__event-branch pr-detail__branch--link"
                             :href="commitWebUrl(selectedPR.mergeCommitSha)"
@@ -2685,6 +2691,8 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                             rel="noopener"
                             :title="`在 Gitea 打开 ${selectedPR.mergeCommitSha.slice(0, 7)} 合并提交`"
                           >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
+                          <span class="pr-detail__event-hint">到</span>
+                          <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
                         </span>
 
                         <!-- v0.7.6：WIP toggle 时不显示 oldTitle → newTitle（标题内容没意义） -->
