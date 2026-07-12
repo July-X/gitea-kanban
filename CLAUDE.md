@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6 + v0.7.7 + v0.7.8 + v0.7.9 + v0.7.10 + v0.7.11 + v0.7.12 + v0.7.13 + v0.7.14 + v0.7.15 + v0.7.16 + v0.7.17）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6 + v0.7.7 + v0.7.8 + v0.7.9 + v0.7.10 + v0.7.11 + v0.7.12 + v0.7.13 + v0.7.14 + v0.7.15 + v0.7.16 + v0.7.17 + v0.7.18）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -10,7 +10,7 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6 + v0.7.7 + v0.7.8 + v0.7.9 + v0.7.10 + v0.7.11 + v0.7.12 + v0.7.13 + v0.7.14 + v0.7.15 + v0.7.16 + v0.7.17）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6 + v0.7.7 + v0.7.8 + v0.7.9 + v0.7.10 + v0.7.11 + v0.7.12 + v0.7.13 + v0.7.14 + v0.7.15 + v0.7.16 + v0.7.17 + v0.7.18）
 
 > **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
 >
@@ -57,6 +57,8 @@
 > **v0.7.16 增量**：merge 事件整段 white-space: nowrap 强制 1 行渲染（user 反馈"合并提交 X 到 Y" 应该 1 行显示）—— v0.7.10 加的 `flex-wrap: wrap` 让长内容在主行宽度不够时换行成 2 行（"X 于 Y 合并提交" 主行 + "ShortSha 到 branch" 下一行）。修法：新增 `.pr-detail__event-merge` CSS class（`white-space: nowrap` + `display: inline-flex`）+ merge 事件 v-else-if 链 span 加 class，强制整段 1 行。主行 `flex-wrap: wrap` 保留让 author / time 太长可换行。对齐 Gitea web "X 合并 commit {sha_short} 到 {branch}" 1 行渲染。docs/releases/v0.7.16.md。
 
 > **v0.7.17 增量**：pr-detail__event-content 内部尽量 1 行显示完（user 反馈"'pr-detail__event-content' 当中内容，应该尽量 1 行显示完，不要多行显示，和 Gitea web 保持一致"）—— v0.7.16 只给 merge 事件整段加 nowrap 兜底，其他事件（push / label / assignees / change_title / review_request / change_target_branch / delete_branch / milestone）还是被 v0.7.10 加的 `flex-wrap: wrap` 换行成 2 行。修法：v0.7.17 收口主行 + inline 块强制 1 行——`.pr-detail__event-content` 加 `overflow: hidden`（内容超出容器宽度直接截断，不撑爆 timeline 列宽），`.pr-detail__event-line` 改 `flex-wrap: nowrap` + 加 `white-space: nowrap` + `overflow: hidden`（主行强制 1 行）。block 块（push event commit 列表）保留 column 布局（每 commit 1 行对齐 Gitea web `commits_list_small` 模板），inline 块（label 兜底单 chip 块）继续 wrap 走窄屏换行。对齐 Gitea web 实际渲染——"X 合并 commit {sha_short} 到 {branch}" / "X 修改了标签 [bug]" / "X 删除分支 cx-same-057405" / "X 指派给自己" 等全部 1 行。docs/releases/v0.7.17.md。
+
+> **v0.7.18 增量**：TimelineItem DTO 字段名 camelCase + merge 事件真正搬主行（user 反馈 "分支信息还是换行了" + "push、delete 事件的分支信息还是未显示"）—— 2 个根因：① TimelineItem DTO 字段 snake_case（Go json tag）→ Wails 生成 snake_case TS class → 前端 dto.ts camelCase 强转后所有 camelCase 访问都拿 undefined（v0.7.6 / v0.7.8 / v0.7.9 加的 13 个字段基本都失效：commitIds / isForcePush / mergeCommitSha / isWipToggle / isWip / addedLabels / removedLabels / labelAction / oldRef / newRef / oldTitle / newTitle / refIssue / refAction / refCommitSha / dependentIssue / removedAssignee / oldMilestone / assignee）。后果——push 事件 block 块不渲染（commit 列表空白）/ WIP toggle 检测走不到（全部走"修改了标题"兜底）/ label 合并 mergeLabelEvents 失效 / assignees isSelfAssign 永远 false（verb 走"指派给"不走"指派给自己"）/ delete_branch 分支名拿不到 / change_title oldTitle → newTitle 不显示 / 跨引用 issue / dependency block 块不显示 ② v0.7.15 注释说要把 merge 事件 SHA + branch 拼到主行 verb 后但**实际没动代码**——span 还在 inline 块（`<div class="pr-detail__event-inline">` 子 div 必然另起一行），v0.7.16 加 `class="pr-detail__event-merge"`（white-space: nowrap）+ v0.7.17 加 `.pr-detail__event-line` 主行 nowrap 都救不了 inline 子 div 必然换行。修法：① `app/platform/adapter.go` TimelineItem 20 字段 json tag 全部 snake_case → camelCase（`commitId` / `oldTitle` / `isWipToggle` / `addedLabels` / `commitIds` / `isForcePush` / `mergeCommitSha` 等），跟 `PullDetailDTO` 保持一致风格，`wails generate module` 重新生成 models.ts（80 处字段名自动改）② `MergesView.vue` merge 事件 v-else-if 链 span 真正搬到主行 `pr-detail__event-line`（紧跟 verb 后，跟 v0.7.14 label chip 同样模式），inline 块里那个 span 整段删掉。修复后预期 Gitea web 1:1 一行渲染——"X 推送了 N 个提交" + 下方 commits_list_small 块 / "X 合并提交 7db04cd 到 main" 1 行 / "X 已将合并请求标记为进行中" 1 行 / "X 指派给自己" 1 行 / "X 删除分支 cx-same-057405" 1 行。docs/releases/v0.7.18.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
