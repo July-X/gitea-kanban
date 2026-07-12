@@ -47,6 +47,8 @@
 > **v0.7.11 增量**：指派自指派判断 + delete_branch verb 对齐 Gitea web（user 反馈 ⑩ "指派给自己的事件，没有对齐" + "分支信息还是有缺失"）—— ① `systemEventVerb` assignees 分支补 `isSelfAssign` 判断（`assignee.username === author.username`）：自指派 → "自指派"/"取消自指派"、指派给他人 → "指派给"/"取消了指派"，对齐 Gitea web 中文 locale（v0.7.5 注释里就有规划但代码漏判）② `systemEventVerb` delete_branch 分支：'删除了分支' → '删除分支'（去掉"了"字对齐 Gitea web "删除分支 ex-same-057405" 渲染，分支名走 inline 块的 GitBranch icon + `<code>{{ item.oldRef }}</code>`，v0.7.4 已有）③ 注意：close 事件 verb "关闭了此合并请求" 跟 Gitea web "关闭此合并请求"（无"了"）也对不齐，user 没明确反馈本次没动。docs/releases/v0.7.11.md。
 
 > **v0.7.12 增量**：Gitea web 1:1 对齐 assignees / delete_branch 渲染（user 反馈 ⑪ "指派给自己的事件，没有对齐" + "分支信息还是有缺失" + "推送事件没显示 commit 消息"）—— ① assignees 事件删除 v0.7.4 加的 inline 块（"+/− icon + assignee 用户名 + 添加了指派" 缩进），对齐 Gitea web 把信息合并到主行 verb（"kanban_bot 于 上个月 指派给自己"）② delete_branch 事件 verb 直接拼分支名（`删除分支 ${oldRef.replace(/^refs\/heads\//, '')}`），去掉 inline 块（v0.7.10 改 CSS 后 user 反馈仍看不到 inline 块，verb 拼接方案兜底），对齐 Gitea web "kanban_bot 于 3 周前 删除分支 cx-same-057405" 渲染 ③ push 事件 commit 消息 v0.7.8 已加 block 块 + commitDetails(sha) helper，留给 user 升级 binary 验证（如不生效 v0.7.13 排查）。docs/releases/v0.7.12.md。
+
+> **v0.7.13 增量**：assignees verb 文案对齐 Gitea web（user 反馈 ⑫"自指派应该改成指派给自己，指派给其他人应该是指派给X"）—— 4 字符串全部按 Gitea web `repo.issues.self_assigned` / `assigned_to` / `unassigned` / `unassigned_from` 中文 locale 改：自指派 add → "指派给自己" / 自指派 remove → "取消指派给自己" / 他人 add → "指派给 {X}"（拼接 `displayName(item.assignee)`） / 他人 remove → "取消指派给 {X}"。user 反馈"还是看不到具体的分支信息"（push event commit 消息 + delete_branch 分支名）v0.7.8 + v0.7.12 master 已修，但 user 实际跑 v0.7.5 之前 binary 看不到效果，需要升级 binary 才能看到新效果。docs/releases/v0.7.13.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 

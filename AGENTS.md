@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.12)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.13)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.12 发版** — Gitea web 1:1 对齐 assignees / delete_branch 渲染：① assignees 事件删 v0.7.4 加的 inline 块（"+/− icon + 添加了指派" 缩进），对齐 Gitea web 把信息合并到主行 verb（"kanban_bot 于 上个月 指派给自己"）② delete_branch 事件 verb 直接拼分支名（`删除分支 ${oldRef.replace(/^refs\/heads\//, '')}`），去掉 inline 块（v0.7.10 改 CSS 后 user 反馈看不到 inline 块，verb 拼接方案兜底）③ push 事件 commit 消息 v0.7.8 已加 block 块 + commitDetails(sha) helper，留给 user 升级 binary 验证——v0.7.11 修指派自指派判断 + delete_branch verb 后，本版本修 v0.7.4 inline 块残留问题）
+> 最后更新：2026-07-12（**v0.7.13 发版** — assignees verb 文案对齐 Gitea web：自指派 add → "指派给自己" / 自指派 remove → "取消指派给自己" / 他人 add → "指派给 {X}"（拼接 `displayName(item.assignee)`）/ 他人 remove → "取消指派给 {X}"（4 字符串按 Gitea web `repo.issues.self_assigned` / `assigned_to` / `unassigned` / `unassigned_from` 中文 locale 改）—— v0.7.12 修 v0.7.4 inline 块残留问题后，本版本按 user 反馈调 assignees 文案；user 反馈"还是看不到具体的分支信息"（push event commit 消息 + delete_branch 分支名）v0.7.8 + v0.7.12 master 已修，user 实际跑 v0.7.5 之前 binary 看不到效果需要升级 binary）
 
 >
 
