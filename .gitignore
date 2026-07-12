@@ -66,3 +66,4 @@ node_modules/
 .qoder
 .reasonix-commit-msg.txt
 .worktrees/
+.cu-screenshots/
