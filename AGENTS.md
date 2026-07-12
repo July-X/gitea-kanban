@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.15)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.16)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.15 发版** — merge 事件对齐 Gitea web "合并提交 X 到 Y"：① systemEventVerb merge 分支去"了"字 "合并了提交" → "合并提交"（对齐 Gitea web "merged commit" 无"了"字）② merge 事件 v-else-if 链调整渲染顺序为 `ShortSha 链接 + 到 + branch`，删 v0.7.8 加的 GitMerge icon（icon 已通过主行 timeline-dot 渲染，去重），对齐 Gitea web "X 于 Y 合并提交 f30ece070c 到 main" 一行渲染——v0.7.14 label chip 移到主行后，本版本按 user 反馈把 merge 事件渲染顺序也对齐 Gitea web）
+> 最后更新：2026-07-12（**v0.7.16 发版** — merge 事件整段 white-space: nowrap 强制 1 行渲染：v0.7.10 加的 `flex-wrap: wrap` 让长内容（"X 于 Y 合并提交 + ShortSha + 到 + branch" 7 个 inline element）在主行宽度不够时换行成 2 行。修法：新增 `.pr-detail__event-merge` CSS class（`white-space: nowrap` + `display: inline-flex`）+ merge 事件 v-else-if 链 span 加 class，强制整段 1 行；主行 `flex-wrap: wrap` 保留让 author / time 等太长可换行。对齐 Gitea web "X 合并 commit {sha_short} 到 {branch}" 1 行渲染——v0.7.15 改 verb 文案 + 渲染顺序后，本版本补 CSS 强制 1 行）
 
 >
 
