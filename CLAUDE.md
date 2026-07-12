@@ -2,7 +2,7 @@
 
 > 这是给 Claude 的工作指引版摘要。若与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
 >
-> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6 + v0.7.7）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
+> **最后更新**：2026-07-12（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6 + v0.7.7 + v0.7.8 + v0.7.9 + v0.7.10 + v0.7.11 + v0.7.12 + v0.7.13 + v0.7.14 + v0.7.15 + v0.7.16 + v0.7.17）。详细版本演进看 [AGENTS.md](./AGENTS.md) 顶部。
 
 ## 项目一句话
 
@@ -10,7 +10,7 @@
 
 目标用户包含非技术人员，所以 UI 必须零术语、危险操作二次确认、错误提示要人话。
 
-## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5）
+## 固定技术栈（v2.0 + v2.4 + v2.5 + v2.6 + v3.x + v0.3.0 + v0.5.3 + v0.6.0 + v0.7.0 + v0.7.1 + v0.7.2 + v0.7.3 + v0.7.4 + v0.7.5 + v0.7.6 + v0.7.7 + v0.7.8 + v0.7.9 + v0.7.10 + v0.7.11 + v0.7.12 + v0.7.13 + v0.7.14 + v0.7.15 + v0.7.16 + v0.7.17）
 
 > **v2.4 增量**：go-git 走 `NoCheckout=true` 轻量模式（只拉元信息，磁盘 -99%）；所有 Wails binding 接受 `projectId` / `owner+repo` 业务态概念（Go 端反查 `localPath + token`，AGENTS §8.1 鉴权铁律）
 >
@@ -55,6 +55,8 @@
 > **v0.7.15 增量**：merge 事件对齐 Gitea web "合并提交 X 到 Y"（user 反馈"文本说明中'合并提交 X 到 Y'"）—— ① `systemEventVerb` merge 分支去"了"字："合并了提交" → "合并提交"（对齐 Gitea web "merged commit" 无"了"字） ② merge 事件 v-else-if 链调整渲染顺序为 `ShortSha 链接 + 到 + branch`，删 v0.7.8 加的 GitMerge icon（icon 已通过主行 timeline-dot 渲染，去重），对齐 Gitea web "X 于 Y 合并提交 f30ece070c 到 main" 一行渲染。docs/releases/v0.7.15.md。
 
 > **v0.7.16 增量**：merge 事件整段 white-space: nowrap 强制 1 行渲染（user 反馈"合并提交 X 到 Y" 应该 1 行显示）—— v0.7.10 加的 `flex-wrap: wrap` 让长内容在主行宽度不够时换行成 2 行（"X 于 Y 合并提交" 主行 + "ShortSha 到 branch" 下一行）。修法：新增 `.pr-detail__event-merge` CSS class（`white-space: nowrap` + `display: inline-flex`）+ merge 事件 v-else-if 链 span 加 class，强制整段 1 行。主行 `flex-wrap: wrap` 保留让 author / time 太长可换行。对齐 Gitea web "X 合并 commit {sha_short} 到 {branch}" 1 行渲染。docs/releases/v0.7.16.md。
+
+> **v0.7.17 增量**：pr-detail__event-content 内部尽量 1 行显示完（user 反馈"'pr-detail__event-content' 当中内容，应该尽量 1 行显示完，不要多行显示，和 Gitea web 保持一致"）—— v0.7.16 只给 merge 事件整段加 nowrap 兜底，其他事件（push / label / assignees / change_title / review_request / change_target_branch / delete_branch / milestone）还是被 v0.7.10 加的 `flex-wrap: wrap` 换行成 2 行。修法：v0.7.17 收口主行 + inline 块强制 1 行——`.pr-detail__event-content` 加 `overflow: hidden`（内容超出容器宽度直接截断，不撑爆 timeline 列宽），`.pr-detail__event-line` 改 `flex-wrap: nowrap` + 加 `white-space: nowrap` + `overflow: hidden`（主行强制 1 行）。block 块（push event commit 列表）保留 column 布局（每 commit 1 行对齐 Gitea web `commits_list_small` 模板），inline 块（label 兜底单 chip 块）继续 wrap 走窄屏换行。对齐 Gitea web 实际渲染——"X 合并 commit {sha_short} 到 {branch}" / "X 修改了标签 [bug]" / "X 删除分支 cx-same-057405" / "X 指派给自己" 等全部 1 行。docs/releases/v0.7.17.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 

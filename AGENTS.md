@@ -1,9 +1,11 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.16)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.17)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.16 发版** — merge 事件整段 white-space: nowrap 强制 1 行渲染：v0.7.10 加的 `flex-wrap: wrap` 让长内容（"X 于 Y 合并提交 + ShortSha + 到 + branch" 7 个 inline element）在主行宽度不够时换行成 2 行。修法：新增 `.pr-detail__event-merge` CSS class（`white-space: nowrap` + `display: inline-flex`）+ merge 事件 v-else-if 链 span 加 class，强制整段 1 行；主行 `flex-wrap: wrap` 保留让 author / time 等太长可换行。对齐 Gitea web "X 合并 commit {sha_short} 到 {branch}" 1 行渲染——v0.7.15 改 verb 文案 + 渲染顺序后，本版本补 CSS 强制 1 行）
+> 最后更新：2026-07-12（**v0.7.17 发版** — pr-detail__event-content 内部尽量 1 行显示完：user 反馈"pr-detail__event-content 当中内容，应该尽量 1 行显示完，不要多行显示，和 Gitea web 保持一致"。v0.7.16 只给 merge 事件整段加 nowrap 兜底，其他事件（push / label / assignees / change_title / review_request / change_target_branch / delete_branch / milestone）还是被 v0.7.10 加的 `flex-wrap: wrap` 换行成 2 行。修法：v0.7.17 收口主行 + inline 块强制 1 行——`.pr-detail__event-content` 加 `overflow: hidden`（内容超出容器宽度直接截断，不撑爆 timeline 列宽），`.pr-detail__event-line` 改 `flex-wrap: nowrap` + 加 `white-space: nowrap` + `overflow: hidden`（主行强制 1 行）。block 块（push event commit 列表）保留 column 布局（每 commit 1 行对齐 Gitea web `commits_list_small` 模板），inline 块（label 兜底单 chip 块）继续 wrap 走窄屏换行。对齐 Gitea web 实际渲染——"X 合并 commit {sha_short} 到 {branch}" / "X 修改了标签 [bug]" / "X 删除分支 cx-same-057405" / "X 指派给自己" 等全部 1 行）
+>
+> **前版本**：**v0.7.16 发版** — merge 事件整段 white-space: nowrap 强制 1 行渲染：v0.7.10 加的 `flex-wrap: wrap` 让长内容（"X 于 Y 合并提交 + ShortSha + 到 + branch" 7 个 inline element）在主行宽度不够时换行成 2 行。修法：新增 `.pr-detail__event-merge` CSS class（`white-space: nowrap` + `display: inline-flex`）+ merge 事件 v-else-if 链 span 加 class，强制整段 1 行；主行 `flex-wrap: wrap` 保留让 author / time 等太长可换行。对齐 Gitea web "X 合并 commit {sha_short} 到 {branch}" 1 行渲染——v0.7.15 改 verb 文案 + 渲染顺序后，本版本补 CSS 强制 1 行
 
 >
 
