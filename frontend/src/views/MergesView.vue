@@ -93,24 +93,35 @@ const markdownBaseUrl = computed<string | undefined>(() => {
  * Gitea / GitHub API 返回 color 为 6 位 hex 字符串（不含 #）。
  * 防御性处理：如果 color 已带 # 或为空，做归一化避免 ## 前缀或空值。
  *
- * 对齐 Gitea web 的 label 渲染：文字色根据背景亮度自动选择黑/白，
- * 背景色用 color + '22'（13% 透明度）做柔和底色。
+ * 对齐 Gitea web `modules/templates/util_render.go: RenderLabel` +
+ * `modules/util/color.go: ContrastColor`：
+ *   - 背景 = label.Color（不透明全色，跟 Gitea web `background-color: #xxxxxx !important` 一致）
+ *   - 文字色 = UseLightText 决定（白字/黑字）
+ *   - 不需要边框（实心 + 文字色已经够清晰）
+ *
+ * 之前的 22% alpha 透明背景 + 边框风格在暗色主题下看着太"淡"：
+ *   - 暗色背景 + 13% 透明彩色背景 ≈ 看不到
+ *   - 边框是唯一辨识，颜色深的话边框也接近看不到
+ * 实心全色背景修复后，无论亮 / 暗主题都有强对比，标签一眼能识别。
+ *
+ * UseLightText 阈值 0.453（相对亮度 WCAG 算法 0.2126R + 0.7152G + 0.0722B），
+ * 与 Gitea 端 `web_src/js/utils/color.js` 保持一致。
  */
 function labelStyle(color: string | undefined): Record<string, string> {
   const hex = (color ?? '').replace(/^#/, '');
   if (!hex || hex.length < 6) {
-    return { '--label-color': '#888', '--label-bg': '#88888822' };
+    return { '--label-color': '#fff', '--label-bg': '#888' };
   }
-  // 计算亮度：Gitea web 用 Y = 0.299R + 0.587G + 0.114B
+  // WCAG 相对亮度 (Gitea `GetRelativeLuminance` 同源)
   const r = parseInt(hex.slice(0, 2), 16);
   const g = parseInt(hex.slice(2, 4), 16);
   const b = parseInt(hex.slice(4, 6), 16);
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-  const textColor = brightness > 140 ? '#1a1a1a' : '#fff';
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  const textColor = luminance < 0.453 ? '#fff' : '#1a1a1a';
   return {
     '--label-color': textColor,
-    '--label-bg': `#${hex}22`,
-    '--label-border': `#${hex}`,
+    '--label-bg': `#${hex}`,
+    '--label-border': 'transparent', // 实心背景后边框无意义，去掉
   };
 }
 
@@ -459,6 +470,22 @@ function giteaPullUrl(p: PullDto): string {
   // 上次错拼 GitHub 为 /pulls/N → GitHub 返 404
   const pathSegment = platform === 'github' ? 'pull' : 'pulls';
   return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/${pathSegment}/${p.index}`;
+}
+
+/**
+ * v0.7.6：生成分支 web 链接 —— 对齐 Gitea web `templates/repo/issue/view_title.tmpl`
+ * 中分支链接的格式 /{owner}/{repo}/src/branch/{ref}。
+ *
+ * GitHub web URL 用 /{owner}/{repo}/tree/{ref}（不是 branch）。
+ */
+function branchWebUrl(ref: string): string {
+  if (!activeRepo.value) return '#';
+  const platform = (repo.currentProject?.platform ?? 'gitea') as 'gitea' | 'github';
+  const baseUrl = (auth.getAccountUrlByPlatform(platform) || '').replace(/\/+$/, '');
+  if (!baseUrl) return '#';
+  // Gitea: /{owner}/{repo}/src/branch/{ref} | GitHub: /{owner}/{repo}/tree/{ref}
+  const pathSegment = platform === 'github' ? 'tree' : 'src/branch';
+  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/${pathSegment}/${encodeURIComponent(ref)}`;
 }
 
 /** 在系统浏览器打开合并请求页面（Wails BrowserOpenURL，window.open / <a target=_blank>
@@ -867,9 +894,42 @@ function systemEventVerb(item: TimelineItemDto): string {
   }
   if (item.type === 'pin') return '置顶了此合并请求';
   if (item.type === 'unpin') return '取消了此合并请求的置顶';
-  if (item.type === 'label') return '修改了标签';
+  if (item.type === 'label') {
+    // v0.7.6：label 事件三态文案 —— 对齐 Gitea web
+    // `repo.issues.add_label` / `remove_label` / `add_remove_labels` 中文 locale +
+    // TrN 单复数（TrN(len(added), "add_label", "add_labels", ...)）。
+    //
+    // 单条 label event 也有 addedLabels/removedLabels 数组（store 拆好了），
+    // 三态判定走数组长度：added && !removed → "添加了" / !added && removed → "移除了" /
+    // 都存在 → "修改了"（add+remove 混合）。
+    const added = item.addedLabels ?? [];
+    const removed = item.removedLabels ?? [];
+    if (added.length > 0 && removed.length === 0) {
+      return added.length === 1 ? '添加了标签' : '添加了多个标签';
+    }
+    if (added.length === 0 && removed.length > 0) {
+      return removed.length === 1 ? '移除了标签' : '移除了多个标签';
+    }
+    if (added.length > 0 && removed.length > 0) {
+      return '修改了标签';
+    }
+    // 兼容：合并前单数 label 字段（store 未处理）
+    return '修改了标签';
+  }
   if (item.type === 'milestone') return '修改了里程碑';
-  if (item.type === 'title' || item.type === 'change_title') return '修改了标题';
+  if (item.type === 'title' || item.type === 'change_title') {
+    // v0.7.6：WIP toggle 特殊渲染 —— 对齐 Gitea web
+    // `modules/templates/util_render_comment.go: commentTimelineEventIsWipToggle` +
+    // `repo.pulls.marked_as_work_in_progress_at` / `marked_as_ready_for_review_at` 中文 locale。
+    //
+    // 当用户在 PR 详情页拖"标记为 WIP / 标记为可评审"按钮时，Gitea 端会改标题
+    // 加/去掉 "WIP:" / "Draft:" 前缀，并触发一条 change_title 事件。
+    // 后端检测到这种特殊改标题会设 isWipToggle=true，前端走下面 2 个分支。
+    if (item.isWipToggle) {
+      return item.isWip ? '已将合并请求标记为进行中' : '已将合并请求标记为可评审';
+    }
+    return '修改了标题';
+  }
   if (item.type === 'delete_branch') return '删除了分支';
   if (item.type === 'change_target_branch') return '修改了目标分支';
   if (item.type === 'lock') return '锁定了此合并请求';
@@ -1910,9 +1970,30 @@ function formatRelative(iso: string | undefined): string {
               <h2 class="pr-detail-header__title">{{ selectedPR.title }}</h2>
               <div class="pr-detail-header__subtitle">
                 <span :class="badgeClass(selectedPR)" class="pr-detail-header__badge">{{ badgeText(selectedPR) }}</span>
-                <span><strong style="color: var(--color-text);">{{ selectedPR.author.username }}</strong> 想把
-                  <code class="mono pr-detail__branch">{{ selectedPR.head.ref }}</code> 合并到
-                  <code class="mono pr-detail__branch pr-detail__branch--dst">{{ selectedPR.base.ref }}</code>
+                <!-- v0.7.6：分支信息对齐 Gitea web `templates/repo/issue/view_title.tmpl` 渲染
+                     格式："{author} 请求将 {N} 次代码提交从 {head} 合并至 {base}"
+                     分支名加链接到 /src/branch/{ref}，点击可在 Gitea web 看分支历史 -->
+                <span><strong style="color: var(--color-text);">{{ displayName(selectedPR.author) }}</strong> 请求将
+                  <strong>{{ Math.max(selectedPR.commits ?? 1, 1) }}</strong> 次代码提交从
+                  <a
+                    v-if="activeRepo"
+                    class="mono pr-detail__branch pr-detail__branch--link"
+                    :href="branchWebUrl(selectedPR.head.ref)"
+                    target="_blank"
+                    rel="noopener"
+                    :title="`在 Gitea 打开 ${selectedPR.head.ref} 分支`"
+                  >{{ selectedPR.head.ref }}</a>
+                  <code v-else class="mono pr-detail__branch">{{ selectedPR.head.ref }}</code>
+                  合并至
+                  <a
+                    v-if="activeRepo"
+                    class="mono pr-detail__branch pr-detail__branch--dst pr-detail__branch--link"
+                    :href="branchWebUrl(selectedPR.base.ref)"
+                    target="_blank"
+                    rel="noopener"
+                    :title="`在 Gitea 打开 ${selectedPR.base.ref} 分支`"
+                  >{{ selectedPR.base.ref }}</a>
+                  <code v-else class="mono pr-detail__branch pr-detail__branch--dst">{{ selectedPR.base.ref }}</code>
                 </span>
               </div>
             </div>
@@ -2172,7 +2253,8 @@ git checkout {{ selectedPR.head.ref }}</pre>
                 暂无对话，发起第一条评论开始讨论吧
               </div>
               <ul v-else class="pr-detail__timeline">
-                <template v-for="(item) in getTimelinePanel().items ?? []">
+                <!-- v0.7.6：v-for 过滤掉 label 合并后被标记 merged=true 的事件（避免重复渲染） -->
+                <template v-for="(item) in (getTimelinePanel().items ?? []).filter((it) => !it.merged)" :key="`tl-${item.id}`">
                   <!-- 评审事件 (v0.7.3：紧凑单行 —— 对齐 Gitea web .timeline-item.event) -->
                   <li
                     v-if="item.type === 'review'"
@@ -2335,7 +2417,17 @@ git checkout {{ selectedPR.head.ref }}</pre>
                       </template>
                       <!-- 展示态 -->
                       <template v-else>
-                        <div class="pr-detail__comment-body md-body" v-html="renderMarkdown(item.body, markdownBaseUrl)"></div>
+                        <!-- v0.7.6 修复：v-if="item.body" 防御性渲染 —— v-html 空字符串会渲染空 div
+                             （不显示但占位），加 v-if 让空 body 评论跳过这个 div，body 完全缺失时
+                             也不至于误判为 "评论内容未显示"。这种情况会显示 "无内容" 占位。 -->
+                        <div
+                          v-if="item.body"
+                          class="pr-detail__comment-body md-body"
+                          v-html="renderMarkdown(item.body, markdownBaseUrl)"
+                        ></div>
+                        <div v-else class="pr-detail__comment-body pr-detail__comment-body--empty">
+                          （无内容）
+                        </div>
                         <span
                           v-if="item.updated && item.updated !== item.created"
                           class="pr-detail__comment-edited-mark"
@@ -2401,8 +2493,27 @@ git checkout {{ selectedPR.head.ref }}</pre>
                         v-if="hasSystemEventInlineDetail(item)"
                         class="pr-detail__event-inline"
                       >
+                        <!-- v0.7.6：label 事件用 addedLabels/removedLabels 数组渲染（合并后） -->
                         <span
-                          v-if="item.type === 'label' && item.label"
+                          v-if="item.type === 'label' && (item.addedLabels?.length || item.removedLabels?.length)"
+                          class="pr-detail__event-labels"
+                        >
+                          <span
+                            v-for="lbl in item.addedLabels"
+                            :key="`add-${lbl.id}`"
+                            class="pr-detail__event-label pr-detail__event-label--add"
+                            :style="labelStyle(lbl.color)"
+                          >{{ lbl.name }}</span>
+                          <span
+                            v-for="lbl in item.removedLabels"
+                            :key="`rm-${lbl.id}`"
+                            class="pr-detail__event-label pr-detail__event-label--remove"
+                            :style="labelStyle(lbl.color)"
+                          >{{ lbl.name }}</span>
+                        </span>
+                        <!-- v0.7.6 兼容：合并前的单条 label event 仍走单 chip 渲染（store 合并时只对连续有效） -->
+                        <span
+                          v-else-if="item.type === 'label' && item.label"
                           class="pr-detail__event-label"
                           :style="labelStyle(item.label.color)"
                         >{{ item.label.name }}</span>
@@ -2454,7 +2565,8 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           </span>
                         </span>
 
-                        <span v-else-if="item.type === 'title' || item.type === 'change_title'">
+                        <!-- v0.7.6：WIP toggle 时不显示 oldTitle → newTitle（标题内容没意义） -->
+                        <span v-else-if="(item.type === 'title' || item.type === 'change_title') && !item.isWipToggle">
                           <span class="pr-detail__event-strike">{{ item.oldTitle }}</span>
                           <span class="pr-detail__event-arrow">→</span>
                           <span class="pr-detail__event-emphasis">{{ item.newTitle }}</span>
@@ -3463,7 +3575,9 @@ git checkout {{ selectedPR.head.ref }}</pre>
   border-radius: var(--radius-pill);
   background: var(--label-bg, var(--color-bg));
   color: var(--label-color, var(--color-text));
-  border: 1px solid var(--label-color, var(--color-divider));
+  /* v0.7.6：实心背景后边框去掉（labelStyle 返回 --label-border: transparent）——
+     之前用 --label-color 当边框色会让深色 label 出现白边，跟 Gitea web 不一致。 */
+  border: 1px solid transparent;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -5474,6 +5588,17 @@ git checkout {{ selectedPR.head.ref }}</pre>
   color: var(--color-primary-bright, var(--color-primary));
   font-weight: 600;
 }
+/* v0.7.6：分支链接样式 —— 鼠标 hover 出现下划线 + 颜色变深，跟 Gitea web
+   蓝色分支链接行为一致；不破坏默认 inline 紧凑布局。 */
+.pr-detail__branch--link {
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s;
+}
+.pr-detail__branch--link:hover {
+  text-decoration: underline;
+  filter: brightness(1.1);
+}
 .pr-detail__label {
   display: inline-block;
   padding: 1px 6px;
@@ -5958,15 +6083,68 @@ git checkout {{ selectedPR.head.ref }}</pre>
 .pr-detail__event-link:hover {
   text-decoration: underline;
 }
-/* Label chip —— 复用属性编辑器的 labelStyle 颜色逻辑（hex + 22 透明 + 文字色） */
+/* Label chip —— 复用属性编辑器的 labelStyle 颜色逻辑（v0.7.6：实心 + 自动文字色） */
 .pr-detail__event-label {
   font-size: 11px;
   padding: 1px 8px;
   border-radius: 10px;
   font-weight: 500;
-  border: 1px solid var(--label-border, var(--color-divider));
+  border: 1px solid var(--label-border, transparent);
   background: var(--label-bg, var(--color-bg-hover));
   color: var(--label-color, var(--color-text));
+}
+
+/* v0.7.6：label 事件多 chip 容器（合并后 add+remove 多个 label 横向排列） */
+.pr-detail__event-labels {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+/* v0.7.6：add label 加左边 + 号提示（去掉后用 line-through + 灰底区分） */
+.pr-detail__event-label--add {
+  position: relative;
+  padding-left: 14px;
+}
+.pr-detail__event-label--add::before {
+  content: "+";
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  /* 实心 label 背景上 + 号用半透明白，跟 label 文字色协调（亮 / 暗都可见） */
+  color: var(--label-color);
+  opacity: 0.75;
+}
+.pr-detail__event-label--remove {
+  position: relative;
+  padding-left: 14px;
+  text-decoration: line-through;
+  text-decoration-color: var(--label-color);
+  text-decoration-thickness: 1.5px;
+  opacity: 0.75;
+}
+.pr-detail__event-label--remove::before {
+  content: "−";
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--label-color);
+  opacity: 0.75;
+}
+
+/* v0.7.6：评论 body 缺失占位 —— 显示 "(无内容)" 让用户知道这是服务端没 body，
+   不是 bug。颜色用 muted 跟"已编辑"mark 风格一致。 */
+.pr-detail__comment-body--empty {
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 /* v0.7.3：review event 不再需要独立的虚线边框样式（avatar 节点颜色档已表达 review state） */

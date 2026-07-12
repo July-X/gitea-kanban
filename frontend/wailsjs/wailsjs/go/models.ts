@@ -1936,6 +1936,7 @@ export namespace platform {
 	    hasConflicts: boolean;
 	    body?: string;
 	    commentsCount: number;
+	    commits?: number;
 	    labels?: PullLabelDTO[];
 	    assignees?: PullUserDTO[];
 	    reviewers?: PullUserDTO[];
@@ -1964,6 +1965,7 @@ export namespace platform {
 	        this.hasConflicts = source["hasConflicts"];
 	        this.body = source["body"];
 	        this.commentsCount = source["commentsCount"];
+	        this.commits = source["commits"];
 	        this.labels = this.convertValues(source["labels"], PullLabelDTO);
 	        this.assignees = this.convertValues(source["assignees"], PullUserDTO);
 	        this.reviewers = this.convertValues(source["reviewers"], PullUserDTO);
@@ -2284,6 +2286,11 @@ export namespace platform {
 	    ref_action?: string;
 	    ref_commit_sha?: string;
 	    dependent_issue?: IssueDTO;
+	    is_wip_toggle?: boolean;
+	    is_wip?: boolean;
+	    added_labels?: PullLabelDTO[];
+	    removed_labels?: PullLabelDTO[];
+	    label_action?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TimelineItem(source);
@@ -2314,6 +2321,11 @@ export namespace platform {
 	        this.ref_action = source["ref_action"];
 	        this.ref_commit_sha = source["ref_commit_sha"];
 	        this.dependent_issue = this.convertValues(source["dependent_issue"], IssueDTO);
+	        this.is_wip_toggle = source["is_wip_toggle"];
+	        this.is_wip = source["is_wip"];
+	        this.added_labels = this.convertValues(source["added_labels"], PullLabelDTO);
+	        this.removed_labels = this.convertValues(source["removed_labels"], PullLabelDTO);
+	        this.label_action = source["label_action"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
