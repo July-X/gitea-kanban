@@ -330,6 +330,11 @@ export interface PullDto {
   // v0.7.6：用于 PR 头部分支链接（/src/branch/{ref}），ListPulls resp 不返回
   // repoFullName，前端用 projectId 反查 LocalState.repoPath 后拼。
   // 不存到 DTO 里（避免污染），用项目级 helper `branchWebUrl()` 处理。
+  // v0.7.8：merge commit SHA —— Gitea 1.26+ timeline 端点 merge_pull event body
+  // 是空字符串（不像 v0.7.4-v0.7.7 假设的 "merged commit {sha}" 文本），timeline
+  // 渲染 merge 事件 inline 块需要的 SHA 从 PR 详情端点 `merge_commit_sha` 字段拿。
+  // ListPulls 轻量接口不返这个字段，store.fetchPullDetail() 拉详情后浅 patch 进来。
+  mergeCommitSha?: string;
 }
 
 export interface ListPullsArgs {
@@ -498,16 +503,25 @@ export interface TimelineItemDto {
   // （避免重复显示 "添加了标签 bug" / "添加了标签 enhancement"）。
   merged?: boolean;
 
-  // ===== v0.7.7：type=29 (push) 事件专属字段 =====
-  // 对齐 Gitea 端 `models/issues/comment.go: Comment.OldCommit / NewCommit /
-  // CommitsNum / IsForcePush`。前端 push 事件模板用 NewCommit 短码显示 + 跳到
-  // Gitea web compare 链接（force push 时 OldCommit..NewCommit）。
-  oldCommit?: string;
-  newCommit?: string;
-  commitsNum?: number;
+  // ===== v0.7.8：type=push (前 v0.7.7 叫 type=29) 事件专属字段 =====
+  //
+  // 根因（v0.7.7 → v0.7.8 重写）：v0.7.7 假设 Gitea /timeline 端点顶层会返
+  // `old_commit_id / new_commit_id / commits_num / is_force_push` 4 个独立字段，
+  // 实际 Gitea 1.26+ API 这 4 个字段**全部不返回**。真实数据在 body JSON 字符串里：
+  //   `{"is_force_push":false,"commit_ids":["sha1","sha2"]}`
+  // v0.7.7 凭印象写代码（没实测过 API），导致所有 push / merge 事件模板永远
+  // 不渲染（type 字符串 "push" 跟实际 "pull_push" 也不匹配）。
+  //
+  // v0.7.8 重写：删 4 个无用字段（oldCommit / newCommit / commitsNum），加
+  // `commitIds` 数组（直接拿 Gitea 端 commit_ids 渲染 commit 列表），保留
+  // isForcePush 标志（从 body JSON 拿，**不是**顶层字段）。
+  commitIds?: string[];
   isForcePush?: boolean;
-  // v0.7.7：type=28 (merge) 事件完整 commit SHA（v0.7.6 用 body regex 抠短码；
-  // 现在后端 TimelineItem 加 MergeCommitSHA 字段更稳）。
+  // type=merge (前 v0.7.7 叫 type=28) 事件：merge commit SHA。
+  // Gitea 1.26+ timeline 端点 merge_pull event body 是空字符串，merge commit SHA
+  // 只能从 PR 详情 `/pulls/{index}` 端点的 `merge_commit_sha` 字段拿（v0.7.8 修
+  // giteaPullRaw 映射，PullDetailDTO.MergeCommitSha 字段 v0.7.7 已有但 raw 漏映射）。
+  // timeline 渲染 merge 事件 inline 块时拿这个字段。PR 未合并时为空。
   mergeCommitSha?: string;
 }
 
