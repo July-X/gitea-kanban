@@ -6570,16 +6570,25 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   gap: 2px;
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
+  /* v0.7.17 根因修复：pr-detail__event-content 内部子块（主行 + inline + block）
+     各自保持 1 行渲染，超出部分溢出隐藏 —— user 反馈"pr-detail__event-content
+     当中内容，应该尽量 1 行显示完，不要多行显示"。主行 / inline 块强制不换行
+     （v0.7.10 加的 flex-wrap: wrap 让长内容在主行宽度不够时换行成 2 行，user
+     期望跟 Gitea web 1 行渲染一致）。block 块（push event commit 列表）保留
+     column 布局（每 commit 一行对齐 Gitea web `commits_list_small` 模板）。 */
+  overflow: hidden;
 }
-/* v0.7.10：timeline 文字字号升一档（user 反馈"文字可以再增加一个字号"）——
-   event-line 显式 14px（之前 author/verb 继承默认 13px），
-   event-prep 14px（之前 13px）、event-time 12px（之前 11px）、
-   event-inline 14px（之前 13px）。 */
+/* v0.7.17 根因修复：event-line 主行强制 1 行（之前 v0.7.10 加的 flex-wrap: wrap
+   让长内容"X 于 Y 合并提交 f30ece070c 到 main" 换行成 2 行）。white-space: nowrap
+   + flex-wrap: nowrap 双保险，溢出部分 hidden（不撑爆容器）。Gitea web 实际
+   "X 于 Y 合并提交 f30ece070c 到 main" 1 行渲染，我们对齐。 */
 .pr-detail__event-line {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
   font-size: var(--font-body);
 }
 /* v0.7.16 根因修复：merge 事件整段（verb "合并提交" + ShortSha + 到 + branch）
