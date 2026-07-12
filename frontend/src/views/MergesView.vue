@@ -853,7 +853,18 @@ function systemEventVerb(item: TimelineItemDto): string {
   if (item.type === 'close') return '关闭了此合并请求';
   if (item.type === 'reopen') return '重新开启了此合并请求';
   if (item.type === 'merge') return '合并了提交';
-  if (item.type === 'push') return '推送了新提交';
+  if (item.type === 'push') {
+    // v0.7.5：从 body 抠 commit 数量 + force push 标志
+    // Gitea 端 body: "added N commits {time}" / "added 1 commit {time}" / "force-pushed X from sha1 to sha2 {time}"
+    // 中文 Gitea body: "添加了 N 个提交 {time}" / "强制推送了 X 从 sha1 到 sha2 {time}"
+    // 简化：只解析 commit 数量（regex 抠数字 + 跟 commit/提交 关键字共现）
+    const m = /(\d+)\s*(commits?|个?提交|个?个提交)/i.exec(item.body ?? '');
+    if (m) {
+      const n = parseInt(m[1] ?? '0', 10);
+      if (n > 0) return n === 1 ? '推送了 1 个提交' : `推送了 ${n} 个提交`;
+    }
+    return '推送了新提交';
+  }
   if (item.type === 'pin') return '置顶了此合并请求';
   if (item.type === 'unpin') return '取消了此合并请求的置顶';
   if (item.type === 'label') return '修改了标签';
