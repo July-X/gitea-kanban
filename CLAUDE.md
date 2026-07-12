@@ -45,6 +45,8 @@
 > **v0.7.10 增量**：PR 对话区 UI 微调（user 反馈 ⑨）—— ① 移除 `pr-detail__conv-header` 对话标题 div（"不需要展示出来"，含 MessageSquare icon + "对话" + 计数 badge + 刷新按钮整块） + 删对应 CSS（.pr-detail__conv-header / .pr-detail__conv-header-left / .pr-detail__conv-count）② timeline dot 22px → 26px（"大一点点"）+ 内部 icon size 13 → 15（review state + system event 2 处同步放大）③ timeline 文字字号升一档：event-line 显式 14px（继承默认 13px）+ event-prep 14px（13px）+ event-time 12px（11px，inline 不引 --font-mono 避免中文 + 数字用等宽字体）+ event-inline 14px（13px）。docs/releases/v0.7.10.md。
 
 > **v0.7.11 增量**：指派自指派判断 + delete_branch verb 对齐 Gitea web（user 反馈 ⑩ "指派给自己的事件，没有对齐" + "分支信息还是有缺失"）—— ① `systemEventVerb` assignees 分支补 `isSelfAssign` 判断（`assignee.username === author.username`）：自指派 → "自指派"/"取消自指派"、指派给他人 → "指派给"/"取消了指派"，对齐 Gitea web 中文 locale（v0.7.5 注释里就有规划但代码漏判）② `systemEventVerb` delete_branch 分支：'删除了分支' → '删除分支'（去掉"了"字对齐 Gitea web "删除分支 ex-same-057405" 渲染，分支名走 inline 块的 GitBranch icon + `<code>{{ item.oldRef }}</code>`，v0.7.4 已有）③ 注意：close 事件 verb "关闭了此合并请求" 跟 Gitea web "关闭此合并请求"（无"了"）也对不齐，user 没明确反馈本次没动。docs/releases/v0.7.11.md。
+
+> **v0.7.12 增量**：Gitea web 1:1 对齐 assignees / delete_branch 渲染（user 反馈 ⑪ "指派给自己的事件，没有对齐" + "分支信息还是有缺失" + "推送事件没显示 commit 消息"）—— ① assignees 事件删除 v0.7.4 加的 inline 块（"+/− icon + assignee 用户名 + 添加了指派" 缩进），对齐 Gitea web 把信息合并到主行 verb（"kanban_bot 于 上个月 指派给自己"）② delete_branch 事件 verb 直接拼分支名（`删除分支 ${oldRef.replace(/^refs\/heads\//, '')}`），去掉 inline 块（v0.7.10 改 CSS 后 user 反馈仍看不到 inline 块，verb 拼接方案兜底），对齐 Gitea web "kanban_bot 于 3 周前 删除分支 cx-same-057405" 渲染 ③ push 事件 commit 消息 v0.7.8 已加 block 块 + commitDetails(sha) helper，留给 user 升级 binary 验证（如不生效 v0.7.13 排查）。docs/releases/v0.7.12.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
