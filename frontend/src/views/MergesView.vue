@@ -22,7 +22,7 @@
  */
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import {
-  GitMerge, GitPullRequestArrow, GitBranch, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink,
+  GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
   // v0.7.2: 系统事件图标（对齐 Gitea web octicon-* 体系）
   RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, UserMinus, Type, Calendar,
@@ -995,6 +995,56 @@ function mergeCommitSha(item: TimelineItemDto): string | null {
 }
 
 /**
+ * v0.7.7：mergeCommitSha(item) 只返 7 位短码；commit 链接需要完整 40 位 SHA。
+ * 从 body regex 抠完整 SHA 返（用于 commitWebUrl 链接）。
+ */
+function fullMergeSha(item: TimelineItemDto): string {
+  if (!item.body) return '';
+  const m = /merged commit ([0-9a-f]{40})/i.exec(item.body);
+  return m ? (m[1] ?? '') : '';
+}
+
+/**
+ * v0.7.7：push 事件的 commit 列表 —— 按 OldCommit..NewCommit 范围从
+ * commitsByPR 缓存里过滤出该次 push 的 commit 子集。
+ *
+ * 算法（简化版）：
+ *   1. 拿 PR 全量 commits（commitsByPR.get(p.index)），按 head 端时间倒序
+ *   2. 找 OldCommit 在列表里的位置（可能不在 — OldCommit 是上次 push 后的 head，
+ *      不一定在当前 base..head 范围里）
+ *   3. 找 NewCommit 在列表里的位置（必定在）
+ *   4. 返回 OldCommit 位置到 NewCommit 位置之间的 commits
+ *
+ * 边界：
+ *   - OldCommit 为空（首次 push）→ 返 commitsByPR 全量
+ *   - OldCommit 不在列表里 → 返 commitsByPR 全量（fallback）
+ *   - NewCommit 不在列表里 → 返空（push event 不在当前 PR 范围）
+ *   - force push → OldCommit..NewCommit 区间可能跳变，按 NewCommit 位置返更稳
+ *
+ * v0.7.7.1 计划：精确分组（用 GitHub compare API 端点拿 OldCommit..NewCommit
+ * 之间的 commit 列表）—— 现在简化版按 NewCommit 位置往前 N 个 (N = CommitsNum)。
+ */
+function pushEventCommits(item: TimelineItemDto): PullCommitDto[] {
+  if (item.type !== 'push') return [];
+  if (!activeRepo.value) return [];
+  const all = pull.commitsByPR.get(activeRepo.value.id) ?? [];
+  if (all.length === 0) return [];
+
+  // 简化策略：找 NewCommit 在 all 里的位置，往前取 CommitsNum 个 commit。
+  // 这是 v0.7.7 临时方案 —— v0.7.7.1 计划用 GitHub compare 端点拿精确范围。
+  if (!item.newCommit) {
+    return all.slice(0, item.commitsNum ?? all.length);
+  }
+  const idx = all.findIndex((c) => c.sha === item.newCommit || c.sha.startsWith(item.newCommit ?? ''));
+  if (idx < 0) {
+    // fallback：返前 N 个
+    return all.slice(0, item.commitsNum ?? 0);
+  }
+  const n = item.commitsNum && item.commitsNum > 0 ? item.commitsNum : 1;
+  return all.slice(idx, idx + n);
+}
+
+/**
  * v0.7.5：系统事件 verb 文案（type 级别，fallback）
  *
  * 严格对齐 Gitea web 中文 locale（locales/zh-CN/options/locale/translation.go）：
@@ -1127,6 +1177,8 @@ function hasSystemEventInlineDetail(item: TimelineItemDto): boolean {
   if (item.type === 'change_target_branch') return !!(item.oldRef || item.newRef);
   if (item.type === 'commit_ref') return !!item.refCommitSha;
   if (item.type === 'merge') return !!selectedPR.value?.base?.ref;
+  // v0.7.7：push 事件 inline 块 —— 显示 commit 列表（按 OldCommit..NewCommit 范围过滤）
+  if (item.type === 'push') return !!(item.newCommit || (item.commitsNum && item.commitsNum > 0));
   return false;
 }
 
@@ -1460,6 +1512,9 @@ async function loadComments(p: PullDto): Promise<void> {
   // 已加载过且非空，跳过（用户切 tab / 列表 refresh 也不会清空，保留上下文）
   if (panel.items.length > 0) return;
   await pull.fetchTimeline(p);
+  // v0.7.7：并行拉 PR 全量 commit 列表 —— push 事件 inline 块渲染用。
+  // 缓存由 store 内部管理（commitsByPR），重复调不重新发请求。
+  await pull.loadCommits(activeProjectId.value, p.index);
 }
 
 /** 强制重拉评论（发送评论后用 —— 保证看到自己刚发的，带权威 id / 时间戳） */
@@ -2550,19 +2605,38 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           <span class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了评审请求' : '请求评审' }}</span>
                         </span>
 
-                        <!-- v0.7.4：merge 合并事件详情
+                        <!-- v0.7.7：push 事件详情
+                             Gitea web: "X 推送了 1 次提交" (1 commit + 短 SHA 链接)
+                             本实现：item.newCommit 7 位短码 + commit web 链接。
+                             push event 的 commit 列表在下方 block 块单独渲染（按 OldCommit..NewCommit 范围）。 -->
+                        <span v-else-if="item.type === 'push' && item.newCommit">
+                          <a
+                            class="mono pr-detail__event-branch pr-detail__branch--link"
+                            :href="commitWebUrl(item.newCommit)"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`在 Gitea 打开 ${item.newCommit.slice(0, 7)} 提交`"
+                          >{{ item.newCommit.slice(0, 7) }}</a>
+                          <span v-if="item.isForcePush" class="pr-detail__event-hint">(强制推送)</span>
+                        </span>
+
+                        <!-- v0.7.7：merge 合并事件详情
                              Gitea web: "X 合并 commit {sha_short} 到 {branch}"
-                             本实现：base ref 从 selectedPR 拿（PR.base.ref 是目标分支），
-                             短 SHA 从 item.body 解析（type 28 合并评论 body 格式：
-                             "merged commit {sha} into {branch}"） -->
+                             v0.7.6: 短 SHA 从 item.body regex 抠 "merged commit {sha}"
+                             v0.7.7: 改用 item.mergeCommitSha 字段（后端 TimelineItem 加） +
+                                     commit web 链接 -->
                         <span v-else-if="item.type === 'merge' && selectedPR?.base?.ref">
                           <GitMerge :size="12" :stroke-width="2" aria-hidden="true" />
                           <span class="pr-detail__event-hint">到</span>
                           <code class="pr-detail__event-branch">{{ selectedPR.base.ref }}</code>
-                          <span v-if="mergeCommitSha(item)" class="pr-detail__event-merge-sha">
-                            <span class="pr-detail__event-hint">·</span>
-                            <code class="pr-detail__event-branch">{{ mergeCommitSha(item) }}</code>
-                          </span>
+                          <a
+                            v-if="item.mergeCommitSha || mergeCommitSha(item)"
+                            class="mono pr-detail__event-branch pr-detail__branch--link"
+                            :href="commitWebUrl(item.mergeCommitSha || fullMergeSha(item))"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`在 Gitea 打开 ${(item.mergeCommitSha || mergeCommitSha(item) || '').slice(0, 7)} 提交`"
+                          >{{ (item.mergeCommitSha || mergeCommitSha(item) || '').slice(0, 7) }}</a>
                         </span>
 
                         <!-- v0.7.6：WIP toggle 时不显示 oldTitle → newTitle（标题内容没意义） -->
@@ -2629,6 +2703,33 @@ git checkout {{ selectedPR.head.ref }}</pre>
                           <span v-else class="pr-detail__event-link">#{{ item.dependentIssue.index }}</span>
                           <span class="pr-detail__event-emphasis">{{ item.dependentIssue.title }}</span>
                         </span>
+                      </div>
+                      <!-- v0.7.7：push 事件 commit 列表块（独立于 hasSystemEventBlockDetail 链）——
+                           对齐 Gitea web `templates/repo/commits_list_small.tmpl` 渲染：
+                           缩进 + 短 SHA 链接 + commit 消息 + 提交者。
+                           Gitea 端 `Comment.Commits` 是 xorm:"-" 服务端字段 API 不暴露，
+                           v0.7.7 实现：调 /pulls/{index}/commits 拉全量 commits + 按
+                           OldCommit..NewCommit 范围过滤（push event 提交子集）。 -->
+                      <div
+                        v-if="item.type === 'push' && pushEventCommits(item).length > 0"
+                        class="pr-detail__event-block pr-detail__event-block--commits"
+                      >
+                        <div
+                          v-for="c in pushEventCommits(item)"
+                          :key="c.sha"
+                          class="pr-detail__event-commit-row"
+                        >
+                          <GitCommit :size="12" :stroke-width="2" aria-hidden="true" class="pr-detail__event-commit-icon" />
+                          <a
+                            class="mono pr-detail__event-commit-sha pr-detail__branch--link"
+                            :href="commitWebUrl(c.sha)"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`在 Gitea 打开 ${c.shortSha || c.sha.slice(0, 7)} 提交`"
+                          >{{ c.shortSha || c.sha.slice(0, 7) }}</a>
+                          <span class="pr-detail__event-commit-subject">{{ c.subject }}</span>
+                          <span v-if="c.authorName" class="pr-detail__event-commit-author">{{ c.authorName }}</span>
+                        </div>
                       </div>
                     </div>
                   </li>
@@ -6458,6 +6559,49 @@ git checkout {{ selectedPR.head.ref }}</pre>
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* v0.7.7：push 事件 commit 列表块 —— 对齐 Gitea web `templates/repo/commits_list_small.tmpl`
+   缩进 + 短 SHA 链接 + commit 消息 + 提交者。 */
+.pr-detail__event-block--commits {
+  margin-top: 4px;
+  padding: 6px 0 6px 22px;
+  border-left: 2px solid var(--color-divider);
+  margin-left: 8px;
+}
+.pr-detail__event-commit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: var(--font-xs);
+  color: var(--color-text);
+}
+.pr-detail__event-commit-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.pr-detail__event-commit-sha {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  padding: 1px 6px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-decoration: none;
+  color: var(--color-text);
+}
+.pr-detail__event-commit-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-detail__event-commit-author {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 /* ===== 评审事件（review_event，单行） ===== */
