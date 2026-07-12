@@ -898,6 +898,16 @@ function reviewEventLabel(event: ReviewEvent): string {
  */
 function systemEventVerb(item: TimelineItemDto): string {
   if (item.type === 'assignees') {
+    // v0.7.11 根因修复：v0.7.5 写注释时就有"自指派 vs 指派给"分支规划，但实际代码
+    // 只判 removedAssignee 没判 assignee == author（user 反馈 ⑩"指派给自己的事件
+    // 没有对齐"——Gitea web 显示"指派给自己"）。补全判断：
+    //   - assignee.login == user.login（自指派）
+    //   - 否则指派给其他人
+    const isSelfAssign = item.assignee?.username && item.author?.username
+      && item.assignee.username === item.author.username;
+    if (isSelfAssign) {
+      return item.removedAssignee ? '取消自指派' : '自指派';
+    }
     return item.removedAssignee ? '取消了指派' : '指派给';
   }
   if (item.type === 'review_request') {
@@ -958,7 +968,7 @@ function systemEventVerb(item: TimelineItemDto): string {
     }
     return '修改了标题';
   }
-  if (item.type === 'delete_branch') return '删除了分支';
+  if (item.type === 'delete_branch') return '删除分支'; // v0.7.11 去掉"了"字 —— 对齐 Gitea web "删除分支"（分支名在 inline 块）
   if (item.type === 'change_target_branch') return '修改了目标分支';
   if (item.type === 'lock') return '锁定了此合并请求';
   if (item.type === 'unlock') return '解锁了此合并请求';
