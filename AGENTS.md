@@ -1,9 +1,9 @@
 <!-- AGENTS.md — gitea-kanban -->
-# AGENTS.md — gitea-kanban (v2.0 → v0.7.13)
+# AGENTS.md — gitea-kanban (v2.0 → v0.7.14)
 
 > **本文件给所有 AI coding agent 和开发者读**。它是项目实现的入口规范；如果本文件与仓库里其它文档冲突，**以本文件为准**。
 >
-> 最后更新：2026-07-12（**v0.7.13 发版** — assignees verb 文案对齐 Gitea web：自指派 add → "指派给自己" / 自指派 remove → "取消指派给自己" / 他人 add → "指派给 {X}"（拼接 `displayName(item.assignee)`）/ 他人 remove → "取消指派给 {X}"（4 字符串按 Gitea web `repo.issues.self_assigned` / `assigned_to` / `unassigned` / `unassigned_from` 中文 locale 改）—— v0.7.12 修 v0.7.4 inline 块残留问题后，本版本按 user 反馈调 assignees 文案；user 反馈"还是看不到具体的分支信息"（push event commit 消息 + delete_branch 分支名）v0.7.8 + v0.7.12 master 已修，user 实际跑 v0.7.5 之前 binary 看不到效果需要升级 binary）
+> 最后更新：2026-07-12（**v0.7.14 发版** — label 事件 chip 移到主行：v0.7.6 把 label chip 渲染在独立 `<div pr-detail__event-inline>` 块（缩进显示）跟 push/merge 在主行 v-else-if 链里渲染风格不一致，v0.7.14 改把 label chip 搬到主行 `<div pr-detail__event-line>` 内紧跟 verb span 后，跟 push/merge 一致同 div 渲染，删除 inline 块内 label chip 重复渲染；user 反馈"修改了标签"后面 chip 不要单独换一行显示，对齐 Gitea web "X 于 Y 修改了标签 [bug] [feature] [needs-review]" 一行渲染——v0.7.13 改 assignees verb 文案后，本版本按 user 反馈把 label chip 渲染位置改一致）
 
 >
 

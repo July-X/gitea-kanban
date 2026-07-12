@@ -49,6 +49,8 @@
 > **v0.7.12 增量**：Gitea web 1:1 对齐 assignees / delete_branch 渲染（user 反馈 ⑪ "指派给自己的事件，没有对齐" + "分支信息还是有缺失" + "推送事件没显示 commit 消息"）—— ① assignees 事件删除 v0.7.4 加的 inline 块（"+/− icon + assignee 用户名 + 添加了指派" 缩进），对齐 Gitea web 把信息合并到主行 verb（"kanban_bot 于 上个月 指派给自己"）② delete_branch 事件 verb 直接拼分支名（`删除分支 ${oldRef.replace(/^refs\/heads\//, '')}`），去掉 inline 块（v0.7.10 改 CSS 后 user 反馈仍看不到 inline 块，verb 拼接方案兜底），对齐 Gitea web "kanban_bot 于 3 周前 删除分支 cx-same-057405" 渲染 ③ push 事件 commit 消息 v0.7.8 已加 block 块 + commitDetails(sha) helper，留给 user 升级 binary 验证（如不生效 v0.7.13 排查）。docs/releases/v0.7.12.md。
 
 > **v0.7.13 增量**：assignees verb 文案对齐 Gitea web（user 反馈 ⑫"自指派应该改成指派给自己，指派给其他人应该是指派给X"）—— 4 字符串全部按 Gitea web `repo.issues.self_assigned` / `assigned_to` / `unassigned` / `unassigned_from` 中文 locale 改：自指派 add → "指派给自己" / 自指派 remove → "取消指派给自己" / 他人 add → "指派给 {X}"（拼接 `displayName(item.assignee)`） / 他人 remove → "取消指派给 {X}"。user 反馈"还是看不到具体的分支信息"（push event commit 消息 + delete_branch 分支名）v0.7.8 + v0.7.12 master 已修，但 user 实际跑 v0.7.5 之前 binary 看不到效果，需要升级 binary 才能看到新效果。docs/releases/v0.7.13.md。
+
+> **v0.7.14 增量**：label 事件 chip 移到主行（user 反馈 ⑬"修改了标签"后面 chip 不要单独换一行显示）—— v0.7.6 把 label chip 渲染在独立 `<div pr-detail__event-inline>` 块（缩进显示），跟 push/merge 在主行 v-else-if 链里渲染的风格不一致；v0.7.14 改：把 label chip 搬到主行 `<div pr-detail__event-line>` 内紧跟 verb span 后，跟 push/merge 一致同 div 渲染；保留单 chip 兜底；删除 inline 块内 label chip 重复渲染。对齐 Gitea web "X 于 Y 修改了标签 [bug] [feature] [needs-review]" 一行渲染。user 反馈"还是看不到具体的分支信息"v0.7.8 + v0.7.12 master 已修，user 实际跑 v0.7.5 之前 binary 看不到效果。docs/releases/v0.7.14.md。
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
