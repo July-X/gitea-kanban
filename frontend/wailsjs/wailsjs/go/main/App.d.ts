@@ -133,4 +133,6 @@ export function UpdatePullMilestone(arg1:main.UpdatePullMilestoneArgs):Promise<p
 
 export function UpdatePullReviewers(arg1:main.UpdatePullReviewersArgs):Promise<platform.PullDetailDTO>;
 
+export function UpdatePullTitle(arg1:main.UpdatePullTitleArgs):Promise<platform.PullDetailDTO>;
+
 export function UploadPullAttachment(arg1:main.UploadPullAttachmentArgs):Promise<platform.AttachmentDTO>;

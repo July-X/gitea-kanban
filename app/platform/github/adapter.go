@@ -1050,6 +1050,22 @@ func (a *GitHubAdapter) UpdatePullReviewers(ctx context.Context, hostURL, userna
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
+// UpdatePullTitle 修改 PR 标题（v0.7.25 WIP toggle 用）
+// GitHub 走 PATCH /repos/{owner}/{repo}/issues/{number} body {"title": "new title"}
+// （GitHub 端 PR 跟 issue 共享 issues 端点，PATCH 改 title 同样适用）。
+func (a *GitHubAdapter) UpdatePullTitle(ctx context.Context, hostURL, username, token, owner, repo string, index int, title string) (*platform.PullDetailDTO, error) {
+	body := map[string]any{"title": title}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, nil); err != nil {
+		return nil, err
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // GitHub 端点与 Gitea 一致：/repos/{owner}/{repo}/issues/{index}/comments

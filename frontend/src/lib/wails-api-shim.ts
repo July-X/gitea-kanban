@@ -247,6 +247,8 @@ type WailsApp = {
   UpdatePullLabels?: (args: { projectId: string; index: number; labels: string[] }) => Promise<unknown>;
   UpdatePullAssignee?: (args: { projectId: string; index: number; assignee: string }) => Promise<unknown>;
   UpdatePullReviewers?: (args: { projectId: string; index: number; reviewers: string[] }) => Promise<unknown>;
+  // v0.7.25：修改 PR 标题（WIP toggle 去掉 "WIP:" 前缀用）
+  UpdatePullTitle?: (args: { projectId: string; index: number; title: string }) => Promise<unknown>;
   // v0.6+ PR 评论（issue 评论另起 v0.7）
   ListPullTimeline?: (args: { projectId: string; index: number }) => Promise<unknown>;
   CreatePullComment?: (args: { projectId: string; index: number; body: string }) => Promise<unknown>;
@@ -869,6 +871,25 @@ const apiShim = {
             projectId: a.projectId,
             index: a.index,
             reviewers: a.reviewers,
+          });
+        },
+      );
+    },
+    // v0.7.25：pulls.updateTitle —— 修改 PR 标题（用于 WIP toggle 去掉 "WIP:" 前缀）
+    // Gitea 走 PATCH /repos/{owner}/{repo}/issues/{index} body {"title": "new title"}
+    // GitHub 走 PATCH /repos/{owner}/{repo}/issues/{number} body {"title": "new title"}
+    updateTitle: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; title: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'updateTitle'),
+        (app) => {
+          if (!app.UpdatePullTitle) {
+            return notImplemented('pulls', 'updateTitle');
+          }
+          return app.UpdatePullTitle({
+            projectId: a.projectId,
+            index: a.index,
+            title: a.title,
           });
         },
       );

@@ -126,6 +126,12 @@ type PlatformAdapter interface {
 	// UpdatePullReviewers 替换合并请求的审查者（空切片 = 清空；Gitea 走 requested_reviewers，GitHub 等价）
 	UpdatePullReviewers(ctx context.Context, hostURL, username, token, owner, repo string, index int, reviewers []string) (*PullDetailDTO, error)
 
+	// v0.7.25：UpdatePullTitle 修改合并请求标题（用于 WIP toggle 去掉 "WIP:" 前缀）
+	// Gitea 走 PATCH /repos/{owner}/{repo}/issues/{index} body {"title": "new title"}
+	// GitHub 走 PATCH /repos/{owner}/{repo}/issues/{number} body {"title": "new title"}（PR 也是 issue）
+	// 返回更新后的 PullDetailDTO（含新 title / draft 字段，前端用 draft 判断是否去掉 WIP）。
+	UpdatePullTitle(ctx context.Context, hostURL, username, token, owner, repo string, index int, title string) (*PullDetailDTO, error)
+
 	// ListPullTimeline 列合并请求时间轴（v0.7.x 对齐 Gitea web）
 	//
 	// 时间轴包含所有 type: 普通评论 + 评审事件 + 系统事件 + 推送事件,

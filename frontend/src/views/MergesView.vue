@@ -195,9 +195,45 @@ const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
  * Gitea web 是把命令行块作为 details 子内容，用户这里是把命令行块作为
  * 标题行下方的可选展开区域，入口换成图标按钮以节省空间。
  */
-const mergeWarningOpen = ref(false);
-function toggleMergeWarning(): void {
-  mergeWarningOpen.value = !mergeWarningOpen.value;
+// v0.7.25：merge warning 拆 3 个独立 state —— 对齐 Gitea web pull_merge_box 多个 item 块
+//
+// Gitea web 端 pull_merge_box.tmpl 真实布局：
+// - WIP 警告：独立 item（带"删除 WIP: 前缀"按钮）
+// - 过期警告：独立 item（带"通过合并更新分支"按钮，v0.7.26 TODO）
+// - 命令行提示：独立 item（details 默认折叠，展开显示 检出+合并 2 个步骤）
+// - 冲突警告：独立 item
+//
+// v0.7.21 之前用 1 个 `mergeWarningOpen` 控制所有 item 展开/折叠 —— 错。
+// WIP 警告在 v0.7.23 删了"展开"概念（Gitea web 也没展开），只剩 cmd 提示展开。
+const cmdHintOpen = ref(false);
+const wipToggleLoading = ref(false);
+
+/** v0.7.25：从 PR 标题中删除 WIP: / Draft: / [WIP] 前缀 —— 对齐 Gitea web "删除 WIP: 前缀" 按钮 */
+async function removeWipPrefix(): Promise<void> {
+  const pr = selectedPR.value;
+  if (!pr) return;
+  const currentTitle = pr.title ?? '';
+  // Gitea 默认 WIP prefix 列表（app.ini 可自定义，常见值：WIP: / WIP / Draft: / [WIP] / [Draft]）
+  const prefixRegex = /^\s*(?:WIP:\s*|WIP\s+|Draft:\s*|Draft\s+|\[WIP\]\s*|\[Draft\]\s*)+/i;
+  const newTitle = currentTitle.replace(prefixRegex, '').trim();
+  if (newTitle === currentTitle.trim()) {
+    // 没有匹配的前缀，避免误改 —— 给个轻提示
+    showToast({ type: 'info', message: '当前标题没有 WIP / Draft 前缀' });
+    return;
+  }
+  wipToggleLoading.value = true;
+  try {
+    const projectId = pull.currentProjectId;
+    if (!projectId) return;
+    await pull.updateTitle(projectId, pr.index, newTitle);
+    showToast({ type: 'success', message: '已删除 WIP: 前缀' });
+  } catch (e) {
+    console.error('[removeWipPrefix] failed', e);
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: err.messageText ?? '删除 WIP: 前缀失败', persistent: true });
+  } finally {
+    wipToggleLoading.value = false;
+  }
 }
 
 const detailTab = ref<'conversation' | 'commits' | 'files'>('conversation');
@@ -2246,85 +2282,72 @@ function formatRelative(iso: string | undefined): string {
             </div>
             <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在描述下方、对话上方） -->
             <div
-              v-if="selectedPR.state === 'open' && (!selectedPR.mergeable || selectedPR.draft)"
+              v-if="selectedPR.state === 'open' && (!selectedPR.mergeable || selectedPR.draft || cmdHintOpen)"
               class="pr-detail__merge-warning-list"
               role="alert"
             >
-              <!-- v0.7.24 根因修复：merge warning 拆多条独立行 —— 对齐 Gitea web
-                   pull_merge_box 模板多个 <div class="item"> 块分别渲染。
-                   v0.7.21 我把所有条件塞进 1 个 div.title 里渲染（v-if WIP / v-else 冲突），
-                   跟 Gitea web 多行布局不一致。user 反馈"评审事件、评审评论，
-                   这些展示没有对齐 Gitea web 的实现"——merge warning 块也包括
-                   在 UI 对齐范围内。
+              <!-- v0.7.25 根因修复：完全按 Gitea web pull_merge_box.tmpl 真实布局重写
+                   —— 多个 item 块分别渲染，每个 item 内：
+                     - WIP 警告 + "删除 WIP: 前缀" 按钮（调 updateTitle API 去掉 WIP: 前缀）
+                     - 过期警告 + "通过合并更新分支" 按钮（v0.7.26 TODO：调 Gitea update branch by merge API）
+                     - 命令行提示 + 默认折叠 + 展开显示 检出 + 合并 2 个步骤（仿 Gitea web pull_merge_instruction.tmpl）
+                     - 冲突警告
 
-                   Gitea web 端 pull_merge_box.tmpl 多行：
-                   - "× 此合并请求被标记为正在进行的工作。"（WIP / draft=true）
-                   - "⚠ 此分支相比基础分支已过期"（commits_behind > 0）
-                   - "▶ 查看命令行提示"（命令行提示，可展开）
-                   - "× 此合并请求有冲突"（!mergeable）
+                   v0.7.24 漏改：
+                     - 缺 "删除 WIP: 前缀" 按钮（Gitea web 调 data-update-url 更新 title）
+                     - 命令行提示展开区缺"合并"步骤（只显示"检出"步骤）
+                     - 多行布局没对齐 Gitea web flex-divided-list
 
-                   v0.7.24 范围：
-                   - WIP 警告（draft=true）→ 拆成独立行
-                   - 过期警告（commits_behind > 0）→ 拆成独立行
-                   - 命令行提示 → 独立行（点击展开）
-                   - 冲突警告（!mergeable）→ 拆成独立行
-                   commits_behind 字段需要调 Gitea API /compare 端点
-                   （v0.7.22 留 TODO），当前 PullDetailDTO 没这个字段，
-                   所以过期警告暂不渲染。 -->
-              <!-- WIP 警告 -->
+                   Gitea web pull_merge_box.tmpl 实际结构（实测 ~/2026/code/gitea 仓库）：
+                   - WIP 警告行：<div class="item flex-left-right"> 左 icon+文字 + 右 button
+                   - 过期警告行：<div class="item"> 包含 update_branch_by_merge 模板
+                   - 命令行提示：<div class="item"> 包含 pull_merge_instruction 模板
+                   - 冲突警告：infoSections 内 (条件性) -->
+              <!-- WIP 警告：左 icon+文字 + 右"删除 WIP: 前缀"按钮 -->
               <div
                 v-if="selectedPR.draft"
-                class="pr-detail__merge-warning pr-detail__merge-warning--wip"
-                :class="{ 'pr-detail__merge-warning--collapsed': !mergeWarningOpen }"
+                class="pr-detail__merge-warning pr-detail__merge-warning--wip pr-detail__merge-warning--flex"
               >
-                <div
-                  class="pr-detail__merge-warning-title"
-                  role="button"
-                  tabindex="0"
-                  :aria-expanded="mergeWarningOpen"
-                  :title="mergeWarningOpen ? '点击收起' : '点击展开'"
-                  @click="toggleMergeWarning"
-                  @keydown.enter.prevent="toggleMergeWarning"
-                  @keydown.space.prevent="toggleMergeWarning"
-                >
-                  <XCircle :size="16" :stroke-width="2" aria-hidden="true" />
-                  <span>此合并请求被标记为正在进行的工作。</span>
-                  <span class="pr-detail__merge-warning-toggle" aria-hidden="true">
-                    <component :is="mergeWarningOpen ? ChevronUp : ChevronDown" :size="14" :stroke-width="2" />
-                  </span>
-                </div>
-                <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
-                  <div class="pr-detail__merge-warning-step">转为可评审状态</div>
-                  <div class="pr-detail__merge-warning-desc">从合并请求标题中移除 "WIP:" 前缀（或 "Draft:" / "[WIP]"）以标记此 PR 已完成、可被评审合并。</div>
-                  <pre class="pr-detail__merge-warning-cmd">当前标题：{{ selectedPR.title }}
-提示：把 "WIP:" 改成 "WIP " 或直接删掉即可</pre>
+                <div class="pr-detail__merge-warning-row">
+                  <XCircle :size="16" :stroke-width="2" aria-hidden="true" class="pr-detail__merge-warning-icon" />
+                  <span class="pr-detail__merge-warning-text">此合并请求被标记为正在进行的工作。</span>
+                  <button
+                    type="button"
+                    class="btn-ghost-sm pr-detail__merge-warning-action"
+                    :disabled="wipToggleLoading"
+                    @click="removeWipPrefix"
+                  >删除 WIP: 前缀</button>
                 </div>
               </div>
-              <!-- 过期警告（v0.7.22 留 TODO：commits_behind 字段没集成） -->
-              <!-- 命令行提示 -->
+              <!-- 过期警告：留 v0.7.26 调 Gitea API /compare 端点 + update_branch_by_merge -->
+              <!-- 命令行提示：默认折叠，点击展开 检出+合并 2 个步骤 -->
               <div
                 class="pr-detail__merge-warning pr-detail__merge-warning--cmd"
-                :class="{ 'pr-detail__merge-warning--collapsed': !mergeWarningOpen }"
+                :class="{ 'pr-detail__merge-warning--collapsed': !cmdHintOpen }"
               >
                 <div
-                  class="pr-detail__merge-warning-title"
+                  class="pr-detail__merge-warning-row pr-detail__merge-warning-row--toggle"
                   role="button"
                   tabindex="0"
-                  :aria-expanded="mergeWarningOpen"
-                  :title="mergeWarningOpen ? '点击收起命令行提示' : '点击展开命令行提示'"
-                  @click="toggleMergeWarning"
-                  @keydown.enter.prevent="toggleMergeWarning"
-                  @keydown.space.prevent="toggleMergeWarning"
+                  :aria-expanded="cmdHintOpen"
+                  @click="cmdHintOpen = !cmdHintOpen"
+                  @keydown.enter.prevent="cmdHintOpen = !cmdHintOpen"
+                  @keydown.space.prevent="cmdHintOpen = !cmdHintOpen"
                 >
-                  <ChevronRight v-if="!mergeWarningOpen" :size="14" :stroke-width="2" aria-hidden="true" />
+                  <ChevronRight v-if="!cmdHintOpen" :size="14" :stroke-width="2" aria-hidden="true" />
                   <ChevronDown v-else :size="14" :stroke-width="2" aria-hidden="true" />
-                  <span>查看命令行提示</span>
+                  <span class="pr-detail__merge-warning-text">查看命令行提示</span>
                 </div>
-                <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
+                <div v-if="cmdHintOpen" class="pr-detail__merge-warning-help">
                   <div class="pr-detail__merge-warning-step">检出</div>
                   <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
                   <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ headLabel(selectedPR) }}:{{ headLabel(selectedPR) }}
 git checkout {{ headLabel(selectedPR) }}</pre>
+                  <div class="pr-detail__merge-warning-step">合并</div>
+                  <div class="pr-detail__merge-warning-desc">合并变更并更新到 Gitea 上</div>
+                  <pre class="pr-detail__merge-warning-cmd">git checkout {{ baseLabel(selectedPR) }}
+git merge --no-ff {{ headLabel(selectedPR) }}
+git push origin {{ baseLabel(selectedPR) }}</pre>
                 </div>
               </div>
               <!-- 冲突警告 -->
@@ -2332,9 +2355,9 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                 v-if="!selectedPR.mergeable"
                 class="pr-detail__merge-warning pr-detail__merge-warning--conflict"
               >
-                <div class="pr-detail__merge-warning-title">
-                  <XCircle :size="16" :stroke-width="2" aria-hidden="true" />
-                  <span>此合并请求有冲突。</span>
+                <div class="pr-detail__merge-warning-row">
+                  <XCircle :size="16" :stroke-width="2" aria-hidden="true" class="pr-detail__merge-warning-icon" />
+                  <span class="pr-detail__merge-warning-text">此合并请求有冲突。</span>
                 </div>
               </div>
             </div>
@@ -6275,6 +6298,49 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   border-radius: var(--radius-sm);
   overflow-x: auto;
   white-space: pre;
+}
+
+/* v0.7.25：Gitea web pull_merge_box.tmpl 真实布局 —— 多个 item 块
+   1. WIP 警告 + 右侧"删除 WIP: 前缀"按钮（flex-left-right）
+   2. 过期警告 + 右侧"通过合并更新分支"按钮（v0.7.26 TODO）
+   3. 命令行提示 + 默认折叠 + 展开显示 检出+合并 2 步骤
+   4. 冲突警告 */
+.pr-detail__merge-warning--flex {
+  /* WIP 警告行：左 icon+文字 + 右按钮，flex 分两端 */
+  display: block;
+  padding: var(--space-3) var(--space-4);
+}
+.pr-detail__merge-warning-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pr-detail__merge-warning-row--toggle {
+  cursor: pointer;
+  user-select: none;
+  padding: var(--space-1) var(--space-2);
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
+  border-radius: var(--radius-sm);
+}
+.pr-detail__merge-warning-row--toggle:hover {
+  background: var(--color-bg-hover);
+}
+.pr-detail__merge-warning-row--toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.pr-detail__merge-warning-icon {
+  flex-shrink: 0;
+  color: var(--color-danger);
+}
+.pr-detail__merge-warning-text {
+  flex: 1;
+  font-weight: 500;
+  color: var(--color-danger);
+}
+.pr-detail__merge-warning-action {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .pr-detail__review-list {
   display: flex;

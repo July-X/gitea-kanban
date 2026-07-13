@@ -14,6 +14,7 @@ import {
   pullsReviewCommentsList, pullsFilesList, pullsFileDiffGet, pullsCommitsList,
   pullsCommentReactionsList, pullsCommentReactionAdd, pullsCommentReactionRemove,
   pullsUpdateLabels, pullsUpdateAssignee, pullsUpdateReviewers, pullsUpdateMilestone,
+  pullsUpdateTitle,
   labelsList, membersList, milestonesList,
   normalizeError,
 } from '@renderer/lib/ipc-client';
@@ -422,6 +423,13 @@ export const usePullStore = defineStore('pull', () => {
     patchItem(index, { milestone: updated.milestone });
   }
 
+  /** v0.7.25：修改 PR 标题（用于 WIP toggle 去掉 "WIP:" 前缀） */
+  async function updateTitle(projectId: string, index: number, title: string): Promise<void> {
+    const updated = await pullsUpdateTitle({ projectId, index, title });
+    // updated 含新 title + draft 字段（去掉 WIP: 后 draft=false）
+    patchItem(index, { title: updated.title, draft: updated.draft });
+  }
+
   return {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
@@ -438,6 +446,8 @@ export const usePullStore = defineStore('pull', () => {
     fetchCommentReactions, addCommentReaction, removeCommentReaction,
     loadAttrEditorData,
     updateLabels, updateAssignees, updateReviewers, updateMilestone,
+    // v0.7.25：修改 PR 标题（用于 WIP toggle 去掉 "WIP:" 前缀）
+    updateTitle,
     labels: labelsList, members: membersList, milestones: milestonesList,
   };
 });

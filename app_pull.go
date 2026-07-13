@@ -298,6 +298,33 @@ func (a *App) UpdatePullReviewers(args UpdatePullReviewersArgs) (PullDetailAppDT
 	return *d, nil
 }
 
+// ===== UpdatePullTitle =====
+
+// UpdatePullTitleArgs 修改合并请求标题参数
+type UpdatePullTitleArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Title     string `json:"title"`
+}
+
+// UpdatePullTitle 修改合并请求标题（v0.7.25 WIP toggle 用）
+//
+// Gitea: PATCH /repos/{owner}/{repo}/issues/{index} body {"title": "new title"}
+// GitHub: PATCH /repos/{owner}/{repo}/issues/{number} body {"title": "new title"}
+// （PR 在两个平台上都是 issue 的一种）
+func (a *App) UpdatePullTitle(args UpdatePullTitleArgs) (PullDetailAppDTO, error) {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullTitle(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Title)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // 范围限定：只做 PR 上下文（issue 评论另起 issue）。

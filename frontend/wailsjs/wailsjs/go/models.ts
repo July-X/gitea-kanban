@@ -1697,6 +1697,22 @@ export namespace main {
 	        this.reviewers = source["reviewers"];
 	    }
 	}
+	export class UpdatePullTitleArgs {
+	    projectId: string;
+	    index: number;
+	    title: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdatePullTitleArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.title = source["title"];
+	    }
+	}
 	export class UploadPullAttachmentArgs {
 	    projectId: string;
 	    index: number;

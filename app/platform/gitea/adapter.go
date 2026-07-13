@@ -617,6 +617,23 @@ func (a *GiteaAdapter) UpdatePullReviewers(ctx context.Context, hostURL, usernam
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
+// UpdatePullTitle 修改合并请求标题（v0.7.25 WIP toggle 用）
+//
+// Gitea 走 PATCH /repos/{owner}/{repo}/issues/{index} body {"title": "new title"}
+// （PR 在 Gitea API 里也是 issue 端点）。返回更新后的 PullDetailDTO。
+func (a *GiteaAdapter) UpdatePullTitle(ctx context.Context, hostURL, username, token, owner, repo string, index int, title string) (*platform.PullDetailDTO, error) {
+	body := map[string]any{"title": title}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, nil); err != nil {
+		return nil, err
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
 // mapMergeMethodToGitea 把前端 MergeMethod 转换为 gitea merge_style_field
 //
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'

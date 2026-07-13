@@ -797,6 +797,15 @@ export function pullsUpdateMilestone(args: {
   return getIpcClient().invoke('pulls', 'updateMilestone', args);
 }
 
+/** v0.7.25：修改 PR 标题（用于 WIP toggle 去掉 "WIP:" 前缀） */
+export function pullsUpdateTitle(args: {
+  projectId: string;
+  index: number;
+  title: string;
+}): Promise<PullDto> {
+  return getIpcClient().invoke('pulls', 'updateTitle', args);
+}
+
 /**
  * 上传 PR/issue 附件（v0.7.0 贴图支持）
  *
