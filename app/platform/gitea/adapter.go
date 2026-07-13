@@ -901,6 +901,35 @@ func giteaTimelineToItem(r giteaTimelineRaw) platform.TimelineItem {
 		item.Type = "merge"
 	}
 
+	// v0.7.22 根因修复：review event state 字段推断 —— Gitea 1.26+ timeline 端
+	// review event `state` 字段恒为 null（实测 pr74 id=578 / id=579 都 null）。
+	// Gitea API `/pulls/{index}/reviews` 端点返空数组 + `/pulls/{index}/reviews/{id}`
+	// 端点 500 Internal Server Error（Gitea 1.26+ bug），无法直接拿 state。
+	//
+	// 临时方案：从 review body 关键词推断 state（master 端用，Gitea web 端用
+	// 后端关联 review 表拿 state 但 SPA 拿不到）。关键词：
+	//   - "approved" / "approve" / "lgtm" / "looks good" / "looks great" →
+	//     state="approved"
+	//   - "request changes" / "request_change" / "blocking" / "needs changes" /
+	//     "needs to be changed" → state="changes_requested"
+	//   - 其他 → state="commented"
+	//
+	// 限制：关键词不匹配 Gitea web 后端逻辑（看 `services/pull/review.go`），
+	// 但能 cover 大多数 Gitea web UI 提交的场景（approve / request changes /
+	// comment 3 个按钮 + 自定义 body）。等 Gitea 1.26+ reviews 端点修好后再
+	// 改成后端查 review_id 拿 state（更准确）。
+	if item.Type == "review" {
+		body := strings.ToLower(item.Body)
+		switch {
+		case strings.Contains(body, "approved") || strings.Contains(body, "approve") || strings.Contains(body, "lgtm") || strings.Contains(body, "looks good") || strings.Contains(body, "looks great"):
+			item.State = "approved"
+		case strings.Contains(body, "request changes") || strings.Contains(body, "request_change") || strings.Contains(body, "blocking") || strings.Contains(body, "needs changes") || strings.Contains(body, "needs to be changed"):
+			item.State = "changes_requested"
+		default:
+			item.State = "commented"
+		}
+	}
+
 	// v0.7.8：push 事件 commit 信息从 body JSON 字符串解析。
 	// 根因：v0.7.7 假设 Gitea timeline 端点顶层会返 old_commit_id / new_commit_id /
 	// commits_num / is_force_push 4 个独立字段，实际 Gitea 1.26+ API 这 4 个字段全不返回，
