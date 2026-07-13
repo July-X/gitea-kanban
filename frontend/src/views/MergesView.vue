@@ -2616,30 +2616,20 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                         v-if="hasSystemEventInlineDetail(item)"
                         class="pr-detail__event-inline"
                       >
-                        <!-- v0.7.6：label 事件用 addedLabels/removedLabels 数组渲染（合并后） -->
-                        <span
-                          v-if="item.type === 'label' && (item.addedLabels?.length || item.removedLabels?.length)"
-                          class="pr-detail__event-labels"
-                        >
-                          <span
-                            v-for="lbl in item.addedLabels"
-                            :key="`add-${lbl.id}`"
-                            class="pr-detail__event-label pr-detail__event-label--add"
-                            :style="labelStyle(lbl.color)"
-                          >{{ lbl.name }}</span>
-                          <span
-                            v-for="lbl in item.removedLabels"
-                            :key="`rm-${lbl.id}`"
-                            class="pr-detail__event-label pr-detail__event-label--remove"
-                            :style="labelStyle(lbl.color)"
-                          >{{ lbl.name }}</span>
-                        </span>
-                        <!-- v0.7.14：label 事件 chip 已在主行 pr-detail__event-line 内
-                             渲染（紧跟 verb "修改了标签" 后面），不再用 inline 块缩进显示。
-                             保留 v-else-if="item.type === 'label' && item.label" 单 chip
-                             兜底已搬到主行（见上），这里删整段避免重复。 -->
+                        <!-- v0.7.20 根因修复：label 事件 chip 已在主行 pr-detail__event-line
+                             渲染（紧跟 verb "添加了标签" / "修改了标签" 后面）——
+                             v0.7.14 注释说要删 inline 块重复渲染但**代码没真删**
+                             （v0.7.14 漏改，跟 v0.7.18 merge 事件同样问题）。user 反馈
+                             "kanban_bot 于 27 天前 添加了标签 [+待办]" 主行 + 下一行
+                             重复渲染 "▢ +待办" chip（缩进显示），跟 Gitea web 不一致。
+                             修法：删 inline 块 v-if="item.type === 'label' && ..."
+                             整段（v0.7.20 改成 milestone 段做新的 v-if 起始，因为
+                             v-else/v-else-if 必须有 adjacent v-if/v-else-if）。label
+                             事件主行 chip 已经在 line 2557 渲染，inline 块不需要再渲染。
+                             修后：label 事件只有 1 个主行 "kanban_bot 于 27 天前
+                             添加了标签 [+待办]" 1 行 + 1 个 chip，无重复。 -->
 
-                        <span v-else-if="item.type === 'milestone'">
+                        <span v-if="item.type === 'milestone'">
                           <template v-if="item.oldMilestone && item.milestone">
                             <span class="pr-detail__event-strike">{{ item.oldMilestone.title }}</span>
                             <span class="pr-detail__event-arrow">→</span>
@@ -2749,7 +2739,7 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                         </span>
 
                         <span v-else-if="item.type === 'commit_ref' && item.refCommitSha">
-                          <code class="pr-detail__event-branch">{{ item.refCommitSha.slice(0, 7) }}</code>
+                          <code class="pr-detail__event-branch">{{ item.refCommitSha!.slice(0, 7) }}</code>
                         </span>
                       </div>
                       <!-- 块级：ref issue / dependency 等需要换行展示的 (对齐 Gitea web .detail) -->
@@ -6686,13 +6676,19 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   gap: 4px;
 }
 
-/* v0.7.7：push 事件 commit 列表块 —— 对齐 Gitea web `templates/repo/commits_list_small.tmpl`
-   缩进 + 短 SHA 链接 + commit 消息 + 提交者。 */
+/* v0.7.20 根因修复：push 事件 commit 列表块 —— 对齐 Gitea web
+   `templates/repo/commits_list_small.tmpl` 渲染（Gitea web 端 commit 列表**没有
+   缩进**，是直接跟在 push event 后面渲染，每个 commit 一行简单布局）。
+   v0.7.7 我加的 `padding: 6px 0 6px 22px` + `border-left: 2px` + `margin-left: 8px`
+   缩进是错的对齐"假想 Gitea web 缩进"——实测 Gitea web `comments.tmpl` push event
+   渲染直接 `{{template "repo/commits_list_small" dict "comment" . "root" $}}`，
+   commits_list_small 模板用 `<div class="flex-text-block">` 简单布局，没有 padding-left。
+   修法：删 padding-left + border-left + margin-left，commit 列表跟主行同一缩进
+   渲染（连接到主时间轴上），不再单独缩进。user 反馈"分支信息也和其他事件一起
+   对齐，连接到主时间轴上，而不是进行一个小的缩进，单独显示一行"。 */
 .pr-detail__event-block--commits {
-  margin-top: 4px;
-  padding: 6px 0 6px 22px;
-  border-left: 2px solid var(--color-divider);
-  margin-left: 8px;
+  margin-top: 2px;
+  padding: 0;
 }
 .pr-detail__event-commit-row {
   display: flex;
