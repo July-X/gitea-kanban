@@ -2247,41 +2247,66 @@ function formatRelative(iso: string | undefined): string {
             <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在描述下方、对话上方） -->
             <div
               v-if="selectedPR.state === 'open' && (!selectedPR.mergeable || selectedPR.draft)"
-              class="pr-detail__merge-warning"
+              class="pr-detail__merge-warning-list"
               role="alert"
-              :class="{ 'pr-detail__merge-warning--collapsed': !mergeWarningOpen }"
             >
-              <GitBranch :size="16" :stroke-width="2" aria-hidden="true" />
-              <div class="pr-detail__merge-warning-body">
-                <!--
-                  v0.7.21 根因修复：按 Gitea web pull_merge_box 模板多状态渲染 —— 不只是
-                  !mergeable 警告，还分 WIP / 过期 / 冲突等条件，对齐 Gitea web 端
-                  `repo.pulls.cannot_merge_work_in_progress` / `repo.pulls.blocked_by_outdated_branch`
-                  / `repo.pulls.files_conflicted` 等 locale 字符串。
+              <!-- v0.7.24 根因修复：merge warning 拆多条独立行 —— 对齐 Gitea web
+                   pull_merge_box 模板多个 <div class="item"> 块分别渲染。
+                   v0.7.21 我把所有条件塞进 1 个 div.title 里渲染（v-if WIP / v-else 冲突），
+                   跟 Gitea web 多行布局不一致。user 反馈"评审事件、评审评论，
+                   这些展示没有对齐 Gitea web 的实现"——merge warning 块也包括
+                   在 UI 对齐范围内。
 
-                  Gitea web 端条件（从 pull_merge_box.tmpl）：
-                  - IsPullWorkInProgress（draft=true）→ "此合并请求被标记为正在进行的工作"
-                  - IsBlockedByOutdatedBranch → "此分支相比基础分支已过期"（需 commits_behind 字段）
-                  - IsFilesConflicted（!mergeable）→ "此合并请求有冲突"
-                  - IsPullRequestBroken → 分支被删
+                   Gitea web 端 pull_merge_box.tmpl 多行：
+                   - "× 此合并请求被标记为正在进行的工作。"（WIP / draft=true）
+                   - "⚠ 此分支相比基础分支已过期"（commits_behind > 0）
+                   - "▶ 查看命令行提示"（命令行提示，可展开）
+                   - "× 此合并请求有冲突"（!mergeable）
 
-                  v0.7.21 范围：
-                  - WIP（draft=true）：显示 "此合并请求被标记为正在进行的工作"
-                  - 冲突（!mergeable）：显示原 "此分支已经包含在目标分支中" 警告
-                  - 过期（commits_behind）：留 v0.7.22 加 Gitea API /compare 端点集成
-                -->
+                   v0.7.24 范围：
+                   - WIP 警告（draft=true）→ 拆成独立行
+                   - 过期警告（commits_behind > 0）→ 拆成独立行
+                   - 命令行提示 → 独立行（点击展开）
+                   - 冲突警告（!mergeable）→ 拆成独立行
+                   commits_behind 字段需要调 Gitea API /compare 端点
+                   （v0.7.22 留 TODO），当前 PullDetailDTO 没这个字段，
+                   所以过期警告暂不渲染。 -->
+              <!-- WIP 警告 -->
+              <div
+                v-if="selectedPR.draft"
+                class="pr-detail__merge-warning pr-detail__merge-warning--wip"
+                :class="{ 'pr-detail__merge-warning--collapsed': !mergeWarningOpen }"
+              >
                 <div
-                  v-if="selectedPR.draft"
                   class="pr-detail__merge-warning-title"
+                  role="button"
+                  tabindex="0"
+                  :aria-expanded="mergeWarningOpen"
+                  :title="mergeWarningOpen ? '点击收起' : '点击展开'"
+                  @click="toggleMergeWarning"
+                  @keydown.enter.prevent="toggleMergeWarning"
+                  @keydown.space.prevent="toggleMergeWarning"
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px;">
-                    <path d="M3.5 6.5L8 11L12.5 6.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M2 3.5h12v9H2z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
-                  </svg>
+                  <XCircle :size="16" :stroke-width="2" aria-hidden="true" />
                   <span>此合并请求被标记为正在进行的工作。</span>
+                  <span class="pr-detail__merge-warning-toggle" aria-hidden="true">
+                    <component :is="mergeWarningOpen ? ChevronUp : ChevronDown" :size="14" :stroke-width="2" />
+                  </span>
                 </div>
+                <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
+                  <div class="pr-detail__merge-warning-step">转为可评审状态</div>
+                  <div class="pr-detail__merge-warning-desc">从合并请求标题中移除 "WIP:" 前缀（或 "Draft:" / "[WIP]"）以标记此 PR 已完成、可被评审合并。</div>
+                  <pre class="pr-detail__merge-warning-cmd">当前标题：{{ selectedPR.title }}
+提示：把 "WIP:" 改成 "WIP " 或直接删掉即可</pre>
+                </div>
+              </div>
+              <!-- 过期警告（v0.7.22 留 TODO：commits_behind 字段没集成） -->
+              <!-- 命令行提示 -->
+              <div
+                class="pr-detail__merge-warning pr-detail__merge-warning--cmd"
+                :class="{ 'pr-detail__merge-warning--collapsed': !mergeWarningOpen }"
+              >
                 <div
-                  v-else
                   class="pr-detail__merge-warning-title"
                   role="button"
                   tabindex="0"
@@ -2291,16 +2316,25 @@ function formatRelative(iso: string | undefined): string {
                   @keydown.enter.prevent="toggleMergeWarning"
                   @keydown.space.prevent="toggleMergeWarning"
                 >
-                  <span>此分支已经包含在目标分支中，没有什么可以合并。</span>
-                  <span class="pr-detail__merge-warning-toggle" aria-hidden="true">
-                    <component :is="mergeWarningOpen ? ChevronUp : ChevronDown" :size="14" :stroke-width="2" />
-                  </span>
+                  <ChevronRight v-if="!mergeWarningOpen" :size="14" :stroke-width="2" aria-hidden="true" />
+                  <ChevronDown v-else :size="14" :stroke-width="2" aria-hidden="true" />
+                  <span>查看命令行提示</span>
                 </div>
-                <div v-if="!selectedPR.draft && mergeWarningOpen" class="pr-detail__merge-warning-help">
+                <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
                   <div class="pr-detail__merge-warning-step">检出</div>
                   <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
                   <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ headLabel(selectedPR) }}:{{ headLabel(selectedPR) }}
 git checkout {{ headLabel(selectedPR) }}</pre>
+                </div>
+              </div>
+              <!-- 冲突警告 -->
+              <div
+                v-if="!selectedPR.mergeable"
+                class="pr-detail__merge-warning pr-detail__merge-warning--conflict"
+              >
+                <div class="pr-detail__merge-warning-title">
+                  <XCircle :size="16" :stroke-width="2" aria-hidden="true" />
+                  <span>此合并请求有冲突。</span>
                 </div>
               </div>
             </div>
@@ -2386,6 +2420,14 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                     <div class="pr-detail__comment-bubble">
                       <div class="pr-detail__comment-meta">
                         <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
+                        <!-- v0.7.24 根因修复：review event 拆 2 卡的 comment 卡
+                             也加"所有者"标签（v0.7.4 加过，普通 comment card 有，
+                             v0.7.21 review event 拆 2 卡时漏加）。user 反馈
+                             "评审事件、评审评论，这些展示没有对齐 Gitea web"
+                             —— Gitea web 端 review event comment card 右上角
+                             也显示 [所有者] 角色标签（`show_role` 模板，
+                             评论作者 == PR 作者时显示）。 -->
+                        <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" title="合并请求作者">所有者</span>
                         <span class="pr-detail__comment-verb">留下了一条评论</span>
                         <a
                           class="pr-detail__comment-time"
