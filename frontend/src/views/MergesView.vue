@@ -4990,6 +4990,10 @@ git checkout {{ headLabel(selectedPR) }}</pre>
 }
 .md-body :deep(img) {
   max-width: 100%;
+  max-height: 400px; /* v0.7.20：#74 PR 评论 body 含 200KB base64 大图，max-width 100% 后
+    高度可能撑爆评论气泡（auto 让原图等比缩放，宽度 100% 时高度可能 3000+px）。
+    限制 max-height 400px 保持气泡紧凑 + 避免加载慢（webview 解码 200KB base64
+    慢，截图时图还没加载完 user 看到"评论信息不显示"）。点击图片看完整原图。 */
   height: auto;
   border-radius: var(--radius-sm);
 }
