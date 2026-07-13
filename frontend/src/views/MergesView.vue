@@ -1140,7 +1140,7 @@ const SYSTEM_EVENT_COLOR: Record<string, SystemEventColor> = {
   merge: 'merge',
   dismiss_review: 'neutral',
   review_request: 'neutral',
-  push: 'success',
+  push: 'neutral', /* v0.7.21 根因修复：push 事件颜色从 success 绿改成 neutral 灰 —— 对齐 Gitea web 端 timeline 实际渲染（看 Gitea web #81 PR push 事件 dot 是灰色 octicon-repo-push，不是绿色）。v0.7.2 我假设 push 跟 reopen 一样 success 绿，但 Gitea web 实际是灰色 .tw-bg-grey。 */
   // 时间类（orange warn）
   due_date: 'warn',
   change_due_date: 'warn',
@@ -2244,9 +2244,9 @@ function formatRelative(iso: string | undefined): string {
               <div class="pr-detail__section-label">描述</div>
               <div class="pr-detail__section-content md-body" v-html="renderMarkdown(selectedPR.body, markdownBaseUrl)"></div>
             </div>
-            <!-- 合并检查警告区（对齐 Gitea web：显示在描述下方、对话上方） -->
+            <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在描述下方、对话上方） -->
             <div
-              v-if="selectedPR.state === 'open' && !selectedPR.mergeable"
+              v-if="selectedPR.state === 'open' && (!selectedPR.mergeable || selectedPR.draft)"
               class="pr-detail__merge-warning"
               role="alert"
               :class="{ 'pr-detail__merge-warning--collapsed': !mergeWarningOpen }"
@@ -2254,19 +2254,34 @@ function formatRelative(iso: string | undefined): string {
               <GitBranch :size="16" :stroke-width="2" aria-hidden="true" />
               <div class="pr-detail__merge-warning-body">
                 <!--
-                  v0.7.x 修正：用户明确需要“收起后只保留标题和图标，连‘查看命令行提示’文字链接也隐藏”。
-                  因此放弃 <details>/<summary>，改用标题行右侧的一个 Chevron 图标按钮作为 toggle 入口。
-                  展开时：标题 + 图标 + ChevronUp + 命令行内容
-                  收起时：标题 + 图标 + ChevronDown（没有文字链接，视觉上更简洁）
-                  100% Vue 受控，避免 WebKit details 二次点击不响应的问题。
-                -->
-                <!--
-                  v0.7.x: 标题行整体作为 toggle 入口。
-                  - 鼠标指针变手型，Chevron 按钮显示 toggle 状态
-                  - 点击标题行任何地方都能展开/收起
-                  - 点击只是 toggle，不做其他操作
+                  v0.7.21 根因修复：按 Gitea web pull_merge_box 模板多状态渲染 —— 不只是
+                  !mergeable 警告，还分 WIP / 过期 / 冲突等条件，对齐 Gitea web 端
+                  `repo.pulls.cannot_merge_work_in_progress` / `repo.pulls.blocked_by_outdated_branch`
+                  / `repo.pulls.files_conflicted` 等 locale 字符串。
+
+                  Gitea web 端条件（从 pull_merge_box.tmpl）：
+                  - IsPullWorkInProgress（draft=true）→ "此合并请求被标记为正在进行的工作"
+                  - IsBlockedByOutdatedBranch → "此分支相比基础分支已过期"（需 commits_behind 字段）
+                  - IsFilesConflicted（!mergeable）→ "此合并请求有冲突"
+                  - IsPullRequestBroken → 分支被删
+
+                  v0.7.21 范围：
+                  - WIP（draft=true）：显示 "此合并请求被标记为正在进行的工作"
+                  - 冲突（!mergeable）：显示原 "此分支已经包含在目标分支中" 警告
+                  - 过期（commits_behind）：留 v0.7.22 加 Gitea API /compare 端点集成
                 -->
                 <div
+                  v-if="selectedPR.draft"
+                  class="pr-detail__merge-warning-title"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px;">
+                    <path d="M3.5 6.5L8 11L12.5 6.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 3.5h12v9H2z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+                  </svg>
+                  <span>此合并请求被标记为正在进行的工作。</span>
+                </div>
+                <div
+                  v-else
                   class="pr-detail__merge-warning-title"
                   role="button"
                   tabindex="0"
@@ -2281,7 +2296,7 @@ function formatRelative(iso: string | undefined): string {
                     <component :is="mergeWarningOpen ? ChevronUp : ChevronDown" :size="14" :stroke-width="2" />
                   </span>
                 </div>
-                <div v-if="mergeWarningOpen" class="pr-detail__merge-warning-help">
+                <div v-if="!selectedPR.draft && mergeWarningOpen" class="pr-detail__merge-warning-help">
                   <div class="pr-detail__merge-warning-step">检出</div>
                   <div class="pr-detail__merge-warning-desc">从您的仓库中检出一个新的分支并测试变更。</div>
                   <pre class="pr-detail__merge-warning-cmd">git fetch -u origin {{ headLabel(selectedPR) }}:{{ headLabel(selectedPR) }}
@@ -2323,7 +2338,7 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                       <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--review-${item.state}`">
                         <component
                           :is="item.state === 'approved' ? CheckCircle2 : item.state === 'changes_requested' ? XCircle : MessageCircle"
-                          :size="15"
+                          :size="13"
                           :stroke-width="2.5"
                           aria-hidden="true"
                         />
@@ -2335,6 +2350,52 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                         <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                         <span class="pr-detail__event-verb">{{ reviewStateLabel(item.state) }}</span>
                       </span>
+                    </div>
+                  </li>
+                  <!-- v0.7.21 根因修复：review 事件下补 comment 卡显示 review body —— 对齐
+                       Gitea web 端 #74 PR 底部"kanban_bot 留下了一条评论 + 测试 approve"渲染。
+                       Gitea 1.26+ timeline 端 review event body 字段就是 review body 内容
+                       （实测 pr74 id=578 body="测试 approve" / id=579 body="评审+1"），
+                       Gitea web 把 review event 拆 2 卡显示：系统事件卡（"评审"）+
+                       comment 卡（"留下了一条评论" + body）。v0.7.1 我只拆了
+                       dismiss_review，没拆 review event，导致 user 反馈
+                       "Gitea web #74 底部信息展示没对齐"。
+
+                       Gitea web 端 comment 卡样式：左侧大头像（review 作者）+ 右侧气泡
+                       （气泡顶部 "kanban_bot 留下了一条评论" + 时间，气泡底部 body
+                       内容 markdown 渲染）。我们走 pr-detail__comment-bubble 样式
+                       （v0.7.5 review event 评论卡已有），复用。
+
+                       限制：review_id 关联 PullReviewDTO state 信息在 Gitea 1.26+
+                       timeline 端没返（state=null），但 Gitea web 端能正确显示
+                       approve / request_changes / comment 状态——可能 Gitea web
+                       调了 `/repos/{owner}/{repo}/reviews/{id}` 单个 review API
+                       拿 state。我们暂不实现（review event dot 走 item.state 字段，
+                       state=null 时 dot 走 MessageCircle 灰色，跟 v0.7.18 之前
+                       行为一致）。 -->
+                  <li
+                    v-if="item.type === 'review' && item.body"
+                    :key="`${item.type}-${item.id}-body`"
+                    class="pr-detail__timeline-item pr-detail__timeline-item--comment pr-detail__timeline-item--review-body"
+                  >
+                    <div class="pr-detail__timeline-rail">
+                      <div class="pr-detail__timeline-avatar" :title="displayName(item.author)" aria-hidden="true">
+                        <MessageSquare :size="13" :stroke-width="2" />
+                      </div>
+                    </div>
+                    <div class="pr-detail__comment-bubble">
+                      <div class="pr-detail__comment-meta">
+                        <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
+                        <span class="pr-detail__comment-verb">留下了一条评论</span>
+                        <a
+                          class="pr-detail__comment-time"
+                          :title="formatDate(item.created)"
+                        >{{ formatRelative(item.created) }}</a>
+                      </div>
+                      <div
+                        class="pr-detail__comment-body md-body"
+                        v-html="renderMarkdown(item.body, markdownBaseUrl)"
+                      ></div>
                     </div>
                   </li>
 
@@ -2535,7 +2596,7 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                   >
                     <div class="pr-detail__timeline-rail">
                       <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`">
-                        <component :is="systemEventIcon(item.type)" :size="15" :stroke-width="2.5" aria-hidden="true" />
+                        <component :is="systemEventIcon(item.type)" :size="13" :stroke-width="2.5" aria-hidden="true" />
                       </div>
                     </div>
                     <div class="pr-detail__event-content">
@@ -6574,11 +6635,14 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
 }
-/* v0.7.10：event dot 22px → 26px（user 反馈"下方时间轴的 icon 大一点点"），
-   内部 icon size 13 → 15 同步放大（保持视觉比例） */
+/* v0.7.21 根因修复：恢复 v0.7.10 之前的 22px dot + 13px icon 设定 —— 对齐 Gitea web
+   端 timeline 实际渲染大小（Gitea web 端 dot 是 22px + icon 13px + 文字 13px）。
+   v0.7.10 我把 dot 22→26 + icon 13→15 + 文字 13→14 是基于 user "icon 大一点点"
+   反馈放大，但实际对齐 Gitea web 应该回到原值。user 反馈 "icon、文字需要恢复
+   之前设定的大小"，指的就是这个。 */
 .pr-detail__timeline-dot {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: var(--color-bg-elevated);
   border: 1.5px solid var(--color-divider);
@@ -6627,7 +6691,7 @@ git checkout {{ headLabel(selectedPR) }}</pre>
   flex-wrap: nowrap;
   white-space: nowrap;
   overflow: hidden;
-  font-size: var(--font-body);
+  font-size: var(--font-sm); /* v0.7.21 根因修复：var(--font-body) 14px → var(--font-sm) 13px，对齐 Gitea web 端 timeline 文字大小。v0.7.10 我把 event-line 显式 14px 是基于 user "文字可以再增加一个字号"反馈放大，但实际对齐 Gitea web 应该回到 13px。 */
 }
 /* v0.7.16 根因修复：merge 事件整段（verb "合并提交" + ShortSha + 到 + branch）
    加 white-space: nowrap，强制 1 行渲染 —— 之前 v0.7.10 加的 flex-wrap: wrap
