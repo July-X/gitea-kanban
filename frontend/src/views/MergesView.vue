@@ -201,12 +201,16 @@ const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
 // - WIP 警告：独立 item（带"删除 WIP: 前缀"按钮）
 // - 过期警告：独立 item（带"通过合并更新分支"按钮，v0.7.26 TODO）
 // - 命令行提示：独立 item（details 默认折叠，展开显示 检出+合并 2 个步骤）
-// - 冲突警告：独立 item
+// - 冲突警告：独立 item（v0.7.25 user 反馈后删除 —— Gitea web 冲突在 InfoSections 内）
 //
 // v0.7.21 之前用 1 个 `mergeWarningOpen` 控制所有 item 展开/折叠 —— 错。
 // WIP 警告在 v0.7.23 删了"展开"概念（Gitea web 也没展开），只剩 cmd 提示展开。
 const cmdHintOpen = ref(false);
 const wipToggleLoading = ref(false);
+
+/** v0.7.26 TODO：commits_behind 字段（PR 详情拿 base/head compare total_commits）
+ *  v0.7.25 暂时固定 0，过期警告区域不渲染。集成后改为从 selectedPR.commitsBehind 取 */
+const commitsBehind = ref(0);
 
 /** v0.7.25：从 PR 标题中删除 WIP: / Draft: / [WIP] 前缀 —— 对齐 Gitea web "删除 WIP: 前缀" 按钮 */
 async function removeWipPrefix(): Promise<void> {
@@ -2282,16 +2286,22 @@ function formatRelative(iso: string | undefined): string {
             </div>
             <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在描述下方、对话上方） -->
             <div
-              v-if="selectedPR.state === 'open' && (!selectedPR.mergeable || selectedPR.draft || cmdHintOpen)"
+              v-if="selectedPR.state === 'open' && (selectedPR.draft || commitsBehind > 0 || cmdHintOpen)"
               class="pr-detail__merge-warning-list"
               role="alert"
             >
               <!-- v0.7.25 根因修复：完全按 Gitea web pull_merge_box.tmpl 真实布局重写
-                   —— 多个 item 块分别渲染，每个 item 内：
+                   —— 多个 item 块分别渲染：
                      - WIP 警告 + "删除 WIP: 前缀" 按钮（调 updateTitle API 去掉 WIP: 前缀）
                      - 过期警告 + "通过合并更新分支" 按钮（v0.7.26 TODO：调 Gitea update branch by merge API）
                      - 命令行提示 + 默认折叠 + 展开显示 检出 + 合并 2 个步骤（仿 Gitea web pull_merge_instruction.tmpl）
-                     - 冲突警告
+
+                   v0.7.25 follow-up（user 反馈 ⑭）：
+                     - 删 "此合并请求有冲突。" 独立红色 item
+                       （Gitea web 冲突在 InfoSections flex-text-block 内，
+                        不是独立红色 item；InfoSections 还包含其他 info 块）
+                     - 改顺序：WIP → 过期 → 命令行提示
+                       （user 截图 2 Gitea web 实际渲染顺序）
 
                    v0.7.24 漏改：
                      - 缺 "删除 WIP: 前缀" 按钮（Gitea web 调 data-update-url 更新 title）
@@ -2299,10 +2309,10 @@ function formatRelative(iso: string | undefined): string {
                      - 多行布局没对齐 Gitea web flex-divided-list
 
                    Gitea web pull_merge_box.tmpl 实际结构（实测 ~/2026/code/gitea 仓库）：
-                   - WIP 警告行：<div class="item flex-left-right"> 左 icon+文字 + 右 button
+                   - 冲突 infoSection：flex-text-block 普通布局（不在 red box 内）
                    - 过期警告行：<div class="item"> 包含 update_branch_by_merge 模板
-                   - 命令行提示：<div class="item"> 包含 pull_merge_instruction 模板
-                   - 冲突警告：infoSections 内 (条件性) -->
+                   - WIP 警告行：<div class="item flex-left-right"> 左 icon+文字 + 右 button
+                   - 命令行提示：<div class="item"> 包含 pull_merge_instruction 模板 -->
               <!-- WIP 警告：左 icon+文字 + 右"删除 WIP: 前缀"按钮 -->
               <div
                 v-if="selectedPR.draft"
@@ -2319,7 +2329,39 @@ function formatRelative(iso: string | undefined): string {
                   >删除 WIP: 前缀</button>
                 </div>
               </div>
-              <!-- 过期警告：留 v0.7.26 调 Gitea API /compare 端点 + update_branch_by_merge -->
+              <!-- 过期警告：v0.7.26 集成 Gitea API /compare 端点拿 commits_behind
+                   + 调 Gitea /update?style=merge 端点。当前 commitsBehind 字段没集成，
+                   暂不渲染（条件 v-if="commitsBehind > 0"）。预期对齐 Gitea web：
+                   - 左 icon(AlertTriangle) + "此分支相比基础分支已过期"
+                   - 右 ui buttons 组件：主按钮 "通过合并更新分支" + 下拉（条件）"通过变基更新分支"
+                   v0.7.26 候选 PR 范围：后端 PullDetailDTO 加 commitsBehind 字段 +
+                   platform.PlatformAdapter 加 GetPullCommitsBehind 接口（调 /compare 端点） +
+                   前端 store.fetchPullDetail 集成 + 本占位行 v-if 切到 commitsBehind > 0 -->
+              <!-- v0.7.26 占位：先注释里规划好结构，PR 集成时直接填 -->
+              <!--
+              <div
+                v-if="commitsBehind > 0"
+                class="pr-detail__merge-warning pr-detail__merge-warning--outdated pr-detail__merge-warning--flex"
+              >
+                <div class="pr-detail__merge-warning-row">
+                  <AlertTriangle :size="16" :stroke-width="2" aria-hidden="true" class="pr-detail__merge-warning-icon" />
+                  <span class="pr-detail__merge-warning-text">此分支相比基础分支已过期</span>
+                  <div class="pr-detail__merge-warning-action-group">
+                    <button
+                      type="button"
+                      class="btn-ghost-sm pr-detail__merge-warning-action"
+                      @click="updateBranchByMerge"
+                    >通过合并更新分支</button>
+                    <button
+                      v-if="canRebaseUpdate"
+                      type="button"
+                      class="btn-ghost-sm pr-detail__merge-warning-action-dropdown"
+                      aria-label="选择更新方式"
+                    >▾</button>
+                  </div>
+                </div>
+              </div>
+              -->
               <!-- 命令行提示：默认折叠，点击展开 检出+合并 2 个步骤 -->
               <div
                 class="pr-detail__merge-warning pr-detail__merge-warning--cmd"
@@ -2348,16 +2390,6 @@ git checkout {{ headLabel(selectedPR) }}</pre>
                   <pre class="pr-detail__merge-warning-cmd">git checkout {{ baseLabel(selectedPR) }}
 git merge --no-ff {{ headLabel(selectedPR) }}
 git push origin {{ baseLabel(selectedPR) }}</pre>
-                </div>
-              </div>
-              <!-- 冲突警告 -->
-              <div
-                v-if="!selectedPR.mergeable"
-                class="pr-detail__merge-warning pr-detail__merge-warning--conflict"
-              >
-                <div class="pr-detail__merge-warning-row">
-                  <XCircle :size="16" :stroke-width="2" aria-hidden="true" class="pr-detail__merge-warning-icon" />
-                  <span class="pr-detail__merge-warning-text">此合并请求有冲突。</span>
                 </div>
               </div>
             </div>
