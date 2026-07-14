@@ -22,7 +22,7 @@
  */
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import {
-  GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ExternalLink,
+  GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
   // v0.7.2: 系统事件图标（对齐 Gitea web octicon-* 体系）
   RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, UserMinus, Type, Calendar,
