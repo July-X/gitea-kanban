@@ -249,6 +249,10 @@ type WailsApp = {
   UpdatePullReviewers?: (args: { projectId: string; index: number; reviewers: string[] }) => Promise<unknown>;
   // v0.7.25：修改 PR 标题（WIP toggle 去掉 "WIP:" 前缀用）
   UpdatePullTitle?: (args: { projectId: string; index: number; title: string }) => Promise<unknown>;
+  // v0.7.26：拿 commits_behind（基础分支领先 head 分支的提交数）
+  GetPullCommitsBehind?: (args: { projectId: string; index: number; base: string; head: string }) => Promise<unknown>;
+  // v0.7.26：更新 head 分支（"通过合并更新分支"按钮用）
+  UpdatePullBranch?: (args: { projectId: string; index: number; style: string }) => Promise<unknown>;
   // v0.6+ PR 评论（issue 评论另起 v0.7）
   ListPullTimeline?: (args: { projectId: string; index: number }) => Promise<unknown>;
   CreatePullComment?: (args: { projectId: string; index: number; body: string }) => Promise<unknown>;
@@ -890,6 +894,45 @@ const apiShim = {
             projectId: a.projectId,
             index: a.index,
             title: a.title,
+          });
+        },
+      );
+    },
+    // v0.7.26：pulls.getCommitsBehind —— 拿"基础分支领先 head 分支的提交数"
+    // Gitea 走 GET /repos/{owner}/{repo}/compare/{head}...{base} → response.total_commits
+    // GitHub 走 GET /repos/{owner}/{repo}/compare/{base}...{head} → response.behind_by
+    getCommitsBehind: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; base: string; head: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'getCommitsBehind'),
+        (app) => {
+          if (!app.GetPullCommitsBehind) {
+            return notImplemented('pulls', 'getCommitsBehind');
+          }
+          return app.GetPullCommitsBehind({
+            projectId: a.projectId,
+            index: a.index,
+            base: a.base,
+            head: a.head,
+          });
+        },
+      );
+    },
+    // v0.7.26：pulls.updateBranch —— 更新 head 分支（"通过合并更新分支"按钮用）
+    // Gitea 走 POST /repos/{owner}/{repo}/pulls/{index}/update?style={merge|rebase}
+    // GitHub 走 PUT  /repos/{owner}/{repo}/pulls/{index}/update-branch（style 忽略）
+    updateBranch: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; style: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'updateBranch'),
+        (app) => {
+          if (!app.UpdatePullBranch) {
+            return notImplemented('pulls', 'updateBranch');
+          }
+          return app.UpdatePullBranch({
+            projectId: a.projectId,
+            index: a.index,
+            style: a.style,
           });
         },
       );

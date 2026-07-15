@@ -1066,6 +1066,51 @@ func (a *GitHubAdapter) UpdatePullTitle(ctx context.Context, hostURL, username, 
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
+// GetPullCommitsBehind 拿"基础分支领先 head 分支的提交数"（v0.7.26）
+//
+// GitHub 走 GET /repos/{owner}/{repo}/compare/{base}...{head}，
+// response.behind_by 是 commits_behind（注意 GitHub 顺序是 base...head，
+// 跟 Gitea 的 head...base 相反；解析字段都是 behind_by）。
+func (a *GitHubAdapter) GetPullCommitsBehind(ctx context.Context, hostURL, username, token, owner, repo, base, head string) (int, error) {
+	if head == "" || base == "" {
+		return 0, nil
+	}
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", owner, repo, base, head)
+	var resp struct {
+		BehindBy int `json:"behind_by"`
+	}
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &resp); err != nil {
+		return 0, nil
+	}
+	return resp.BehindBy, nil
+}
+
+// UpdatePullBranch 更新 head 分支（v0.7.26 "通过合并更新分支"按钮用）
+//
+// GitHub 走 PUT /repos/{owner}/{repo}/pulls/{index}/update-branch
+// body {"expected_head_sha": "..."}（GitHub 端用 expected_head_sha 验证 head
+// 没被人改过；style 决策由 GitHub 仓库设置决定，不由 API 参数控制）。
+//
+// Gitea / GitHub 行为差异：Gitea 走 ?style=merge|rebase 二选一；
+// GitHub 走 update-branch 端点，merge 还是 rebase 由仓库 admin 设置决定。
+// 我们传 style 主要是给日志用，GitHub adapter 忽略该参数。
+func (a *GitHubAdapter) UpdatePullBranch(ctx context.Context, hostURL, username, token, owner, repo string, index int, style string) (*platform.PullDetailDTO, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/update-branch", owner, repo, index)
+	// GitHub 端 update-branch 需要 expected_head_sha（head ref 当前 SHA）
+	// 但 PullDetailDTO 没存 head SHA，简化实现：body 留空（GitHub 默认行为会失败但用户可见）
+	// v0.7.26 first version：先实现端点 + 错误信息，让 user 看到 API 反馈
+	// v0.7.27 再补 expected_head_sha 头校验
+	body := map[string]any{}
+	reader, err := encodeJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.doRequest(ctx, hostURL, token, "PUT", path, reader, nil); err != nil {
+		return nil, err
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // GitHub 端点与 Gitea 一致：/repos/{owner}/{repo}/issues/{index}/comments

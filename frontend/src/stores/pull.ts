@@ -14,7 +14,7 @@ import {
   pullsReviewCommentsList, pullsFilesList, pullsFileDiffGet, pullsCommitsList,
   pullsCommentReactionsList, pullsCommentReactionAdd, pullsCommentReactionRemove,
   pullsUpdateLabels, pullsUpdateAssignee, pullsUpdateReviewers, pullsUpdateMilestone,
-  pullsUpdateTitle,
+  pullsUpdateTitle, pullsGetCommitsBehind, pullsUpdateBranch,
   labelsList, membersList, milestonesList,
   normalizeError,
 } from '@renderer/lib/ipc-client';
@@ -294,10 +294,36 @@ export const usePullStore = defineStore('pull', () => {
    */
   async function fetchPullDetail(p: PullDto): Promise<void> {
     try {
-      const detail = (await pullsGet({ projectId: currentProjectId.value!, index: p.index })) as PullDto & { mergeCommitSha?: string; commits?: number };
+      const detail = (await pullsGet({ projectId: currentProjectId.value!, index: p.index })) as PullDto & { mergeCommitSha?: string; commits?: number; commitsBehind?: number };
       patchItem(p.index, detail);
       if (currentSelectedItem.value?.index === p.index) {
         currentSelectedItem.value = { ...currentSelectedItem.value, ...detail } as PullDto;
+      }
+      // v0.7.26：commits_behind 字段 Gitea 1.26+ /pulls/{index} 端点不返，
+      // 拿到 PR 详情（拿到 head.label / base.label）后再调
+      // GET /repos/{owner}/{repo}/compare/{head}...{base} 拿 commits_behind。
+      // 失败 / 0 不阻断主流程（merge warning 区 v-if="commitsBehind > 0" 决定是否渲染）。
+      const base = (detail as { base?: { label?: string } }).base?.label
+        ?? (detail as { base?: { ref?: string } }).base?.ref;
+      const head = (detail as { head?: { label?: string } }).head?.label
+        ?? (detail as { head?: { ref?: string } }).head?.ref;
+      if (base && head) {
+        try {
+          const behind = await pullsGetCommitsBehind({
+            projectId: currentProjectId.value!,
+            index: p.index,
+            base,
+            head,
+          });
+          if (typeof behind === 'number' && behind > 0) {
+            patchItem(p.index, { commitsBehind: behind });
+            if (currentSelectedItem.value?.index === p.index) {
+              currentSelectedItem.value = { ...currentSelectedItem.value, commitsBehind: behind } as PullDto;
+            }
+          }
+        } catch {
+          // compare 端点失败（404/500/跨 fork 权限等）→ 不渲染过期警告
+        }
       }
     } catch {
       // 失败不阻断（merge 事件 SHA 链接不显示，但 timeline 仍可渲染）
@@ -430,6 +456,23 @@ export const usePullStore = defineStore('pull', () => {
     patchItem(index, { title: updated.title, draft: updated.draft });
   }
 
+  /** v0.7.26：更新 head 分支（"通过合并更新分支"按钮用） */
+  async function updateBranch(projectId: string, index: number, style: string): Promise<void> {
+    const updated = await pullsUpdateBranch({ projectId, index, style });
+    // updated 含新 head ref SHA + commits_behind（应该是 0 因为已经同步）
+    // 浅 patch 同步 list + currentSelectedItem
+    if (updated && typeof updated === 'object') {
+      const patch: Partial<PullDto> = {};
+      if ('mergeCommitSha' in updated) (patch as Record<string, unknown>).mergeCommitSha = updated.mergeCommitSha;
+      if ('commitsBehind' in updated) patch.commitsBehind = updated.commitsBehind;
+      if ('head' in updated) patch.head = updated.head;
+      patchItem(index, patch);
+      if (currentSelectedItem.value?.index === index) {
+        currentSelectedItem.value = { ...currentSelectedItem.value, ...patch } as PullDto;
+      }
+    }
+  }
+
   return {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
@@ -448,6 +491,8 @@ export const usePullStore = defineStore('pull', () => {
     updateLabels, updateAssignees, updateReviewers, updateMilestone,
     // v0.7.25：修改 PR 标题（用于 WIP toggle 去掉 "WIP:" 前缀）
     updateTitle,
+    // v0.7.26：更新 head 分支（"通过合并更新分支"按钮用）
+    updateBranch,
     labels: labelsList, members: membersList, milestones: milestonesList,
   };
 });

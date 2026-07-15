@@ -90,6 +90,10 @@ export function GetPull(arg1) {
   return window['go']['main']['App']['GetPull'](arg1);
 }
 
+export function GetPullCommitsBehind(arg1) {
+  return window['go']['main']['App']['GetPullCommitsBehind'](arg1);
+}
+
 export function GetPullFileDiff(arg1) {
   return window['go']['main']['App']['GetPullFileDiff'](arg1);
 }
@@ -240,6 +244,10 @@ export function UnstarBranch(arg1) {
 
 export function UpdatePullAssignee(arg1) {
   return window['go']['main']['App']['UpdatePullAssignee'](arg1);
+}
+
+export function UpdatePullBranch(arg1) {
+  return window['go']['main']['App']['UpdatePullBranch'](arg1);
 }
 
 export function UpdatePullComment(arg1) {

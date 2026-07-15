@@ -49,6 +49,8 @@ export function GetGitGraphAscii(arg1:main.GetGitGraphArgs):Promise<git.GraphLin
 
 export function GetPull(arg1:main.GetPullArgs):Promise<platform.PullDetailDTO>;
 
+export function GetPullCommitsBehind(arg1:main.GetPullCommitsBehindArgs):Promise<number>;
+
 export function GetPullFileDiff(arg1:main.GetPullFileDiffArgs):Promise<platform.PullFileDiffDTO>;
 
 export function GetRepoById(arg1:main.GetRepoByIdArgs):Promise<main.GetRepoByIdResult>;
@@ -124,6 +126,8 @@ export function TestGitBinary(arg1:main.SetGitBinaryPathArgs):Promise<gitbinary.
 export function UnstarBranch(arg1:main.UnstarBranchArgs):Promise<void>;
 
 export function UpdatePullAssignee(arg1:main.UpdatePullAssigneeArgs):Promise<platform.PullDetailDTO>;
+
+export function UpdatePullBranch(arg1:main.UpdatePullBranchArgs):Promise<platform.PullDetailDTO>;
 
 export function UpdatePullComment(arg1:main.UpdatePullCommentArgs):Promise<platform.CommentDTO>;
 

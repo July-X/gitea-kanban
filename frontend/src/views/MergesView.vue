@@ -32,6 +32,8 @@ import {
   CheckCircle2,
   // v0.7.4: 评论 header 右侧图标 (smile 表情 / more-horizontal ... 菜单)
   Smile, MoreHorizontal, Link as LinkIcon,
+  // v0.7.26: 过期警告行 icon (AlertTriangle 对应 Gitea web octicon-alert)
+  AlertTriangle,
 } from 'lucide-vue-next';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
@@ -207,10 +209,29 @@ const deletingComment = ref<{ p: PullDto; c: IssueCommentDto } | null>(null);
 // WIP 警告在 v0.7.23 删了"展开"概念（Gitea web 也没展开），只剩 cmd 提示展开。
 const cmdHintOpen = ref(false);
 const wipToggleLoading = ref(false);
+const branchUpdateLoading = ref(false);
 
-/** v0.7.26 TODO：commits_behind 字段（PR 详情拿 base/head compare total_commits）
- *  v0.7.25 暂时固定 0，过期警告区域不渲染。集成后改为从 selectedPR.commitsBehind 取 */
-const commitsBehind = ref(0);
+/** v0.7.26："通过合并更新分支"按钮 handler —— 调 store.updateBranch
+ *  成功后 store 自动 patchItem 把 commitsBehind 重置为 0，
+ *  过期警告行自动隐藏。 */
+async function updateBranchByMerge(): Promise<void> {
+  const pr = selectedPR.value;
+  if (!pr) return;
+  if (branchUpdateLoading.value) return;
+  branchUpdateLoading.value = true;
+  try {
+    const projectId = pull.currentProjectId;
+    if (!projectId) return;
+    await pull.updateBranch(projectId, pr.index, 'merge');
+    showToast({ type: 'success', message: '已通过合并更新分支' });
+  } catch (e) {
+    console.error('[updateBranchByMerge] failed', e);
+    const err = e as { messageText?: string };
+    showToast({ type: 'error', message: err.messageText ?? '更新分支失败', persistent: true });
+  } finally {
+    branchUpdateLoading.value = false;
+  }
+}
 
 /** v0.7.25：从 PR 标题中删除 WIP: / Draft: / [WIP] 前缀 —— 对齐 Gitea web "删除 WIP: 前缀" 按钮 */
 async function removeWipPrefix(): Promise<void> {
@@ -2286,7 +2307,7 @@ function formatRelative(iso: string | undefined): string {
             </div>
             <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在描述下方、对话上方） -->
             <div
-              v-if="selectedPR.state === 'open' && (selectedPR.draft || commitsBehind > 0 || cmdHintOpen)"
+              v-if="selectedPR.state === 'open' && (selectedPR.draft || (selectedPR.commitsBehind && selectedPR.commitsBehind > 0) || cmdHintOpen)"
               class="pr-detail__merge-warning-list"
               role="alert"
             >
@@ -2337,31 +2358,29 @@ function formatRelative(iso: string | undefined): string {
                    v0.7.26 候选 PR 范围：后端 PullDetailDTO 加 commitsBehind 字段 +
                    platform.PlatformAdapter 加 GetPullCommitsBehind 接口（调 /compare 端点） +
                    前端 store.fetchPullDetail 集成 + 本占位行 v-if 切到 commitsBehind > 0 -->
-              <!-- v0.7.26 占位：先注释里规划好结构，PR 集成时直接填 -->
-              <!--
+              <!-- v0.7.26 激活：过期警告行（commits_behind > 0 时显示）
+                   条件：selectedPR.commitsBehind 来自 store.fetchPullDetail 调
+                   platform.GetPullCommitsBehind 拿到的值（Gitea 1.26+ /pulls/{index}
+                   端点不返 commits_behind，必须调 /compare 端点）。
+                   "通过合并更新分支"按钮调 updateBranchByMerge handler（store.updateBranch
+                   → platform.UpdatePullBranch 调 Gitea /pulls/{index}/update?style=merge）。
+                   变基按钮下拉留 v0.7.27 TODO（Gitea 端 /update?style=rebase 已支持，
+                   前端需要单独的 UpdateStyle 字段判断仓库 admin 允许哪种）。 -->
               <div
-                v-if="commitsBehind > 0"
+                v-if="selectedPR.commitsBehind && selectedPR.commitsBehind > 0"
                 class="pr-detail__merge-warning pr-detail__merge-warning--outdated pr-detail__merge-warning--flex"
               >
                 <div class="pr-detail__merge-warning-row">
                   <AlertTriangle :size="16" :stroke-width="2" aria-hidden="true" class="pr-detail__merge-warning-icon" />
                   <span class="pr-detail__merge-warning-text">此分支相比基础分支已过期</span>
-                  <div class="pr-detail__merge-warning-action-group">
-                    <button
-                      type="button"
-                      class="btn-ghost-sm pr-detail__merge-warning-action"
-                      @click="updateBranchByMerge"
-                    >通过合并更新分支</button>
-                    <button
-                      v-if="canRebaseUpdate"
-                      type="button"
-                      class="btn-ghost-sm pr-detail__merge-warning-action-dropdown"
-                      aria-label="选择更新方式"
-                    >▾</button>
-                  </div>
+                  <button
+                    type="button"
+                    class="btn-ghost-sm pr-detail__merge-warning-action"
+                    :disabled="branchUpdateLoading"
+                    @click="updateBranchByMerge"
+                  >通过合并更新分支</button>
                 </div>
               </div>
-              -->
               <!-- 命令行提示：默认折叠，点击展开 检出+合并 2 个步骤 -->
               <div
                 class="pr-detail__merge-warning pr-detail__merge-warning--cmd"

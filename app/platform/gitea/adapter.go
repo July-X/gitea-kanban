@@ -634,6 +634,54 @@ func (a *GiteaAdapter) UpdatePullTitle(ctx context.Context, hostURL, username, t
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
+// GetPullCommitsBehind 拿"基础分支领先 head 分支的提交数"（v0.7.26）
+//
+// Gitea 走 GET /repos/{owner}/{repo}/compare/{head}...{base}，
+// response.total_commits 就是 commits_behind。
+//   - 注意 Git diff `A...B` 三点语法：列出"从 B 可达但 A 不可达"的 commit
+//   - 我们传 `{head}...{base}` = 列出"base 领先 head"的提交 = commits_behind
+//   - PR #74 实测：head=conflict-same-line-106921, base=main → total_commits=53
+//
+// 失败（API 错误 / 仓库无 compare 端点 / 跨 fork 私有仓库权限）时返 0，
+// 前端按"没过期"渲染（v-if="commitsBehind > 0" 不显示警告行）。
+func (a *GiteaAdapter) GetPullCommitsBehind(ctx context.Context, hostURL, username, token, owner, repo, base, head string) (int, error) {
+	// 防御：head / base 不能为空，否则 Gitea 返 500
+	if head == "" || base == "" {
+		return 0, nil
+	}
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", owner, repo, head, base)
+	var resp struct {
+		TotalCommits int `json:"total_commits"`
+	}
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &resp); err != nil {
+		// compare 端点失败（404 跨 fork 私有仓库 / 500 等）按 0 兜底
+		// 不让 timeline 加载因为 compare 失败而整体挂掉
+		return 0, nil
+	}
+	return resp.TotalCommits, nil
+}
+
+// UpdatePullBranch 更新 head 分支（v0.7.26 "通过合并更新分支"按钮用）
+//
+// Gitea 走 POST /repos/{owner}/{repo}/pulls/{index}/update?style={merge|rebase}
+// style 参数：
+//   - "merge"（默认）：把 base 合并到 head（merge commit）
+//   - "rebase"：把 head 变基到 base（replay commits）
+//
+// 失败：返 401/403/409（permission/分支保护）等错误让前端 toast 显示。
+// 成功后重拉 PR 详情（head ref SHA 已变），前端展示新 commits_behind = 0。
+func (a *GiteaAdapter) UpdatePullBranch(ctx context.Context, hostURL, username, token, owner, repo string, index int, style string) (*platform.PullDetailDTO, error) {
+	// style 兜底：Gitea 默认 merge（无 style 时 backend 走 repo 的 DefaultUpdateStyle）
+	if style == "" {
+		style = "merge"
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/update?style=%s", owner, repo, index, style)
+	if err := a.doRequest(ctx, hostURL, token, "POST", path, nil, nil); err != nil {
+		return nil, err
+	}
+	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
 // mapMergeMethodToGitea 把前端 MergeMethod 转换为 gitea merge_style_field
 //
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'

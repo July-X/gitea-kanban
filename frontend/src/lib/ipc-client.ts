@@ -806,6 +806,25 @@ export function pullsUpdateTitle(args: {
   return getIpcClient().invoke('pulls', 'updateTitle', args);
 }
 
+/** v0.7.26：拿"基础分支领先 head 分支的提交数"（commits_behind） */
+export function pullsGetCommitsBehind(args: {
+  projectId: string;
+  index: number;
+  base: string;
+  head: string;
+}): Promise<number> {
+  return getIpcClient().invoke('pulls', 'getCommitsBehind', args);
+}
+
+/** v0.7.26：更新 head 分支（"通过合并更新分支"按钮用） */
+export function pullsUpdateBranch(args: {
+  projectId: string;
+  index: number;
+  style: string; // "merge" | "rebase"
+}): Promise<PullDto> {
+  return getIpcClient().invoke('pulls', 'updateBranch', args);
+}
+
 /**
  * 上传 PR/issue 附件（v0.7.0 贴图支持）
  *

@@ -132,6 +132,32 @@ type PlatformAdapter interface {
 	// 返回更新后的 PullDetailDTO（含新 title / draft 字段，前端用 draft 判断是否去掉 WIP）。
 	UpdatePullTitle(ctx context.Context, hostURL, username, token, owner, repo string, index int, title string) (*PullDetailDTO, error)
 
+	// v0.7.26：GetPullCommitsBehind 拿"基础分支领先 head 分支的提交数"
+	//
+	// Gitea 走 GET /repos/{owner}/{repo}/compare/{head}...{base}，
+	// response.total_commits 就是 commits_behind（base 领先 head）。
+	// GitHub 走 GET /repos/{owner}/{repo}/compare/{base}...{head}，
+	// response.behind_by 是 commits_behind。
+	//
+	// 用于：
+	//   - 过期警告 "此分支相比基础分支已过期"（v0.7.26 跟 Gitea web pull_merge_box 1:1 对齐）
+	//   - "通过合并更新分支"按钮（调 UpdatePullBranch API）
+	//
+	// 注意：Gitea 1.26+ /pulls/{index} 端点不返 commits_behind 字段（之前 v0.7.x
+	// TODO），必须调 /compare 端点单独拿。
+	GetPullCommitsBehind(ctx context.Context, hostURL, username, token, owner, repo, base, head string) (int, error)
+
+	// v0.7.26：UpdatePullBranch 更新 head 分支（合并 base → head 或 rebase head on base）
+	//
+	// Gitea 走 POST /repos/{owner}/{repo}/pulls/{index}/update?style=merge
+	//       或 POST .../update?style=rebase
+	// GitHub 走 PUT /repos/{owner}/{repo}/pulls/{index}/update-branch
+	//       body {"expected_head_sha": "..."}（用 rebase / merge 由 GitHub 决定）
+	//
+	// style: "merge" | "rebase"（对齐 Gitea 端 UpdateStyle）
+	// 返回更新后的 PullDetailDTO。
+	UpdatePullBranch(ctx context.Context, hostURL, username, token, owner, repo string, index int, style string) (*PullDetailDTO, error)
+
 	// ListPullTimeline 列合并请求时间轴（v0.7.x 对齐 Gitea web）
 	//
 	// 时间轴包含所有 type: 普通评论 + 评审事件 + 系统事件 + 推送事件,
@@ -542,6 +568,17 @@ type PullDetailDTO struct {
 	Reviewers      []PullUserDTO  `json:"reviewers,omitempty"`
 	MergedBy       *PullUserDTO   `json:"mergedBy,omitempty"`
 	MergeCommitSHA string         `json:"mergeCommitSha,omitempty"` // 合并成功后回填
+	// v0.7.26：commits_behind 字段（PR 基础分支领先 head 分支的提交数）
+	//
+	// Gitea 1.26+ /pulls/{index} 端点不返这个字段，必须调
+	// GET /repos/{owner}/{repo}/compare/{head}...{base} 拿 total_commits。
+	// giteaPullToDetail / githubPullToDetail 暂填 0，由 store.fetchPullDetail
+	// 后调 platform.GetPullCommitsBehind 拿值 + patchItem 同步。
+	//
+	// 用于：
+	//   - 过期警告 "此分支相比基础分支已过期"
+	//   - "通过合并更新分支"按钮的 v-if 条件
+	CommitsBehind  int            `json:"commitsBehind,omitempty"`
 	// Milestone v0.6.0：get / patch 后填回（如设置过则填，否则 nil）
 	// Gitea 端 LongPoll 时间充裕（v0.7.0 漏映射，由 github 端补 PullDetailDTO 字段后可在 gitea adapter 也映射）
 	Milestone *MilestoneDTO `json:"milestone,omitempty"`

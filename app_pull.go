@@ -325,6 +325,59 @@ func (a *App) UpdatePullTitle(args UpdatePullTitleArgs) (PullDetailAppDTO, error
 	return *d, nil
 }
 
+// ===== GetPullCommitsBehind =====
+
+// GetPullCommitsBehindArgs 拿"基础分支领先 head 分支的提交数"参数
+type GetPullCommitsBehindArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Base      string `json:"base"`
+	Head      string `json:"head"`
+}
+
+// GetPullCommitsBehind 拿"基础分支领先 head 分支的提交数"（v0.7.26 过期警告用）
+//
+// Gitea: GET /repos/{owner}/{repo}/compare/{head}...{base} → response.total_commits
+// GitHub: GET /repos/{owner}/{repo}/compare/{base}...{head} → response.behind_by
+//
+// 失败 / 端点 404 返 0（不影响 timeline 主流程加载）。
+func (a *App) GetPullCommitsBehind(args GetPullCommitsBehindArgs) (int, error) {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return adapter.GetPullCommitsBehind(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Base, args.Head)
+}
+
+// ===== UpdatePullBranch =====
+
+// UpdatePullBranchArgs 更新 head 分支参数
+type UpdatePullBranchArgs struct {
+	ProjectID string `json:"projectId"`
+	Index     int    `json:"index"`
+	Style     string `json:"style"` // "merge" | "rebase"
+}
+
+// UpdatePullBranch 更新 head 分支（v0.7.26 "通过合并更新分支"按钮用）
+//
+// Gitea: POST /repos/{owner}/{repo}/pulls/{index}/update?style=merge
+// GitHub: PUT  /repos/{owner}/{repo}/pulls/{index}/update-branch
+//
+// style: "merge"（默认）/ "rebase"——Gitea 用 style 参数，GitHub 忽略（GitHub 端
+// merge/rebase 由仓库 admin 设置决定）。
+func (a *App) UpdatePullBranch(args UpdatePullBranchArgs) (PullDetailAppDTO, error) {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+
+	d, err := adapter.UpdatePullBranch(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Style)
+	if err != nil {
+		return PullDetailAppDTO{}, err
+	}
+	return *d, nil
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // 范围限定：只做 PR 上下文（issue 评论另起 issue）。

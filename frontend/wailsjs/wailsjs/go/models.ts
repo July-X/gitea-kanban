@@ -760,6 +760,24 @@ export namespace main {
 	        this.index = source["index"];
 	    }
 	}
+	export class GetPullCommitsBehindArgs {
+	    projectId: string;
+	    index: number;
+	    base: string;
+	    head: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetPullCommitsBehindArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.base = source["base"];
+	        this.head = source["head"];
+	    }
+	}
 	export class GetPullFileDiffArgs {
 	    projectId: string;
 	    index: number;
@@ -1633,6 +1651,22 @@ export namespace main {
 	        this.assignees = source["assignees"];
 	    }
 	}
+	export class UpdatePullBranchArgs {
+	    projectId: string;
+	    index: number;
+	    style: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdatePullBranchArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.index = source["index"];
+	        this.style = source["style"];
+	    }
+	}
 	export class UpdatePullCommentArgs {
 	    projectId: string;
 	    commentId: number;
@@ -1960,6 +1994,7 @@ export namespace platform {
 	    reviewers?: PullUserDTO[];
 	    mergedBy?: PullUserDTO;
 	    mergeCommitSha?: string;
+	    commitsBehind?: number;
 	    milestone?: MilestoneDTO;
 	
 	    static createFrom(source: any = {}) {
@@ -1989,6 +2024,7 @@ export namespace platform {
 	        this.reviewers = this.convertValues(source["reviewers"], PullUserDTO);
 	        this.mergedBy = this.convertValues(source["mergedBy"], PullUserDTO);
 	        this.mergeCommitSha = source["mergeCommitSha"];
+	        this.commitsBehind = source["commitsBehind"];
 	        this.milestone = this.convertValues(source["milestone"], MilestoneDTO);
 	    }
 	

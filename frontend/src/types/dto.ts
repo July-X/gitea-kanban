@@ -343,6 +343,14 @@ export interface PullDto {
   // 渲染 merge 事件 inline 块需要的 SHA 从 PR 详情端点 `merge_commit_sha` 字段拿。
   // ListPulls 轻量接口不返这个字段，store.fetchPullDetail() 拉详情后浅 patch 进来。
   mergeCommitSha?: string;
+  // v0.7.26：commits_behind —— 基础分支领先 head 分支的提交数。
+  // Gitea 1.26+ /pulls/{index} 端点不返这个字段，必须调
+  // GET /repos/{owner}/{repo}/compare/{head}...{base} 单独拿。
+  // store.fetchPullDetail() 之后调 platform.GetPullCommitsBehind 拿值 + patchItem。
+  // 用途：
+  //   - merge warning 区过期警告 "此分支相比基础分支已过期"
+  //   - "通过合并更新分支"按钮的 v-if 条件
+  commitsBehind?: number;
 }
 
 export interface ListPullsArgs {
