@@ -60,8 +60,12 @@ const repo = useRepoStore();
 const pullStore = usePullStore();
 const pull = pullStore;
 const auth = useAuthStore();
-/** 当前平台（gitea / github）v0.6.0 */
-// v0.7.x: currentPlatform 不再使用
+/** v0.7.26：当前激活账号的平台（gitea / github）—— merge warning 区域平台感知
+ *  - Gitea：WIP toggle 按钮 + "查看命令行提示"折叠块（Gitea web pull_merge_box 真实布局）
+ *  - GitHub：只渲染 "Update branch" 按钮（GitHub 端 draft 不可在 conversation 改，
+ *    没有"查看命令行提示"折叠块，命令行直接在 merge 按钮下） */
+const currentPlatform = computed<'gitea' | 'github'>(() => auth.currentPlatform);
+const isGithub = computed<boolean>(() => currentPlatform.value === 'github');
 const activeProjectId = computed<string | null>(() => repo.currentProjectId);
 
 // v0.6+ 滚动到底自动加载分页：哨兵 + IntersectionObserver
@@ -2334,9 +2338,13 @@ function formatRelative(iso: string | undefined): string {
                    - 过期警告行：<div class="item"> 包含 update_branch_by_merge 模板
                    - WIP 警告行：<div class="item flex-left-right"> 左 icon+文字 + 右 button
                    - 命令行提示：<div class="item"> 包含 pull_merge_instruction 模板 -->
-              <!-- WIP 警告：左 icon+文字 + 右"删除 WIP: 前缀"按钮 -->
+              <!-- WIP 警告：左 icon+文字 + 右"删除 WIP: 前缀"按钮
+                   v0.7.26 平台感知：仅 Gitea 平台渲染
+                   - Gitea：WIP 状态可由用户在 conversation 改 title（PATCH /issues/{index}）
+                   - GitHub：draft 不可在 conversation 改（必须 Edit PR title），GitHub 原生
+                     "Draft" 徽章已经够清晰，不需要额外 WIP 警告行 -->
               <div
-                v-if="selectedPR.draft"
+                v-if="selectedPR.draft && !isGithub"
                 class="pr-detail__merge-warning pr-detail__merge-warning--wip pr-detail__merge-warning--flex"
               >
                 <div class="pr-detail__merge-warning-row">
@@ -2365,24 +2373,40 @@ function formatRelative(iso: string | undefined): string {
                    "通过合并更新分支"按钮调 updateBranchByMerge handler（store.updateBranch
                    → platform.UpdatePullBranch 调 Gitea /pulls/{index}/update?style=merge）。
                    变基按钮下拉留 v0.7.27 TODO（Gitea 端 /update?style=rebase 已支持，
-                   前端需要单独的 UpdateStyle 字段判断仓库 admin 允许哪种）。 -->
+                   前端需要单独的 UpdateStyle 字段判断仓库 admin 允许哪种）。
+
+                   v0.7.26 平台感知：两平台都显示"过期警告"行，按钮文案 + 调用的
+                   adapter 端点不同：
+                   - Gitea："通过合并更新分支"（POST /pulls/{index}/update?style=merge）
+                   - GitHub："Update branch"（PUT /pulls/{index}/update-branch，GitHub 端
+                     merge/rebase 由仓库 admin 设置决定，不由 API 参数控制）
+                   adapter 端 v0.7.26 UpdatePullBranch 已经实现两套，Gitea 走 style=merge
+                   走 ?style=merge 端点，GitHub 走 update-branch 端点（style 忽略）。 -->
               <div
                 v-if="selectedPR.commitsBehind && selectedPR.commitsBehind > 0"
                 class="pr-detail__merge-warning pr-detail__merge-warning--outdated pr-detail__merge-warning--flex"
               >
                 <div class="pr-detail__merge-warning-row">
                   <AlertTriangle :size="16" :stroke-width="2" aria-hidden="true" class="pr-detail__merge-warning-icon" />
-                  <span class="pr-detail__merge-warning-text">此分支相比基础分支已过期</span>
+                  <span class="pr-detail__merge-warning-text">
+                    {{ isGithub ? '此分支相比基础分支已过期（GitHub 端将通过 Update branch API 同步）' : '此分支相比基础分支已过期' }}
+                  </span>
                   <button
                     type="button"
                     class="btn-ghost-sm pr-detail__merge-warning-action"
                     :disabled="branchUpdateLoading"
                     @click="updateBranchByMerge"
-                  >通过合并更新分支</button>
+                  >{{ isGithub ? 'Update branch' : '通过合并更新分支' }}</button>
                 </div>
               </div>
-              <!-- 命令行提示：默认折叠，点击展开 检出+合并 2 个步骤 -->
+              <!-- 命令行提示：默认折叠，点击展开 检出+合并 2 个步骤
+                   v0.7.26 平台感知：仅 Gitea 平台渲染
+                   - Gitea：Gitea web 端"查看命令行提示"折叠块（pull_merge_instruction.tmpl）
+                   - GitHub：GitHub 端没有这个折叠块，命令行提示直接显示在 merge form 下
+                     （GitHub web 端 merge form 用 3 个 button：Merge Pull Request /
+                     Squash and merge / Rebase and merge，每个下面有自己的命令行） -->
               <div
+                v-if="!isGithub"
                 class="pr-detail__merge-warning pr-detail__merge-warning--cmd"
                 :class="{ 'pr-detail__merge-warning--collapsed': !cmdHintOpen }"
               >

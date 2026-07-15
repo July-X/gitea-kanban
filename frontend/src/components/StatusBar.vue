@@ -588,8 +588,21 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
             <div v-else-if="repo.repos.length === 0" class="statusbar__dropdown-empty">
               <EmptyState
                 title="仓库列表为空"
-                description="刷新一下试试，或去 gitea 添加新仓库"
+                :description="auth.currentPlatform === 'github'
+                  ? '刷新一下试试，或去 GitHub 添加新仓库'
+                  : '刷新一下试试，或去 gitea 添加新仓库'"
               />
+              <a
+                v-if="auth.newRepoUrl"
+                :href="auth.newRepoUrl"
+                target="_blank"
+                rel="noopener"
+                class="statusbar__add-repo-link"
+                :title="auth.currentPlatform === 'github' ? '在 GitHub 上创建仓库' : '在 gitea 上创建仓库'"
+              >
+                <ExternalLink :size="12" :stroke-width="2" aria-hidden="true" />
+                <span>{{ auth.currentPlatform === 'github' ? '去 GitHub 添加新仓库' : '去 gitea 添加新仓库' }}</span>
+              </a>
             </div>
             <EmptyState v-else title="没有匹配的仓库" description="试试别的搜索词" />
           </div>
@@ -1438,5 +1451,22 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 
 .statusbar__dropdown-empty {
   padding: var(--space-3);
+}
+.statusbar__add-repo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-primary);
+  font-size: var(--font-sm);
+  text-decoration: none;
+  transition: background 0.12s ease;
+}
+.statusbar__add-repo-link:hover {
+  background: var(--color-bg-hover);
+  text-decoration: underline;
 }
 </style>

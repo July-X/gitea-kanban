@@ -67,6 +67,34 @@ export const useAuthStore = defineStore('auth', () => {
     return gitea?.giteaUrl ?? '';
   }
 
+  // ===== getters =====
+
+  /**
+   * 当前激活账号的平台（v0.7.26：StatusBar 平台感知文案 + MergesView GitHub 风格
+   * 渲染判断用）
+   *
+   * 取 `accounts[0]`（auth.accounts 是按"当前激活"排第一的，pickAccount 会把选中
+   * 的 swap 到 [0]）。没账号时返 'gitea' 兜底（兼容旧逻辑）。
+   */
+  const currentPlatform = computed<'gitea' | 'github'>(
+    () => (accounts.value[0]?.platform as 'gitea' | 'github' | undefined) ?? 'gitea',
+  );
+
+  /**
+   * 当前激活账号的"创建新仓库"链接（v0.7.26 平台感知）
+   *
+   * - Gitea: `{giteaUrl}/-/new` (Gitea 仓库创建页面)
+   * - GitHub: `https://github.com/new` (归一化，api.github.com → github.com)
+   */
+  const newRepoUrl = computed<string>(() => {
+    if (currentPlatform.value === 'github') {
+      return 'https://github.com/new';
+    }
+    const gitea = accounts.value.find((a) => (a.platform ?? 'gitea') === 'gitea');
+    const base = gitea?.giteaUrl ?? '';
+    return base ? `${base.replace(/\/$/, '')}/-/new` : '';
+  });
+
   // ===== actions =====
 
   /**
@@ -182,6 +210,8 @@ export const useAuthStore = defineStore('auth', () => {
     // getters
     isConnected,
     currentGiteaUrl,
+    currentPlatform, // v0.7.26：当前激活账号的平台
+    newRepoUrl,      // v0.7.26：当前平台"创建新仓库"链接
     getAccountUrlByPlatform, // v2.37：多平台 URL 查找
     // actions
     refreshStatus,
