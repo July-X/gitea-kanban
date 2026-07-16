@@ -2121,3 +2121,133 @@ func TestGitHubAdapter_UploadIssueAttachment(t *testing.T) {
 		t.Errorf("BrowserDownloadURL should not be empty")
 	}
 }
+
+// TestGitHubAdapter_ListPullTimeline_CommentAndReview 验证 GitHub timeline 组合
+// v0.7.26 根因修复：之前 ListPullTimeline 返 ErrNotSupported 导致评论全丢
+// 现改为组合 ListPullComments + ListPullReviews，按时间倒序合并
+func TestGitHubAdapter_ListPullTimeline_CommentAndReview(t *testing.T) {
+	commentsPath := "/repos/alice/dolphin/issues/42/comments"
+	reviewsPath := "/repos/alice/dolphin/pulls/42/reviews"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case commentsPath:
+			// 3 条评论：2024-06-05 09:00 / 11:30 / 14:00
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 101, "body": "first comment", "user": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T09:00:00Z", "updated_at": "2024-06-05T09:00:00Z"},
+				{"id": 102, "body": "second comment", "user": map[string]interface{}{"login": "bob"}, "created_at": "2024-06-05T11:30:00Z", "updated_at": "2024-06-05T11:30:00Z"},
+				{"id": 103, "body": "third comment", "user": map[string]interface{}{"login": "carol"}, "created_at": "2024-06-05T14:00:00Z", "updated_at": "2024-06-05T14:00:00Z"},
+			})
+		case reviewsPath:
+			// 2 条评审：2024-06-05 10:00 (APPROVED) / 13:00 (CHANGES_REQUESTED)
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 201, "state": "APPROVED", "body": "LGTM", "user": map[string]interface{}{"login": "dave"}, "commit_id": "abc", "submitted_at": "2024-06-05T10:00:00Z"},
+				{"id": 202, "state": "CHANGES_REQUESTED", "body": "fix this", "user": map[string]interface{}{"login": "eve"}, "commit_id": "def", "submitted_at": "2024-06-05T13:00:00Z"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 5 {
+		t.Fatalf("len(items) = %d, want 5 (3 comment + 2 review)", len(items))
+	}
+
+	// 验证按时间倒序：14:00 -> 13:00 -> 11:30 -> 10:00 -> 09:00
+	wantOrder := []struct {
+		Type      string
+		Body      string
+		CreatedAt string
+		State     string
+	}{
+		{"comment", "third comment", "2024-06-05T14:00:00Z", ""},
+		{"review", "fix this", "2024-06-05T13:00:00Z", "changes_requested"},
+		{"comment", "second comment", "2024-06-05T11:30:00Z", ""},
+		{"review", "LGTM", "2024-06-05T10:00:00Z", "approved"},
+		{"comment", "first comment", "2024-06-05T09:00:00Z", ""},
+	}
+	for i, w := range wantOrder {
+		if items[i].Type != w.Type {
+			t.Errorf("items[%d].Type = %q, want %q", i, items[i].Type, w.Type)
+		}
+		if items[i].Body != w.Body {
+			t.Errorf("items[%d].Body = %q, want %q", i, items[i].Body, w.Body)
+		}
+		if items[i].Created != w.CreatedAt {
+			t.Errorf("items[%d].Created = %q, want %q", i, items[i].Created, w.CreatedAt)
+		}
+		if w.State != "" && items[i].State != w.State {
+			t.Errorf("items[%d].State = %q, want %q (GitHub 大写 state 必须归一化)", i, items[i].State, w.State)
+		}
+	}
+
+	// 验证 comment items 带 author
+	for _, it := range items {
+		if it.Type == "comment" && (it.Author == nil || it.Author.Username == "") {
+			t.Errorf("comment item 缺 author: id=%d", it.ID)
+		}
+		if it.Type == "review" && (it.Author == nil || it.Author.Username == "") {
+			t.Errorf("review item 缺 author: id=%d", it.ID)
+		}
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_EmptyCase 验证评论和评审都为空时返空 slice（不返 nil）
+func TestGitHubAdapter_ListPullTimeline_EmptyCase(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, "[]")
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if items == nil {
+		t.Errorf("ListPullTimeline should return empty slice, not nil (前端 range 会 panic)")
+	}
+	if len(items) != 0 {
+		t.Errorf("len(items) = %d, want 0", len(items))
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_CommentsFailureFallback 验证评论接口失败时，
+// 不阻断评审拉取（fallback 单边容错）
+func TestGitHubAdapter_ListPullTimeline_CommentsFailureFallback(t *testing.T) {
+	reviewsPath := "/repos/alice/dolphin/pulls/42/reviews"
+	commentsPath := "/repos/alice/dolphin/issues/42/comments"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case commentsPath:
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		case reviewsPath:
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `[{"id": 1, "state": "APPROVED", "body": "ok", "user": {"login": "alice"}, "commit_id": "x", "submitted_at": "2024-06-05T10:00:00Z"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline 应该在评论失败时仍返评审列表: %v", err)
+	}
+	if len(items) != 1 {
+		t.Errorf("len(items) = %d, want 1 (评论失败 fallback 到评审)", len(items))
+	}
+	if items[0].Type != "review" {
+		t.Errorf("items[0].Type = %q, want review", items[0].Type)
+	}
+}

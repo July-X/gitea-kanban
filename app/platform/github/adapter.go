@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1132,8 +1133,71 @@ func (a *GitHubAdapter) ListPullComments(ctx context.Context, hostURL, username,
 
 // ListPullTimeline 列 PR 时间轴（v0.7.x 对齐 Gitea web）
 // GitHub 首期不支持（GitHub REST API 没有对等聚合端点）
+// ListPullTimeline 列 PR 时间轴
+//
+// v0.7.26 根因修复：之前直接返 ErrNotSupported 导致 GitHub PR 评论/评审全部不显示。
+// user 反馈"当数据源切换为 Github 后，PR 功能的评论信息都无法正确显示"。
+//
+// GitHub REST v3 没有对等 Gitea /issues/{index}/timeline 的聚合端点（issue timeline
+// 只有 GraphQL API 支持），但可以通过组合多个 REST 端点近似还原：
+//
+//  1. 评论（type=comment）：GET /repos/{owner}/{repo}/issues/{number}/comments
+//  2. 评审（type=review）：GET /repos/{owner}/{repo}/pulls/{number}/reviews
+//
+// 系统事件（labeled / unlabeled / assigned / review_requested / cross-referenced /
+// referenced / closed / reopened / merged / locked / unlocked）GitHub REST v3 没
+// 公开端点，**留 v0.7.27 TODO**（需要 GraphQL issueOrPullRequest.timelineItems）。
+//
+// 按时间倒序合并两个端点的结果，让前端 timeline 列表能显示。
 func (a *GitHubAdapter) ListPullTimeline(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.TimelineItem, error) {
-	return nil, platform.ErrNotSupported
+	hostURL = normalizeGitHubHostURL(hostURL)
+
+	// 1. 拉评论
+	comments, err := a.ListPullComments(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		// 拉评论失败不阻断（评审可能能拉到），仅返空 timeline
+		comments = nil
+	}
+
+	// 2. 拉评审
+	reviews, err := a.ListPullReviews(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		reviews = nil
+	}
+
+	// 3. 合并成 timeline items
+	items := make([]platform.TimelineItem, 0, len(comments)+len(reviews))
+	for _, c := range comments {
+		items = append(items, platform.TimelineItem{
+			ID:        c.ID,
+			Type:      "comment",
+			Body:      c.Body,
+			Created:   c.CreatedAt,
+			Updated:   c.UpdatedAt,
+			Author:     c.Author,
+		})
+	}
+	for _, r := range reviews {
+		// r.State 已被 githubReviewToDTO + platform.NormalizeReviewState 归一化到小写
+		// (approved / changes_requested / commented / dismissed)，直接用
+		items = append(items, platform.TimelineItem{
+			ID:        r.ID,
+			Type:      "review",
+			State:     r.State,
+			Body:      r.Body,
+			Created:   r.SubmittedAt,
+			Updated:   r.SubmittedAt,
+			Author:     r.Author,
+			Official:  false, // GitHub 没官方评审字段
+		})
+	}
+
+	// 4. 按 createdAt 倒序（最新在前），对齐 Gitea timeline 顺序
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Created > items[j].Created
+	})
+
+	return items, nil
 }
 
 // CreatePullComment 发 PR 评论（POST /repos/{owner}/{repo}/issues/{index}/comments）
