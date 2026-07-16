@@ -23,7 +23,7 @@ import type {
   ListPullsResp, PullDto, PullState, MergeMethod,
   TimelineItemDto, PullReviewCommentDto, PullFileDto, PullFileDiffDto, PullReviewDto,
   PullCommitDto,
-  MilestoneDto, CollaboratorDto,
+  MilestoneDto, CollaboratorDto, ReactionDto,
 } from '@renderer/types/dto';
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -160,6 +160,16 @@ export const usePullStore = defineStore('pull', () => {
   // commitsLoading ref，v0.7.8 删了组件本地版改用 store 这个）
   const commitsLoading = ref(false);
   const fileDiffByPath = ref<Map<string, PullFileDiffDto>>(new Map());
+
+  // v0.7.26：reactionsByComment 缓存 —— 评论级 reaction 状态
+  //   key = commentId（注意：不是 PR index，reaction 是 per-comment 维度）
+  //   用途：
+  //     1. addCommentReaction / removeCommentReaction 调完 IPC 后 fetchCommentReactions
+  //        写回缓存，ReactionBar 组件从 store 读（reactive）→ 立即刷新
+  //     2. 避免每次 ReactionBar 挂载都重新拉（已经有缓存直接用）
+  //   v0.7.26 之前 ReactionBar 自己有 local ref + loadReactions 主动拉，
+  //   跟 MergesView 调 addCommentReaction handler 流程不联动 → 表情不刷新。
+  const reactionsByComment = ref<Map<number, ReactionDto[]>>(new Map());
   const availableMilestones = ref<MilestoneDto[]>([]);
   const availableMembers = ref<CollaboratorDto[]>([]);
 
@@ -398,11 +408,65 @@ export const usePullStore = defineStore('pull', () => {
     } catch { return null; }
   }
 
-  async function fetchCommentReactions(_p: PullDto, commentId: number): Promise<unknown[]> {
-    try { return await pullsCommentReactionsList({ projectId: currentProjectId.value!, commentId }); } catch { return []; }
+  /**
+   * v0.7.26 根因修复：fetchCommentReactions 改为写入 reactionsByComment 缓存
+   * user 反馈 "Github数据源，commit添加表情后没有及时刷新commit信息流"
+   *
+   * 之前：调完 IPC 直接 return，没存到 store，ReactionBar 组件读不到。
+   * 现在：写入 reactionsByComment ref（Map），ReactionBar 从 store 读（reactive），
+   *       addCommentReaction 调完 IPC 后调 fetchCommentReactions 重拉，UI 自动刷新。
+   *
+   * p 参数：保留向后兼容（v0.7.4 ReactionBar 用过），v0.7.26 后从 store 调用
+   *        store 内部用 currentProjectId 即可，p 不再被使用。
+   */
+  async function fetchCommentReactions(_p: PullDto | null, commentId: number): Promise<ReactionDto[]> {
+    try {
+      const list = (await pullsCommentReactionsList({ projectId: currentProjectId.value!, commentId })) as ReactionDto[];
+      reactionsByComment.value.set(commentId, list ?? []);
+      return list ?? [];
+    } catch {
+      // 失败清空缓存，避免脏数据
+      reactionsByComment.value.set(commentId, []);
+      return [];
+    }
   }
-  async function addCommentReaction(_p: PullDto, commentId: number, content: string): Promise<void> { await pullsCommentReactionAdd({ projectId: currentProjectId.value!, commentId, content }); }
-  async function removeCommentReaction(_p: PullDto, commentId: number, content: string): Promise<void> { await pullsCommentReactionRemove({ projectId: currentProjectId.value!, commentId, content }); }
+
+  /**
+   * v0.7.26：添加 reaction → IPC 成功后**重拉**该 comment 的 reactions
+   *
+   * 之前只 await IPC 调用，**不刷新任何东西**——ReactionBar 组件读不到新数据。
+   * 现在乐观策略：
+   *   1. 快照当前 reactionsByComment[commentId] 缓存
+   *   2. 调 IPC 添加 reaction（失败回滚快照）
+   *   3. 成功 → fetchCommentReactions 重新拉（拿服务端权威 reactions 列表 + user 字段）
+   *   4. store reactions 变化触发 ReactionBar 重渲染
+   *
+   * 注意：不重拉整个 timeline（fetchTimeline），开销太大；reactions 是评论级
+   * 状态，单 comment 拉足够。
+   */
+  async function addCommentReaction(p: PullDto | null, commentId: number, content: string): Promise<void> {
+    const snapshot = reactionsByComment.value.get(commentId) ?? [];
+    try {
+      await pullsCommentReactionAdd({ projectId: currentProjectId.value!, commentId, content });
+      await fetchCommentReactions(p, commentId);
+    } catch (e) {
+      // 回滚缓存（如果 fetchCommentReactions 部分成功会被 snapshot 覆盖）
+      reactionsByComment.value.set(commentId, snapshot);
+      throw e;
+    }
+  }
+
+  /** v0.7.26：移除 reaction → 跟 addCommentReaction 一样 IPC 后重拉 */
+  async function removeCommentReaction(p: PullDto | null, commentId: number, content: string): Promise<void> {
+    const snapshot = reactionsByComment.value.get(commentId) ?? [];
+    try {
+      await pullsCommentReactionRemove({ projectId: currentProjectId.value!, commentId, content });
+      await fetchCommentReactions(p, commentId);
+    } catch (e) {
+      reactionsByComment.value.set(commentId, snapshot);
+      throw e;
+    }
+  }
 
   async function loadAttrEditorData(_projectId: string): Promise<void> {
     try {
@@ -478,6 +542,7 @@ export const usePullStore = defineStore('pull', () => {
     currentPage, hasMore, loadingMore,
     timelinePanels, reviewPanels, reviewSubmitting,
     reviewCommentsByPR, filesByPR, fileDiffByPath, commitsByPR, commitsLoading,
+    reactionsByComment, // v0.7.26：评论级 reaction 缓存（addCommentReaction 后重拉）
     availableMilestones, availableMembers,
     total, counts, filteredItems, reviewCommentsGrouped,
     list, loadMore, refresh, setFilter, select, get, mergePull, closePull,
