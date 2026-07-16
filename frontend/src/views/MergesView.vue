@@ -1870,7 +1870,18 @@ function badgeClass(p: PullDto): string {
   return 'merge-badge merge-badge--closed';
 }
 
+/** v0.7.27 平台感知：GitHub web 风格用英文 Closed / Merged / Open / Draft
+ *  - Gitea: "草稿" / "待合并" / "已合并" / "已关闭"（CLAUDE.md 零术语锁死的中文）
+ *  - GitHub: "Draft" / "Open" / "Merged" / "Closed"（GitHub web 实际就是英文，user 反馈对齐）
+ *  颜色 class 跟 Gitea 共用 4 档语义色（draft=warn/orange / open=success/green /
+ *  merged=purple / closed=danger/red），不变。 */
 function badgeText(p: PullDto): string {
+  if (isGithub.value) {
+    if (p.draft) return 'Draft';
+    if (p.state === 'open') return 'Open';
+    if (p.merged) return 'Merged';
+    return 'Closed';
+  }
   if (p.draft) return '草稿';
   if (p.state === 'open') return '待合并';
   if (p.merged) return '已合并';
@@ -2108,8 +2119,13 @@ function formatRelative(iso: string | undefined): string {
                 <span :class="badgeClass(selectedPR)" class="pr-detail-header__badge">{{ badgeText(selectedPR) }}</span>
                 <!-- v0.7.6：分支信息对齐 Gitea web `templates/repo/issue/view_title.tmpl` 渲染
                      格式："{author} 请求将 {N} 次代码提交从 {head} 合并至 {base}"
-                     分支名加链接到 /src/branch/{ref}，点击可在 Gitea web 看分支历史 -->
-                <span><strong style="color: var(--color-text);">{{ displayName(selectedPR.author) }}</strong> 请求将
+                     分支名加链接到 /src/branch/{ref}，点击可在 Gitea web 看分支历史
+                     v0.7.27 平台感知：
+                     - Gitea 风格（CLAUDE.md 零术语）："X 请求将 N 次代码提交从 head 合并至 base"
+                     - GitHub web 风格（user 截图反馈）："X wants to merge N commit into base from head"
+                     GitHub 端的"X wants to merge"是固定句式（不像 Gitea "请求将"），
+                     介词是 "into base from head"（注意 from head 在最后，跟 Gitea 顺序相反） -->
+                <span v-if="!isGithub"><strong style="color: var(--color-text);">{{ displayName(selectedPR.author) }}</strong> 请求将
                   <strong>{{ Math.max(selectedPR.commits ?? 1, 1) }}</strong> 次代码提交从
                   <a
                     v-if="activeRepo"
@@ -2130,6 +2146,28 @@ function formatRelative(iso: string | undefined): string {
                     :title="`在 Gitea 打开 ${baseLabel(selectedPR)} 分支`"
                   >{{ baseLabel(selectedPR) }}</a>
                   <code v-else class="mono pr-detail__branch pr-detail__branch--dst">{{ baseLabel(selectedPR) }}</code>
+                </span>
+                <span v-else><strong style="color: var(--color-text);">{{ displayName(selectedPR.author) }}</strong> wants to merge
+                  <strong>{{ Math.max(selectedPR.commits ?? 1, 1) }}</strong> commit into
+                  <a
+                    v-if="activeRepo"
+                    class="mono pr-detail__branch pr-detail__branch--dst pr-detail__branch--link"
+                    :href="branchWebUrl(baseLabel(selectedPR))"
+                    target="_blank"
+                    rel="noopener"
+                    :title="`在 GitHub 打开 ${baseLabel(selectedPR)} 分支`"
+                  >{{ baseLabel(selectedPR) }}</a>
+                  <code v-else class="mono pr-detail__branch pr-detail__branch--dst">{{ baseLabel(selectedPR) }}</code>
+                  from
+                  <a
+                    v-if="activeRepo"
+                    class="mono pr-detail__branch pr-detail__branch--link"
+                    :href="branchWebUrl(headLabel(selectedPR))"
+                    target="_blank"
+                    rel="noopener"
+                    :title="`在 GitHub 打开 ${headLabel(selectedPR)} 分支`"
+                  >{{ headLabel(selectedPR) }}</a>
+                  <code v-else class="mono pr-detail__branch">{{ headLabel(selectedPR) }}</code>
                 </span>
               </div>
             </div>
@@ -2254,7 +2292,13 @@ function formatRelative(iso: string | undefined): string {
           </div>
         </div>
 
-        <!-- Tab 导航：对话 / 代码提交 / 文件变动（对齐 Gitea） -->
+        <!-- Tab 导航：对话 / 代码提交 / 文件变动（对齐 Gitea）
+             v0.7.27 平台感知：
+             - Gitea: "对话" / "代码提交" / "文件变动"（CLAUDE.md 零术语中文）
+             - GitHub web: "Conversation" / "Commits" / "Files changed"（user 截图反馈）
+             GitHub 端 4 tab "Conversation / Commits / Checks / Files changed"，
+             我们的 "Checks" 暂未集成（v0.7.28 TODO 调 GitHub Check Runs API），
+             暂保持 3 tab，标签名按平台切换 -->
         <div class="pr-detail-tabs">
           <button
             type="button"
@@ -2262,7 +2306,7 @@ function formatRelative(iso: string | undefined): string {
             :class="{ 'pr-detail-tab--active': detailTab === 'conversation' }"
             @click="detailTab = 'conversation'"
           >
-            对话
+            {{ isGithub ? 'Conversation' : '对话' }}
             <span v-if="tabLoading.conversation" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
@@ -2276,7 +2320,7 @@ function formatRelative(iso: string | undefined): string {
             :class="{ 'pr-detail-tab--active': detailTab === 'commits' }"
             @click="detailTab = 'commits'"
           >
-            代码提交
+            {{ isGithub ? 'Commits' : '代码提交' }}
             <span v-if="tabLoading.commits" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
@@ -2290,7 +2334,7 @@ function formatRelative(iso: string | undefined): string {
             :class="{ 'pr-detail-tab--active': detailTab === 'files' }"
             @click="detailTab = 'files'"
           >
-            文件变动
+            {{ isGithub ? 'Files changed' : '文件变动' }}
             <span v-if="tabLoading.files" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>

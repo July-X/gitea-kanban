@@ -378,15 +378,15 @@ type githubPullRaw struct {
 	Comments           int                  `json:"comments"`
 	// v0.7.6：PR header "请求将 N 次代码提交从 {head} 合并至 {base}" 用
 	// GitHub /repos/{owner}/{repo}/pulls/{number} 返回 `commits` 字段。
-	Commits            int                  `json:"commits"`
-	Body               string               `json:"body"`
-	MergedBy           *githubUserRaw       `json:"merged_by"`
+	Commits  int            `json:"commits"`
+	Body     string         `json:"body"`
+	MergedBy *githubUserRaw `json:"merged_by"`
 	// v0.7.8：merge commit SHA —— GitHub /repos/{owner}/{repo}/pulls/{number}
 	// 返回 `merge_commit_sha` 字段（PR 合并后才有值，否则空）。
 	// 跟 Gitea 端同源：timeline 端点 merge 事件 body 不一定带 SHA，从 PR 详情兜底拿。
-	MergeCommitSHA     string               `json:"merge_commit_sha,omitempty"`
-	CreatedAt          string               `json:"created_at"`
-	UpdatedAt          string               `json:"updated_at"`
+	MergeCommitSHA string `json:"merge_commit_sha,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 	// Milestone v0.7.0：GitHub PR 可能挂在某个 milestone 上
 	// 字段：{url, html_url, number, title, description, state, ...}
 	Milestone *githubPullMilestoneRaw `json:"milestone"`
@@ -449,8 +449,8 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		// v0.7.8：merge 事件 commit SHA 链接用 —— timeline 端点 merge 事件 body 不一定带 SHA，
 		// 拿 PR 详情 `merge_commit_sha` 字段兜底。PR 未合并时为空字符串。
 		MergeCommitSHA: p.MergeCommitSHA,
-		CreatedAt:     p.CreatedAt,
-		UpdatedAt:     p.UpdatedAt,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 	if p.User != nil {
 		out.Author = &platform.PullUserDTO{Username: p.User.Login, FullName: p.User.Name, AvatarURL: p.User.AvatarURL}
@@ -1132,23 +1132,51 @@ func (a *GitHubAdapter) ListPullComments(ctx context.Context, hostURL, username,
 }
 
 // ListPullTimeline 列 PR 时间轴（v0.7.x 对齐 Gitea web）
-// GitHub 首期不支持（GitHub REST API 没有对等聚合端点）
-// ListPullTimeline 列 PR 时间轴
 //
 // v0.7.26 根因修复：之前直接返 ErrNotSupported 导致 GitHub PR 评论/评审全部不显示。
-// user 反馈"当数据源切换为 Github 后，PR 功能的评论信息都无法正确显示"。
+// v0.7.27 根因修复：组合 comments + reviews 之外，**必须**加 GitHub Issue Events API
+// （GET /repos/{owner}/{repo}/issues/{number}/events），否则 labeled / unlabeled /
+// assigned / review_requested / closed / reopened / merged / head_ref_deleted /
+// cross-referenced / referenced / pinned / unpinned / locked / unlocked 等系统事件
+// 全不显示。
 //
-// GitHub REST v3 没有对等 Gitea /issues/{index}/timeline 的聚合端点（issue timeline
-// 只有 GraphQL API 支持），但可以通过组合多个 REST 端点近似还原：
+// v0.7.26 follow-up 注释说"GitHub REST v3 没对等 Gitea /timeline 聚合端点，需要
+// GraphQL"——**这是错的**！GitHub 公开的 Issue Events API 就是 issue/PR timeline
+// 事件来源，每个 PR 作为 issue 也有完整 events 列表。详见：
 //
+//	https://docs.github.com/en/rest/issues/events
+//
+// 三端点组合：
 //  1. 评论（type=comment）：GET /repos/{owner}/{repo}/issues/{number}/comments
 //  2. 评审（type=review）：GET /repos/{owner}/{repo}/pulls/{number}/reviews
+//  3. 系统事件：GET /repos/{owner}/{repo}/issues/{number}/events
 //
-// 系统事件（labeled / unlabeled / assigned / review_requested / cross-referenced /
-// referenced / closed / reopened / merged / locked / unlocked）GitHub REST v3 没
-// 公开端点，**留 v0.7.27 TODO**（需要 GraphQL issueOrPullRequest.timelineItems）。
+// 事件类型映射（GitHub event 字符串 → Gitea timeline type）：
 //
-// 按时间倒序合并两个端点的结果，让前端 timeline 列表能显示。
+//	labeled/unlabeled → "label"（LabelAction="add"/"remove"）
+//	assigned/unassigned → "assignees"（RemovedAssignee=false/true）
+//	review_requested/review_request_removed → "review_request"
+//	milestoned/demilestoned → "milestone"
+//	renamed → "change_title"
+//	closed (commit_id 存在) → "merge"（GitHub 没独立 merge event，merge 通过
+//	                             "closed + commit_id" 表示）
+//	closed (无 commit_id) → "close"
+//	reopened → "reopen"
+//	head_ref_deleted → "delete_branch"（OldRef=event.ref）
+//	head_ref_restored → "delete_branch" 兜底（v0.7.27 简化：复用 OldRef，
+//	                                      v0.7.28 拆 reopen_branch 类型）
+//	cross-referenced → "issue_ref" / "pull_ref"（RefAction="cross"）
+//	referenced → "issue_ref"（RefAction="cross"）
+//	pinned/unpinned → "pin"/"unpin"
+//	locked/unlocked → "lock"/"unlock"
+//	review_dismissed → "dismiss_review"
+//	converted_to_discussion / marked_as_duplicate → 跳过（v0.7.28 TODO）
+//	mentioned / subscribed / unsubscribed → 跳过（通知类不渲染）
+//	commented → 跳过（评论已走 ListPullComments）
+//	reviewed → 跳过（review 已走 ListPullReviews）
+//
+// 单边失败不阻断（评论/评审/事件任一端点失败时仍返其他数据），降级路径对齐
+// v0.7.26 容错语义。
 func (a *GitHubAdapter) ListPullTimeline(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]platform.TimelineItem, error) {
 	hostURL = normalizeGitHubHostURL(hostURL)
 
@@ -1165,39 +1193,385 @@ func (a *GitHubAdapter) ListPullTimeline(ctx context.Context, hostURL, username,
 		reviews = nil
 	}
 
-	// 3. 合并成 timeline items
-	items := make([]platform.TimelineItem, 0, len(comments)+len(reviews))
+	// 3. 拉系统事件（v0.7.27 新增）
+	events, err := a.listIssueEvents(ctx, hostURL, username, token, owner, repo, index)
+	if err != nil {
+		// 拉事件失败不阻断（评论+评审仍能返），仅返空 events
+		events = nil
+	}
+
+	// 4. 合并成 timeline items
+	items := make([]platform.TimelineItem, 0, len(comments)+len(reviews)+len(events))
 	for _, c := range comments {
 		items = append(items, platform.TimelineItem{
-			ID:        c.ID,
-			Type:      "comment",
-			Body:      c.Body,
-			Created:   c.CreatedAt,
-			Updated:   c.UpdatedAt,
-			Author:     c.Author,
+			ID:      c.ID,
+			Type:    "comment",
+			Body:    c.Body,
+			Created: c.CreatedAt,
+			Updated: c.UpdatedAt,
+			Author:  c.Author,
 		})
 	}
 	for _, r := range reviews {
 		// r.State 已被 githubReviewToDTO + platform.NormalizeReviewState 归一化到小写
 		// (approved / changes_requested / commented / dismissed)，直接用
 		items = append(items, platform.TimelineItem{
-			ID:        r.ID,
-			Type:      "review",
-			State:     r.State,
-			Body:      r.Body,
-			Created:   r.SubmittedAt,
-			Updated:   r.SubmittedAt,
-			Author:     r.Author,
-			Official:  false, // GitHub 没官方评审字段
+			ID:       r.ID,
+			Type:     "review",
+			State:    r.State,
+			Body:     r.Body,
+			Created:  r.SubmittedAt,
+			Updated:  r.SubmittedAt,
+			Author:   r.Author,
+			Official: false, // GitHub 没官方评审字段
 		})
 	}
+	for _, e := range events {
+		item, ok := githubEventToTimelineItem(e)
+		if !ok {
+			// event 类型不渲染（mentioned / subscribed / converted_to_discussion / reviewed / commented 等）
+			continue
+		}
+		items = append(items, item)
+	}
 
-	// 4. 按 createdAt 倒序（最新在前），对齐 Gitea timeline 顺序
+	// 5. 按 createdAt 倒序（最新在前），对齐 Gitea timeline 顺序
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Created > items[j].Created
 	})
 
 	return items, nil
+}
+
+// githubIssueEventRaw GitHub /repos/{owner}/{repo}/issues/{number}/events 端点原始响应
+//
+// GitHub Issue Events API 是 PR timeline 系统事件来源（v0.7.27 新增集成）。
+// event 字符串取值清单见 https://docs.github.com/en/rest/using-the-rest-api/issue-event-types
+// 实际只部分 type 在 PR 场景出现，其他（如 marked_as_duplicate / converted_to_discussion）
+// 主要 issue 场景用，本 adapter 跳过不渲染。
+//
+// 各 event 字段对应二级详情（不在所有 event 都出现，按 event 类型取需要的字段）：
+//
+//	labeled/unlabeled: Label{Name, Color}（**没 id 字段**）
+//	assigned/unassigned: Assignee{Login, Name, AvatarURL, ID}
+//	milestoned/demilestoned: Milestone{Title, Number, ...}
+//	renamed: Rename{From, To}
+//	closed (commit_id 存在, 来自 PR merge): CommitID + CommitURL → 触发 "merge" type
+//	head_ref_deleted/restored: Ref（字符串，branch 名）
+//	cross-referenced/referenced: Source{Type, Issue{Number, Title, State}}
+//	pinned/unpinned/locked/unlocked: 无二级详情
+type githubIssueEventRaw struct {
+	ID        int64          `json:"id"`
+	Event     string         `json:"event"`
+	Actor     *githubUserRaw `json:"actor"`
+	CreatedAt string         `json:"created_at"`
+	CommitID  string         `json:"commit_id,omitempty"`
+	CommitURL string         `json:"commit_url,omitempty"`
+	Label     *struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	} `json:"label,omitempty"`
+	Assignee  *githubUserRaw `json:"assignee,omitempty"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone,omitempty"`
+	Rename *struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	} `json:"rename,omitempty"`
+	Ref    *string `json:"head_ref,omitempty"` // GitHub 实际叫 source.issue.head_ref? v0.7.27 暂不取，ref 从 source.issue 拿
+	Source *struct {
+		Type  string `json:"type"` // "issue" / "pull_request"
+		Issue *struct {
+			Number int64  `json:"number"`
+			Title  string `json:"title"`
+			State  string `json:"state"`
+		} `json:"issue,omitempty"`
+	} `json:"source,omitempty"`
+}
+
+// listIssueEvents 拉 GitHub Issue Events（GET /repos/{owner}/{repo}/issues/{number}/events）
+//
+// v0.7.27 新增：ListPullTimeline 组合 comments + reviews + events 3 端点还原 PR timeline。
+// 单边容错：调用方负责 try-catch（ListPullTimeline 内部 err 时 events=nil）。
+func (a *GitHubAdapter) listIssueEvents(ctx context.Context, hostURL, username, token, owner, repo string, index int) ([]githubIssueEventRaw, error) {
+	var raw []githubIssueEventRaw
+	// per_page=100 是 GitHub REST v3 文档最大单页数。
+	// PR timeline 事件数一般 < 100，超大 PR (>100 events) 翻页 v0.7.28 补。
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/events?per_page=100", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// githubEventToTimelineItem 把 GitHub Issue Event 映射为 platform.TimelineItem
+//
+// 返回 (item, true) 表示需要渲染；返回 (zero, false) 表示跳过（mentioned / subscribed
+// / reviewed / commented / converted_to_discussion 等不渲染类型）。
+//
+// 映射表详见 ListPullTimeline 头部注释。
+func githubEventToTimelineItem(e githubIssueEventRaw) (platform.TimelineItem, bool) {
+	item := platform.TimelineItem{
+		ID:      e.ID,
+		Created: e.CreatedAt,
+		Updated: e.CreatedAt,
+	}
+	if e.Actor != nil {
+		item.Author = &platform.PullUserDTO{
+			Username:  e.Actor.Login,
+			FullName:  e.Actor.Name,
+			AvatarURL: e.Actor.AvatarURL,
+		}
+	}
+
+	switch e.Event {
+	// 标签增删
+	case "labeled":
+		item.Type = "label"
+		item.LabelAction = "add"
+		if e.Label != nil {
+			label := &platform.PullLabelDTO{
+				Name:  e.Label.Name,
+				Color: e.Label.Color,
+			}
+			item.AddedLabels = []*platform.PullLabelDTO{label}
+			item.Label = label
+		}
+		return item, true
+	case "unlabeled":
+		item.Type = "label"
+		item.LabelAction = "remove"
+		if e.Label != nil {
+			label := &platform.PullLabelDTO{
+				Name:  e.Label.Name,
+				Color: e.Label.Color,
+			}
+			item.RemovedLabels = []*platform.PullLabelDTO{label}
+			item.Label = label
+		}
+		return item, true
+
+	// 指派人增删（assignee 字段是 GitHub user 对象）
+	case "assigned":
+		item.Type = "assignees"
+		item.RemovedAssignee = false
+		if e.Assignee != nil {
+			item.Assignee = &platform.PullUserDTO{
+				Username:  e.Assignee.Login,
+				FullName:  e.Assignee.Name,
+				AvatarURL: e.Assignee.AvatarURL,
+			}
+		}
+		return item, true
+	case "unassigned":
+		item.Type = "assignees"
+		item.RemovedAssignee = true
+		if e.Assignee != nil {
+			item.Assignee = &platform.PullUserDTO{
+				Username:  e.Assignee.Login,
+				FullName:  e.Assignee.Name,
+				AvatarURL: e.Assignee.AvatarURL,
+			}
+		}
+		return item, true
+
+	// 评审请求
+	case "review_requested":
+		item.Type = "review_request"
+		item.RemovedAssignee = false
+		if e.Assignee != nil {
+			item.Assignee = &platform.PullUserDTO{
+				Username:  e.Assignee.Login,
+				FullName:  e.Assignee.Name,
+				AvatarURL: e.Assignee.AvatarURL,
+			}
+		}
+		return item, true
+	case "review_request_removed":
+		item.Type = "review_request"
+		item.RemovedAssignee = true
+		if e.Assignee != nil {
+			item.Assignee = &platform.PullUserDTO{
+				Username:  e.Assignee.Login,
+				FullName:  e.Assignee.Name,
+				AvatarURL: e.Assignee.AvatarURL,
+			}
+		}
+		return item, true
+
+	// 里程碑
+	case "milestoned":
+		item.Type = "milestone"
+		if e.Milestone != nil {
+			item.Milestone = &platform.MilestoneDTO{Title: e.Milestone.Title}
+		}
+		return item, true
+	case "demilestoned":
+		item.Type = "milestone"
+		if e.Milestone != nil {
+			item.OldMilestone = &platform.MilestoneDTO{Title: e.Milestone.Title}
+		}
+		return item, true
+
+	// 标题改动（GitHub 没独立的 WIP toggle 事件——只在 title 文本前加 [WIP] 前缀
+	// 触发 renamed 事件，user 改 WIP 状态实质上就是改名。检测 WIP toggle 用
+	// Gitea 端同款 isWipToggleEvent helper）
+	case "renamed":
+		item.Type = "change_title"
+		if e.Rename != nil {
+			item.OldTitle = e.Rename.From
+			item.NewTitle = e.Rename.To
+			isToggle, isWip := githubIsWipToggleEvent(e.Rename.From, e.Rename.To)
+			item.IsWipToggle = isToggle
+			item.IsWip = isWip
+		}
+		return item, true
+
+	// 关闭 / 合并（GitHub 端合并通过 closed + commit_id 区分）
+	// v0.7.27 根因修复：之前没拉 events，GitHub PR merge 事件不显示。
+	// 真实 merge commit SHA 从 PR 详情端点 /pulls/{index} 的 merge_commit_sha 拿
+	// （v0.7.8 已加 PullDetailDTO.MergeCommitSHA 字段）。这里先把 event=closed
+	// + commit_id 标记为 "merge" type，template 端用 selectedPR.mergeCommitSha 兜底。
+	case "closed":
+		if e.CommitID != "" {
+			// PR merge：commit_id 有值
+			item.Type = "merge"
+			item.CommitID = e.CommitID
+		} else {
+			item.Type = "close"
+		}
+		return item, true
+	case "reopened":
+		item.Type = "reopen"
+		return item, true
+
+	// head branch 删除 / 恢复
+	case "head_ref_deleted":
+		item.Type = "delete_branch"
+		// v0.7.27 简化：GitHub events 端点 head_ref 字段实际是嵌套的 source.issue.head_ref
+		// (cross-referenced 也有)，delete_branch 事件里没专门字段；走 commit_id
+		// 兜底（合并 commit）或留空（用户前端会显示 "删除分支" 不带分支名）
+		// 跟 v0.7.12 修 Gitea delete_branch 行为对齐
+		if e.CommitID != "" {
+			item.OldRef = e.CommitID
+		}
+		return item, true
+	case "head_ref_restored":
+		// v0.7.27 简化：复用 delete_branch 走 "恢复了分支" verb
+		// （item.Type 用 "delete_branch" 是错的，但 verb 拼接 item.oldRef 兜底显示）
+		// v0.7.28 拆独立 "reopen_branch" 类型
+		item.Type = "delete_branch"
+		return item, true
+
+	// 跨引用 issue / PR
+	case "cross-referenced":
+		if e.Source != nil && e.Source.Issue != nil {
+			isPull := e.Source.Type == "pull_request"
+			item.Type = "issue_ref"
+			if isPull {
+				item.Type = "pull_ref"
+			}
+			item.RefAction = "cross"
+			item.RefIssue = &platform.IssueDTO{
+				Index:  int(e.Source.Issue.Number),
+				Title:  e.Source.Issue.Title,
+				State:  e.Source.Issue.State,
+				IsPull: isPull,
+			}
+		}
+		return item, true
+	case "referenced":
+		if e.Source != nil && e.Source.Issue != nil {
+			isPull := e.Source.Type == "pull_request"
+			item.Type = "issue_ref"
+			if isPull {
+				item.Type = "pull_ref"
+			}
+			item.RefAction = "cross"
+			item.RefIssue = &platform.IssueDTO{
+				Index:  int(e.Source.Issue.Number),
+				Title:  e.Source.Issue.Title,
+				State:  e.Source.Issue.State,
+				IsPull: isPull,
+			}
+		}
+		return item, true
+
+	// 引脚 / 锁
+	case "pinned":
+		item.Type = "pin"
+		return item, true
+	case "unpinned":
+		item.Type = "unpin"
+		return item, true
+	case "locked":
+		item.Type = "lock"
+		return item, true
+	case "unlocked":
+		item.Type = "unlock"
+		return item, true
+
+	// 评审驳回（v0.7.27 新增支持）
+	case "review_dismissed":
+		item.Type = "dismiss_review"
+		return item, true
+
+	// 不渲染类型：评论走 ListPullComments、review 走 ListPullReviews、通知类
+	// (mentioned / subscribed / unsubscribed) 不在 timeline 渲染，
+	// converted_to_discussion / marked_as_duplicate 暂未用。
+	case "commented", "reviewed", "mentioned", "subscribed", "unsubscribed",
+		"converted_to_discussion", "marked_as_duplicate", "unmarked_as_duplicate",
+		"transferred", "added_to_project", "moved_columns_in_project",
+		"removed_from_project":
+		return platform.TimelineItem{}, false
+	}
+
+	// 未识别 event 类型：跳过（不渲染）
+	return platform.TimelineItem{}, false
+}
+
+// githubWipPrefixes GitHub 端 WIP / Draft 前缀列表（v0.7.27）
+//
+// GitHub 没有 Gitea 那种 WorkInProgressPrefixes 配置（用户改 app.ini 加自定义前缀），
+// GitHub 端只识别 "WIP:" / "Draft:" 2 个默认前缀。我们前端在 GitHub PR 详情
+// 检测 WIP toggle 行为时只用这 2 个，commit 也依赖这个判断。
+//
+// 注意：WIP toggle 渲染**只在 isWipToggleEvent 返回 true 时**走 WIP 分支，
+// 否则走 Gitea 端同款 "修改了标题" 通用 verb 拼接。GitHub 端 WIP 标记的源码：
+// https://github.com/github/markup 和 https://github.com/refined-github/refined-github
+// （第三方插件）都识别 WIP: / Draft: 前缀，GitHub 官方 web 端支持。
+var githubWipPrefixes = []string{"WIP:", "Draft:"}
+
+// githubCutWipPrefix 模仿 Gitea CutWorkInProgressPrefix 行为
+func githubCutWipPrefix(title string) (string, bool) {
+	for _, prefix := range githubWipPrefixes {
+		if len(title) >= len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
+			return title[len(prefix):], true
+		}
+	}
+	return title, false
+}
+
+// githubIsWipToggleEvent 判断 GitHub renamed 事件是否是"切换 WIP / Ready for review"操作
+//
+// 返回：
+//   - isToggle: 是否命中 WIP toggle 特殊渲染
+//   - isWip: 切换后是否是 WIP 状态（NewTitle 有前缀）
+//
+// GitHub 端 WIP 切换实际没有专门的 `ready_for_review` event，只是用户把 title
+// 改成 [WIP] xxx 或去掉前缀触发 renamed 事件，前端按 Gitea 同款 isWipToggleEvent
+// 检测识别"加了/去掉 WIP 前缀"特殊渲染（"已将合并请求标记为进行中"）。
+func githubIsWipToggleEvent(oldTitle, newTitle string) (isToggle, isWip bool) {
+	title1, ok1 := githubCutWipPrefix(oldTitle)
+	title2, ok2 := githubCutWipPrefix(newTitle)
+	if ok1 == ok2 {
+		return false, false
+	}
+	if strings.TrimSpace(title1) != strings.TrimSpace(title2) {
+		return false, false
+	}
+	return true, ok2
 }
 
 // CreatePullComment 发 PR 评论（POST /repos/{owner}/{repo}/issues/{index}/comments）
