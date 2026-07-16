@@ -1048,10 +1048,29 @@ function systemEventVerb(item: TimelineItemDto): string {
   //   - Gitea: 通常返 "cx-same-057405" 短码
   //   - 老 Gitea / GitHub: 返 "refs/heads/branch" 全路径 → strip 掉前缀
   // 对齐 Gitea web "kanban_bot 于 3 周前 删除分支 cx-same-057405" 渲染。
-  if (item.type === 'delete_branch' && item.oldRef) {
-    return `删除分支 ${item.oldRef.replace(/^refs\/heads\//, '')}`;
+  //
+  // v0.7.27.1 根因修复：GitHub Issue Events 端 `head_ref_deleted` event **不**返
+  // head ref name（只有 GraphQL timelineItems 才返），item.oldRef 一直是空。
+  // 之前 v0.7.27 错把 commit SHA 填到 OldRef 字段，verb 拼接出错的"SHA 字符串"。
+  // 修法：OldRef 为空时，兜底用 selectedPR?.head?.label（PR 详情 head 字段，
+  // v0.7.9 已有 Gitea 1.20+ / GitHub 全支持，返真实分支名如 "int-test-1783..."）。
+  // 跟 Gitea 端行为对齐："X 于 Y 删除分支 feature-branch-123"。
+  const headRef = item.oldRef?.replace(/^refs\/heads\//, '') || selectedPR.value?.head?.label;
+  if (item.type === 'delete_branch' && headRef) {
+    return `删除分支 ${headRef}`;
   }
   if (item.type === 'delete_branch') return '删除分支'; // v0.7.11 去掉"了"字（无 oldRef fallback）
+
+  // v0.7.27.1 平台感知：change_target_branch 在 GitHub 端 `base_ref_changed` event
+  // 不返 base ref name（只有 GraphQL 返），item.oldRef/newRef 留空。
+  // 兜底用 selectedPR?.base?.label（当前 base，跟 item 时间点不严格匹配，但 80% 场景够用）。
+  // v0.7.28 计划从 GraphQL 拉 base ref 改前/改后名字。
+  if (item.type === 'change_target_branch' && (item.oldRef || item.newRef)) {
+    return `修改了目标分支 ${item.oldRef || '?'} → ${item.newRef || '?'}`;
+  }
+  if (item.type === 'change_target_branch' && selectedPR.value?.base?.label) {
+    return `修改了目标分支（当前 base: ${selectedPR.value.base.label}）`;
+  }
   if (item.type === 'change_target_branch') return '修改了目标分支';
   if (item.type === 'lock') return '锁定了此合并请求';
   if (item.type === 'unlock') return '解锁了此合并请求';

@@ -1139,6 +1139,14 @@ func (a *GitHubAdapter) ListPullComments(ctx context.Context, hostURL, username,
 // assigned / review_requested / closed / reopened / merged / head_ref_deleted /
 // cross-referenced / referenced / pinned / unpinned / locked / unlocked 等系统事件
 // 全不显示。
+// v0.7.27.1 根因修复：v0.7.27 漏了 6 个 event type
+//   - `merged`（v0.7.27 错用 "closed + commit_id 推断"，实际 GitHub 独立有 merged event）
+//   - `committed`（push 事件，GitHub 端独立 event）
+//   - `head_ref_force_pushed`（强制推送，v0.7.27 完全没拉）
+//   - `head_ref_deleted`（v0.7.27 用 commit SHA 填 OldRef 是错的，commit_id 是 SHA 不是 branch name）
+//   - `base_ref_changed`（改 base branch，对应 Gitea change_target_branch）
+//   - `ready_for_review` / `convert_to_draft`（draft 状态切换，v0.7.27 只用 renamed 推断
+//     不够精确，GitHub 端有独立 event）
 //
 // v0.7.26 follow-up 注释说"GitHub REST v3 没对等 Gitea /timeline 聚合端点，需要
 // GraphQL"——**这是错的**！GitHub 公开的 Issue Events API 就是 issue/PR timeline
@@ -1158,13 +1166,17 @@ func (a *GitHubAdapter) ListPullComments(ctx context.Context, hostURL, username,
 //	review_requested/review_request_removed → "review_request"
 //	milestoned/demilestoned → "milestone"
 //	renamed → "change_title"
-//	closed (commit_id 存在) → "merge"（GitHub 没独立 merge event，merge 通过
-//	                             "closed + commit_id" 表示）
-//	closed (无 commit_id) → "close"
+//	ready_for_review/convert_to_draft → "change_title"（IsWipToggle=true，前端走 WIP verb）
+//	closed → "close"（v0.7.27.1 修正：不再用 commit_id 推断 merge）
+//	merged → "merge"（v0.7.27.1 新增：CommitID=e.CommitID 是真实 merge commit SHA）
 //	reopened → "reopen"
-//	head_ref_deleted → "delete_branch"（OldRef=event.ref）
-//	head_ref_restored → "delete_branch" 兜底（v0.7.27 简化：复用 OldRef，
-//	                                      v0.7.28 拆 reopen_branch 类型）
+//	committed → "push"（v0.7.27.1 新增：CommitID=e.CommitID 单 commit，
+//	                     GitHub events 端没 commit_ids 数组，只有单条 commit_id）
+//	head_ref_force_pushed → "push"（v0.7.27.1 新增：IsForcePush=true）
+//	head_ref_deleted → "delete_branch"（v0.7.27.1 修正：不填 OldRef，commit_id 是 SHA；
+//	                                   branch name 走 selectedPR.head.label 兜底）
+//	head_ref_restored → "delete_branch" 兜底（v0.7.28 拆 reopen_branch 类型）
+//	base_ref_changed → "change_target_branch"（v0.7.27.1 新增：base 改 branch）
 //	cross-referenced → "issue_ref" / "pull_ref"（RefAction="cross"）
 //	referenced → "issue_ref"（RefAction="cross"）
 //	pinned/unpinned → "pin"/"unpin"
@@ -1428,40 +1440,86 @@ func githubEventToTimelineItem(e githubIssueEventRaw) (platform.TimelineItem, bo
 		}
 		return item, true
 
-	// 关闭 / 合并（GitHub 端合并通过 closed + commit_id 区分）
-	// v0.7.27 根因修复：之前没拉 events，GitHub PR merge 事件不显示。
-	// 真实 merge commit SHA 从 PR 详情端点 /pulls/{index} 的 merge_commit_sha 拿
-	// （v0.7.8 已加 PullDetailDTO.MergeCommitSHA 字段）。这里先把 event=closed
-	// + commit_id 标记为 "merge" type，template 端用 selectedPR.mergeCommitSha 兜底。
+	// 关闭 / 合并
+	// v0.7.27.1 根因修复：v0.7.27 用 "closed + commit_id 推断 merge" 是错的——
+	// GitHub Issue Events 端点独立有 `merged` event（commit_id 字段是真实 merge SHA），
+	// `closed` 事件只表示"关闭未合并"。`closed + commit_id 推断`逻辑应该删掉。
+	// 真实 merge commit SHA 优先用 TimelineItem.CommitID（来自 merged event 的 commit_id），
+	// 模板端用 selectedPR.mergeCommitSha 兜底（PR 详情端点字段，v0.7.8 已加）。
 	case "closed":
-		if e.CommitID != "" {
-			// PR merge：commit_id 有值
-			item.Type = "merge"
-			item.CommitID = e.CommitID
-		} else {
-			item.Type = "close"
-		}
+		item.Type = "close"
+		return item, true
+	case "merged":
+		// v0.7.27.1 新增：GitHub 独立 merge event —— CommitID 是真实 merge commit SHA
+		// （区别于 closed event 的 commit_id 是 head SHA 不是 merge SHA）
+		item.Type = "merge"
+		item.CommitID = e.CommitID
 		return item, true
 	case "reopened":
 		item.Type = "reopen"
 		return item, true
 
+	// v0.7.27.1 新增：push 事件（GitHub events 端点独立 `committed` event + `head_ref_force_pushed` event）
+	//
+	// 根因：v0.7.27 完全没拉这 2 个 event，导致 GitHub PR push 事件不显示。
+	// 字段差异：GitHub events 端 `committed` / `head_ref_force_pushed` 只有单条 commit_id
+	// （不是数组），前端 push event block 块 v-for 用 `item.commitIds` 数组；
+	// 把单 commit 包成 [commit_id] 数组让模板通用渲染逻辑复用。
+	// 限制：GitHub events 端不返回 commit message / author，subject/authorName 拿不到
+	// （v0.7.19 Gitea 端从 PR 详情 commits 二次拉，GitHub 端走
+	// ListPullCommits 端点能拉完整 commit + author，模板端走 commitDetails(sha) 兜底）
+	case "committed":
+		item.Type = "push"
+		if e.CommitID != "" {
+			item.CommitIDs = []string{e.CommitID}
+		}
+		return item, true
+	case "head_ref_force_pushed":
+		item.Type = "push"
+		item.IsForcePush = true
+		if e.CommitID != "" {
+			item.CommitIDs = []string{e.CommitID}
+		}
+		return item, true
+
+	// v0.7.27.1 新增：draft 状态切换 —— GitHub 端有独立 event（`ready_for_review` /
+	// `convert_to_draft`），比 v0.7.27 用 renamed 推断 WIP 切换更精确。
+	// 前端 systemEventVerb 在 IsWipToggle=true 时走 "已将合并请求标记为进行中/可评审"
+	// verb（v0.7.6 已支持）。
+	case "ready_for_review":
+		item.Type = "change_title"
+		item.IsWipToggle = true
+		item.IsWip = false
+		return item, true
+	case "convert_to_draft":
+		item.Type = "change_title"
+		item.IsWipToggle = true
+		item.IsWip = true
+		return item, true
+
 	// head branch 删除 / 恢复
 	case "head_ref_deleted":
 		item.Type = "delete_branch"
-		// v0.7.27 简化：GitHub events 端点 head_ref 字段实际是嵌套的 source.issue.head_ref
-		// (cross-referenced 也有)，delete_branch 事件里没专门字段；走 commit_id
-		// 兜底（合并 commit）或留空（用户前端会显示 "删除分支" 不带分支名）
-		// 跟 v0.7.12 修 Gitea delete_branch 行为对齐
-		if e.CommitID != "" {
-			item.OldRef = e.CommitID
-		}
+		// v0.7.27.1 根因修复：v0.7.27 用 commit_id 填 OldRef 是错的——commit_id 是
+		// 关联 commit SHA（如 d52...）不是 branch name（如 cx-same-057405）。
+		// GitHub events 端不返回 head ref name（只有 GraphQL timelineItems 才返）。
+		// **不**填 OldRef，前端 systemEventVerb 兜底拼接 selectedPR?.head?.label。
+		// （v0.7.28 计划让 listIssueEvents 额外拉 PR 详情 /pulls/{index} 拿 head ref name）
 		return item, true
 	case "head_ref_restored":
-		// v0.7.27 简化：复用 delete_branch 走 "恢复了分支" verb
+		// v0.7.27.1 简化：复用 delete_branch 走 "恢复了分支" verb
 		// （item.Type 用 "delete_branch" 是错的，但 verb 拼接 item.oldRef 兜底显示）
 		// v0.7.28 拆独立 "reopen_branch" 类型
 		item.Type = "delete_branch"
+		return item, true
+
+	// v0.7.27.1 新增：base branch 改动（GitHub PR 可以改 base branch，
+	// 触发 `base_ref_changed` event，e.Source.Issue 含 base ref 信息）
+	// GitHub events 端 base_ref_changed event 实际不返 base ref name 字段
+	// （只有 GraphQL 返），OldRef / NewRef 留空，前端用 selectedPR?.base?.label 兜底。
+	// v0.7.28 计划查 GraphQL 拿 base ref 改前/改后名字。
+	case "base_ref_changed":
+		item.Type = "change_target_branch"
 		return item, true
 
 	// 跨引用 issue / PR
