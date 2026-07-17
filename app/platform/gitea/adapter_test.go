@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1476,5 +1477,46 @@ func TestGiteaAdapter_GetPull_RefLabel(t *testing.T) {
 	}
 	if pull.Base.Ref != "main" {
 		t.Errorf("Base.Ref = %q, want main", pull.Base.Ref)
+	}
+}
+
+// TestGiteaAdapter_RestorePullBranch 验证 v0.7.28 恢复 head 分支端点
+// 调 POST /repos/{owner}/{repo}/git/refs body {ref: "refs/heads/{branch}", sha: "..."}
+// Gitea 端点带 /api/v1 前缀
+func TestGiteaAdapter_RestorePullBranch(t *testing.T) {
+	refsPath := "/api/v1/repos/alice/dolphin/git/refs"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != refsPath || r.Method != "POST" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		// 验证 body
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body failed: %v", err)
+		}
+		if body["ref"] != "refs/heads/feature-branch" {
+			t.Errorf("body.ref = %q, want refs/heads/feature-branch", body["ref"])
+		}
+		if body["sha"] != "abc123def" {
+			t.Errorf("body.sha = %q, want abc123def", body["sha"])
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"ref":"refs/heads/feature-branch","node_id":"...","url":"...","object":{"sha":"abc123def"}}`)
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "feature-branch", "abc123def"); err != nil {
+		t.Errorf("RestorePullBranch failed: %v", err)
+	}
+
+	// 验证空 branch / sha 走 validation 错误
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "", "abc"); err == nil {
+		t.Error("empty branch should fail validation")
+	}
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "feature", ""); err == nil {
+		t.Error("empty sha should fail validation")
 	}
 }

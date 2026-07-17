@@ -2112,6 +2112,9 @@ function formatRelative(iso: string | undefined): string {
 
       <!-- ===== 右侧：PR 详情面板 ===== -->
       <section v-if="selectedPR" class="pr-detail-panel" :key="selectedPR.index">
+        <div class="pr-detail-layout">
+          <!-- v0.7.28：主内容列（PR 详情 / 评论 / timeline） -->
+          <div class="pr-detail-content">
         <!-- 详情头部：标题 + 状态 -->
         <div class="pr-detail-header">
           <div class="pr-detail-header__top">
@@ -2360,6 +2363,21 @@ function formatRelative(iso: string | undefined): string {
             <span v-if="pull.filesByPR.get(selectedPR?.index ?? -1)?.length" class="pr-detail-tab__count">
               {{ pull.filesByPR.get(selectedPR?.index ?? -1)?.length ?? 0 }}
             </span>
+          </button>
+          <!-- v0.7.28：GitHub web 4 tab Checks 占位
+               - 暂不实现：GitHub Check Runs API 端点 GET /repos/{}/{}/commits/{}/check-runs
+                 + 还要聚合 commit head SHA + per-commit status，scope 较大
+               - 留 v0.7.29 TODO：参考 GitHub Check Runs / Check Suites API
+               - 当前显示 disabled 状态 + "0" 计数（GitHub PR 还没 Checks 时也是 0） -->
+          <button
+            v-if="isGithub"
+            type="button"
+            class="pr-detail-tab pr-detail-tab--disabled"
+            disabled
+            :title="'Checks 暂未集成（v0.7.29 TODO）'"
+          >
+            {{ isGithub ? 'Checks' : '检查' }}
+            <span class="pr-detail-tab__count">0</span>
           </button>
         </div>
 
@@ -3105,6 +3123,32 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     </div>
                   </li>
 
+                  <!-- v0.7.28：head_ref_deleted event 旁 Restore branch 按钮
+                       GitHub web 渲染 "X deleted the `branch-name` branch 2 weeks ago"
+                       + 右侧 "Restore branch" 按钮。分支名走 selectedPR?.head?.label
+                       (v0.7.28 后端已 split(":"))，SHA 走 selectedPR.head.sha。
+                       限制：head ref 已删的状态下 head ref sha 实际还有效（GitHub 不删
+                       commit 对象只删 ref），所以 head.sha 是有效可用的。 -->
+                  <li
+                    v-if="item.type === 'delete_branch' && selectedPR && selectedPR.head?.sha && selectedPR.head?.label"
+                    :key="`${item.type}-${item.id}-restore`"
+                    class="pr-detail__timeline-item pr-detail__timeline-item--event pr-detail__timeline-item--restore-action"
+                  >
+                    <div class="pr-detail__timeline-rail">
+                      <div class="pr-detail__timeline-dot pr-detail__timeline-dot--restore" aria-hidden="true">
+                        <RotateCcw :size="13" :stroke-width="2.5" />
+                      </div>
+                    </div>
+                    <div class="pr-detail__event-line">
+                      <button
+                        type="button"
+                        class="btn-primary-sm pr-detail__restore-btn"
+                        :disabled="pull.restoreBranchLoading"
+                        @click="pull.restoreBranch(activeProjectId!, selectedPR.index, selectedPR.head.label, selectedPR.head.sha)"
+                      >{{ pull.restoreBranchLoading ? '恢复中…' : 'Restore branch' }}</button>
+                    </div>
+                  </li>
+
                   <!-- v0.7.3：dismiss_review 拆 2 卡 —— event 卡已在上面 system-event 块渲染，
                        这里补 reason comment 卡（独立 timeline item，按 comment 卡样式渲染） -->
                   <li
@@ -3133,6 +3177,45 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                   </li>
                 </template>
               </ul>
+            </div>
+
+            <!-- v0.7.28：PR 关闭状态块（GitHub web 风格）
+                 - 关闭但未合并：渲染 "Closed with unmerged commits" + "This pull request is closed."
+                 - 关闭且已合并：渲染 "Merged" + merge commit 链接
+                 - 草稿 / 开放：什么都不渲染
+                 视觉对齐 GitHub web 底部那个灰色 panel（浅灰底 + GitBranch icon 左 + 文字 + Restore branch 按钮右） -->
+            <div
+              v-if="selectedPR.state === 'closed' && !selectedPR.merged"
+              class="pr-detail__closed-banner pr-detail__closed-banner--unmerged"
+              role="status"
+            >
+              <GitBranch :size="18" :stroke-width="2" aria-hidden="true" class="pr-detail__closed-banner-icon" />
+              <div class="pr-detail__closed-banner-text">
+                <div class="pr-detail__closed-banner-title">Closed with unmerged commits</div>
+                <div class="pr-detail__closed-banner-desc">This pull request is closed.</div>
+              </div>
+            </div>
+            <div
+              v-else-if="selectedPR.state === 'closed' && selectedPR.merged"
+              class="pr-detail__closed-banner pr-detail__closed-banner--merged"
+              role="status"
+            >
+              <GitPullRequestArrow :size="18" :stroke-width="2" aria-hidden="true" class="pr-detail__closed-banner-icon" />
+              <div class="pr-detail__closed-banner-text">
+                <div class="pr-detail__closed-banner-title">Merged</div>
+                <div
+                  v-if="selectedPR.mergeCommitSha"
+                  class="pr-detail__closed-banner-desc"
+                >This pull request was merged via commit
+                  <a
+                    class="mono pr-detail__branch pr-detail__branch--link"
+                    :href="commitWebUrl(selectedPR.mergeCommitSha)"
+                    target="_blank"
+                    rel="noopener"
+                  >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
+                  {{ ' ' }}into {{ baseLabel(selectedPR) }}.
+                </div>
+              </div>
             </div>
 
             <!-- 评论输入区 -->
@@ -3258,6 +3341,83 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               :project-id="activeProjectId ?? ''"
             />
           </div>
+        </div>
+          </div>
+          <!-- v0.7.28：右侧 sidebar（GitHub web 风格：Reviewers / Assignees / Labels /
+               Projects / Milestone / Development / Notifications）
+               v0.7.28 简版：渲染 4 个常用块（Reviewers / Assignees / Labels / Milestone）。
+               Projects / Development / Notifications 留 v0.7.29 补（Projects 端点要
+               调 GitHub GraphQL 拿 issue/71 项目关联，scope 较大）。 -->
+          <aside class="pr-detail-sidebar" v-if="selectedPR">
+            <!-- Reviewers -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">Reviewers</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="(selectedPR.reviewers ?? []).length === 0"
+                  class="pr-sidebar-block__empty"
+                >No reviews</div>
+                <div
+                  v-for="r in (selectedPR.reviewers ?? [])"
+                  :key="r.username"
+                  class="pr-sidebar-block__user"
+                >
+                  <div class="pr-sidebar-block__avatar">{{ r.username.charAt(0).toUpperCase() }}</div>
+                  <span class="pr-sidebar-block__username">{{ r.username }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Assignees -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">Assignees</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="(selectedPR.assignees ?? []).length === 0"
+                  class="pr-sidebar-block__empty"
+                >No one—<span class="pr-sidebar-block__assign-link">assign yourself</span></div>
+                <div
+                  v-for="a in (selectedPR.assignees ?? [])"
+                  :key="a.username"
+                  class="pr-sidebar-block__user"
+                >
+                  <div class="pr-sidebar-block__avatar">{{ a.username.charAt(0).toUpperCase() }}</div>
+                  <span class="pr-sidebar-block__username">{{ a.username }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Labels -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">Labels</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="(selectedPR.labels ?? []).length === 0"
+                  class="pr-sidebar-block__empty"
+                >None yet</div>
+                <div class="pr-sidebar-block__label-list">
+                  <span
+                    v-for="label in (selectedPR.labels ?? [])"
+                    :key="label.id"
+                    class="pr-sidebar-block__label"
+                    :style="labelStyle(label.color)"
+                  >{{ label.name }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Milestone -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">Milestone</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="!selectedPR.milestone"
+                  class="pr-sidebar-block__empty"
+                >No milestone</div>
+                <div v-else class="pr-sidebar-block__milestone">
+                  <GitBranch :size="14" :stroke-width="2" aria-hidden="true" />
+                  <span>{{ selectedPR.milestone.title }}</span>
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
       </section>
 
@@ -5975,6 +6135,91 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   justify-content: center;
 }
 
+/* v0.7.28：两列布局（主内容 + 右侧 sidebar，GitHub web 风格） */
+.pr-detail-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.pr-detail-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.pr-detail-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-divider);
+  padding: var(--space-4);
+  overflow-y: auto;
+  background: var(--color-shell-main-bg);
+}
+.pr-sidebar-block {
+  margin-bottom: var(--space-4);
+}
+.pr-sidebar-block__title {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-divider);
+}
+.pr-sidebar-block__empty {
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+.pr-sidebar-block__assign-link {
+  color: var(--color-link);
+  cursor: pointer;
+}
+.pr-sidebar-block__user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 0;
+  font-size: var(--font-sm);
+}
+.pr-sidebar-block__avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-shell-main-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.pr-sidebar-block__username {
+  color: var(--color-text);
+}
+.pr-sidebar-block__label-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pr-sidebar-block__label {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.pr-sidebar-block__milestone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
 /* 详情头部 */
 .pr-detail-header {
   padding: var(--space-4);
@@ -6273,6 +6518,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease);
 }
 .pr-detail-tab:hover { color: var(--color-text); }
+.pr-detail-tab--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.pr-detail-tab--disabled:hover { color: var(--color-text-secondary); }
 .pr-detail-tab--active {
   color: var(--color-text);
   border-bottom-color: var(--color-primary);
@@ -6416,6 +6666,54 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
+}
+
+/* ===== v0.7.28 PR 关闭状态块（GitHub web 风格，timeline 下方） ===== */
+.pr-detail__closed-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+}
+.pr-detail__closed-banner-icon {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+.pr-detail__closed-banner--merged .pr-detail__closed-banner-icon {
+  color: #8957e5; /* GitHub merged 紫 */
+}
+.pr-detail__closed-banner--unmerged .pr-detail__closed-banner-icon {
+  color: #cf222e; /* GitHub closed 红 */
+}
+.pr-detail__closed-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+.pr-detail__closed-banner-title {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pr-detail__closed-banner-desc {
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  margin-top: 2px;
+}
+
+/* v0.7.28：head_ref_deleted 事件旁的 Restore branch 按钮（独立 timeline item） */
+.pr-detail__timeline-item--restore-action {
+  padding: 4px 0 12px;
+}
+.pr-detail__timeline-dot--restore {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-divider);
+}
+.pr-detail__restore-btn {
+  margin-left: var(--space-2);
 }
 .pr-detail__merge-warning-step {
   font-weight: 600;

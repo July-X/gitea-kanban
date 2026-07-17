@@ -2043,6 +2043,119 @@ func TestGitHubAdapter_GetPull_NoMilestone(t *testing.T) {
 	}
 }
 
+// TestGitHubAdapter_GetPull_RefLabel 验证 v0.7.28 修复：GitHub head.label
+// 是 "owner:branch" 格式（不是完整 ref 路径），需要 split 拿 branch 名
+//
+// 根因：v0.7.9 写代码时注释错说"GitHub 端 label == ref（都是 refs/heads/main 路径）"，
+// user 反馈 PR header 显示 "July-X:main" / "July-X:int-test-..." 把 owner 前缀
+// 拼进去了。v0.7.28 加 githubRefLabel helper split(":") 拿 branch 部分。
+func TestGitHubAdapter_GetPull_RefLabel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number": 19,
+			"title":  "int test",
+			"state":  "closed",
+			"head": map[string]interface{}{
+				"label": "July-X:int-test-1782998094151278000", // owner:branch 格式
+				"ref":   "int-test-1782998094151278000",          // 纯 branch 名
+				"sha":   "aaa",
+			},
+			"base": map[string]interface{}{
+				"label": "July-X:main", // owner:branch 格式
+				"ref":   "main",        // 纯 branch 名
+				"sha":   "bbb",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	pull, err := adapter.GetPull(context.Background(), server.URL, "alice", "ghp", "alice", "kanban-test", 19)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+
+	// head label 应该是纯 branch 名（v0.7.28 修复：去 owner 前缀）
+	if pull.Head.Label != "int-test-1782998094151278000" {
+		t.Errorf("Head.Label = %q, want int-test-1782998094151278000 (v0.7.28 修复：去 owner 前缀)", pull.Head.Label)
+	}
+	if pull.Head.Ref != "int-test-1782998094151278000" {
+		t.Errorf("Head.Ref = %q, want int-test-1782998094151278000", pull.Head.Ref)
+	}
+
+	// base label 应该是纯 branch 名
+	if pull.Base.Label != "main" {
+		t.Errorf("Base.Label = %q, want main (v0.7.28 修复：去 owner 前缀)", pull.Base.Label)
+	}
+	if pull.Base.Ref != "main" {
+		t.Errorf("Base.Ref = %q, want main", pull.Base.Ref)
+	}
+}
+
+// TestGitHubAdapter_RestorePullBranch 验证 v0.7.28 恢复 head 分支端点
+// GitHub 端点跟 Gitea 一致：POST /repos/{owner}/{repo}/git/refs
+// body {ref: "refs/heads/{branch}", sha: "..."}
+func TestGitHubAdapter_RestorePullBranch(t *testing.T) {
+	refsPath := "/repos/alice/dolphin/git/refs"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != refsPath || r.Method != "POST" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body failed: %v", err)
+		}
+		if body["ref"] != "refs/heads/feature-branch" {
+			t.Errorf("body.ref = %q, want refs/heads/feature-branch", body["ref"])
+		}
+		if body["sha"] != "abc123def" {
+			t.Errorf("body.sha = %q, want abc123def", body["sha"])
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"ref":"refs/heads/feature-branch","node_id":"...","url":"...","object":{"sha":"abc123def"}}`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "feature-branch", "abc123def"); err != nil {
+		t.Errorf("RestorePullBranch failed: %v", err)
+	}
+
+	// 验证 validation
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "", "abc"); err == nil {
+		t.Error("empty branch should fail validation")
+	}
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "feature", ""); err == nil {
+		t.Error("empty sha should fail validation")
+	}
+}
+
+// TestGitHubAdapter_GithubRefLabel 单元测 githubRefLabel helper
+func TestGitHubAdapter_GithubRefLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+		ref   string
+		want  string
+	}{
+		{"owner:branch", "July-X:int-test-178...", "int-test-178...", "int-test-178..."},
+		{"branch only (no colon)", "main", "main", "main"},
+		{"empty label, ref fallback", "", "main", "main"},
+		{"multi-colon (defensive)", "owner:sub:branch", "branch", "branch"},
+		{"empty label and ref", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := githubRefLabel(tt.label, tt.ref)
+			if got != tt.want {
+				t.Errorf("githubRefLabel(%q, %q) = %q, want %q", tt.label, tt.ref, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestGitHubAdapter_UploadIssueAttachment 验证 multipart/form-data 上传到
 // POST /repos/{owner}/{repo}/issues/{issue_number}/assets。form field 必须是 'file'
 // （与 Gitea 的 'attachment' 不同——adapter 层翻译）。

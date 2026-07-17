@@ -403,9 +403,30 @@ type githubPullRefRaw struct {
 	// v0.7.9：Label 字段 —— GitHub API 在 head/base 嵌套对象里也返 label 字段
 	// （与 ref 相同，都是 `refs/heads/main` 这种完整路径，去掉前缀后是分支名）
 	// GitHub 端 label == ref（不像 Gitea label 是真实分支名）
+	// v0.7.28 根因修复：v0.7.9 注释**实测错误**！GitHub API 实际 head.label 是
+	// "owner:branch" 格式（如 "July-X:int-test-178..."），不是完整 ref 路径。
+	// ref 字段才是纯 branch name（如 "int-test-178..."），label 字段是 owner:branch
+	// 拼接（GitHub web URL 风格）。user 反馈 PR header 显示 "July-X:main" /
+	// "July-X:int-test-..." 错把 owner 前缀拼进去了。
+	// 修法：GitHub adapter 处理 head.label 时 split(":") 拿 branch 部分存到
+	// PullRefDTO.Label，让前端 headLabel 渲染看到的是纯 branch name（跟 Gitea 一致）。
 	Label string `json:"label,omitempty"`
 	Ref   string `json:"ref"`
 	SHA   string `json:"sha"`
+}
+
+// githubRefLabel 把 GitHub API "owner:branch" 格式的 label 转成纯 branch name。
+// 例如 "July-X:int-test-178..." → "int-test-178..."。
+// 兜底：label 为空时直接用 ref（ref 是纯 branch name）。
+func githubRefLabel(label, ref string) string {
+	if label == "" {
+		return ref
+	}
+	// 找最后一个 ":"（避免 owner 名带 ":" 的极端情况）
+	if idx := strings.LastIndex(label, ":"); idx >= 0 && idx < len(label)-1 {
+		return label[idx+1:]
+	}
+	return label
 }
 
 type githubUserRaw struct {
@@ -439,8 +460,8 @@ func githubPullToDetail(p githubPullRaw) platform.PullDetailDTO {
 		State:         p.State,
 		Draft:         p.Draft,
 		Merged:        p.Merged,
-		Head:          platform.PullRefDTO{Ref: p.Head.Ref, Label: p.Head.Label, SHA: p.Head.SHA},
-		Base:          platform.PullRefDTO{Ref: p.Base.Ref, Label: p.Base.Label, SHA: p.Base.SHA},
+		Head:          platform.PullRefDTO{Ref: p.Head.Ref, Label: githubRefLabel(p.Head.Label, p.Head.Ref), SHA: p.Head.SHA},
+		Base:          platform.PullRefDTO{Ref: p.Base.Ref, Label: githubRefLabel(p.Base.Label, p.Base.Ref), SHA: p.Base.SHA},
 		Mergeable:     mergeable,
 		HasConflicts:  !mergeable,
 		Body:          p.Body,
@@ -1110,6 +1131,34 @@ func (a *GitHubAdapter) UpdatePullBranch(ctx context.Context, hostURL, username,
 		return nil, err
 	}
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+}
+
+// RestorePullBranch 恢复被删的 head 分支（v0.7.28）
+//
+// GitHub 端点跟 Gitea 一致：POST /repos/{owner}/{repo}/git/refs
+// body: {"ref": "refs/heads/{branch}", "sha": "{commit_sha}"}
+// 成功返 201 Created；分支已存在返 422（提示用户"分支已存在，无需恢复"）。
+//
+// 注意：GitHub 端点跟 Gitea 端点路径和请求体完全一样（GitHub API 设计参考了
+// Git 底层 semantics），同一个 endpoint 实现可在两个平台都用。
+func (a *GitHubAdapter) RestorePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch, sha string) error {
+	hostURL = normalizeGitHubHostURL(hostURL)
+	if strings.TrimSpace(branch) == "" {
+		return ipc.NewValidationFailed("分支名不能为空", "")
+	}
+	if strings.TrimSpace(sha) == "" {
+		return ipc.NewValidationFailed("commit SHA 不能为空", "")
+	}
+	payload := map[string]any{
+		"ref": "refs/heads/" + branch,
+		"sha": sha,
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo)
+	return a.doRequest(ctx, hostURL, token, "POST", path, reader, nil)
 }
 
 // ===== PR 评论（v0.6+）=====

@@ -682,6 +682,33 @@ func (a *GiteaAdapter) UpdatePullBranch(ctx context.Context, hostURL, username, 
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
+// RestorePullBranch 恢复被删的 head 分支（v0.7.28）
+//
+// Gitea 端点：POST /repos/{owner}/{repo}/git/refs
+// body: {"ref": "refs/heads/{branch}", "sha": "{commit_sha}"}
+//   - branch: 不带 refs/heads/ 前缀
+//   - sha: 任意 commit SHA（PR 详情 head.sha 即可）
+//
+// 成功返 201 Created；分支已存在返 422（提示用户"分支已存在，无需恢复"）。
+func (a *GiteaAdapter) RestorePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch, sha string) error {
+	if strings.TrimSpace(branch) == "" {
+		return ipc.NewValidationFailed("分支名不能为空", "")
+	}
+	if strings.TrimSpace(sha) == "" {
+		return ipc.NewValidationFailed("commit SHA 不能为空", "")
+	}
+	payload := map[string]any{
+		"ref": "refs/heads/" + branch,
+		"sha": sha,
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo)
+	return a.doRequest(ctx, hostURL, token, "POST", path, reader, nil)
+}
+
 // mapMergeMethodToGitea 把前端 MergeMethod 转换为 gitea merge_style_field
 //
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'

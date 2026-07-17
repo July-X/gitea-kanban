@@ -111,6 +111,8 @@ export function RemovePullCommentReaction(arg1:main.RemovePullCommentReactionArg
 
 export function RemoveWorkspaceRepos(arg1:main.RemoveWorkspaceReposArgs):Promise<main.RemoveWorkspaceReposResult>;
 
+export function RestorePullBranch(arg1:main.RestorePullBranchArgs):Promise<void>;
+
 export function SetGitBinaryPath(arg1:main.SetGitBinaryPathArgs):Promise<void>;
 
 export function SetUserPrefs(arg1:main.SetUserPrefsArgs):Promise<Record<string, any>>;

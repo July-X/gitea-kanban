@@ -378,6 +378,35 @@ func (a *App) UpdatePullBranch(args UpdatePullBranchArgs) (PullDetailAppDTO, err
 	return *d, nil
 }
 
+// ===== RestorePullBranch =====
+
+// RestorePullBranchArgs 恢复被删 head 分支参数
+type RestorePullBranchArgs struct {
+	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"` // 要恢复的分支名（不带 refs/heads/ 前缀）
+	SHA       string `json:"sha"`    // 分支指向的 commit SHA（PR 详情 head.sha）
+}
+
+// RestorePullBranch 恢复被删的 head 分支（v0.7.28 "Restore branch" 按钮用）
+//
+// 场景：PR 关闭 + head 分支被删（GitHub web 关闭 PR 默认删除源分支）后，user
+// 在 timeline head_ref_deleted event 旁看到 "Restore branch" 按钮，点这个调
+// 后端重建分支（POST /repos/{owner}/{repo}/git/refs）。
+//
+// Gitea + GitHub 端点统一：POST /repos/{owner}/{repo}/git/refs
+// body: {"ref": "refs/heads/{branch}", "sha": "{commit_sha}"}
+//
+// 错误处理：
+//   - 422 "Reference already exists" → 分支已存在，提示用户
+//   - 404 "Not Found" → commit SHA 失效（极罕见，分支 SHA 被 force push 后又删）
+func (a *App) RestorePullBranch(args RestorePullBranchArgs) error {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return err
+	}
+	return adapter.RestorePullBranch(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Branch, args.SHA)
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // 范围限定：只做 PR 上下文（issue 评论另起 issue）。

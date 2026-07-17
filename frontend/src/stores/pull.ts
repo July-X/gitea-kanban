@@ -14,10 +14,11 @@ import {
   pullsReviewCommentsList, pullsFilesList, pullsFileDiffGet, pullsCommitsList,
   pullsCommentReactionsList, pullsCommentReactionAdd, pullsCommentReactionRemove,
   pullsUpdateLabels, pullsUpdateAssignee, pullsUpdateReviewers, pullsUpdateMilestone,
-  pullsUpdateTitle, pullsGetCommitsBehind, pullsUpdateBranch,
+  pullsUpdateTitle, pullsGetCommitsBehind, pullsUpdateBranch, pullsRestoreBranch,
   labelsList, membersList, milestonesList,
   normalizeError,
 } from '@renderer/lib/ipc-client';
+import { showToast } from '@renderer/lib/toast';
 import type { UserFacingError } from '@renderer/lib/ipc-client';
 import type {
   ListPullsResp, PullDto, PullState, MergeMethod,
@@ -537,11 +538,43 @@ export const usePullStore = defineStore('pull', () => {
     }
   }
 
+  /** v0.7.28：恢复被删 head 分支（"Restore branch" 按钮用，head_ref_deleted event 旁） */
+  // restoreBranch 状态（按钮 loading 用）
+  const restoreBranchLoading = ref(false);
+  async function restoreBranch(projectId: string, index: number, branch: string, sha: string): Promise<void> {
+    if (!branch || !sha) {
+      showToast({ type: 'error', message: '缺少分支名或 commit SHA，无法恢复' });
+      return;
+    }
+    // fetchTimeline / fetchPullDetail 接 PullDto，从 currentSelectedItem 或 items 里拿
+    const p = currentSelectedItem.value?.index === index
+      ? currentSelectedItem.value
+      : items.value.find(it => it.index === index);
+    if (!p) {
+      showToast({ type: 'error', message: `找不到 #${index} 的 PR 数据` });
+      return;
+    }
+    restoreBranchLoading.value = true;
+    try {
+      await pullsRestoreBranch({ projectId, branch, sha });
+      showToast({ type: 'success', message: `分支 ${branch} 已恢复` });
+      // 恢复成功后 refetch timeline + PR 详情（head_ref_deleted event 状态会变）
+      await fetchTimeline(p);
+      await fetchPullDetail(p);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast({ type: 'error', message: `恢复分支失败：${msg}` });
+    } finally {
+      restoreBranchLoading.value = false;
+    }
+  }
+
   return {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
     timelinePanels, reviewPanels, reviewSubmitting,
     reviewCommentsByPR, filesByPR, fileDiffByPath, commitsByPR, commitsLoading,
+    restoreBranchLoading,
     reactionsByComment, // v0.7.26：评论级 reaction 缓存（addCommentReaction 后重拉）
     availableMilestones, availableMembers,
     total, counts, filteredItems, reviewCommentsGrouped,
@@ -558,6 +591,8 @@ export const usePullStore = defineStore('pull', () => {
     updateTitle,
     // v0.7.26：更新 head 分支（"通过合并更新分支"按钮用）
     updateBranch,
+    // v0.7.28：恢复被删 head 分支（"Restore branch" 按钮用）
+    restoreBranch,
     labels: labelsList, members: membersList, milestones: milestonesList,
   };
 });

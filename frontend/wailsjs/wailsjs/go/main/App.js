@@ -214,6 +214,10 @@ export function RemoveWorkspaceRepos(arg1) {
   return window['go']['main']['App']['RemoveWorkspaceRepos'](arg1);
 }
 
+export function RestorePullBranch(arg1) {
+  return window['go']['main']['App']['RestorePullBranch'](arg1);
+}
+
 export function SetGitBinaryPath(arg1) {
   return window['go']['main']['App']['SetGitBinaryPath'](arg1);
 }

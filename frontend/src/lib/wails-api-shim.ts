@@ -253,6 +253,8 @@ type WailsApp = {
   GetPullCommitsBehind?: (args: { projectId: string; index: number; base: string; head: string }) => Promise<unknown>;
   // v0.7.26：更新 head 分支（"通过合并更新分支"按钮用）
   UpdatePullBranch?: (args: { projectId: string; index: number; style: string }) => Promise<unknown>;
+  // v0.7.28：恢复被删 head 分支（"Restore branch" 按钮用，head_ref_deleted event 旁）
+  RestorePullBranch?: (args: { projectId: string; branch: string; sha: string }) => Promise<unknown>;
   // v0.6+ PR 评论（issue 评论另起 v0.7）
   ListPullTimeline?: (args: { projectId: string; index: number }) => Promise<unknown>;
   CreatePullComment?: (args: { projectId: string; index: number; body: string }) => Promise<unknown>;
@@ -933,6 +935,25 @@ const apiShim = {
             projectId: a.projectId,
             index: a.index,
             style: a.style,
+          });
+        },
+      );
+    },
+    // v0.7.28：pulls.restoreBranch —— 恢复被删 head 分支（"Restore branch" 按钮用，
+    // head_ref_deleted event 旁）。Gitea + GitHub 端点统一：
+    //   POST /repos/{owner}/{repo}/git/refs body {ref, sha}
+    restoreBranch: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; branch: string; sha: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'restoreBranch'),
+        (app) => {
+          if (!app.RestorePullBranch) {
+            return notImplemented('pulls', 'restoreBranch');
+          }
+          return app.RestorePullBranch({
+            projectId: a.projectId,
+            branch: a.branch,
+            sha: a.sha,
           });
         },
       );
