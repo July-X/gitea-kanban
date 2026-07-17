@@ -2818,9 +2818,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                              "评审事件、评审评论，这些展示没有对齐 Gitea web"
                              —— Gitea web 端 review event comment card 右上角
                              也显示 [所有者] 角色标签（`show_role` 模板，
-                             评论作者 == PR 作者时显示）。 -->
+                             评论作者 == PR 作者时显示）。
+                             v0.7.32：GitHub 端统一用 "commented" verb（跟普通
+                             comment card 一致），去掉 "left a comment"。
+                             GitHub web 实际渲染 "X commented time" 1 行。 -->
                         <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" :title="isGithub ? 'This user is the pull request author' : '合并请求作者'">{{ isGithub ? 'Author' : '所有者' }}</span>
-                        <span class="pr-detail__comment-verb">{{ isGithub ? 'left a comment' : '留下了一条评论' }}</span>
+                        <span class="pr-detail__comment-verb">{{ isGithub ? 'commented' : '留下了一条评论' }}</span>
                         <a
                           class="pr-detail__comment-time"
                           :title="formatDate(item.created)"
@@ -2848,7 +2851,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
                         <div class="pr-detail__comment-meta-left">
-                          <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
+                          <!-- v0.7.32：GitHub 端不渲染"我"标签（GitHub web 没有 self tag，
+                               只显示 username）。Gitea 端继续渲染"我"标签方便 PM 识别自己的评论。 -->
+                          <span v-if="!isGithub && currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
                           <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
                           <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" :title="isGithub ? 'This user is the pull request author' : '合并请求作者'">{{ isGithub ? 'Author' : '所有者' }}</span>
                           <span class="pr-detail__comment-verb">{{ isGithub ? 'commented' : '评论于' }}</span>
@@ -3035,7 +3040,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     </div>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
-                        <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
+                        <!-- v0.7.32：GitHub 端单 commit push 不显示 author + verb
+                             GitHub web 实际渲染："commit subject" + "short SHA" 单行，无
+                             "X added 1 commit" verb，也无 pusher 名字（commit author 在 commit
+                             详情里，不在 timeline event 上）。
+                             Gitea 端：actor + 于 + time + verb + body（保持 v0.7.31 布局）。 -->
+                        <span
+                          v-if="!(isGithub && item.type === 'push' && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
+                          class="pr-detail__event-author"
+                        >{{ displayName(item.author) }}</span>
                         <!-- v0.7.31 平台感知：主行 layout
                              - Gitea: actor + 于 + time + verb + body（CLAUDE.md 零术语中文）
                              - GitHub web: actor + verb + body + time（无"于"介词，时间放 verb 后
@@ -3046,8 +3059,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                              保留 v-else-if 链渲染 verb + body（label chip / merge SHA / force push hint），
                              时间在 v-else-if 链外独立 v-if="isGithub" 渲染。 -->
                         <span v-if="!isGithub" class="pr-detail__event-prep">于</span>
-                        <span v-if="!isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
-                        <span class="pr-detail__event-verb">{{ platformSystemEventVerb(item) }}</span>
+                        <span
+                          v-if="!(isGithub && item.type === 'push' && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
+                        >
+                          <span v-if="!isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        </span>
+                        <span
+                          v-if="!(isGithub && item.type === 'push' && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
+                          class="pr-detail__event-verb"
+                        >{{ platformSystemEventVerb(item) }}</span>
                         <!-- v0.7.14：label 事件 chip 移到主行（跟 push/merge/delete_branch
                              一致），不单独换 div 块 —— user 反馈 ⑬"修改了标签" 后面 chip
                              不要单独换一行显示。Gitea web 渲染 "X 于 Y 修改了标签
@@ -3105,6 +3125,36 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                           >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
                           <span class="pr-detail__event-hint">{{ isGithub ? 'into' : '到' }}</span>
                           <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
+                        </span>
+                        <!-- v0.7.32：push event GitHub 端单 commit 特殊渲染
+                             GitHub web 实际渲染："commit subject" + "short SHA" 同行（右侧），
+                             不显示 "X added 1 commit" verb 也不显示 commit 列表。
+                             参考 https://github.com/July-X/kanban-test/pull/21 截图：
+                             "integration test fixture" + "973c6cd" 单行。
+                             Gitea web 走 Gitea 风格："X 推送了 N 个提交" + 下面 commits_list_small
+                             块（v0.7.8 / v0.7.19 修过），保持不变。
+                             多 commit push：GitHub 端也走 "added N commits" + 列表（Gitea 风格）
+                             —— 避免信息丢失。
+                             限制：必须 commitDetails(sha) 拿得到 subject（store 缓存走
+                             fetchCommitsByPr 拉过），否则 fallback 到 Gitea 风格 verb。 -->
+                        <span
+                          v-else-if="item.type === 'push' && isGithub && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject"
+                          class="pr-detail__event-push-github"
+                        >
+                          <a
+                            class="pr-detail__event-commit-subject pr-detail__branch--link"
+                            :href="commitWebUrl(item.commitIds[0])"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`Open commit ${item.commitIds[0].slice(0, 7)} on GitHub`"
+                          >{{ commitDetails(item.commitIds[0])?.subject }}</a>
+                          <a
+                            class="mono pr-detail__event-commit-sha pr-detail__branch--link"
+                            :href="commitWebUrl(item.commitIds[0])"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`Open commit ${item.commitIds[0].slice(0, 7)} on GitHub`"
+                          >{{ item.commitIds[0].slice(0, 7) }}</a>
                         </span>
                         <!-- v0.7.19 根因修复：force push 提示搬到主行（v0.7.8 加的 inline 块
                              跟 block 块 v-for 重复，v0.7.19 删 inline 块后 force 提示
@@ -3330,8 +3380,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                            只显示 SHA 短码链接 + 完整 SHA title（hover 看）。
                            v0.7.9 计划：拉 /pulls/{index}/commits 二次匹配补
                            subject / author 信息（按 SHA 短码 7 位匹配）。 -->
+                      <!-- v0.7.32：GitHub 端单 commit push 不渲染 commit 列表块
+                           （已经在主行 v-else-if 链 pr-detail__event-push-github 里渲染
+                           commit subject + short SHA 同行，避免重复）。多 commit 或
+                           Gitea 端继续渲染列表块。 -->
                       <div
-                        v-if="item.type === 'push' && item.commitIds && item.commitIds.length > 0"
+                        v-if="item.type === 'push' && item.commitIds && item.commitIds.length > 0 && !(isGithub && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
                         class="pr-detail__event-block pr-detail__event-block--commits"
                       >
                         <div
@@ -7608,6 +7662,24 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__event-block--commits {
   margin-top: 2px;
   padding: 0;
+}
+/* v0.7.32：GitHub 端单 commit push 主行内 commit subject + short SHA 同行布局
+   跟 Gitea web commits_list_small 模板不同，GitHub web 是单行 "subject" + "short SHA"
+   （右侧），无 GitCommit icon 无 author。 */
+.pr-detail__event-push-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.pr-detail__event-push-github .pr-detail__event-commit-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pr-detail__event-commit-row {
   display: flex;
