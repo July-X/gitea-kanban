@@ -2769,8 +2769,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     <div class="pr-detail__event-line">
                       <span class="pr-detail__event-text">
                         <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <!-- v0.7.31 平台感知：review event 时间 layout
+                             - Gitea: actor + time + verb（Gitea web .timeline-item.event 渲染顺序）
+                             - GitHub web: actor + verb + time（"X approved these changes 2 weeks ago"） -->
+                        <span v-if="!isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                         <span class="pr-detail__event-verb">{{ reviewStateLabel(item.state) }}</span>
+                        <span v-if="isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </span>
                     </div>
                   </li>
@@ -3032,8 +3036,17 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
                         <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__event-prep">于</span>
-                        <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <!-- v0.7.31 平台感知：主行 layout
+                             - Gitea: actor + 于 + time + verb + body（CLAUDE.md 零术语中文）
+                             - GitHub web: actor + verb + body + time（无"于"介词，时间放 verb 后
+                               跟 GitHub web "X closed this 2 weeks ago" 格式 1:1 对齐）
+                             时间用 v-if 分两处渲染：
+                             - Gitea 端在 verb 前
+                             - GitHub 端在 body 之后
+                             保留 v-else-if 链渲染 verb + body（label chip / merge SHA / force push hint），
+                             时间在 v-else-if 链外独立 v-if="isGithub" 渲染。 -->
+                        <span v-if="!isGithub" class="pr-detail__event-prep">于</span>
+                        <span v-if="!isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                         <span class="pr-detail__event-verb">{{ platformSystemEventVerb(item) }}</span>
                         <!-- v0.7.14：label 事件 chip 移到主行（跟 push/merge/delete_branch
                              一致），不单独换 div 块 —— user 反馈 ⑬"修改了标签" 后面 chip
@@ -3102,6 +3115,25 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                           v-else-if="item.type === 'push' && item.isForcePush"
                           class="pr-detail__event-hint"
                         >{{ isGithub ? '(force pushed)' : '(强制推送)' }}</span>
+                        <!-- v0.7.31 平台感知：GitHub 端时间放 verb 后 + Restore branch 按钮
+                             跟 deleted event 同行（右侧）—— user 反馈 ⑭ "Restore branch 也是和
+                             删除事件一行显示"（参考 GitHub 官方示意图）。
+                             - Gitea 端：时间已在 verb 前渲染（v-if="!isGithub" 上面那个 span），
+                               这里不再渲染时间
+                             - GitHub 端：时间 + restore button 放 verb 后，跟 GitHub web
+                               "X deleted the `branch` branch 2 weeks ago [Restore branch]" 1 行
+                             Restore branch 按钮条件：
+                             - 仅 GitHub（Gitea 没这个概念）
+                             - 仅 delete_branch event
+                             - 需要 selectedPR.head.sha + selectedPR.head.label（v0.7.28 修） -->
+                        <span v-if="isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <button
+                          v-if="isGithub && item.type === 'delete_branch' && selectedPR && selectedPR.head?.sha && selectedPR.head?.label"
+                          type="button"
+                          class="btn-primary-sm pr-detail__restore-btn pr-detail__restore-btn--inline"
+                          :disabled="pull.restoreBranchLoading"
+                          @click="pull.restoreBranch(activeProjectId!, selectedPR.index, selectedPR.head.label, selectedPR.head.sha)"
+                        >{{ pull.restoreBranchLoading ? 'Restoring…' : 'Restore branch' }}</button>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
                       <div
@@ -3341,31 +3373,14 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     </div>
                   </li>
 
-                  <!-- v0.7.28：head_ref_deleted event 旁 Restore branch 按钮
-                       GitHub web 渲染 "X deleted the `branch-name` branch 2 weeks ago"
-                       + 右侧 "Restore branch" 按钮。分支名走 selectedPR?.head?.label
-                       (v0.7.28 后端已 split(":"))，SHA 走 selectedPR.head.sha。
-                       限制：head ref 已删的状态下 head ref sha 实际还有效（GitHub 不删
-                       commit 对象只删 ref），所以 head.sha 是有效可用的。 -->
-                  <li
-                    v-if="item.type === 'delete_branch' && selectedPR && selectedPR.head?.sha && selectedPR.head?.label"
-                    :key="`${item.type}-${item.id}-restore`"
-                    class="pr-detail__timeline-item pr-detail__timeline-item--event pr-detail__timeline-item--restore-action"
-                  >
-                    <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-dot pr-detail__timeline-dot--restore" aria-hidden="true">
-                        <RotateCcw :size="13" :stroke-width="2.5" />
-                      </div>
-                    </div>
-                    <div class="pr-detail__event-line">
-                      <button
-                        type="button"
-                        class="btn-primary-sm pr-detail__restore-btn"
-                        :disabled="pull.restoreBranchLoading"
-                        @click="pull.restoreBranch(activeProjectId!, selectedPR.index, selectedPR.head.label, selectedPR.head.sha)"
-                      >{{ pull.restoreBranchLoading ? (isGithub ? 'Restoring…' : '恢复中…') : (isGithub ? 'Restore branch' : '恢复分支') }}</button>
-                    </div>
-                  </li>
+                  <!-- v0.7.28-29 注释保留：早期版本 Restore branch 按钮是独立 <li>
+                       （在 delete_branch event 之后另起一行）。v0.7.31 user 反馈 ⑭
+                       "Restore branch 也是和删除事件一行显示，参考 GitHub 官方示意图" —
+                       已搬到 delete_branch event 主行 pr-detail__event-line 内
+                       （v-if="isGithub && item.type === 'delete_branch' && ..."），
+                       Gitea 端不显示（Gitea 没 Restore branch 概念），GitHub 端跟
+                       "X deleted the `branch` branch 2 weeks ago [Restore branch]" 同行。
+                       早期独立 <li> 代码已删。下面这条注释留着是方便历史溯源。 -->
 
                   <!-- v0.7.3：dismiss_review 拆 2 卡 —— event 卡已在上面 system-event 块渲染，
                        这里补 reason comment 卡（独立 timeline item，按 comment 卡样式渲染） -->
@@ -6988,17 +7003,24 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   margin-left: auto;
 }
 
-/* v0.7.28：head_ref_deleted 事件旁的 Restore branch 按钮（独立 timeline item） */
-.pr-detail__timeline-item--restore-action {
-  padding: 4px 0 12px;
-}
-.pr-detail__timeline-dot--restore {
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-divider);
-}
+/* v0.7.28-29 注释保留：早期版本 Restore branch 按钮是独立 <li>（带 left rail
+   RotateCcw icon dot）。v0.7.31 已搬到 delete_branch event 主行 pr-detail__event-line 内
+   （v-if="isGithub && item.type === 'delete_branch' && ..."），独立 <li> 删了。
+   下面 2 条 CSS 规则已无引用，删掉避免 dead code：
+     - .pr-detail__timeline-item--restore-action
+     - .pr-detail__timeline-dot--restore
+   保留这条注释是方便历史溯源。 */
+
 .pr-detail__restore-btn {
   margin-left: var(--space-2);
+}
+/* v0.7.31：Restore branch 按钮在 event-line 内（同行右侧）样式微调
+   比独立 <li> 时的版本小一号，跟主行文字大小一致（Gitea web 实际就是小按钮） */
+.pr-detail__restore-btn--inline {
+  margin-left: auto;       /* flex 推到最右 */
+  padding: 2px 10px;
+  font-size: var(--font-sm);
+  line-height: 1.4;
 }
 .pr-detail__merge-warning-step {
   font-weight: 600;
