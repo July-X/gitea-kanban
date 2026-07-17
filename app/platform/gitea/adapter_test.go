@@ -1520,3 +1520,27 @@ func TestGiteaAdapter_RestorePullBranch(t *testing.T) {
 		t.Error("empty sha should fail validation")
 	}
 }
+
+// TestGiteaAdapter_DeletePullBranch 验证 v0.7.29 "Delete branch" 按钮端点
+// Gitea 走 DELETE /api/v1/repos/{owner}/{repo}/git/refs/refs/heads/{branch}（路径里带 refs/heads/ 前缀）
+func TestGiteaAdapter_DeletePullBranch(t *testing.T) {
+	expectedPath := "/api/v1/repos/alice/dolphin/git/refs/refs/heads/feature-branch"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != expectedPath || r.Method != "DELETE" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "feature-branch"); err != nil {
+		t.Errorf("DeletePullBranch failed: %v", err)
+	}
+	// 验证空 branch 走 validation
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", ""); err == nil {
+		t.Error("empty branch should fail validation")
+	}
+}

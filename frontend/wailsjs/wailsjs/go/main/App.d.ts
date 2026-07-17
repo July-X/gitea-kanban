@@ -31,6 +31,8 @@ export function CreatePullReview(arg1:main.CreatePullReviewArgs):Promise<platfor
 
 export function CreatePullReviewComment(arg1:main.CreatePullReviewCommentArgs):Promise<platform.PullReviewCommentDto>;
 
+export function DeletePullBranch(arg1:main.DeletePullBranchArgs):Promise<void>;
+
 export function DeletePullComment(arg1:main.DeletePullCommentArgs):Promise<void>;
 
 export function ExportLogs(arg1:main.ExportLogsArgs):Promise<main.ExportLogsResult>;

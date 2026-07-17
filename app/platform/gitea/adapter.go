@@ -709,6 +709,20 @@ func (a *GiteaAdapter) RestorePullBranch(ctx context.Context, hostURL, username,
 	return a.doRequest(ctx, hostURL, token, "POST", path, reader, nil)
 }
 
+// DeletePullBranch 删除 head 分支（v0.7.29 "Delete branch" 按钮用）
+//
+// Gitea 端点：DELETE /api/v1/repos/{owner}/{repo}/git/refs/{ref}
+//   - ref 必须含 refs/heads/ 前缀（不能省略！）
+//   - 成功返 204 No Content
+//   - 分支不存在返 404（race condition：用户两个 tab 同时删）
+func (a *GiteaAdapter) DeletePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch string) error {
+	if strings.TrimSpace(branch) == "" {
+		return ipc.NewValidationFailed("分支名不能为空", "")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/git/refs/refs/heads/%s", owner, repo, branch)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+}
+
 // mapMergeMethodToGitea 把前端 MergeMethod 转换为 gitea merge_style_field
 //
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'

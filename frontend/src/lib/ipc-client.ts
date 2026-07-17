@@ -836,6 +836,17 @@ export function pullsRestoreBranch(args: {
   return getIpcClient().invoke('pulls', 'restoreBranch', args);
 }
 
+/** v0.7.29：删除 head 分支（"Delete branch" 按钮用，Closed 状态块右侧）
+ * Gitea: DELETE /api/v1/repos/{owner}/{repo}/git/refs/refs/heads/{branch}（路径带 refs/heads/ 前缀）
+ * GitHub: DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}（路径不带 refs/heads/ 前缀）
+ * branch 不带 refs/heads/ 前缀（Go 端按平台加） */
+export function pullsDeleteBranch(args: {
+  projectId: string;
+  branch: string;
+}): Promise<void> {
+  return getIpcClient().invoke('pulls', 'deleteBranch', args);
+}
+
 /**
  * 上传 PR/issue 附件（v0.7.0 贴图支持）
  *

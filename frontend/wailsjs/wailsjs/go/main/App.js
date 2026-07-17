@@ -54,6 +54,10 @@ export function CreatePullReviewComment(arg1) {
   return window['go']['main']['App']['CreatePullReviewComment'](arg1);
 }
 
+export function DeletePullBranch(arg1) {
+  return window['go']['main']['App']['DeletePullBranch'](arg1);
+}
+
 export function DeletePullComment(arg1) {
   return window['go']['main']['App']['DeletePullComment'](arg1);
 }

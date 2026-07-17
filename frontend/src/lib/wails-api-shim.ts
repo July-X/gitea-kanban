@@ -255,6 +255,8 @@ type WailsApp = {
   UpdatePullBranch?: (args: { projectId: string; index: number; style: string }) => Promise<unknown>;
   // v0.7.28：恢复被删 head 分支（"Restore branch" 按钮用，head_ref_deleted event 旁）
   RestorePullBranch?: (args: { projectId: string; branch: string; sha: string }) => Promise<unknown>;
+  // v0.7.29：删除 head 分支（"Delete branch" 按钮用，Closed 状态块右侧）
+  DeletePullBranch?: (args: { projectId: string; branch: string }) => Promise<unknown>;
   // v0.6+ PR 评论（issue 评论另起 v0.7）
   ListPullTimeline?: (args: { projectId: string; index: number }) => Promise<unknown>;
   CreatePullComment?: (args: { projectId: string; index: number; body: string }) => Promise<unknown>;
@@ -954,6 +956,25 @@ const apiShim = {
             projectId: a.projectId,
             branch: a.branch,
             sha: a.sha,
+          });
+        },
+      );
+    },
+    // v0.7.29：pulls.deleteBranch —— 删除 head 分支（"Delete branch" 按钮用，
+    // Closed 状态块右侧）。
+    //   Gitea: DELETE /api/v1/repos/{owner}/{repo}/git/refs/refs/heads/{branch}
+    //   GitHub: DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
+    deleteBranch: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; branch: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'deleteBranch'),
+        (app) => {
+          if (!app.DeletePullBranch) {
+            return notImplemented('pulls', 'deleteBranch');
+          }
+          return app.DeletePullBranch({
+            projectId: a.projectId,
+            branch: a.branch,
           });
         },
       );

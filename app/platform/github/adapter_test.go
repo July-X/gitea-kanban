@@ -2132,6 +2132,47 @@ func TestGitHubAdapter_RestorePullBranch(t *testing.T) {
 	}
 }
 
+// TestGitHubAdapter_DeletePullBranch 验证 v0.7.29 "Delete branch" 按钮端点
+// GitHub 走 DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}（路径里不带 refs/heads/ 前缀）
+func TestGitHubAdapter_DeletePullBranch(t *testing.T) {
+	expectedPath := "/repos/alice/dolphin/git/refs/heads/feature-branch"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != expectedPath || r.Method != "DELETE" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "feature-branch"); err != nil {
+		t.Errorf("DeletePullBranch failed: %v", err)
+	}
+	// 验证空 branch 走 validation
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", ""); err == nil {
+		t.Error("empty branch should fail validation")
+	}
+}
+
+// TestGitHubAdapter_HeadRefRestored 验证 v0.7.29 head_ref_restored event 改独立
+// type="restore_branch"（v0.7.27.1 用 type=delete_branch 兜底错的）
+func TestGitHubAdapter_HeadRefRestored(t *testing.T) {
+	item, ok := githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        1,
+		Event:     "head_ref_restored",
+		CreatedAt: "2024-06-05T10:00:00Z",
+		Actor:     &githubUserRaw{Login: "alice"},
+	})
+	if !ok {
+		t.Fatalf("head_ref_restored should be rendered")
+	}
+	if item.Type != "restore_branch" {
+		t.Errorf("Type = %q, want restore_branch (v0.7.29 改独立 type，v0.7.27.1 用 delete_branch 兜底错的)", item.Type)
+	}
+}
+
 // TestGitHubAdapter_GithubRefLabel 单元测 githubRefLabel helper
 func TestGitHubAdapter_GithubRefLabel(t *testing.T) {
 	tests := []struct {

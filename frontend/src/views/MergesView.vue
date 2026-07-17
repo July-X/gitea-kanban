@@ -1060,6 +1060,12 @@ function systemEventVerb(item: TimelineItemDto): string {
     return `删除分支 ${headRef}`;
   }
   if (item.type === 'delete_branch') return '删除分支'; // v0.7.11 去掉"了"字（无 oldRef fallback）
+  // v0.7.29：head_ref_restored event 渲染（GitHub 端独立 type="restore_branch"）
+  // verb 拼接分支名（走 selectedPR.head.label 兜底，GitHub events 端不返 head ref name）
+  if (item.type === 'restore_branch' && headRef) {
+    return `恢复了分支 ${headRef}`;
+  }
+  if (item.type === 'restore_branch') return '恢复了分支';
 
   // v0.7.27.1 平台感知：change_target_branch 在 GitHub 端 `base_ref_changed` event
   // 不返 base ref name（只有 GraphQL 返），item.oldRef/newRef 留空。
@@ -2606,7 +2612,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                              —— Gitea web 端 review event comment card 右上角
                              也显示 [所有者] 角色标签（`show_role` 模板，
                              评论作者 == PR 作者时显示）。 -->
-                        <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" title="合并请求作者">所有者</span>
+                        <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" :title="isGithub ? 'This user is the pull request author' : '合并请求作者'">{{ isGithub ? 'Author' : '所有者' }}</span>
                         <span class="pr-detail__comment-verb">留下了一条评论</span>
                         <a
                           class="pr-detail__comment-time"
@@ -2637,7 +2643,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         <div class="pr-detail__comment-meta-left">
                           <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
                           <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
-                          <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" title="合并请求作者">所有者</span>
+                          <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" :title="isGithub ? 'This user is the pull request author' : '合并请求作者'">{{ isGithub ? 'Author' : '所有者' }}</span>
                           <span class="pr-detail__comment-verb">评论于</span>
                           <a
                             class="pr-detail__comment-time"
@@ -3180,10 +3186,10 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
             </div>
 
             <!-- v0.7.28：PR 关闭状态块（GitHub web 风格）
-                 - 关闭但未合并：渲染 "Closed with unmerged commits" + "This pull request is closed."
+                 - 关闭但未合并：渲染 "Closed with unmerged commits" + "This pull request is closed, but the `{branch}` branch has unmerged commits." + Delete branch 按钮（v0.7.29 新增）
                  - 关闭且已合并：渲染 "Merged" + merge commit 链接
                  - 草稿 / 开放：什么都不渲染
-                 视觉对齐 GitHub web 底部那个灰色 panel（浅灰底 + GitBranch icon 左 + 文字 + Restore branch 按钮右） -->
+                 视觉对齐 GitHub web 底部那个灰色 panel（浅灰底 + GitBranch icon 左 + 文字 + Delete branch 按钮右） -->
             <div
               v-if="selectedPR.state === 'closed' && !selectedPR.merged"
               class="pr-detail__closed-banner pr-detail__closed-banner--unmerged"
@@ -3192,8 +3198,31 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               <GitBranch :size="18" :stroke-width="2" aria-hidden="true" class="pr-detail__closed-banner-icon" />
               <div class="pr-detail__closed-banner-text">
                 <div class="pr-detail__closed-banner-title">Closed with unmerged commits</div>
-                <div class="pr-detail__closed-banner-desc">This pull request is closed.</div>
+                <div class="pr-detail__closed-banner-desc">
+                  This pull request is closed, but the
+                  <a
+                    v-if="headLabel(selectedPR)"
+                    class="mono pr-detail__branch pr-detail__branch--link"
+                    :href="branchWebUrl(headLabel(selectedPR))"
+                    target="_blank"
+                    rel="noopener"
+                  >{{ headLabel(selectedPR) }}</a>
+                  <code v-else class="mono pr-detail__branch">{{ selectedPR.head?.ref }}</code>
+                  branch has unmerged commits.
+                </div>
               </div>
+              <!-- v0.7.29：Delete branch 按钮（GitHub web 风格，紧跟 head_ref_deleted event 之后
+                   出现在 Closed 状态块右侧）—— 显式删 head 分支，pr 已关 + branch 还在场景。
+                   v0.7.29 简化：分两阶段 —— 1. 二次确认 dialog（v0.7.30 TODO）2. 直接调 IPC。
+                   user 点击直接调，确认弹窗留 v0.7.30 补。
+                   branch 名走 selectedPR.head.label（v0.7.28 后端 split(":")) -->
+              <button
+                v-if="headLabel(selectedPR)"
+                type="button"
+                class="btn-ghost-sm pr-detail__closed-banner-action"
+                :disabled="pull.deleteBranchLoading"
+                @click="pull.deleteBranch(activeProjectId!, selectedPR.index, headLabel(selectedPR))"
+              >{{ pull.deleteBranchLoading ? '删除中…' : 'Delete branch' }}</button>
             </div>
             <div
               v-else-if="selectedPR.state === 'closed' && selectedPR.merged"
@@ -6701,6 +6730,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   color: var(--color-text-secondary);
   font-size: var(--font-sm);
   margin-top: 2px;
+}
+/* v0.7.29：Delete branch 按钮（Closed 状态块右侧，GitHub web 风格） */
+.pr-detail__closed-banner-action {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* v0.7.28：head_ref_deleted 事件旁的 Restore branch 按钮（独立 timeline item） */

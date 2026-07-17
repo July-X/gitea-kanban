@@ -14,7 +14,7 @@ import {
   pullsReviewCommentsList, pullsFilesList, pullsFileDiffGet, pullsCommitsList,
   pullsCommentReactionsList, pullsCommentReactionAdd, pullsCommentReactionRemove,
   pullsUpdateLabels, pullsUpdateAssignee, pullsUpdateReviewers, pullsUpdateMilestone,
-  pullsUpdateTitle, pullsGetCommitsBehind, pullsUpdateBranch, pullsRestoreBranch,
+  pullsUpdateTitle, pullsGetCommitsBehind, pullsUpdateBranch, pullsRestoreBranch, pullsDeleteBranch,
   labelsList, membersList, milestonesList,
   normalizeError,
 } from '@renderer/lib/ipc-client';
@@ -569,12 +569,42 @@ export const usePullStore = defineStore('pull', () => {
     }
   }
 
+  /** v0.7.29：删除 head 分支（"Delete branch" 按钮用，Closed 状态块右侧） */
+  // deleteBranch 状态（按钮 loading 用）
+  const deleteBranchLoading = ref(false);
+  async function deleteBranch(projectId: string, index: number, branch: string): Promise<void> {
+    if (!branch) {
+      showToast({ type: 'error', message: '缺少分支名，无法删除' });
+      return;
+    }
+    const p = currentSelectedItem.value?.index === index
+      ? currentSelectedItem.value
+      : items.value.find(it => it.index === index);
+    if (!p) {
+      showToast({ type: 'error', message: `找不到 #${index} 的 PR 数据` });
+      return;
+    }
+    deleteBranchLoading.value = true;
+    try {
+      await pullsDeleteBranch({ projectId, branch });
+      showToast({ type: 'success', message: `分支 ${branch} 已删除` });
+      // 成功后 refetch timeline（GitHub 端会触发新的 head_ref_deleted event）
+      await fetchTimeline(p);
+      await fetchPullDetail(p);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast({ type: 'error', message: `删除分支失败：${msg}` });
+    } finally {
+      deleteBranchLoading.value = false;
+    }
+  }
+
   return {
     items, loading, error, currentProjectId, filter, search, currentSelectedItem,
     currentPage, hasMore, loadingMore,
     timelinePanels, reviewPanels, reviewSubmitting,
     reviewCommentsByPR, filesByPR, fileDiffByPath, commitsByPR, commitsLoading,
-    restoreBranchLoading,
+    restoreBranchLoading, deleteBranchLoading,
     reactionsByComment, // v0.7.26：评论级 reaction 缓存（addCommentReaction 后重拉）
     availableMilestones, availableMembers,
     total, counts, filteredItems, reviewCommentsGrouped,
@@ -593,6 +623,8 @@ export const usePullStore = defineStore('pull', () => {
     updateBranch,
     // v0.7.28：恢复被删 head 分支（"Restore branch" 按钮用）
     restoreBranch,
+    // v0.7.29：删除 head 分支（"Delete branch" 按钮用）
+    deleteBranch,
     labels: labelsList, members: membersList, milestones: milestonesList,
   };
 });

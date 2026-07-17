@@ -627,6 +627,20 @@ export namespace main {
 	        this.line = source["line"];
 	    }
 	}
+	export class DeletePullBranchArgs {
+	    projectId: string;
+	    branch: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletePullBranchArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.branch = source["branch"];
+	    }
+	}
 	export class DeletePullCommentArgs {
 	    projectId: string;
 	    commentId: number;

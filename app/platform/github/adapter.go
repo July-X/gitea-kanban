@@ -1161,6 +1161,24 @@ func (a *GitHubAdapter) RestorePullBranch(ctx context.Context, hostURL, username
 	return a.doRequest(ctx, hostURL, token, "POST", path, reader, nil)
 }
 
+// DeletePullBranch 删除 head 分支（v0.7.29 "Delete branch" 按钮用）
+//
+// GitHub 端点：DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
+//   - branch 不带 refs/heads/ 前缀（路径里自动拼）
+//   - 成功返 204 No Content
+//   - 分支不存在返 404（race condition：用户两个 tab 同时删）
+//
+// GitHub 端点路径跟 Gitea 不同：Gitea 走 /git/refs/{ref} 含 refs/heads/ 前缀，
+// GitHub 走 /git/refs/heads/{branch} 不含 refs/heads/ 前缀。
+func (a *GitHubAdapter) DeletePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch string) error {
+	hostURL = normalizeGitHubHostURL(hostURL)
+	if strings.TrimSpace(branch) == "" {
+		return ipc.NewValidationFailed("分支名不能为空", "")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, branch)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // GitHub 端点与 Gitea 一致：/repos/{owner}/{repo}/issues/{index}/comments
@@ -1556,10 +1574,12 @@ func githubEventToTimelineItem(e githubIssueEventRaw) (platform.TimelineItem, bo
 		// （v0.7.28 计划让 listIssueEvents 额外拉 PR 详情 /pulls/{index} 拿 head ref name）
 		return item, true
 	case "head_ref_restored":
-		// v0.7.27.1 简化：复用 delete_branch 走 "恢复了分支" verb
-		// （item.Type 用 "delete_branch" 是错的，但 verb 拼接 item.oldRef 兜底显示）
-		// v0.7.28 拆独立 "reopen_branch" 类型
-		item.Type = "delete_branch"
+		// v0.7.29 根因修复：v0.7.27.1 用 type=delete_branch 兜底是错的——
+		// GitHub web 实际渲染独立 "X restored the `branch` branch" event
+		// （跟 head_ref_deleted 区分），不能复用 delete_branch 走 "恢复了分支" verb。
+		// v0.7.29 拆独立 type="restore_branch" + verb 拼接 selectedPR.head.label 兜底
+		// （GitHub events 端 head_ref_restored 不返 head ref name，跟 head_ref_deleted 同问题）
+		item.Type = "restore_branch"
 		return item, true
 
 	// v0.7.27.1 新增：base branch 改动（GitHub PR 可以改 base branch，

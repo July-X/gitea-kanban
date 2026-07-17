@@ -407,6 +407,33 @@ func (a *App) RestorePullBranch(args RestorePullBranchArgs) error {
 	return adapter.RestorePullBranch(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Branch, args.SHA)
 }
 
+// ===== DeletePullBranch =====
+
+// DeletePullBranchArgs 删除 head 分支参数
+type DeletePullBranchArgs struct {
+	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"` // 要删除的分支名（不带 refs/heads/ 前缀）
+}
+
+// DeletePullBranch 删除 head 分支（v0.7.29 "Delete branch" 按钮用）
+//
+// 场景：PR 关闭后 user 在 Closed 状态块右侧看到 "Delete branch" 按钮（GitHub web
+// 风格）→ 显式删 head 分支（pr 已经关了 + branch 还在的情况）。
+//
+// Gitea 走 DELETE /api/v1/repos/{owner}/{repo}/git/refs/refs/heads/{branch}
+// GitHub 走 DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
+//
+// 错误处理：
+//   - 404 "Not Found" → 分支已不存在（race condition，提示用户"分支已被删除"）
+//   - 422 / 403 → 没权限（提示用户联系仓库管理员）
+func (a *App) DeletePullBranch(args DeletePullBranchArgs) error {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return err
+	}
+	return adapter.DeletePullBranch(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Branch)
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // 范围限定：只做 PR 上下文（issue 评论另起 issue）。
