@@ -40,6 +40,11 @@ import {
 // （方块+箭头）形状差太多。1:1 复刻 octicon 路径做组件。详见
 // components/icons/CrossReference.vue 顶部注释
 import CrossReference from '../components/icons/CrossReference.vue';
+// v0.7.42：自定义 octicon-git-branch 组件 —— lucide 的 GitBranch 是简单
+// T 形（2 端点圆），octicon-git-branch 是 3 分支（主+侧+侧上 fork）+ 3 圆点，
+// 形状差太多。1:1 复刻 octicon 路径做组件，给 delete_branch / restore_branch
+// 事件用。详见 components/icons/OcticonGitBranch.vue 顶部注释
+import OcticonGitBranch from '../components/icons/OcticonGitBranch.vue';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -1395,9 +1400,13 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  *   - merge (octicon-git-merge)            → GitMerge（v0.7.35 改 GitPullRequest → GitMerge，紫圈 merge icon）
  *   - push / committed (octicon-git-commit) → GitCommit（v0.7.35 改 ArrowUp → GitCommit，小圆点）
  *   - head_ref_force_pushed                 → GitCommit（v0.7.35 新增 entry，force push 走 isForcePush 提示）
- *   - delete_branch (octicon-git-branch)    → GitBranch（v0.7.2 已有）
- *   - restore_branch (octicon-git-branch)   → GitBranch（v0.7.35 改 RotateCcw → GitBranch，
- *                                              跟 delete_branch 同 icon，靠颜色 + 按钮区分）
+ *   - delete_branch (octicon-git-branch)    → OcticonGitBranch（v0.7.42 自定义组件，1:1
+ *                                                       复刻 octicon 3 分支+3 圆点；v0.7.2
+ *                                                       错用 lucide GitBranch 是简单 T 形
+ *                                                       跟 octicon 形状不对）
+ *   - restore_branch (octicon-git-branch)   → OcticonGitBranch（同上，跟 delete_branch
+ *                                                       走同一个 octicon + 同颜色，靠
+ *                                                       Restore branch 按钮 + verb 区分）
  *   - commit_ref (octicon-bookmark)         → Bookmark（v0.7.2 已有）
  *   - label (octicon-tag)                   → Tag（v0.7.2 已有）
  *   - milestone (octicon-milestone)         → Milestone（v0.7.2 已有）
@@ -1436,9 +1445,14 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   title: Pencil,
   // v0.7.35：change_title 跟 title 一样走 pencil（GitHub web 同 icon）
   change_title: Pencil,
-  delete_branch: GitBranch,
-  // v0.7.35：RotateCcw → GitBranch（GitHub web 跟 delete_branch 同 icon，靠颜色 + 按钮区分）
-  restore_branch: GitBranch,
+  // v0.7.42：delete_branch 用自定义 octicon-git-branch 组件（OcticonGitBranch）——
+  // lucide 的 GitBranch 是简单 2 端点 T 形，跟 octicon-git-branch 3 分支 + 3 圆点
+  // 形状差太多，1:1 复刻 octicon 路径做组件
+  // v0.7.35 错用 lucide GitBranch（看名字一样以为可以近似，实际形状不对）
+  delete_branch: OcticonGitBranch,
+  // v0.7.42：restore_branch 跟 delete_branch 同一个 octicon (git-branch)，
+  // 走同一个 OcticonGitBranch 自定义组件
+  restore_branch: OcticonGitBranch,
   due_date: Calendar,
   change_due_date: Calendar,
   remove_due_date: Calendar,
