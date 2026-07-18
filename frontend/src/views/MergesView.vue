@@ -3639,12 +3639,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               class="pr-detail__closed-banner pr-detail__closed-banner--merged"
               role="status"
             >
-              <!-- v0.7.36：merged 面板也走"实心圆 + 反白 icon"（GitHub web），
-                   跟 unmerged 面板同款 wrapper，颜色用 --merged 紫
-                   （GitHub web Octicon GitMerge 标准色 #8250df） -->
-              <div class="pr-detail__closed-banner-icon-wrap pr-detail__closed-banner-icon-wrap--merged" aria-hidden="true">
-                <GitPullRequestArrow :size="18" :stroke-width="2" class="pr-detail__closed-banner-icon" />
-              </div>
+              <!-- v0.7.43：merged 面板去掉"实心圆 + 反白 icon" wrapper，
+                   改用紫色边框线包括整个文字区域（用户 23:25 反馈的样式）。
+                   跟 unmerged 面板（保留灰实心圆 + GitMerge）做区分：
+                   unmerged = 警示性（带 icon 提示），
+                   merged = 完成性（干净边框）。 -->
               <div class="pr-detail__closed-banner-text">
                 <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Merged' : '已合并' }}</div>
                 <div
@@ -7169,13 +7168,18 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   flex-shrink: 0;
 }
 .pr-detail__closed-banner-icon-wrap--unmerged { background: #6e7681; } /* GitHub web "Closed" 灰 */
-.pr-detail__closed-banner-icon-wrap--merged { background: #8250df; } /* GitHub web "Merged" 紫 */
-/* 修前 .pr-detail__closed-banner--merged .pr-detail__closed-banner-icon / --unmerged
-   覆写 color 现在不需要了（icon-wrap 负责填色 + icon 走 --color: #fff），
-   保留作为 fallback 防御（万一 wrapper 漏渲染时 icon 至少有色） */
-.pr-detail__closed-banner--merged .pr-detail__closed-banner-icon {
-  color: #8957e5; /* GitHub merged 紫 fallback */
+/* v0.7.43：merged 面板去掉了"实心圆 + 反白 icon" wrapper
+   （.pr-detail__closed-banner-icon-wrap--merged CSS 已删，不再生效），
+   改用 .pr-detail__closed-banner--merged 的紫色边框线包括整个文字区域。
+   颜色用 GitHub web Octicon GitMerge 标准色 #8250df（深紫）。 */
+.pr-detail__closed-banner--merged {
+  border-color: #8250df; /* 紫色边框（GitHub web "Merged" 标准色） */
 }
+/* 修前 .pr-detail__closed-banner--merged .pr-detail__closed-banner-icon /
+   --unmerged 覆写 color 现在不需要了（icon-wrap 负责填色 + icon 走
+   --color: #fff），保留 --unmerged 作为 fallback 防御（万一 wrapper
+   漏渲染时 icon 至少有色）。--merged fallback 已删（v0.7.43 模板
+   不再渲染 merged icon-wrap，对应 fallback 也没意义）。 */
 .pr-detail__closed-banner--unmerged .pr-detail__closed-banner-icon {
   color: #cf222e; /* GitHub closed 红 fallback */
 }
