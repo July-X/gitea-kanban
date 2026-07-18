@@ -604,6 +604,35 @@ const isBranchCurrentlyDeleted = computed<boolean>(() => {
   return lastDeleteAt > lastRestoreAt; // ISO 8601 字符串比较：最后 delete 晚于最后 restore → 当前被删
 });
 
+/**
+ * v0.7.46：把 PR 描述（selectedPR.body）合成首条 comment 注入 timeline
+ *
+ * 背景：GitHub web 把 PR 描述当 conversation 的第一条 comment 渲染（含 avatar + author header +
+ * 时间 + 表情反应按钮），Gitea web 同理（PR body 显示在 conversation tab 顶部作为 comment 卡）。
+ * gitea-kanban 之前用单独的"描述"section 渲染，无 author / 时间 / 反应按钮，跟 Gitea web 不一致。
+ *
+ * 做法：computed 在 timeline items 前面拼一个合成 item（id=0, type='comment'），
+ * 复用现有 v-else-if="item.type === 'comment'" 分支的 comment bubble 渲染。
+ * id=0 标志位 → 模板用 `item.id > 0` 隐藏 emoji/.../编辑/删除/引用按钮
+ * （Gitea API 把 PR body 当作 issue content 而非 comment，无法走 reaction/comment API；
+ *  GitHub 端 id=0 也会走 API 失败，但视觉对齐更重要，行为 fallback 接受）。
+ * ReactionBar 已有 `commentId <= 0` 防御 → 不会发请求。
+ */
+const displayTimelineItems = computed<TimelineItemDto[]>(() => {
+  const items = getTimelinePanel().items ?? [];
+  const pr = selectedPR.value;
+  if (!pr?.body || !pr.author?.username) return items;
+  const synthetic: TimelineItemDto = {
+    id: 0, // 0 = 合成标志（不调 reaction/comment API）
+    type: 'comment',
+    body: pr.body,
+    author: pr.author,
+    created: pr.createdAt,
+    updated: pr.createdAt, // 跟 created 相同 → 不显示"已编辑"标记
+  };
+  return [synthetic, ...items];
+});
+
 /** 在系统浏览器打开 commit 页面 */
 function openCommitExternal(sha: string): void {
   const url = commitWebUrl(sha);
@@ -2671,7 +2700,8 @@ function formatRelative(iso: string | undefined): string {
               <i></i><i></i><i></i>
             </span>
             <span v-if="getTimelinePanel().items.length > 0" class="pr-detail-tab__count">
-              {{ getTimelinePanel().items.length }}
+              <!-- v0.7.46：displayTimelineItems 包含 PR 描述合成 comment，count 要同步 +1 -->
+              {{ displayTimelineItems.length }}
             </span>
           </button>
           <button
@@ -2723,12 +2753,7 @@ function formatRelative(iso: string | undefined): string {
         <div class="pr-detail-body">
           <!-- 对话 Tab -->
           <div v-if="detailTab === 'conversation'" class="pr-detail__conversation">
-            <!-- PR 描述（对齐 Gitea：对话流顶部显示） -->
-            <div v-if="selectedPR.body" class="pr-detail__section">
-              <div class="pr-detail__section-label">描述</div>
-              <div class="pr-detail__section-content md-body" v-html="renderMarkdown(selectedPR.body, markdownBaseUrl)"></div>
-            </div>
-            <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在描述下方、对话上方） -->
+            <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在对话上方） -->
             <div
               v-if="selectedPR.state === 'open' && (selectedPR.draft || (selectedPR.commitsBehind && selectedPR.commitsBehind > 0) || cmdHintOpen)"
               class="pr-detail__merge-warning-list"
@@ -2876,8 +2901,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                 {{ isGithub ? 'No conversation yet — add the first comment to start the discussion' : '暂无对话，发起第一条评论开始讨论吧' }}
               </div>
               <ul v-else class="pr-detail__timeline">
-                <!-- v0.7.6：v-for 过滤掉 label 合并后被标记 merged=true 的事件（避免重复渲染） -->
-                <template v-for="(item) in (getTimelinePanel().items ?? []).filter((it) => !it.merged)" :key="`tl-${item.id}`">
+                <!-- v0.7.46：使用 displayTimelineItems（computed）—— 自动在前面拼 PR 描述作为合成首条 comment
+                     v0.7.6：v-for 过滤掉 label 合并后被标记 merged=true 的事件（避免重复渲染） -->
+                <template v-for="(item) in displayTimelineItems.filter((it) => !it.merged)" :key="`tl-${item.id}`">
                   <!-- 评审事件 (v0.7.3：紧凑单行 —— 对齐 Gitea web .timeline-item.event) -->
                   <li
                     v-if="item.type === 'review'"
@@ -2993,8 +3019,17 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                           >{{ formatRelative(item.created) }}</a>
                         </div>
                         <!-- v0.7.4：comment header 右侧 actions —— 对齐 Gitea web show_role + add_reaction + context_menu
-                             表情选择器 + ... 菜单在外部渲染（避免 popover 嵌套在 comment-meta 里影响布局） -->
-                        <div v-if="editingCommentId !== item.id" class="pr-detail__comment-meta-right">
+                             表情选择器 + ... 菜单在外部渲染（避免 popover 嵌套在 comment-meta 里影响布局）
+                             v0.7.46：item.id === 0（PR 描述合成 comment）加 always-visible class —
+                             对齐 GitHub web "first comment smile 按钮常驻" 渲染（其他 comment
+                             仍然 hover-only 保持 Gitea web 行为）。
+                             后端 API 在 Gitea 端会失败（PR description 不是 comment），
+                             GitHub 端需要后端扩展支持 commentId=0 → PR description 路由。-->
+                        <div
+                          v-if="editingCommentId !== item.id"
+                          class="pr-detail__comment-meta-right"
+                          :class="{ 'pr-detail__comment-meta-right--always-visible': item.id === 0 }"
+                        >
                           <!-- 表情添加按钮（点击展开 emoji 选择器） -->
                           <div class="pr-detail__comment-action-wrap">
                             <button
@@ -3119,7 +3154,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                           class="pr-detail__comment-edited-mark"
                           :title="isGithub ? `Edited ${formatDate(item.updated)}` : `编辑于 ${formatDate(item.updated)}`"
                         >{{ isGithub ? '(edited)' : '（已编辑）' }}</span>
-                        <div class="pr-detail__comment-actions">
+                        <!-- v0.7.46：item.id === 0 合成 PR 描述 comment 隐藏底部 action 区
+                             （quote / edit / delete）—— 描述本身不能被引用 / 编辑 / 删除。-->
+                        <div v-if="item.id > 0" class="pr-detail__comment-actions">
                           <button
                             v-if="currentUsername && item.author?.username !== currentUsername"
                             type="button"
@@ -3452,7 +3489,32 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         </span>
 
                         <span v-else-if="item.type === 'commit_ref' && item.refCommitSha">
-                          <code class="pr-detail__event-branch">{{ item.refCommitSha!.slice(0, 7) }}</code>
+                          <!-- v0.7.46 根因修复：commit_ref 之前只显示短 SHA，丢失 commit subject + author
+                               （v0.7.7 简化版假设 commitSha 在 timeline event 上有，1.26+ 实际没有），
+                               对齐 GitHub web "integration test fixture 3530198" 渲染。
+                               用 commitDetails(refCommitSha) 从 store.commitsByPR 缓存按
+                               短码匹配找 commit subject（selectPR 时 loadCommits 已经预拉），
+                               没缓存降级到只显示 SHA（行为不变）。
+                               注：author 名字 GitHub web 显示在 commit 行右侧，gitea-kanban
+                               timeline 紧凑布局没空间放，跟 v0.7.18 merge event inline 一样
+                               只显示 subject + SHA。-->
+                          <template v-if="commitDetails(item.refCommitSha!)?.subject">
+                            <a
+                              class="pr-detail__event-commit-subject pr-detail__branch--link"
+                              :href="commitWebUrl(item.refCommitSha!)"
+                              target="_blank"
+                              rel="noopener"
+                              :title="`Open commit ${item.refCommitSha!.slice(0, 7)}`"
+                            >{{ commitDetails(item.refCommitSha!)?.subject }}</a>
+                            <a
+                              class="mono pr-detail__event-commit-sha pr-detail__branch--link"
+                              :href="commitWebUrl(item.refCommitSha!)"
+                              target="_blank"
+                              rel="noopener"
+                              :title="`Open commit ${item.refCommitSha!.slice(0, 7)}`"
+                            >{{ item.refCommitSha!.slice(0, 7) }}</a>
+                          </template>
+                          <code v-else class="pr-detail__event-branch">{{ item.refCommitSha!.slice(0, 7) }}</code>
                         </span>
                       </div>
                       <!-- 块级：ref issue / dependency 等需要换行展示的 (对齐 Gitea web .detail) -->
@@ -7233,12 +7295,10 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__closed-banner--merged .pr-detail__closed-banner-text-box {
   border-color: #8250df; /* 紫色边框（GitHub web "Merged" 标准色） */
 }
-/* 修前 .pr-detail__closed-banner--unmerged .pr-detail__closed-banner-icon
-   覆写 color 保留作为 fallback 防御（万一 wrapper 漏渲染时 icon 至少有色）。
-   --merged fallback 已删（v0.7.43 模板不再渲染 merged icon-wrap）。*/
-.pr-detail__closed-banner--unmerged .pr-detail__closed-banner-icon {
-  color: #cf222e; /* GitHub closed 红 fallback */
-}
+/* v0.7.46 删 unmerged 红色 fallback —— v0.7.36 已经在 base .pr-detail__closed-banner-icon
+   强制 color:#fff（实心灰底 + 反白 icon，对齐 GitHub web MergeabilityIcon 风格），
+   这条 specificity 0,2,0 的红色覆写是 v0.7.36 之前留的"防御"，现在反而把反白盖住
+   变成红 icon。删了让 base #fff 生效，对齐 Gitea web 灰底白 icon 视觉。*/
 .pr-detail__closed-banner-text {
   flex: 1;
   min-width: 0;
@@ -7672,7 +7732,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__timeline {
   list-style: none;
   margin: 0;
-  padding: 0 0 0 32px;       /* 左侧留 32px 给 avatar/icon 节点 */
+  padding: 0 0 0 44px;       /* v0.7.46 左侧留 44px 给 avatar/icon 节点（28px 头像 + 16px 间隙，对齐 GitHub web first comment 视觉） */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -7712,7 +7772,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 /* ===== Avatar (comment) / Dot (event) 节点 —— 定位在 timeline 竖线上 ===== */
 .pr-detail__timeline-rail {
   position: absolute;
-  left: -32px;                /* 对齐 ul 的 padding-left: 32px */
+  left: -44px;                /* v0.7.46 对齐 ul 的 padding-left: 44px */
   top: 50%;
   transform: translateY(-50%);
   width: 28px;
@@ -8006,7 +8066,8 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   transition: opacity 0.15s ease;
 }
 .pr-detail__comment-bubble:hover .pr-detail__comment-meta-right,
-.pr-detail__comment-meta-right:has(.pr-detail__comment-action-btn--active) {
+.pr-detail__comment-meta-right:has(.pr-detail__comment-action-btn--active),
+.pr-detail__comment-meta-right--always-visible {
   opacity: 1;
 }
 .pr-detail__comment-action-wrap {
