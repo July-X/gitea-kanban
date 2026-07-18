@@ -51,6 +51,12 @@ import OcticonGitBranch from '../components/icons/OcticonGitBranch.vue';
 // dot + Closed with unmerged commits 面板 icon 用。
 // 详见 components/icons/OcticonGitMerge.vue 顶部注释
 import OcticonGitMerge from '../components/icons/OcticonGitMerge.vue';
+// v0.7.46：自定义 octicon-person 组件 —— lucide 的 UserPlus/UserMinus 是带
+// + / - 符号，octicon-person 是纯人头+身体（不带符号）。GitHub web 区分
+// add/remove 不靠 icon 靠 verb 文案（"指派给" / "取消了指派给"）。
+// 1:1 复刻 octicon 路径做组件，给 assignee 事件 timeline dot 用。
+// 详见 components/icons/OcticonPerson.vue 顶部注释
+import OcticonPerson from '../components/icons/OcticonPerson.vue';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -1420,7 +1426,13 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  *   - commit_ref (octicon-bookmark)         → Bookmark（v0.7.2 已有）
  *   - label (octicon-tag)                   → Tag（v0.7.2 已有）
  *   - milestone (octicon-milestone)         → Milestone（v0.7.2 已有）
- *   - assignee (octicon-person-add)         → UserPlus（v0.7.2 已有，移除走 UserMinus）
+ *   - assignee (octicon-person)            → OcticonPerson（v0.7.46 自定义组件，1:1
+ *                                                    复刻 octicon 人头+身体；v0.7.2
+ *                                                    错用 lucide UserPlus 是带 +
+ *                                                    符号，跟 GitHub web 实际
+ *                                                    octicon-person 不带 + 形状不对；
+ *                                                    add/remove 不靠 icon 区分
+ *                                                    靠 verb 文案"指派给"/"取消了指派给"）
  *   - title / change_title (octicon-pencil) → Pencil（v0.7.35 改 Type → Pencil，GitHub web 实际）
  *   - issue_ref / pull_ref (octicon-cross-reference) → CrossReference（v0.7.41 自定义组件，
  *                                                            复刻 octicon 路径；v0.7.35
@@ -1450,7 +1462,12 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
-  assignee: UserPlus,
+  // v0.7.46：assignee 事件 timeline dot 用自定义 octicon-person 组件
+  //（OcticonPerson）—— lucide UserPlus 是带 + 符号，octicon-person 是纯
+  // 人头+身体（不带 +/-）。add/remove 不靠 icon 区分靠 verb 文案
+  // v0.7.2 错用 lucide UserPlus（看名字 person-add 以为可以近似，
+  // 实际 octicon 不用 person-add 也不带 + 符号）
+  assignee: OcticonPerson,
   // v0.7.35：Type → Pencil（GitHub web octicon-pencil，rename 实际是 pencil icon）
   title: Pencil,
   // v0.7.35：change_title 跟 title 一样走 pencil（GitHub web 同 icon）
