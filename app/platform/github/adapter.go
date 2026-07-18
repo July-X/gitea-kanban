@@ -1314,9 +1314,14 @@ func (a *GitHubAdapter) ListPullTimeline(ctx context.Context, hostURL, username,
 		items = append(items, item)
 	}
 
-	// 5. 按 createdAt 倒序（最新在前），对齐 Gitea timeline 顺序
+	// 5. 按 createdAt 升序（最旧在前）—— 对齐 GitHub web PR timeline 实际渲染顺序
+	// (https://github.com/July-X/kanban-test/pull/21 截图：first comment 在最顶，
+	//  close / delete branch events 排在 comments 之后)。
+	// v0.7.20 之前是 DESCENDING（newest first），但 user 反馈 ⑯ "PR 的 closed 事件、
+	// deleted 事件，显示的位置不正确" —— 事件应该在 comments 之后（事件通常发生在
+	// 评论之后，如 close PR 后自动删 branch），ASCENDING 才对齐 GitHub web。
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].Created > items[j].Created
+		return items[i].Created < items[j].Created
 	})
 
 	return items, nil

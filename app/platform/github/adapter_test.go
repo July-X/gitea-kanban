@@ -2057,7 +2057,7 @@ func TestGitHubAdapter_GetPull_RefLabel(t *testing.T) {
 			"state":  "closed",
 			"head": map[string]interface{}{
 				"label": "July-X:int-test-1782998094151278000", // owner:branch 格式
-				"ref":   "int-test-1782998094151278000",          // 纯 branch 名
+				"ref":   "int-test-1782998094151278000",        // 纯 branch 名
 				"sha":   "aaa",
 			},
 			"base": map[string]interface{}{
@@ -2314,18 +2314,19 @@ func TestGitHubAdapter_ListPullTimeline_CommentAndReview(t *testing.T) {
 		t.Fatalf("len(items) = %d, want 5 (3 comment + 2 review)", len(items))
 	}
 
-	// 验证按时间倒序：14:00 -> 13:00 -> 11:30 -> 10:00 -> 09:00
+	// v0.7.33 验证按时间升序（对齐 GitHub web PR timeline 实际渲染顺序）：
+	// 09:00 first comment → 10:00 LGTM → 11:30 second comment → 13:00 fix this → 14:00 third comment
 	wantOrder := []struct {
 		Type      string
 		Body      string
 		CreatedAt string
 		State     string
 	}{
-		{"comment", "third comment", "2024-06-05T14:00:00Z", ""},
-		{"review", "fix this", "2024-06-05T13:00:00Z", "changes_requested"},
-		{"comment", "second comment", "2024-06-05T11:30:00Z", ""},
-		{"review", "LGTM", "2024-06-05T10:00:00Z", "approved"},
 		{"comment", "first comment", "2024-06-05T09:00:00Z", ""},
+		{"review", "LGTM", "2024-06-05T10:00:00Z", "approved"},
+		{"comment", "second comment", "2024-06-05T11:30:00Z", ""},
+		{"review", "fix this", "2024-06-05T13:00:00Z", "changes_requested"},
+		{"comment", "third comment", "2024-06-05T14:00:00Z", ""},
 	}
 	for i, w := range wantOrder {
 		if items[i].Type != w.Type {
@@ -2485,28 +2486,28 @@ func TestGitHubAdapter_ListPullTimeline_IssueEvents(t *testing.T) {
 		t.Fatalf("len(items) = %d, want %d", len(items), expectedTotal)
 	}
 
-	// 验证按时间倒序
-	// 最高: 16:00 unlabeled → 15:00 pinned → 14:00 closed+commit_id (merge) →
-	// 13:00 reopened → 12:00 closed → 11:00 renamed → 10:00 review →
-	// 09:00 comment → 08:55 labeled → 08:50 cross-ref → 08:45 review_req →
-	// 08:40 head_ref_deleted → 08:35 assigned → 08:30 locked
+	// v0.7.33 验证按时间升序（对齐 GitHub web PR timeline 实际渲染顺序）：
+	// 08:30 locked → 08:35 assigned → 08:40 head_ref_deleted → 08:45 review_requested →
+	// 08:50 cross-referenced → 08:55 labeled → 09:00 comment → 10:00 review →
+	// 11:00 renamed → 12:00 closed → 13:00 reopened → 14:00 closed+commit_id (merge) →
+	// 15:00 pinned → 16:00 unlabeled
 	wantOrder := []struct {
 		Type string
 	}{
-		{"label"},          // 16:00 unlabeled → label
-		{"pin"},            // 15:00 pinned
-		{"merge"},          // 14:00 closed+commit_id → merge
-		{"reopen"},         // 13:00 reopened
-		{"close"},          // 12:00 closed (no commit_id)
-		{"change_title"},   // 11:00 renamed
-		{"review"},         // 10:00 review
-		{"comment"},        // 09:00 comment
-		{"label"},          // 08:55 labeled
-		{"pull_ref"},       // 08:50 cross-referenced
-		{"review_request"}, // 08:45 review_requested
-		{"delete_branch"},  // 08:40 head_ref_deleted
-		{"assignees"},      // 08:35 assigned
 		{"lock"},           // 08:30 locked
+		{"assignees"},      // 08:35 assigned
+		{"delete_branch"},  // 08:40 head_ref_deleted
+		{"review_request"}, // 08:45 review_requested
+		{"pull_ref"},       // 08:50 cross-referenced
+		{"label"},          // 08:55 labeled
+		{"comment"},        // 09:00 comment
+		{"review"},         // 10:00 review
+		{"change_title"},   // 11:00 renamed
+		{"close"},          // 12:00 closed (no commit_id)
+		{"reopen"},         // 13:00 reopened
+		{"merge"},          // 14:00 closed+commit_id → merge
+		{"pin"},            // 15:00 pinned
+		{"label"},          // 16:00 unlabeled → label
 	}
 	for i, w := range wantOrder {
 		if items[i].Type != w.Type {
@@ -2514,31 +2515,31 @@ func TestGitHubAdapter_ListPullTimeline_IssueEvents(t *testing.T) {
 		}
 	}
 
-	// 验证特定字段
-	// unlabeled (16:00): LabelAction=remove, RemovedLabels=[bug]
-	if items[0].LabelAction != "remove" {
-		t.Errorf("items[0] (unlabeled).LabelAction = %q, want remove", items[0].LabelAction)
+	// 验证特定字段（v0.7.33 索引按升序更新）
+	// unlabeled (16:00): LabelAction=remove, RemovedLabels=[bug] → items[13]
+	if items[13].LabelAction != "remove" {
+		t.Errorf("items[13] (unlabeled).LabelAction = %q, want remove", items[13].LabelAction)
 	}
-	if len(items[0].RemovedLabels) != 1 || items[0].RemovedLabels[0].Name != "bug" {
-		t.Errorf("items[0] (unlabeled) RemovedLabels = %+v, want [bug]", items[0].RemovedLabels)
+	if len(items[13].RemovedLabels) != 1 || items[13].RemovedLabels[0].Name != "bug" {
+		t.Errorf("items[13] (unlabeled) RemovedLabels = %+v, want [bug]", items[13].RemovedLabels)
 	}
 
-	// closed+commit_id (14:00): Type=merge, CommitID=merge-sha-abc123
-	mergeItem := items[2]
+	// closed+commit_id (14:00): Type=merge, CommitID=merge-sha-abc123 → items[11]
+	mergeItem := items[11]
 	if mergeItem.Type != "merge" || mergeItem.CommitID != "merge-sha-abc123" {
 		t.Errorf("merge item = Type=%q, CommitID=%q, want Type=merge, CommitID=merge-sha-abc123",
 			mergeItem.Type, mergeItem.CommitID)
 	}
 
-	// renamed (11:00): OldTitle=new title, NewTitle=old title? 等等应该是 OldTitle=old title, NewTitle=new title
-	renamedItem := items[5]
+	// renamed (11:00): OldTitle=old title, NewTitle=new title → items[8]
+	renamedItem := items[8]
 	if renamedItem.OldTitle != "old title" || renamedItem.NewTitle != "new title" {
 		t.Errorf("renamed item = OldTitle=%q, NewTitle=%q, want old title / new title",
 			renamedItem.OldTitle, renamedItem.NewTitle)
 	}
 
-	// labeled (08:55): LabelAction=add, AddedLabels=[bug]
-	labeledItem := items[8]
+	// labeled (08:55): LabelAction=add, AddedLabels=[bug] → items[5]
+	labeledItem := items[5]
 	if labeledItem.LabelAction != "add" {
 		t.Errorf("labeled item LabelAction = %q, want add", labeledItem.LabelAction)
 	}
@@ -2546,8 +2547,8 @@ func TestGitHubAdapter_ListPullTimeline_IssueEvents(t *testing.T) {
 		t.Errorf("labeled item AddedLabels = %+v, want [bug]", labeledItem.AddedLabels)
 	}
 
-	// cross-referenced (08:50): Type=pull_ref, RefAction=cross, RefIssue.Number=10
-	crossItem := items[9]
+	// cross-referenced (08:50): Type=pull_ref, RefAction=cross, RefIssue.Number=10 → items[4]
+	crossItem := items[4]
 	if crossItem.Type != "pull_ref" {
 		t.Errorf("cross-ref item Type = %q, want pull_ref", crossItem.Type)
 	}
@@ -2558,8 +2559,8 @@ func TestGitHubAdapter_ListPullTimeline_IssueEvents(t *testing.T) {
 		t.Errorf("cross-ref item RefIssue = %+v, want Index=10", crossItem.RefIssue)
 	}
 
-	// review_requested (08:45): Assignee.Username=carol
-	reviewReqItem := items[10]
+	// review_requested (08:45): Assignee.Username=carol → items[3]
+	reviewReqItem := items[3]
 	if reviewReqItem.Assignee == nil || reviewReqItem.Assignee.Username != "carol" {
 		t.Errorf("review_request item Assignee = %+v, want Username=carol", reviewReqItem.Assignee)
 	}
@@ -2567,15 +2568,14 @@ func TestGitHubAdapter_ListPullTimeline_IssueEvents(t *testing.T) {
 		t.Errorf("review_request item RemovedAssignee = true, want false")
 	}
 
-	// head_ref_deleted (08:40): OldRef="" (v0.7.27.1 修正：commit_id 是 SHA 不是 branch name,
-	// 真实 branch name 走前端 selectedPR.head.label 兜底)
-	deleteItem := items[11]
+	// head_ref_deleted (08:40): OldRef="" (v0.7.27.1 修正) → items[2]
+	deleteItem := items[2]
 	if deleteItem.OldRef != "" {
 		t.Errorf("head_ref_deleted item OldRef = %q, want empty (v0.7.27.1 修复)", deleteItem.OldRef)
 	}
 
-	// assigned (08:35): Assignee.Username=bob, RemovedAssignee=false
-	assignItem := items[12]
+	// assigned (08:35): Assignee.Username=bob, RemovedAssignee=false → items[1]
+	assignItem := items[1]
 	if assignItem.Assignee == nil || assignItem.Assignee.Username != "bob" {
 		t.Errorf("assigned item Assignee = %+v, want Username=bob", assignItem.Assignee)
 	}
@@ -2751,27 +2751,22 @@ func TestGitHubAdapter_ListPullTimeline_MergedAndPush(t *testing.T) {
 		t.Fatalf("len(items) = %d, want 4", len(items))
 	}
 
-	// 时间倒序：13:00 force push → 12:00 push → 11:00 merge → 10:00 close
-	if items[0].Type != "push" || !items[0].IsForcePush {
-		t.Errorf("items[0] Type=%q IsForcePush=%v, want push+true (head_ref_force_pushed)", items[0].Type, items[0].IsForcePush)
+	// 时间升序（v0.7.33 改）：10:00 close → 11:00 merge → 12:00 push → 13:00 force push
+	// 对齐 GitHub web PR timeline 实际渲染顺序（first 最早，last 最新）。
+	if items[0].Type != "close" {
+		t.Errorf("items[0] Type=%q IsForcePush=%v, want close", items[0].Type, items[0].IsForcePush)
 	}
-	if len(items[0].CommitIDs) != 1 || items[0].CommitIDs[0] != "force-push-sha-987xyz" {
-		t.Errorf("items[0] CommitIDs = %v, want [force-push-sha-987xyz]", items[0].CommitIDs)
+	if items[0].IsForcePush {
+		t.Errorf("items[0] IsForcePush=true, want false")
 	}
-
-	if items[1].Type != "push" || items[1].IsForcePush {
-		t.Errorf("items[1] Type=%q IsForcePush=%v, want push+false (committed)", items[1].Type, items[1].IsForcePush)
+	if items[1].Type != "merge" || items[1].CommitID != "merge-sha-real-abc123def456" {
+		t.Errorf("items[1] Type=%q CommitID=%q, want merge+merge-sha-real-abc123def456", items[1].Type, items[1].CommitID)
 	}
-	if len(items[1].CommitIDs) != 1 || items[1].CommitIDs[0] != "push-commit-sha-xyz789" {
-		t.Errorf("items[1] CommitIDs = %v, want [push-commit-sha-xyz789]", items[1].CommitIDs)
+	if items[2].Type != "push" || items[2].IsForcePush || len(items[2].CommitIDs) != 1 || items[2].CommitIDs[0] != "push-commit-sha-xyz789" {
+		t.Errorf("items[2] Type=%q IsForcePush=%v CommitIDs=%v, want push+false+[push-commit-sha-xyz789]", items[2].Type, items[2].IsForcePush, items[2].CommitIDs)
 	}
-
-	if items[2].Type != "merge" || items[2].CommitID != "merge-sha-real-abc123def456" {
-		t.Errorf("items[2] Type=%q CommitID=%q, want merge+merge-sha-real-abc123def456", items[2].Type, items[2].CommitID)
-	}
-
-	if items[3].Type != "close" {
-		t.Errorf("items[3] Type = %q, want close (v0.7.27.1 修正：closed 不再推断 merge)", items[3].Type)
+	if items[3].Type != "push" || !items[3].IsForcePush || len(items[3].CommitIDs) != 1 || items[3].CommitIDs[0] != "force-push-sha-987xyz" {
+		t.Errorf("items[3] Type=%q IsForcePush=%v CommitIDs=%v, want push+true+[force-push-sha-987xyz]", items[3].Type, items[3].IsForcePush, items[3].CommitIDs)
 	}
 }
 
