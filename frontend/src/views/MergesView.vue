@@ -22,7 +22,7 @@
  */
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import {
-  GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
+  GitMerge, GitPullRequestArrow, GitPullRequestClosed, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
   // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
   RotateCcw, Bookmark, Tag, Milestone, UserPlus, UserMinus, Calendar,
@@ -1414,11 +1414,13 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  */
 const SYSTEM_EVENT_ICON: Record<string, Component> = {
   reopen: RotateCcw,
-  // close event 用 octicon-git-merge（2 圆点 merge 到 1 圆点的 merge 图）——
-  // 用户 22:46 大图确认：红色实心圆里实际是 git-merge icon，不是 git-branch 也不是 check mark。
-  // 跟 merge event timeline 走同一个 icon 形状，只靠 dot 颜色区分（红 = closed / 紫 = merged）。
-  // v0.7.36/v0.7.38 错改两次：先 CircleCheck（issue-closed check mark）→ GitBranch，都跟实际不符。
-  close: GitMerge,
+  // close event 用 octicon-git-pull-request-closed（PR 图 + 中间 X 标记）——
+  // 用户 22:54 给的实际 SVG class 是 `octicon-git-pull-request-closed`，
+  // 复合 icon：左右 2 条 PR 分支线 + 4 端点圆 + 中间一个 X。
+  // v0.7.36/v0.7.38/v0.7.39 错改三次：先 CircleCheck（issue-closed check mark）
+  // → GitBranch（git-branch 3 圆点）→ GitMerge（git-merge merge 图），都跟实际 SVG 不符。
+  // 现在用 GitPullRequestClosed（lucide 也有同名 icon）才对得上。
+  close: GitPullRequestClosed,
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
@@ -3249,7 +3251,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         <button
                           v-if="isGithub && item.type === 'delete_branch' && selectedPR && selectedPR.head?.sha && selectedPR.head?.label && isBranchCurrentlyDeleted"
                           type="button"
-                          class="btn-primary-sm pr-detail__restore-btn pr-detail__restore-btn--inline"
+                          class="btn-ghost-sm pr-detail__restore-btn pr-detail__restore-btn--inline"
                           :disabled="pull.restoreBranchLoading"
                           @click="pull.restoreBranch(activeProjectId!, selectedPR.index, selectedPR.head.label, selectedPR.head.sha)"
                         >{{ pull.restoreBranchLoading ? 'Restoring…' : 'Restore branch' }}</button>
@@ -3555,9 +3557,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               role="status"
             >
               <!-- v0.7.36：包一个实心圆背景 + 反白 icon，对齐 GitHub web "Closed with unmerged commits" 面板
-                   修前只是彩色 GitBranch icon，GitHub web 是实心圆 + 反白 icon 视觉差异大 -->
+                   修前只是彩色 GitBranch icon，GitHub web 是实心圆 + 反白 icon 视觉差异大
+                   v0.7.40：GitBranch → GitMerge（用户给的实际 SVG class 是 octicon-git-merge，
+                   跟 GitHub web 实际渲染一致） -->
               <div class="pr-detail__closed-banner-icon-wrap pr-detail__closed-banner-icon-wrap--unmerged" aria-hidden="true">
-                <GitBranch :size="18" :stroke-width="2" class="pr-detail__closed-banner-icon" />
+                <GitMerge :size="18" :stroke-width="2" class="pr-detail__closed-banner-icon" />
               </div>
               <div class="pr-detail__closed-banner-text">
                 <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Closed with unmerged commits' : '有未合并的提交' }}</div>
@@ -7125,7 +7129,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   flex-shrink: 0;
 }
 /* v0.7.36：icon-wrap 走"实心填色圆"（GitHub web 风格）—— 修前 panel icon 只是彩色
-   GitBranch/GitPullRequestArrow 无圆背景，v0.7.36 包一个 36×36 圆 + 实心填色
+   GitMerge/GitPullRequestArrow 无圆背景，v0.7.36 包一个 36×36 圆 + 实心填色
    + 反白 icon，跟 GitHub web 视觉一致。
    - unmerged 面板：深灰底（GitHub web 标准，#6e7681 ≈ --color-text-muted）
    - merged 面板：  紫色底（GitHub web Octicon GitMerge 标准色 #8250df）
