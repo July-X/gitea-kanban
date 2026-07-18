@@ -45,6 +45,12 @@ import CrossReference from '../components/icons/CrossReference.vue';
 // 形状差太多。1:1 复刻 octicon 路径做组件，给 delete_branch / restore_branch
 // 事件用。详见 components/icons/OcticonGitBranch.vue 顶部注释
 import OcticonGitBranch from '../components/icons/OcticonGitBranch.vue';
+// v0.7.45：自定义 octicon-git-merge 组件 —— lucide 的 GitMerge 是简化版
+//（缺 3 外圆+底部弧线），octicon-git-merge 是 3 外圆+3 内点+merge 路径
+// + 底部弧线+垂直线，1:1 复刻 octicon 路径做组件，给 merge event timeline
+// dot + Closed with unmerged commits 面板 icon 用。
+// 详见 components/icons/OcticonGitMerge.vue 顶部注释
+import OcticonGitMerge from '../components/icons/OcticonGitMerge.vue';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -1397,7 +1403,11 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  * GitHub Primer Octicons 实际映射（实测 GitHub web PR timeline + 官方 octicon 库）：
  *   - close (octicon-issue-closed)         → XCircle（红圈 X，对齐 GitHub web）
  *   - reopen (octicon-issue-reopened)      → RotateCcw（v0.7.2 已有，绿圈）
- *   - merge (octicon-git-merge)            → GitMerge（v0.7.35 改 GitPullRequest → GitMerge，紫圈 merge icon）
+ *   - merge (octicon-git-merge)            → OcticonGitMerge（v0.7.45 自定义组件，1:1
+ *                                                       复刻 octicon 3 外圆+3 内点+merge
+ *                                                       路径+底部弧线；v0.7.35 错用
+ *                                                       lucide GitMerge 是简化版，缺
+ *                                                       3 外圆+底部弧线）
  *   - push / committed (octicon-git-commit) → GitCommit（v0.7.35 改 ArrowUp → GitCommit，小圆点）
  *   - head_ref_force_pushed                 → GitCommit（v0.7.35 新增 entry，force push 走 isForcePush 提示）
  *   - delete_branch (octicon-git-branch)    → OcticonGitBranch（v0.7.42 自定义组件，1:1
@@ -1460,8 +1470,10 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   unlock: Key,
   change_target_branch: ArrowLeftRight,
   review_request: Eye,
-  // v0.7.35：GitPullRequest → GitMerge（GitHub web octicon-git-merge 紫圈 merge icon）
-  merge: GitMerge,
+  // v0.7.45：merge event timeline dot 用自定义 octicon-git-merge 组件
+  //（OcticonGitMerge）—— lucide GitMerge 是简化版，1:1 复刻 octicon
+  // v0.7.35 错用 lucide GitMerge（看名字一样以为可以近似，实际形状不对）
+  merge: OcticonGitMerge,
   // v0.7.35：ArrowUp → GitCommit（GitHub web octicon-git-commit 小圆点）
   push: GitCommit,
   // v0.7.35 新增：单 commit push（GitHub events 端 committed event，走 type=push）
@@ -3583,9 +3595,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
             >
               <!-- v0.7.44：icon 在内容框外部（左侧独立圆角方块，跟内容框分两个 flex item）
                    内容框独立有 border + 圆角。修前 v0.7.36 icon 在内容框内部（圆 wrapper）
-                   v0.7.40 GitBranch → GitMerge（用户给的实际 SVG class 是 octicon-git-merge）-->
+                   v0.7.40 GitBranch → GitMerge（lucide 简化版）
+                   v0.7.45 lucide GitMerge → OcticonGitMerge（用户给的实际 SVG class
+                   是 octicon-git-merge，1:1 复刻 octicon 路径，3 外圆+3 内点+merge 路径
+                   +底部弧线+垂直线，比 lucide 多 3 外圆+底部弧线）-->
               <div class="pr-detail__closed-banner-icon-wrap pr-detail__closed-banner-icon-wrap--unmerged" aria-hidden="true">
-                <GitMerge :size="20" :stroke-width="2" class="pr-detail__closed-banner-icon" />
+                <OcticonGitMerge :size="20" :stroke-width="2" class="pr-detail__closed-banner-icon" />
               </div>
               <div class="pr-detail__closed-banner-text-box">
                 <div class="pr-detail__closed-banner-text">
