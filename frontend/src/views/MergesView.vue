@@ -35,6 +35,11 @@ import {
   // v0.7.26: 过期警告行 icon (AlertTriangle 对应 Gitea web octicon-alert)
   AlertTriangle,
 } from 'lucide-vue-next';
+// v0.7.41：自定义 octicon-cross-reference 组件 —— lucide 没同名 icon，
+// 最近 Link/Link2 视觉上是 chain link（圆环链）跟 cross-reference
+// （方块+箭头）形状差太多。1:1 复刻 octicon 路径做组件。详见
+// components/icons/CrossReference.vue 顶部注释
+import CrossReference from '../components/icons/CrossReference.vue';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -1398,9 +1403,11 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  *   - milestone (octicon-milestone)         → Milestone（v0.7.2 已有）
  *   - assignee (octicon-person-add)         → UserPlus（v0.7.2 已有，移除走 UserMinus）
  *   - title / change_title (octicon-pencil) → Pencil（v0.7.35 改 Type → Pencil，GitHub web 实际）
- *   - issue_ref / pull_ref (octicon-link)   → LinkIcon（v0.7.35 新增，跨引用）
- *   - change_issue_ref (octicon-link)       → LinkIcon（v0.7.35 新增）
- *   - add_dependency / remove_dependency   → LinkIcon（v0.7.35 新增，依赖关联）
+ *   - issue_ref / pull_ref (octicon-cross-reference) → CrossReference（v0.7.41 自定义组件，
+ *                                                            复刻 octicon 路径；v0.7.35
+ *                                                            错用 LinkIcon 视觉是 chain link 不对）
+ *   - change_issue_ref (octicon-cross-reference)    → CrossReference（同上）
+ *   - add_dependency / remove_dependency            → CrossReference（同上）
  *   - due_date (octicon-clock)              → Calendar（v0.7.2 已有）
  *   - lock (octicon-lock)                   → Lock（v0.7.2 已有）
  *   - unlock (octicon-key)                  → Key（v0.7.2 已有）
@@ -1447,13 +1454,17 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   committed: GitCommit,
   // v0.7.35 新增：force push（GitHub events 端 head_ref_force_pushed event，走 type=push + IsForcePush=true）
   head_ref_force_pushed: GitCommit,
-  // v0.7.35 新增：跨引用（GitHub web octicon-link，跟 commit_ref 的 Bookmark 区分）
-  issue_ref: LinkIcon,
-  pull_ref: LinkIcon,
-  change_issue_ref: LinkIcon,
-  // v0.7.35 新增：依赖关联（GitHub web octicon-package / link 近似）
-  add_dependency: LinkIcon,
-  remove_dependency: LinkIcon,
+  // v0.7.41：跨引用 —— 用户给的 SVG class 是 `octicon-cross-reference`（方块+箭头），
+  // 不是 lucide 的 Link（chain link 圆环链）。改用自定义组件 CrossReference。
+  // v0.7.35 错用 LinkIcon（看 GitHub web 用了 link 类 octicon 以为可以近似，
+  // 实际是 cross-reference，chain link 形状完全不对）。
+  issue_ref: CrossReference,
+  pull_ref: CrossReference,
+  change_issue_ref: CrossReference,
+  // v0.7.41：依赖关联 —— 跟 issue_ref / pull_ref 同一个 octicon（cross-reference），
+  // 改用 CrossReference 跟 issue_ref 视觉一致
+  add_dependency: CrossReference,
+  remove_dependency: CrossReference,
   move: Folder,
   dismiss_review: XCircle,
   pin: Pin,
