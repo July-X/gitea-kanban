@@ -1426,13 +1426,15 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  *   - commit_ref (octicon-bookmark)         → Bookmark（v0.7.2 已有）
  *   - label (octicon-tag)                   → Tag（v0.7.2 已有）
  *   - milestone (octicon-milestone)         → Milestone（v0.7.2 已有）
- *   - assignee (octicon-person)            → OcticonPerson（v0.7.46 自定义组件，1:1
+ *   - assignees (octicon-person)           → OcticonPerson（v0.7.46 自定义组件，1:1
  *                                                    复刻 octicon 人头+身体；v0.7.2
  *                                                    错用 lucide UserPlus 是带 +
  *                                                    符号，跟 GitHub web 实际
  *                                                    octicon-person 不带 + 形状不对；
  *                                                    add/remove 不靠 icon 区分
- *                                                    靠 verb 文案"指派给"/"取消了指派给"）
+ *                                                    靠 verb 文案"指派给"/"取消了指派给"；
+ *                                                    平台通用——Gitea/GitHub 都是
+ *                                                    OcticonPerson，不分平台）
  *   - title / change_title (octicon-pencil) → Pencil（v0.7.35 改 Type → Pencil，GitHub web 实际）
  *   - issue_ref / pull_ref (octicon-cross-reference) → CrossReference（v0.7.41 自定义组件，
  *                                                            复刻 octicon 路径；v0.7.35
@@ -1462,12 +1464,17 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
-  // v0.7.46：assignee 事件 timeline dot 用自定义 octicon-person 组件
-  //（OcticonPerson）—— lucide UserPlus 是带 + 符号，octicon-person 是纯
-  // 人头+身体（不带 +/-）。add/remove 不靠 icon 区分靠 verb 文案
+  // v0.7.46 + v0.7.47：assignees 事件 timeline dot 用自定义 octicon-person
+  // 组件（OcticonPerson）—— lucide UserPlus 是带 + 符号，octicon-person
+  // 是纯人头+身体（不带 +/-）。add/remove 不靠 icon 区分靠 verb 文案。
+  // v0.7.47 修：key 从 'assignee'（单数）改 'assignees'（复数）——
+  // 修前 systemEventIcon('assignees') lookup 'assignee' 找不到 fallback
+  // 到 MessageCircle（聊天气泡），跟实际 octicon-person 形状完全不对。
+  // 后端 TimelineItem.type 实际是 'assignees'（复数，看 systemEventVerb
+  // 和 hasSystemEventInlineDetail 里的 type check 都是 'assignees'）。
   // v0.7.2 错用 lucide UserPlus（看名字 person-add 以为可以近似，
   // 实际 octicon 不用 person-add 也不带 + 符号）
-  assignee: OcticonPerson,
+  assignees: OcticonPerson,
   // v0.7.35：Type → Pencil（GitHub web octicon-pencil，rename 实际是 pencil icon）
   title: Pencil,
   // v0.7.35：change_title 跟 title 一样走 pencil（GitHub web 同 icon）
@@ -1550,7 +1557,11 @@ const SYSTEM_EVENT_COLOR: Record<string, SystemEventColor> = {
   // 修改类（neutral）
   label: 'neutral',
   milestone: 'neutral',
-  assignee: 'neutral',
+  // v0.7.47：key 跟 SYSTEM_EVENT_ICON 同步 'assignee' → 'assignees'（复数，
+  // 对齐后端 TimelineItem.type）。修前 systemEventColor('assignees') lookup
+  // 'assignee' 找不到 fallback 到 'neutral'，dot 颜色碰巧对（也想要 neutral）
+  // 但 key 跟 type 不匹配是隐患
+  assignees: 'neutral',
   title: 'neutral',
   delete_branch: 'neutral',
   restore_branch: 'neutral',
