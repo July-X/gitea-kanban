@@ -7685,7 +7685,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__timeline-dot--danger  { color: #fff; background: var(--color-danger, #cf222e);  border-color: var(--color-danger, #cf222e); }
 .pr-detail__timeline-dot--merge   { color: #fff; background: #8250df;             border-color: #8250df; }
 .pr-detail__timeline-dot--warn    { color: #fff; background: #d4a72c;             border-color: #d4a72c; }
-.pr-detail__timeline-dot--neutral { color: var(--color-text-muted); background: var(--color-bg-elevated); border-color: var(--color-divider); }
+.pr-detail__timeline-dot--neutral { color: #fff; background: #6e7681;             border-color: #6e7681; }
 /* 评审事件 dot 颜色按 state（GitHub web 同色：approved 绿 / changes_requested 红 / commented 灰） */
 .pr-detail__timeline-dot--review-approved { color: #fff; background: var(--color-success, #1f883d); border-color: var(--color-success, #1f883d); }
 .pr-detail__timeline-dot--review-changes_requested { color: #fff; background: var(--color-danger, #cf222e); border-color: var(--color-danger, #cf222e); }
