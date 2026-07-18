@@ -3581,16 +3581,16 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               class="pr-detail__closed-banner pr-detail__closed-banner--unmerged"
               role="status"
             >
-              <!-- v0.7.36：包一个实心圆背景 + 反白 icon，对齐 GitHub web "Closed with unmerged commits" 面板
-                   修前只是彩色 GitBranch icon，GitHub web 是实心圆 + 反白 icon 视觉差异大
-                   v0.7.40：GitBranch → GitMerge（用户给的实际 SVG class 是 octicon-git-merge，
-                   跟 GitHub web 实际渲染一致） -->
+              <!-- v0.7.44：icon 在内容框外部（左侧独立圆角方块，跟内容框分两个 flex item）
+                   内容框独立有 border + 圆角。修前 v0.7.36 icon 在内容框内部（圆 wrapper）
+                   v0.7.40 GitBranch → GitMerge（用户给的实际 SVG class 是 octicon-git-merge）-->
               <div class="pr-detail__closed-banner-icon-wrap pr-detail__closed-banner-icon-wrap--unmerged" aria-hidden="true">
-                <GitMerge :size="18" :stroke-width="2" class="pr-detail__closed-banner-icon" />
+                <GitMerge :size="20" :stroke-width="2" class="pr-detail__closed-banner-icon" />
               </div>
-              <div class="pr-detail__closed-banner-text">
-                <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Closed with unmerged commits' : '有未合并的提交' }}</div>
-                <div class="pr-detail__closed-banner-desc">
+              <div class="pr-detail__closed-banner-text-box">
+                <div class="pr-detail__closed-banner-text">
+                  <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Closed with unmerged commits' : '有未合并的提交' }}</div>
+                  <div class="pr-detail__closed-banner-desc">
                   <!-- v0.7.34：分支被删时不带 branch 描述（对齐 GitHub web "This pull request is closed."） -->
                   <template v-if="isBranchCurrentlyDeleted">
                     <template v-if="isGithub">This pull request is closed.</template>
@@ -3622,10 +3622,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                   </template>
                 </div>
               </div>
-              <!-- v0.7.29 + v0.7.30 + v0.7.34：Delete branch 按钮 platform-aware + 仅在分支存在时显示
-                   （分支被删时按钮无意义，再点一次是 no-op，且 v0.7.34 之前 v-if="headLabel(...)"
-                   无条件显示是 bug，参考 user 反馈 ⑰ "Delete branch 和 Restore branch 的显示
-                   位置不正确，以及显示逻辑" —— GitHub web 只在分支存在时显示 Delete branch）。 -->
+              <!-- v0.7.29 + v0.7.30 + v0.7.34 + v0.7.44：Delete branch 按钮
+                   platform-aware + 仅在分支存在时显示（分支被删时按钮无意义）。
+                   v0.7.44 按钮从 pr-detail__closed-banner 直接子元素搬进
+                   pr-detail__closed-banner-text-box 内（text-box 是新加的
+                   有 border 的内容框，按钮现在跟文字一起在框内）-->
               <button
                 v-if="!isBranchCurrentlyDeleted && headLabel(selectedPR)"
                 type="button"
@@ -3633,19 +3634,19 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                 :disabled="pull.deleteBranchLoading"
                 @click="pull.deleteBranch(activeProjectId!, selectedPR.index, headLabel(selectedPR))"
               >{{ pull.deleteBranchLoading ? (isGithub ? 'Deleting…' : '删除中…') : (isGithub ? 'Delete branch' : '删除分支') }}</button>
+              </div>
             </div>
             <div
               v-else-if="selectedPR.state === 'closed' && selectedPR.merged"
               class="pr-detail__closed-banner pr-detail__closed-banner--merged"
               role="status"
             >
-              <!-- v0.7.43：merged 面板去掉"实心圆 + 反白 icon" wrapper，
-                   改用紫色边框线包括整个文字区域（用户 23:25 反馈的样式）。
-                   跟 unmerged 面板（保留灰实心圆 + GitMerge）做区分：
-                   unmerged = 警示性（带 icon 提示），
-                   merged = 完成性（干净边框）。 -->
-              <div class="pr-detail__closed-banner-text">
-                <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Merged' : '已合并' }}</div>
+              <!-- v0.7.44：merged 面板文字也包在 .pr-detail__closed-banner-text-box 里
+                   （紫色边框线，v0.7.43 紫色边框从 base 容器搬到 text-box），
+                   跟 unmerged 面板结构一致（都是 text-box 在右侧，没有 icon-wrap） -->
+              <div class="pr-detail__closed-banner-text-box">
+                <div class="pr-detail__closed-banner-text">
+                  <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Merged' : '已合并' }}</div>
                 <div
                   v-if="selectedPR.mergeCommitSha"
                   class="pr-detail__closed-banner-desc"
@@ -3671,6 +3672,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     合并至 {{ baseLabel(selectedPR) }}。
                   </template>
                 </div>
+              </div>
               </div>
             </div>
 
@@ -7137,49 +7139,60 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   border-radius: var(--radius-sm);
 }
 
-/* ===== v0.7.28 PR 关闭状态块（GitHub web 风格，timeline 下方） ===== */
+/* ===== v0.7.28 + v0.7.44 PR 关闭状态块（GitHub web 风格，timeline 下方） =====
+   v0.7.44 改：base 容器只做 flex 布局，border/背景/padding 都搬到
+   内层 .pr-detail__closed-banner-text-box（icon 在外部左侧独立圆角方块，
+   跟内容框分两个 flex item，对齐 GitHub web MergeabilityIcon 实际渲染）。*/
 .pr-detail__closed-banner {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
   margin-top: var(--space-3);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-md);
+  /* v0.7.44：background / border / border-radius / padding 都搬给
+     内层 .pr-detail__closed-banner-text-box（base 容器只做 flex 布局）*/
 }
 .pr-detail__closed-banner-icon {
-  color: #fff; /* v0.7.36：反白（GitHub web 风格 — 实心圆背景 + 反白 icon） */
+  color: #fff; /* v0.7.36：反白（GitHub web 风格 — 实心方块背景 + 反白 icon） */
   flex-shrink: 0;
 }
-/* v0.7.36：icon-wrap 走"实心填色圆"（GitHub web 风格）—— 修前 panel icon 只是彩色
-   GitMerge/GitPullRequestArrow 无圆背景，v0.7.36 包一个 36×36 圆 + 实心填色
-   + 反白 icon，跟 GitHub web 视觉一致。
-   - unmerged 面板：深灰底（GitHub web 标准，#6e7681 ≈ --color-text-muted）
-   - merged 面板：  紫色底（GitHub web Octicon GitMerge 标准色 #8250df）
-   icon 自身已走 .pr-detail__closed-banner-icon { color: #fff } 反白 */
+/* v0.7.36 + v0.7.44：icon-wrap 走"实心填色方块"（GitHub web MergeabilityIcon
+   风格）—— 修前 panel icon 只是彩色 GitMerge/GitPullRequestArrow 无方块背景，
+   v0.7.36 包一个 36×36 圆 + 实心填色 + 反白 icon。
+   v0.7.44 改 border-radius: 50% → var(--radius-md)（圆 → 圆角方块，
+   对齐 GitHub web "rounded-2"），并把 wrap 从内容框内部搬到外部左侧
+   （跟 .pr-detail__closed-banner-text-box 分两个 flex item）。
+   - unmerged 面板：深灰底（GitHub web 标准，#6e7681 ≈ --color-text-muted）*/
 .pr-detail__closed-banner-icon-wrap {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 .pr-detail__closed-banner-icon-wrap--unmerged { background: #6e7681; } /* GitHub web "Closed" 灰 */
-/* v0.7.43：merged 面板去掉了"实心圆 + 反白 icon" wrapper
-   （.pr-detail__closed-banner-icon-wrap--merged CSS 已删，不再生效），
-   改用 .pr-detail__closed-banner--merged 的紫色边框线包括整个文字区域。
-   颜色用 GitHub web Octicon GitMerge 标准色 #8250df（深紫）。 */
-.pr-detail__closed-banner--merged {
+/* v0.7.44：内容框（独立有 border + 圆角，icon 在外部）。
+   merged 面板的紫色边框从 .pr-detail__closed-banner--merged base 搬到这里
+   （v0.7.43 紫色边框原本加在 base 容器，现在 base 只做 flex，border
+   由 text-box 承担，所以紫色也搬过来）。*/
+.pr-detail__closed-banner-text-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+}
+.pr-detail__closed-banner--merged .pr-detail__closed-banner-text-box {
   border-color: #8250df; /* 紫色边框（GitHub web "Merged" 标准色） */
 }
-/* 修前 .pr-detail__closed-banner--merged .pr-detail__closed-banner-icon /
-   --unmerged 覆写 color 现在不需要了（icon-wrap 负责填色 + icon 走
-   --color: #fff），保留 --unmerged 作为 fallback 防御（万一 wrapper
-   漏渲染时 icon 至少有色）。--merged fallback 已删（v0.7.43 模板
-   不再渲染 merged icon-wrap，对应 fallback 也没意义）。 */
+/* 修前 .pr-detail__closed-banner--unmerged .pr-detail__closed-banner-icon
+   覆写 color 保留作为 fallback 防御（万一 wrapper 漏渲染时 icon 至少有色）。
+   --merged fallback 已删（v0.7.43 模板不再渲染 merged icon-wrap）。*/
 .pr-detail__closed-banner--unmerged .pr-detail__closed-banner-icon {
   color: #cf222e; /* GitHub closed 红 fallback */
 }
