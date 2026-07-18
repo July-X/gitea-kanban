@@ -24,6 +24,8 @@ import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted,
 import {
   GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
+  // v0.7.36：CircleCheck 对齐 GitHub web octicon-issue-closed（实心红圈 + check mark）
+  CircleCheck,
   // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
   RotateCcw, Bookmark, Tag, Milestone, UserPlus, UserMinus, Calendar,
   Lock, Key, Eye, ArrowLeftRight, Folder, Pin,
@@ -1414,8 +1416,9 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  */
 const SYSTEM_EVENT_ICON: Record<string, Component> = {
   reopen: RotateCcw,
-  // v0.7.35：XIcon → XCircle（GitHub web octicon-issue-closed 红圈 X）
-  close: XCircle,
+  // v0.7.36：XCircle → CircleCheck（GitHub web octicon-issue-closed 实心红圈 + check mark）
+  // 修前用 XCircle 是空心圈 + X 跟 GitHub 实心红圈 + check mark 不一致
+  close: CircleCheck,
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
@@ -3551,7 +3554,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               class="pr-detail__closed-banner pr-detail__closed-banner--unmerged"
               role="status"
             >
-              <GitBranch :size="18" :stroke-width="2" aria-hidden="true" class="pr-detail__closed-banner-icon" />
+              <!-- v0.7.36：包一个实心圆背景 + 反白 icon，对齐 GitHub web "Closed with unmerged commits" 面板
+                   修前只是彩色 GitBranch icon，GitHub web 是实心圆 + 反白 icon 视觉差异大 -->
+              <div class="pr-detail__closed-banner-icon-wrap pr-detail__closed-banner-icon-wrap--unmerged" aria-hidden="true">
+                <GitBranch :size="18" :stroke-width="2" class="pr-detail__closed-banner-icon" />
+              </div>
               <div class="pr-detail__closed-banner-text">
                 <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Closed with unmerged commits' : '有未合并的提交' }}</div>
                 <div class="pr-detail__closed-banner-desc">
@@ -3603,7 +3610,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               class="pr-detail__closed-banner pr-detail__closed-banner--merged"
               role="status"
             >
-              <GitPullRequestArrow :size="18" :stroke-width="2" aria-hidden="true" class="pr-detail__closed-banner-icon" />
+              <!-- v0.7.36：merged 面板也走"实心圆 + 反白 icon"（GitHub web），
+                   跟 unmerged 面板同款 wrapper，颜色用 --merged 紫
+                   （GitHub web Octicon GitMerge 标准色 #8250df） -->
+              <div class="pr-detail__closed-banner-icon-wrap pr-detail__closed-banner-icon-wrap--merged" aria-hidden="true">
+                <GitPullRequestArrow :size="18" :stroke-width="2" class="pr-detail__closed-banner-icon" />
+              </div>
               <div class="pr-detail__closed-banner-text">
                 <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Merged' : '已合并' }}</div>
                 <div
@@ -7109,14 +7121,34 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   border-radius: var(--radius-md);
 }
 .pr-detail__closed-banner-icon {
-  color: var(--color-text-secondary);
+  color: #fff; /* v0.7.36：反白（GitHub web 风格 — 实心圆背景 + 反白 icon） */
   flex-shrink: 0;
 }
+/* v0.7.36：icon-wrap 走"实心填色圆"（GitHub web 风格）—— 修前 panel icon 只是彩色
+   GitBranch/GitPullRequestArrow 无圆背景，v0.7.36 包一个 36×36 圆 + 实心填色
+   + 反白 icon，跟 GitHub web 视觉一致。
+   - unmerged 面板：深灰底（GitHub web 标准，#6e7681 ≈ --color-text-muted）
+   - merged 面板：  紫色底（GitHub web Octicon GitMerge 标准色 #8250df）
+   icon 自身已走 .pr-detail__closed-banner-icon { color: #fff } 反白 */
+.pr-detail__closed-banner-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.pr-detail__closed-banner-icon-wrap--unmerged { background: #6e7681; } /* GitHub web "Closed" 灰 */
+.pr-detail__closed-banner-icon-wrap--merged { background: #8250df; } /* GitHub web "Merged" 紫 */
+/* 修前 .pr-detail__closed-banner--merged .pr-detail__closed-banner-icon / --unmerged
+   覆写 color 现在不需要了（icon-wrap 负责填色 + icon 走 --color: #fff），
+   保留作为 fallback 防御（万一 wrapper 漏渲染时 icon 至少有色） */
 .pr-detail__closed-banner--merged .pr-detail__closed-banner-icon {
-  color: #8957e5; /* GitHub merged 紫 */
+  color: #8957e5; /* GitHub merged 紫 fallback */
 }
 .pr-detail__closed-banner--unmerged .pr-detail__closed-banner-icon {
-  color: #cf222e; /* GitHub closed 红 */
+  color: #cf222e; /* GitHub closed 红 fallback */
 }
 .pr-detail__closed-banner-text {
   flex: 1;
@@ -7637,16 +7669,27 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
-/* 5 档颜色 —— 对齐 Gitea web .badge 语义色 */
-.pr-detail__timeline-dot--success { color: var(--color-success); border-color: var(--color-success); }
-.pr-detail__timeline-dot--danger  { color: var(--color-danger);  border-color: var(--color-danger); }
-.pr-detail__timeline-dot--merge   { color: #8250df;             border-color: #8250df; }
-.pr-detail__timeline-dot--warn    { color: #d4a72c;             border-color: #d4a72c; }
-.pr-detail__timeline-dot--neutral { color: var(--color-text-muted); border-color: var(--color-divider); }
-/* 评审事件 dot 颜色按 state */
-.pr-detail__timeline-dot--review-approved { color: var(--color-success); border-color: var(--color-success); }
-.pr-detail__timeline-dot--review-changes_requested { color: var(--color-danger); border-color: var(--color-danger); }
-.pr-detail__timeline-dot--review-commented { color: var(--color-text-muted); border-color: var(--color-divider); }
+/* v0.7.36：5 档颜色 —— 对齐 GitHub web 实心填色 + 反白 icon
+ *   修前：dot 保持中性背景（background 走 var(--color-bg-elevated)），只改 border + icon 颜色
+ *         跟 GitHub web 实心圆 + 反白 icon 视觉差异大
+ *   修后：colored event dot 走"实心填色背景 + 反白 icon"（GitHub web 风格）
+ *         中性 dot 保持现状（背景 --color-bg-elevated + 描边 --color-divider）
+ *   颜色取自 GitHub Primer color palette（octicon issue-closed/merged/reopened 标准色）：
+ *     - success: GitHub #1f883d / Gitea --color-success
+ *     - danger:  GitHub #cf222e / Gitea --color-danger
+ *     - merge:   GitHub #8250df（purple）
+ *     - warn:    GitHub #d4a72c（orange / amber）
+ *     - neutral: 保持中性（不变）
+ */
+.pr-detail__timeline-dot--success { color: #fff; background: var(--color-success, #1f883d); border-color: var(--color-success, #1f883d); }
+.pr-detail__timeline-dot--danger  { color: #fff; background: var(--color-danger, #cf222e);  border-color: var(--color-danger, #cf222e); }
+.pr-detail__timeline-dot--merge   { color: #fff; background: #8250df;             border-color: #8250df; }
+.pr-detail__timeline-dot--warn    { color: #fff; background: #d4a72c;             border-color: #d4a72c; }
+.pr-detail__timeline-dot--neutral { color: var(--color-text-muted); background: var(--color-bg-elevated); border-color: var(--color-divider); }
+/* 评审事件 dot 颜色按 state（GitHub web 同色：approved 绿 / changes_requested 红 / commented 灰） */
+.pr-detail__timeline-dot--review-approved { color: #fff; background: var(--color-success, #1f883d); border-color: var(--color-success, #1f883d); }
+.pr-detail__timeline-dot--review-changes_requested { color: #fff; background: var(--color-danger, #cf222e); border-color: var(--color-danger, #cf222e); }
+.pr-detail__timeline-dot--review-commented { color: var(--color-text-muted); background: var(--color-bg-elevated); border-color: var(--color-divider); }
 
 /* ===== System Event 紧凑单行（对齐 Gitea web .timeline-item event） ===== */
 .pr-detail__timeline-item--system .pr-detail__event-content {
