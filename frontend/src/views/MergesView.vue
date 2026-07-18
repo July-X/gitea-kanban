@@ -1414,11 +1414,11 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  */
 const SYSTEM_EVENT_ICON: Record<string, Component> = {
   reopen: RotateCcw,
-  // close event 用 octicon-git-branch（3 圆点+线的分支图）—— 跟用户截图确认：
-  // close / 面板 unmerged / delete_branch 三个位置的 dot icon 全部是同一个 git-branch，
-  // 只靠容器颜色区分（红实心圆 / 灰圆角方块 / 深灰实心圆）。
-  // v0.7.36 错改成 CircleCheck（issue-closed 红圈+check mark）跟实际 GitHub web 渲染不一致。
-  close: GitBranch,
+  // close event 用 octicon-git-merge（2 圆点 merge 到 1 圆点的 merge 图）——
+  // 用户 22:46 大图确认：红色实心圆里实际是 git-merge icon，不是 git-branch 也不是 check mark。
+  // 跟 merge event timeline 走同一个 icon 形状，只靠 dot 颜色区分（红 = closed / 紫 = merged）。
+  // v0.7.36/v0.7.38 错改两次：先 CircleCheck（issue-closed check mark）→ GitBranch，都跟实际不符。
+  close: GitMerge,
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
