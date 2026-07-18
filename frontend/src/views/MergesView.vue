@@ -24,8 +24,6 @@ import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted,
 import {
   GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
-  // v0.7.36：CircleCheck 对齐 GitHub web octicon-issue-closed（实心红圈 + check mark）
-  CircleCheck,
   // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
   RotateCcw, Bookmark, Tag, Milestone, UserPlus, UserMinus, Calendar,
   Lock, Key, Eye, ArrowLeftRight, Folder, Pin,
@@ -1416,9 +1414,11 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  */
 const SYSTEM_EVENT_ICON: Record<string, Component> = {
   reopen: RotateCcw,
-  // v0.7.36：XCircle → CircleCheck（GitHub web octicon-issue-closed 实心红圈 + check mark）
-  // 修前用 XCircle 是空心圈 + X 跟 GitHub 实心红圈 + check mark 不一致
-  close: CircleCheck,
+  // close event 用 octicon-git-branch（3 圆点+线的分支图）—— 跟用户截图确认：
+  // close / 面板 unmerged / delete_branch 三个位置的 dot icon 全部是同一个 git-branch，
+  // 只靠容器颜色区分（红实心圆 / 灰圆角方块 / 深灰实心圆）。
+  // v0.7.36 错改成 CircleCheck（issue-closed 红圈+check mark）跟实际 GitHub web 渲染不一致。
+  close: GitBranch,
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
