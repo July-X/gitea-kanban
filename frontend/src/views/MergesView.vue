@@ -550,6 +550,38 @@ function baseLabel(p: PullDto): string {
   return p.base.label || p.base.ref;
 }
 
+/**
+ * v0.7.34：head 分支当前是否被删除
+ *
+ * GitHub Issue Events API:
+ *   - `head_ref_deleted` 事件 → 触发 type="delete_branch"（GitHub adapter 映射）
+ *   - `head_ref_restored` 事件 → 触发 type="restore_branch"（v0.7.29 加）
+ *
+ * 当前分支状态由"最后一次相关事件"决定：
+ *   - 最后一次是 head_ref_deleted（无后续 restore）→ 分支当前被删
+ *   - 最后一次是 head_ref_restored / 没有相关事件 → 分支当前存在
+ *
+ * UI 表现（对齐 GitHub web）：
+ *   - 分支被删：timeline 上 delete_branch event 旁显示 "Restore branch" 按钮
+ *     + panel "Closed with unmerged commits" 描述简化成 "This pull request is closed."（不提及 branch）
+ *     + panel 不显示 "Delete branch" 按钮（branch 已经被删了，再删一次是 no-op）
+ *   - 分支存在：timeline 上 delete_branch event 旁**不**显示按钮
+ *     + panel 描述 "This pull request is closed, but the `{branch}` branch has unmerged commits."
+ *     + panel 显示 "Delete branch" 按钮
+ *
+ * timeline 已按 v0.7.33 升序（oldest first），item.created 是 ISO 8601 字符串可直接比较。
+ */
+const isBranchCurrentlyDeleted = computed<boolean>(() => {
+  const items = getTimelinePanel().items ?? [];
+  let lastDeleteAt = '';
+  let lastRestoreAt = '';
+  for (const item of items) {
+    if (item.type === 'delete_branch') lastDeleteAt = item.created;
+    else if (item.type === 'restore_branch') lastRestoreAt = item.created;
+  }
+  return lastDeleteAt > lastRestoreAt; // ISO 8601 字符串比较：最后 delete 晚于最后 restore → 当前被删
+});
+
 /** 在系统浏览器打开 commit 页面 */
 function openCommitExternal(sha: string): void {
   const url = commitWebUrl(sha);
@@ -1382,6 +1414,8 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   assignee: UserPlus,
   title: Type,
   delete_branch: GitBranch,
+  // v0.7.34：restore_branch icon（跟 delete_branch 走同一族 GitBranch + RotateCcw 视觉）
+  restore_branch: RotateCcw,
   due_date: Calendar,
   change_due_date: Calendar,
   remove_due_date: Calendar,
@@ -1436,6 +1470,7 @@ const SYSTEM_EVENT_COLOR: Record<string, SystemEventColor> = {
   assignee: 'neutral',
   title: 'neutral',
   delete_branch: 'neutral',
+  restore_branch: 'neutral',
   change_target_branch: 'neutral',
   commit_ref: 'neutral',
   move: 'neutral',
@@ -3168,6 +3203,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         <!-- v0.7.31 平台感知：GitHub 端时间放 verb 后 + Restore branch 按钮
                              跟 deleted event 同行（右侧）—— user 反馈 ⑭ "Restore branch 也是和
                              删除事件一行显示"（参考 GitHub 官方示意图）。
+                             v0.7.34 user 反馈 ⑰ 显示逻辑修复：Restore branch 按钮**仅在
+                             分支当前被删**时显示（看 isBranchCurrentlyDeleted，遍历 timeline
+                             判断最后一次 head_ref_deleted / head_ref_restored 事件）。
+                             修前 bug：每次 delete_branch event 都显示按钮，但分支可能已经被
+                             restore（delete → restore 之后），再显示 Restore 按钮是错的。
+                             对齐 GitHub web：分支当前被删才显示，已 restore 不显示。
                              - Gitea 端：时间已在 verb 前渲染（v-if="!isGithub" 上面那个 span），
                                这里不再渲染时间
                              - GitHub 端：时间 + restore button 放 verb 后，跟 GitHub web
@@ -3175,10 +3216,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                              Restore branch 按钮条件：
                              - 仅 GitHub（Gitea 没这个概念）
                              - 仅 delete_branch event
+                             - **仅当分支当前被删**（isBranchCurrentlyDeleted）
                              - 需要 selectedPR.head.sha + selectedPR.head.label（v0.7.28 修） -->
                         <span v-if="isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                         <button
-                          v-if="isGithub && item.type === 'delete_branch' && selectedPR && selectedPR.head?.sha && selectedPR.head?.label"
+                          v-if="isGithub && item.type === 'delete_branch' && selectedPR && selectedPR.head?.sha && selectedPR.head?.label && isBranchCurrentlyDeleted"
                           type="button"
                           class="btn-primary-sm pr-detail__restore-btn pr-detail__restore-btn--inline"
                           :disabled="pull.restoreBranchLoading"
@@ -3466,10 +3508,16 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               </ul>
             </div>
 
-            <!-- v0.7.28 + v0.7.30 platform-aware 改进：
-                 - 关闭但未合并：渲染 "Closed with unmerged commits" 标题 + 描述带 branch 名
-                   - Gitea: "此合并请求已关闭，但 {branch} 分支有未合并的提交。"
-                   - GitHub: "This pull request is closed, but the `{branch}` branch has unmerged commits."
+            <!-- v0.7.28 + v0.7.30 + v0.7.34 platform-aware 改进：
+                 - 关闭但未合并：渲染 "Closed with unmerged commits" panel
+                   - 分支存在：描述带 branch 名 + Delete branch 按钮
+                     · Gitea: "此合并请求已关闭，但 {branch} 分支有未合并的提交。"
+                     · GitHub: "This pull request is closed, but the `{branch}` branch has unmerged commits."
+                   - 分支被删：描述简化 + 无 Delete branch 按钮（已被删，删第二次是 no-op）
+                     · Gitea: "此合并请求已关闭。"
+                     · GitHub: "This pull request is closed."
+                   分支状态由 isBranchCurrentlyDeleted（看 timeline 最后一次 head_ref_*
+                   事件）决定。
                  - 关闭且已合并：渲染 "Merged" + merge commit 链接
                    - Gitea: "此合并请求通过提交 {sha} 合并至 {base}。"
                    - GitHub: "This pull request was merged via commit {sha} into {base}."
@@ -3483,7 +3531,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               <div class="pr-detail__closed-banner-text">
                 <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Closed with unmerged commits' : '有未合并的提交' }}</div>
                 <div class="pr-detail__closed-banner-desc">
-                  <template v-if="isGithub">
+                  <!-- v0.7.34：分支被删时不带 branch 描述（对齐 GitHub web "This pull request is closed."） -->
+                  <template v-if="isBranchCurrentlyDeleted">
+                    <template v-if="isGithub">This pull request is closed.</template>
+                    <template v-else>此合并请求已关闭。</template>
+                  </template>
+                  <template v-else-if="isGithub">
                     This pull request is closed, but the
                     <a
                       v-if="headLabel(selectedPR)"
@@ -3509,9 +3562,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                   </template>
                 </div>
               </div>
-              <!-- v0.7.29 + v0.7.30：Delete branch 按钮 platform-aware -->
+              <!-- v0.7.29 + v0.7.30 + v0.7.34：Delete branch 按钮 platform-aware + 仅在分支存在时显示
+                   （分支被删时按钮无意义，再点一次是 no-op，且 v0.7.34 之前 v-if="headLabel(...)"
+                   无条件显示是 bug，参考 user 反馈 ⑰ "Delete branch 和 Restore branch 的显示
+                   位置不正确，以及显示逻辑" —— GitHub web 只在分支存在时显示 Delete branch）。 -->
               <button
-                v-if="headLabel(selectedPR)"
+                v-if="!isBranchCurrentlyDeleted && headLabel(selectedPR)"
                 type="button"
                 class="btn-ghost-sm pr-detail__closed-banner-action"
                 :disabled="pull.deleteBranchLoading"

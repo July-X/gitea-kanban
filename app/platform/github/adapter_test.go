@@ -2717,6 +2717,63 @@ func TestGitHubAdapter_ListPullTimeline_NotRenderedEventTypes(t *testing.T) {
 //   - `closed` event 没有 commit_id 推断逻辑（v0.7.27 错逻辑已删）→ type=close
 //   - `committed` event（push 提交）→ type=push + CommitIDs=[commit_id] 单元素数组
 //   - `head_ref_force_pushed` event（强制 push）→ type=push + IsForcePush=true + CommitIDs=[commit_id]
+//
+// TestGitHubAdapter_ListPullTimeline_HeadRefDeletedThenRestored 验证 v0.7.34
+// "head_ref_deleted → head_ref_restored" 完整流程，timeline 同时包含这 2 个 event。
+// 前端 isBranchCurrentlyDeleted computed 用这个数据判断"分支当前是否被删"：
+//   - 最后一次是 head_ref_restored → 分支当前存在
+//   - 最后一次是 head_ref_deleted（无后续 restore）→ 分支当前被删
+//
+// 这个测试覆盖 event 流转，让前端能正确显示 Restore/Delete branch 按钮。
+func TestGitHubAdapter_ListPullTimeline_HeadRefDeletedThenRestored(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/alice/dolphin/issues/42/comments":
+			fmt.Fprint(w, "[]")
+		case "/repos/alice/dolphin/pulls/42/reviews":
+			fmt.Fprint(w, "[]")
+		case "/repos/alice/dolphin/issues/42/events":
+			// 时间升序：先 close (10:00) → 后 delete branch (11:00) → 最后 restore branch (12:00)
+			// 最后一次是 restore_branch → 分支当前存在
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 501, "event": "closed", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T10:00:00Z"},
+				{"id": 502, "event": "head_ref_deleted", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T11:00:00Z"},
+				{"id": 503, "event": "head_ref_restored", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T12:00:00Z"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3 (close + delete_branch + restore_branch)", len(items))
+	}
+
+	// 升序：close (10:00) → delete_branch (11:00) → restore_branch (12:00)
+	if items[0].Type != "close" {
+		t.Errorf("items[0].Type = %q, want close", items[0].Type)
+	}
+	if items[1].Type != "delete_branch" {
+		t.Errorf("items[1].Type = %q, want delete_branch", items[1].Type)
+	}
+	if items[2].Type != "restore_branch" {
+		t.Errorf("items[2].Type = %q, want restore_branch", items[2].Type)
+	}
+
+	// 验证时间顺序让前端能正确判断分支状态
+	// 最后一次是 restore_branch (12:00) → 分支当前存在
+	if items[1].Created >= items[2].Created {
+		t.Errorf("delete_branch (%s) 应该在 restore_branch (%s) 之前", items[1].Created, items[2].Created)
+	}
+}
+
 func TestGitHubAdapter_ListPullTimeline_MergedAndPush(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
