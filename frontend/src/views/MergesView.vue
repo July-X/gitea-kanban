@@ -24,9 +24,9 @@ import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted,
 import {
   GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
-  // v0.7.2: 系统事件图标（对齐 Gitea web octicon-* 体系）
-  RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, UserMinus, Type, Calendar,
-  Lock, Key, Eye, ArrowLeftRight, GitPullRequest, ArrowUp, Folder, Pin,
+  // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
+  RotateCcw, Bookmark, Tag, Milestone, UserPlus, UserMinus, Calendar,
+  Lock, Key, Eye, ArrowLeftRight, Folder, Pin,
   MessageCircle,
   // v0.7.3: 评审事件状态图标
   CheckCircle2,
@@ -1381,41 +1381,52 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  */
 
 /**
- * v0.7.2：系统事件图标 —— 从 Unicode 字符迁到 lucide-vue-next，
+ * v0.7.2 + v0.7.35：系统事件图标 —— 从 Unicode 字符迁到 lucide-vue-next，
  * 视觉上对齐 Gitea web 的 octicon-* 体系（GitHub Primer Icons 风格）。
- *
- * 关键映射：
- *   - reopen (octicon-dot-fill)        → RotateCcw（顺时针回旋）
- *   - close (octicon-issue-closed)     → X（方头 X）
- *   - merge (octicon-git-merge)        → GitPullRequest（PR 已合图标）
- *   - commit_ref (octicon-bookmark)    → Bookmark
- *   - label (octicon-tag)              → Tag
- *   - milestone (octicon-milestone)    → Milestone
- *   - assignee (octicon-person)        → UserPlus/UserMinus
- *   - title (octicon-pencil)           → Type
- *   - delete_branch (octicon-git-branch)→ GitBranch (同 change_target_branch)
- *   - due_date (octicon-clock)         → Calendar
- *   - lock (octicon-lock)              → Lock
- *   - unlock (octicon-key)             → Key
- *   - review_request (octicon-eye)     → Eye
- *   - push (octicon-repo-push)         → ArrowUp
- *   - dismiss_review (octicon-x)       → XCircle
- *   - pin (octicon-pin)                → Pin
- *   - move (octicon-project)           → Folder
+ * v0.7.35 user 反馈 ⑱：GitHub 数据源各 event icon 要对齐 GitHub web。
+ * GitHub Primer Octicons 实际映射（实测 GitHub web PR timeline + 官方 octicon 库）：
+ *   - close (octicon-issue-closed)         → XCircle（红圈 X，对齐 GitHub web）
+ *   - reopen (octicon-issue-reopened)      → RotateCcw（v0.7.2 已有，绿圈）
+ *   - merge (octicon-git-merge)            → GitMerge（v0.7.35 改 GitPullRequest → GitMerge，紫圈 merge icon）
+ *   - push / committed (octicon-git-commit) → GitCommit（v0.7.35 改 ArrowUp → GitCommit，小圆点）
+ *   - head_ref_force_pushed                 → GitCommit（v0.7.35 新增 entry，force push 走 isForcePush 提示）
+ *   - delete_branch (octicon-git-branch)    → GitBranch（v0.7.2 已有）
+ *   - restore_branch (octicon-git-branch)   → GitBranch（v0.7.35 改 RotateCcw → GitBranch，
+ *                                              跟 delete_branch 同 icon，靠颜色 + 按钮区分）
+ *   - commit_ref (octicon-bookmark)         → Bookmark（v0.7.2 已有）
+ *   - label (octicon-tag)                   → Tag（v0.7.2 已有）
+ *   - milestone (octicon-milestone)         → Milestone（v0.7.2 已有）
+ *   - assignee (octicon-person-add)         → UserPlus（v0.7.2 已有，移除走 UserMinus）
+ *   - title / change_title (octicon-pencil) → Pencil（v0.7.35 改 Type → Pencil，GitHub web 实际）
+ *   - issue_ref / pull_ref (octicon-link)   → LinkIcon（v0.7.35 新增，跨引用）
+ *   - change_issue_ref (octicon-link)       → LinkIcon（v0.7.35 新增）
+ *   - add_dependency / remove_dependency   → LinkIcon（v0.7.35 新增，依赖关联）
+ *   - due_date (octicon-clock)              → Calendar（v0.7.2 已有）
+ *   - lock (octicon-lock)                   → Lock（v0.7.2 已有）
+ *   - unlock (octicon-key)                  → Key（v0.7.2 已有）
+ *   - review_request (octicon-eye)          → Eye（v0.7.2 已有）
+ *   - dismiss_review (octicon-x)            → XCircle（v0.7.2 已有）
+ *   - pin (octicon-pin)                     → Pin（v0.7.2 已有）
+ *   - unpin (octicon-pin)                   → Pin（v0.7.2 已有）
+ *   - move (octicon-project)                → Folder（v0.7.2 已有）
  *
  * 返回 lucide Vue component（VNode），模板用 <component :is="..."> 渲染。
  */
 const SYSTEM_EVENT_ICON: Record<string, Component> = {
   reopen: RotateCcw,
-  close: XIcon,
+  // v0.7.35：XIcon → XCircle（GitHub web octicon-issue-closed 红圈 X）
+  close: XCircle,
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
   assignee: UserPlus,
-  title: Type,
+  // v0.7.35：Type → Pencil（GitHub web octicon-pencil，rename 实际是 pencil icon）
+  title: Pencil,
+  // v0.7.35：change_title 跟 title 一样走 pencil（GitHub web 同 icon）
+  change_title: Pencil,
   delete_branch: GitBranch,
-  // v0.7.34：restore_branch icon（跟 delete_branch 走同一族 GitBranch + RotateCcw 视觉）
-  restore_branch: RotateCcw,
+  // v0.7.35：RotateCcw → GitBranch（GitHub web 跟 delete_branch 同 icon，靠颜色 + 按钮区分）
+  restore_branch: GitBranch,
   due_date: Calendar,
   change_due_date: Calendar,
   remove_due_date: Calendar,
@@ -1423,8 +1434,21 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   unlock: Key,
   change_target_branch: ArrowLeftRight,
   review_request: Eye,
-  merge: GitPullRequest,
-  push: ArrowUp,
+  // v0.7.35：GitPullRequest → GitMerge（GitHub web octicon-git-merge 紫圈 merge icon）
+  merge: GitMerge,
+  // v0.7.35：ArrowUp → GitCommit（GitHub web octicon-git-commit 小圆点）
+  push: GitCommit,
+  // v0.7.35 新增：单 commit push（GitHub events 端 committed event，走 type=push）
+  committed: GitCommit,
+  // v0.7.35 新增：force push（GitHub events 端 head_ref_force_pushed event，走 type=push + IsForcePush=true）
+  head_ref_force_pushed: GitCommit,
+  // v0.7.35 新增：跨引用（GitHub web octicon-link，跟 commit_ref 的 Bookmark 区分）
+  issue_ref: LinkIcon,
+  pull_ref: LinkIcon,
+  change_issue_ref: LinkIcon,
+  // v0.7.35 新增：依赖关联（GitHub web octicon-package / link 近似）
+  add_dependency: LinkIcon,
+  remove_dependency: LinkIcon,
   move: Folder,
   dismiss_review: XCircle,
   pin: Pin,
