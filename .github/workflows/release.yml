@@ -104,12 +104,14 @@ jobs:
         run: go test ./... -count=1
 
       # macOS / Windows 都用 wails build 加 -ldflags 注入版本号
+      # 注意：不传 -o，wails build 默认输出到 build/bin/<appname>.app (mac)
+      # 或 build/bin/<appname>.exe (windows)。早期传 -o gitea-kanban.app 时
+      # go build 把 .app 当 binary 输出文件，wails packaging 想 mkdir 同名目录失败。
       - name: 构建（macOS / Windows 通用）
         run: |
           wails build \
             -platform ${{ matrix.platform }}/${{ matrix.arch }} \
             -clean \
-            -o ${{ matrix.output }} \
             -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
         shell: bash
 
