@@ -192,23 +192,30 @@ jobs:
         run: |
           mkdir -p build/release
 
+          # v0.8.0 rc25 review nit：产物名带 tag，跟 app/updater/manifest.go:158 AssetFilename()
+          # 期望的 gitea-kanban-<version>-<platform>-<arch>[.exe] 一致
+          # （fallback 不签名，verify 拒签，但产物命名跟正式 release 对齐方便 manifest 解析）
+          TAG="${{ github.ref_name }}"
+          MAC_ZIP="build/release/gitea-kanban-${TAG}-macos-amd64.zip"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
+
           # 兼容 wails build 各种输出形态：
           #   - mac: build/bin/gitea-kanban.app/Contents/MacOS/gitea-kanban（macos 旧版）
           #   - mac: build/bin/Contents/MacOS/gitea-kanban（artifact 解压后 Contents 在 bin 下）
           #   - windows: build/bin/gitea-kanban.exe
           # 优先匹配带 .app 目录的形态，找不到就 fallback 到 .app/*/Contents/MacOS 形态
           if [[ -d build/bin/gitea-kanban.app ]]; then
-            (cd build/bin && zip -r ../release/gitea-kanban-macos-amd64.zip gitea-kanban.app >/dev/null)
+            (cd build/bin && zip -r "../../release/gitea-kanban-${TAG}-macos-amd64.zip" gitea-kanban.app >/dev/null)
             echo "macOS raw build zipped (gitea-kanban.app dir)"
           elif [[ -f build/bin/Contents/MacOS/gitea-kanban ]]; then
-            (cd build/bin && zip -r ../release/gitea-kanban-macos-amd64.zip Contents >/dev/null)
+            (cd build/bin && zip -r "../../release/gitea-kanban-${TAG}-macos-amd64.zip" Contents >/dev/null)
             echo "macOS raw build zipped (Contents dir, wails artifact 解压形态)"
           else
             echo "WARN: macOS .app 找不到（CI macos build 可能 FAIL）"
           fi
 
           if [[ -f build/bin/gitea-kanban.exe ]]; then
-            cp build/bin/gitea-kanban.exe build/release/gitea-kanban-windows-amd64.exe
+            cp build/bin/gitea-kanban.exe "build/release/gitea-kanban-${TAG}-windows-amd64.exe"
             echo "windows raw build copied"
           else
             echo "WARN: gitea-kanban.exe 找不到（CI windows build 可能 FAIL）"
@@ -228,9 +235,7 @@ jobs:
           # 占位 .sig 文件（0 字节 + 注释），让 gh release create 检测到
           # （fallback 模式 release 是无签名的 raw build，sig 只是 placeholder
           # 防止 gh release create 报 "no matches found for *.sig"）
-          for asset in build/release/gitea-kanban-macos-amd64.zip \
-                       build/release/gitea-kanban-windows-amd64.exe \
-                       build/release/latest.json; do
+          for asset in "$MAC_ZIP" "$WIN_EXE" "build/release/latest.json"; do
             if [[ -f "$asset" ]]; then
               echo "# placeholder signature (SIGN_PRIVATE_KEY secret missing)" > "${asset}.sig"
             fi
@@ -253,17 +258,21 @@ jobs:
 
           # 动态检测可用 asset（脚本 release.sh 已经把可用 asset sign/manifest 完成）
           AVAILABLE_ASSETS=()
-          if [[ -f build/release/gitea-kanban-macos-amd64.zip ]]; then
-            AVAILABLE_ASSETS+=(build/release/gitea-kanban-macos-amd64.zip)
-            AVAILABLE_ASSETS+=(build/release/gitea-kanban-macos-amd64.zip.sig)
+          # v0.8.0 rc25 review nit：产物名带 tag（fallback raw build 跟正式 release 命名一致）
+          TAG="${{ github.ref_name }}"
+          MAC_ZIP="build/release/gitea-kanban-${TAG}-macos-amd64.zip"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
+          if [[ -f "$MAC_ZIP" ]]; then
+            AVAILABLE_ASSETS+=("$MAC_ZIP")
+            AVAILABLE_ASSETS+=("$MAC_ZIP.sig")
           else
-            echo "WARN: gitea-kanban-macos-amd64.zip 缺失（macOS build FAIL）"
+            echo "WARN: $MAC_ZIP 缺失（macOS build FAIL）"
           fi
-          if [[ -f build/release/gitea-kanban-windows-amd64.exe ]]; then
-            AVAILABLE_ASSETS+=(build/release/gitea-kanban-windows-amd64.exe)
-            AVAILABLE_ASSETS+=(build/release/gitea-kanban-windows-amd64.exe.sig)
+          if [[ -f "$WIN_EXE" ]]; then
+            AVAILABLE_ASSETS+=("$WIN_EXE")
+            AVAILABLE_ASSETS+=("$WIN_EXE.sig")
           else
-            echo "WARN: gitea-kanban-windows-amd64.exe 缺失（windows build FAIL）"
+            echo "WARN: $WIN_EXE 缺失（windows build FAIL）"
           fi
           if [[ -f build/release/latest.json ]]; then
             AVAILABLE_ASSETS+=(build/release/latest.json)
