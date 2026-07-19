@@ -7804,7 +7804,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__timeline {
   list-style: none;
   margin: 0;
-  padding: 0 0 0 44px;       /* v0.7.46 左侧留 44px 给 avatar/icon 节点（28px 头像 + 16px 间隙，对齐 GitHub web first comment 视觉） */
+  padding: 0 0 0 36px;       /* v0.7.50 缩到 36px：comment avatar (28px 宽) + 8px 间隙紧贴 bubble，avatar 和 bubble 不再被 line 分开 */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -7813,9 +7813,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__timeline::before {
   content: "";
   position: absolute;
-  top: 14px;                  /* 第一个 avatar 中心对齐 */
-  bottom: 14px;               /* 最后一个 avatar 中心对齐 */
-  left: 14px;                 /* 竖线在 padding 32px 的中间 */
+  top: 14px;                  /* 第一个 system event dot 中心对齐 */
+  bottom: 14px;               /* 最后一个 system event dot 中心对齐 */
+  left: 200px;                /* v0.7.50 从 44px 移到 200px —— 缩进到 bubble 内容区域右侧，line passes through system event icon 中心，远离 comment avatar */
   width: 2px;
   /* v0.7.4：用 --color-timeline（专门 token，比 --color-divider 略亮）——
      暗色 18% / 亮色 16% alpha，确保 timeline 序列感可见但不喧宾夺主 */
@@ -7833,17 +7833,17 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   padding: 6px 0;
   position: relative;        /* v0.7.46：让 ::before 绝对定位生效 */
 }
-/* v0.7.46：comment 位置用 ::before 覆盖 ul::before 竖线 —— 对齐 GitHub web
-   timeline "line 在两次对话之间，贯穿多个 events，不在每个 user avatar 之间" 视觉。
-   ul::before 画 2px 竖线从 14px 到 width:2px 在 padding 区域（line 在 -30px 距
-   comment 左边缘 = 14px 距 ul 左边缘 = line 实际位置）。comment ::before 用
-   ul 同色背景（var(--color-bg)）盖 30px+ 宽，z-index:1 高于 line z-index:0。
-   效果：line 在 system events 之间可见（events 间距 > 30px），comment 位置断开。*/
+/* v0.7.50：comment 位置用 ::before 覆盖 ul::before 竖线 —— 对齐 GitHub web
+   两层对话视觉（line 缩进到 bubble 右侧，不在 avatar 和 bubble 之间）。
+   ul::before 画 2px 竖线在 200px 距 ul 左边缘（bubble 内容区域右侧）。
+   comment ::before 用 ul 同色背景盖 line 区域（4px 宽够覆盖 2px line），
+   z-index:1 高于 line z-index:0。效果：line 在 system events 之间贯穿
+   （rail 居中 200px），comment 位置断开。*/
 .pr-detail__timeline-item--comment::before {
   content: "";
   position: absolute;
-  left: -30px;
-  width: 32px;
+  left: 164px;                /* 36+164=200px from ul left edge，line 中心 */
+  width: 4px;                 /* 4px 宽，刚好覆盖 2px line，最小化 bubble 文字遮挡 */
   top: 0;
   bottom: 0;
   background: var(--color-bg);
@@ -7862,7 +7862,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 /* ===== Avatar (comment) / Dot (event) 节点 —— 定位在 timeline 竖线上 ===== */
 .pr-detail__timeline-rail {
   position: absolute;
-  left: -44px;                /* v0.7.46 对齐 ul 的 padding-left: 44px */
+  left: -36px;                /* v0.7.50 跟随 ul padding 缩到 36px，comment avatar 仍居中最左 (rail spans 0-28 from ul, center 14px) */
   top: 50%;
   transform: translateY(-50%);
   width: 28px;
@@ -7871,6 +7871,10 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   display: flex;
   align-items: center;
   justify-content: center;
+}
+/* v0.7.50：system event / review event 的 rail 缩进到 line 位置（28px 宽居中 200px from ul） */
+.pr-detail__timeline-item--event .pr-detail__timeline-rail {
+  left: 150px;                /* rail spans 186-214 from ul，center 200px = line 位置 */
 }
 /* comment avatar：圆形 + 边框（边框色 == ul 背景色 = 切断竖线） */
 .pr-detail__timeline-avatar {
