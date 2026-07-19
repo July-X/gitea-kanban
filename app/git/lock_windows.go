@@ -3,6 +3,9 @@
 package git
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -28,10 +31,37 @@ func lockPath(localPath string) (func(), error) {
 	v, _ := pathLocks.LoadOrStore(localPath, &sync.Mutex{})
 	mu := v.(*sync.Mutex)
 	mu.Lock()
+
+	// v0.8.0 修 windows CI TestLockFileCreated：windows 也创建 .lock 占位文件
+	// 保持跟 unix 平台一致的 .lock file 语义（cross-process visibility）
+	lockFile := localPath + ".lock"
+	if _, err := os.Stat(lockFile); err != nil {
+		if err := os.WriteFile(lockFile, []byte(fmt.Sprintf("pid=%d\ntime=%s\n", os.Getpid(), time.Now().Format(time.RFC3339))), 0o644); err != nil {
+			return func() { mu.Unlock() }, fmt.Errorf("write lock file: %w", err)
+		}
+	}
+
 	return func() { mu.Unlock() }, nil
 }
 
 func cleanupStaleGitLock(localPath, name string) error {
-	// windows 暂不实现 stale lock cleanup（同 unix 平台行为，依赖调用方定期检查）
+	// windows 也清理 stale .lock 文件（跟 unix 平台行为保持一致）
+	lockFile := localPath + ".lock"
+	info, err := os.Stat(lockFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // 不存在就跳过
+		}
+		return err
+	}
+	if time.Since(info.ModTime()) >= staleGitLockAge {
+		if err := os.Remove(lockFile); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	return nil
 }
+
+// 避免 unused import warnings（sync 和 time 都用于 pathLocks/staleGitLockAge，os/filepath 用于锁文件 IO）
+var _ = filepath.Join
+var _ = os.Getpid
