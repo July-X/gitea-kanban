@@ -25,7 +25,7 @@ import {
   GitMerge, GitPullRequestArrow, GitPullRequestClosed, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
   // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
-  RotateCcw, Bookmark, Tag, Milestone, UserPlus, UserMinus, Calendar,
+  RotateCcw, Bookmark, Tag, Milestone, Calendar,
   Lock, Key, Eye, ArrowLeftRight, Folder, Pin,
   MessageCircle,
   // v0.7.3: 评审事件状态图标
@@ -1156,7 +1156,13 @@ function systemEventVerb(item: TimelineItemDto): string {
     return item.removedAssignee ? `取消指派给 ${assigneeName}` : `指派给 ${assigneeName}`;
   }
   if (item.type === 'review_request') {
-    return item.removedAssignee ? '取消了评审请求' : '请求评审';
+    // v0.7.55：把 reviewer 名字拼到主行 verb 里，删 inline 块 —— 对齐 Gitea web
+    // "X 于 Y 请求 Z 评审" 1 行渲染（看 Gitea web pr 底部 timeline 截图）。
+    // 之前 v0.7.4 拆 2 卡（主行 "请求评审" + 下面 inline 块 reviewer name 重复渲染），
+    // 跟 Gitea web 不一致。Gitea web 端 "请求 m4java 评审" / "请求 tester 评审"
+    // 一行，self-request 跟 review-others 都走同一 verb 格式。
+    const reviewerName = displayName(item.assignee);
+    return item.removedAssignee ? `取消了 ${reviewerName} 的评审请求` : `请求 ${reviewerName} 评审`;
   }
   if (item.type === 'close') return '关闭了此合并请求';
   if (item.type === 'reopen') return '重新开启了此合并请求';
@@ -1654,7 +1660,9 @@ function hasSystemEventInlineDetail(item: TimelineItemDto): boolean {
   if (item.type === 'label') return !!item.label;
   if (item.type === 'milestone') return !!(item.oldMilestone || item.milestone);
   if (item.type === 'assignees') return !!item.assignee;
-  if (item.type === 'review_request') return !!item.assignee;
+  // v0.7.55：review_request 不再有 inline 块，reviewer name 已拼到主行 verb
+  // （看 systemEventVerb '请求 X 评审' / '取消了 X 的评审请求'），
+  // hasSystemEventInlineDetail 同步返回 false，避免渲染空 inline div。
   if (item.type === 'title' || item.type === 'change_title') return !!(item.oldTitle || item.newTitle);
   if (item.type === 'delete_branch') return !!item.oldRef;
   if (item.type === 'change_target_branch') return !!(item.oldRef || item.newRef);
@@ -3472,18 +3480,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         <!-- v0.7.12: assignees 事件不再有 inline 块，verb 在主行完整 -->
 
 
-                        <!-- v0.7.4：review_request 评审请求详情
-                             Gitea web: "X 请求 Y 评审" / "X 移除了 Y 评审请求"
-                             X = actor (item.author), Y = requested reviewer (item.assignee) -->
-                        <span v-else-if="item.type === 'review_request' && item.assignee">
-                          <UserPlus v-if="!item.removedAssignee" :size="12" :stroke-width="2" aria-hidden="true" />
-                          <UserMinus v-else :size="12" :stroke-width="2" aria-hidden="true" />
-                          <span class="pr-detail__event-username">{{ displayName(item.assignee) }}</span>
-                          <!-- v0.7.30 平台感知：review_request inline hint
-                               - Gitea: "请求评审" / "移除了评审请求"
-                               - GitHub web: 不显示该 hint（actor + reviewer + icon 已表达语义） -->
-                          <span v-if="!isGithub" class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了评审请求' : '请求评审' }}</span>
-                        </span>
+                        <!-- v0.7.55：review_request inline 块整段移除 —— reviewer name 已拼到
+                             systemEventVerb 主行 ('请求 X 评审' / '取消了 X 的评审请求')，
+                             对齐 Gitea web "X 于 Y 请求 Z 评审" 1 行渲染。 -->
 
                         <!-- v0.7.8 根因修复：push 事件详情
                              Gitea 1.26+ timeline 端点 body 是 JSON 字符串
