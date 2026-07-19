@@ -115,11 +115,89 @@ jobs:
             -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
         shell: bash
 
+      # v0.8.0 rc30：macOS 改成出 dmg，不再出 zip。
+      # 用户反馈"MacOS 包体不完整（解压只有 Contents/ 文件夹没有 .app 包装）"，
+      # 改用 macOS runner 自带 hdiutil 构造完整 .dmg 镜像（双击挂载后能看到完整 .app bundle）。
+      # windows 不受影响（继续产 .exe）。
+      - name: macOS：构造 .app 包装 + hdiutil 出 dmg
+        if: matrix.os == 'macos-14'
+        run: |
+          set -euo pipefail
+          cd build/bin
+
+          # v0.8.0 rc30 fix：wails build 在 macos-14 runner 上的产物形态是
+          # build/bin/Contents/MacOS/gitea-kanban（Contents 在 bin 下，没 .app 包装）。
+          # 但 wails build 默认应该产生 .app bundle，理论上 build/ 下应当
+          # 有 build/bin/gitea-kanban.app。两种情况都要 handle：
+          if [[ ! -d gitea-kanban.app && -d Contents ]]; then
+            echo "==> 检测到 loose Contents/，包装成 gitea-kanban.app/"
+            mkdir -p gitea-kanban.app
+            cp -R Contents gitea-kanban.app/
+          fi
+
+          if [[ ! -d gitea-kanban.app ]]; then
+            echo "ERROR: build/bin/gitea-kanban.app 找不到（wails build 失败）" >&2
+            exit 1
+          fi
+
+          echo "==> .app bundle 结构验证:"
+          ls -la gitea-kanban.app/
+          ls -la gitea-kanban.app/Contents/MacOS/
+
+          TAG="${{ github.ref_name }}"
+          DMG="gitea-kanban-${TAG}-macos-amd64.dmg"
+
+          # 用 hdiutil 构造 dmg 镜像：volatile 表示不预分配，UDZO 压缩。
+          # srcfolder 模式：直接把 .app bundle 拖进 dmg。
+          # iconfile：用 build/icon.icns（v0.8.0 build/ 下已有）
+          # 注意：-fs HFS+ 因为 Apple Silicon + Intel 双兼容（APFS dmg 在某些 macOS 版本不挂载）
+          echo "==> hdiutil 创建 dmg ..."
+          hdiutil create \
+            -volname "Gitea Kanban" \
+            -srcfolder gitea-kanban.app \
+            -ov \
+            -format UDZO \
+            -fs HFS+ \
+            -noanyowners \
+            -imagekey zlib-level=9 \
+            "$DMG"
+
+          echo "==> dmg output:"
+          ls -la "$DMG"
+          file "$DMG"
+
+          # 验证 dmg 挂载后确实能看到 .app bundle（不是裸 Contents/）
+          echo "==> dmg 验证：挂载测试"
+          MOUNT_DIR=$(mktemp -d)
+          hdiutil attach -readonly -nobrowse -noverify -mountpoint "$MOUNT_DIR" "$DMG"
+          ls -la "$MOUNT_DIR"
+          if [[ ! -d "$MOUNT_DIR/gitea-kanban.app" ]]; then
+            echo "ERROR: dmg 内找不到 gitea-kanban.app bundle，挂载得到:"
+            ls -la "$MOUNT_DIR/"
+            hdiutil detach "$MOUNT_DIR"
+            rmdir "$MOUNT_DIR"
+            exit 1
+          fi
+          echo "dmg 验证 OK：包含完整 gitea-kanban.app bundle"
+          hdiutil detach "$MOUNT_DIR"
+          rmdir "$MOUNT_DIR"
+        shell: bash
+
       - name: 上传构建产物
+        if: matrix.os != 'macos-14'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: build/bin/${{ matrix.output }}
+          if-no-files-found: error
+
+      # macOS dmg 在前一步构造好，单独上传（artifact name 改 -dmg 后缀）
+      - name: 上传 macOS dmg 产物
+        if: matrix.os == 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitea-kanban-macos-amd64-dmg
+          path: build/bin/gitea-kanban-${{ github.ref_name }}-macos-amd64.dmg
           if-no-files-found: error
 
   # ===== Stage 2: sign + publish =====
@@ -140,11 +218,11 @@ jobs:
         with:
           go-version: '1.22'
 
-      # 下载 2 个 build artifact（continue-on-error 让 windows FAIL 也能 release macOS）
-      - name: 下载 macOS amd64 build
+      # 下载 macOS dmg build（v0.8.0 rc30：从 zip 改成 dmg，artifact name 同步）
+      - name: 下载 macOS amd64 dmg
         uses: actions/download-artifact@v4
         with:
-          name: gitea-kanban-macos-amd64
+          name: gitea-kanban-macos-amd64-dmg
           path: build/bin/
         continue-on-error: true
 
@@ -186,42 +264,37 @@ jobs:
           RELEASE_DIR: build/release
         run: bash scripts/release.sh "${{ github.ref_name }}"
 
-      # raw build fallback（secrets 缺失时）：把 raw .app + .exe 直接发布，不签名
+      # raw build fallback（secrets 缺失时）：把 macOS dmg + windows .exe 直接发布，不签名
+      # v0.8.0 rc30：macOS 改成 .dmg（之前是 zip 的 bug：解压得到裸 Contents/）
       - name: raw build fallback（无签名）
         if: env.SIGN_PRIVATE_KEY == '' || env.SIGN_PASSWORD == ''
         run: |
           mkdir -p build/release
 
           # v0.8.0 rc25 review nit：产物名带 tag，跟 app/updater/manifest.go:158 AssetFilename()
-          # 期望的 gitea-kanban-<version>-<platform>-<arch>[.exe] 一致
-          # （fallback 不签名，verify 拒签，但产物命名跟正式 release 对齐方便 manifest 解析）
+          # 期望的 gitea-kanban-<version>-<platform>-<arch>[.dmg|.exe] 一致
           TAG="${{ github.ref_name }}"
-          MAC_ZIP="build/release/gitea-kanban-${TAG}-macos-amd64.zip"
+          MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
           WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
 
-          # 兼容 wails build 各种输出形态：
-          #   - mac: build/bin/gitea-kanban.app/Contents/MacOS/gitea-kanban（macos 旧版）
-          #   - mac: build/bin/Contents/MacOS/gitea-kanban（artifact 解压后 Contents 在 bin 下）
-          #   - windows: build/bin/gitea-kanban.exe
-          # 优先匹配带 .app 目录的形态，找不到就 fallback 到 .app/*/Contents/MacOS 形态
-          if [[ -d build/bin/gitea-kanban.app ]]; then
-            (cd build/bin && zip -r "../release/gitea-kanban-${TAG}-macos-amd64.zip" gitea-kanban.app >/dev/null)
-            echo "macOS raw build zipped (gitea-kanban.app dir)"
-          elif [[ -f build/bin/Contents/MacOS/gitea-kanban ]]; then
-            # v0.8.0 rc29 fix：Contents/ 直接 zip 出来是裸 Contents/，Mac 用户需要
-            # 手动 mv 到 gitea-kanban.app/Contents/ 才能双击跑。这里先 mkdir + cp
-            # 一个 gitea-kanban.app/Contents/ 临时目录树，再 zip 完整 .app bundle。
-            mkdir -p build/bin/gitea-kanban.app
-            cp -R build/bin/Contents build/bin/gitea-kanban.app/
-            (cd build/bin && zip -r "../release/gitea-kanban-${TAG}-macos-amd64.zip" gitea-kanban.app >/dev/null)
-            echo "macOS raw build zipped (Contents → wrapped into gitea-kanban.app/)"
+          # macOS：dmg 已经由 build step 用 hdiutil 构造好（包含完整 .app bundle）
+          # 这里只需要 mv build/bin/*.dmg 到 build/release/ 带 tag 命名
+          if compgen -G 'build/bin/*.dmg' > /dev/null; then
+            mv build/bin/*.dmg "$MAC_DMG"
+            echo "macOS raw dmg moved to $MAC_DMG"
           else
-            echo "WARN: macOS .app 找不到（CI macos build 可能 FAIL）"
+            echo "WARN: macOS dmg 找不到（CI macos build 可能 FAIL）"
+          fi
+
+          # 验证 dmg 格式（带 sanity check：file 命令看格式对不对）
+          if [[ -f "$MAC_DMG" ]]; then
+            echo "==> dmg info:"
+            file "$MAC_DMG"
           fi
 
           if [[ -f build/bin/gitea-kanban.exe ]]; then
-            cp build/bin/gitea-kanban.exe "build/release/gitea-kanban-${TAG}-windows-amd64.exe"
-            echo "windows raw build copied"
+            mv build/bin/gitea-kanban.exe "$WIN_EXE"
+            echo "windows raw build moved to $WIN_EXE"
           else
             echo "WARN: gitea-kanban.exe 找不到（CI windows build 可能 FAIL）"
           fi
@@ -240,7 +313,7 @@ jobs:
           # 占位 .sig 文件（0 字节 + 注释），让 gh release create 检测到
           # （fallback 模式 release 是无签名的 raw build，sig 只是 placeholder
           # 防止 gh release create 报 "no matches found for *.sig"）
-          for asset in "$MAC_ZIP" "$WIN_EXE" "build/release/latest.json"; do
+          for asset in "$MAC_DMG" "$WIN_EXE" "build/release/latest.json"; do
             if [[ -f "$asset" ]]; then
               echo "# placeholder signature (SIGN_PRIVATE_KEY secret missing)" > "${asset}.sig"
             fi
@@ -263,15 +336,17 @@ jobs:
 
           # 动态检测可用 asset（脚本 release.sh 已经把可用 asset sign/manifest 完成）
           AVAILABLE_ASSETS=()
-          # v0.8.0 rc25 review nit：产物名带 tag（fallback raw build 跟正式 release 命名一致）
+          # v0.8.0 rc30：macOS 产物从 zip 改成 dmg（构造完整 .app bundle）
+          #   - 之前 zip 解压得到裸 Contents/，用户需要手动包装成 .app bundle
+          #   - 现在 dmg 挂载直接看到完整 gitea-kanban.app bundle
           TAG="${{ github.ref_name }}"
-          MAC_ZIP="build/release/gitea-kanban-${TAG}-macos-amd64.zip"
+          MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
           WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
-          if [[ -f "$MAC_ZIP" ]]; then
-            AVAILABLE_ASSETS+=("$MAC_ZIP")
-            AVAILABLE_ASSETS+=("$MAC_ZIP.sig")
+          if [[ -f "$MAC_DMG" ]]; then
+            AVAILABLE_ASSETS+=("$MAC_DMG")
+            AVAILABLE_ASSETS+=("$MAC_DMG.sig")
           else
-            echo "WARN: $MAC_ZIP 缺失（macOS build FAIL）"
+            echo "WARN: $MAC_DMG 缺失（macOS build FAIL）"
           fi
           if [[ -f "$WIN_EXE" ]]; then
             AVAILABLE_ASSETS+=("$WIN_EXE")

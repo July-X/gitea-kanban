@@ -7,8 +7,9 @@
 #   env SIGN_PASSWORD（解密密码）
 #
 # 行为：
-#   1. 检测 build/bin/ 下的 .app / .exe 双平台产物
-#   2. macOS .app → zip 打包
+#   1. 检测 build/bin/ 下的 macOS dmg + Windows exe 双平台产物
+#   2. macOS dmg（已由 build job 用 hdiutil 构造好含完整 .app bundle）
+#      + Windows exe 直接作为 release asset
 #   3. 写私钥到临时文件 + chmod 600
 #   4. cmd/sign sign 对每个 asset 生成 .sig
 #   5. cmd/sign manifest 生成 latest.json
@@ -46,7 +47,8 @@ echo "==> BUILD_DIR=$BUILD_DIR"
 echo "==> RELEASE_DIR=$RELEASE_DIR"
 
 # ===== 1. 依赖检查 =====
-for cmd in zip go sha256sum; do
+# v0.8.0 rc30：去 zip 依赖（macOS 改 dmg，dmg 在 build job 已经构造好）
+for cmd in file go sha256sum; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "ERROR: required command not found: $cmd" >&2
     exit 1
@@ -66,37 +68,46 @@ fi
 # ===== 2. 检测产物 =====
 mkdir -p "$RELEASE_DIR"
 
-MACOS_APP="$BUILD_DIR/gitea-kanban.app"
-WINDOWS_EXE="$BUILD_DIR/gitea-kanban.exe"
+# v0.8.0 rc30：macOS 改成 dmg，dmg 在 build job 已经构造好（hdiutil 在 macos runner）。
+# 本脚本不再做 dmg 构造，只负责 rename + 移到 RELEASE_DIR + sign。
+# 兼容 2 种 build job 产物命名：
+#   1. gitea-kanban-${TAG}-macos-amd64.dmg（tag 化命名，user 期望）
+#   2. *.dmg（带 tag 命名前的中间产物，artifact 上传后改名）
+MACOS_DMG_BUILD=$(find "$BUILD_DIR" -maxdepth 1 -name '*.dmg' -type f | head -n 1 || true)
+WINDOWS_EXE_BUILD="$BUILD_DIR/gitea-kanban.exe"
 
-# v0.8.0 rc27 review nit（major blocking）：产物名带 TAG，跟
-# app/updater/manifest.go:158 AssetFilename() 一致。
-# release.yml 的 AVAILABLE_ASSETS 检测按 TAG 命名匹配，
-# 若 release.sh 生成无 tag 命名则正式签名链只会上传 latest.json。
-MACOS_ZIP="$RELEASE_DIR/gitea-kanban-${TAG}-macos-amd64.zip"
+# 产物名带 TAG，跟 app/updater/manifest.go:158 AssetFilename() 一致
+MACOS_DMG="$RELEASE_DIR/gitea-kanban-${TAG}-macos-amd64.dmg"
 WINDOWS_EXE_OUT="$RELEASE_DIR/gitea-kanban-${TAG}-windows-amd64.exe"
 
 ASSETS=()
 
-if [[ -d "$MACOS_APP" ]]; then
-  echo "==> 打包 macOS .app → zip"
-  (cd "$BUILD_DIR" && zip -r "$MACOS_ZIP" gitea-kanban.app >/dev/null)
-  ASSETS+=("$MACOS_ZIP")
-elif [[ -f "$MACOS_ZIP" ]]; then
-  echo "==> 复用已存在的 macOS zip: $MACOS_ZIP"
-  ASSETS+=("$MACOS_ZIP")
+if [[ -n "$MACOS_DMG_BUILD" && -f "$MACOS_DMG_BUILD" ]]; then
+  if [[ "$MACOS_DMG_BUILD" != "$MACOS_DMG" ]]; then
+    mv "$MACOS_DMG_BUILD" "$MACOS_DMG"
+    echo "==> 移动 macOS dmg: $MACOS_DMG_BUILD → $MACOS_DMG"
+  fi
+  # sanity check dmg 格式
+  DMG_TYPE=$(file --mime-type -b "$MACOS_DMG" || true)
+  if [[ "$DMG_TYPE" != *zip* && "$DMG_TYPE" != *dmg* && "$DMG_TYPE" != *x-apple* ]]; then
+    echo "WARN: dmg file 类型异常: $DMG_TYPE（期望 application/x-apple-diskimage 或类似）"
+  fi
+  ASSETS+=("$MACOS_DMG")
+elif [[ -f "$MACOS_DMG" ]]; then
+  echo "==> 复用已存在的 macOS dmg: $MACOS_DMG"
+  ASSETS+=("$MACOS_DMG")
 else
-  echo "WARN: macOS build missing ($MACOS_APP / $MACOS_ZIP) — skipping" >&2
+  echo "WARN: macOS build missing (*.dmg in $BUILD_DIR) — skipping" >&2
 fi
 
-if [[ -f "$WINDOWS_EXE" ]]; then
-  cp "$WINDOWS_EXE" "$WINDOWS_EXE_OUT"
+if [[ -f "$WINDOWS_EXE_BUILD" ]]; then
+  cp "$WINDOWS_EXE_BUILD" "$WINDOWS_EXE_OUT"
   ASSETS+=("$WINDOWS_EXE_OUT")
 elif [[ -f "$WINDOWS_EXE_OUT" ]]; then
   echo "==> 复用已存在的 Windows exe: $WINDOWS_EXE_OUT"
   ASSETS+=("$WINDOWS_EXE_OUT")
 else
-  echo "WARN: Windows build missing ($WINDOWS_EXE / $WINDOWS_EXE_OUT) — skipping" >&2
+  echo "WARN: Windows build missing ($WINDOWS_EXE_BUILD) — skipping" >&2
 fi
 
 if [[ ${#ASSETS[@]} -eq 0 ]]; then
@@ -150,8 +161,8 @@ cd "$RELEASE_DIR"
 ls -la
 echo ""
 echo "================ SHA256 checksums ================"
-sha256sum gitea-kanban-macos-amd64.zip \
-          gitea-kanban-macos-amd64.zip.sig \
+sha256sum gitea-kanban-macos-amd64.dmg \
+          gitea-kanban-macos-amd64.dmg.sig \
           gitea-kanban-windows-amd64.exe \
           gitea-kanban-windows-amd64.exe.sig \
           latest.json \
