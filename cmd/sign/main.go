@@ -3,7 +3,8 @@
 // 用法（CI / maintainer 本地）：
 //
 //	# 1. 生成 ed25519 key pair（一次性）
-//	go run ./cmd/sign genkey ./keys --password "$pwd"
+//	# ⚠️ go flag 严格顺序：flag 必须在 positional arg 前（不是 `--password pwd out-dir`）
+//	go run ./cmd/sign genkey --password "$pwd" ./keys
 //	# 产出：./keys/gitea-kanban-public.b64（嵌入 verify.go 常量）
 //	#       ./keys/gitea-kanban-private.b64（加密存 CI secret）
 //
@@ -60,7 +61,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: sign <subcommand> [args]\n\nsubcommands:\n  genkey <out-dir> [--password <pwd>]\n  sign --key <key> --password <pwd> <asset>...\n  manifest --version <ver> --notes <file> [--repo <owner/name>] <asset>...\n")
+	fmt.Fprintf(os.Stderr, "usage: sign <subcommand> [args]\n\nsubcommands:\n  genkey --password <pwd> <out-dir>\n  sign --key <key> --password <pwd> <asset>...\n  manifest --version <ver> --notes <file> [--repo <owner/name>] <asset>...\n")
 }
 
 // --- genkey ---
