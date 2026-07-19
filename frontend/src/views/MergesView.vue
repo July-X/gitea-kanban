@@ -2624,17 +2624,9 @@ function formatRelative(iso: string | undefined): string {
           <div class="pr-detail-meta__item"><dt>{{ isGithub ? 'Updated' : '更新' }}</dt><dd>{{ formatRelative(selectedPR.updatedAt) }}</dd></div>
           <div class="pr-detail-meta__item"><dt>{{ isGithub ? 'Conflicts' : '冲突' }}</dt><dd>{{ selectedPR.hasConflicts ? (isGithub ? 'Yes' : '有冲突') : (isGithub ? 'No' : '无冲突') }}</dd></div>
           <div class="pr-detail-meta__item"><dt>{{ isGithub ? 'Mergeable' : '可合并' }}</dt><dd>{{ selectedPR.mergeable ? (isGithub ? 'Yes' : '是') : (isGithub ? 'No' : '否') }}</dd></div>
-          <div class="pr-detail-meta__item" v-if="(selectedPR.labels ?? []).length > 0">
-            <dt>{{ isGithub ? 'Labels' : '标签' }}</dt>
-            <dd>
-              <span
-                v-for="label in (selectedPR.labels ?? [])"
-                :key="label.id"
-                class="pr-detail__label"
-                :style="labelStyle(label.color)"
-              >{{ label.name }}</span>
-            </dd>
-          </div>
+          <!-- v0.7.55：移除 pr-detail-meta 里的 Labels 字段 —— label 信息统一由 sidebar 的
+               pr-sidebar-block__content 显示，跟 GitHub web 一致（避免顶部 meta 条重复显示）。
+               sidebar label 跟 timeline 事件 label 一样有实色背景 + 自适应文字色。 -->
           <div class="pr-detail-meta__item" v-if="selectedPR.milestone">
             <dt>{{ isGithub ? 'Milestone' : '里程碑' }}</dt><dd>{{ selectedPR.milestone.title }}</dd>
           </div>
@@ -6859,6 +6851,13 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+  /* v0.7.55：sidebar label 加实色背景 + 自适应文字色（跟 .pr-detail__event-label
+     timeline 事件 label 同源），保持跟 timeline 一致的视觉。color/background 用
+     var 读取 labelStyle() 注入的 --label-color / --label-bg；border 显式 transparent
+     避免 fallback 触发别的 border-color（v0.7.6 labelStyle 已返回 --label-border: transparent）。 */
+  color: var(--label-color);
+  background: var(--label-bg);
+  border: 1px solid var(--label-border, transparent);
 }
 .pr-sidebar-block__milestone {
   display: flex;
@@ -6967,17 +6966,6 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__branch--link:hover {
   text-decoration: underline;
   filter: brightness(1.1);
-}
-.pr-detail__label {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  margin-right: 2px;
-  color: var(--label-color);
-  background: var(--label-bg);
-  border: 1px solid var(--label-border, transparent);
-  font-weight: 500;
 }
 .pr-detail__edit-attrs {
   display: inline-flex;
