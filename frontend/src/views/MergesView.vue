@@ -613,10 +613,13 @@ const isBranchCurrentlyDeleted = computed<boolean>(() => {
  *
  * 做法：computed 在 timeline items 前面拼一个合成 item（id=0, type='comment'），
  * 复用现有 v-else-if="item.type === 'comment'" 分支的 comment bubble 渲染。
- * id=0 标志位 → 模板用 `item.id > 0` 隐藏 emoji/.../编辑/删除/引用按钮
+ * id=0 标志位 → 模板用 `item.id > 0` 隐藏 emoji 按钮 / ReactionBar /
+ * 编辑 / 删除 / 引用按钮
  * （Gitea API 把 PR body 当作 issue content 而非 comment，无法走 reaction/comment API；
- *  GitHub 端 id=0 也会走 API 失败，但视觉对齐更重要，行为 fallback 接受）。
- * ReactionBar 已有 `commentId <= 0` 防御 → 不会发请求。
+ *  GitHub 端 id=0 也会走 API 失败——v0.7.48 修：v0.7.46 加的 `always-visible`
+ * class 让 PR 描述的 smile 按钮变成"常驻可点"，用户点 → POST /issues/comments/0/reactions
+ * → GitHub 404。修法是给 smile 按钮 / ReactionBar 都加 v-if="item.id > 0"
+ * 视觉上彻底隐藏，加 addCommentReaction early-return 兜底防御。）。
  *
  * v0.7.46 还注入首条 commit_ref 事件 —— Gitea /issues/{index}/timeline 端点对初始
  * commit（创建 PR 时的唯一 commit）不返回 commit_ref 事件（v0.7.8 测过，只有
@@ -2099,6 +2102,11 @@ function toggleCommentMenu(commentId: number): void {
  */
 async function addCommentReaction(p: PullDto, commentId: number, content: string): Promise<void> {
   if (!activeProjectId.value) return;
+  // v0.7.48 防御：commentId <= 0（PR 描述合成 comment / 非法 id）不调 API。
+  // 修前 v0.7.46 给 PR 描述加 always-visible class 让 smile 按钮常驻可点，
+  // 用户点 → POST /issues/comments/0/reactions → GitHub 404。视觉上 v-if
+  // 已经隐藏，这里再兜底防止别处绕过直接调。
+  if (commentId <= 0) return;
   try {
     await pull.addCommentReaction(p, commentId, content);
     showToast({ type: 'success', message: '已添加表情' });
@@ -3063,18 +3071,21 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         </div>
                         <!-- v0.7.4：comment header 右侧 actions —— 对齐 Gitea web show_role + add_reaction + context_menu
                              表情选择器 + ... 菜单在外部渲染（避免 popover 嵌套在 comment-meta 里影响布局）
-                             v0.7.46：item.id === 0（PR 描述合成 comment）加 always-visible class —
-                             对齐 GitHub web "first comment smile 按钮常驻" 渲染（其他 comment
-                             仍然 hover-only 保持 Gitea web 行为）。
-                             后端 API 在 Gitea 端会失败（PR description 不是 comment），
-                             GitHub 端需要后端扩展支持 commentId=0 → PR description 路由。-->
+                             v0.7.48：PR 描述合成 comment（item.id === 0）整体隐藏
+                             表情按钮（v-if="item.id > 0"）——
+                             修前 v0.7.46 加的 always-visible class 让 PR 描述的
+                             smile 按钮常驻可点，用户点 → POST /issues/comments/0/reactions
+                             → GitHub 404。修法是视觉上彻底隐藏。
+                             保留 ... 菜单（Copy link 等跟 id 无关的功能还能用）。-->
                         <div
                           v-if="editingCommentId !== item.id"
                           class="pr-detail__comment-meta-right"
-                          :class="{ 'pr-detail__comment-meta-right--always-visible': item.id === 0 }"
                         >
-                          <!-- 表情添加按钮（点击展开 emoji 选择器） -->
-                          <div class="pr-detail__comment-action-wrap">
+                          <!-- 表情添加按钮（点击展开 emoji 选择器）—— v0.7.48
+                               item.id > 0 防御：PR 描述（id=0）不渲染，
+                               否则点 → POST /issues/comments/0/reactions → 404。
+                               真实评论（id > 0）才显示 smile 按钮。-->
+                          <div v-if="item.id > 0" class="pr-detail__comment-action-wrap">
                             <button
                               type="button"
                               class="pr-detail__comment-action-btn"
@@ -3219,7 +3230,10 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                             </button>
                           </template>
                         </div>
+                        <!-- v0.7.48：ReactionBar 也加 v-if="item.id > 0" 防御
+                             （PR 描述 id=0 不能加 reaction，避免 404）-->
                         <ReactionBar
+                          v-if="item.id > 0"
                           :project-id="activeProjectId ?? ''"
                           :comment-id="item.id"
                           :editable="selectedPR.state === 'open'"
@@ -3243,21 +3257,48 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     ]"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`">
+                      <!-- v0.7.46：system event rail 改用 user avatar（替代 v0.7.3 起的 colored dot +
+                           system event icon）—— 对齐 GitHub web "PR 事件最前面不应该持续显示用户名，
+                           而是用用户头像做最简洁的信息展示" 渲染。GitHub web 系统事件左侧
+                           就是一个 user avatar（红圆），没多余文字。v0.7.3 之前那种"灰圆 + icon"
+                           视觉冗余，author 名已经在 verb 上下文里有"X 于 Y 关闭了此合并请求"。
+                           有 author → 用 avatar（avatarUrl 优先，无 url 退化首字母）；
+                           无 author → 退到原 colored dot（极少数 system 事件如时间类没 actor）。-->
+                      <div
+                        v-if="item.author"
+                        class="pr-detail__timeline-avatar pr-detail__timeline-avatar--system"
+                        :title="displayName(item.author)"
+                      >
+                        <img
+                          v-if="item.author.avatarUrl"
+                          :src="item.author.avatarUrl"
+                          :alt="displayName(item.author)"
+                          class="pr-detail__timeline-avatar-img"
+                          referrerpolicy="no-referrer"
+                        />
+                        <span v-else aria-hidden="true">{{ (item.author.username || '?').charAt(0).toUpperCase() }}</span>
+                      </div>
+                      <div
+                        v-else
+                        class="pr-detail__timeline-dot"
+                        :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`"
+                      >
                         <component :is="systemEventIcon(item.type)" :size="13" :stroke-width="2.5" aria-hidden="true" />
                       </div>
                     </div>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
+                        <!-- v0.7.46：删 system event 主行的 author 名 span —— 左侧 rail 已经
+                             改用 user avatar（v0.7.46 + 上面 if/else），avatar 是最简洁的
+                             身份识别。主行只剩 "于 + time + verb" + body，对齐 GitHub web
+                             紧凑布局（GitHub web 系统事件主行只显示 verb + body，没 author 名）。
+                             评论 (.pr-detail__timeline-item--comment) 保留 author 名在
+                             bubble header 里（v0.7.4 已有），那是另一个渲染分支不受影响。-->
                         <!-- v0.7.32：GitHub 端单 commit push 不显示 author + verb
                              GitHub web 实际渲染："commit subject" + "short SHA" 单行，无
                              "X added 1 commit" verb，也无 pusher 名字（commit author 在 commit
                              详情里，不在 timeline event 上）。
                              Gitea 端：actor + 于 + time + verb + body（保持 v0.7.31 布局）。 -->
-                        <span
-                          v-if="!(isGithub && item.type === 'push' && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
-                          class="pr-detail__event-author"
-                        >{{ displayName(item.author) }}</span>
                         <!-- v0.7.31 平台感知：主行 layout
                              - Gitea: actor + 于 + time + verb + body（CLAUDE.md 零术语中文）
                              - GitHub web: actor + verb + body + time（无"于"介词，时间放 verb 后
