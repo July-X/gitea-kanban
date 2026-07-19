@@ -283,11 +283,20 @@ jobs:
             gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes
           fi
 
+          # 优先用 maintainer 写的 docs/releases/<tag>.md，没有就 fallback --generate-notes
+          NOTES_ARGS=()
+          if [[ -f "docs/releases/${{ github.ref_name }}.md" ]]; then
+            NOTES_ARGS=(--notes-file "docs/releases/${{ github.ref_name }}.md")
+          else
+            echo "WARN: docs/releases/${{ github.ref_name }}.md 不存在，用 --generate-notes"
+            NOTES_ARGS=(--generate-notes)
+          fi
+
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --title "gitea-kanban ${{ github.ref_name }}" \
-            --notes-file "docs/releases/${{ github.ref_name }}.md" \
             $PRE_RELEASE_FLAG \
+            "${NOTES_ARGS[@]}" \
             "${AVAILABLE_ASSETS[@]}"
         shell: bash
 
