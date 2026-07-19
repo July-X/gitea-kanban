@@ -3257,43 +3257,31 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     ]"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <!-- v0.7.46：system event rail 改用 user avatar（替代 v0.7.3 起的 colored dot +
-                           system event icon）—— 对齐 GitHub web "PR 事件最前面不应该持续显示用户名，
-                           而是用用户头像做最简洁的信息展示" 渲染。GitHub web 系统事件左侧
-                           就是一个 user avatar（红圆），没多余文字。v0.7.3 之前那种"灰圆 + icon"
-                           视觉冗余，author 名已经在 verb 上下文里有"X 于 Y 关闭了此合并请求"。
-                           有 author → 用 avatar（avatarUrl 优先，无 url 退化首字母）；
-                           无 author → 退到原 colored dot（极少数 system 事件如时间类没 actor）。-->
-                      <div
-                        v-if="item.author"
-                        class="pr-detail__timeline-avatar pr-detail__timeline-avatar--system"
-                        :title="displayName(item.author)"
-                      >
-                        <img
-                          v-if="item.author.avatarUrl"
-                          :src="item.author.avatarUrl"
-                          :alt="displayName(item.author)"
-                          class="pr-detail__timeline-avatar-img"
-                          referrerpolicy="no-referrer"
-                        />
-                        <span v-else aria-hidden="true">{{ (item.author.username || '?').charAt(0).toUpperCase() }}</span>
-                      </div>
-                      <div
-                        v-else
-                        class="pr-detail__timeline-dot"
-                        :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`"
-                      >
+                      <!-- v0.7.46 修订：system event rail 回退到小 colored dot（v0.7.3 起的样式）——
+                           之前 v0.7.46 改成 user avatar（28x28）把 ul::before 的 2px 竖线
+                           全盖了，line 在 system events 之间也被切断。GitHub web 实际是
+                           system events 用 16-20px 小 icon + line 穿过小 icon 在 events
+                           之间贯穿（看 GitHub web #81 PR 截图），comment 才是 28x28
+                           user avatar 把 line 切断。user 反馈"timeline 连接线应该在
+                           两次对话之间，贯穿多个事件之间，而不是每个用户头像之间"。
+                           改回 colored dot：line 在 events 之间可见，comment 位置由
+                           .pr-detail__timeline-item--comment::before 盖住断开。-->
+                      <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`">
                         <component :is="systemEventIcon(item.type)" :size="13" :stroke-width="2.5" aria-hidden="true" />
                       </div>
                     </div>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
-                        <!-- v0.7.46：删 system event 主行的 author 名 span —— 左侧 rail 已经
-                             改用 user avatar（v0.7.46 + 上面 if/else），avatar 是最简洁的
-                             身份识别。主行只剩 "于 + time + verb" + body，对齐 GitHub web
-                             紧凑布局（GitHub web 系统事件主行只显示 verb + body，没 author 名）。
+                        <!-- v0.7.46 修订：恢复 system event 主行的 author 名 span。
+                             v0.7.46 第一次改时想对齐 GitHub web"系统事件主行只显示 verb + body"，
+                             但 GitHub web 系统事件实际是"kanban_demo 于上个月 推送了1个提交"
+                             —— author 名在文本里（X = actor），跟 v0.7.3 起的 v0.7.31 Gitea 端
+                             布局一致。同时 v0.7.46 第二次改时把 system event rail 改回
+                             colored dot（不再是 user avatar），author 名回归文本是必要的
+                             —— 不然事件不知道是谁触发的。
                              评论 (.pr-detail__timeline-item--comment) 保留 author 名在
                              bubble header 里（v0.7.4 已有），那是另一个渲染分支不受影响。-->
+                        <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
                         <!-- v0.7.32：GitHub 端单 commit push 不显示 author + verb
                              GitHub web 实际渲染："commit subject" + "short SHA" 单行，无
                              "X added 1 commit" verb，也无 pusher 名字（commit author 在 commit
@@ -7843,6 +7831,24 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 /* 普通评论卡 (timeline-item--comment) —— 用大块气泡布局 */
 .pr-detail__timeline-item--comment {
   padding: 6px 0;
+  position: relative;        /* v0.7.46：让 ::before 绝对定位生效 */
+}
+/* v0.7.46：comment 位置用 ::before 覆盖 ul::before 竖线 —— 对齐 GitHub web
+   timeline "line 在两次对话之间，贯穿多个 events，不在每个 user avatar 之间" 视觉。
+   ul::before 画 2px 竖线从 14px 到 width:2px 在 padding 区域（line 在 -30px 距
+   comment 左边缘 = 14px 距 ul 左边缘 = line 实际位置）。comment ::before 用
+   ul 同色背景（var(--color-bg)）盖 30px+ 宽，z-index:1 高于 line z-index:0。
+   效果：line 在 system events 之间可见（events 间距 > 30px），comment 位置断开。*/
+.pr-detail__timeline-item--comment::before {
+  content: "";
+  position: absolute;
+  left: -30px;
+  width: 32px;
+  top: 0;
+  bottom: 0;
+  background: var(--color-bg);
+  z-index: 1;
+  pointer-events: none;
 }
 /* 评审事件 / 系统事件 (timeline-item--event) —— 单行紧凑 */
 .pr-detail__timeline-item--event {
