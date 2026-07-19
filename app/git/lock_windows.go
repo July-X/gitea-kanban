@@ -32,11 +32,16 @@ func lockPath(localPath string) (func(), error) {
 	mu := v.(*sync.Mutex)
 	mu.Lock()
 
-	// v0.8.0 修 windows CI TestLockFileCreated：windows 也创建 .lock 占位文件
-	// 保持跟 unix 平台一致的 .lock file 语义（cross-process visibility）
-	lockFile := localPath + ".lock"
-	if _, err := os.Stat(lockFile); err != nil {
-		if err := os.WriteFile(lockFile, []byte(fmt.Sprintf("pid=%d\ntime=%s\n", os.Getpid(), time.Now().Format(time.RFC3339))), 0o644); err != nil {
+	// v0.8.0 修 windows CI：跟 unix 平台一致，先 MkdirAll parent dir
+	//（早期版本漏了 → CloneRepo 测试 `___` repo 写 `___.lock` 失败 "path specified"）
+	// unix 版本用 `os.O_CREATE|os.O_RDWR` + flock，windows 这里简化为
+	// 占位文件（仅做跨进程可见性提示，无 flock 强保证）。
+	lockFilePath := localPath + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockFilePath), 0o755); err != nil {
+		return func() { mu.Unlock() }, fmt.Errorf("mkdir parent for lock: %w", err)
+	}
+	if _, err := os.Stat(lockFilePath); err != nil {
+		if err := os.WriteFile(lockFilePath, []byte(fmt.Sprintf("pid=%d\ntime=%s\n", os.Getpid(), time.Now().Format(time.RFC3339))), 0o644); err != nil {
 			return func() { mu.Unlock() }, fmt.Errorf("write lock file: %w", err)
 		}
 	}
@@ -45,8 +50,9 @@ func lockPath(localPath string) (func(), error) {
 }
 
 func cleanupStaleGitLock(localPath, name string) error {
-	// windows 也清理 stale .lock 文件（跟 unix 平台行为保持一致）
-	lockFile := localPath + ".lock"
+	// windows 跟 unix 一致：`.git/<name>` 而非 `localPath + ".lock"`
+	//（修 v0.8.0 TestCleanupStaleGitLock_RemovesOldLock FAIL）
+	lockFile := filepath.Join(localPath, ".git", name)
 	info, err := os.Stat(lockFile)
 	if err != nil {
 		if os.IsNotExist(err) {
