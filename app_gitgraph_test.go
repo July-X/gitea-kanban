@@ -21,6 +21,7 @@ func TestApp_FindProjectAndAccount(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 1. 没 project → NotFound
@@ -78,6 +79,7 @@ func TestApp_PullRepoByProjectId(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 准备 account + project + keychain
@@ -132,6 +134,7 @@ func TestApp_GetGitGraph(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	accountID := "acc-1"
@@ -189,6 +192,7 @@ func TestApp_GetRepoById(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 准备 account + project

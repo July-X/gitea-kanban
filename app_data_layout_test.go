@@ -40,6 +40,7 @@ func TestApp_OnStartup_DataLayout(t *testing.T) {
 		}()
 		app.OnStartup(context.Background())
 	}()
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 1. ${dataDir}/logs/main/main-YYYY-MM-DD.log 必须存在
@@ -103,6 +104,7 @@ func TestApp_GetWorkspace_ReturnsRepoWorkspace(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// v2.x：用户选的是数据根目录 (DataRoot)，不是 workspace 子目录
@@ -131,6 +133,7 @@ func TestApp_SetWorkspace_AlwaysRejects(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	today := time.Now().UTC().Format("2006-01-02")
@@ -161,6 +164,7 @@ func TestApp_SetWorkspace_EmptyPath(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	err := app.SetWorkspace(SetWorkspaceArgs{Cwd: ""})
@@ -177,6 +181,7 @@ func TestApp_DataDir_ResolveConsistency(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	if config.ResolveDataDir() != app.dataDir {

@@ -31,6 +31,7 @@ func TestApp_CloneRepo_NoTokenInArgs(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 序列化空 CloneRepoArgs 看字段
@@ -59,6 +60,7 @@ func TestApp_CloneRepo_RejectsUnmatchedAccount(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// localStore 没账号 → CloneRepo 应返 NotFound
@@ -92,6 +94,7 @@ func TestApp_CloneRepo_HappyPath(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// mock gitea server
@@ -170,6 +173,7 @@ func TestApp_CloneRepo_MissingFields(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	tests := []struct {
@@ -201,6 +205,7 @@ func TestApp_IsRepoCloned(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 没 clone 过 → false
@@ -241,6 +246,7 @@ func TestApp_ResolveTokenByLocalPath(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 1. 不在 workspace 下的路径 → ValidationFailed
@@ -320,6 +326,7 @@ func TestApp_ResolveTokenByLocalPath_V25Layout(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	workspace := filepath.Join(tmp, "workspace")
@@ -380,6 +387,7 @@ func TestApp_ResolveTokenByLocalPath_V25AccountMismatch(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	hostURL := "https://gitea.example.com"
@@ -424,6 +432,7 @@ func TestApp_CloneRepo_AutoCreatesProject(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 准备 mock gitea server（不让它真 clone 成功，但能走到 step 4 之前的逻辑）
