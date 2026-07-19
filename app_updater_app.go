@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"gitea-kanban/app/logx"
+	"gitea-kanban/app/store"
 	"gitea-kanban/app/updater"
 )
 
@@ -21,6 +22,21 @@ var appChannel = "stable"
 // Version Wails binding — 返当前运行版本（前端 banner / 设置页显示用）
 func (a *App) Version() string {
 	return appVersion
+}
+
+// SetCheckUpdatesPref Wails binding — SettingsView 切换「启动时自动检查更新」开关
+//
+// v0.8.0 引入。返 error 让前端 toast 显示。
+func (a *App) SetCheckUpdatesPref(enabled bool) error {
+	if a.localStore == nil {
+		return fmt.Errorf("localStore not initialized")
+	}
+	return store.SetPrefBool(a.localStore, store.CheckUpdatesPrefKey, enabled)
+}
+
+// GetCheckUpdatesPref Wails binding — SettingsView 读当前 toggle 状态
+func (a *App) GetCheckUpdatesPref() bool {
+	return store.GetPrefBool(a.localStore, store.CheckUpdatesPrefKey, true)
 }
 
 // CheckUpdate Wails binding — 拉取 GitHub latest release，跟 running version 比较
