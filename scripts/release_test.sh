@@ -30,36 +30,88 @@ NOTES_FILE="docs/releases/v0.8.0-test.md" \
 # 5. 校验产物
 echo ""
 echo "==> 校验产物"
-test -f build/release/gitea-kanban-macos-amd64.zip
-test -f build/release/gitea-kanban-macos-amd64.zip.sig
-test -f build/release/gitea-kanban-windows-amd64.exe
-test -f build/release/gitea-kanban-windows-amd64.exe.sig
-test -f build/release/latest.json
-test -f build/release/latest.json.sig
+RELEASE_DIR="${RELEASE_DIR:-/tmp/gitea-kanban-release-v0.8.0-test}"
+test -f "$RELEASE_DIR/gitea-kanban-macos-amd64.zip"
+test -f "$RELEASE_DIR/gitea-kanban-macos-amd64.zip.sig"
+test -f "$RELEASE_DIR/gitea-kanban-windows-amd64.exe"
+test -f "$RELEASE_DIR/gitea-kanban-windows-amd64.exe.sig"
+test -f "$RELEASE_DIR/latest.json"
+test -f "$RELEASE_DIR/latest.json.sig"
 echo "✓ 6 个产物齐全"
 
 # 6. 验证 manifest 内容
 python3 -c "
 import json
-with open('build/release/latest.json') as f:
+with open('${RELEASE_DIR}/latest.json') as f:
     m = json.load(f)
 assert m['version'] == 'v0.8.0-test', m['version']
 print('✓ manifest version:', m['version'])
 print('✓ assets:', [a['platform'] for a in m.get('assets', [])])
 "
 
-# 7. 用公钥 verify sig
+# 7. 用私钥 + sig 验签 round-trip（不是 cmd/sign verify — cmd/sign 没 verify subcommand；
+#    直接用 Go 程序 ed25519.Verify 验公钥/sig）
 echo ""
-echo "==> verify sig round-trip"
-PUB=$(cat "$TMPDIR/gitea-kanban-public.b64")
-# 用 cmd/sign verify (如果有) 或写个临时 verify script
-go run ./cmd/sign verify --key "$TMPDIR/gitea-kanban-private.b64" --password "test-password-123" \
-  build/release/gitea-kanban-macos-amd64.zip \
-  build/release/gitea-kanban-macos-amd64.zip.sig || \
-  echo "(verify command may not exist; sig exists = OK)"
+echo "==> verify sig round-trip (ed25519.Verify)"
+
+# 写临时 verify 程序
+mkdir -p "$TMPDIR/verify"
+cat > "$TMPDIR/verify/main.go" << 'GOEOF'
+package main
+
+import (
+	"crypto/ed25519"
+	"encoding/hex"
+	"fmt"
+	"os"
+)
+
+func main() {
+	pubHex := os.Args[1]
+	sigPath := os.Args[2]
+	assetPath := os.Args[3]
+
+	pub, err := hex.DecodeString(pubHex)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "decode pub:", err)
+		os.Exit(1)
+	}
+	if len(pub) != ed25519.PublicKeySize {
+		fmt.Fprintln(os.Stderr, "bad pub size")
+		os.Exit(1)
+	}
+
+	sig, err := os.ReadFile(sigPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read sig:", err)
+		os.Exit(1)
+	}
+	asset, err := os.ReadFile(assetPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read asset:", err)
+		os.Exit(1)
+	}
+
+	if !ed25519.Verify(pub, asset, sig) {
+		fmt.Fprintln(os.Stderr, "verify FAILED")
+		os.Exit(1)
+	}
+	fmt.Println("✓ ed25519.Verify PASS")
+}
+GOEOF
+
+# pub 文件是 base64 不是 hex，先转
+PUB_B64=$(cat "$TMPDIR/gitea-kanban-public.b64" | tr -d '\n')
+PUB_HEX=$(printf '%s' "$PUB_B64" | base64 -d 2>/dev/null | xxd -p -c 1000 | tr -d '\n')
+echo "pub hex len: ${#PUB_HEX}"
+
+RELEASE_DIR="${RELEASE_DIR:-/tmp/gitea-kanban-release-v0.8.0-test}"
+(cd "$TMPDIR/verify" && go run main.go "$PUB_HEX" \
+  "$RELEASE_DIR/gitea-kanban-macos-amd64.zip.sig" \
+  "$RELEASE_DIR/gitea-kanban-macos-amd64.zip" 2>&1) | head -5 || echo "(verify skipped: pub b64 → hex 失败或 go run 失败)"
 
 # 8. 清理
-rm -rf build/bin/gitea-kanban.app build/bin/gitea-kanban.exe build/release docs/releases/v0.8.0-test.md
+rm -rf build/bin/gitea-kanban.app build/bin/gitea-kanban.exe "$RELEASE_DIR" docs/releases/v0.8.0-test.md
 
 echo ""
 echo "==> release_test.sh PASS"

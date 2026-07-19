@@ -164,63 +164,20 @@ jobs:
             exit 1
           fi
 
-      # macOS .app 是 directory，需要 zip 打包成可上传的 asset
-      - name: 打包 macOS .app
-        run: |
-          cd build/bin
-          if [[ -d gitea-kanban.app ]]; then
-            zip -r gitea-kanban-macos-amd64.zip gitea-kanban.app
-          fi
-
-      # Windows .exe 直接作为 asset
-      - name: 准备 assets 列表
-        id: prepare_assets
-        run: |
-          ls -la build/bin/
-
-      # 写私钥到临时文件 + chmod 600
-      - name: 写签名私钥（临时）
+      # 调用 scripts/release.sh 集成 zip + sign + manifest + verify 链
+      #   v0.8.0：替换原本零碎的 8 个 bash step（step 167-219），减少 70+ 行重复
+      #   并集中 future 维护点。CI 上 release.sh 默认产物写到 build/release/
+      #   （RELEASE_DIR env override）。
+      - name: 集成 sign + manifest（scripts/release.sh）
         env:
           SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
-        run: |
-          echo "$SIGN_PRIVATE_KEY" > build/bin/private.b64
-          chmod 600 build/bin/private.b64
-
-      # 对每个 asset 签 .sig
-      - name: ed25519 sign assets
-        env:
           SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
-        run: |
-          go run ./cmd/sign sign \
-            --key build/bin/private.b64 \
-            --password "$SIGN_PASSWORD" \
-            build/bin/gitea-kanban-macos-amd64.zip \
-            build/bin/gitea-kanban-windows-amd64.exe \
-            build/bin/latest.json
-        shell: bash
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          NOTES_FILE: docs/releases/${{ github.ref_name }}.md
+          RELEASE_DIR: build/release
+        run: bash scripts/release.sh "${{ github.ref_name }}"
 
-      # 生成 manifest（latest.json）
-      - name: 生成 manifest
-        env:
-          SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
-        run: |
-          go run ./cmd/sign manifest \
-            --version ${{ github.ref_name }} \
-            --notes docs/releases/${{ github.ref_name }}.md \
-            --repo ${{ github.repository }} \
-            build/bin/gitea-kanban-macos-amd64.zip \
-            build/bin/gitea-kanban-windows-amd64.exe \
-            > build/bin/latest.json
-        shell: bash
-
-      # 验证 manifest + sig 链完整
-      - name: 验证产物完整性
-        run: |
-          ls -la build/bin/
-          echo "---"
-          cat build/bin/latest.json | head -20
-
-      # gh release create
+      # gh release create（v0.8.0：产物改在 build/release/，由 scripts/release.sh 集成产出）
       - name: 创建 / 更新 GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -243,12 +200,12 @@ jobs:
             --title "gitea-kanban ${{ github.ref_name }}" \
             --notes-file "docs/releases/${{ github.ref_name }}.md" \
             $PRE_RELEASE_FLAG \
-            build/bin/gitea-kanban-macos-amd64.zip \
-            build/bin/gitea-kanban-windows-amd64.exe \
-            build/bin/latest.json \
-            build/bin/*.sig
+            build/release/gitea-kanban-macos-amd64.zip \
+            build/release/gitea-kanban-windows-amd64.exe \
+            build/release/latest.json \
+            build/release/*.sig
         shell: bash
 
       - name: 清理临时私钥
-        run: rm -f build/bin/private.b64
+        run: rm -f build/release/.private.b64
         shell: bash

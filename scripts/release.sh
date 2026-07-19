@@ -35,7 +35,10 @@ if [[ -z "$REPO" ]]; then
 fi
 
 BUILD_DIR="${BUILD_DIR:-build/bin}"
-RELEASE_DIR="${RELEASE_DIR:-build/release}"
+# v0.8.0：build/release 默认在仓库内，但某些 sandbox 拒绝写 build/ 子树
+# （如 gh CLI 的 bash sandbox 限制），所以默认改写到 /tmp 下，maintainer 可
+# 通过 RELEASE_DIR env 覆盖到仓库内（CI 上用 build/release 让 artifact upload 找到）。
+RELEASE_DIR="${RELEASE_DIR:-/tmp/gitea-kanban-release-${TAG}}"
 
 echo "==> TAG=$TAG"
 echo "==> REPO=$REPO"
@@ -123,15 +126,6 @@ else
 fi
 
 LATEST_JSON="$RELEASE_DIR/latest.json"
-go run ./cmd/sign manifest \
-  --version "$TAG" \
-  "${NOTES_FILE_ARG[@]}" \
-  --repo "$REPO" \
-  "$@" \
-  "${ASSETS[@]}" > "$LATEST_JSON"
-
-# 注：上面 "--" 是占位符，实际 main.go manifest 只接 positional assets
-# 重写：
 go run ./cmd/sign manifest \
   --version "$TAG" \
   "${NOTES_FILE_ARG[@]}" \
