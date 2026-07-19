@@ -743,6 +743,7 @@ func isNotCollaboratorErr(err error) bool {
 //   - message: commit message
 //   - branchName: 目标 branch
 //   - parentSHA: 该 branch 当前 head commit SHA
+//
 // 返回新 commit SHA
 func addCommitToBranch(ctx context.Context, token, branchName, file, content, message, parentSHA string) (string, error) {
 	// 1. blob
@@ -1037,8 +1038,8 @@ func TestGitHubIntegration_PRWithReview(t *testing.T) {
 
 	// 1. 3 个评审 state 都要测
 	reviewCases := []struct {
-		event    string
-		body     string
+		event       string
+		body        string
 		wantLowCase string // 期望归一化后的 state
 	}{
 		{"APPROVE", "looks good to me", "approved"},
@@ -1266,7 +1267,7 @@ func TestGitHubIntegration_PRWithMergeConflict(t *testing.T) {
 // TestGitHubIntegration_PRMergeState 验证 merged=true + mergeCommitSha
 //
 // 对应应用 v0.7.8 merge 事件 inline 块需要 mergeCommitSha 字段
-//（Gitea 1.26+ timeline 端点不返 SHA，从 PR 详情 merge_commit_sha 拿）
+// （Gitea 1.26+ timeline 端点不返 SHA，从 PR 详情 merge_commit_sha 拿）
 func TestGitHubIntegration_PRMergeState(t *testing.T) {
 	ctx := context.Background()
 	token := mustToken(t)

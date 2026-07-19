@@ -1268,13 +1268,13 @@ func TestGiteaAdapter_ListPullTimeline_LabelAction(t *testing.T) {
 // 根因：v0.7.5/v0.7.7 凭印象假设 Gitea /timeline 端点 type 字符串是 "push" / "merge"，
 // 实际 Gitea 1.26+ 返回 snake_case 命名 "pull_push" / "merge_pull"，导致前端模板
 // 永远不进 push/merge 渲染分支。同时 commit 信息在 body JSON 字符串里
-//（{"is_force_push":false,"commit_ids":["sha1"]}），不在顶层独立字段。
+// （{"is_force_push":false,"commit_ids":["sha1"]}），不在顶层独立字段。
 //
 // 修复：giteaTimelineToItem 做两层归一化 ——
-//   1. type 字符串：pull_push → push / merge_pull → merge
-//   2. push 事件 body JSON 解析：commit_ids → CommitIDs 数组 / is_force_push → IsForcePush
-//   3. 删 v0.7.7 假设的 4 个独立顶层字段（OldCommit / NewCommit / CommitsNum / IsForcePush
-//      在 API 里都不存在）
+//  1. type 字符串：pull_push → push / merge_pull → merge
+//  2. push 事件 body JSON 解析：commit_ids → CommitIDs 数组 / is_force_push → IsForcePush
+//  3. 删 v0.7.7 假设的 4 个独立顶层字段（OldCommit / NewCommit / CommitsNum / IsForcePush
+//     在 API 里都不存在）
 func TestGiteaAdapter_ListPullTimeline_PushMergeTypeNormalization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]interface{}{
@@ -1449,8 +1449,8 @@ func TestGiteaAdapter_GetPull_RefLabel(t *testing.T) {
 				"sha":   "aaaa",
 			},
 			"base": map[string]interface{}{
-				"label": "main",  // base 通常 label == ref
-				"ref":   "main",  // Gitea base 不带 refs/heads/ 前缀（已对齐）
+				"label": "main", // base 通常 label == ref
+				"ref":   "main", // Gitea base 不带 refs/heads/ 前缀（已对齐）
 				"sha":   "bbbb",
 			},
 		})
