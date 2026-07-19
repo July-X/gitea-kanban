@@ -22,11 +22,11 @@
  */
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import {
-  GitMerge, GitPullRequestArrow, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
+  GitMerge, GitPullRequestArrow, GitPullRequestClosed, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
-  // v0.7.2: 系统事件图标（对齐 Gitea web octicon-* 体系）
-  RotateCcw, X as XIcon, Bookmark, Tag, Milestone, UserPlus, UserMinus, Type, Calendar,
-  Lock, Key, Eye, ArrowLeftRight, GitPullRequest, ArrowUp, Folder, Pin,
+  // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
+  RotateCcw, Bookmark, Tag, Milestone, Calendar,
+  Lock, Key, Eye, ArrowLeftRight, Folder, Pin,
   MessageCircle,
   // v0.7.3: 评审事件状态图标
   CheckCircle2,
@@ -35,6 +35,28 @@ import {
   // v0.7.26: 过期警告行 icon (AlertTriangle 对应 Gitea web octicon-alert)
   AlertTriangle,
 } from 'lucide-vue-next';
+// v0.7.41：自定义 octicon-cross-reference 组件 —— lucide 没同名 icon，
+// 最近 Link/Link2 视觉上是 chain link（圆环链）跟 cross-reference
+// （方块+箭头）形状差太多。1:1 复刻 octicon 路径做组件。详见
+// components/icons/CrossReference.vue 顶部注释
+import CrossReference from '../components/icons/CrossReference.vue';
+// v0.7.42：自定义 octicon-git-branch 组件 —— lucide 的 GitBranch 是简单
+// T 形（2 端点圆），octicon-git-branch 是 3 分支（主+侧+侧上 fork）+ 3 圆点，
+// 形状差太多。1:1 复刻 octicon 路径做组件，给 delete_branch / restore_branch
+// 事件用。详见 components/icons/OcticonGitBranch.vue 顶部注释
+import OcticonGitBranch from '../components/icons/OcticonGitBranch.vue';
+// v0.7.45：自定义 octicon-git-merge 组件 —— lucide 的 GitMerge 是简化版
+//（缺 3 外圆+底部弧线），octicon-git-merge 是 3 外圆+3 内点+merge 路径
+// + 底部弧线+垂直线，1:1 复刻 octicon 路径做组件，给 merge event timeline
+// dot + Closed with unmerged commits 面板 icon 用。
+// 详见 components/icons/OcticonGitMerge.vue 顶部注释
+import OcticonGitMerge from '../components/icons/OcticonGitMerge.vue';
+// v0.7.46：自定义 octicon-person 组件 —— lucide 的 UserPlus/UserMinus 是带
+// + / - 符号，octicon-person 是纯人头+身体（不带符号）。GitHub web 区分
+// add/remove 不靠 icon 靠 verb 文案（"指派给" / "取消了指派给"）。
+// 1:1 复刻 octicon 路径做组件，给 assignee 事件 timeline dot 用。
+// 详见 components/icons/OcticonPerson.vue 顶部注释
+import OcticonPerson from '../components/icons/OcticonPerson.vue';
 import { useRepoStore } from '@renderer/stores/repo';
 import { usePullStore, type PullFilter } from '@renderer/stores/pull';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -133,13 +155,25 @@ function labelStyle(color: string | undefined): Record<string, string> {
 /** 当前选中的合并请求（左右布局：左列表点击 → 右侧详情，null = 未选中显示空态） */
 const selectedPR = ref<PullDto | null>(null);
 
-/** tab 列表：全部 / 待合并 / 已合并 / 已关闭 */
-const tabs: { id: PullFilter; label: string }[] = [
-  { id: 'all', label: '全部' },
-  { id: 'open', label: '待合并' },
-  { id: 'merged', label: '已合并' },
-  { id: 'closed', label: '已关闭' },
-];
+/** v0.7.30 平台感知：tab 列表
+ *  - Gitea: 全部 / 待合并 / 已合并 / 已关闭（CLAUDE.md 零术语）
+ *  - GitHub: All / Open / Merged / Closed */
+const tabs = computed<{ id: PullFilter; label: string }[]>(() => {
+  if (isGithub.value) {
+    return [
+      { id: 'all', label: 'All' },
+      { id: 'open', label: 'Open' },
+      { id: 'merged', label: 'Merged' },
+      { id: 'closed', label: 'Closed' },
+    ];
+  }
+  return [
+    { id: 'all', label: '全部' },
+    { id: 'open', label: '待合并' },
+    { id: 'merged', label: '已合并' },
+    { id: 'closed', label: '已关闭' },
+  ];
+});
 
 // ===== 合并二次确认状态 =====
 
@@ -151,13 +185,27 @@ const tabs: { id: PullFilter; label: string }[] = [
  * - 高级方式（变基/变基+合并/压缩）默认折叠在"高级选项" disclosure 下
  *   PM 看不到默认不点 → 不会被技术术语吓到
  * - 4 种 hint 文案统一为"动作 + 影响"两段式（不再纯技术）
+ *
+ * v0.7.30 平台感知：GitHub 端走英文 "Create a merge commit" / "Squash and merge" /
+ * "Rebase and merge"。GitHub API 不区分 rebase / rebase-merge（统一 rebase），
+ * 后端 mapMergeMethodToGitHub 已经把 'rebase-merge' 映射为 'rebase'。
  */
-const mergeMethods: { value: MergeMethod; label: string; hint: string; advanced?: boolean }[] = [
-  { value: 'merge', label: '普通合并', hint: '保留所有提交历史（推荐，最安全）' },
-  { value: 'rebase', label: '变基', hint: '重排历史提交（⚠️ 会改写分支历史，慎用）', advanced: true },
-  { value: 'rebase-merge', label: '变基 + 合并', hint: '重排后再合并（⚠️ 会改写历史）', advanced: true },
-  { value: 'squash', label: '压缩', hint: '把多个提交合成 1 个（⚠️ 会丢掉中间提交信息）', advanced: true },
-];
+const mergeMethods = computed<{ value: MergeMethod; label: string; hint: string; advanced?: boolean }[]>(() => {
+  if (isGithub.value) {
+    return [
+      { value: 'merge', label: 'Create a merge commit', hint: 'All commits from the head branch will be combined into the base branch via a merge commit.' },
+      { value: 'squash', label: 'Squash and merge', hint: 'Combine all commits into a single commit on the base branch.', advanced: true },
+      { value: 'rebase', label: 'Rebase and merge', hint: 'Replay all commits onto the base branch (⚠️ rewrites history).', advanced: true },
+      // GitHub 没区分 rebase-merge，这里隐藏掉（GitHub adapter 已经把 rebase-merge 映射为 rebase）
+    ];
+  }
+  return [
+    { value: 'merge', label: '普通合并', hint: '保留所有提交历史（推荐，最安全）' },
+    { value: 'rebase', label: '变基', hint: '重排历史提交（⚠️ 会改写分支历史，慎用）', advanced: true },
+    { value: 'rebase-merge', label: '变基 + 合并', hint: '重排后再合并（⚠️ 会改写历史）', advanced: true },
+    { value: 'squash', label: '压缩', hint: '把多个提交合成 1 个（⚠️ 会丢掉中间提交信息）', advanced: true },
+  ];
+});
 
 /** 当前选中的合并方式（A-3 P2：默认走普通合并，避免 PM 被迫选高级） */
 const selectedMethod = ref<MergeMethod>('merge');
@@ -524,6 +572,106 @@ function baseLabel(p: PullDto): string {
   return p.base.label || p.base.ref;
 }
 
+/**
+ * v0.7.34：head 分支当前是否被删除
+ *
+ * GitHub Issue Events API:
+ *   - `head_ref_deleted` 事件 → 触发 type="delete_branch"（GitHub adapter 映射）
+ *   - `head_ref_restored` 事件 → 触发 type="restore_branch"（v0.7.29 加）
+ *
+ * 当前分支状态由"最后一次相关事件"决定：
+ *   - 最后一次是 head_ref_deleted（无后续 restore）→ 分支当前被删
+ *   - 最后一次是 head_ref_restored / 没有相关事件 → 分支当前存在
+ *
+ * UI 表现（对齐 GitHub web）：
+ *   - 分支被删：timeline 上 delete_branch event 旁显示 "Restore branch" 按钮
+ *     + panel "Closed with unmerged commits" 描述简化成 "This pull request is closed."（不提及 branch）
+ *     + panel 不显示 "Delete branch" 按钮（branch 已经被删了，再删一次是 no-op）
+ *   - 分支存在：timeline 上 delete_branch event 旁**不**显示按钮
+ *     + panel 描述 "This pull request is closed, but the `{branch}` branch has unmerged commits."
+ *     + panel 显示 "Delete branch" 按钮
+ *
+ * timeline 已按 v0.7.33 升序（oldest first），item.created 是 ISO 8601 字符串可直接比较。
+ */
+const isBranchCurrentlyDeleted = computed<boolean>(() => {
+  const items = getTimelinePanel().items ?? [];
+  let lastDeleteAt = '';
+  let lastRestoreAt = '';
+  for (const item of items) {
+    if (item.type === 'delete_branch') lastDeleteAt = item.created;
+    else if (item.type === 'restore_branch') lastRestoreAt = item.created;
+  }
+  return lastDeleteAt > lastRestoreAt; // ISO 8601 字符串比较：最后 delete 晚于最后 restore → 当前被删
+});
+
+/**
+ * v0.7.46：把 PR 描述（selectedPR.body）合成首条 comment 注入 timeline
+ *
+ * 背景：GitHub web 把 PR 描述当 conversation 的第一条 comment 渲染（含 avatar + author header +
+ * 时间 + 表情反应按钮），Gitea web 同理（PR body 显示在 conversation tab 顶部作为 comment 卡）。
+ * gitea-kanban 之前用单独的"描述"section 渲染，无 author / 时间 / 反应按钮，跟 Gitea web 不一致。
+ *
+ * 做法：computed 在 timeline items 前面拼一个合成 item（id=0, type='comment'），
+ * 复用现有 v-else-if="item.type === 'comment'" 分支的 comment bubble 渲染。
+ * id=0 标志位 → 模板用 `item.id > 0` 隐藏 emoji 按钮 / ReactionBar /
+ * 编辑 / 删除 / 引用按钮
+ * （Gitea API 把 PR body 当作 issue content 而非 comment，无法走 reaction/comment API；
+ *  GitHub 端 id=0 也会走 API 失败——v0.7.48 修：v0.7.46 加的 `always-visible`
+ * class 让 PR 描述的 smile 按钮变成"常驻可点"，用户点 → POST /issues/comments/0/reactions
+ * → GitHub 404。修法是给 smile 按钮 / ReactionBar 都加 v-if="item.id > 0"
+ * 视觉上彻底隐藏，加 addCommentReaction early-return 兜底防御。）。
+ *
+ * v0.7.46 还注入首条 commit_ref 事件 —— Gitea /issues/{index}/timeline 端点对初始
+ * commit（创建 PR 时的唯一 commit）不返回 commit_ref 事件（v0.7.8 测过，只有
+ * 后续 push 才返 pull_push / merge_pull）。GitHub web 端同样 Issue Events API
+ * 不返 "committed" event，user 在 timeline 看到 "integration test fixture" 是
+ * GitHub web 单独前端拼的。我们这边对齐同样做法：从 store.commitsByPR 缓存
+ * 拿首条 commit，合成 type='commit_ref' 事件注入到 PR 描述 comment 后面。
+ *
+ * id=-1 合成标志（不调任何 API，纯渲染）。created 用首条 commit 的 authoredAt
+ * 让排序自然落到 PR 描述之后；fallback PR.createdAt。author 走 PR.author
+ * （对初始 commit 来说 author = PR author，绝大多数情况成立）。
+ */
+const displayTimelineItems = computed<TimelineItemDto[]>(() => {
+  const items = getTimelinePanel().items ?? [];
+  const pr = selectedPR.value;
+  const out: TimelineItemDto[] = [];
+
+  if (pr?.body && pr.author?.username) {
+    out.push({
+      id: 0, // 0 = PR 描述合成 comment
+      type: 'comment',
+      body: pr.body,
+      author: pr.author,
+      created: pr.createdAt,
+      updated: pr.createdAt,
+    });
+  } else if (!pr) {
+    return items;
+  }
+
+  // v0.7.46：首条 commit_ref 事件注入（如果 timeline 里还没有同 SHA 的 commit_ref）
+  const firstCommit = pr ? pull.commitsByPR.get(pr.index)?.[0] : undefined;
+  if (firstCommit) {
+    const existsAlready = items.some(
+      (it) => it.type === 'commit_ref' && it.refCommitSha && it.refCommitSha.startsWith(firstCommit.shortSha),
+    );
+    if (!existsAlready) {
+      out.push({
+        id: -1, // 负数 = 合成（不调任何 API）
+        type: 'commit_ref',
+        body: '',
+        author: pr!.author,
+        created: firstCommit.authoredAt || pr!.createdAt,
+        refCommitSha: firstCommit.sha,
+      } as TimelineItemDto);
+    }
+  }
+
+  out.push(...items);
+  return out;
+});
+
 /** 在系统浏览器打开 commit 页面 */
 function openCommitExternal(sha: string): void {
   const url = commitWebUrl(sha);
@@ -843,10 +991,15 @@ function cancelClose(): void {
   closingPull.value = null;
 }
 
-/** 关闭确认描述文案 */
+/** v0.7.30 平台感知：关闭确认描述文案
+ *  - Gitea 端：中文 + "在 gitea 页面重新打开"
+ *  - GitHub 端：英文 + "on GitHub" */
 const closeConfirmDescription = computed(() => {
   const p = closingPull.value;
   if (!p) return '';
+  if (isGithub.value) {
+    return `Will close #${p.index} "${p.title}".\n\nAfter closing, this pull request cannot be merged again — you'll need to reopen it on GitHub.`;
+  }
   return `将关闭 #${p.index}「${p.title}」。\n\n关闭后此合并请求将不再可合并，需要在 gitea 页面重新打开。`;
 });
 
@@ -929,8 +1082,19 @@ async function submitReview(p: PullDto): Promise<void> {
   }
 }
 
-/** 评审状态标签（人话，零术语） */
+/** v0.7.30：评审状态标签 platform-aware
+ *  Gitea 端走中文（零术语）："已批准" / "请求修改" / "已评论"
+ *  GitHub 端走英文：approved / requested changes / commented */
 function reviewStateLabel(state: string | undefined): string {
+  if (isGithub.value) {
+    switch (state) {
+      case 'approved': return 'approved these changes';
+      case 'changes_requested': return 'requested changes';
+      case 'commented': return 'left a comment';
+      case 'dismissed': return 'dismissed';
+      default: return state ?? 'left a comment';
+    }
+  }
   switch (state) {
     case 'approved': return '已批准';
     case 'changes_requested': return '请求修改';
@@ -939,8 +1103,16 @@ function reviewStateLabel(state: string | undefined): string {
   }
 }
 
-/** 评审事件标签（人话，零术语） */
+/** v0.7.30：评审事件标签 platform-aware */
 function reviewEventLabel(event: ReviewEvent): string {
+  if (isGithub.value) {
+    switch (event) {
+      case 'approve': return 'Approve';
+      case 'request_changes': return 'Request changes';
+      case 'comment': return 'Comment';
+      default: return event;
+    }
+  }
   switch (event) {
     case 'approve': return '批准此合并请求';
     case 'request_changes': return '请求修改';
@@ -984,7 +1156,13 @@ function systemEventVerb(item: TimelineItemDto): string {
     return item.removedAssignee ? `取消指派给 ${assigneeName}` : `指派给 ${assigneeName}`;
   }
   if (item.type === 'review_request') {
-    return item.removedAssignee ? '取消了评审请求' : '请求评审';
+    // v0.7.55：把 reviewer 名字拼到主行 verb 里，删 inline 块 —— 对齐 Gitea web
+    // "X 于 Y 请求 Z 评审" 1 行渲染（看 Gitea web pr 底部 timeline 截图）。
+    // 之前 v0.7.4 拆 2 卡（主行 "请求评审" + 下面 inline 块 reviewer name 重复渲染），
+    // 跟 Gitea web 不一致。Gitea web 端 "请求 m4java 评审" / "请求 tester 评审"
+    // 一行，self-request 跟 review-others 都走同一 verb 格式。
+    const reviewerName = displayName(item.assignee);
+    return item.removedAssignee ? `取消了 ${reviewerName} 的评审请求` : `请求 ${reviewerName} 评审`;
   }
   if (item.type === 'close') return '关闭了此合并请求';
   if (item.type === 'reopen') return '重新开启了此合并请求';
@@ -1048,10 +1226,35 @@ function systemEventVerb(item: TimelineItemDto): string {
   //   - Gitea: 通常返 "cx-same-057405" 短码
   //   - 老 Gitea / GitHub: 返 "refs/heads/branch" 全路径 → strip 掉前缀
   // 对齐 Gitea web "kanban_bot 于 3 周前 删除分支 cx-same-057405" 渲染。
-  if (item.type === 'delete_branch' && item.oldRef) {
-    return `删除分支 ${item.oldRef.replace(/^refs\/heads\//, '')}`;
+  //
+  // v0.7.27.1 根因修复：GitHub Issue Events 端 `head_ref_deleted` event **不**返
+  // head ref name（只有 GraphQL timelineItems 才返），item.oldRef 一直是空。
+  // 之前 v0.7.27 错把 commit SHA 填到 OldRef 字段，verb 拼接出错的"SHA 字符串"。
+  // 修法：OldRef 为空时，兜底用 selectedPR?.head?.label（PR 详情 head 字段，
+  // v0.7.9 已有 Gitea 1.20+ / GitHub 全支持，返真实分支名如 "int-test-1783..."）。
+  // 跟 Gitea 端行为对齐："X 于 Y 删除分支 feature-branch-123"。
+  const headRef = item.oldRef?.replace(/^refs\/heads\//, '') || selectedPR.value?.head?.label;
+  if (item.type === 'delete_branch' && headRef) {
+    return `删除分支 ${headRef}`;
   }
   if (item.type === 'delete_branch') return '删除分支'; // v0.7.11 去掉"了"字（无 oldRef fallback）
+  // v0.7.29：head_ref_restored event 渲染（GitHub 端独立 type="restore_branch"）
+  // verb 拼接分支名（走 selectedPR.head.label 兜底，GitHub events 端不返 head ref name）
+  if (item.type === 'restore_branch' && headRef) {
+    return `恢复了分支 ${headRef}`;
+  }
+  if (item.type === 'restore_branch') return '恢复了分支';
+
+  // v0.7.27.1 平台感知：change_target_branch 在 GitHub 端 `base_ref_changed` event
+  // 不返 base ref name（只有 GraphQL 返），item.oldRef/newRef 留空。
+  // 兜底用 selectedPR?.base?.label（当前 base，跟 item 时间点不严格匹配，但 80% 场景够用）。
+  // v0.7.28 计划从 GraphQL 拉 base ref 改前/改后名字。
+  if (item.type === 'change_target_branch' && (item.oldRef || item.newRef)) {
+    return `修改了目标分支 ${item.oldRef || '?'} → ${item.newRef || '?'}`;
+  }
+  if (item.type === 'change_target_branch' && selectedPR.value?.base?.label) {
+    return `修改了目标分支（当前 base: ${selectedPR.value.base.label}）`;
+  }
   if (item.type === 'change_target_branch') return '修改了目标分支';
   if (item.type === 'lock') return '锁定了此合并请求';
   if (item.type === 'unlock') return '解锁了此合并请求';
@@ -1084,6 +1287,146 @@ function systemEventVerb(item: TimelineItemDto): string {
 }
 
 /**
+ * v0.7.30：GitHub 端 systemEventVerb —— 严格对齐 GitHub web 实际渲染
+ *
+ * 与 Gitea 端 systemEventVerb 的关键差异：
+ *  1. 格式：GitHub web 走 "actor verb body time"（无"于"介词），不是 Gitea "actor 于 time verb"
+ *  2. 语言：英文（GitHub web 端 i18n 默认是英文 locale en-US）
+ *  3. body 字段：GitHub 端 verb 自带 body（如 "added the {label} label" / "closed this"），
+ *     Gitea 端 verb 只返回短语主体（"添加了标签"），body 在模板中拼接
+ *
+ * Verb 列表参考 GitHub web timeline 实际渲染 + Issues Events API event type 文档
+ * (https://docs.github.com/en/rest/using-the-rest-api/issue-event-types)。
+ *
+ * 调用方式：systemEventVerb(item) wrapper 根据 isGithub.value 自动选 Gitea / GitHub 风格。
+ */
+function githubSystemEventVerb(item: TimelineItemDto): string {
+  // 辅助：根据 isSelfAssign 判断自指派 / 指派他人
+  const isSelfAssignForAssignees = (() => {
+    const a = item.assignee;
+    const u = item.author;
+    if (!a || !u) return false;
+    return a.username === u.username;
+  })();
+
+  if (item.type === 'assignees') {
+    if (isSelfAssignForAssignees) {
+      return item.removedAssignee ? 'removed their assignment' : 'self-assigned this';
+    }
+    const name = displayName(item.assignee);
+    return item.removedAssignee ? `unassigned ${name}` : `assigned ${name}`;
+  }
+  if (item.type === 'review_request') {
+    const name = displayName(item.assignee);
+    if (item.removedAssignee) return `removed the review request for ${name}`;
+    return `requested a review from ${name}`;
+  }
+  if (item.type === 'close') return 'closed this pull request';
+  if (item.type === 'reopen') return 'reopened this pull request';
+  if (item.type === 'merge') return 'merged commit'; // SHA + branch 在主行 v-else-if 块拼接
+  if (item.type === 'push') {
+    const n = item.commitIds?.length ?? 0;
+    if (n === 1) return 'added 1 commit';
+    if (n > 1) return `added ${n} commits`;
+    return 'pushed new commits';
+  }
+  if (item.type === 'pin') return 'pinned this pull request';
+  if (item.type === 'unpin') return 'unpinned this pull request';
+  if (item.type === 'label') {
+    const added = item.addedLabels ?? [];
+    const removed = item.removedLabels ?? [];
+    if (added.length > 0 && removed.length === 0) {
+      if (added.length === 1) return `added the ${added[0].name} label`;
+      return `added ${added.length} labels`;
+    }
+    if (added.length === 0 && removed.length > 0) {
+      if (removed.length === 1) return `removed the ${removed[0].name} label`;
+      return `removed ${removed.length} labels`;
+    }
+    if (added.length > 0 && removed.length > 0) {
+      return 'added and removed labels';
+    }
+    return 'changed labels';
+  }
+  if (item.type === 'milestone') {
+    if (item.milestone) return `added the ${item.milestone.title} milestone`;
+    if (item.oldMilestone) return `removed the ${item.oldMilestone.title} milestone`;
+    return 'changed the milestone';
+  }
+  if (item.type === 'title' || item.type === 'change_title') {
+    if (item.isWipToggle) {
+      return item.isWip
+        ? 'marked the pull request as work in progress'
+        : 'marked the pull request as ready for review';
+    }
+    if (item.oldTitle && item.newTitle) return 'changed the title';
+    return 'changed the title';
+  }
+  // delete_branch / restore_branch 走 selectedPR.head.label 兜底（GitHub events 不返 head ref name）
+  const headRef = item.oldRef?.replace(/^refs\/heads\//, '') || selectedPR.value?.head?.label;
+  if (item.type === 'delete_branch' && headRef) {
+    return `deleted the ${headRef} branch`;
+  }
+  if (item.type === 'delete_branch') return 'deleted a branch';
+  if (item.type === 'restore_branch' && headRef) {
+    return `restored the ${headRef} branch`;
+  }
+  if (item.type === 'restore_branch') return 'restored a branch';
+  if (item.type === 'change_target_branch') {
+    if (item.oldRef && item.newRef) {
+      return `changed the base branch from ${item.oldRef} to ${item.newRef}`;
+    }
+    if (item.newRef) return `changed the base branch to ${item.newRef}`;
+    return 'changed the base branch';
+  }
+  if (item.type === 'lock') return 'locked this pull request';
+  if (item.type === 'unlock') return 'unlocked this pull request';
+  if (item.type === 'due_date') return 'set the due date';
+  if (item.type === 'change_due_date') return 'changed the due date';
+  if (item.type === 'remove_due_date') return 'removed the due date';
+  if (item.type === 'commit_ref') return 'referenced this commit';
+  if (item.type === 'issue_ref' || item.type === 'pull_ref' ||
+      item.type === 'comment_ref' || item.type === 'change_issue_ref') {
+    const target = item.refIssue
+      ? (item.refIssue.repoFullName
+          ? `${item.refIssue.repoFullName}#${item.refIssue.index}`
+          : `#${item.refIssue.index}`)
+      : 'an issue';
+    if (item.refAction === 'close') return `closed this via ${target}`;
+    if (item.refAction === 'reopen') return `reopened this via ${target}`;
+    return `linked ${target}`;
+  }
+  if (item.type === 'add_dependency') return 'added a dependency';
+  if (item.type === 'remove_dependency') return 'removed a dependency';
+  if (item.type === 'dismiss_review') return 'dismissed a review';
+  if (item.type === 'move') return 'moved this pull request';
+  if (item.type === 'pr_scheduled_to_auto_merge') return 'enabled auto-merge';
+  if (item.type === 'pr_unscheduled_to_auto_merge') return 'disabled auto-merge';
+  if (item.type === 'project') return 'added this to a project';
+  if (item.type === 'project_column') return 'moved this to another column';
+  // Gitea 专属事件（GitHub 端没对应）—— 不显示 verb
+  if (['start_tracking', 'stop_tracking', 'add_time_manual', 'cancel_tracking',
+    'delete_time_manual', 'change_time_estimate'].includes(item.type)) {
+    return '';
+  }
+  // 未识别 type：返回空字符串
+  return '';
+}
+
+/**
+ * v0.7.30：systemEventVerb wrapper —— 根据 platform 自动选 Gitea / GitHub 风格 verb
+ *
+ * - Gitea 端：走 systemEventVerb（中文 verb，对齐 Gitea web 中文 locale，CLAUDE.md 锁的零术语）
+ * - GitHub 端：走 githubSystemEventVerb（英文 verb，对齐 GitHub web 实际渲染）
+ *
+ * 上层模板（v-else-if 链、head_ref_deleted event、merge event 块、label chip 等）
+ * 不用改 —— 都按 verb 文案渲染，对两边都自然。
+ */
+function platformSystemEventVerb(item: TimelineItemDto): string {
+  return isGithub.value ? githubSystemEventVerb(item) : systemEventVerb(item);
+}
+
+/**
  * v0.7.4：用户显示名
  *
  * Gitea web 的 shared/user/authorlink.tmpl 优先用 User.FullName（display name，
@@ -1094,8 +1437,8 @@ function systemEventVerb(item: TimelineItemDto): string {
  * 本函数：优先 fullName（display name），空时回退 username。
  */
 function displayName(user: { fullName?: string; username: string } | null | undefined): string {
-  if (!user) return '匿名';
-  return user.fullName || user.username || '匿名';
+  if (!user) return isGithub.value ? 'ghost' : '匿名';
+  return user.fullName || user.username || (isGithub.value ? 'ghost' : '匿名');
 }
 
 /**
@@ -1134,39 +1477,90 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  */
 
 /**
- * v0.7.2：系统事件图标 —— 从 Unicode 字符迁到 lucide-vue-next，
+ * v0.7.2 + v0.7.35：系统事件图标 —— 从 Unicode 字符迁到 lucide-vue-next，
  * 视觉上对齐 Gitea web 的 octicon-* 体系（GitHub Primer Icons 风格）。
- *
- * 关键映射：
- *   - reopen (octicon-dot-fill)        → RotateCcw（顺时针回旋）
- *   - close (octicon-issue-closed)     → X（方头 X）
- *   - merge (octicon-git-merge)        → GitPullRequest（PR 已合图标）
- *   - commit_ref (octicon-bookmark)    → Bookmark
- *   - label (octicon-tag)              → Tag
- *   - milestone (octicon-milestone)    → Milestone
- *   - assignee (octicon-person)        → UserPlus/UserMinus
- *   - title (octicon-pencil)           → Type
- *   - delete_branch (octicon-git-branch)→ GitBranch (同 change_target_branch)
- *   - due_date (octicon-clock)         → Calendar
- *   - lock (octicon-lock)              → Lock
- *   - unlock (octicon-key)             → Key
- *   - review_request (octicon-eye)     → Eye
- *   - push (octicon-repo-push)         → ArrowUp
- *   - dismiss_review (octicon-x)       → XCircle
- *   - pin (octicon-pin)                → Pin
- *   - move (octicon-project)           → Folder
+ * v0.7.35 user 反馈 ⑱：GitHub 数据源各 event icon 要对齐 GitHub web。
+ * GitHub Primer Octicons 实际映射（实测 GitHub web PR timeline + 官方 octicon 库）：
+ *   - close (octicon-issue-closed)         → XCircle（红圈 X，对齐 GitHub web）
+ *   - reopen (octicon-issue-reopened)      → RotateCcw（v0.7.2 已有，绿圈）
+ *   - merge (octicon-git-merge)            → OcticonGitMerge（v0.7.45 自定义组件，1:1
+ *                                                       复刻 octicon 3 外圆+3 内点+merge
+ *                                                       路径+底部弧线；v0.7.35 错用
+ *                                                       lucide GitMerge 是简化版，缺
+ *                                                       3 外圆+底部弧线）
+ *   - push / committed (octicon-git-commit) → GitCommit（v0.7.35 改 ArrowUp → GitCommit，小圆点）
+ *   - head_ref_force_pushed                 → GitCommit（v0.7.35 新增 entry，force push 走 isForcePush 提示）
+ *   - delete_branch (octicon-git-branch)    → OcticonGitBranch（v0.7.42 自定义组件，1:1
+ *                                                       复刻 octicon 3 分支+3 圆点；v0.7.2
+ *                                                       错用 lucide GitBranch 是简单 T 形
+ *                                                       跟 octicon 形状不对）
+ *   - restore_branch (octicon-git-branch)   → OcticonGitBranch（同上，跟 delete_branch
+ *                                                       走同一个 octicon + 同颜色，靠
+ *                                                       Restore branch 按钮 + verb 区分）
+ *   - commit_ref (octicon-bookmark)         → Bookmark（v0.7.2 已有）
+ *   - label (octicon-tag)                   → Tag（v0.7.2 已有）
+ *   - milestone (octicon-milestone)         → Milestone（v0.7.2 已有）
+ *   - assignees (octicon-person)           → OcticonPerson（v0.7.46 自定义组件，1:1
+ *                                                    复刻 octicon 人头+身体；v0.7.2
+ *                                                    错用 lucide UserPlus 是带 +
+ *                                                    符号，跟 GitHub web 实际
+ *                                                    octicon-person 不带 + 形状不对；
+ *                                                    add/remove 不靠 icon 区分
+ *                                                    靠 verb 文案"指派给"/"取消了指派给"；
+ *                                                    平台通用——Gitea/GitHub 都是
+ *                                                    OcticonPerson，不分平台）
+ *   - title / change_title (octicon-pencil) → Pencil（v0.7.35 改 Type → Pencil，GitHub web 实际）
+ *   - issue_ref / pull_ref (octicon-cross-reference) → CrossReference（v0.7.41 自定义组件，
+ *                                                            复刻 octicon 路径；v0.7.35
+ *                                                            错用 LinkIcon 视觉是 chain link 不对）
+ *   - change_issue_ref (octicon-cross-reference)    → CrossReference（同上）
+ *   - add_dependency / remove_dependency            → CrossReference（同上）
+ *   - due_date (octicon-clock)              → Calendar（v0.7.2 已有）
+ *   - lock (octicon-lock)                   → Lock（v0.7.2 已有）
+ *   - unlock (octicon-key)                  → Key（v0.7.2 已有）
+ *   - review_request (octicon-eye)          → Eye（v0.7.2 已有）
+ *   - dismiss_review (octicon-x)            → XCircle（v0.7.2 已有）
+ *   - pin (octicon-pin)                     → Pin（v0.7.2 已有）
+ *   - unpin (octicon-pin)                   → Pin（v0.7.2 已有）
+ *   - move (octicon-project)                → Folder（v0.7.2 已有）
  *
  * 返回 lucide Vue component（VNode），模板用 <component :is="..."> 渲染。
  */
 const SYSTEM_EVENT_ICON: Record<string, Component> = {
   reopen: RotateCcw,
-  close: XIcon,
+  // close event 用 octicon-git-pull-request-closed（PR 图 + 中间 X 标记）——
+  // 用户 22:54 给的实际 SVG class 是 `octicon-git-pull-request-closed`，
+  // 复合 icon：左右 2 条 PR 分支线 + 4 端点圆 + 中间一个 X。
+  // v0.7.36/v0.7.38/v0.7.39 错改三次：先 CircleCheck（issue-closed check mark）
+  // → GitBranch（git-branch 3 圆点）→ GitMerge（git-merge merge 图），都跟实际 SVG 不符。
+  // 现在用 GitPullRequestClosed（lucide 也有同名 icon）才对得上。
+  close: GitPullRequestClosed,
   commit_ref: Bookmark,
   label: Tag,
   milestone: Milestone,
-  assignee: UserPlus,
-  title: Type,
-  delete_branch: GitBranch,
+  // v0.7.46 + v0.7.47：assignees 事件 timeline dot 用自定义 octicon-person
+  // 组件（OcticonPerson）—— lucide UserPlus 是带 + 符号，octicon-person
+  // 是纯人头+身体（不带 +/-）。add/remove 不靠 icon 区分靠 verb 文案。
+  // v0.7.47 修：key 从 'assignee'（单数）改 'assignees'（复数）——
+  // 修前 systemEventIcon('assignees') lookup 'assignee' 找不到 fallback
+  // 到 MessageCircle（聊天气泡），跟实际 octicon-person 形状完全不对。
+  // 后端 TimelineItem.type 实际是 'assignees'（复数，看 systemEventVerb
+  // 和 hasSystemEventInlineDetail 里的 type check 都是 'assignees'）。
+  // v0.7.2 错用 lucide UserPlus（看名字 person-add 以为可以近似，
+  // 实际 octicon 不用 person-add 也不带 + 符号）
+  assignees: OcticonPerson,
+  // v0.7.35：Type → Pencil（GitHub web octicon-pencil，rename 实际是 pencil icon）
+  title: Pencil,
+  // v0.7.35：change_title 跟 title 一样走 pencil（GitHub web 同 icon）
+  change_title: Pencil,
+  // v0.7.42：delete_branch 用自定义 octicon-git-branch 组件（OcticonGitBranch）——
+  // lucide 的 GitBranch 是简单 2 端点 T 形，跟 octicon-git-branch 3 分支 + 3 圆点
+  // 形状差太多，1:1 复刻 octicon 路径做组件
+  // v0.7.35 错用 lucide GitBranch（看名字一样以为可以近似，实际形状不对）
+  delete_branch: OcticonGitBranch,
+  // v0.7.42：restore_branch 跟 delete_branch 同一个 octicon (git-branch)，
+  // 走同一个 OcticonGitBranch 自定义组件
+  restore_branch: OcticonGitBranch,
   due_date: Calendar,
   change_due_date: Calendar,
   remove_due_date: Calendar,
@@ -1174,8 +1568,27 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   unlock: Key,
   change_target_branch: ArrowLeftRight,
   review_request: Eye,
-  merge: GitPullRequest,
-  push: ArrowUp,
+  // v0.7.45：merge event timeline dot 用自定义 octicon-git-merge 组件
+  //（OcticonGitMerge）—— lucide GitMerge 是简化版，1:1 复刻 octicon
+  // v0.7.35 错用 lucide GitMerge（看名字一样以为可以近似，实际形状不对）
+  merge: OcticonGitMerge,
+  // v0.7.35：ArrowUp → GitCommit（GitHub web octicon-git-commit 小圆点）
+  push: GitCommit,
+  // v0.7.35 新增：单 commit push（GitHub events 端 committed event，走 type=push）
+  committed: GitCommit,
+  // v0.7.35 新增：force push（GitHub events 端 head_ref_force_pushed event，走 type=push + IsForcePush=true）
+  head_ref_force_pushed: GitCommit,
+  // v0.7.41：跨引用 —— 用户给的 SVG class 是 `octicon-cross-reference`（方块+箭头），
+  // 不是 lucide 的 Link（chain link 圆环链）。改用自定义组件 CrossReference。
+  // v0.7.35 错用 LinkIcon（看 GitHub web 用了 link 类 octicon 以为可以近似，
+  // 实际是 cross-reference，chain link 形状完全不对）。
+  issue_ref: CrossReference,
+  pull_ref: CrossReference,
+  change_issue_ref: CrossReference,
+  // v0.7.41：依赖关联 —— 跟 issue_ref / pull_ref 同一个 octicon（cross-reference），
+  // 改用 CrossReference 跟 issue_ref 视觉一致
+  add_dependency: CrossReference,
+  remove_dependency: CrossReference,
   move: Folder,
   dismiss_review: XCircle,
   pin: Pin,
@@ -1218,9 +1631,14 @@ const SYSTEM_EVENT_COLOR: Record<string, SystemEventColor> = {
   // 修改类（neutral）
   label: 'neutral',
   milestone: 'neutral',
-  assignee: 'neutral',
+  // v0.7.47：key 跟 SYSTEM_EVENT_ICON 同步 'assignee' → 'assignees'（复数，
+  // 对齐后端 TimelineItem.type）。修前 systemEventColor('assignees') lookup
+  // 'assignee' 找不到 fallback 到 'neutral'，dot 颜色碰巧对（也想要 neutral）
+  // 但 key 跟 type 不匹配是隐患
+  assignees: 'neutral',
   title: 'neutral',
   delete_branch: 'neutral',
+  restore_branch: 'neutral',
   change_target_branch: 'neutral',
   commit_ref: 'neutral',
   move: 'neutral',
@@ -1242,7 +1660,9 @@ function hasSystemEventInlineDetail(item: TimelineItemDto): boolean {
   if (item.type === 'label') return !!item.label;
   if (item.type === 'milestone') return !!(item.oldMilestone || item.milestone);
   if (item.type === 'assignees') return !!item.assignee;
-  if (item.type === 'review_request') return !!item.assignee;
+  // v0.7.55：review_request 不再有 inline 块，reviewer name 已拼到主行 verb
+  // （看 systemEventVerb '请求 X 评审' / '取消了 X 的评审请求'），
+  // hasSystemEventInlineDetail 同步返回 false，避免渲染空 inline div。
   if (item.type === 'title' || item.type === 'change_title') return !!(item.oldTitle || item.newTitle);
   if (item.type === 'delete_branch') return !!item.oldRef;
   if (item.type === 'change_target_branch') return !!(item.oldRef || item.newRef);
@@ -1690,6 +2110,11 @@ function toggleCommentMenu(commentId: number): void {
  */
 async function addCommentReaction(p: PullDto, commentId: number, content: string): Promise<void> {
   if (!activeProjectId.value) return;
+  // v0.7.48 防御：commentId <= 0（PR 描述合成 comment / 非法 id）不调 API。
+  // 修前 v0.7.46 给 PR 描述加 always-visible class 让 smile 按钮常驻可点，
+  // 用户点 → POST /issues/comments/0/reactions → GitHub 404。视觉上 v-if
+  // 已经隐藏，这里再兜底防止别处绕过直接调。
+  if (commentId <= 0) return;
   try {
     await pull.addCommentReaction(p, commentId, content);
     showToast({ type: 'success', message: '已添加表情' });
@@ -1847,13 +2272,23 @@ function onCommentKeydown(p: PullDto, e: KeyboardEvent): void {
   }
 }
 
-/** 生成二次确认描述文案 */
+/** v0.7.30 平台感知：生成二次确认描述文案
+ *  - Gitea: 中文 + 人话（CLAUDE.md 零术语）
+ *  - GitHub: 英文 + GitHub web merge commit dialog 风格 */
 const confirmDescription = computed(() => {
   const p = mergingPull.value;
   if (!p) return '';
-  const methodInfo = mergeMethods.find((m) => m.value === selectedMethod.value);
+  const methodInfo = mergeMethods.value.find((m) => m.value === selectedMethod.value);
   const methodLabel = methodInfo?.label ?? selectedMethod.value;
   const methodHint = methodInfo?.hint ?? '';
+  if (isGithub.value) {
+    let desc = `Will merge #${p.index} "${p.title}" into ${baseLabel(p)} using **${methodLabel}**.`;
+    if (methodHint) desc += `\n\nMethod: ${methodHint}`;
+    if (isMainBranch(p.base.ref)) {
+      desc += '\n\n⚠️ Target is a main branch — this will affect all collaborators.';
+    }
+    return desc;
+  }
   let desc = `将把 #${p.index}「${p.title}」以「${methodLabel}」方式合并到 ${baseLabel(p)}。`;
   if (methodHint) desc += `\n\n方式说明：${methodHint}`;
   if (isMainBranch(p.base.ref)) {
@@ -1870,7 +2305,18 @@ function badgeClass(p: PullDto): string {
   return 'merge-badge merge-badge--closed';
 }
 
+/** v0.7.27 平台感知：GitHub web 风格用英文 Closed / Merged / Open / Draft
+ *  - Gitea: "草稿" / "待合并" / "已合并" / "已关闭"（CLAUDE.md 零术语锁死的中文）
+ *  - GitHub: "Draft" / "Open" / "Merged" / "Closed"（GitHub web 实际就是英文，user 反馈对齐）
+ *  颜色 class 跟 Gitea 共用 4 档语义色（draft=warn/orange / open=success/green /
+ *  merged=purple / closed=danger/red），不变。 */
 function badgeText(p: PullDto): string {
+  if (isGithub.value) {
+    if (p.draft) return 'Draft';
+    if (p.state === 'open') return 'Open';
+    if (p.merged) return 'Merged';
+    return 'Closed';
+  }
   if (p.draft) return '草稿';
   if (p.state === 'open') return '待合并';
   if (p.merged) return '已合并';
@@ -1917,24 +2363,24 @@ function formatRelative(iso: string | undefined): string {
       <div class="merges__title">
         <GitMerge :size="18" :stroke-width="1.75" aria-hidden="true" />
         <div class="merges__title-text">
-          <h1 class="merges__title-h1">合并请求</h1>
-          <p class="merges__repo">{{ activeRepo?.fullName ?? '请选择仓库' }}</p>
+          <h1 class="merges__title-h1">{{ isGithub ? 'Pull requests' : '合并请求' }}</h1>
+          <p class="merges__repo">{{ activeRepo?.fullName ?? (isGithub ? 'Select a repository' : '请选择仓库') }}</p>
         </div>
       </div>
       <div class="merges__topbar-right">
-        <span class="merges__counter">共 {{ pull.total }} 个</span>
-        <span class="merges__merge-method-hint muted" title="每次合并的默认方式，可在确认时改">
-          默认：{{ mergeMethods.find((m) => m.value === selectedMethod)?.label }}
+        <span class="merges__counter">{{ isGithub ? `${pull.total} total` : `共 ${pull.total} 个` }}</span>
+        <span class="merges__merge-method-hint muted" :title="isGithub ? 'Default merge method — change before confirming' : '每次合并的默认方式，可在确认时改'">
+          {{ isGithub ? 'Default:' : '默认：' }}{{ mergeMethods.find((m) => m.value === selectedMethod)?.label }}
         </span>
         <button
           type="button"
           class="merges__refresh"
           :disabled="pull.loading"
-          :title="'刷新'"
+          :title="isGithub ? 'Refresh' : '刷新'"
           @click="onRefresh"
         >
           <RefreshCw :size="14" :stroke-width="2" />
-          <span>刷新</span>
+          <span>{{ isGithub ? 'Refresh' : '刷新' }}</span>
         </button>
       </div>
     </header>
@@ -1949,18 +2395,21 @@ function formatRelative(iso: string | undefined): string {
       主体空态判断（独立 v-if，避免污染 v-else 链）
     -->
     <div v-if="!activeRepo" class="merges__placeholder">
-      <EmptyState title="还没有选中仓库" description='去"看板"页选一个仓库，再回来这里看合并请求' />
+      <EmptyState
+        :title="isGithub ? 'No repository selected' : '还没有选中仓库'"
+        :description="isGithub ? 'Go to the Kanban page to select a repository, then come back to see pull requests' : '去「看板」页选一个仓库，再回来这里看合并请求'"
+      />
     </div>
     <div v-else-if="!pull.items.length" class="merges__placeholder">
       <EmptyState
-        title="这个仓库还没有合并请求"
-        description="去 gitea 创建第一个合并请求，或去时间轴页看分支进度"
+        :title="isGithub ? 'This repository has no pull requests' : '这个仓库还没有合并请求'"
+        :description="isGithub ? 'Create the first pull request on GitHub, or visit the timeline page to track branch progress' : '去 gitea 创建第一个合并请求，或去时间轴页看分支进度'"
       />
     </div>
     <div v-else-if="!pull.filteredItems.length" class="merges__placeholder">
       <EmptyState
-        :title="`没有匹配「${tabs.find((t) => t.id === pull.filter)?.label}」的合并请求`"
-        description="试试切换其他 tab，或调整搜索词"
+        :title="isGithub ? `No pull requests match “${tabs.find((t) => t.id === pull.filter)?.label}”` : `没有匹配「${tabs.find((t) => t.id === pull.filter)?.label}」的合并请求`"
+        :description="isGithub ? 'Try switching tabs or adjusting your search' : '试试切换其他 tab，或调整搜索词'"
       />
     </div>
 
@@ -1991,7 +2440,7 @@ function formatRelative(iso: string | undefined): string {
               v-model="pull.search"
               type="text"
               class="merges__search-input"
-              placeholder="按标题 / 来源 / 目标搜索"
+              :placeholder="isGithub ? 'Search by title / source / target' : '按标题 / 来源 / 目标搜索'"
               autocomplete="off"
               spellcheck="false"
             />
@@ -2054,7 +2503,7 @@ function formatRelative(iso: string | undefined): string {
                 <span class="pr-card__author">{{ p.author.username }}</span>
                 <span class="pr-card__time">{{ formatRelative(p.createdAt) }}</span>
                 <span :class="badgeClass(p)" class="pr-card__badge">{{ badgeText(p) }}</span>
-                <span v-if="p.hasConflicts && p.state === 'open'" class="pr-card__conflict">有冲突</span>
+                <span v-if="p.hasConflicts && p.state === 'open'" class="pr-card__conflict">{{ isGithub ? 'Conflicts' : '有冲突' }}</span>
                 <span v-if="(p.commentsCount ?? 0) > 0" class="pr-card__comments">💬 {{ p.commentsCount }}</span>
               </div>
             </div>
@@ -2082,6 +2531,9 @@ function formatRelative(iso: string | undefined): string {
 
       <!-- ===== 右侧：PR 详情面板 ===== -->
       <section v-if="selectedPR" class="pr-detail-panel" :key="selectedPR.index">
+        <div class="pr-detail-layout">
+          <!-- v0.7.28：主内容列（PR 详情 / 评论 / timeline） -->
+          <div class="pr-detail-content">
         <!-- 详情头部：标题 + 状态 -->
         <div class="pr-detail-header">
           <div class="pr-detail-header__top">
@@ -2108,8 +2560,13 @@ function formatRelative(iso: string | undefined): string {
                 <span :class="badgeClass(selectedPR)" class="pr-detail-header__badge">{{ badgeText(selectedPR) }}</span>
                 <!-- v0.7.6：分支信息对齐 Gitea web `templates/repo/issue/view_title.tmpl` 渲染
                      格式："{author} 请求将 {N} 次代码提交从 {head} 合并至 {base}"
-                     分支名加链接到 /src/branch/{ref}，点击可在 Gitea web 看分支历史 -->
-                <span><strong style="color: var(--color-text);">{{ displayName(selectedPR.author) }}</strong> 请求将
+                     分支名加链接到 /src/branch/{ref}，点击可在 Gitea web 看分支历史
+                     v0.7.27 平台感知：
+                     - Gitea 风格（CLAUDE.md 零术语）："X 请求将 N 次代码提交从 head 合并至 base"
+                     - GitHub web 风格（user 截图反馈）："X wants to merge N commit into base from head"
+                     GitHub 端的"X wants to merge"是固定句式（不像 Gitea "请求将"），
+                     介词是 "into base from head"（注意 from head 在最后，跟 Gitea 顺序相反） -->
+                <span v-if="!isGithub"><strong style="color: var(--color-text);">{{ displayName(selectedPR.author) }}</strong> 请求将
                   <strong>{{ Math.max(selectedPR.commits ?? 1, 1) }}</strong> 次代码提交从
                   <a
                     v-if="activeRepo"
@@ -2131,17 +2588,39 @@ function formatRelative(iso: string | undefined): string {
                   >{{ baseLabel(selectedPR) }}</a>
                   <code v-else class="mono pr-detail__branch pr-detail__branch--dst">{{ baseLabel(selectedPR) }}</code>
                 </span>
+                <span v-else><strong style="color: var(--color-text);">{{ displayName(selectedPR.author) }}</strong> wants to merge
+                  <strong>{{ Math.max(selectedPR.commits ?? 1, 1) }}</strong> commit into
+                  <a
+                    v-if="activeRepo"
+                    class="mono pr-detail__branch pr-detail__branch--dst pr-detail__branch--link"
+                    :href="branchWebUrl(baseLabel(selectedPR))"
+                    target="_blank"
+                    rel="noopener"
+                    :title="`在 GitHub 打开 ${baseLabel(selectedPR)} 分支`"
+                  >{{ baseLabel(selectedPR) }}</a>
+                  <code v-else class="mono pr-detail__branch pr-detail__branch--dst">{{ baseLabel(selectedPR) }}</code>
+                  from
+                  <a
+                    v-if="activeRepo"
+                    class="mono pr-detail__branch pr-detail__branch--link"
+                    :href="branchWebUrl(headLabel(selectedPR))"
+                    target="_blank"
+                    rel="noopener"
+                    :title="`在 GitHub 打开 ${headLabel(selectedPR)} 分支`"
+                  >{{ headLabel(selectedPR) }}</a>
+                  <code v-else class="mono pr-detail__branch">{{ headLabel(selectedPR) }}</code>
+                </span>
               </div>
             </div>
             <div class="pr-detail-header__ext">
               <button
                 type="button"
                 class="btn-ghost-sm"
-                title="在浏览器打开"
+                :title="isGithub ? 'Open in browser' : '在浏览器打开'"
                 @click="openPullExternal(selectedPR)"
               >
                 <ExternalLink :size="14" :stroke-width="2" aria-hidden="true" />
-                在浏览器打开
+                {{ isGithub ? 'Open in browser' : '在浏览器打开' }}
               </button>
             </div>
           </div>
@@ -2149,26 +2628,18 @@ function formatRelative(iso: string | undefined): string {
 
         <!-- Meta 信息条 -->
         <dl class="pr-detail-meta">
-          <div class="pr-detail-meta__item"><dt>创建</dt><dd>{{ formatDate(selectedPR.createdAt) }}</dd></div>
-          <div class="pr-detail-meta__item"><dt>更新</dt><dd>{{ formatRelative(selectedPR.updatedAt) }}</dd></div>
-          <div class="pr-detail-meta__item"><dt>冲突</dt><dd>{{ selectedPR.hasConflicts ? '有冲突' : '无冲突' }}</dd></div>
-          <div class="pr-detail-meta__item"><dt>可合并</dt><dd>{{ selectedPR.mergeable ? '是' : '否' }}</dd></div>
-          <div class="pr-detail-meta__item" v-if="(selectedPR.labels ?? []).length > 0">
-            <dt>标签</dt>
-            <dd>
-              <span
-                v-for="label in (selectedPR.labels ?? [])"
-                :key="label.id"
-                class="pr-detail__label"
-                :style="labelStyle(label.color)"
-              >{{ label.name }}</span>
-            </dd>
-          </div>
+          <div class="pr-detail-meta__item"><dt>{{ isGithub ? 'Created' : '创建' }}</dt><dd>{{ formatDate(selectedPR.createdAt) }}</dd></div>
+          <div class="pr-detail-meta__item"><dt>{{ isGithub ? 'Updated' : '更新' }}</dt><dd>{{ formatRelative(selectedPR.updatedAt) }}</dd></div>
+          <div class="pr-detail-meta__item"><dt>{{ isGithub ? 'Conflicts' : '冲突' }}</dt><dd>{{ selectedPR.hasConflicts ? (isGithub ? 'Yes' : '有冲突') : (isGithub ? 'No' : '无冲突') }}</dd></div>
+          <div class="pr-detail-meta__item"><dt>{{ isGithub ? 'Mergeable' : '可合并' }}</dt><dd>{{ selectedPR.mergeable ? (isGithub ? 'Yes' : '是') : (isGithub ? 'No' : '否') }}</dd></div>
+          <!-- v0.7.55：移除 pr-detail-meta 里的 Labels 字段 —— label 信息统一由 sidebar 的
+               pr-sidebar-block__content 显示，跟 GitHub web 一致（避免顶部 meta 条重复显示）。
+               sidebar label 跟 timeline 事件 label 一样有实色背景 + 自适应文字色。 -->
           <div class="pr-detail-meta__item" v-if="selectedPR.milestone">
-            <dt>里程碑</dt><dd>{{ selectedPR.milestone.title }}</dd>
+            <dt>{{ isGithub ? 'Milestone' : '里程碑' }}</dt><dd>{{ selectedPR.milestone.title }}</dd>
           </div>
           <div class="pr-detail-meta__item" v-if="(selectedPR.assignees ?? []).length > 0">
-            <dt>指派人</dt><dd>{{ (selectedPR.assignees ?? []).map(a => a.username).join('、') }}</dd>
+            <dt>{{ isGithub ? 'Assignees' : '指派人' }}</dt><dd>{{ (selectedPR.assignees ?? []).map(a => a.username).join(isGithub ? ', ' : '、') }}</dd>
           </div>
           <button
             type="button"
@@ -2176,52 +2647,52 @@ function formatRelative(iso: string | undefined): string {
             @click="openAttrEditor(selectedPR)"
           >
             <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
-            <span>编辑属性</span>
+            <span>{{ isGithub ? 'Edit' : '编辑属性' }}</span>
           </button>
           <!-- 操作按钮（靠右贴边） -->
           <div class="pr-detail-meta__actions">
             <span
               v-if="selectedPR.hasConflicts && selectedPR.state === 'open'"
               class="pr-detail__conflict-hint"
-              title="此合并请求存在冲突，请先在 gitea 页面解决"
-            >有冲突</span>
+              :title="isGithub ? 'This pull request has conflicts, please resolve them on GitHub first' : '此合并请求存在冲突，请先在 gitea 页面解决'"
+            >{{ isGithub ? 'Conflicts' : '有冲突' }}</span>
             <button
               v-if="selectedPR.state === 'open' && !selectedPR.draft"
               type="button"
               class="btn-primary-sm"
               :disabled="selectedPR.hasConflicts || !selectedPR.mergeable || merging"
-              :title="selectedPR.hasConflicts ? '有冲突，请先在 gitea 页面解决冲突' : !selectedPR.mergeable ? '当前不可合并' : '合并此请求'"
+              :title="selectedPR.hasConflicts ? (isGithub ? 'Conflicts — please resolve them on GitHub first' : '有冲突，请先在 gitea 页面解决冲突') : !selectedPR.mergeable ? (isGithub ? 'Not mergeable' : '当前不可合并') : (isGithub ? 'Merge pull request' : '合并此请求')"
               @click="requestMerge(selectedPR)"
             >
               <GitMerge :size="14" :stroke-width="2" aria-hidden="true" />
-              <span>{{ merging && mergingPull?.index === selectedPR.index ? '合并中…' : '合并' }}</span>
+              <span>{{ merging && mergingPull?.index === selectedPR.index ? (isGithub ? 'Merging…' : '合并中…') : (isGithub ? 'Merge' : '合并') }}</span>
             </button>
             <template v-if="selectedPR.state === 'open'">
               <button
                 type="button"
                 class="btn-approve-sm"
                 :disabled="reviewSubmitting"
-                title="批准此合并请求"
+                :title="isGithub ? 'Approve these changes' : '批准此合并请求'"
                 @click="toggleReviewEditor(selectedPR, 'approve')"
-              ><span>批准</span></button>
+              ><span>{{ isGithub ? 'Approve' : '批准' }}</span></button>
               <button
                 type="button"
                 class="btn-request-changes-sm"
                 :disabled="reviewSubmitting"
-                title="请求修改"
+                :title="isGithub ? 'Request changes' : '请求修改'"
                 @click="toggleReviewEditor(selectedPR, 'request_changes')"
-              ><span>请求修改</span></button>
+              ><span>{{ isGithub ? 'Request changes' : '请求修改' }}</span></button>
             </template>
             <button
               v-if="selectedPR.state === 'open'"
               type="button"
               class="btn-ghost-sm"
               :disabled="closing"
-              title="关闭此合并请求（不合并）"
+              :title="isGithub ? 'Close this pull request (without merging)' : '关闭此合并请求（不合并）'"
               @click="requestClose(selectedPR)"
             >
               <XCircle :size="14" :stroke-width="2" aria-hidden="true" />
-              <span>{{ closing && closingPull?.index === selectedPR.index ? '关闭中…' : '关闭' }}</span>
+              <span>{{ closing && closingPull?.index === selectedPR.index ? (isGithub ? 'Closing…' : '关闭中…') : (isGithub ? 'Close' : '关闭') }}</span>
             </button>
           </div>
         </dl>
@@ -2236,7 +2707,7 @@ function formatRelative(iso: string | undefined): string {
             rows="3"
             :value="reviewEditorBody.get(selectedPR.index) ?? ''"
             @input="reviewEditorBody.set(selectedPR.index, ($event.target as HTMLTextAreaElement).value)"
-            placeholder="评审总结（可选）"
+            :placeholder="isGithub ? 'Leave a comment (optional)' : '评审总结（可选）'"
             spellcheck="false"
           ></textarea>
           <div class="pr-detail__review-editor-actions">
@@ -2245,16 +2716,22 @@ function formatRelative(iso: string | undefined): string {
               class="btn-primary-sm"
               :disabled="reviewSubmitting"
               @click="submitReview(selectedPR)"
-            >{{ reviewSubmitting ? '提交中…' : '提交评审' }}</button>
+            >{{ reviewSubmitting ? (isGithub ? 'Submitting…' : '提交中…') : (isGithub ? 'Submit review' : '提交评审') }}</button>
             <button
               type="button"
               class="btn-ghost-sm"
               @click="reviewEditorOpen.delete(selectedPR.index); reviewEditorBody.delete(selectedPR.index)"
-            >取消</button>
+            >{{ isGithub ? 'Cancel' : '取消' }}</button>
           </div>
         </div>
 
-        <!-- Tab 导航：对话 / 代码提交 / 文件变动（对齐 Gitea） -->
+        <!-- Tab 导航：对话 / 代码提交 / 文件变动（对齐 Gitea）
+             v0.7.27 平台感知：
+             - Gitea: "对话" / "代码提交" / "文件变动"（CLAUDE.md 零术语中文）
+             - GitHub web: "Conversation" / "Commits" / "Files changed"（user 截图反馈）
+             GitHub 端 4 tab "Conversation / Commits / Checks / Files changed"，
+             我们的 "Checks" 暂未集成（v0.7.28 TODO 调 GitHub Check Runs API），
+             暂保持 3 tab，标签名按平台切换 -->
         <div class="pr-detail-tabs">
           <button
             type="button"
@@ -2262,12 +2739,13 @@ function formatRelative(iso: string | undefined): string {
             :class="{ 'pr-detail-tab--active': detailTab === 'conversation' }"
             @click="detailTab = 'conversation'"
           >
-            对话
+            {{ isGithub ? 'Conversation' : '对话' }}
             <span v-if="tabLoading.conversation" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
             <span v-if="getTimelinePanel().items.length > 0" class="pr-detail-tab__count">
-              {{ getTimelinePanel().items.length }}
+              <!-- v0.7.46：displayTimelineItems 包含 PR 描述合成 comment，count 要同步 +1 -->
+              {{ displayTimelineItems.length }}
             </span>
           </button>
           <button
@@ -2276,7 +2754,7 @@ function formatRelative(iso: string | undefined): string {
             :class="{ 'pr-detail-tab--active': detailTab === 'commits' }"
             @click="detailTab = 'commits'"
           >
-            代码提交
+            {{ isGithub ? 'Commits' : '代码提交' }}
             <span v-if="tabLoading.commits" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
@@ -2290,7 +2768,7 @@ function formatRelative(iso: string | undefined): string {
             :class="{ 'pr-detail-tab--active': detailTab === 'files' }"
             @click="detailTab = 'files'"
           >
-            文件变动
+            {{ isGithub ? 'Files changed' : '文件变动' }}
             <span v-if="tabLoading.files" class="pr-detail-tab__wave" aria-hidden="true">
               <i></i><i></i><i></i>
             </span>
@@ -2298,18 +2776,28 @@ function formatRelative(iso: string | undefined): string {
               {{ pull.filesByPR.get(selectedPR?.index ?? -1)?.length ?? 0 }}
             </span>
           </button>
+          <!-- v0.7.28：GitHub web 4 tab Checks 占位
+               - 暂不实现：GitHub Check Runs API 端点 GET /repos/{}/{}/commits/{}/check-runs
+                 + 还要聚合 commit head SHA + per-commit status，scope 较大
+               - 留 v0.7.29 TODO：参考 GitHub Check Runs / Check Suites API
+               - 当前显示 disabled 状态 + "0" 计数（GitHub PR 还没 Checks 时也是 0） -->
+          <button
+            v-if="isGithub"
+            type="button"
+            class="pr-detail-tab pr-detail-tab--disabled"
+            disabled
+            title="Checks — not yet integrated (planned for v0.7.30+)"
+          >
+            Checks
+            <span class="pr-detail-tab__count">0</span>
+          </button>
         </div>
 
         <!-- ===== Tab 内容滚动区 ===== -->
         <div class="pr-detail-body">
           <!-- 对话 Tab -->
           <div v-if="detailTab === 'conversation'" class="pr-detail__conversation">
-            <!-- PR 描述（对齐 Gitea：对话流顶部显示） -->
-            <div v-if="selectedPR.body" class="pr-detail__section">
-              <div class="pr-detail__section-label">描述</div>
-              <div class="pr-detail__section-content md-body" v-html="renderMarkdown(selectedPR.body, markdownBaseUrl)"></div>
-            </div>
-            <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在描述下方、对话上方） -->
+            <!-- 合并检查警告区（对齐 Gitea web pull_merge_box 模板：显示在对话上方） -->
             <div
               v-if="selectedPR.state === 'open' && (selectedPR.draft || (selectedPR.commitsBehind && selectedPR.commitsBehind > 0) || cmdHintOpen)"
               class="pr-detail__merge-warning-list"
@@ -2447,18 +2935,19 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
             <div class="pr-detail__conv-list">
               <div v-if="getTimelinePanel().loading && getTimelinePanel().items.length === 0" class="pr-detail__conv-loading">
                 <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
-                <span>正在加载对话…</span>
+                <span>{{ isGithub ? 'Loading conversation…' : '正在加载对话…' }}</span>
               </div>
               <div v-else-if="getTimelinePanel().error && getTimelinePanel().items.length === 0" class="pr-detail__conv-error" role="alert">
                 <span>{{ getTimelinePanel().error }}</span>
-                <button type="button" class="btn-ghost-sm" @click="fetchComments(selectedPR)">重试</button>
+                <button type="button" class="btn-ghost-sm" @click="fetchComments(selectedPR)">{{ isGithub ? 'Retry' : '重试' }}</button>
               </div>
               <div v-else-if="getTimelinePanel().items.length === 0" class="pr-detail__conv-empty">
-                暂无对话，发起第一条评论开始讨论吧
+                {{ isGithub ? 'No conversation yet — add the first comment to start the discussion' : '暂无对话，发起第一条评论开始讨论吧' }}
               </div>
               <ul v-else class="pr-detail__timeline">
-                <!-- v0.7.6：v-for 过滤掉 label 合并后被标记 merged=true 的事件（避免重复渲染） -->
-                <template v-for="(item) in (getTimelinePanel().items ?? []).filter((it) => !it.merged)" :key="`tl-${item.id}`">
+                <!-- v0.7.46：使用 displayTimelineItems（computed）—— 自动在前面拼 PR 描述作为合成首条 comment
+                     v0.7.6：v-for 过滤掉 label 合并后被标记 merged=true 的事件（避免重复渲染） -->
+                <template v-for="(item) in displayTimelineItems.filter((it) => !it.merged)" :key="`tl-${item.id}`">
                   <!-- 评审事件 (v0.7.3：紧凑单行 —— 对齐 Gitea web .timeline-item.event) -->
                   <li
                     v-if="item.type === 'review'"
@@ -2479,8 +2968,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     <div class="pr-detail__event-line">
                       <span class="pr-detail__event-text">
                         <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <!-- v0.7.31 平台感知：review event 时间 layout
+                             - Gitea: actor + time + verb（Gitea web .timeline-item.event 渲染顺序）
+                             - GitHub web: actor + verb + time（"X approved these changes 2 weeks ago"） -->
+                        <span v-if="!isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                         <span class="pr-detail__event-verb">{{ reviewStateLabel(item.state) }}</span>
+                        <span v-if="isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
                       </span>
                     </div>
                   </li>
@@ -2524,9 +3017,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                              "评审事件、评审评论，这些展示没有对齐 Gitea web"
                              —— Gitea web 端 review event comment card 右上角
                              也显示 [所有者] 角色标签（`show_role` 模板，
-                             评论作者 == PR 作者时显示）。 -->
-                        <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" title="合并请求作者">所有者</span>
-                        <span class="pr-detail__comment-verb">留下了一条评论</span>
+                             评论作者 == PR 作者时显示）。
+                             v0.7.32：GitHub 端统一用 "commented" verb（跟普通
+                             comment card 一致），去掉 "left a comment"。
+                             GitHub web 实际渲染 "X commented time" 1 行。 -->
+                        <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" :title="isGithub ? 'This user is the pull request author' : '合并请求作者'">{{ isGithub ? 'Author' : '所有者' }}</span>
+                        <span class="pr-detail__comment-verb">{{ isGithub ? 'commented' : '留下了一条评论' }}</span>
                         <a
                           class="pr-detail__comment-time"
                           :title="formatDate(item.created)"
@@ -2547,17 +3043,26 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     :class="{ 'pr-detail__timeline-item--self': currentUsername && item.author?.username === currentUsername }"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-avatar" :title="displayName(item.author)" aria-hidden="true">
-                        {{ (item.author?.username || '?').charAt(0).toUpperCase() }}
+                      <div class="pr-detail__timeline-avatar" :title="displayName(item.author)">
+                        <img
+                          v-if="item.author?.avatarUrl"
+                          :src="item.author.avatarUrl"
+                          :alt="displayName(item.author)"
+                          class="pr-detail__timeline-avatar-img"
+                          referrerpolicy="no-referrer"
+                        />
+                        <span v-else aria-hidden="true">{{ (item.author?.username || '?').charAt(0).toUpperCase() }}</span>
                       </div>
                     </div>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
                       <div class="pr-detail__comment-meta">
                         <div class="pr-detail__comment-meta-left">
-                          <span v-if="currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
+                          <!-- v0.7.32：GitHub 端不渲染"我"标签（GitHub web 没有 self tag，
+                               只显示 username）。Gitea 端继续渲染"我"标签方便 PM 识别自己的评论。 -->
+                          <span v-if="!isGithub && currentUsername && item.author?.username === currentUsername" class="pr-detail__comment-self-tag">我</span>
                           <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
-                          <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" title="合并请求作者">所有者</span>
-                          <span class="pr-detail__comment-verb">评论于</span>
+                          <span v-if="isPRAuthor(item)" class="pr-detail__comment-role-tag" :title="isGithub ? 'This user is the pull request author' : '合并请求作者'">{{ isGithub ? 'Author' : '所有者' }}</span>
+                          <span class="pr-detail__comment-verb">{{ isGithub ? 'commented' : '评论于' }}</span>
                           <a
                             class="pr-detail__comment-time"
                             :title="formatDate(item.created)"
@@ -2565,16 +3070,28 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                           >{{ formatRelative(item.created) }}</a>
                         </div>
                         <!-- v0.7.4：comment header 右侧 actions —— 对齐 Gitea web show_role + add_reaction + context_menu
-                             表情选择器 + ... 菜单在外部渲染（避免 popover 嵌套在 comment-meta 里影响布局） -->
-                        <div v-if="editingCommentId !== item.id" class="pr-detail__comment-meta-right">
-                          <!-- 表情添加按钮（点击展开 emoji 选择器） -->
-                          <div class="pr-detail__comment-action-wrap">
+                             表情选择器 + ... 菜单在外部渲染（避免 popover 嵌套在 comment-meta 里影响布局）
+                             v0.7.48：PR 描述合成 comment（item.id === 0）整体隐藏
+                             表情按钮（v-if="item.id > 0"）——
+                             修前 v0.7.46 加的 always-visible class 让 PR 描述的
+                             smile 按钮常驻可点，用户点 → POST /issues/comments/0/reactions
+                             → GitHub 404。修法是视觉上彻底隐藏。
+                             保留 ... 菜单（Copy link 等跟 id 无关的功能还能用）。-->
+                        <div
+                          v-if="editingCommentId !== item.id"
+                          class="pr-detail__comment-meta-right"
+                        >
+                          <!-- 表情添加按钮（点击展开 emoji 选择器）—— v0.7.48
+                               item.id > 0 防御：PR 描述（id=0）不渲染，
+                               否则点 → POST /issues/comments/0/reactions → 404。
+                               真实评论（id > 0）才显示 smile 按钮。-->
+                          <div v-if="item.id > 0" class="pr-detail__comment-action-wrap">
                             <button
                               type="button"
                               class="pr-detail__comment-action-btn"
                               :class="{ 'pr-detail__comment-action-btn--active': commentSmileOpen === item.id }"
-                              title="添加表情"
-                              aria-label="添加表情"
+                              :title="isGithub ? 'Add reaction' : '添加表情'"
+                              :aria-label="isGithub ? 'Add reaction' : '添加表情'"
                               @click.stop="toggleSmilePicker(item.id)"
                             >
                               <Smile :size="14" :stroke-width="2" aria-hidden="true" />
@@ -2600,8 +3117,8 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                               type="button"
                               class="pr-detail__comment-action-btn"
                               :class="{ 'pr-detail__comment-action-btn--active': commentMenuOpen === item.id }"
-                              title="更多操作"
-                              aria-label="更多操作"
+                              :title="isGithub ? 'More actions' : '更多操作'"
+                              :aria-label="isGithub ? 'More actions' : '更多操作'"
                               @click.stop="toggleCommentMenu(item.id)"
                             >
                               <MoreHorizontal :size="14" :stroke-width="2" aria-hidden="true" />
@@ -2618,7 +3135,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                                 @click="quoteComment(selectedPR.index, item as any); commentMenuOpen = null"
                               >
                                 <Quote :size="13" :stroke-width="2" aria-hidden="true" />
-                                <span>引用</span>
+                                <span>{{ isGithub ? 'Quote' : '引用' }}</span>
                               </button>
                               <button
                                 type="button"
@@ -2626,7 +3143,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                                 @click="copyCommentLink(item.id)"
                               >
                                 <LinkIcon :size="13" :stroke-width="2" aria-hidden="true" />
-                                <span>复制链接</span>
+                                <span>{{ isGithub ? 'Copy link' : '复制链接' }}</span>
                               </button>
                               <button
                                 v-if="currentUsername && item.author?.username === currentUsername"
@@ -2635,7 +3152,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                                 @click="startEditComment(item as any); commentMenuOpen = null"
                               >
                                 <Pencil :size="13" :stroke-width="2" aria-hidden="true" />
-                                <span>编辑</span>
+                                <span>{{ isGithub ? 'Edit' : '编辑' }}</span>
                               </button>
                               <button
                                 v-if="currentUsername && item.author?.username === currentUsername"
@@ -2644,7 +3161,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                                 @click="confirmDeleteComment(selectedPR, item as any); commentMenuOpen = null"
                               >
                                 <XCircle :size="13" :stroke-width="2" aria-hidden="true" />
-                                <span>删除</span>
+                                <span>{{ isGithub ? 'Delete' : '删除' }}</span>
                               </button>
                             </div>
                           </div>
@@ -2663,14 +3180,14 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                           spellcheck="false"
                         ></textarea>
                         <div class="pr-detail__comment-edit-actions">
-                          <span class="pr-detail__comment-editing-hint">ESC 取消 · Enter 保存</span>
-                          <button type="button" class="btn-ghost-sm" @click.stop="cancelEditComment()">取消</button>
+                          <span class="pr-detail__comment-editing-hint">{{ isGithub ? 'ESC to cancel · Enter to save' : 'ESC 取消 · Enter 保存' }}</span>
+                          <button type="button" class="btn-ghost-sm" @click.stop="cancelEditComment()">{{ isGithub ? 'Cancel' : '取消' }}</button>
                           <button
                             type="button"
                             class="btn-primary-sm"
                             :disabled="(editDrafts.get(item.id) ?? '').trim().length === 0"
                             @click.stop="submitEditComment(selectedPR, item as any)"
-                          >保存</button>
+                          >{{ isGithub ? 'Save' : '保存' }}</button>
                         </div>
                       </template>
                       <!-- 展示态 -->
@@ -2689,29 +3206,34 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         <span
                           v-if="item.updated && item.updated !== item.created"
                           class="pr-detail__comment-edited-mark"
-                          :title="'编辑于 ' + formatDate(item.updated)"
-                        >（已编辑）</span>
-                        <div class="pr-detail__comment-actions">
+                          :title="isGithub ? `Edited ${formatDate(item.updated)}` : `编辑于 ${formatDate(item.updated)}`"
+                        >{{ isGithub ? '(edited)' : '（已编辑）' }}</span>
+                        <!-- v0.7.46：item.id === 0 合成 PR 描述 comment 隐藏底部 action 区
+                             （quote / edit / delete）—— 描述本身不能被引用 / 编辑 / 删除。-->
+                        <div v-if="item.id > 0" class="pr-detail__comment-actions">
                           <button
                             v-if="currentUsername && item.author?.username !== currentUsername"
                             type="button"
                             class="pr-detail__comment-quote"
-                            title="引用这条评论"
+                            :title="isGithub ? 'Quote this comment' : '引用这条评论'"
                             @click.stop="quoteComment(selectedPR.index, item as any)"
                           >
                             <Quote :size="11" :stroke-width="2" aria-hidden="true" />
-                            <span>引用</span>
+                            <span>{{ isGithub ? 'Quote' : '引用' }}</span>
                           </button>
                           <template v-if="currentUsername && item.author?.username === currentUsername">
-                            <button type="button" class="pr-detail__comment-edit-btn" title="编辑" @click.stop="startEditComment(item as any)">
+                            <button type="button" class="pr-detail__comment-edit-btn" :title="isGithub ? 'Edit' : '编辑'" @click.stop="startEditComment(item as any)">
                               <Pencil :size="11" :stroke-width="2" aria-hidden="true" />
                             </button>
-                            <button type="button" class="pr-detail__comment-delete-btn" title="删除" @click.stop="confirmDeleteComment(selectedPR, item as any)">
+                            <button type="button" class="pr-detail__comment-delete-btn" :title="isGithub ? 'Delete' : '删除'" @click.stop="confirmDeleteComment(selectedPR, item as any)">
                               <XCircle :size="11" :stroke-width="2" aria-hidden="true" />
                             </button>
                           </template>
                         </div>
+                        <!-- v0.7.48：ReactionBar 也加 v-if="item.id > 0" 防御
+                             （PR 描述 id=0 不能加 reaction，避免 404）-->
                         <ReactionBar
+                          v-if="item.id > 0"
                           :project-id="activeProjectId ?? ''"
                           :comment-id="item.id"
                           :editable="selectedPR.state === 'open'"
@@ -2735,16 +3257,55 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     ]"
                   >
                     <div class="pr-detail__timeline-rail">
+                      <!-- v0.7.46 修订：system event rail 回退到小 colored dot（v0.7.3 起的样式）——
+                           之前 v0.7.46 改成 user avatar（28x28）把 ul::before 的 2px 竖线
+                           全盖了，line 在 system events 之间也被切断。GitHub web 实际是
+                           system events 用 16-20px 小 icon + line 穿过小 icon 在 events
+                           之间贯穿（看 GitHub web #81 PR 截图），comment 才是 28x28
+                           user avatar 把 line 切断。user 反馈"timeline 连接线应该在
+                           两次对话之间，贯穿多个事件之间，而不是每个用户头像之间"。
+                           改回 colored dot：line 在 events 之间可见，comment 位置由
+                           .pr-detail__timeline-item--comment::before 盖住断开。-->
                       <div class="pr-detail__timeline-dot" :class="`pr-detail__timeline-dot--${systemEventColor(item.type)}`">
                         <component :is="systemEventIcon(item.type)" :size="13" :stroke-width="2.5" aria-hidden="true" />
                       </div>
                     </div>
                     <div class="pr-detail__event-content">
                       <div class="pr-detail__event-line">
+                        <!-- v0.7.46 修订：恢复 system event 主行的 author 名 span。
+                             v0.7.46 第一次改时想对齐 GitHub web"系统事件主行只显示 verb + body"，
+                             但 GitHub web 系统事件实际是"kanban_demo 于上个月 推送了1个提交"
+                             —— author 名在文本里（X = actor），跟 v0.7.3 起的 v0.7.31 Gitea 端
+                             布局一致。同时 v0.7.46 第二次改时把 system event rail 改回
+                             colored dot（不再是 user avatar），author 名回归文本是必要的
+                             —— 不然事件不知道是谁触发的。
+                             评论 (.pr-detail__timeline-item--comment) 保留 author 名在
+                             bubble header 里（v0.7.4 已有），那是另一个渲染分支不受影响。-->
                         <span class="pr-detail__event-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__event-prep">于</span>
-                        <span class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
-                        <span class="pr-detail__event-verb">{{ systemEventVerb(item) }}</span>
+                        <!-- v0.7.32：GitHub 端单 commit push 不显示 author + verb
+                             GitHub web 实际渲染："commit subject" + "short SHA" 单行，无
+                             "X added 1 commit" verb，也无 pusher 名字（commit author 在 commit
+                             详情里，不在 timeline event 上）。
+                             Gitea 端：actor + 于 + time + verb + body（保持 v0.7.31 布局）。 -->
+                        <!-- v0.7.31 平台感知：主行 layout
+                             - Gitea: actor + 于 + time + verb + body（CLAUDE.md 零术语中文）
+                             - GitHub web: actor + verb + body + time（无"于"介词，时间放 verb 后
+                               跟 GitHub web "X closed this 2 weeks ago" 格式 1:1 对齐）
+                             时间用 v-if 分两处渲染：
+                             - Gitea 端在 verb 前
+                             - GitHub 端在 body 之后
+                             保留 v-else-if 链渲染 verb + body（label chip / merge SHA / force push hint），
+                             时间在 v-else-if 链外独立 v-if="isGithub" 渲染。 -->
+                        <span v-if="!isGithub" class="pr-detail__event-prep">于</span>
+                        <span
+                          v-if="!(isGithub && item.type === 'push' && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
+                        >
+                          <span v-if="!isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        </span>
+                        <span
+                          v-if="!(isGithub && item.type === 'push' && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
+                          class="pr-detail__event-verb"
+                        >{{ platformSystemEventVerb(item) }}</span>
                         <!-- v0.7.14：label 事件 chip 移到主行（跟 push/merge/delete_branch
                              一致），不单独换 div 块 —— user 反馈 ⑬"修改了标签" 后面 chip
                              不要单独换一行显示。Gitea web 渲染 "X 于 Y 修改了标签
@@ -2798,19 +3359,76 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                             :href="commitWebUrl(selectedPR.mergeCommitSha)"
                             target="_blank"
                             rel="noopener"
-                            :title="`在 Gitea 打开 ${selectedPR.mergeCommitSha.slice(0, 7)} 合并提交`"
+                            :title="`${isGithub ? 'Open commit' : '在 Gitea 打开'} ${selectedPR.mergeCommitSha.slice(0, 7)} ${isGithub ? 'on GitHub' : '合并提交'}`"
                           >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
-                          <span class="pr-detail__event-hint">到</span>
+                          <span class="pr-detail__event-hint">{{ isGithub ? 'into' : '到' }}</span>
                           <code class="pr-detail__event-branch">{{ baseLabel(selectedPR) }}</code>
+                        </span>
+                        <!-- v0.7.32：push event GitHub 端单 commit 特殊渲染
+                             GitHub web 实际渲染："commit subject" + "short SHA" 同行（右侧），
+                             不显示 "X added 1 commit" verb 也不显示 commit 列表。
+                             参考 https://github.com/July-X/kanban-test/pull/21 截图：
+                             "integration test fixture" + "973c6cd" 单行。
+                             Gitea web 走 Gitea 风格："X 推送了 N 个提交" + 下面 commits_list_small
+                             块（v0.7.8 / v0.7.19 修过），保持不变。
+                             多 commit push：GitHub 端也走 "added N commits" + 列表（Gitea 风格）
+                             —— 避免信息丢失。
+                             限制：必须 commitDetails(sha) 拿得到 subject（store 缓存走
+                             fetchCommitsByPr 拉过），否则 fallback 到 Gitea 风格 verb。 -->
+                        <span
+                          v-else-if="item.type === 'push' && isGithub && item.commitIds && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject"
+                          class="pr-detail__event-push-github"
+                        >
+                          <a
+                            class="pr-detail__event-commit-subject pr-detail__branch--link"
+                            :href="commitWebUrl(item.commitIds[0])"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`Open commit ${item.commitIds[0].slice(0, 7)} on GitHub`"
+                          >{{ commitDetails(item.commitIds[0])?.subject }}</a>
+                          <a
+                            class="mono pr-detail__event-commit-sha pr-detail__branch--link"
+                            :href="commitWebUrl(item.commitIds[0])"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`Open commit ${item.commitIds[0].slice(0, 7)} on GitHub`"
+                          >{{ item.commitIds[0].slice(0, 7) }}</a>
                         </span>
                         <!-- v0.7.19 根因修复：force push 提示搬到主行（v0.7.8 加的 inline 块
                              跟 block 块 v-for 重复，v0.7.19 删 inline 块后 force 提示
                              搬主行："kanban_demo 于 28 天前 推送了 1 个提交 (强制推送)" 1 行
-                             + 下面 commits_list_small 块。 -->
+                             + 下面 commits_list_small 块。
+                             v0.7.30 平台感知：GitHub 端走 "(force pushed)"。 -->
                         <span
                           v-else-if="item.type === 'push' && item.isForcePush"
                           class="pr-detail__event-hint"
-                        >(强制推送)</span>
+                        >{{ isGithub ? '(force pushed)' : '(强制推送)' }}</span>
+                        <!-- v0.7.31 平台感知：GitHub 端时间放 verb 后 + Restore branch 按钮
+                             跟 deleted event 同行（右侧）—— user 反馈 ⑭ "Restore branch 也是和
+                             删除事件一行显示"（参考 GitHub 官方示意图）。
+                             v0.7.34 user 反馈 ⑰ 显示逻辑修复：Restore branch 按钮**仅在
+                             分支当前被删**时显示（看 isBranchCurrentlyDeleted，遍历 timeline
+                             判断最后一次 head_ref_deleted / head_ref_restored 事件）。
+                             修前 bug：每次 delete_branch event 都显示按钮，但分支可能已经被
+                             restore（delete → restore 之后），再显示 Restore 按钮是错的。
+                             对齐 GitHub web：分支当前被删才显示，已 restore 不显示。
+                             - Gitea 端：时间已在 verb 前渲染（v-if="!isGithub" 上面那个 span），
+                               这里不再渲染时间
+                             - GitHub 端：时间 + restore button 放 verb 后，跟 GitHub web
+                               "X deleted the `branch` branch 2 weeks ago [Restore branch]" 1 行
+                             Restore branch 按钮条件：
+                             - 仅 GitHub（Gitea 没这个概念）
+                             - 仅 delete_branch event
+                             - **仅当分支当前被删**（isBranchCurrentlyDeleted）
+                             - 需要 selectedPR.head.sha + selectedPR.head.label（v0.7.28 修） -->
+                        <span v-if="isGithub" class="pr-detail__event-time" :title="formatDate(item.created)">{{ formatRelative(item.created) }}</span>
+                        <button
+                          v-if="isGithub && item.type === 'delete_branch' && selectedPR && selectedPR.head?.sha && selectedPR.head?.label && isBranchCurrentlyDeleted"
+                          type="button"
+                          class="btn-ghost-sm pr-detail__restore-btn pr-detail__restore-btn--inline"
+                          :disabled="pull.restoreBranchLoading"
+                          @click="pull.restoreBranch(activeProjectId!, selectedPR.index, selectedPR.head.label, selectedPR.head.sha)"
+                        >{{ pull.restoreBranchLoading ? 'Restoring…' : 'Restore branch' }}</button>
                       </div>
                       <!-- 行内附加：label chip / milestone / branch / assignees / title 等小信息 -->
                       <div
@@ -2862,15 +3480,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         <!-- v0.7.12: assignees 事件不再有 inline 块，verb 在主行完整 -->
 
 
-                        <!-- v0.7.4：review_request 评审请求详情
-                             Gitea web: "X 请求 Y 评审" / "X 移除了 Y 评审请求"
-                             X = actor (item.author), Y = requested reviewer (item.assignee) -->
-                        <span v-else-if="item.type === 'review_request' && item.assignee">
-                          <UserPlus v-if="!item.removedAssignee" :size="12" :stroke-width="2" aria-hidden="true" />
-                          <UserMinus v-else :size="12" :stroke-width="2" aria-hidden="true" />
-                          <span class="pr-detail__event-username">{{ displayName(item.assignee) }}</span>
-                          <span class="pr-detail__event-hint">{{ item.removedAssignee ? '移除了评审请求' : '请求评审' }}</span>
-                        </span>
+                        <!-- v0.7.55：review_request inline 块整段移除 —— reviewer name 已拼到
+                             systemEventVerb 主行 ('请求 X 评审' / '取消了 X 的评审请求')，
+                             对齐 Gitea web "X 于 Y 请求 Z 评审" 1 行渲染。 -->
 
                         <!-- v0.7.8 根因修复：push 事件详情
                              Gitea 1.26+ timeline 端点 body 是 JSON 字符串
@@ -2940,7 +3552,32 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         </span>
 
                         <span v-else-if="item.type === 'commit_ref' && item.refCommitSha">
-                          <code class="pr-detail__event-branch">{{ item.refCommitSha!.slice(0, 7) }}</code>
+                          <!-- v0.7.46 根因修复：commit_ref 之前只显示短 SHA，丢失 commit subject + author
+                               （v0.7.7 简化版假设 commitSha 在 timeline event 上有，1.26+ 实际没有），
+                               对齐 GitHub web "integration test fixture 3530198" 渲染。
+                               用 commitDetails(refCommitSha) 从 store.commitsByPR 缓存按
+                               短码匹配找 commit subject（selectPR 时 loadCommits 已经预拉），
+                               没缓存降级到只显示 SHA（行为不变）。
+                               注：author 名字 GitHub web 显示在 commit 行右侧，gitea-kanban
+                               timeline 紧凑布局没空间放，跟 v0.7.18 merge event inline 一样
+                               只显示 subject + SHA。-->
+                          <template v-if="commitDetails(item.refCommitSha!)?.subject">
+                            <a
+                              class="pr-detail__event-commit-subject pr-detail__branch--link"
+                              :href="commitWebUrl(item.refCommitSha!)"
+                              target="_blank"
+                              rel="noopener"
+                              :title="`Open commit ${item.refCommitSha!.slice(0, 7)}`"
+                            >{{ commitDetails(item.refCommitSha!)?.subject }}</a>
+                            <a
+                              class="mono pr-detail__event-commit-sha pr-detail__branch--link"
+                              :href="commitWebUrl(item.refCommitSha!)"
+                              target="_blank"
+                              rel="noopener"
+                              :title="`Open commit ${item.refCommitSha!.slice(0, 7)}`"
+                            >{{ item.refCommitSha!.slice(0, 7) }}</a>
+                          </template>
+                          <code v-else class="pr-detail__event-branch">{{ item.refCommitSha!.slice(0, 7) }}</code>
                         </span>
                       </div>
                       <!-- 块级：ref issue / dependency 等需要换行展示的 (对齐 Gitea web .detail) -->
@@ -2949,9 +3586,14 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                         class="pr-detail__event-block"
                       >
                         <span v-if="(item.type === 'issue_ref' || item.type === 'pull_ref' || item.type === 'comment_ref' || item.type === 'change_issue_ref') && item.refIssue">
-                          <span v-if="item.refAction === 'close'" class="pr-detail__event-hint">关闭了</span>
-                          <span v-else-if="item.refAction === 'reopen'" class="pr-detail__event-hint">重开了</span>
-                          <span v-else class="pr-detail__event-hint">引用了</span>
+                          <!-- v0.7.30 平台感知：ref action hint
+                               - Gitea: "关闭了" / "重开了" / "引用了"
+                               - GitHub web 渲染：GitHub 端 timeline 这种 event verb 主体已
+                                 自带动作（"closed this via #N" / "linked #N"），inline 块
+                                 不再需要 verb 提示。 -->
+                          <span v-if="!isGithub && item.refAction === 'close'" class="pr-detail__event-hint">关闭了</span>
+                          <span v-else-if="!isGithub && item.refAction === 'reopen'" class="pr-detail__event-hint">重开了</span>
+                          <span v-else-if="!isGithub" class="pr-detail__event-hint">引用了</span>
                           <a
                             v-if="item.refIssue.repoFullName"
                             :href="refIssueWebUrl(item.refIssue)"
@@ -2999,8 +3641,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                            只显示 SHA 短码链接 + 完整 SHA title（hover 看）。
                            v0.7.9 计划：拉 /pulls/{index}/commits 二次匹配补
                            subject / author 信息（按 SHA 短码 7 位匹配）。 -->
+                      <!-- v0.7.32：GitHub 端单 commit push 不渲染 commit 列表块
+                           （已经在主行 v-else-if 链 pr-detail__event-push-github 里渲染
+                           commit subject + short SHA 同行，避免重复）。多 commit 或
+                           Gitea 端继续渲染列表块。 -->
                       <div
-                        v-if="item.type === 'push' && item.commitIds && item.commitIds.length > 0"
+                        v-if="item.type === 'push' && item.commitIds && item.commitIds.length > 0 && !(isGithub && item.commitIds.length === 1 && commitDetails(item.commitIds[0])?.subject)"
                         class="pr-detail__event-block pr-detail__event-block--commits"
                       >
                         <div
@@ -3023,7 +3669,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                             :href="commitWebUrl(sha)"
                             target="_blank"
                             rel="noopener"
-                            :title="`在 Gitea 打开 ${sha.slice(0, 7)} 提交`"
+                            :title="`${isGithub ? 'Open commit' : '在 Gitea 打开'} ${sha.slice(0, 7)} ${isGithub ? 'on GitHub' : ''}`"
                           >{{ commitDetails(sha)?.subject }}</a>
                           <a
                             v-else
@@ -3031,7 +3677,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                             :href="commitWebUrl(sha)"
                             target="_blank"
                             rel="noopener"
-                            :title="`在 Gitea 打开 ${sha.slice(0, 7)} 提交`"
+                            :title="`${isGithub ? 'Open commit' : '在 Gitea 打开'} ${sha.slice(0, 7)} ${isGithub ? 'on GitHub' : ''}`"
                           >{{ sha.slice(0, 7) }}</a>
                           <span
                             v-if="commitDetails(sha)?.authorName"
@@ -3041,6 +3687,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                       </div>
                     </div>
                   </li>
+
+                  <!-- v0.7.28-29 注释保留：早期版本 Restore branch 按钮是独立 <li>
+                       （在 delete_branch event 之后另起一行）。v0.7.31 user 反馈 ⑭
+                       "Restore branch 也是和删除事件一行显示，参考 GitHub 官方示意图" —
+                       已搬到 delete_branch event 主行 pr-detail__event-line 内
+                       （v-if="isGithub && item.type === 'delete_branch' && ..."），
+                       Gitea 端不显示（Gitea 没 Restore branch 概念），GitHub 端跟
+                       "X deleted the `branch` branch 2 weeks ago [Restore branch]" 同行。
+                       早期独立 <li> 代码已删。下面这条注释留着是方便历史溯源。 -->
 
                   <!-- v0.7.3：dismiss_review 拆 2 卡 —— event 卡已在上面 system-event 块渲染，
                        这里补 reason comment 卡（独立 timeline item，按 comment 卡样式渲染） -->
@@ -3056,9 +3711,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     </div>
                     <div class="pr-detail__comment-bubble">
                       <div class="pr-detail__comment-meta">
-                        <span class="pr-detail__comment-dismiss-reason-tag">驳回原因</span>
+                        <span class="pr-detail__comment-dismiss-reason-tag">{{ isGithub ? 'Dismissal reason' : '驳回原因' }}</span>
                         <span class="pr-detail__comment-author">{{ displayName(item.author) }}</span>
-                        <span class="pr-detail__comment-verb">评论于</span>
+                        <span class="pr-detail__comment-verb">{{ isGithub ? 'commented' : '评论于' }}</span>
                         <a
                           class="pr-detail__comment-time"
                           :title="formatDate(item.created)"
@@ -3072,20 +3727,139 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               </ul>
             </div>
 
-            <!-- 评论输入区 -->
+            <!-- v0.7.28 + v0.7.30 + v0.7.34 platform-aware 改进：
+                 - 关闭但未合并：渲染 "Closed with unmerged commits" panel
+                   - 分支存在：描述带 branch 名 + Delete branch 按钮
+                     · Gitea: "此合并请求已关闭，但 {branch} 分支有未合并的提交。"
+                     · GitHub: "This pull request is closed, but the `{branch}` branch has unmerged commits."
+                   - 分支被删：描述简化 + 无 Delete branch 按钮（已被删，删第二次是 no-op）
+                     · Gitea: "此合并请求已关闭。"
+                     · GitHub: "This pull request is closed."
+                   分支状态由 isBranchCurrentlyDeleted（看 timeline 最后一次 head_ref_*
+                   事件）决定。
+                 - 关闭且已合并：渲染 "Merged" + merge commit 链接
+                   - Gitea: "此合并请求通过提交 {sha} 合并至 {base}。"
+                   - GitHub: "This pull request was merged via commit {sha} into {base}."
+                 - 草稿 / 开放：什么都不渲染 -->
+            <div
+              v-if="selectedPR.state === 'closed' && !selectedPR.merged"
+              class="pr-detail__closed-banner pr-detail__closed-banner--unmerged"
+              role="status"
+            >
+              <!-- v0.7.44：icon 在内容框外部（左侧独立圆角方块，跟内容框分两个 flex item）
+                   内容框独立有 border + 圆角。修前 v0.7.36 icon 在内容框内部（圆 wrapper）
+                   v0.7.40 GitBranch → GitMerge（lucide 简化版）
+                   v0.7.45 lucide GitMerge → OcticonGitMerge（用户给的实际 SVG class
+                   是 octicon-git-merge，1:1 复刻 octicon 路径，3 外圆+3 内点+merge 路径
+                   +底部弧线+垂直线，比 lucide 多 3 外圆+底部弧线）-->
+              <div class="pr-detail__closed-banner-icon-wrap pr-detail__closed-banner-icon-wrap--unmerged" aria-hidden="true">
+                <OcticonGitMerge :size="20" :stroke-width="2" class="pr-detail__closed-banner-icon" />
+              </div>
+              <div class="pr-detail__closed-banner-text-box">
+                <div class="pr-detail__closed-banner-text">
+                  <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Closed with unmerged commits' : '有未合并的提交' }}</div>
+                  <div class="pr-detail__closed-banner-desc">
+                  <!-- v0.7.34：分支被删时不带 branch 描述（对齐 GitHub web "This pull request is closed."） -->
+                  <template v-if="isBranchCurrentlyDeleted">
+                    <template v-if="isGithub">This pull request is closed.</template>
+                    <template v-else>此合并请求已关闭。</template>
+                  </template>
+                  <template v-else-if="isGithub">
+                    This pull request is closed, but the
+                    <a
+                      v-if="headLabel(selectedPR)"
+                      class="mono pr-detail__branch pr-detail__branch--link"
+                      :href="branchWebUrl(headLabel(selectedPR))"
+                      target="_blank"
+                      rel="noopener"
+                    >{{ headLabel(selectedPR) }}</a>
+                    <code v-else class="mono pr-detail__branch">{{ selectedPR.head?.ref }}</code>
+                    branch has unmerged commits.
+                  </template>
+                  <template v-else>
+                    此合并请求已关闭，但
+                    <a
+                      v-if="headLabel(selectedPR)"
+                      class="mono pr-detail__branch pr-detail__branch--link"
+                      :href="branchWebUrl(headLabel(selectedPR))"
+                      target="_blank"
+                      rel="noopener"
+                    >{{ headLabel(selectedPR) }}</a>
+                    <code v-else class="mono pr-detail__branch">{{ selectedPR.head?.ref }}</code>
+                    分支有未合并的提交。
+                  </template>
+                </div>
+              </div>
+              <!-- v0.7.29 + v0.7.30 + v0.7.34 + v0.7.44：Delete branch 按钮
+                   platform-aware + 仅在分支存在时显示（分支被删时按钮无意义）。
+                   v0.7.44 按钮从 pr-detail__closed-banner 直接子元素搬进
+                   pr-detail__closed-banner-text-box 内（text-box 是新加的
+                   有 border 的内容框，按钮现在跟文字一起在框内）-->
+              <button
+                v-if="!isBranchCurrentlyDeleted && headLabel(selectedPR)"
+                type="button"
+                class="btn-ghost-sm pr-detail__closed-banner-action"
+                :disabled="pull.deleteBranchLoading"
+                @click="pull.deleteBranch(activeProjectId!, selectedPR.index, headLabel(selectedPR))"
+              >{{ pull.deleteBranchLoading ? (isGithub ? 'Deleting…' : '删除中…') : (isGithub ? 'Delete branch' : '删除分支') }}</button>
+              </div>
+            </div>
+            <div
+              v-else-if="selectedPR.state === 'closed' && selectedPR.merged"
+              class="pr-detail__closed-banner pr-detail__closed-banner--merged"
+              role="status"
+            >
+              <!-- v0.7.44：merged 面板文字也包在 .pr-detail__closed-banner-text-box 里
+                   （紫色边框线，v0.7.43 紫色边框从 base 容器搬到 text-box），
+                   跟 unmerged 面板结构一致（都是 text-box 在右侧，没有 icon-wrap） -->
+              <div class="pr-detail__closed-banner-text-box">
+                <div class="pr-detail__closed-banner-text">
+                  <div class="pr-detail__closed-banner-title">{{ isGithub ? 'Merged' : '已合并' }}</div>
+                <div
+                  v-if="selectedPR.mergeCommitSha"
+                  class="pr-detail__closed-banner-desc"
+                >
+                  <template v-if="isGithub">
+                    This pull request was merged via commit
+                    <a
+                      class="mono pr-detail__branch pr-detail__branch--link"
+                      :href="commitWebUrl(selectedPR.mergeCommitSha)"
+                      target="_blank"
+                      rel="noopener"
+                    >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
+                    into {{ baseLabel(selectedPR) }}.
+                  </template>
+                  <template v-else>
+                    此合并请求通过提交
+                    <a
+                      class="mono pr-detail__branch pr-detail__branch--link"
+                      :href="commitWebUrl(selectedPR.mergeCommitSha)"
+                      target="_blank"
+                      rel="noopener"
+                    >{{ selectedPR.mergeCommitSha.slice(0, 7) }}</a>
+                    合并至 {{ baseLabel(selectedPR) }}。
+                  </template>
+                </div>
+              </div>
+              </div>
+            </div>
+
+            <!-- 评论输入区
+                 v0.7.30 平台感知：GitHub 端 tooltips 走英文
+                 (保持按钮文字在 Gitea 端中文，跟 Gitea 现有 locale 一致) -->
             <div class="pr-detail__comment-compose">
               <!-- Markdown 工具栏 -->
               <div class="pr-detail__md-toolbar">
-                <button type="button" class="md-toolbar-btn" title="粗体" @click="insertMarkdown(selectedPR.index, 'bold')"><strong>B</strong></button>
-                <button type="button" class="md-toolbar-btn" title="斜体" @click="insertMarkdown(selectedPR.index, 'italic')"><em>I</em></button>
-                <button type="button" class="md-toolbar-btn" title="行内代码" @click="insertMarkdown(selectedPR.index, 'code')"><code>{ }</code></button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'Bold' : '粗体'" @click="insertMarkdown(selectedPR.index, 'bold')"><strong>B</strong></button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'Italic' : '斜体'" @click="insertMarkdown(selectedPR.index, 'italic')"><em>I</em></button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'Inline code' : '行内代码'" @click="insertMarkdown(selectedPR.index, 'code')"><code>{ }</code></button>
                 <span class="md-toolbar-divider"></span>
-                <button type="button" class="md-toolbar-btn" title="链接" @click="insertMarkdown(selectedPR.index, 'link')">链接</button>
-                <button type="button" class="md-toolbar-btn" title="图片" @click="insertMarkdown(selectedPR.index, 'image')">图片</button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'Link' : '链接'" @click="insertMarkdown(selectedPR.index, 'link')">链接</button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'Image' : '图片'" @click="insertMarkdown(selectedPR.index, 'image')">图片</button>
                 <span class="md-toolbar-divider"></span>
-                <button type="button" class="md-toolbar-btn" title="引用" @click="insertMarkdown(selectedPR.index, 'quote')">引用</button>
-                <button type="button" class="md-toolbar-btn" title="列表" @click="insertMarkdown(selectedPR.index, 'list')">列表</button>
-                <button type="button" class="md-toolbar-btn" title="待办" @click="insertMarkdown(selectedPR.index, 'task')">待办</button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'Quote' : '引用'" @click="insertMarkdown(selectedPR.index, 'quote')">引用</button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'List' : '列表'" @click="insertMarkdown(selectedPR.index, 'list')">列表</button>
+                <button type="button" class="md-toolbar-btn" :title="isGithub ? 'Task' : '待办'" @click="insertMarkdown(selectedPR.index, 'task')">待办</button>
               </div>
               <div class="pr-detail__comment-input-wrap">
                 <textarea
@@ -3097,7 +3871,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                   @paste="void onCommentPaste(selectedPR.index, $event)"
                   @drop="void onCommentDrop(selectedPR.index, $event)"
                   @dragover.prevent
-                  :placeholder="'发条评论给 #' + selectedPR.index + '\n@ 提及成员，Enter 发送'"
+                  :placeholder="isGithub ? `Add your comment to #${selectedPR.index}\n@ to mention, Enter to submit` : `发条评论给 #${selectedPR.index}\n@ 提及成员，Enter 发送`"
                   :disabled="getTimelinePanel().posting"
                   rows="3"
                   maxlength="65535"
@@ -3107,7 +3881,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                   type="button"
                   class="pr-detail__comment-send"
                   :disabled="getTimelinePanel().posting || getDraft(selectedPR.index).trim().length === 0"
-                  title="发送评论（Enter 也可发送）"
+                  :title="isGithub ? 'Submit comment (Enter also works)' : '发送评论（Enter 也可发送）'"
                   @click.stop="postComment(selectedPR)"
                 >
                   <Send :size="14" :stroke-width="2" aria-hidden="true" />
@@ -3138,17 +3912,17 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
           <div v-if="detailTab === 'commits'" class="pr-detail__commits">
             <div v-if="pull.commitsLoading" class="pr-detail__conv-loading">
               <Loader2 :size="14" :stroke-width="2" class="spin" aria-hidden="true" />
-              <span>正在加载提交列表…</span>
+              <span>{{ isGithub ? 'Loading commits…' : '正在加载提交列表…' }}</span>
             </div>
             <div v-else-if="pull.commitsByPR.get(selectedPR.index)?.length" class="pr-detail__commit-scroll">
             <table class="pr-detail__commit-table">
               <thead>
                 <tr>
-                  <th class="pr-detail__commit-th-author">作者</th>
+                  <th class="pr-detail__commit-th-author">{{ isGithub ? 'Author' : '作者' }}</th>
                   <th class="pr-detail__commit-th-sha">SHA1</th>
-                  <th class="pr-detail__commit-th-subject">备注</th>
-                  <th class="pr-detail__commit-th-date">提交日期</th>
-                  <th class="pr-detail__commit-th-actions">操作</th>
+                  <th class="pr-detail__commit-th-subject">{{ isGithub ? 'Message' : '备注' }}</th>
+                  <th class="pr-detail__commit-th-date">{{ isGithub ? 'Date' : '提交日期' }}</th>
+                  <th class="pr-detail__commit-th-actions">{{ isGithub ? 'Actions' : '操作' }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -3167,7 +3941,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     <button
                       type="button"
                       class="pr-detail__commit-action-btn"
-                      title="复制完整 SHA"
+                      :title="isGithub ? 'Copy full SHA' : '复制完整 SHA'"
                       @click="copySha(c.sha)"
                     >
                       <Copy :size="12" :stroke-width="2" aria-hidden="true" />
@@ -3175,7 +3949,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     <button
                       type="button"
                       class="pr-detail__commit-action-btn"
-                      title="在 Git Server 中查看此提交"
+                      :title="isGithub ? 'View commit on GitHub' : '在 Git Server 中查看此提交'"
                       @click="openCommitExternal(c.sha)"
                     >
                       <ExternalLink :size="12" :stroke-width="2" aria-hidden="true" />
@@ -3185,7 +3959,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               </tbody>
             </table>
             </div>
-            <div v-else class="pr-detail__empty-hint">暂无提交信息</div>
+            <div v-else class="pr-detail__empty-hint">{{ isGithub ? 'No commits' : '暂无提交信息' }}</div>
           </div>
 
           <!-- 文件变动 Tab -->
@@ -3196,20 +3970,100 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
             />
           </div>
         </div>
+          </div>
+          <!-- v0.7.28：右侧 sidebar（GitHub web 风格：Reviewers / Assignees / Labels /
+               Projects / Milestone / Development / Notifications）
+               v0.7.28 简版：渲染 4 个常用块（Reviewers / Assignees / Labels / Milestone）。
+               Projects / Development / Notifications 留 v0.7.29 补（Projects 端点要
+               调 GitHub GraphQL 拿 issue/71 项目关联，scope 较大）。 -->
+          <aside class="pr-detail-sidebar" v-if="selectedPR">
+            <!-- Reviewers -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Reviewers' : '审阅人' }}</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="(selectedPR.reviewers ?? []).length === 0"
+                  class="pr-sidebar-block__empty"
+                >{{ isGithub ? 'No reviews' : '暂无审阅人' }}</div>
+                <div
+                  v-for="r in (selectedPR.reviewers ?? [])"
+                  :key="r.username"
+                  class="pr-sidebar-block__user"
+                >
+                  <div class="pr-sidebar-block__avatar">{{ r.username.charAt(0).toUpperCase() }}</div>
+                  <span class="pr-sidebar-block__username">{{ r.username }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Assignees -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Assignees' : '指派人' }}</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="(selectedPR.assignees ?? []).length === 0"
+                  class="pr-sidebar-block__empty"
+                >{{ isGithub ? 'No one—' : '尚未指派 — ' }}<span class="pr-sidebar-block__assign-link">{{ isGithub ? 'assign yourself' : '指派自己' }}</span></div>
+                <div
+                  v-for="a in (selectedPR.assignees ?? [])"
+                  :key="a.username"
+                  class="pr-sidebar-block__user"
+                >
+                  <div class="pr-sidebar-block__avatar">{{ a.username.charAt(0).toUpperCase() }}</div>
+                  <span class="pr-sidebar-block__username">{{ a.username }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Labels -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Labels' : '标签' }}</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="(selectedPR.labels ?? []).length === 0"
+                  class="pr-sidebar-block__empty"
+                >{{ isGithub ? 'None yet' : '暂无标签' }}</div>
+                <div class="pr-sidebar-block__label-list">
+                  <span
+                    v-for="label in (selectedPR.labels ?? [])"
+                    :key="label.id"
+                    class="pr-sidebar-block__label"
+                    :style="labelStyle(label.color)"
+                  >{{ label.name }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Milestone -->
+            <div class="pr-sidebar-block">
+              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Milestone' : '里程碑' }}</h3>
+              <div class="pr-sidebar-block__content">
+                <div
+                  v-if="!selectedPR.milestone"
+                  class="pr-sidebar-block__empty"
+                >{{ isGithub ? 'No milestone' : '暂无里程碑' }}</div>
+                <div v-else class="pr-sidebar-block__milestone">
+                  <GitBranch :size="14" :stroke-width="2" aria-hidden="true" />
+                  <span>{{ selectedPR.milestone.title }}</span>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
       </section>
 
       <!-- 未选中 PR 空态 -->
       <section v-else class="pr-detail-panel pr-detail-panel--empty">
-        <EmptyState title="选择一个合并请求" description="点击左侧列表查看详情、评论和操作" />
+        <EmptyState
+          :title="isGithub ? 'Select a pull request' : '选择一个合并请求'"
+          :description="isGithub ? 'Click a pull request from the list to view details, comments, and actions' : '点击左侧列表查看详情、评论和操作'"
+        />
       </section>
     </div>
 
     <!-- ============== 合并二次确认弹窗 ============== -->
     <ConfirmDialog
       :open="confirmMergeOpen"
-      title="确认合并"
+      :title="isGithub ? 'Confirm merge' : '确认合并'"
       :description="confirmDescription"
-      confirm-label="我了解风险，仍要合并"
+      :confirm-label="isGithub ? 'I understand the risks, merge anyway' : '我了解风险，仍要合并'"
       :danger="isMainBranch(mergingPull?.base.ref ?? '')"
       @update:open="confirmMergeOpen = $event"
       @confirm="performMerge"
@@ -3217,7 +4071,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
     >
       <!-- 合并方式选择 slot：放在 description 后面、确认按钮前面 -->
       <div class="merge-confirm__methods">
-        <p class="merge-confirm__methods-title">选择合并方式：</p>
+        <p class="merge-confirm__methods-title">{{ isGithub ? 'Choose merge method:' : '选择合并方式：' }}</p>
         <!-- A-3 P2 · B5 修法：默认只显示普通合并，高级方式折叠 -->
         <div class="merge-confirm__method-list">
           <label
@@ -3236,7 +4090,8 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
             <span class="merge-confirm__method-hint">{{ m.hint }}</span>
           </label>
         </div>
-        <!-- A-3 P2：高级方式 disclosure 开关 -->
+        <!-- A-3 P2：高级方式 disclosure 开关
+             v0.7.30 平台感知：GitHub 端走 "Advanced options" -->
         <button
           v-if="!showAdvancedMethods"
           type="button"
@@ -3244,7 +4099,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
           @click="showAdvancedMethods = true"
         >
           <ChevronDown :size="12" :stroke-width="2" aria-hidden="true" />
-          <span>高级选项（变基 / 压缩）</span>
+          <span>{{ isGithub ? 'Advanced options (rebase / squash)' : '高级选项（变基 / 压缩）' }}</span>
         </button>
         <button
           v-else
@@ -3253,21 +4108,22 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
           @click="showAdvancedMethods = false"
         >
           <ChevronUp :size="12" :stroke-width="2" aria-hidden="true" />
-          <span>收起高级选项</span>
+          <span>{{ isGithub ? 'Hide advanced options' : '收起高级选项' }}</span>
         </button>
         <!-- squash 需要输入 commitMessage -->
         <div v-if="needsCommitMessage(selectedMethod)" class="merge-confirm__message">
-          <label class="merge-confirm__message-label" for="squash-msg">合并提交信息（必填）：</label>
+          <label class="merge-confirm__message-label" for="squash-msg">{{ isGithub ? 'Commit message (required):' : '合并提交信息（必填）：' }}</label>
           <input
             id="squash-msg"
             v-model="squashMessage"
             type="text"
             class="merge-confirm__message-input"
-            placeholder="请输入合并提交信息"
+            :placeholder="isGithub ? 'Enter the commit message' : '请输入合并提交信息'"
             autocomplete="off"
           />
         </div>
-        <!-- v0.6+：合并后顺手删除源分支（PM 选 merge 时最容易忘的清理） -->
+        <!-- v0.6+：合并后顺手删除源分支（PM 选 merge 时最容易忘的清理）
+             v0.7.30 平台感知：GitHub 端走 "Delete the source branch after merging" 文案 -->
         <div v-if="mergingPull" class="merge-confirm__delete-branch">
           <label class="merge-confirm__delete-branch-label">
             <input
@@ -3275,11 +4131,17 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
               type="checkbox"
               class="merge-confirm__delete-branch-checkbox"
             />
-            <span>合并后删除源分支 <code>{{ headLabel(mergingPull) }}</code></span>
+            <span v-if="isGithub">Delete the source branch <code>{{ headLabel(mergingPull) }}</code> after merging</span>
+            <span v-else>合并后删除源分支 <code>{{ headLabel(mergingPull) }}</code></span>
           </label>
           <p class="merge-confirm__delete-branch-hint">
-            勾选后：合并成功时删除 <code>{{ headLabel(mergingPull) }}</code>。
-            GitHub 合并成功后会调 DELETE /git/refs/heads/&lt;ref&gt;；Gitea 直接走 /pulls/{index}/merge 内置参数。
+            <template v-if="isGithub">
+              When enabled, the <code>{{ headLabel(mergingPull) }}</code> branch will be deleted after the merge succeeds via <code>DELETE /git/refs/heads/&lt;ref&gt;</code>.
+            </template>
+            <template v-else>
+              勾选后：合并成功时删除 <code>{{ headLabel(mergingPull) }}</code>。
+              GitHub 合并成功后会调 DELETE /git/refs/heads/&lt;ref&gt;；Gitea 直接走 /pulls/{index}/merge 内置参数。
+            </template>
           </p>
         </div>
       </div>
@@ -3288,9 +4150,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
     <!-- ============== 删除评论二次确认弹窗（v0.5.0 M1） ============== -->
     <ConfirmDialog
       :open="confirmDeleteOpen"
-      title="删除评论"
-      description="确定要删除这条评论吗？删除后无法恢复。"
-      confirm-label="删除"
+      :title="isGithub ? 'Delete comment' : '删除评论'"
+      :description="isGithub ? 'Are you sure you want to delete this comment? It cannot be recovered.' : '确定要删除这条评论吗？删除后无法恢复。'"
+      :confirm-label="isGithub ? 'Delete' : '删除'"
       :danger="true"
       @update:open="confirmDeleteOpen = $event"
       @confirm="deletingComment && deleteComment(deletingComment.p, deletingComment.c)"
@@ -5912,6 +6774,98 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   justify-content: center;
 }
 
+/* v0.7.28：两列布局（主内容 + 右侧 sidebar，GitHub web 风格） */
+.pr-detail-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.pr-detail-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.pr-detail-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-divider);
+  padding: var(--space-4);
+  overflow-y: auto;
+  background: var(--color-shell-main-bg);
+}
+.pr-sidebar-block {
+  margin-bottom: var(--space-4);
+}
+.pr-sidebar-block__title {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-divider);
+}
+.pr-sidebar-block__empty {
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+.pr-sidebar-block__assign-link {
+  color: var(--color-link);
+  cursor: pointer;
+}
+.pr-sidebar-block__user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 0;
+  font-size: var(--font-sm);
+}
+.pr-sidebar-block__avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-shell-main-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.pr-sidebar-block__username {
+  color: var(--color-text);
+}
+.pr-sidebar-block__label-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pr-sidebar-block__label {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  /* v0.7.55：sidebar label 加实色背景 + 自适应文字色（跟 .pr-detail__event-label
+     timeline 事件 label 同源），保持跟 timeline 一致的视觉。color/background 用
+     var 读取 labelStyle() 注入的 --label-color / --label-bg；border 显式 transparent
+     避免 fallback 触发别的 border-color（v0.7.6 labelStyle 已返回 --label-border: transparent）。 */
+  color: var(--label-color);
+  background: var(--label-bg);
+  border: 1px solid var(--label-border, transparent);
+}
+.pr-sidebar-block__milestone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-sm);
+  color: var(--color-text);
+}
+
 /* 详情头部 */
 .pr-detail-header {
   padding: var(--space-4);
@@ -6011,17 +6965,6 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__branch--link:hover {
   text-decoration: underline;
   filter: brightness(1.1);
-}
-.pr-detail__label {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  margin-right: 2px;
-  color: var(--label-color);
-  background: var(--label-bg);
-  border: 1px solid var(--label-border, transparent);
-  font-weight: 500;
 }
 .pr-detail__edit-attrs {
   display: inline-flex;
@@ -6210,6 +7153,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   transition: color var(--t-base) var(--ease), border-color var(--t-base) var(--ease);
 }
 .pr-detail-tab:hover { color: var(--color-text); }
+.pr-detail-tab--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.pr-detail-tab--disabled:hover { color: var(--color-text-secondary); }
 .pr-detail-tab--active {
   color: var(--color-text);
   border-bottom-color: var(--color-primary);
@@ -6353,6 +7301,100 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg);
   border-radius: var(--radius-sm);
+}
+
+/* ===== v0.7.28 + v0.7.44 PR 关闭状态块（GitHub web 风格，timeline 下方） =====
+   v0.7.44 改：base 容器只做 flex 布局，border/背景/padding 都搬到
+   内层 .pr-detail__closed-banner-text-box（icon 在外部左侧独立圆角方块，
+   跟内容框分两个 flex item，对齐 GitHub web MergeabilityIcon 实际渲染）。*/
+.pr-detail__closed-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  /* v0.7.44：background / border / border-radius / padding 都搬给
+     内层 .pr-detail__closed-banner-text-box（base 容器只做 flex 布局）*/
+}
+.pr-detail__closed-banner-icon {
+  color: #fff; /* v0.7.36：反白（GitHub web 风格 — 实心方块背景 + 反白 icon） */
+  flex-shrink: 0;
+}
+/* v0.7.36 + v0.7.44：icon-wrap 走"实心填色方块"（GitHub web MergeabilityIcon
+   风格）—— 修前 panel icon 只是彩色 GitMerge/GitPullRequestArrow 无方块背景，
+   v0.7.36 包一个 36×36 圆 + 实心填色 + 反白 icon。
+   v0.7.44 改 border-radius: 50% → var(--radius-md)（圆 → 圆角方块，
+   对齐 GitHub web "rounded-2"），并把 wrap 从内容框内部搬到外部左侧
+   （跟 .pr-detail__closed-banner-text-box 分两个 flex item）。
+   - unmerged 面板：深灰底（GitHub web 标准，#6e7681 ≈ --color-text-muted）*/
+.pr-detail__closed-banner-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.pr-detail__closed-banner-icon-wrap--unmerged { background: #6e7681; } /* GitHub web "Closed" 灰 */
+/* v0.7.44：内容框（独立有 border + 圆角，icon 在外部）。
+   merged 面板的紫色边框从 .pr-detail__closed-banner--merged base 搬到这里
+   （v0.7.43 紫色边框原本加在 base 容器，现在 base 只做 flex，border
+   由 text-box 承担，所以紫色也搬过来）。*/
+.pr-detail__closed-banner-text-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+}
+.pr-detail__closed-banner--merged .pr-detail__closed-banner-text-box {
+  border-color: #8250df; /* 紫色边框（GitHub web "Merged" 标准色） */
+}
+/* v0.7.46 删 unmerged 红色 fallback —— v0.7.36 已经在 base .pr-detail__closed-banner-icon
+   强制 color:#fff（实心灰底 + 反白 icon，对齐 GitHub web MergeabilityIcon 风格），
+   这条 specificity 0,2,0 的红色覆写是 v0.7.36 之前留的"防御"，现在反而把反白盖住
+   变成红 icon。删了让 base #fff 生效，对齐 Gitea web 灰底白 icon 视觉。*/
+.pr-detail__closed-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+.pr-detail__closed-banner-title {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pr-detail__closed-banner-desc {
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  margin-top: 2px;
+}
+/* v0.7.29：Delete branch 按钮（Closed 状态块右侧，GitHub web 风格） */
+.pr-detail__closed-banner-action {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* v0.7.28-29 注释保留：早期版本 Restore branch 按钮是独立 <li>（带 left rail
+   RotateCcw icon dot）。v0.7.31 已搬到 delete_branch event 主行 pr-detail__event-line 内
+   （v-if="isGithub && item.type === 'delete_branch' && ..."），独立 <li> 删了。
+   下面 2 条 CSS 规则已无引用，删掉避免 dead code：
+     - .pr-detail__timeline-item--restore-action
+     - .pr-detail__timeline-dot--restore
+   保留这条注释是方便历史溯源。 */
+
+.pr-detail__restore-btn {
+  margin-left: var(--space-2);
+}
+/* v0.7.31：Restore branch 按钮在 event-line 内（同行右侧）样式微调
+   比独立 <li> 时的版本小一号，跟主行文字大小一致（Gitea web 实际就是小按钮） */
+.pr-detail__restore-btn--inline {
+  margin-left: auto;       /* flex 推到最右 */
+  padding: 2px 10px;
+  font-size: var(--font-sm);
+  line-height: 1.4;
 }
 .pr-detail__merge-warning-step {
   font-weight: 600;
@@ -6725,7 +7767,13 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__conv-list {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  /* v0.7.55：移除 overflow-y: auto，让 timeline 内容溢出时让 .pr-detail-body
+     的滚动条接管。修复前 .pr-detail-content + .pr-detail-body + .pr-detail__conv-list
+     三层嵌套都 overflow-y: auto，timeline 自己内嵌一条滚动条 + 外层一条，user 反馈
+     "timeline 不应该出现新的纵向滚动条"。flex:1 + min-height:0 保留，让 conv-list
+     仍然撑满 body 高度（让 timeline ul 的 position: absolute 子元素能正确
+     相对 conv-list 定位），但滚动归 .pr-detail-body 管。 */
+  overflow: visible;
 }
 .pr-detail__conv-loading,
 .pr-detail__conv-error,
@@ -6749,7 +7797,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__timeline {
   list-style: none;
   margin: 0;
-  padding: 0 0 0 32px;       /* 左侧留 32px 给 avatar/icon 节点 */
+  padding: 0 0 0 36px;       /* v0.7.50 缩到 36px：comment avatar (28px 宽) + 8px 间隙紧贴 bubble，avatar 和 bubble 不再被 line 分开 */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -6758,15 +7806,19 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__timeline::before {
   content: "";
   position: absolute;
-  top: 14px;                  /* 第一个 avatar 中心对齐 */
-  bottom: 14px;               /* 最后一个 avatar 中心对齐 */
-  left: 14px;                 /* 竖线在 padding 32px 的中间 */
+  top: 14px;                  /* 第一个 system event dot 中心对齐 */
+  bottom: 14px;               /* 最后一个 system event dot 中心对齐 */
+  left: 80px;                 /* v0.7.51 从 200px 改回 80px —— line 在 bubble 左边缘内侧（44px inside），不切断 bubble 文字，对齐 GitHub web */
   width: 2px;
   /* v0.7.4：用 --color-timeline（专门 token，比 --color-divider 略亮）——
      暗色 18% / 亮色 16% alpha，确保 timeline 序列感可见但不喧宾夺主 */
   background: var(--color-timeline, var(--color-divider));
   border-radius: 1px;
-  z-index: 0;
+  /* v0.7.52：z-index 改 auto（之前 0 创建 stacking context，反而渲染在 li 之后，
+     盖在 bubble 上面造成"line 穿过 bubble"覆盖 bug）。改 auto 后不创建 stacking
+     context，按文档顺序渲染在 li 之前，被 bubble 背景自然盖住 —— 实现
+     "timeline 在气泡下面隐而不断" 效果。system event rail 仍 z-index:1 在 line 上面。 */
+  z-index: auto;
 }
 .pr-detail__timeline-item {
   position: relative;         /* 让 .pr-detail__timeline-rail 绝对定位生效 */
@@ -6776,7 +7828,14 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 /* 普通评论卡 (timeline-item--comment) —— 用大块气泡布局 */
 .pr-detail__timeline-item--comment {
   padding: 6px 0;
+  position: relative;        /* v0.7.46：让 ::before 绝对定位生效 */
 }
+/* v0.7.52：删除 comment ::before patch。v0.7.51 之前 line z-index:0 创建
+   stacking context，渲染在 bubble 之后盖住 bubble 内部，所以需要 ::before 用
+   var(--color-bg) patch line（但 patch 颜色跟 bubble 的 var(--color-bg-elevated)
+   不同，会产生可见色差）。v0.7.52 line 改 z-index:auto 后，按文档顺序渲染在
+   li 之前，bubble 背景自然盖住 line —— 实现"timeline 在气泡下面隐而不断" 效果，
+   不再需要 ::before patch。*/
 /* 评审事件 / 系统事件 (timeline-item--event) —— 单行紧凑 */
 .pr-detail__timeline-item--event {
   display: flex;
@@ -6789,7 +7848,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 /* ===== Avatar (comment) / Dot (event) 节点 —— 定位在 timeline 竖线上 ===== */
 .pr-detail__timeline-rail {
   position: absolute;
-  left: -32px;                /* 对齐 ul 的 padding-left: 32px */
+  left: -36px;                /* v0.7.50 跟随 ul padding 缩到 36px，comment avatar 仍居中最左 (rail spans 0-28 from ul, center 14px) */
   top: 50%;
   transform: translateY(-50%);
   width: 28px;
@@ -6798,6 +7857,18 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   display: flex;
   align-items: center;
   justify-content: center;
+}
+/* v0.7.55：comment 类卡片（普通评论 / 评审正文 / dismiss reason）的 avatar
+   不再 li 垂直居中，改为对齐 bubble 左箭头位置。
+   计算：li padding-top 6px + bubble padding-top 12px + 6px 三角中心 = 24px from li top。
+   rail height 28px，top:24px + translateY(-50%) 让 rail 中心 = 24px = 箭头中心。
+   之前用 top:50% 居中在 ~36px，avatar 比箭头低 ~12px 看起来脱钩。 */
+.pr-detail__timeline-item--comment .pr-detail__timeline-rail {
+  top: 24px;
+}
+/* v0.7.51：system event / review event 的 rail 缩进到 line 位置（28px 宽居中 80px from ul） */
+.pr-detail__timeline-item--event .pr-detail__timeline-rail {
+  left: 30px;                 /* rail spans 66-94 from ul，center 80px = line 位置 */
 }
 /* comment avatar：圆形 + 边框（边框色 == ul 背景色 = 切断竖线） */
 .pr-detail__timeline-avatar {
@@ -6813,6 +7884,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   font-size: 12px;
   color: var(--color-text-secondary);
   user-select: none;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+/* v0.7.46 头像图片：填满 28×28 圆形，覆盖全容器 */
+.pr-detail__timeline-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .pr-detail__timeline-avatar--dismiss {
   background: var(--color-bg-hover);
@@ -6835,16 +7915,27 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
-/* 5 档颜色 —— 对齐 Gitea web .badge 语义色 */
-.pr-detail__timeline-dot--success { color: var(--color-success); border-color: var(--color-success); }
-.pr-detail__timeline-dot--danger  { color: var(--color-danger);  border-color: var(--color-danger); }
-.pr-detail__timeline-dot--merge   { color: #8250df;             border-color: #8250df; }
-.pr-detail__timeline-dot--warn    { color: #d4a72c;             border-color: #d4a72c; }
-.pr-detail__timeline-dot--neutral { color: var(--color-text-muted); border-color: var(--color-divider); }
-/* 评审事件 dot 颜色按 state */
-.pr-detail__timeline-dot--review-approved { color: var(--color-success); border-color: var(--color-success); }
-.pr-detail__timeline-dot--review-changes_requested { color: var(--color-danger); border-color: var(--color-danger); }
-.pr-detail__timeline-dot--review-commented { color: var(--color-text-muted); border-color: var(--color-divider); }
+/* v0.7.36：5 档颜色 —— 对齐 GitHub web 实心填色 + 反白 icon
+ *   修前：dot 保持中性背景（background 走 var(--color-bg-elevated)），只改 border + icon 颜色
+ *         跟 GitHub web 实心圆 + 反白 icon 视觉差异大
+ *   修后：colored event dot 走"实心填色背景 + 反白 icon"（GitHub web 风格）
+ *         中性 dot 保持现状（背景 --color-bg-elevated + 描边 --color-divider）
+ *   颜色取自 GitHub Primer color palette（octicon issue-closed/merged/reopened 标准色）：
+ *     - success: GitHub #1f883d / Gitea --color-success
+ *     - danger:  GitHub #cf222e / Gitea --color-danger
+ *     - merge:   GitHub #8250df（purple）
+ *     - warn:    GitHub #d4a72c（orange / amber）
+ *     - neutral: 保持中性（不变）
+ */
+.pr-detail__timeline-dot--success { color: #fff; background: var(--color-success, #1f883d); border-color: var(--color-success, #1f883d); }
+.pr-detail__timeline-dot--danger  { color: #fff; background: var(--color-danger, #cf222e);  border-color: var(--color-danger, #cf222e); }
+.pr-detail__timeline-dot--merge   { color: #fff; background: #8250df;             border-color: #8250df; }
+.pr-detail__timeline-dot--warn    { color: #fff; background: #d4a72c;             border-color: #d4a72c; }
+.pr-detail__timeline-dot--neutral { color: #fff; background: #6e7681;             border-color: #6e7681; }
+/* 评审事件 dot 颜色按 state（GitHub web 同色：approved 绿 / changes_requested 红 / commented 灰） */
+.pr-detail__timeline-dot--review-approved { color: #fff; background: var(--color-success, #1f883d); border-color: var(--color-success, #1f883d); }
+.pr-detail__timeline-dot--review-changes_requested { color: #fff; background: var(--color-danger, #cf222e); border-color: var(--color-danger, #cf222e); }
+.pr-detail__timeline-dot--review-commented { color: var(--color-text-muted); background: var(--color-bg-elevated); border-color: var(--color-divider); }
 
 /* ===== System Event 紧凑单行（对齐 Gitea web .timeline-item event） ===== */
 .pr-detail__timeline-item--system .pr-detail__event-content {
@@ -6855,6 +7946,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   gap: 2px;
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
+  /* v0.7.51：system event rail 缩进到 line 位置 (x=80)，event-content 需要
+     padding-left 把文字推到 icon 右边（rail spans x=66-94, center 80）。
+     58px = 30px (rail 距 li 左 30px) + 28px (rail width) = 文字从 x=36+58=94 开始，
+     正好接 rail 右边，避免文字被 icon 盖住。*/
+  padding-left: 58px;
   /* v0.7.17 根因修复：pr-detail__event-content 内部子块（主行 + inline + block）
      各自保持 1 行渲染，超出部分溢出隐藏 —— user 反馈"pr-detail__event-content
      当中内容，应该尽量 1 行显示完，不要多行显示"。主行 / inline 块强制不换行
@@ -6941,6 +8037,24 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   margin-top: 2px;
   padding: 0;
 }
+/* v0.7.32：GitHub 端单 commit push 主行内 commit subject + short SHA 同行布局
+   跟 Gitea web commits_list_small 模板不同，GitHub web 是单行 "subject" + "short SHA"
+   （右侧），无 GitCommit icon 无 author。 */
+.pr-detail__event-push-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.pr-detail__event-push-github .pr-detail__event-commit-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pr-detail__event-commit-row {
   display: flex;
   align-items: center;
@@ -6969,6 +8083,19 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* v0.7.46：commit_ref 事件主行包装（紧跟 verb "引用了此提交" 后）——
+   margin-left: auto 把整个包装推到主行右边（跟 verb 分开，verb 留在左边），
+   min-width: 0 + max-width: 100% + overflow: hidden 配合内部 subject 的
+   flex:1 + ellipsis，撑爆宽度时 subject 优先省略号截断，短 SHA 不动。*/
+.pr-detail__event-commit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+  max-width: 100%;
+  overflow: hidden;
 }
 .pr-detail__event-commit-author {
   color: var(--color-text-muted);
@@ -7054,7 +8181,8 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   transition: opacity 0.15s ease;
 }
 .pr-detail__comment-bubble:hover .pr-detail__comment-meta-right,
-.pr-detail__comment-meta-right:has(.pr-detail__comment-action-btn--active) {
+.pr-detail__comment-meta-right:has(.pr-detail__comment-action-btn--active),
+.pr-detail__comment-meta-right--always-visible {
   opacity: 1;
 }
 .pr-detail__comment-action-wrap {
@@ -7164,13 +8292,25 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   min-width: 0;
   padding: var(--space-3);
   background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   /* v0.7.3：左箭头 —— 对齐 Gitea web .avatar-content-left-arrow。
      三角形 ::before 指向左侧 timeline-rail 节点，模拟气泡箭头。
      event（review / system）通过 timeline-item--event 不用 bubble，没箭头。 */
   position: relative;
+  /* v0.7.53：加 hover 效果 —— border 颜色从 divider 变 text-muted，background
+     从 bg-elevated 变 bg-hover，配合 0.15s ease transition。user 反馈"对话汽包
+     应该有边线、悬浮效果，不然和 timeline 配合起来有些突兀"。*/
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.pr-detail__comment-bubble:hover {
+  border-color: var(--color-text-muted);
+  background: var(--color-bg-hover);
 }
 .pr-detail__comment-bubble::before {
+  /* v0.7.3：内三角形（背景色）—— 实际可见的箭头填充。
+     v0.7.54：z-index:1 盖在 ::after 外三角形上面，让内三角形"吃掉"外三角形
+     1px 边线以内的区域，形成边线效果。 */
   content: "";
   position: absolute;
   left: -6px;
@@ -7180,8 +8320,42 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   border-style: solid;
   border-width: 6px 6px 6px 0;
   border-color: transparent var(--color-bg-elevated) transparent transparent;
+  z-index: 1;
+  /* v0.7.53：hover 时左箭头跟着 bubble 背景变（var(--color-bg-hover)），
+     否则箭头和 bubble 背景色不一致会露馅。*/
+  transition: border-right-color 0.15s ease;
 }
-.pr-detail__comment-bubble--editing { background: var(--color-bg-elevated); }
+/* v0.7.54：外三角形（border 色）—— 模拟箭头边线。比 ::before 内三角形大 1px
+   （7px vs 6px，左偏 1px），内三角形 z-index:1 盖住重叠区域，露出的 1px 形成
+   箭头边线。边线颜色跟 bubble border 同步：默认 divider、hover text-muted、
+   editing primary。*/
+.pr-detail__comment-bubble::after {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 11px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 7px 7px 7px 0;
+  border-color: transparent var(--color-divider) transparent transparent;
+  transition: border-right-color 0.15s ease;
+}
+.pr-detail__comment-bubble:hover::before {
+  border-right-color: var(--color-bg-hover);
+}
+.pr-detail__comment-bubble:hover::after {
+  border-right-color: var(--color-text-muted);
+}
+.pr-detail__comment-bubble--editing {
+  background: var(--color-bg-elevated);
+  /* v0.7.53：editing 状态 border 用 primary 色高亮，区别于普通 hover。*/
+  border-color: var(--color-primary);
+}
+.pr-detail__comment-bubble--editing::after {
+  /* v0.7.54：editing 状态外三角形同步 primary 色。*/
+  border-right-color: var(--color-primary);
+}
 .pr-detail__comment-meta {
   display: flex;
   align-items: center;

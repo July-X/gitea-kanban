@@ -378,6 +378,62 @@ func (a *App) UpdatePullBranch(args UpdatePullBranchArgs) (PullDetailAppDTO, err
 	return *d, nil
 }
 
+// ===== RestorePullBranch =====
+
+// RestorePullBranchArgs 恢复被删 head 分支参数
+type RestorePullBranchArgs struct {
+	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"` // 要恢复的分支名（不带 refs/heads/ 前缀）
+	SHA       string `json:"sha"`    // 分支指向的 commit SHA（PR 详情 head.sha）
+}
+
+// RestorePullBranch 恢复被删的 head 分支（v0.7.28 "Restore branch" 按钮用）
+//
+// 场景：PR 关闭 + head 分支被删（GitHub web 关闭 PR 默认删除源分支）后，user
+// 在 timeline head_ref_deleted event 旁看到 "Restore branch" 按钮，点这个调
+// 后端重建分支（POST /repos/{owner}/{repo}/git/refs）。
+//
+// Gitea + GitHub 端点统一：POST /repos/{owner}/{repo}/git/refs
+// body: {"ref": "refs/heads/{branch}", "sha": "{commit_sha}"}
+//
+// 错误处理：
+//   - 422 "Reference already exists" → 分支已存在，提示用户
+//   - 404 "Not Found" → commit SHA 失效（极罕见，分支 SHA 被 force push 后又删）
+func (a *App) RestorePullBranch(args RestorePullBranchArgs) error {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return err
+	}
+	return adapter.RestorePullBranch(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Branch, args.SHA)
+}
+
+// ===== DeletePullBranch =====
+
+// DeletePullBranchArgs 删除 head 分支参数
+type DeletePullBranchArgs struct {
+	ProjectID string `json:"projectId"`
+	Branch    string `json:"branch"` // 要删除的分支名（不带 refs/heads/ 前缀）
+}
+
+// DeletePullBranch 删除 head 分支（v0.7.29 "Delete branch" 按钮用）
+//
+// 场景：PR 关闭后 user 在 Closed 状态块右侧看到 "Delete branch" 按钮（GitHub web
+// 风格）→ 显式删 head 分支（pr 已经关了 + branch 还在的情况）。
+//
+// Gitea 走 DELETE /api/v1/repos/{owner}/{repo}/git/refs/refs/heads/{branch}
+// GitHub 走 DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
+//
+// 错误处理：
+//   - 404 "Not Found" → 分支已不存在（race condition，提示用户"分支已被删除"）
+//   - 422 / 403 → 没权限（提示用户联系仓库管理员）
+func (a *App) DeletePullBranch(args DeletePullBranchArgs) error {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return err
+	}
+	return adapter.DeletePullBranch(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Branch)
+}
+
 // ===== PR 评论（v0.6+）=====
 //
 // 范围限定：只做 PR 上下文（issue 评论另起 issue）。

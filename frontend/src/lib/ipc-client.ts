@@ -825,6 +825,28 @@ export function pullsUpdateBranch(args: {
   return getIpcClient().invoke('pulls', 'updateBranch', args);
 }
 
+/** v0.7.28：恢复被删 head 分支（"Restore branch" 按钮用，head_ref_deleted event 旁）
+ * Gitea + GitHub 端点统一：POST /repos/{owner}/{repo}/git/refs body {ref, sha}
+ * branch 不带 refs/heads/ 前缀（Go 端会拼），sha 是 PR 详情 head.sha */
+export function pullsRestoreBranch(args: {
+  projectId: string;
+  branch: string;
+  sha: string;
+}): Promise<void> {
+  return getIpcClient().invoke('pulls', 'restoreBranch', args);
+}
+
+/** v0.7.29：删除 head 分支（"Delete branch" 按钮用，Closed 状态块右侧）
+ * Gitea: DELETE /api/v1/repos/{owner}/{repo}/git/refs/refs/heads/{branch}（路径带 refs/heads/ 前缀）
+ * GitHub: DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}（路径不带 refs/heads/ 前缀）
+ * branch 不带 refs/heads/ 前缀（Go 端按平台加） */
+export function pullsDeleteBranch(args: {
+  projectId: string;
+  branch: string;
+}): Promise<void> {
+  return getIpcClient().invoke('pulls', 'deleteBranch', args);
+}
+
 /**
  * 上传 PR/issue 附件（v0.7.0 贴图支持）
  *

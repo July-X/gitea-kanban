@@ -11,12 +11,8 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useAuthStore } from '@renderer/stores/auth';
+import { usePullStore } from '@renderer/stores/pull';
 import { showToast } from '@renderer/lib/toast';
-import {
-  pullsCommentReactionAdd,
-  pullsCommentReactionRemove,
-  pullsCommentReactionsList,
-} from '@renderer/lib/ipc-client';
 import type { ReactionContent, ReactionDto, ReactionGroupDto } from '@renderer/types/dto';
 
 // ===== 受支持的 8 种表情（对齐 Gitea / GitHub） =====
@@ -39,8 +35,23 @@ const props = defineProps<{
 }>();
 
 const auth = useAuthStore();
+const pull = usePullStore();
 
-const reactions = ref<ReactionDto[]>([]);
+/** v0.7.26：reactions 改为从 store 读（reactive）
+ *
+ * 之前：local ref + 自己的 loadReactions 主动拉 + 乐观更新。
+ * 跟 MergesView 的 addCommentReaction handler（不通过 ReactionBar 直接调 store action）
+ * 流程不联动 → store action 调完 IPC 后 UI 不刷新。
+ *
+ * 现在：store 维护 reactionsByComment 缓存，store action 调完 IPC 后
+ * fetchCommentReactions 重拉写回缓存，组件 computed 读 store 拿最新值。
+ *
+ * ReactionBar 仍保留 toggleReaction 用于"已有 reaction 单击 toggle"流程，
+ * 但内部走 store.addCommentReaction / store.removeCommentReaction 走同一路径。
+ */
+const reactions = computed<ReactionDto[]>(
+  () => pull.reactionsByComment.get(props.commentId) ?? [],
+);
 const loading = ref(false);
 const showPicker = ref(false);
 const toggling = ref(false);
@@ -96,11 +107,9 @@ async function loadReactions(): Promise<void> {
   if (!props.projectId || props.commentId <= 0) return;
   loading.value = true;
   try {
-    const list = await pullsCommentReactionsList({
-      projectId: props.projectId,
-      commentId: props.commentId,
-    });
-    reactions.value = (list ?? []) as ReactionDto[];
+    // v0.7.26：走 store.fetchCommentReactions，写入 reactionsByComment 缓存
+    // reactions computed 直接从 store 读，store 变化触发 UI 重渲染
+    await pull.fetchCommentReactions(null, props.commentId);
   } catch {
     // 失败不报 toast（reaction 是 nice-to-have，不应打断主流程）
   } finally {
@@ -108,51 +117,24 @@ async function loadReactions(): Promise<void> {
   }
 }
 
-/** Toggle 单个表情 */
+/** Toggle 单个表情
+ *
+ * v0.7.26：走 store action（统一入口，addCommentReaction / removeCommentReaction
+ * 内部会调完 IPC 后 fetchCommentReactions 重拉 store 缓存）
+ */
 async function toggleReaction(content: ReactionContent): Promise<void> {
   if (toggling.value || !props.editable) return;
   const hasReacted = viewerReactedContents.value.has(content);
 
-  // 乐观更新
-  const snapshot = [...reactions.value];
-  if (hasReacted) {
-    reactions.value = reactions.value.filter(
-      (r) => !(r.content === content && (r?.user?.username ?? '') === currentUsername.value),
-    );
-  } else {
-    reactions.value = [
-      ...reactions.value,
-      {
-        id: -1, // 临时 id；拉取后会被覆盖
-        content,
-        user: { username: currentUsername.value ?? '' },
-      },
-    ];
-  }
-
   toggling.value = true;
   try {
     if (hasReacted) {
-      await pullsCommentReactionRemove({
-        projectId: props.projectId,
-        commentId: props.commentId,
-        content,
-      });
+      await pull.removeCommentReaction(null, props.commentId, content);
     } else {
-      const added = await pullsCommentReactionAdd({
-        projectId: props.projectId,
-        commentId: props.commentId,
-        content,
-      });
-      // 用服务端返回的权威 reaction 替换临时项
-      reactions.value = reactions.value.map((r) =>
-        r.id === -1 && r.content === content ? (added as ReactionDto) : r,
-      );
+      await pull.addCommentReaction(null, props.commentId, content);
     }
     showPicker.value = false;
   } catch {
-    // 回滚
-    reactions.value = snapshot;
     showToast({ type: 'error', message: '操作失败，请重试' });
   } finally {
     toggling.value = false;

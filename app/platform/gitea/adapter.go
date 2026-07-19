@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -337,16 +338,16 @@ type giteaPullRaw struct {
 	Comments           int                 `json:"comments"`
 	// v0.7.6：PR 头部分支显示 "请求将 N 次代码提交从 {head} 合并至 {base}" 用
 	// 对齐 Gitea web `templates/repo/issue/view_title.tmpl` 渲染。
-	Commits            int                 `json:"commits"`
-	Body               string              `json:"body"`
-	MergedBy           *giteaUserRaw       `json:"merged_by"`
+	Commits  int           `json:"commits"`
+	Body     string        `json:"body"`
+	MergedBy *giteaUserRaw `json:"merged_by"`
 	// v0.7.8：merge commit SHA —— Gitea 1.26+ timeline 端点 `merge_pull` 事件
 	// body 是空字符串（不像 v0.7.6 假设的 "merged commit {sha} into {branch}"），
 	// 拿 merge commit SHA 只能从 PR 详情端点 `/repos/{owner}/{repo}/pulls/{index}`
 	// 的 `merge_commit_sha` 字段。前端 timeline 渲染 merge 事件 inline 块时拿这个字段。
-	MergeCommitSHA     string              `json:"merge_commit_sha,omitempty"`
-	CreatedAt          string              `json:"created_at"`
-	UpdatedAt          string              `json:"updated_at"`
+	MergeCommitSHA string `json:"merge_commit_sha,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 type giteaPullRefRaw struct {
@@ -393,8 +394,8 @@ func giteaPullToDetail(p giteaPullRaw) platform.PullDetailDTO {
 		// v0.7.8：merge 事件 commit SHA 链接用 —— timeline 端点 merge_pull body 是空，
 		// 拿这个字段兜底。PR 未合并时为空字符串（omitempty），前端模板 v-if 跳过。
 		MergeCommitSHA: p.MergeCommitSHA,
-		CreatedAt:     p.CreatedAt,
-		UpdatedAt:     p.UpdatedAt,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 	if p.User != nil {
 		out.Author = &platform.PullUserDTO{Username: p.User.Login, FullName: p.User.FullName, AvatarURL: p.User.AvatarURL}
@@ -682,6 +683,47 @@ func (a *GiteaAdapter) UpdatePullBranch(ctx context.Context, hostURL, username, 
 	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
 }
 
+// RestorePullBranch 恢复被删的 head 分支（v0.7.28）
+//
+// Gitea 端点：POST /repos/{owner}/{repo}/git/refs
+// body: {"ref": "refs/heads/{branch}", "sha": "{commit_sha}"}
+//   - branch: 不带 refs/heads/ 前缀
+//   - sha: 任意 commit SHA（PR 详情 head.sha 即可）
+//
+// 成功返 201 Created；分支已存在返 422（提示用户"分支已存在，无需恢复"）。
+func (a *GiteaAdapter) RestorePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch, sha string) error {
+	if strings.TrimSpace(branch) == "" {
+		return ipc.NewValidationFailed("分支名不能为空", "")
+	}
+	if strings.TrimSpace(sha) == "" {
+		return ipc.NewValidationFailed("commit SHA 不能为空", "")
+	}
+	payload := map[string]any{
+		"ref": "refs/heads/" + branch,
+		"sha": sha,
+	}
+	reader, err := encodeJSONBody(payload)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo)
+	return a.doRequest(ctx, hostURL, token, "POST", path, reader, nil)
+}
+
+// DeletePullBranch 删除 head 分支（v0.7.29 "Delete branch" 按钮用）
+//
+// Gitea 端点：DELETE /api/v1/repos/{owner}/{repo}/git/refs/{ref}
+//   - ref 必须含 refs/heads/ 前缀（不能省略！）
+//   - 成功返 204 No Content
+//   - 分支不存在返 404（race condition：用户两个 tab 同时删）
+func (a *GiteaAdapter) DeletePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch string) error {
+	if strings.TrimSpace(branch) == "" {
+		return ipc.NewValidationFailed("分支名不能为空", "")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/git/refs/refs/heads/%s", owner, repo, branch)
+	return a.doRequest(ctx, hostURL, token, "DELETE", path, nil, nil)
+}
+
 // mapMergeMethodToGitea 把前端 MergeMethod 转换为 gitea merge_style_field
 //
 // 前端：'merge' | 'rebase' | 'rebase-merge' | 'squash'
@@ -832,6 +874,14 @@ func (a *GiteaAdapter) ListPullTimeline(ctx context.Context, hostURL, username, 
 	for _, r := range raw {
 		out = append(out, giteaTimelineToItem(r))
 	}
+	// v0.7.33：按 createdAt 升序（最旧在前）—— 对齐 Gitea web PR timeline 实际渲染顺序
+	// （与 GitHub 端 v0.7.33 同步：first comment 在最顶，close / delete branch events
+	// 排在 comments 之后）。Gitea API 默认 DESCENDING（newest first），需客户端反转。
+	// user 反馈 ⑯ "PR 的 closed 事件、deleted 事件，显示的位置不正确" —— 事件
+	// 应该排在 comments 之后（事件通常发生在评论之后）。
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Created < out[j].Created
+	})
 	return out, nil
 }
 
@@ -869,9 +919,9 @@ func (a *GiteaAdapter) ListPullComments(ctx context.Context, hostURL, username, 
 // IsForcePush（同样是 xorm:"-"），这些是 Gitea web 端模板直渲染用，API 没暴露，
 // 对应系统事件卡显示完整 detail 有数据缺口（Push 只能显示"N 提交"文案，没有列表）。
 type giteaTimelineRaw struct {
-	ID           int64              `json:"id"`
-	Type         string             `json:"type"`
-	Body         string             `json:"body"`
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+	Body string `json:"body"`
 	// v0.7.6：type=7 (label) 事件时存 "1"=add / 其他=remove（用于前端聚合）。
 	// 对应 Gitea 源码 `models/issues/comment.go: Content` 字段在 label change 时
 	// 写 "1" 表示添加，写 label name 表示移除（罕见，用其他值兜底）。
@@ -889,21 +939,21 @@ type giteaTimelineRaw struct {
 	// 同一 tag 多个字段会全部不填值，实测 /tmp/test_json.go 确认）。把 label 判断
 	// 改成 `r.Body == "1"` 即可。如果未来 Gitea 版本改字段名，跟踪 gitea 源码
 	// `models/issues/comment.go` 即可。
-	User          *giteaUserRaw      `json:"user"`
-	Created       string             `json:"created_at"`
-	Updated       string             `json:"updated_at"`
-	State         string             `json:"state,omitempty"`
-	CommitID      string             `json:"commit_id,omitempty"`
-	Official      bool               `json:"official,omitempty"`
-	CommitSHA     string             `json:"commit_sha,omitempty"`
-	OldTitle      string             `json:"old_title,omitempty"`
-	NewTitle      string             `json:"new_title,omitempty"`
-	OldRef        string             `json:"old_ref,omitempty"`
-	NewRef        string             `json:"new_ref,omitempty"`
-	Label         *giteaPullLabelRaw `json:"label,omitempty"`
-	OldMilestone  *giteaMilestoneRaw `json:"old_milestone,omitempty"`
-	Milestone     *giteaMilestoneRaw `json:"milestone,omitempty"`
-	Assignee      *giteaUserRaw      `json:"assignee,omitempty"`
+	User         *giteaUserRaw      `json:"user"`
+	Created      string             `json:"created_at"`
+	Updated      string             `json:"updated_at"`
+	State        string             `json:"state,omitempty"`
+	CommitID     string             `json:"commit_id,omitempty"`
+	Official     bool               `json:"official,omitempty"`
+	CommitSHA    string             `json:"commit_sha,omitempty"`
+	OldTitle     string             `json:"old_title,omitempty"`
+	NewTitle     string             `json:"new_title,omitempty"`
+	OldRef       string             `json:"old_ref,omitempty"`
+	NewRef       string             `json:"new_ref,omitempty"`
+	Label        *giteaPullLabelRaw `json:"label,omitempty"`
+	OldMilestone *giteaMilestoneRaw `json:"old_milestone,omitempty"`
+	Milestone    *giteaMilestoneRaw `json:"milestone,omitempty"`
+	Assignee     *giteaUserRaw      `json:"assignee,omitempty"`
 	// AssigneeTeam: Gitea 有，但 platform 包当前没有 TeamDTO，v0.7.2 不暴露（保留扩展位）
 	RemovedAssignee bool              `json:"removed_assignee,omitempty"`
 	RefIssue        *giteaIssueRefRaw `json:"ref_issue,omitempty"`

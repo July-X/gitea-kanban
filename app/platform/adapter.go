@@ -158,6 +158,28 @@ type PlatformAdapter interface {
 	// 返回更新后的 PullDetailDTO。
 	UpdatePullBranch(ctx context.Context, hostURL, username, token, owner, repo string, index int, style string) (*PullDetailDTO, error)
 
+	// v0.7.28：RestorePullBranch 恢复 head 分支（PR 关闭后 head branch 被删时
+	// GitHub web 显示 "Restore branch" 按钮调这个）
+	//
+	// Gitea + GitHub 端点统一都是 POST /repos/{owner}/{repo}/git/refs
+	// body: {"ref": "refs/heads/{branch}", "sha": "{commit_sha}"}
+	//   - branch: 要恢复的分支名（不带 refs/heads/ 前缀，前端 PR 详情 head.ref 拿）
+	//   - sha:    分支指向的 commit SHA（PR 详情 head.sha）
+	// 成功返 201 + ref 对象（含 ref URL）；失败常见错误：
+	//   - 422: 分支已存在（ref exists）→ 提示用户"分支已存在，无需恢复"
+	//   - 422: commit SHA 不存在 → 罕见
+	RestorePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch, sha string) error
+
+	// v0.7.29：DeletePullBranch 删除 head 分支（PR 关闭 + "Delete branch" 按钮用）
+	//
+	// Gitea 走 DELETE /api/v1/repos/{owner}/{repo}/git/refs/{ref}（ref 含 refs/heads/ 前缀）
+	// GitHub 走 DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}（branch 不带 refs/heads/ 前缀）
+	//
+	// 成功返 204 No Content；分支不存在返 404（race condition：用户在两个 tab 同时删）。
+	//
+	// branch: 不带 refs/heads/ 前缀（前端 PR 详情 head.ref 拿，v0.7.28 已 split owner: 前缀）
+	DeletePullBranch(ctx context.Context, hostURL, username, token, owner, repo, branch string) error
+
 	// ListPullTimeline 列合并请求时间轴（v0.7.x 对齐 Gitea web）
 	//
 	// 时间轴包含所有 type: 普通评论 + 评审事件 + 系统事件 + 推送事件,

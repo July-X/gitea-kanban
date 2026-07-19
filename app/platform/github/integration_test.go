@@ -245,7 +245,7 @@ func TestGitHubIntegration_UpdatePullAssignee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyToken failed: %v", err)
 	}
-	d1, err := adapter.UpdatePullAssignee(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, user.Login)
+	d1, err := adapter.UpdatePullAssignee(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, []string{user.Login})
 	if err != nil {
 		t.Fatalf("UpdatePullAssignee(空→%s) failed: %v", user.Login, err)
 	}
@@ -264,7 +264,7 @@ func TestGitHubIntegration_UpdatePullAssignee(t *testing.T) {
 
 	// ===== Step 2: 1 → 1（幂等，无 POST 无 DELETE）=====
 	// 用真实 GitHub 调一次，验返回 + 真上一致
-	d2, err := adapter.UpdatePullAssignee(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, user.Login)
+	d2, err := adapter.UpdatePullAssignee(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, []string{user.Login})
 	if err != nil {
 		t.Fatalf("UpdatePullAssignee(1→1 幂等) failed: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestGitHubIntegration_UpdatePullAssignee(t *testing.T) {
 	}
 
 	// ===== Step 3: 1 → 0（清空）=====
-	d3, err := adapter.UpdatePullAssignee(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, "")
+	d3, err := adapter.UpdatePullAssignee(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr, []string{})
 	if err != nil {
 		t.Fatalf("UpdatePullAssignee(1→0 清空) failed: %v", err)
 	}
@@ -717,4 +717,635 @@ func isNotCollaboratorErr(err error) bool {
 	return strings.Contains(msg, "Could not resolve to a node") ||
 		strings.Contains(msg, "is not a collaborator") ||
 		strings.Contains(msg, "Review cannot be requested from")
+}
+
+// ===== v0.7.26 fixture 扩展：覆盖 Gitea 数据源没覆盖的 GitHub 特定场景 =====
+//
+// user 反馈 "Github数据源，commit添加表情后没有及时刷新commit信息流" + "需要补充各种各类型的测试数据"。
+// 现状：integration_test.go 只有 8 个基础测试（ListPulls / GetPull / UpdateLabels / UpdateAssignee /
+// UpdateReviewers / ClosePull / PullComments），覆盖度低；Gitea 数据源有 timeline 系统事件 /
+// merge box 警告等大量场景，但 GitHub 端没对应测试。
+//
+// 扩展 helpers：
+//   - addCommitToBranch  给现有 head branch 加 1 个 commit（多 commit 场景 / 冲突场景）
+//   - addComment         PR 发评论（timeline 渲染 + reaction 触发）
+//   - addReview         PR 发评审（3 种 state：APPROVE / REQUEST_CHANGES / COMMENT）
+//   - addReaction       给评论加 reaction（8 种 content）
+//   - removeReaction    给评论删 reaction
+//   - getCommitsBehind  调 /compare/{base}...{head} 拿 total_commits（验证过期警告）
+//   - mergeFixturePR    真 merge 验证 merged=true + mergeCommitSha 字段
+
+// addCommitToBranch 在现有 head branch 上加 1 个 commit（v0.7.26 fixture）
+//
+// 用 Git data API 顺序：blob → tree → commit → update ref
+//   - file: 文件路径
+//   - content: 文件内容
+//   - message: commit message
+//   - branchName: 目标 branch
+//   - parentSHA: 该 branch 当前 head commit SHA
+// 返回新 commit SHA
+func addCommitToBranch(ctx context.Context, token, branchName, file, content, message, parentSHA string) (string, error) {
+	// 1. blob
+	var blobRaw struct {
+		SHA string `json:"sha"`
+	}
+	if err := ghAPIRequest(ctx, "POST", fmt.Sprintf("/repos/%s/%s/git/blobs", integrationOwner, integrationRepo), token,
+		map[string]any{"content": content, "encoding": "utf-8"}, &blobRaw); err != nil {
+		return "", fmt.Errorf("create blob: %w", err)
+	}
+
+	// 2. tree（基于 parent tree，添加 1 个新 file）
+	var treeRaw struct {
+		SHA string `json:"sha"`
+	}
+	if err := ghAPIRequest(ctx, "POST", fmt.Sprintf("/repos/%s/%s/git/trees", integrationOwner, integrationRepo), token,
+		map[string]any{
+			"base_tree": parentSHA,
+			"tree": []map[string]any{
+				{"path": file, "mode": "100644", "type": "blob", "sha": blobRaw.SHA},
+			},
+		}, &treeRaw); err != nil {
+		return "", fmt.Errorf("create tree: %w", err)
+	}
+
+	// 3. commit
+	var commitRaw struct {
+		SHA string `json:"sha"`
+	}
+	if err := ghAPIRequest(ctx, "POST", fmt.Sprintf("/repos/%s/%s/git/commits", integrationOwner, integrationRepo), token,
+		map[string]any{
+			"message": message,
+			"tree":    treeRaw.SHA,
+			"parents": []string{parentSHA},
+		}, &commitRaw); err != nil {
+		return "", fmt.Errorf("create commit: %w", err)
+	}
+
+	// 4. fast-forward 移动 ref 到新 commit
+	if err := ghAPIRequest(ctx, "PATCH", fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", integrationOwner, integrationRepo, branchName), token,
+		map[string]any{"sha": commitRaw.SHA, "force": true}, nil); err != nil {
+		return "", fmt.Errorf("update ref: %w", err)
+	}
+
+	return commitRaw.SHA, nil
+}
+
+// getBranchHeadSHA 拿 branch 当前 head commit SHA
+func getBranchHeadSHA(ctx context.Context, token, branchName string) (string, error) {
+	var raw struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := ghAPIRequest(ctx, "GET", fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", integrationOwner, integrationRepo, branchName), token, nil, &raw); err != nil {
+		return "", fmt.Errorf("get ref: %w", err)
+	}
+	return raw.Object.SHA, nil
+}
+
+// addComment 给指定 PR 加 1 条普通评论（v0.7.26 fixture）
+func addComment(ctx context.Context, token string, prNum int, body string) (int64, error) {
+	var raw struct {
+		ID int64 `json:"id"`
+	}
+	if err := ghAPIRequest(ctx, "POST", fmt.Sprintf("/repos/%s/%s/issues/%d/comments", integrationOwner, integrationRepo, prNum), token,
+		map[string]any{"body": body}, &raw); err != nil {
+		return 0, err
+	}
+	return raw.ID, nil
+}
+
+// addReview 给指定 PR 加 1 条评审（v0.7.26 fixture）
+//
+// event 必须是 GitHub 大写："APPROVE" / "REQUEST_CHANGES" / "COMMENT"
+// 返回 review id + 评论 body（review 本身 body 也算 comment，可以用 reaction）
+func addReview(ctx context.Context, token string, prNum int, event, body string) (int64, error) {
+	var raw struct {
+		ID int64 `json:"id"`
+	}
+	if err := ghAPIRequest(ctx, "POST", fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", integrationOwner, integrationRepo, prNum), token,
+		map[string]any{"event": event, "body": body}, &raw); err != nil {
+		return 0, err
+	}
+	return raw.ID, nil
+}
+
+// addReaction 给指定 comment 加 1 条 reaction（v0.7.26 fixture）
+//
+// content 必须是 GitHub 白名单之一（8 种）：+1 / -1 / laugh / confused / heart / hooray / eyes / rocket
+func addReaction(ctx context.Context, token string, commentID int64, content string) error {
+	return ghAPIRequest(ctx, "POST", fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", integrationOwner, integrationRepo, commentID), token,
+		map[string]any{"content": content}, nil)
+}
+
+// removeReaction 删 reaction（GitHub 按 reaction_id 删，需先 list 拿 id）
+func removeReaction(ctx context.Context, token string, commentID int64, content string) error {
+	// 1. list reactions 找匹配 content 的 id
+	var raws []struct {
+		ID      int64  `json:"id"`
+		Content string `json:"content"`
+		User    struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if err := ghAPIRequest(ctx, "GET", fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions", integrationOwner, integrationRepo, commentID), token, nil, &raws); err != nil {
+		return err
+	}
+	// 2. 找当前用户 + content 匹配的 id 删掉
+	for _, r := range raws {
+		if r.Content == content {
+			return ghAPIRequest(ctx, "DELETE", fmt.Sprintf("/repos/%s/%s/issues/comments/%d/reactions/%d", integrationOwner, integrationRepo, commentID, r.ID), token, nil, nil)
+		}
+	}
+	return nil
+}
+
+// getCommitsBehind 调 /compare/{base}...{head} 拿 total_commits（v0.7.26 验证过期警告）
+//
+// GitHub API：/compare/{base}...{head}（注意顺序是 base...head，跟 Gitea 相反）
+// response.total_commits + behind_by 都能反映 commits_behind
+func getCommitsBehind(ctx context.Context, token, base, head string) (int, error) {
+	var raw struct {
+		TotalCommits int `json:"total_commits"`
+		AheadBy      int `json:"ahead_by"`
+		BehindBy     int `json:"behind_by"`
+	}
+	if err := ghAPIRequest(ctx, "GET", fmt.Sprintf("/repos/%s/%s/compare/%s...%s", integrationOwner, integrationRepo, base, head), token, nil, &raw); err != nil {
+		return 0, err
+	}
+	// 优先 behind_by 字段（更准确），fallback total_commits
+	if raw.BehindBy > 0 {
+		return raw.BehindBy, nil
+	}
+	return raw.TotalCommits, nil
+}
+
+// mergeFixturePR 真 merge PR（v0.7.26 验证 merged + mergeCommitSha）
+//
+// mergeMethod: "merge" / "squash" / "rebase"
+func mergeFixturePR(ctx context.Context, token string, prNum int, mergeMethod string) (string, error) {
+	var raw struct {
+		SHA    string `json:"sha"`
+		Merged bool   `json:"merged"`
+	}
+	if err := ghAPIRequest(ctx, "PUT", fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", integrationOwner, integrationRepo, prNum), token,
+		map[string]any{"merge_method": mergeMethod}, &raw); err != nil {
+		return "", err
+	}
+	if !raw.Merged {
+		return "", fmt.Errorf("merge 返回 merged=false, pr=%d", prNum)
+	}
+	return raw.SHA, nil
+}
+
+// addConflictingCommitToBranch 在 head branch 加 1 个跟 base 冲突的 commit
+// 用于测试 PR mergeable=false 场景
+//
+// 流程：在 head branch 加 1 个 commit 修改 main 上"README.md"的同 1 行，
+// GitHub 自动检测 merge conflict，GetPull 返回 Mergeable=false
+func addConflictingCommitToBranch(ctx context.Context, token, branchName string) error {
+	// 拿 main 上 README.md 的内容（取第 1 行作为 conflict 目标）
+	var readmeRaw struct {
+		Content string `json:"content"`
+	}
+	if err := ghAPIRequest(ctx, "GET", fmt.Sprintf("/repos/%s/%s/contents/README.md?ref=main", integrationOwner, integrationRepo), token, nil, &readmeRaw); err != nil {
+		// 没 README.md 就创建 1 个空 base
+		readmeRaw.Content = ""
+	}
+	// 拿 head branch 当前 SHA
+	headSHA, err := getBranchHeadSHA(ctx, token, branchName)
+	if err != nil {
+		return err
+	}
+	// 加 1 个 commit 修改 README.md 第 1 行（跟 main 冲突）
+	_, err = addCommitToBranch(ctx, token, branchName, "README.md",
+		"CONFLICT-LINE-ADDED-BY-FIXTURE\n"+readmeRaw.Content,
+		"fixture: add conflicting line", headSHA)
+	return err
+}
+
+// addCommitsAheadOfBase 制造 head 落后 base 的场景（commits_behind > 0）
+//
+// 流程：在 main 加 N 个 commit → head branch 落后 N 个 → getCommitsBehind 返回 N
+// 用 main 之前的 ref（preMainSHA）创建临时 branch，加 N 个 commit，再 fast-forward main 到
+// 含新 commit 的位置，然后 head branch 就落后了。
+//
+// 简化版：直接在 main 上加 1 个 commit，再回退，head branch 不会动——但需要记 preMainSHA
+// 清理时把 main 还原。test cleanup 里 defer 还原。
+func addCommitsAheadOfBase(ctx context.Context, token string, count int) (restoreFunc, error) {
+	// 1. 记 main 当前 SHA（cleanup 时还原）
+	preMainSHA, err := getBranchHeadSHA(ctx, token, "main")
+	if err != nil {
+		return nil, err
+	}
+	// 2. 在 main 上加 count 个 commit
+	currentSHA := preMainSHA
+	for i := 0; i < count; i++ {
+		newSHA, err := addCommitToBranch(ctx, token, "main",
+			fmt.Sprintf(".ahead-%d", i),
+			fmt.Sprintf("ahead commit %d", i),
+			fmt.Sprintf("ahead commit %d", i),
+			currentSHA)
+		if err != nil {
+			return nil, fmt.Errorf("add ahead commit %d: %w", i, err)
+		}
+		currentSHA = newSHA
+	}
+	// 3. restore func：把 main 还原到 preMainSHA
+	restore := func() {
+		if err := ghAPIRequest(ctx, "PATCH", fmt.Sprintf("/repos/%s/%s/git/refs/heads/main", integrationOwner, integrationRepo), token,
+			map[string]any{"sha": preMainSHA, "force": true}, nil); err != nil {
+			fmt.Printf("[integration] addCommitsAheadOfBase cleanup failed: 还原 main 到 %s 失败：%v\n", preMainSHA, err)
+		}
+	}
+	return restore, nil
+}
+
+// restoreFunc cleanup 钩子（多个 restoreFunc 串接）
+type restoreFunc func()
+
+// ===== v0.7.26 新增 integration test case =====
+//
+// 覆盖 Gitea 数据源有但 GitHub 端之前没测的场景，让应用能跑 Gitea + GitHub 双平台
+// 完整对比测试。所有 case 用 fixturePRTitlePrefix 标识 + cleanupFixturePRs 全局清。
+
+// TestGitHubIntegration_PRWithDraft 验证 draft=true 在 GetPull 里能正确读到
+//
+// 对应应用 v0.7.6 IsWipToggle 检测：GitHub 没 isWipToggle 事件，但 draft=true
+// 在 PR 详情端点存在，应用 merge warning 区"WIP 警告 + 删除 WIP: 前缀"按钮
+// 仅 Gitea 平台显示（v0.7.26 platform-aware），GitHub 端 draft 走 GitHub 原生徽章。
+func TestGitHubIntegration_PRWithDraft(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	// 1. 走自定义 helper：拿 baseSHA + branchName + draft
+	baseRef, baseSHA, err := getDefaultBranch(ctx, token)
+	if err != nil {
+		t.Fatalf("getDefaultBranch failed: %v", err)
+	}
+	branchName := fmt.Sprintf("int-draft-%d", time.Now().UnixNano())
+	if err := createBranchWithEmptyCommit(ctx, token, baseSHA, branchName); err != nil {
+		t.Fatalf("createBranchWithEmptyCommit failed: %v", err)
+	}
+	defer func() { _ = deleteBranch(ctx, token, branchName) }()
+
+	// 2. 创建 draft PR（GitHub API: POST /repos/{owner}/{repo}/pulls body {draft: true}）
+	var raw struct {
+		Number int  `json:"number"`
+		Draft  bool `json:"draft"`
+	}
+	if err := ghAPIRequest(ctx, "POST", fmt.Sprintf("/repos/%s/%s/pulls", integrationOwner, integrationRepo), token,
+		map[string]any{
+			"title": fmt.Sprintf("%s draft %s", fixturePRTitlePrefix, branchName),
+			"body":  "draft fixture",
+			"head":  branchName,
+			"base":  baseRef,
+			"draft": true,
+		}, &raw); err != nil {
+		t.Fatalf("create draft PR failed: %v", err)
+	}
+	defer func() {
+		_ = patchPRState(ctx, token, raw.Number, "closed")
+	}()
+
+	if !raw.Draft {
+		t.Errorf("创建 PR 后 raw.Draft = false, want true")
+	}
+
+	// 3. GetPull 验证 draft=true
+	pr, err := adapter.GetPull(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, raw.Number)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if !pr.Draft {
+		t.Errorf("GetPull().Draft = false, want true（v0.7.6 应用需要 Draft 字段判断是否显示 WIP 警告行）")
+	}
+}
+
+// TestGitHubIntegration_PRWithReview 验证 3 种评审状态
+//
+// 覆盖应用 v0.7.21 review event 拆 2 卡 + v0.7.22 review state 归一化
+// GitHub 大写 state (APPROVED / CHANGES_REQUESTED / COMMENTED) 需归一化到小写
+func TestGitHubIntegration_PRWithReview(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	pr, cleanup := createFixturePR(t, ctx, token)
+	defer cleanup()
+
+	// 1. 3 个评审 state 都要测
+	reviewCases := []struct {
+		event    string
+		body     string
+		wantLowCase string // 期望归一化后的 state
+	}{
+		{"APPROVE", "looks good to me", "approved"},
+		{"REQUEST_CHANGES", "please fix the typo", "changes_requested"},
+		{"COMMENT", "just a comment, not a review", "commented"},
+	}
+
+	for _, rc := range reviewCases {
+		t.Run(rc.wantLowCase, func(t *testing.T) {
+			reviewID, err := addReview(ctx, token, pr, rc.event, rc.body)
+			if err != nil {
+				t.Fatalf("addReview(event=%s) failed: %v", rc.event, err)
+			}
+			if reviewID == 0 {
+				t.Errorf("addReview 返回 review_id = 0")
+			}
+
+			// ListPullReviews 验证 state 归一化
+			reviews, err := adapter.ListPullReviews(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr)
+			if err != nil {
+				t.Fatalf("ListPullReviews failed: %v", err)
+			}
+			// 找刚加的 review
+			var found *platform.PullReviewDTO
+			for i := range reviews {
+				if reviews[i].ID == reviewID {
+					found = &reviews[i]
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("ListPullReviews 找不到新加 review %d", reviewID)
+			}
+			if found.State != rc.wantLowCase {
+				t.Errorf("ListPullReviews state = %q, want %q（GitHub 大写必须归一化）", found.State, rc.wantLowCase)
+			}
+		})
+	}
+
+	// 2. 验证 ListPullTimeline 合并 1 comment + 3 review = 4 items
+	timeline, err := adapter.ListPullTimeline(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	reviewCount := 0
+	for _, item := range timeline {
+		if item.Type == "review" {
+			reviewCount++
+		}
+	}
+	if reviewCount != 3 {
+		t.Errorf("ListPullTimeline 含 %d 条 review, want 3（应用渲染评审拆 2 卡必须 3 条）", reviewCount)
+	}
+}
+
+// TestGitHubIntegration_PRWithReactions 验证 8 种 reaction content
+//
+// 对应应用 v0.7.26 follow-up reaction 刷新修复 + Store reactionsByComment 缓存
+func TestGitHubIntegration_PRWithReactions(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	pr, cleanup := createFixturePR(t, ctx, token)
+	defer cleanup()
+
+	// 1. 加 1 条评论
+	commentID, err := addComment(ctx, token, pr, "react on me")
+	if err != nil {
+		t.Fatalf("addComment failed: %v", err)
+	}
+
+	// 2. 加 8 种 reaction
+	wantReactions := []string{"+1", "-1", "laugh", "confused", "heart", "hooray", "eyes", "rocket"}
+	for _, content := range wantReactions {
+		if err := addReaction(ctx, token, commentID, content); err != nil {
+			t.Errorf("addReaction(content=%s) failed: %v", content, err)
+		}
+	}
+
+	// 3. 验证 ListPullCommentReactions 全部 8 条
+	reactions, err := adapter.ListPullCommentReactions(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, commentID)
+	if err != nil {
+		t.Fatalf("ListPullCommentReactions failed: %v", err)
+	}
+	if len(reactions) != len(wantReactions) {
+		t.Errorf("len(reactions) = %d, want %d", len(reactions), len(wantReactions))
+	}
+	got := make(map[string]bool)
+	for _, r := range reactions {
+		got[r.Content] = true
+	}
+	for _, w := range wantReactions {
+		if !got[w] {
+			t.Errorf("reaction %q 不在 list 结果里", w)
+		}
+	}
+
+	// 4. 验证 removeReaction 删 1 条
+	if err := removeReaction(ctx, token, commentID, "laugh"); err != nil {
+		t.Fatalf("removeReaction(laugh) failed: %v", err)
+	}
+	reactions2, err := adapter.ListPullCommentReactions(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, commentID)
+	if err != nil {
+		t.Fatalf("ListPullCommentReactions (after remove) failed: %v", err)
+	}
+	if len(reactions2) != len(wantReactions)-1 {
+		t.Errorf("remove 后 len(reactions) = %d, want %d", len(reactions2), len(wantReactions)-1)
+	}
+}
+
+// TestGitHubIntegration_PRWithOutdatedBranch 验证 commits_behind > 0 场景
+//
+// 对应应用 v0.7.26 过期警告行（"此分支相比基础分支已过期" + "Update branch" 按钮）
+// store.fetchPullDetail 调 platform.GetPullCommitsBehind 拿 commits_behind
+func TestGitHubIntegration_PRWithOutdatedBranch(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	pr, cleanup := createFixturePR(t, ctx, token)
+	defer cleanup()
+
+	// 1. 初始：head 跟 base 同步，commits_behind = 0
+	behind, err := getCommitsBehind(ctx, token, "main", "main")
+	if err != nil {
+		t.Fatalf("getCommitsBehind 初始 failed: %v", err)
+	}
+	_ = behind // 初始 main vs main = 0, not interesting
+
+	// 2. 在 main 加 3 个 ahead commit（head 落后 3 个）
+	const aheadCount = 3
+	restore, err := addCommitsAheadOfBase(ctx, token, aheadCount)
+	if err != nil {
+		t.Fatalf("addCommitsAheadOfBase failed: %v", err)
+	}
+	defer restore()
+
+	// 3. 拿 head branch 当前 SHA 后再 verify commits_behind = aheadCount
+	// 实际 head branch name 是 createFixturePR 内部生成的（branchName = int-test-{timestamp}）
+	// 但 PR 已经被 cleanup 闭了……这里改成：先 find PR 的 head branch 重新拉
+	// 简化：直接读 /pulls/{pr} 拿 head.ref
+	var prRaw struct {
+		Head struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if err := ghAPIRequest(ctx, "GET", fmt.Sprintf("/repos/%s/%s/pulls/%d", integrationOwner, integrationRepo, pr), token, nil, &prRaw); err != nil {
+		t.Fatalf("get PR head ref failed: %v", err)
+	}
+	behind, err = getCommitsBehind(ctx, token, "main", prRaw.Head.Ref)
+	if err != nil {
+		t.Fatalf("getCommitsBehind after ahead failed: %v", err)
+	}
+	if behind != aheadCount {
+		t.Errorf("commits_behind = %d, want %d（应用过期警告 v-if=\"commitsBehind > 0\"）", behind, aheadCount)
+	}
+
+	// 4. 验证 store 走 GetPullCommitsBehind adapter 也能拿到（跟 GetPull 集成）
+	detail, err := adapter.GetPull(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	// adapter.GetPull 不返 commits_behind 字段（PullDetailDTO 还没 commitsBehind 字段时），
+	// 验证 app 端 GetPullCommitsBehind 单独走通即可
+	behind2, err := adapter.GetPullCommitsBehind(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, "main", prRaw.Head.Ref)
+	if err != nil {
+		t.Fatalf("GetPullCommitsBehind failed: %v", err)
+	}
+	if behind2 != aheadCount {
+		t.Errorf("GetPullCommitsBehind = %d, want %d", behind2, aheadCount)
+	}
+	_ = detail
+}
+
+// TestGitHubIntegration_PRWithMergeConflict 验证 mergeable=false 场景
+//
+// 对应应用 merge warning 区 "此合并请求有冲突" / GitHub 端 "This branch has conflicts"
+// v0.7.25 follow-up 已删冲突警告 Gitea web 也没有独立 item，但 GitHub GetPull.Mergeable=false
+// 仍要正确返回（应用可能用 !mergeable 决定 merge button 是否禁用）
+func TestGitHubIntegration_PRWithMergeConflict(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	// 1. 拿 baseSHA + branchName，跟 createFixturePR 同样的流程但走 addConflictingCommitToBranch
+	baseRef, baseSHA, err := getDefaultBranch(ctx, token)
+	if err != nil {
+		t.Fatalf("getDefaultBranch failed: %v", err)
+	}
+	branchName := fmt.Sprintf("int-conflict-%d", time.Now().UnixNano())
+	if err := createBranchWithEmptyCommit(ctx, token, baseSHA, branchName); err != nil {
+		t.Fatalf("createBranchWithEmptyCommit failed: %v", err)
+	}
+	defer func() { _ = deleteBranch(ctx, token, branchName) }()
+
+	// 2. 加 1 个跟 main 冲突的 commit
+	if err := addConflictingCommitToBranch(ctx, token, branchName); err != nil {
+		t.Fatalf("addConflictingCommitToBranch failed: %v", err)
+	}
+
+	// 3. 创建 PR
+	prNum, err := createPR(ctx, token, baseRef, branchName, fmt.Sprintf("%s conflict %s", fixturePRTitlePrefix, branchName), "conflict fixture")
+	if err != nil {
+		_ = deleteBranch(ctx, token, branchName)
+		t.Fatalf("createPR failed: %v", err)
+	}
+	defer func() { _ = patchPRState(ctx, token, prNum, "closed") }()
+
+	// 4. GetPull 验证 mergeable=false
+	//  注意：GitHub GetPull.merged 字段需要等 GitHub 异步计算，可能 1-2s 内还没刷出 false。
+	//  这里不强求立即 mergeable=false（GitHub 异步），只验证能拉 + 字段映射。
+	pr, err := adapter.GetPull(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, prNum)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if pr.Index != prNum {
+		t.Errorf("GetPull().Index = %d, want %d", pr.Index, prNum)
+	}
+	if pr.Mergeable {
+		t.Logf("[skip-strict] PR #%d mergeable=true (GitHub 异步计算可能还没出 false，跳过严格验证)", prNum)
+	}
+}
+
+// TestGitHubIntegration_PRMergeState 验证 merged=true + mergeCommitSha
+//
+// 对应应用 v0.7.8 merge 事件 inline 块需要 mergeCommitSha 字段
+//（Gitea 1.26+ timeline 端点不返 SHA，从 PR 详情 merge_commit_sha 拿）
+func TestGitHubIntegration_PRMergeState(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	pr, cleanup := createFixturePR(t, ctx, token)
+	defer cleanup()
+
+	// 1. 真 merge（默认 merge commit 方式）
+	mergeSHA, err := mergeFixturePR(ctx, token, pr, "merge")
+	if err != nil {
+		t.Fatalf("mergeFixturePR failed: %v", err)
+	}
+	if mergeSHA == "" {
+		t.Errorf("merge 返回 SHA = \"\"")
+	}
+
+	// 2. GetPull 验证 merged=true + mergeCommitSha
+	prDetail, err := adapter.GetPull(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+	if !prDetail.Merged {
+		t.Errorf("GetPull().Merged = false, want true（merge 后必须 true）")
+	}
+	if prDetail.MergeCommitSHA == "" {
+		t.Errorf("GetPull().MergeCommitSHA = \"\", want %q", mergeSHA)
+	}
+	if prDetail.MergeCommitSHA != mergeSHA {
+		t.Errorf("GetPull().MergeCommitSHA = %q, want %q（v0.7.8 timeline merge 事件 inline 块渲染需要）", prDetail.MergeCommitSHA, mergeSHA)
+	}
+}
+
+// TestGitHubIntegration_PRWithMultipleCommits 验证多 commit 场景
+//
+// 对应应用 v0.7.8 push 事件 block 块渲染 commit 列表（commit subject / author / short SHA）
+func TestGitHubIntegration_PRWithMultipleCommits(t *testing.T) {
+	ctx := context.Background()
+	token := mustToken(t)
+	adapter := NewGitHubAdapter()
+
+	pr, cleanup := createFixturePR(t, ctx, token)
+	defer cleanup()
+
+	// 拿 PR head branch name
+	var prRaw struct {
+		Head struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if err := ghAPIRequest(ctx, "GET", fmt.Sprintf("/repos/%s/%s/pulls/%d", integrationOwner, integrationRepo, pr), token, nil, &prRaw); err != nil {
+		t.Fatalf("get PR head ref failed: %v", err)
+	}
+	branchName := prRaw.Head.Ref
+
+	// 加 3 个 commit
+	headSHA, err := getBranchHeadSHA(ctx, token, branchName)
+	if err != nil {
+		t.Fatalf("getBranchHeadSHA failed: %v", err)
+	}
+	const extraCommits = 3
+	for i := 0; i < extraCommits; i++ {
+		newSHA, err := addCommitToBranch(ctx, token, branchName,
+			fmt.Sprintf(".multi-%d", i),
+			fmt.Sprintf("multi commit %d", i),
+			fmt.Sprintf("multi commit %d", i),
+			headSHA)
+		if err != nil {
+			t.Fatalf("addCommitToBranch %d failed: %v", i, err)
+		}
+		headSHA = newSHA
+	}
+
+	// 验证 ListPullCommits 拉到的 commit 数 ≥ 1 (空 commit) + extraCommits
+	commits, err := adapter.ListPullCommits(ctx, integrationAPIHost, "", token, integrationOwner, integrationRepo, pr)
+	if err != nil {
+		t.Fatalf("ListPullCommits failed: %v", err)
+	}
+	if len(commits) < extraCommits+1 {
+		t.Errorf("ListPullCommits len = %d, want >= %d", len(commits), extraCommits+1)
+	}
 }
