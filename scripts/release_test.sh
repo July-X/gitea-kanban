@@ -31,10 +31,10 @@ NOTES_FILE="docs/releases/v0.8.0-test.md" \
 echo ""
 echo "==> 校验产物"
 RELEASE_DIR="${RELEASE_DIR:-/tmp/gitea-kanban-release-v0.8.0-test}"
-test -f "$RELEASE_DIR/gitea-kanban-macos-amd64.zip"
-test -f "$RELEASE_DIR/gitea-kanban-macos-amd64.zip.sig"
-test -f "$RELEASE_DIR/gitea-kanban-windows-amd64.exe"
-test -f "$RELEASE_DIR/gitea-kanban-windows-amd64.exe.sig"
+test -f "$RELEASE_DIR/gitea-kanban-v0.8.0-test-macos-amd64.zip"
+test -f "$RELEASE_DIR/gitea-kanban-v0.8.0-test-macos-amd64.zip.sig"
+test -f "$RELEASE_DIR/gitea-kanban-v0.8.0-test-windows-amd64.exe"
+test -f "$RELEASE_DIR/gitea-kanban-v0.8.0-test-windows-amd64.exe.sig"
 test -f "$RELEASE_DIR/latest.json"
 test -f "$RELEASE_DIR/latest.json.sig"
 echo "✓ 6 个产物齐全"
@@ -107,8 +107,8 @@ echo "pub hex len: ${#PUB_HEX}"
 
 RELEASE_DIR="${RELEASE_DIR:-/tmp/gitea-kanban-release-v0.8.0-test}"
 if ! (cd "$TMPDIR/verify" && go run main.go "$PUB_HEX" \
-  "$RELEASE_DIR/gitea-kanban-macos-amd64.zip.sig" \
-  "$RELEASE_DIR/gitea-kanban-macos-amd64.zip") 2>&1 | head -5; then
+  "$RELEASE_DIR/gitea-kanban-v0.8.0-test-macos-amd64.zip.sig" \
+  "$RELEASE_DIR/gitea-kanban-v0.8.0-test-macos-amd64.zip") 2>&1 | head -5; then
   echo "ERROR: ed25519.Verify FAILED（zip.sig 不是 zip 的合法签名）" >&2
   exit 1
 fi

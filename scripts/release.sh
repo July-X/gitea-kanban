@@ -69,8 +69,12 @@ mkdir -p "$RELEASE_DIR"
 MACOS_APP="$BUILD_DIR/gitea-kanban.app"
 WINDOWS_EXE="$BUILD_DIR/gitea-kanban.exe"
 
-MACOS_ZIP="$RELEASE_DIR/gitea-kanban-macos-amd64.zip"
-WINDOWS_EXE_OUT="$RELEASE_DIR/gitea-kanban-windows-amd64.exe"
+# v0.8.0 rc27 review nit（major blocking）：产物名带 TAG，跟
+# app/updater/manifest.go:158 AssetFilename() 一致。
+# release.yml 的 AVAILABLE_ASSETS 检测按 TAG 命名匹配，
+# 若 release.sh 生成无 tag 命名则正式签名链只会上传 latest.json。
+MACOS_ZIP="$RELEASE_DIR/gitea-kanban-${TAG}-macos-amd64.zip"
+WINDOWS_EXE_OUT="$RELEASE_DIR/gitea-kanban-${TAG}-windows-amd64.exe"
 
 ASSETS=()
 
