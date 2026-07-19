@@ -19,7 +19,7 @@ import (
 // 生成的临时 key pair，私钥本地保存，公钥嵌 binary）。
 //
 // 注意：v0.7.x 之前没有这个常量，引入时必须由 maintainer 在发 v0.8.0 前替换。
-var PublicKeyB64 = "PLACEHOLDER_REPLACE_WITH_BASE64_ED25519_PUBLIC_KEY_BEFORE_RELEASE"
+var PublicKeyB64 = "WpREoAlh/PbjiNvCN6lfa3uYGU/RbBoI2qBn0IvWE8g="
 
 // PublicKey 是解码后的 ed25519 公钥。
 var PublicKey = func() ed25519.PublicKey {
