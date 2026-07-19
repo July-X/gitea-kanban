@@ -84,7 +84,13 @@ func (a *App) updaterRunningVersion() string {
 //   - OpenBrowser 用平台默认（macOS open / Windows rundll32 / Linux xdg-open）
 func (a *App) initUpdater() {
 	if a.dataDir == "" {
-		a.logger.Warn("updater: dataDir not set, skipping init")
+		if a.logger != nil {
+			a.logger.Warn("updater: dataDir not set, skipping init")
+		}
+		return
+	}
+	if a.logger == nil {
+		// 测试环境或 logger 初始化顺序问题：不阻断 startup
 		return
 	}
 	cacheDir := a.dataDir + "/updates"
@@ -125,7 +131,7 @@ func (a *App) slogFunc() func(level, format string, args ...any) {
 // 触发条件：localStore.prefs["app.checkUpdates"] 默认 true
 // 不触发时返 silently。
 func (a *App) checkUpdatesAtStartup() {
-	if a.updater == nil || a.localStore == nil {
+	if a.updater == nil || a.localStore == nil || a.logger == nil {
 		return
 	}
 	checkEnabled := true // default

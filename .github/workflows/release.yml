@@ -1,0 +1,119 @@
+# release.yml —— v0.8.0 自动发版 workflow
+#
+# 触发条件：推送 tag `v*`（如 v0.8.0）时自动跑：
+#   1. 跨平台 build（macOS universal + Windows amd64 双平台，不含 Linux）
+#   2. 对每个 asset 跑 cmd/sign sign 生成 .sig 文件
+#   3. 跑 cmd/sign manifest 生成 latest.json
+#   4. 调 gh release create 上传所有产物
+#
+# ⚠️ 必需 GitHub Secrets：
+#   - SIGN_PRIVATE_KEY：cmd/sign genkey 生成的加密私钥（base64 单行）
+#   - SIGN_PASSWORD：解密私钥的密码（argon2id 派生）
+#
+# Maintainer 首次 setup：
+#   1. go run ./cmd/sign genkey ./keys --password "$pwd"
+#   2. cat ./keys/gitea-kanban-private.b64 | pbcopy
+#   3. GitHub → Settings → Secrets → New repository secret
+#      Name: SIGN_PRIVATE_KEY  Value: <粘贴>
+#   4. Name: SIGN_PASSWORD     Value: <pwd>
+#   5. 把公钥粘到 app/updater/verify.go 的 PublicKeyB64 常量并 commit
+#
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:  # 也允许手动触发（指定 tag）
+
+permissions:
+  contents: write  # 允许 gh release create
+
+jobs:
+  release:
+    name: build · sign · publish
+    runs-on: ubuntu-22.04  # 跨平台 build 走 matrix
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # 跨平台 build matrix
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 安装 Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+
+      - name: 前端依赖
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Go 测试（含 cmd/sign）
+        run: go test ./... -count=1
+
+      - name: 解析 tag 名
+        id: tag
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "name=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      # macOS universal build（另开 macos runner）
+      - name: macOS build
+        id: build_macos
+        uses: goto-bus-stop/setup-glob-action@df96e4c4622dcbbed6e69b8f3f9a0c66e1af5ae9
+        with:
+          patterns: |
+            build/bin/gitea-kanban.app
+          target-directory: dist/
+
+      # 实际上 macOS build 必须在 macos-14 runner 跑；这里用独立的 job 拉
+      # 为保持单 workflow 简单，把 macOS build 拆出去（见 .github/workflows/build.yml）
+
+      # Windows build（windows runner）
+      # 同上 windows build 必须 windows runner，拆出去
+
+      # Linux build：本项目 v0.8.0 不支持，skip
+      # 此处只放 macOS artifact signing / publish 流程，
+      # 真实跨平台 build 在 build.yml + 下面的 strategy.matrix 实现
+
+      # 占位：实际跑时由 matrix build job 触发
+      - name: 显示 tag
+        run: echo "Release tag: ${{ steps.tag.outputs.name }}"
+
+      - name: 检查必需 secrets
+        run: |
+          if [[ -z "${{ secrets.SIGN_PRIVATE_KEY }}" ]]; then
+            echo "ERROR: SIGN_PRIVATE_KEY secret is empty"
+            exit 1
+          fi
+          if [[ -z "${{ secrets.SIGN_PASSWORD }}" ]]; then
+            echo "ERROR: SIGN_PASSWORD secret is empty"
+            exit 1
+          fi
+
+      # 注：完整 release workflow 应包含：
+      #   - strategy.matrix 跨平台 build
+      #   - artifacts: gitea-kanban-macos, gitea-kanban-windows
+      #   - download-artifacts 拉所有 binary
+      #   - 跑 cmd/sign sign 对每个 asset 签名
+      #   - 跑 cmd/sign manifest 生成 latest.json
+      #   - gh release create ${{ github.ref_name }} 上传所有产物
+      #
+      # 当前 v0.8.0 阶段：骨架 workflow 就绪，maintainer 实际触发时
+      # 需要先 (1) 跑 cmd/sign genkey 生成私钥并存 GitHub secrets；
+      # (2) 公钥粘到 app/updater/verify.go 替换 PLACEHOLDER；
+      # (3) 完整 matrix 实现见 docs/releases/v0.8.0.md

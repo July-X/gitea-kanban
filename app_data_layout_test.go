@@ -31,7 +31,14 @@ func TestApp_OnStartup_DataLayout(t *testing.T) {
 	t.Setenv("GITEA_KANBAN_DEV_KEYCHAIN", "1")
 
 	app := NewApp()
-	app.OnStartup(context.Background())
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("OnStartup PANIC: %v", r)
+			}
+		}()
+		app.OnStartup(context.Background())
+	}()
 	defer app.OnShutdown(context.Background())
 
 	// 1. ${dataDir}/logs/main/main.log 必须存在
