@@ -7780,7 +7780,13 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .pr-detail__conv-list {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  /* v0.7.55：移除 overflow-y: auto，让 timeline 内容溢出时让 .pr-detail-body
+     的滚动条接管。修复前 .pr-detail-content + .pr-detail-body + .pr-detail__conv-list
+     三层嵌套都 overflow-y: auto，timeline 自己内嵌一条滚动条 + 外层一条，user 反馈
+     "timeline 不应该出现新的纵向滚动条"。flex:1 + min-height:0 保留，让 conv-list
+     仍然撑满 body 高度（让 timeline ul 的 position: absolute 子元素能正确
+     相对 conv-list 定位），但滚动归 .pr-detail-body 管。 */
+  overflow: visible;
 }
 .pr-detail__conv-loading,
 .pr-detail__conv-error,
