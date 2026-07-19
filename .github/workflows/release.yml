@@ -1,10 +1,11 @@
 # release.yml —— v0.8.0 自动发版 workflow
 #
-# 触发条件：推送 tag `v*`（如 v0.8.0）时自动跑：
-#   1. 跨平台 build（macOS universal + Windows amd64 双平台，不含 Linux）
-#   2. 对每个 asset 跑 cmd/sign sign 生成 .sig 文件
-#   3. 跑 cmd/sign manifest 生成 latest.json
-#   4. 调 gh release create 上传所有产物
+# 触发条件：推送 tag `v*`（如 v0.8.0 / v0.8.0-rc1）时自动跑：
+#   1. matrix build（macOS amd64 + windows amd64 双平台，不含 Linux 和 arm64）
+#   2. 收集所有 build artifacts 到单一 job（release-publish）
+#   3. 对每个 asset 跑 cmd/sign sign 生成 .sig 文件
+#   4. 跑 cmd/sign manifest 生成 latest.json
+#   5. 调 gh release create 上传所有产物 + 删除 pre-release tag 的旧 release
 #
 # ⚠️ 必需 GitHub Secrets：
 #   - SIGN_PRIVATE_KEY：cmd/sign genkey 生成的加密私钥（base64 单行）
@@ -17,25 +18,47 @@
 #      Name: SIGN_PRIVATE_KEY  Value: <粘贴>
 #   4. Name: SIGN_PASSWORD     Value: <pwd>
 #   5. 把公钥粘到 app/updater/verify.go 的 PublicKeyB64 常量并 commit
-#
+
 name: release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:  # 也允许手动触发（指定 tag）
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.8.0 / v0.8.0-rc1)'
+        required: true
 
 permissions:
-  contents: write  # 允许 gh release create
+  contents: write  # 允许 gh release create / upload
 
 jobs:
-  release:
-    name: build · sign · publish
-    runs-on: ubuntu-22.04  # 跨平台 build 走 matrix
-    timeout-minutes: 60
+  # ===== Stage 1: 跨平台 build matrix =====
+  build:
+    name: build (${{ matrix.os }}-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # v0.8.0 仅 stable + Windows/macOS 双平台 + Intel (amd64) 单架构
+        # Linux / arm64 暂不在 v0.8.0 范围（plan v0.8.0.md 红线）
+        include:
+          - os: macos-14
+            platform: darwin
+            arch: amd64
+            artifact: gitea-kanban-macos-amd64
+            output: gitea-kanban.app
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+            artifact: gitea-kanban-windows-amd64
+            output: gitea-kanban.exe
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
 
-      # 跨平台 build matrix
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
@@ -54,66 +77,167 @@ jobs:
 
       - name: 安装 Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+        shell: bash
 
       - name: 前端依赖
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Go 测试（含 cmd/sign）
+      - name: Go 测试（含 cmd/sign + app/updater）
         run: go test ./... -count=1
 
-      - name: 解析 tag 名
-        id: tag
+      - name: 前端 typecheck
+        working-directory: frontend
+        run: pnpm run typecheck
+
+      - name: 前端 build
+        working-directory: frontend
+        run: pnpm run build
+
+      # macOS / Windows 都用 wails build 加 -ldflags 注入版本号
+      - name: 构建（macOS / Windows 通用）
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "name=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-          else
-            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          wails build \
+            -platform ${{ matrix.platform }}/${{ matrix.arch }} \
+            -clean \
+            -o ${{ matrix.output }} \
+            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
+        shell: bash
 
-      # macOS universal build（另开 macos runner）
-      - name: macOS build
-        id: build_macos
-        uses: goto-bus-stop/setup-glob-action@df96e4c4622dcbbed6e69b8f3f9a0c66e1af5ae9
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
         with:
-          patterns: |
-            build/bin/gitea-kanban.app
-          target-directory: dist/
+          name: ${{ matrix.artifact }}
+          path: build/bin/${{ matrix.output }}
+          if-no-files-found: error
 
-      # 实际上 macOS build 必须在 macos-14 runner 跑；这里用独立的 job 拉
-      # 为保持单 workflow 简单，把 macOS build 拆出去（见 .github/workflows/build.yml）
+  # ===== Stage 2: sign + publish =====
+  publish:
+    name: sign · manifest · publish
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
 
-      # Windows build（windows runner）
-      # 同上 windows build 必须 windows runner，拆出去
+    steps:
+      - uses: actions/checkout@v4
 
-      # Linux build：本项目 v0.8.0 不支持，skip
-      # 此处只放 macOS artifact signing / publish 流程，
-      # 真实跨平台 build 在 build.yml + 下面的 strategy.matrix 实现
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
 
-      # 占位：实际跑时由 matrix build job 触发
-      - name: 显示 tag
-        run: echo "Release tag: ${{ steps.tag.outputs.name }}"
+      # 下载 2 个 build artifact
+      - name: 下载 macOS amd64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: gitea-kanban-macos-amd64
+          path: build/bin/
+
+      - name: 下载 Windows amd64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: gitea-kanban-windows-amd64
+          path: build/bin/
 
       - name: 检查必需 secrets
+        env:
+          SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
+          SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
         run: |
-          if [[ -z "${{ secrets.SIGN_PRIVATE_KEY }}" ]]; then
+          if [[ -z "$SIGN_PRIVATE_KEY" ]]; then
             echo "ERROR: SIGN_PRIVATE_KEY secret is empty"
             exit 1
           fi
-          if [[ -z "${{ secrets.SIGN_PASSWORD }}" ]]; then
+          if [[ -z "$SIGN_PASSWORD" ]]; then
             echo "ERROR: SIGN_PASSWORD secret is empty"
             exit 1
           fi
 
-      # 注：完整 release workflow 应包含：
-      #   - strategy.matrix 跨平台 build
-      #   - artifacts: gitea-kanban-macos, gitea-kanban-windows
-      #   - download-artifacts 拉所有 binary
-      #   - 跑 cmd/sign sign 对每个 asset 签名
-      #   - 跑 cmd/sign manifest 生成 latest.json
-      #   - gh release create ${{ github.ref_name }} 上传所有产物
-      #
-      # 当前 v0.8.0 阶段：骨架 workflow 就绪，maintainer 实际触发时
-      # 需要先 (1) 跑 cmd/sign genkey 生成私钥并存 GitHub secrets；
-      # (2) 公钥粘到 app/updater/verify.go 替换 PLACEHOLDER；
-      # (3) 完整 matrix 实现见 docs/releases/v0.8.0.md
+      # macOS .app 是 directory，需要 zip 打包成可上传的 asset
+      - name: 打包 macOS .app
+        run: |
+          cd build/bin
+          if [[ -d gitea-kanban.app ]]; then
+            zip -r gitea-kanban-macos-amd64.zip gitea-kanban.app
+          fi
+
+      # Windows .exe 直接作为 asset
+      - name: 准备 assets 列表
+        id: prepare_assets
+        run: |
+          ls -la build/bin/
+
+      # 写私钥到临时文件 + chmod 600
+      - name: 写签名私钥（临时）
+        env:
+          SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
+        run: |
+          echo "$SIGN_PRIVATE_KEY" > build/bin/private.b64
+          chmod 600 build/bin/private.b64
+
+      # 对每个 asset 签 .sig
+      - name: ed25519 sign assets
+        env:
+          SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
+        run: |
+          go run ./cmd/sign sign \
+            --key build/bin/private.b64 \
+            --password "$SIGN_PASSWORD" \
+            build/bin/gitea-kanban-macos-amd64.zip \
+            build/bin/gitea-kanban-windows-amd64.exe \
+            build/bin/latest.json
+        shell: bash
+
+      # 生成 manifest（latest.json）
+      - name: 生成 manifest
+        env:
+          SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
+        run: |
+          go run ./cmd/sign manifest \
+            --version ${{ github.ref_name }} \
+            --notes docs/releases/${{ github.ref_name }}.md \
+            --repo ${{ github.repository }} \
+            build/bin/gitea-kanban-macos-amd64.zip \
+            build/bin/gitea-kanban-windows-amd64.exe \
+            > build/bin/latest.json
+        shell: bash
+
+      # 验证 manifest + sig 链完整
+      - name: 验证产物完整性
+        run: |
+          ls -la build/bin/
+          echo "---"
+          cat build/bin/latest.json | head -20
+
+      # gh release create
+      - name: 创建 / 更新 GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 兼容 rc tag（如 v0.8.0-rc1）使用 --prerelease
+          if [[ "${{ github.ref_name }}" == *"-rc"* ]] || [[ "${{ github.ref_name }}" == *"-beta"* ]]; then
+            PRE_RELEASE_FLAG="--prerelease"
+          else
+            PRE_RELEASE_FLAG=""
+          fi
+
+          # 先看 release 是否已存在（workflow_dispatch 重跑场景）
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release ${{ github.ref_name }} 已存在，删除旧的再重建"
+            gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes
+          fi
+
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "gitea-kanban ${{ github.ref_name }}" \
+            --notes-file "docs/releases/${{ github.ref_name }}.md" \
+            $PRE_RELEASE_FLAG \
+            build/bin/gitea-kanban-macos-amd64.zip \
+            build/bin/gitea-kanban-windows-amd64.exe \
+            build/bin/latest.json \
+            build/bin/*.sig
+        shell: bash
+
+      - name: 清理临时私钥
+        run: rm -f build/bin/private.b64
+        shell: bash
