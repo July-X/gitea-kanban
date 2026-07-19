@@ -1,0 +1,5 @@
+# 子目录 .gitignore override：白名单 .exe 文件
+# 根目录 .gitignore 排除 *.exe（避免误提交用户本地构建产物）
+# 这里覆盖例外，允许 app/gitbinary/binaries/git/ 下的 .exe 文件入库
+# （v0.4.0+ dev 占位二进制，release 前用真实 git 2.55.0 windows binary 替换）
+!*.exe
