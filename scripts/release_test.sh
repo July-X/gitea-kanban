@@ -106,9 +106,12 @@ PUB_HEX=$(printf '%s' "$PUB_B64" | base64 -d 2>/dev/null | xxd -p -c 1000 | tr -
 echo "pub hex len: ${#PUB_HEX}"
 
 RELEASE_DIR="${RELEASE_DIR:-/tmp/gitea-kanban-release-v0.8.0-test}"
-(cd "$TMPDIR/verify" && go run main.go "$PUB_HEX" \
+if ! (cd "$TMPDIR/verify" && go run main.go "$PUB_HEX" \
   "$RELEASE_DIR/gitea-kanban-macos-amd64.zip.sig" \
-  "$RELEASE_DIR/gitea-kanban-macos-amd64.zip" 2>&1) | head -5 || echo "(verify skipped: pub b64 → hex 失败或 go run 失败)"
+  "$RELEASE_DIR/gitea-kanban-macos-amd64.zip") 2>&1 | head -5; then
+  echo "ERROR: ed25519.Verify FAILED（zip.sig 不是 zip 的合法签名）" >&2
+  exit 1
+fi
 
 # 8. 清理
 rm -rf build/bin/gitea-kanban.app build/bin/gitea-kanban.exe "$RELEASE_DIR" docs/releases/v0.8.0-test.md
