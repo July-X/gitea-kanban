@@ -8307,6 +8307,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   background: var(--color-bg-hover);
 }
 .pr-detail__comment-bubble::before {
+  /* v0.7.3：内三角形（背景色）—— 实际可见的箭头填充。
+     v0.7.54：z-index:1 盖在 ::after 外三角形上面，让内三角形"吃掉"外三角形
+     1px 边线以内的区域，形成边线效果。 */
   content: "";
   position: absolute;
   left: -6px;
@@ -8316,17 +8319,41 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   border-style: solid;
   border-width: 6px 6px 6px 0;
   border-color: transparent var(--color-bg-elevated) transparent transparent;
+  z-index: 1;
   /* v0.7.53：hover 时左箭头跟着 bubble 背景变（var(--color-bg-hover)），
      否则箭头和 bubble 背景色不一致会露馅。*/
+  transition: border-right-color 0.15s ease;
+}
+/* v0.7.54：外三角形（border 色）—— 模拟箭头边线。比 ::before 内三角形大 1px
+   （7px vs 6px，左偏 1px），内三角形 z-index:1 盖住重叠区域，露出的 1px 形成
+   箭头边线。边线颜色跟 bubble border 同步：默认 divider、hover text-muted、
+   editing primary。*/
+.pr-detail__comment-bubble::after {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 11px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 7px 7px 7px 0;
+  border-color: transparent var(--color-divider) transparent transparent;
   transition: border-right-color 0.15s ease;
 }
 .pr-detail__comment-bubble:hover::before {
   border-right-color: var(--color-bg-hover);
 }
+.pr-detail__comment-bubble:hover::after {
+  border-right-color: var(--color-text-muted);
+}
 .pr-detail__comment-bubble--editing {
   background: var(--color-bg-elevated);
   /* v0.7.53：editing 状态 border 用 primary 色高亮，区别于普通 hover。*/
   border-color: var(--color-primary);
+}
+.pr-detail__comment-bubble--editing::after {
+  /* v0.7.54：editing 状态外三角形同步 primary 色。*/
+  border-right-color: var(--color-primary);
 }
 .pr-detail__comment-meta {
   display: flex;
