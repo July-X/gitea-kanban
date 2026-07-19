@@ -134,12 +134,7 @@ func (a *App) checkUpdatesAtStartup() {
 	if a.updater == nil || a.localStore == nil || a.logger == nil {
 		return
 	}
-	checkEnabled := true // default
-	if v, ok := a.localStore.Get().Prefs["app.checkUpdates"]; ok {
-		if b, ok := v.(bool); ok {
-			checkEnabled = b
-		}
-	}
+	checkEnabled := store.GetPrefBool(a.localStore, store.CheckUpdatesPrefKey, true)
 	if !checkEnabled {
 		a.logger.Info("update check: skipped (disabled in prefs)")
 		return
