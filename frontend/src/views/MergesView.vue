@@ -8291,11 +8291,20 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   min-width: 0;
   padding: var(--space-3);
   background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   /* v0.7.3：左箭头 —— 对齐 Gitea web .avatar-content-left-arrow。
      三角形 ::before 指向左侧 timeline-rail 节点，模拟气泡箭头。
      event（review / system）通过 timeline-item--event 不用 bubble，没箭头。 */
   position: relative;
+  /* v0.7.53：加 hover 效果 —— border 颜色从 divider 变 text-muted，background
+     从 bg-elevated 变 bg-hover，配合 0.15s ease transition。user 反馈"对话汽包
+     应该有边线、悬浮效果，不然和 timeline 配合起来有些突兀"。*/
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.pr-detail__comment-bubble:hover {
+  border-color: var(--color-text-muted);
+  background: var(--color-bg-hover);
 }
 .pr-detail__comment-bubble::before {
   content: "";
@@ -8307,8 +8316,18 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   border-style: solid;
   border-width: 6px 6px 6px 0;
   border-color: transparent var(--color-bg-elevated) transparent transparent;
+  /* v0.7.53：hover 时左箭头跟着 bubble 背景变（var(--color-bg-hover)），
+     否则箭头和 bubble 背景色不一致会露馅。*/
+  transition: border-right-color 0.15s ease;
 }
-.pr-detail__comment-bubble--editing { background: var(--color-bg-elevated); }
+.pr-detail__comment-bubble:hover::before {
+  border-right-color: var(--color-bg-hover);
+}
+.pr-detail__comment-bubble--editing {
+  background: var(--color-bg-elevated);
+  /* v0.7.53：editing 状态 border 用 primary 色高亮，区别于普通 hover。*/
+  border-color: var(--color-primary);
+}
 .pr-detail__comment-meta {
   display: flex;
   align-items: center;
