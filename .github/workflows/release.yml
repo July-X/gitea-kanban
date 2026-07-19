@@ -83,16 +83,18 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Go 测试（含 cmd/sign + app/updater）
-        run: go test ./... -count=1
+      - name: 前端 build（生成 dist/ 给 Go embed）
+        working-directory: frontend
+        run: pnpm run build
 
       - name: 前端 typecheck
         working-directory: frontend
         run: pnpm run typecheck
 
-      - name: 前端 build
-        working-directory: frontend
-        run: pnpm run build
+      # 必须放在 pnpm build 之后：main.go 用 //go:embed all:frontend/dist 嵌入前端资源，
+      # 没有 dist/ 会导致 go build 和 go test 一起 setup failed（FAIL: pattern all:frontend/dist: no matching files）
+      - name: Go 测试（含 cmd/sign + app/updater）
+        run: go test ./... -count=1
 
       # macOS / Windows 都用 wails build 加 -ldflags 注入版本号
       - name: 构建（macOS / Windows 通用）
