@@ -17,6 +17,6 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: 'frontend/pnpm-lock.yaml'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm e2e:all
+      - run: pnpm test
         env:
           KB_TOKEN: ${{ secrets.KB_TOKEN }}
