@@ -224,6 +224,18 @@ jobs:
             "assets": []
           }
           EOF
+
+          # 占位 .sig 文件（0 字节 + 注释），让 gh release create 检测到
+          # （fallback 模式 release 是无签名的 raw build，sig 只是 placeholder
+          # 防止 gh release create 报 "no matches found for *.sig"）
+          for asset in build/release/gitea-kanban-macos-amd64.zip \
+                       build/release/gitea-kanban-windows-amd64.exe \
+                       build/release/latest.json; do
+            if [[ -f "$asset" ]]; then
+              echo "# placeholder signature (SIGN_PRIVATE_KEY secret missing)" > "${asset}.sig"
+            fi
+          done
+
           echo "==> build/release/ 内容:"
           ls -la build/release/
 
