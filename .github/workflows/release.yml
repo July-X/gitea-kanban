@@ -93,8 +93,10 @@ jobs:
 
       # 必须放在 pnpm build 之后：main.go 用 //go:embed all:frontend/dist 嵌入前端资源，
       # 没有 dist/ 会导致 go build 和 go test 一起 setup failed（FAIL: pattern all:frontend/dist: no matching files）
+      # 用 GOOS=GOARCH 显式指定（windows runner 默认 GOARCH=amd64 但 darwin-14 runner 是 arm64；
+      # 必须显式 amd64 才能嵌入 windows 二进制 + macOS Intel 二进制）
       - name: Go 测试（含 cmd/sign + app/updater）
-        run: go test ./... -count=1
+        run: GOOS=${{ matrix.platform }} GOARCH=${{ matrix.arch }} go test ./... -count=1
 
       # macOS / Windows 都用 wails build 加 -ldflags 注入版本号
       - name: 构建（macOS / Windows 通用）
