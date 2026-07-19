@@ -8034,6 +8034,19 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* v0.7.46：commit_ref 事件主行包装（紧跟 verb "引用了此提交" 后）——
+   margin-left: auto 把整个包装推到主行右边（跟 verb 分开，verb 留在左边），
+   min-width: 0 + max-width: 100% + overflow: hidden 配合内部 subject 的
+   flex:1 + ellipsis，撑爆宽度时 subject 优先省略号截断，短 SHA 不动。*/
+.pr-detail__event-commit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+  max-width: 100%;
+  overflow: hidden;
+}
 .pr-detail__event-commit-author {
   color: var(--color-text-muted);
   font-size: 11px;
