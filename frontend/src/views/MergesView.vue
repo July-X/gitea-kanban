@@ -7865,6 +7865,14 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   align-items: center;
   justify-content: center;
 }
+/* v0.7.55：comment 类卡片（普通评论 / 评审正文 / dismiss reason）的 avatar
+   不再 li 垂直居中，改为对齐 bubble 左箭头位置。
+   计算：li padding-top 6px + bubble padding-top 12px + 6px 三角中心 = 24px from li top。
+   rail height 28px，top:24px + translateY(-50%) 让 rail 中心 = 24px = 箭头中心。
+   之前用 top:50% 居中在 ~36px，avatar 比箭头低 ~12px 看起来脱钩。 */
+.pr-detail__timeline-item--comment .pr-detail__timeline-rail {
+  top: 24px;
+}
 /* v0.7.51：system event / review event 的 rail 缩进到 line 位置（28px 宽居中 80px from ul） */
 .pr-detail__timeline-item--event .pr-detail__timeline-rail {
   left: 30px;                 /* rail spans 66-94 from ul，center 80px = line 位置 */
