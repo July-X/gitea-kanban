@@ -208,8 +208,13 @@ jobs:
             (cd build/bin && zip -r "../release/gitea-kanban-${TAG}-macos-amd64.zip" gitea-kanban.app >/dev/null)
             echo "macOS raw build zipped (gitea-kanban.app dir)"
           elif [[ -f build/bin/Contents/MacOS/gitea-kanban ]]; then
-            (cd build/bin && zip -r "../release/gitea-kanban-${TAG}-macos-amd64.zip" Contents >/dev/null)
-            echo "macOS raw build zipped (Contents dir, wails artifact 解压形态)"
+            # v0.8.0 rc29 fix：Contents/ 直接 zip 出来是裸 Contents/，Mac 用户需要
+            # 手动 mv 到 gitea-kanban.app/Contents/ 才能双击跑。这里先 mkdir + cp
+            # 一个 gitea-kanban.app/Contents/ 临时目录树，再 zip 完整 .app bundle。
+            mkdir -p build/bin/gitea-kanban.app
+            cp -R build/bin/Contents build/bin/gitea-kanban.app/
+            (cd build/bin && zip -r "../release/gitea-kanban-${TAG}-macos-amd64.zip" gitea-kanban.app >/dev/null)
+            echo "macOS raw build zipped (Contents → wrapped into gitea-kanban.app/)"
           else
             echo "WARN: macOS .app 找不到（CI macos build 可能 FAIL）"
           fi
