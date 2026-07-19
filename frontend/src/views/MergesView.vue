@@ -7815,7 +7815,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   position: absolute;
   top: 14px;                  /* 第一个 system event dot 中心对齐 */
   bottom: 14px;               /* 最后一个 system event dot 中心对齐 */
-  left: 200px;                /* v0.7.50 从 44px 移到 200px —— 缩进到 bubble 内容区域右侧，line passes through system event icon 中心，远离 comment avatar */
+  left: 80px;                 /* v0.7.51 从 200px 改回 80px —— line 在 bubble 左边缘内侧（44px inside），不切断 bubble 文字，对齐 GitHub web */
   width: 2px;
   /* v0.7.4：用 --color-timeline（专门 token，比 --color-divider 略亮）——
      暗色 18% / 亮色 16% alpha，确保 timeline 序列感可见但不喧宾夺主 */
@@ -7833,16 +7833,16 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   padding: 6px 0;
   position: relative;        /* v0.7.46：让 ::before 绝对定位生效 */
 }
-/* v0.7.50：comment 位置用 ::before 覆盖 ul::before 竖线 —— 对齐 GitHub web
-   两层对话视觉（line 缩进到 bubble 右侧，不在 avatar 和 bubble 之间）。
-   ul::before 画 2px 竖线在 200px 距 ul 左边缘（bubble 内容区域右侧）。
+/* v0.7.51：comment 位置用 ::before 覆盖 ul::before 竖线 —— 对齐 GitHub web
+   两层对话视觉（line 在 bubble 左边缘内侧，不切断 bubble 文字）。
+   ul::before 画 2px 竖线在 80px 距 ul 左边缘（bubble 左边 44px inside）。
    comment ::before 用 ul 同色背景盖 line 区域（4px 宽够覆盖 2px line），
    z-index:1 高于 line z-index:0。效果：line 在 system events 之间贯穿
-   （rail 居中 200px），comment 位置断开。*/
+   （rail 居中 80px），comment 位置断开。*/
 .pr-detail__timeline-item--comment::before {
   content: "";
   position: absolute;
-  left: 164px;                /* 36+164=200px from ul left edge，line 中心 */
+  left: 44px;                 /* 36+44=80px from ul left edge，line 中心 */
   width: 4px;                 /* 4px 宽，刚好覆盖 2px line，最小化 bubble 文字遮挡 */
   top: 0;
   bottom: 0;
@@ -7872,9 +7872,9 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   align-items: center;
   justify-content: center;
 }
-/* v0.7.50：system event / review event 的 rail 缩进到 line 位置（28px 宽居中 200px from ul） */
+/* v0.7.51：system event / review event 的 rail 缩进到 line 位置（28px 宽居中 80px from ul） */
 .pr-detail__timeline-item--event .pr-detail__timeline-rail {
-  left: 150px;                /* rail spans 186-214 from ul，center 200px = line 位置 */
+  left: 30px;                 /* rail spans 66-94 from ul，center 80px = line 位置 */
 }
 /* comment avatar：圆形 + 边框（边框色 == ul 背景色 = 切断竖线） */
 .pr-detail__timeline-avatar {
@@ -7952,6 +7952,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   gap: 2px;
   font-size: var(--font-sm);
   color: var(--color-text-secondary);
+  /* v0.7.51：system event rail 缩进到 line 位置 (x=80)，event-content 需要
+     padding-left 把文字推到 icon 右边（rail spans x=66-94, center 80）。
+     58px = 30px (rail 距 li 左 30px) + 28px (rail width) = 文字从 x=36+58=94 开始，
+     正好接 rail 右边，避免文字被 icon 盖住。*/
+  padding-left: 58px;
   /* v0.7.17 根因修复：pr-detail__event-content 内部子块（主行 + inline + block）
      各自保持 1 行渲染，超出部分溢出隐藏 —— user 反馈"pr-detail__event-content
      当中内容，应该尽量 1 行显示完，不要多行显示"。主行 / inline 块强制不换行
