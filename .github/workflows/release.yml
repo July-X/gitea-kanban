@@ -191,15 +191,30 @@ jobs:
         if: env.SIGN_PRIVATE_KEY == '' || env.SIGN_PASSWORD == ''
         run: |
           mkdir -p build/release
+
+          # 兼容 wails build 各种输出形态：
+          #   - mac: build/bin/gitea-kanban.app/Contents/MacOS/gitea-kanban（macos 旧版）
+          #   - mac: build/bin/Contents/MacOS/gitea-kanban（artifact 解压后 Contents 在 bin 下）
+          #   - windows: build/bin/gitea-kanban.exe
+          # 优先匹配带 .app 目录的形态，找不到就 fallback 到 .app/*/Contents/MacOS 形态
           if [[ -d build/bin/gitea-kanban.app ]]; then
             (cd build/bin && zip -r ../release/gitea-kanban-macos-amd64.zip gitea-kanban.app >/dev/null)
-            echo "macOS raw build zipped"
+            echo "macOS raw build zipped (gitea-kanban.app dir)"
+          elif [[ -f build/bin/Contents/MacOS/gitea-kanban ]]; then
+            (cd build/bin && zip -r ../release/gitea-kanban-macos-amd64.zip Contents >/dev/null)
+            echo "macOS raw build zipped (Contents dir, wails artifact 解压形态)"
+          else
+            echo "WARN: macOS .app 找不到（CI macos build 可能 FAIL）"
           fi
+
           if [[ -f build/bin/gitea-kanban.exe ]]; then
             cp build/bin/gitea-kanban.exe build/release/gitea-kanban-windows-amd64.exe
             echo "windows raw build copied"
+          else
+            echo "WARN: gitea-kanban.exe 找不到（CI windows build 可能 FAIL）"
           fi
-          # 写一个 minimal latest.json（无签名的 placeholder，manifest 端修）
+
+          # 写一个 minimal latest.json（无签名的 placeholder）
           cat > build/release/latest.json << 'EOF'
           {
             "version": "${{ github.ref_name }}",
@@ -209,6 +224,7 @@ jobs:
             "assets": []
           }
           EOF
+          echo "==> build/release/ 内容:"
           ls -la build/release/
 
       # gh release create（v0.8.0：动态检测可用 asset，windows FAIL 也能 release macOS）
