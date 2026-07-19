@@ -13,6 +13,8 @@ package config
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,6 +23,26 @@ import (
 	"sync"
 	"time"
 )
+
+// hashAttrs 算 []slog.Attr 的内容哈希（slog.Attr 不支持 comparable，用 sha256）
+func hashAttrs(attrs []slog.Attr) string {
+	h := sha256.New()
+	for _, a := range attrs {
+		h.Write([]byte(a.Key))
+		h.Write([]byte{0})
+		switch a.Value.Kind() {
+		case slog.KindString:
+			h.Write([]byte(a.Value.String()))
+		case slog.KindInt64:
+			// 简化：slog 数值 Value 没暴露原始 int，写 String 即可（用于去重而非加密）
+			h.Write([]byte(a.Value.String()))
+		default:
+			h.Write([]byte(a.Value.String()))
+		}
+		h.Write([]byte{0})
+	}
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
 
 // AppName 应用名
 const AppName = "gitea-kanban"
@@ -47,15 +69,16 @@ const logRetentionDays = 14
 // 且新增一个三方依赖。AGENTS §13 明确禁止自决引入重大新依赖。
 // 我们自己写的 ~80 行 handler 完全够用，且零外部风险。
 type dailyRotateHandler struct {
-	mu       sync.Mutex
-	logDir   string
-	level    slog.Leveler
-	attrs    []slog.Attr
-	group    string
-	now      func() time.Time // 可注入，便于测试
-	inner    slog.Handler     // 当前活跃的文件 handler
-	innerDay string           // 当前 handler 对应的日期（YYYY-MM-DD）
-	file     *os.File         // 当前活跃的文件句柄（v0.8.0 加，Close() 直接关）
+	mu               sync.Mutex
+	logDir           string
+	level            slog.Leveler
+	attrs            []slog.Attr
+	group            string
+	now              func() time.Time // 可注入，便于测试
+	inner            slog.Handler     // 当前活跃的文件 handler
+	innerDay         string           // 当前 handler 对应的日期（YYYY-MM-DD）
+	file             *os.File         // 当前活跃的文件句柄（v0.8.0 加，Close() 直接关）
+	attrsAppliedHash string           // 当前 h.inner 已应用的 attrs 哈希（v0.8.0 rc20：slog.Attr 不 comparable）
 }
 
 // newDailyRotateHandler 创建日切 handler（同时跑一次 GC）
@@ -88,30 +111,56 @@ func (h *dailyRotateHandler) Handle(ctx context.Context, r slog.Record) error {
 		}
 		return err
 	}
+	// v0.8.0 rc20 fix：WithAttrs 共享 h.inner 后（避免 windows file handle leak），
+	// 但 h.inner 第一次创建时不带 attrs（创建时 h.attrs 还是空）。
+	// 子 handler 通过 WithAttrs 添加 attrs 时，h.inner 没重新生成 → attrs 丢失。
+	// 修复：每次 Handle 检查 h.attrs 是否已应用到 h.inner，没就重新 WithAttrs。
+	attrsHash := hashAttrs(h.attrs)
+	if h.attrsAppliedHash != attrsHash {
+		base := h.inner
+		if len(h.attrs) > 0 {
+			base = base.WithAttrs(h.attrs)
+		}
+		if h.group != "" {
+			base = base.WithGroup(h.group)
+		}
+		h.inner = base
+		h.attrsAppliedHash = attrsHash
+	}
 	return h.inner.Handle(ctx, r)
 }
 
 // WithAttrs 实现 slog.Handler：把 attrs 透传到 inner
+//
+// v0.8.0 rc20 fix：返回的 handler 继承 h.file / h.inner / h.innerDay
+// （之前 new 一个独立 *dailyRotateHandler 但 file/inner 是 nil → 测试
+// sub.Info("hello") 触发 h2.rotateIfNeeded() 打开独立 file → windows
+// 上 leak 一个 file handle → t.TempDir() RemoveAll "file in use" FAIL）
 func (h *dailyRotateHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	// attrs 只缓存到外层,真正的应用在 rotateIfNeeded 里(在 inner 上 WithAttrs)
 	merged := append(append([]slog.Attr{}, h.attrs...), attrs...)
 	return &dailyRotateHandler{
-		logDir: h.logDir,
-		level:  h.level,
-		attrs:  merged,
-		group:  h.group,
-		now:    h.now,
+		logDir:   h.logDir,
+		level:    h.level,
+		attrs:    merged,
+		group:    h.group,
+		now:      h.now,
+		inner:    h.inner,
+		innerDay: h.innerDay,
+		file:     h.file,
 	}
 }
 
 // WithGroup 实现 slog.Handler：与 WithAttrs 同理
 func (h *dailyRotateHandler) WithGroup(name string) slog.Handler {
 	return &dailyRotateHandler{
-		logDir: h.logDir,
-		level:  h.level,
-		attrs:  h.attrs,
-		group:  name,
-		now:    h.now,
+		logDir:   h.logDir,
+		level:    h.level,
+		attrs:    h.attrs,
+		group:    name,
+		now:      h.now,
+		inner:    h.inner,
+		innerDay: h.innerDay,
+		file:     h.file,
 	}
 }
 
