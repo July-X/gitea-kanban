@@ -3,6 +3,12 @@
 > 一个基于 Gitea / GitHub 的桌面端 Git Graph + 看板工具。
 > 给开发者、PM、设计师、市场、运营一起用 —— 一边看代码改动，一边排任务、看流程。
 
+## License
+
+[Apache License 2.0](LICENSE) — `Copyright 2026 gitea-kanban authors`
+
+Third-party attributions in [NOTICE](NOTICE).
+
 ## 这是什么
 
 gitea-kanban 是一个桌面应用（不是网页、不是命令行），装在你的电脑上。
