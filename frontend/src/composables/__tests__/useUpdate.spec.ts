@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useUpdate, formatBytes } from '@renderer/composables/useUpdate';
-import { ref, nextTick } from 'vue';
 import type { UpdateInfo } from '@renderer/types/dto';
 
 // Mock Wails bindings
