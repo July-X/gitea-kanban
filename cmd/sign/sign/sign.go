@@ -66,14 +66,16 @@ func EncryptPrivateKey(priv ed25519.PrivateKey, password string) (string, error)
 
 // DecryptPrivateKey 解密 EncryptPrivateKey 输出。
 //
-// 错误密码返 ErrWrongPassword（不 panic）。
+// 所有解密失败（非法 Base64 / blob 过短 / 篡改 ciphertext / 错误密码 / GCM auth 失败）
+// 都 wrap ErrWrongPassword —— 调用方用 errors.Is(err, ErrWrongPassword) 统一判断
+// "解密失败"语义，避免泄露密码学细节（区分"格式错"vs"密码错"对攻击者没意义）。
 func DecryptPrivateKey(blob string, password string) (ed25519.PrivateKey, error) {
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(blob))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: invalid base64: %v", ErrWrongPassword, err)
 	}
 	if len(raw) < saltSize+aesNonceSize+ed25519.PrivateKeySize {
-		return nil, errors.New("private key blob too short")
+		return nil, fmt.Errorf("%w: blob too short (%d bytes)", ErrWrongPassword, len(raw))
 	}
 	salt := raw[:saltSize]
 	nonce := raw[saltSize : saltSize+aesNonceSize]
@@ -82,18 +84,18 @@ func DecryptPrivateKey(blob string, password string) (ed25519.PrivateKey, error)
 	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: aes cipher: %v", ErrWrongPassword, err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: gcm: %v", ErrWrongPassword, err)
 	}
 	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrWrongPassword, err)
+		return nil, fmt.Errorf("%w: gcm open: %v", ErrWrongPassword, err)
 	}
 	if len(plain) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("plain size mismatch: %d", len(plain))
+		return nil, fmt.Errorf("%w: plain size mismatch: %d", ErrWrongPassword, len(plain))
 	}
 	return ed25519.PrivateKey(plain), nil
 }

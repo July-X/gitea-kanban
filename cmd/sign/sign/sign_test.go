@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -31,16 +32,26 @@ func TestEncryptDecryptRoundtrip(t *testing.T) {
 		t.Error("decrypted key doesn't match original")
 	}
 
-	if _, err := DecryptPrivateKey(blob, "wrong-password"); err == nil {
-		t.Error("decrypt with wrong password should fail")
+	if _, err := DecryptPrivateKey(blob, "wrong-password"); !errors.Is(err, ErrWrongPassword) {
+		t.Errorf("wrong password: want errors.Is(err, ErrWrongPassword), got %v", err)
 	}
 
 	tampered := strings.Replace(blob, "A", "B", 1)
 	if len(tampered) == len(blob) {
 		tampered = blob[:len(blob)-4] + "AAAA"
 	}
-	if _, err := DecryptPrivateKey(tampered, password); err == nil {
-		t.Error("decrypt with tampered blob should fail")
+	if _, err := DecryptPrivateKey(tampered, password); !errors.Is(err, ErrWrongPassword) {
+		t.Errorf("tampered ciphertext: want errors.Is(err, ErrWrongPassword), got %v", err)
+	}
+
+	// 非 Base64 输入也必须返 ErrWrongPassword（不区分"格式错"vs"密码错"）
+	if _, err := DecryptPrivateKey("not-base64-!@#$%", password); !errors.Is(err, ErrWrongPassword) {
+		t.Errorf("invalid base64: want errors.Is(err, ErrWrongPassword), got %v", err)
+	}
+
+	// blob 过短也必须返 ErrWrongPassword
+	if _, err := DecryptPrivateKey("AAAA", password); !errors.Is(err, ErrWrongPassword) {
+		t.Errorf("blob too short: want errors.Is(err, ErrWrongPassword), got %v", err)
 	}
 }
 
