@@ -2470,3 +2470,64 @@ export namespace store {
 
 }
 
+export namespace updater {
+	
+	export class UpdateDownloadResult {
+	    version: string;
+	    channel: string;
+	    platform: string;
+	    path: string;
+	    size: number;
+	    sha256: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateDownloadResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.channel = source["channel"];
+	        this.platform = source["platform"];
+	        this.path = source["path"];
+	        this.size = source["size"];
+	        this.sha256 = source["sha256"];
+	    }
+	}
+	export class UpdateInfo {
+	    available: boolean;
+	    current: string;
+	    latest: string;
+	    notes?: string;
+	    channel: string;
+	    canSelfUpdate: boolean;
+	    manualOnly?: boolean;
+	    manualReason?: string;
+	    downloadUrl?: string;
+	    assetSize?: number;
+	    downloaded: boolean;
+	    err?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.notes = source["notes"];
+	        this.channel = source["channel"];
+	        this.canSelfUpdate = source["canSelfUpdate"];
+	        this.manualOnly = source["manualOnly"];
+	        this.manualReason = source["manualReason"];
+	        this.downloadUrl = source["downloadUrl"];
+	        this.assetSize = source["assetSize"];
+	        this.downloaded = source["downloaded"];
+	        this.err = source["err"];
+	    }
+	}
+
+}
+
