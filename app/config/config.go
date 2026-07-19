@@ -14,7 +14,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -56,6 +55,7 @@ type dailyRotateHandler struct {
 	now      func() time.Time // 可注入，便于测试
 	inner    slog.Handler     // 当前活跃的文件 handler
 	innerDay string           // 当前 handler 对应的日期（YYYY-MM-DD）
+	file     *os.File         // 当前活跃的文件句柄（v0.8.0 加，Close() 直接关）
 }
 
 // newDailyRotateHandler 创建日切 handler（同时跑一次 GC）
@@ -133,10 +133,8 @@ func (h *dailyRotateHandler) rotateIfNeeded() error {
 	}
 
 	// 关闭旧文件
-	if h.inner != nil {
-		if closer, ok := h.inner.(io.Closer); ok {
-			_ = closer.Close()
-		}
+	if h.file != nil {
+		_ = h.file.Close()
 	}
 
 	// 打开新文件
@@ -159,6 +157,7 @@ func (h *dailyRotateHandler) rotateIfNeeded() error {
 
 	h.inner = inner
 	h.innerDay = today
+	h.file = f
 	return nil
 }
 
@@ -166,11 +165,11 @@ func (h *dailyRotateHandler) rotateIfNeeded() error {
 func (h *dailyRotateHandler) Close() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.inner == nil {
-		return nil
-	}
-	if closer, ok := h.inner.(io.Closer); ok {
-		return closer.Close()
+	// v0.8.0 修复 windows CI file lock：直接 Close *os.File file 引用，不依赖
+	// inner.(io.Closer) 类型断言（slog.TextHandler 不实现 io.Closer）。
+	if h.file != nil {
+		_ = h.file.Close()
+		h.file = nil
 	}
 	return nil
 }
