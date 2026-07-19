@@ -19,57 +19,15 @@ func resetInitFlag(t *testing.T) {
 
 // TestInit_ReleasesEmbeddedBinary 验证 Init 能把嵌入二进制释放到磁盘。
 //
-// 仅在有嵌入二进制的 build 下跑（darwin/amd64 + darwin/arm64 + windows/amd64），
-// Linux 上 embeddedGitBytes() 返回 nil，Init 跳过释放。
-func TestInit_ReleasesEmbeddedBinary(t *testing.T) {
-	resetInitFlag(t)
-	tmp := t.TempDir()
-
-	if err := Init(tmp, nil); err != nil {
-		t.Fatalf("Init failed: %v", err)
-	}
-
-	def := DefaultBinaryPath()
-	if def == "" {
-		// Init 跑完后 defaultBinaryPath 为空有 3 种情况：
-		//   1. Linux 平台不嵌入 → Skip
-		//   2. 0 字节 placeholder（dev 期未替换真实 git 二进制）+ smoke test 失败
-		//      → Init 把空文件写到 disk，smoke test 调 --version 失败，
-		//        按 runner.go:208 设计清空 defaultBinaryPath → Skip
-		//   3. 真正嵌入失败（write 错 / chmod 错 / 缺 GOOS 支持） → Fatal
-		if runtime.GOOS == "linux" {
-			t.Skip("Linux 平台不嵌入 git 二进制，跳过 expect-release 断言")
-		}
-		// 检查嵌入二进制本身是不是 0 字节 placeholder（CI 上 dev 期常见）
-		// 直接 stat 磁盘上的预期位置（embeddedGitBytes 跨 build tag 不能在
-		// runner_test.go 这个无 build-tag 文件里直接访问，换 stat 探查）
-		toolsDir := filepath.Join(tmp, "tools", "git")
-		if _, statErr := os.Stat(toolsDir); statErr == nil {
-			entries, _ := os.ReadDir(toolsDir)
-			for _, e := range entries {
-				info, _ := e.Info()
-				if info != nil && info.Size() == 0 {
-					t.Skipf("嵌入二进制为 0 字节 placeholder：%s（dev 期占位，release 前 wails build 替换），跳过 expect-release 断言", e.Name())
-				}
-			}
-		}
-		t.Fatalf("Init 后 DefaultBinaryPath 为空（实际值 %q），期望嵌入二进制路径", def)
-	}
-
-	info, err := os.Stat(def)
-	if err != nil {
-		t.Fatalf("嵌入二进制不存在: %v", err)
-	}
-	if info.IsDir() {
-		t.Fatalf("嵌入二进制路径指向目录: %s", def)
-	}
-	// 0 字节 placeholder 出现时（dev 期），要打 WARNING 但不 fail
-	if info.Size() == 0 {
-		t.Logf("嵌入二进制为 0 字节 placeholder：%s（dev 期占位，release 前替换）", def)
-		return
-	}
-}
-
+// 按 build tag 分平台定义（runner_test_darwin.go / runner_test_windows.go /
+// runner_test_other.go），避免在无嵌入二进制平台（linux）上失败。
+//
+// 设计背景（v0.8.0 CI fix）：CI 上 GOOS=darwin GOARCH=amd64 强制编译时，嵌入
+// 二进制是 0 字节 dev 期 placeholder。Init 检测到 len(bin)==0 直接 return，
+// defaultBinaryPath 不会被 Set。早期实现放在 runner_test.go（无 build tag），
+// linux runner 编译 embeddedGitBytes() 返回 nil，darwin runner 编译时也走
+// embed_other.go 路径，测试无法区分当前平台是否有真实嵌入二进制。
+//
 // TestInit_Idempotent 重复调 Init 不应 panic / 双写。
 func TestInit_Idempotent(t *testing.T) {
 	resetInitFlag(t)
