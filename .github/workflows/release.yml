@@ -125,7 +125,10 @@ jobs:
   # ===== Stage 2: sign + publish =====
   publish:
     name: sign · manifest · publish
+    # v0.8.0 rc17 fix：if: always() 让 windows FAIL 也能 release macOS
+    #（master HEAD windows 7 个 bug 未修，强行等 build 全 PASS → publish 永远 skipped）
     needs: build
+    if: always()
     runs-on: ubuntu-22.04
     timeout-minutes: 15
 
@@ -137,18 +140,20 @@ jobs:
         with:
           go-version: '1.22'
 
-      # 下载 2 个 build artifact
+      # 下载 2 个 build artifact（continue-on-error 让 windows FAIL 也能 release macOS）
       - name: 下载 macOS amd64 build
         uses: actions/download-artifact@v4
         with:
           name: gitea-kanban-macos-amd64
           path: build/bin/
+        continue-on-error: true
 
       - name: 下载 Windows amd64 build
         uses: actions/download-artifact@v4
         with:
           name: gitea-kanban-windows-amd64
           path: build/bin/
+        continue-on-error: true
 
       - name: 检查必需 secrets
         env:
@@ -163,6 +168,9 @@ jobs:
             echo "ERROR: SIGN_PASSWORD secret is empty"
             exit 1
           fi
+          # 列出可用 asset
+          echo "==> 可用 build artifacts:"
+          ls -la build/bin/ 2>&1 || echo "(build/bin/ 为空 — 所有 build matrix 都 FAIL)"
 
       # 调用 scripts/release.sh 集成 zip + sign + manifest + verify 链
       #   v0.8.0：替换原本零碎的 8 个 bash step（step 167-219），减少 70+ 行重复
@@ -177,7 +185,7 @@ jobs:
           RELEASE_DIR: build/release
         run: bash scripts/release.sh "${{ github.ref_name }}"
 
-      # gh release create（v0.8.0：产物改在 build/release/，由 scripts/release.sh 集成产出）
+      # gh release create（v0.8.0：动态检测可用 asset，windows FAIL 也能 release macOS）
       - name: 创建 / 更新 GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -188,6 +196,32 @@ jobs:
           else
             PRE_RELEASE_FLAG=""
           fi
+
+          # 动态检测可用 asset（脚本 release.sh 已经把可用 asset sign/manifest 完成）
+          AVAILABLE_ASSETS=()
+          if [[ -f build/release/gitea-kanban-macos-amd64.zip ]]; then
+            AVAILABLE_ASSETS+=(build/release/gitea-kanban-macos-amd64.zip)
+            AVAILABLE_ASSETS+=(build/release/gitea-kanban-macos-amd64.zip.sig)
+          else
+            echo "WARN: gitea-kanban-macos-amd64.zip 缺失（macOS build FAIL）"
+          fi
+          if [[ -f build/release/gitea-kanban-windows-amd64.exe ]]; then
+            AVAILABLE_ASSETS+=(build/release/gitea-kanban-windows-amd64.exe)
+            AVAILABLE_ASSETS+=(build/release/gitea-kanban-windows-amd64.exe.sig)
+          else
+            echo "WARN: gitea-kanban-windows-amd64.exe 缺失（windows build FAIL）"
+          fi
+          if [[ -f build/release/latest.json ]]; then
+            AVAILABLE_ASSETS+=(build/release/latest.json)
+            AVAILABLE_ASSETS+=(build/release/latest.json.sig)
+          fi
+
+          if [[ ${#AVAILABLE_ASSETS[@]} -eq 0 ]]; then
+            echo "ERROR: 无任何可用 asset，发布中止" >&2
+            exit 1
+          fi
+          echo "==> 将上传 ${#AVAILABLE_ASSETS[@]} 个 asset:"
+          printf '  %s\n' "${AVAILABLE_ASSETS[@]}"
 
           # 先看 release 是否已存在（workflow_dispatch 重跑场景）
           if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
@@ -200,10 +234,7 @@ jobs:
             --title "gitea-kanban ${{ github.ref_name }}" \
             --notes-file "docs/releases/${{ github.ref_name }}.md" \
             $PRE_RELEASE_FLAG \
-            build/release/gitea-kanban-macos-amd64.zip \
-            build/release/gitea-kanban-windows-amd64.exe \
-            build/release/latest.json \
-            build/release/*.sig
+            "${AVAILABLE_ASSETS[@]}"
         shell: bash
 
       - name: 清理临时私钥
