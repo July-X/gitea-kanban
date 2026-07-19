@@ -7821,7 +7821,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
      暗色 18% / 亮色 16% alpha，确保 timeline 序列感可见但不喧宾夺主 */
   background: var(--color-timeline, var(--color-divider));
   border-radius: 1px;
-  z-index: 0;
+  /* v0.7.52：z-index 改 auto（之前 0 创建 stacking context，反而渲染在 li 之后，
+     盖在 bubble 上面造成"line 穿过 bubble"覆盖 bug）。改 auto 后不创建 stacking
+     context，按文档顺序渲染在 li 之前，被 bubble 背景自然盖住 —— 实现
+     "timeline 在气泡下面隐而不断" 效果。system event rail 仍 z-index:1 在 line 上面。 */
+  z-index: auto;
 }
 .pr-detail__timeline-item {
   position: relative;         /* 让 .pr-detail__timeline-rail 绝对定位生效 */
@@ -7833,23 +7837,12 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   padding: 6px 0;
   position: relative;        /* v0.7.46：让 ::before 绝对定位生效 */
 }
-/* v0.7.51：comment 位置用 ::before 覆盖 ul::before 竖线 —— 对齐 GitHub web
-   两层对话视觉（line 在 bubble 左边缘内侧，不切断 bubble 文字）。
-   ul::before 画 2px 竖线在 80px 距 ul 左边缘（bubble 左边 44px inside）。
-   comment ::before 用 ul 同色背景盖 line 区域（4px 宽够覆盖 2px line），
-   z-index:1 高于 line z-index:0。效果：line 在 system events 之间贯穿
-   （rail 居中 80px），comment 位置断开。*/
-.pr-detail__timeline-item--comment::before {
-  content: "";
-  position: absolute;
-  left: 44px;                 /* 36+44=80px from ul left edge，line 中心 */
-  width: 4px;                 /* 4px 宽，刚好覆盖 2px line，最小化 bubble 文字遮挡 */
-  top: 0;
-  bottom: 0;
-  background: var(--color-bg);
-  z-index: 1;
-  pointer-events: none;
-}
+/* v0.7.52：删除 comment ::before patch。v0.7.51 之前 line z-index:0 创建
+   stacking context，渲染在 bubble 之后盖住 bubble 内部，所以需要 ::before 用
+   var(--color-bg) patch line（但 patch 颜色跟 bubble 的 var(--color-bg-elevated)
+   不同，会产生可见色差）。v0.7.52 line 改 z-index:auto 后，按文档顺序渲染在
+   li 之前，bubble 背景自然盖住 line —— 实现"timeline 在气泡下面隐而不断" 效果，
+   不再需要 ::before patch。*/
 /* 评审事件 / 系统事件 (timeline-item--event) —— 单行紧凑 */
 .pr-detail__timeline-item--event {
   display: flex;
