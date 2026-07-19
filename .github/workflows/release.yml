@@ -205,10 +205,10 @@ jobs:
           #   - windows: build/bin/gitea-kanban.exe
           # 优先匹配带 .app 目录的形态，找不到就 fallback 到 .app/*/Contents/MacOS 形态
           if [[ -d build/bin/gitea-kanban.app ]]; then
-            (cd build/bin && zip -r "../../release/gitea-kanban-${TAG}-macos-amd64.zip" gitea-kanban.app >/dev/null)
+            (cd build/bin && zip -r "../release/gitea-kanban-${TAG}-macos-amd64.zip" gitea-kanban.app >/dev/null)
             echo "macOS raw build zipped (gitea-kanban.app dir)"
           elif [[ -f build/bin/Contents/MacOS/gitea-kanban ]]; then
-            (cd build/bin && zip -r "../../release/gitea-kanban-${TAG}-macos-amd64.zip" Contents >/dev/null)
+            (cd build/bin && zip -r "../release/gitea-kanban-${TAG}-macos-amd64.zip" Contents >/dev/null)
             echo "macOS raw build zipped (Contents dir, wails artifact 解压形态)"
           else
             echo "WARN: macOS .app 找不到（CI macos build 可能 FAIL）"
