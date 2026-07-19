@@ -130,7 +130,7 @@ function onRefreshClick(): void {
           class="update-banner__btn update-banner__btn--primary"
           @click="onInstallClick"
         >
-          重启以安装
+          {{ isMacUnsigned ? '前往下载页' : '重启以安装' }}
         </button>
         <button class="update-banner__btn" @click="onDismissClick">
           稍后

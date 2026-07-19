@@ -37,6 +37,12 @@ type UpdaterConfig struct {
 	Logger func(level, format string, args ...any)
 	// OpenBrowser 打开浏览器到指定 URL（macOS 未签名 build 走这条路径）
 	OpenBrowser func(url string) error
+	// Progress 下载/校验进度回调（phase: downloading/verifying/downloaded/error；
+	//                            received/total 字节数；err 非空表示错误）
+	//
+	// 接收方：app_updater_app.go 把这个回调桥接到 wruntime.EventsEmit(ctx, "updater:progress", ...)
+	//        前端 UpdateBanner.vue 订阅 Wails 'updater:progress' 事件更新进度条。
+	Progress func(phase string, received, total int64, errMsg string)
 }
 
 // Updater 是 v0.8.0 自动更新的核心 orchestrator。
@@ -178,30 +184,44 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 
 	m, err := u.fetchLatestManifest(ctx)
 	if err != nil {
+		u.emitProgress("error", 0, 0, err.Error())
 		return nil, err
 	}
 
 	plat := CurrentPlatform()
 	asset, ok := m.Assets[plat]
 	if !ok {
-		return nil, &ErrNoAssetForPlatform{Platform: plat}
+		err := &ErrNoAssetForPlatform{Platform: plat}
+		u.emitProgress("error", 0, 0, err.Error())
+		return nil, err
 	}
 
 	if err := os.MkdirAll(u.cfg.CacheDir, 0o755); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrPermissionDenied, err)
+		err := fmt.Errorf("%w: %v", ErrPermissionDenied, err)
+		u.emitProgress("error", 0, 0, err.Error())
+		return nil, err
 	}
 
 	assetName := AssetFilename(m.Version, plat)
 	destPath := filepath.Join(u.cfg.CacheDir, assetName)
 
+	// emit downloading start
+	u.emitProgress("downloading", 0, asset.Size, "")
+
 	body, err := u.downloadWithRetry(ctx, asset.URL, 0, asset.Size)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrDownloadFailed, err)
+		err := fmt.Errorf("%w: %v", ErrDownloadFailed, err)
+		u.emitProgress("error", 0, asset.Size, err.Error())
+		return nil, err
 	}
+
+	// emit downloading complete
+	u.emitProgress("downloading", int64(len(body)), asset.Size, "")
 
 	// 二次 SHA256 校验（manifest 里没有就跳过——plan 文档允许 SHA256 字段可选）
 	if asset.SHA256 != "" {
 		if err := VerifySHA256(body, asset.SHA256); err != nil {
+			u.emitProgress("error", int64(len(body)), asset.Size, err.Error())
 			return nil, err
 		}
 	}
@@ -210,19 +230,27 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 	sum := sha256.Sum256(body)
 	sumHex := hex.EncodeToString(sum[:])
 
+	// emit verifying
+	u.emitProgress("verifying", int64(len(body)), asset.Size, "")
+
 	// 拉签名 + ed25519 校验
 	sigURL := asset.URL + ".sig"
 	sig, err := u.downloadWithRetry(ctx, sigURL, 0, ed25519SignatureSize)
 	if err != nil {
-		return nil, fmt.Errorf("%w: signature fetch: %v", ErrDownloadFailed, err)
+		err := fmt.Errorf("%w: signature fetch: %v", ErrDownloadFailed, err)
+		u.emitProgress("error", int64(len(body)), asset.Size, err.Error())
+		return nil, err
 	}
 	if err := Verify(body, sig); err != nil {
+		u.emitProgress("error", int64(len(body)), asset.Size, err.Error())
 		return nil, err
 	}
 
 	// 原子写
 	if err := writeFileAtomic(destPath, body, 0o755); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrPermissionDenied, err)
+		err := fmt.Errorf("%w: %v", ErrPermissionDenied, err)
+		u.emitProgress("error", int64(len(body)), asset.Size, err.Error())
+		return nil, err
 	}
 
 	rec := downloadedRecord{
@@ -238,6 +266,9 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 		u.cfg.Logger("warn", "update: save record failed: %v", err)
 	}
 
+	// emit downloaded
+	u.emitProgress("downloaded", int64(len(body)), asset.Size, "")
+
 	return &UpdateDownloadResult{
 		Version:  rec.Version,
 		Channel:  rec.Channel,
@@ -246,6 +277,13 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 		Size:     rec.Size,
 		SHA256:   rec.SHA256,
 	}, nil
+}
+
+// emitProgress 转发给 UpdaterConfig.Progress；nil safe。
+func (u *Updater) emitProgress(phase string, received, total int64, errMsg string) {
+	if u.cfg.Progress != nil {
+		u.cfg.Progress(phase, received, total, errMsg)
+	}
 }
 
 // Install 把缓存的 binary 应用到当前平台。

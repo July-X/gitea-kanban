@@ -9,6 +9,7 @@ import (
 	"gitea-kanban/app/logx"
 	"gitea-kanban/app/store"
 	"gitea-kanban/app/updater"
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // appVersion 编译期注入（main.go 用 -ldflags "-X main.appVersion=v0.8.0"）
@@ -98,6 +99,8 @@ func (a *App) updaterRunningVersion() string {
 //   - HTTP client 用默认（不注入 token 也不会有，公开 GitHub API）
 //   - Logger 走 slog
 //   - OpenBrowser 用平台默认（macOS open / Windows rundll32 / Linux xdg-open）
+//   - Progress 桥接到 wruntime.EventsEmit(ctx, "updater:progress", ...)，
+//     前端 UpdateBanner.vue 订阅 Wails 'updater:progress' 事件更新进度条
 func (a *App) initUpdater() {
 	if a.dataDir == "" {
 		if a.logger != nil {
@@ -116,9 +119,26 @@ func (a *App) initUpdater() {
 		CacheDir:       cacheDir,
 		Logger:         a.slogFunc(),
 		OpenBrowser:    defaultOpenBrowser,
+		Progress:       a.emitUpdateProgress,
 	}
 	a.updater = updater.New(cfg)
 	a.logger.Info("updater initialized", "version", appVersion, "channel", appChannel, "cacheDir", cacheDir)
+}
+
+// emitUpdateProgress 桥接 updater.UpdaterConfig.Progress 到 Wails 'updater:progress' 事件。
+//
+// 接收 phase (downloading/verifying/downloaded/error) + received/total bytes + errMsg；
+// 转发给前端 UpdateBanner.vue 订阅的事件流。
+func (a *App) emitUpdateProgress(phase string, received, total int64, errMsg string) {
+	if a.ctx == nil {
+		return
+	}
+	wruntime.EventsEmit(a.ctx, "updater:progress", map[string]any{
+		"phase":    phase,
+		"received": received,
+		"total":    total,
+		"err":      errMsg,
+	})
 }
 
 // slogFunc 把 slog.Logger 适配成 updater.UpdaterConfig.Logger 签名。
