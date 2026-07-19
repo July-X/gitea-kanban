@@ -155,18 +155,18 @@ jobs:
           path: build/bin/
         continue-on-error: true
 
-      - name: 检查必需 secrets
+      - name: 检查必需 secrets（可选：缺失时 release raw build 不签名）
         env:
           SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
           SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
         run: |
+          # v0.8.0 rc18 fix：secrets 缺失只 warn 不 exit 1
+          #（CI 上 maintainer 还没设 secrets，但用户仍想看 raw build 能否 release）
           if [[ -z "$SIGN_PRIVATE_KEY" ]]; then
-            echo "ERROR: SIGN_PRIVATE_KEY secret is empty"
-            exit 1
+            echo "WARN: SIGN_PRIVATE_KEY secret is empty — release raw build（无签名）"
           fi
           if [[ -z "$SIGN_PASSWORD" ]]; then
-            echo "ERROR: SIGN_PASSWORD secret is empty"
-            exit 1
+            echo "WARN: SIGN_PASSWORD secret is empty — release raw build（无签名）"
           fi
           # 列出可用 asset
           echo "==> 可用 build artifacts:"
@@ -177,6 +177,7 @@ jobs:
       #   并集中 future 维护点。CI 上 release.sh 默认产物写到 build/release/
       #   （RELEASE_DIR env override）。
       - name: 集成 sign + manifest（scripts/release.sh）
+        if: env.SIGN_PRIVATE_KEY != '' && env.SIGN_PASSWORD != ''
         env:
           SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
           SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
@@ -184,6 +185,31 @@ jobs:
           NOTES_FILE: docs/releases/${{ github.ref_name }}.md
           RELEASE_DIR: build/release
         run: bash scripts/release.sh "${{ github.ref_name }}"
+
+      # raw build fallback（secrets 缺失时）：把 raw .app + .exe 直接发布，不签名
+      - name: raw build fallback（无签名）
+        if: env.SIGN_PRIVATE_KEY == '' || env.SIGN_PASSWORD == ''
+        run: |
+          mkdir -p build/release
+          if [[ -d build/bin/gitea-kanban.app ]]; then
+            (cd build/bin && zip -r ../release/gitea-kanban-macos-amd64.zip gitea-kanban.app >/dev/null)
+            echo "macOS raw build zipped"
+          fi
+          if [[ -f build/bin/gitea-kanban.exe ]]; then
+            cp build/bin/gitea-kanban.exe build/release/gitea-kanban-windows-amd64.exe
+            echo "windows raw build copied"
+          fi
+          # 写一个 minimal latest.json（无签名的 placeholder，manifest 端修）
+          cat > build/release/latest.json << 'EOF'
+          {
+            "version": "${{ github.ref_name }}",
+            "notes": "release built without signature (SIGN_PRIVATE_KEY secret missing) — see docs/releases/${{ github.ref_name }}.md",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "channel": "stable",
+            "assets": []
+          }
+          EOF
+          ls -la build/release/
 
       # gh release create（v0.8.0：动态检测可用 asset，windows FAIL 也能 release macOS）
       - name: 创建 / 更新 GitHub release
