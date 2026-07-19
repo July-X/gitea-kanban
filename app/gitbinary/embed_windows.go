@@ -2,7 +2,10 @@
 
 package gitbinary
 
-import _ "embed"
+import (
+	_ "embed"
+	"runtime"
+)
 
 // v0.4.0 内嵌 Git 2.55.0 Windows 二进制（windows only，build tag 隔离）。
 //
