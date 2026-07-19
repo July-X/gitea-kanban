@@ -13,6 +13,7 @@ import (
 	"gitea-kanban/app/store"
 	"gitea-kanban/app/updater"
 	"github.com/google/uuid"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -246,4 +247,15 @@ func (a *App) OnShutdown(ctx context.Context) {
 	if a.logger != nil {
 		a.logger.Info("gitea-kanban shutting down")
 	}
+	// v0.8.0 修 windows CI file lock：主动 Close logger handler 释放文件句柄
+	// dailyRotateHandler.Close() → TextHandler → *os.File.Close()
+	// 解决 testing.go:1464 TempDir RemoveAll cleanup: file in use 的 windows-only FAIL
+	if a.logger != nil {
+		if h := a.logger.Handler(); h != nil {
+			if closer, ok := h.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}
+	}
+	_ = ctx
 }
