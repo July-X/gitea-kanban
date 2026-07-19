@@ -617,20 +617,56 @@ const isBranchCurrentlyDeleted = computed<boolean>(() => {
  * （Gitea API 把 PR body 当作 issue content 而非 comment，无法走 reaction/comment API；
  *  GitHub 端 id=0 也会走 API 失败，但视觉对齐更重要，行为 fallback 接受）。
  * ReactionBar 已有 `commentId <= 0` 防御 → 不会发请求。
+ *
+ * v0.7.46 还注入首条 commit_ref 事件 —— Gitea /issues/{index}/timeline 端点对初始
+ * commit（创建 PR 时的唯一 commit）不返回 commit_ref 事件（v0.7.8 测过，只有
+ * 后续 push 才返 pull_push / merge_pull）。GitHub web 端同样 Issue Events API
+ * 不返 "committed" event，user 在 timeline 看到 "integration test fixture" 是
+ * GitHub web 单独前端拼的。我们这边对齐同样做法：从 store.commitsByPR 缓存
+ * 拿首条 commit，合成 type='commit_ref' 事件注入到 PR 描述 comment 后面。
+ *
+ * id=-1 合成标志（不调任何 API，纯渲染）。created 用首条 commit 的 authoredAt
+ * 让排序自然落到 PR 描述之后；fallback PR.createdAt。author 走 PR.author
+ * （对初始 commit 来说 author = PR author，绝大多数情况成立）。
  */
 const displayTimelineItems = computed<TimelineItemDto[]>(() => {
   const items = getTimelinePanel().items ?? [];
   const pr = selectedPR.value;
-  if (!pr?.body || !pr.author?.username) return items;
-  const synthetic: TimelineItemDto = {
-    id: 0, // 0 = 合成标志（不调 reaction/comment API）
-    type: 'comment',
-    body: pr.body,
-    author: pr.author,
-    created: pr.createdAt,
-    updated: pr.createdAt, // 跟 created 相同 → 不显示"已编辑"标记
-  };
-  return [synthetic, ...items];
+  const out: TimelineItemDto[] = [];
+
+  if (pr?.body && pr.author?.username) {
+    out.push({
+      id: 0, // 0 = PR 描述合成 comment
+      type: 'comment',
+      body: pr.body,
+      author: pr.author,
+      created: pr.createdAt,
+      updated: pr.createdAt,
+    });
+  } else if (!pr) {
+    return items;
+  }
+
+  // v0.7.46：首条 commit_ref 事件注入（如果 timeline 里还没有同 SHA 的 commit_ref）
+  const firstCommit = pr ? pull.commitsByPR.get(pr.index)?.[0] : undefined;
+  if (firstCommit) {
+    const existsAlready = items.some(
+      (it) => it.type === 'commit_ref' && it.refCommitSha && it.refCommitSha.startsWith(firstCommit.shortSha),
+    );
+    if (!existsAlready) {
+      out.push({
+        id: -1, // 负数 = 合成（不调任何 API）
+        type: 'commit_ref',
+        body: '',
+        author: pr!.author,
+        created: firstCommit.authoredAt || pr!.createdAt,
+        refCommitSha: firstCommit.sha,
+      } as TimelineItemDto);
+    }
+  }
+
+  out.push(...items);
+  return out;
 });
 
 /** 在系统浏览器打开 commit 页面 */
@@ -2999,8 +3035,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                     :class="{ 'pr-detail__timeline-item--self': currentUsername && item.author?.username === currentUsername }"
                   >
                     <div class="pr-detail__timeline-rail">
-                      <div class="pr-detail__timeline-avatar" :title="displayName(item.author)" aria-hidden="true">
-                        {{ (item.author?.username || '?').charAt(0).toUpperCase() }}
+                      <div class="pr-detail__timeline-avatar" :title="displayName(item.author)">
+                        <img
+                          v-if="item.author?.avatarUrl"
+                          :src="item.author.avatarUrl"
+                          :alt="displayName(item.author)"
+                          class="pr-detail__timeline-avatar-img"
+                          referrerpolicy="no-referrer"
+                        />
+                        <span v-else aria-hidden="true">{{ (item.author?.username || '?').charAt(0).toUpperCase() }}</span>
                       </div>
                     </div>
                     <div class="pr-detail__comment-bubble" :class="{ 'pr-detail__comment-bubble--editing': editingCommentId === item.id }">
@@ -7796,6 +7839,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   font-size: 12px;
   color: var(--color-text-secondary);
   user-select: none;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+/* v0.7.46 头像图片：填满 28×28 圆形，覆盖全容器 */
+.pr-detail__timeline-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .pr-detail__timeline-avatar--dismiss {
   background: var(--color-bg-hover);
