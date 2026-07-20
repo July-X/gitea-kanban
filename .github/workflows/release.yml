@@ -69,14 +69,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: 安装 Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+      - name: 缓存 Wails CLI（命中则跳过 go install，节省 ~2 分钟）
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/wails
+          key: wails-cli-v2.12.0-${{ runner.os }}-${{ matrix.arch }}
+
+      - name: 安装 Wails CLI（缓存命中时跳过）
+        run: |
+          export GOBIN="$HOME/.cache/wails"
+          if [[ ! -x "$GOBIN/wails" ]]; then
+            go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          else
+            echo "==> Wails CLI 已命中缓存（$GOBIN/wails），跳过 go install"
+          fi
+          export PATH="$GOBIN:$PATH"
         shell: bash
 
       - name: 前端依赖
