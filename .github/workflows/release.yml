@@ -402,12 +402,27 @@ jobs:
             NOTES_ARGS=(--generate-notes)
           fi
 
-          gh release create "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --title "gitea-kanban ${{ github.ref_name }}" \
-            $PRE_RELEASE_FLAG \
-            "${NOTES_ARGS[@]}" \
-            "${AVAILABLE_ASSETS[@]}"
+          # v0.8.0 rc34 fix：gh release create 偶发 HTTP 503（GitHub API 临时挂），
+          # 加 retry 3 次 + 指数 backoff（10s / 30s / 60s）兜底
+          for attempt in 1 2 3; do
+            echo "==> gh release create attempt $attempt/3"
+            if gh release create "${{ github.ref_name }}" \
+              --repo "${{ github.repository }}" \
+              --title "gitea-kanban ${{ github.ref_name }}" \
+              $PRE_RELEASE_FLAG \
+              "${NOTES_ARGS[@]}" \
+              "${AVAILABLE_ASSETS[@]}"; then
+              echo "release 创建成功"
+              break
+            fi
+            # rc33 报 HTTP 503 只 sleep 后 retry（其他错误立即 fail）
+            echo "WARN: gh release create attempt $attempt 失败，sleep $((10 * 3**(attempt-1)))s 后重试"
+            sleep "$((10 * 3**(attempt-1)))"
+            if [[ $attempt -eq 3 ]]; then
+              echo "ERROR: gh release create 3 次都失败" >&2
+              exit 1
+            fi
+          done
         shell: bash
 
       - name: 清理临时私钥
