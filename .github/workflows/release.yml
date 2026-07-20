@@ -24,9 +24,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches-ignore:
-      - master
-      - feat/v0.8.0
   workflow_dispatch:
     inputs:
       tag:
