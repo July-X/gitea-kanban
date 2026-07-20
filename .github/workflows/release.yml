@@ -221,7 +221,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # v0.8.2 fix: fetch-depth: 0 让 workflow 能调 `git push origin --delete tag`
+      # 删除既有 release 对应的 git tag ref（gh release delete 不删 tag ref）
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 安装 Go
         uses: actions/setup-go@v5
@@ -388,6 +392,11 @@ jobs:
           if [[ "$EXISTING_RELEASE_ID" =~ ^[0-9]+$ ]]; then
             echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 gh release delete 清掉 assets"
             gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes >/dev/null
+            # v0.8.2 fix: gh release delete 只删 Release 对象，不删 git tag ref
+            # 必须手动 `git push --delete tag` 删 tag,否则下次 gh release create
+            # 会报 "a release with the same tag name already exists"
+            echo "==> 删除远程 git tag ${{ github.ref_name }}"
+            git push origin --delete tag "${{ github.ref_name }}" 2>&1 || echo "WARN: 删除 tag 失败（可能 tag 已被 force push 覆盖）"
           fi
 
           # 优先用 maintainer 写的 docs/releases/<tag>.md，没有就 fallback --generate-notes
