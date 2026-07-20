@@ -389,25 +389,34 @@ jobs:
           # + 指数 backoff（10s / 30s / 90s / 270s / 810s，总计约 20 分钟）。借鉴 rc33 fix
           # （de23966） 的处理但只绕 retry 不引入其它 rc33+ 改动（保持 macOS build 用 v2.10.1
           # 已验证配置）。
-          for attempt in 1 2 3 4 5; do
+          set +e
+          attempt=1
+          release_ok=0
+          while [[ $attempt -le 5 ]]; do
             echo "==> gh release create attempt $attempt/5"
-            if gh release create "${{ github.ref_name }}" \
+            gh release create "${{ github.ref_name }}" \
               --repo "${{ github.repository }}" \
               --title "gitea-kanban ${{ github.ref_name }}" \
               $PRE_RELEASE_FLAG \
               "${NOTES_ARGS[@]}" \
-              "${AVAILABLE_ASSETS[@]}"; then
+              "${AVAILABLE_ASSETS[@]}"
+            gh_exit=$?
+            if [[ $gh_exit -eq 0 ]]; then
               echo "release 创建成功"
+              release_ok=1
               break
             fi
+            echo "WARN: gh release create attempt $attempt exit=$gh_exit"
             if [[ $attempt -eq 5 ]]; then
               echo "ERROR: gh release create 5 次都失败" >&2
               exit 1
             fi
             SLEEP_S=$((10 * 3**(attempt-1)))
-            echo "WARN: gh release create attempt $attempt 失败，sleep ${SLEEP_S}s 后重试"
+            echo "sleep ${SLEEP_S}s 后重试"
             sleep "$SLEEP_S"
+            attempt=$((attempt + 1))
           done
+          set -e
         shell: bash
 
       - name: 清理临时私钥
