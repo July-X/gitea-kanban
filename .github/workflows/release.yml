@@ -69,7 +69,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
+          # v0.8.2 follow-up: GitHub Actions runner 升级后 actions/setup-node 的
+          # `cache: 'pnpm'` 选项在新 runner 上 validate 失败导致 job 立刻 fail。
+          # 关闭 pnpm cache（pnpm install 自身速度足够，依赖 workspace 缓存已覆盖）。
+          cache: ''
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v4
