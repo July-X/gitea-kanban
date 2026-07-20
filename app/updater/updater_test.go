@@ -95,7 +95,7 @@ func TestAssetFilename(t *testing.T) {
 	if got := AssetFilename("v0.8.0", "windows-amd64"); got != "gitea-kanban-v0.8.0-windows-amd64.exe" {
 		t.Errorf("windows: got %q", got)
 	}
-	if got := AssetFilename("v0.8.0", "darwin-arm64"); got != "gitea-kanban-v0.8.0-darwin-arm64.zip" {
+	if got := AssetFilename("v0.8.0", "darwin-arm64"); got != "gitea-kanban-v0.8.0-darwin-arm64.dmg" {
 		t.Errorf("darwin: got %q", got)
 	}
 }

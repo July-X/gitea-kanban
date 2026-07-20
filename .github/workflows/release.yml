@@ -22,7 +22,8 @@
 name: release
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -51,6 +52,9 @@ jobs:
             platform: windows
             arch: amd64
             artifact: gitea-kanban-windows-amd64
+            # v0.8.5 follow-up: 简化 — matrix.output 回到 gitea-kanban.exe (portable exe 名字),
+            # step 13 上传 portable exe + NSIS installer(如果生成),publish job
+            # 优先选 setup.exe fallback portable exe。
             output: gitea-kanban.exe
 
     runs-on: ${{ matrix.os }}
@@ -69,28 +73,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: 缓存 Wails CLI（命中则跳过 go install，节省 ~2 分钟）
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/wails
-          key: wails-cli-v2.12.0-${{ runner.os }}-${{ matrix.arch }}
-
-      - name: 安装 Wails CLI（缓存命中时跳过）
-        run: |
-          export GOBIN="$HOME/.cache/wails"
-          if [[ ! -x "$GOBIN/wails" ]]; then
-            go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-          else
-            echo "==> Wails CLI 已命中缓存（$GOBIN/wails），跳过 go install"
-          fi
-          export PATH="$GOBIN:$PATH"
+      - name: 安装 Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
         shell: bash
 
       - name: 前端依赖
@@ -121,12 +111,20 @@ jobs:
       # 注意：不传 -o，wails build 默认输出到 build/bin/<appname>.app (mac)
       # 或 build/bin/<appname>.exe (windows)。早期传 -o gitea-kanban.app 时
       # go build 把 .app 当 binary 输出文件，wails packaging 想 mkdir 同名目录失败。
+      # v0.8.4 follow-up: Windows 加 -nsis 生成 NSIS installer (build/bin/gitea-kanban-setup.exe)。
+      # macOS 不加 -nsis (macOS 走 hdiutil 构造 dmg)。
+      # Windows runner (windows-2022) 预装 NSIS 3.10（见 GitHub runner-images Windows2022-Readme.md）。
       - name: 构建（macOS / Windows 通用）
         run: |
+          NSIS_FLAG=""
+          if [[ "${{ matrix.platform }}" == "windows" ]]; then
+            NSIS_FLAG="-nsis"
+          fi
           wails build \
             -platform ${{ matrix.platform }}/${{ matrix.arch }} \
             -clean \
-            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
+            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable" \
+            $NSIS_FLAG
         shell: bash
 
       # v0.8.0 rc30：macOS 改成出 dmg，不再出 zip。
@@ -202,7 +200,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: build/bin/${{ matrix.output }}
+          # v0.8.5 follow-up: 上传 build/bin 下所有 .exe (NSIS installer + portable exe 同时),
+          # publish job 后续选 setup.exe 优先 / portable exe fallback。
+          path: build/bin/*.exe
           if-no-files-found: error
 
       # macOS dmg 在前一步构造好，单独上传（artifact name 改 -dmg 后缀）
@@ -225,7 +225,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # v0.8.2 fix: fetch-depth: 0 让 workflow 能调 `git push origin --delete tag`
+      # 删除既有 release 对应的 git tag ref（gh release delete 不删 tag ref）
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 安装 Go
         uses: actions/setup-go@v5
@@ -306,11 +310,16 @@ jobs:
             file "$MAC_DMG"
           fi
 
-          if [[ -f build/bin/gitea-kanban.exe ]]; then
-            mv build/bin/gitea-kanban.exe "$WIN_EXE"
-            echo "windows raw build moved to $WIN_EXE"
+          # v0.8.5 follow-up: 优先选 NSIS installer，fallback portable exe
+          if [[ -f build/bin/gitea-kanban-setup.exe ]]; then
+            cp build/bin/gitea-kanban-setup.exe "$WIN_EXE"
+            echo "windows NSIS installer copied to $WIN_EXE (portable gitea-kanban.exe 也保留供 fallback)"
+          elif [[ -f build/bin/gitea-kanban.exe ]]; then
+            # 兜底：NSIS 没产出时用 portable exe
+            cp build/bin/gitea-kanban.exe "$WIN_EXE"
+            echo "WARN: gitea-kanban-setup.exe 找不到,fallback 用 portable gitea-kanban.exe"
           else
-            echo "WARN: gitea-kanban.exe 找不到（CI windows build 可能 FAIL）"
+            echo "WARN: gitea-kanban-setup.exe 和 gitea-kanban.exe 都找不到（CI windows build 可能 FAIL）"
           fi
 
           # 写一个 minimal latest.json（无签名的 placeholder）
@@ -384,13 +393,15 @@ jobs:
           # v0.8.0 rc32 fix：用 REST API 直接删 release，gh release delete 不删 assets
           #   → 重跑时旧 assets 留下导致 "ReleaseAsset.name already exists"
           #   → REST API DELETE /releases/{id} 会同步清掉所有 assets
-          # v0.8.0 rc32.1 fix：jq 拿 id 失败时可能返 error JSON {"message":"Not Found"...}，
-          #   EXISTING_RELEASE_ID 是 dict 不是数字，DELETE 路径编码后报
-          #   "unsupported protocol scheme"。只在 EXISTING_RELEASE_ID 是纯数字时才删。
-          EXISTING_RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.id // empty' 2>/dev/null || true)
+          EXISTING_RELEASE_ID=$(gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --jq '.id' 2>/dev/null || echo "")
           if [[ "$EXISTING_RELEASE_ID" =~ ^[0-9]+$ ]]; then
-            echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 REST API 删除并清掉 assets"
-            gh api -X DELETE "repos/${{ github.repository }}/releases/$EXISTING_RELEASE_ID" >/dev/null
+            echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 gh release delete 清掉 assets"
+            gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes >/dev/null
+            # v0.8.2 fix: gh release delete 只删 Release 对象，不删 git tag ref
+            # 必须手动 `git push --delete tag` 删 tag,否则下次 gh release create
+            # 会报 "a release with the same tag name already exists"
+            echo "==> 删除远程 git tag ${{ github.ref_name }}"
+            git push origin --delete tag "${{ github.ref_name }}" 2>&1 || echo "WARN: 删除 tag 失败（可能 tag 已被 force push 覆盖）"
           fi
 
           # 优先用 maintainer 写的 docs/releases/<tag>.md，没有就 fallback --generate-notes
@@ -402,27 +413,38 @@ jobs:
             NOTES_ARGS=(--generate-notes)
           fi
 
-          # v0.8.0 rc34 fix：gh release create 偶发 HTTP 503（GitHub API 临时挂），
-          # 加 retry 5 次 + 指数 backoff（10s / 30s / 90s / 270s / 810s，总计约 20 分钟）
-          for attempt in 1 2 3 4 5; do
+          # v0.8.2 follow-up: gh release create 偶发 HTTP 503（GH API 临时挂），加 retry 5 次
+          # + 指数 backoff（10s / 30s / 90s / 270s / 810s，总计约 20 分钟）。借鉴 rc33 fix
+          # （de23966） 的处理但只绕 retry 不引入其它 rc33+ 改动（保持 macOS build 用 v2.10.1
+          # 已验证配置）。
+          set +e
+          attempt=1
+          release_ok=0
+          while [[ $attempt -le 5 ]]; do
             echo "==> gh release create attempt $attempt/5"
-            if gh release create "${{ github.ref_name }}" \
+            gh release create "${{ github.ref_name }}" \
               --repo "${{ github.repository }}" \
               --title "gitea-kanban ${{ github.ref_name }}" \
               $PRE_RELEASE_FLAG \
               "${NOTES_ARGS[@]}" \
-              "${AVAILABLE_ASSETS[@]}"; then
+              "${AVAILABLE_ASSETS[@]}"
+            gh_exit=$?
+            if [[ $gh_exit -eq 0 ]]; then
               echo "release 创建成功"
+              release_ok=1
               break
             fi
-            # rc33 rc34 报 HTTP 503 只 sleep 后 retry（其他错误立即 fail）
-            echo "WARN: gh release create attempt $attempt 失败，sleep $((10 * 3**(attempt-1)))s 后重试"
-            sleep "$((10 * 3**(attempt-1)))"
+            echo "WARN: gh release create attempt $attempt exit=$gh_exit"
             if [[ $attempt -eq 5 ]]; then
               echo "ERROR: gh release create 5 次都失败" >&2
               exit 1
             fi
+            SLEEP_S=$((10 * 3**(attempt-1)))
+            echo "sleep ${SLEEP_S}s 后重试"
+            sleep "$SLEEP_S"
+            attempt=$((attempt + 1))
           done
+          set -e
         shell: bash
 
       - name: 清理临时私钥

@@ -152,15 +152,20 @@ func DecodePublicKey(s string) ([]byte, error) {
 // AssetFilename 由 manifest + platform 推断期望的安装包文件名。
 //
 // 期望命名约定：
-//   - gitea-kanban-v0.8.0-windows-amd64.exe
-//   - gitea-kanban-v0.8.0-darwin-arm64.zip（macOS universal 用 zip 装 .app）
-//   - gitea-kanban-v0.8.0-darwin-universal.zip
+//   - gitea-kanban-v0.8.0-windows-amd64.exe（NSIS installer 或 portable exe）
+//   - gitea-kanban-v0.8.0-darwin-arm64.dmg（macOS universal 用 dmg 装 .app）
+//   - gitea-kanban-v0.8.0-darwin-universal.dmg
+//
+// 注意：v0.8.5+ Windows 产物可能是：
+//   - NSIS installer（gitea-kanban-setup.exe，安装后运行）
+//   - portable exe（gitea-kanban.exe，直接运行）
+// 两种文件名统一作为 gitea-kanban-{version}-windows-amd64.exe 发布。
 func AssetFilename(version, platformKey string) string {
 	base := "gitea-kanban-" + version + "-" + platformKey
 	if strings.HasPrefix(platformKey, "windows-") {
 		return base + ".exe"
 	}
-	return base + ".zip"
+	return base + ".dmg"
 }
 
 // SignatureFilename 由安装包文件名 + ".sig" 得到签名文件名。

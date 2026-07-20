@@ -17,6 +17,15 @@ var assets embed.FS
 //go:embed build/appicon.png
 var appIcon []byte
 
+// appVersion / appChannel 编译期注入的 var 定义在 app_updater_app.go
+// （feat/v0.8.0 引入，Version() binding 也走它）。
+//
+// dev build（wails dev）不传 -ldflags，落到 var 零值（"dev" / "stable"）。
+// updater.Check 检测 appVersion == "dev" 时跳过自动更新检查（避免 dev 噪音）。
+//
+// CI release.yml 用法：
+//   wails build -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
+
 func main() {
 	// v0.8.0 · appVersion / appChannel 编译期注入
 	//
