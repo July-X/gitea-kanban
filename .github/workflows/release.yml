@@ -311,7 +311,7 @@ jobs:
           fi
 
           # v0.8.5 follow-up: 不再 mv build/bin/ 下的 .exe（保持原文件名,让 step 13 上传 build/bin/*.exe），
-# publish job 在 build/release/ 阶段选 setup.exe 优先 / portable fallback。
+          # publish job 在 build/release/ 阶段选 setup.exe 优先 / portable fallback。
           if [[ -f build/bin/gitea-kanban-setup.exe ]]; then
             cp build/bin/gitea-kanban-setup.exe "$WIN_EXE"
             echo "windows NSIS installer copied to $WIN_EXE (portable gitea-kanban.exe 也保留供 fallback)"
