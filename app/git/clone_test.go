@@ -1,11 +1,14 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"gitea-kanban/app/ipc"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -492,4 +495,49 @@ func TestRepoIsShallow(t *testing.T) {
 	if !repoIsShallow(bareDir) {
 		t.Error("repoIsShallow should be true for bare repo with root shallow")
 	}
+}
+
+// TestCloneWithFilter_GhNotInstalled v0.7.20 回归测试：
+//
+//   - gh 未安装时 CloneWithFilter 返回 *ipc.IpcError{Code: "gh_not_installed"}
+//   - 前端捕获后展示"打开安装页"按钮
+//
+// 测试方法：临时清空 PATH 中的 gh 可执行文件（通过 t.Setenv 隔离，不影响主进程）
+func TestCloneWithFilter_GhNotInstalled(t *testing.T) {
+	// 记录原始 PATH，然后替换为不包含 gh 的 PATH
+	origPath := os.Getenv("PATH")
+
+	// 构建一个不含任何 gh 的干净 PATH（只保留 /usr/bin 和 /bin）
+	// gh 通常在 /usr/local/bin、~/go/bin 等；这里用最简的 /usr/bin 兜底
+	cleanPath := "/usr/bin:/bin"
+	t.Setenv("PATH", cleanPath)
+
+	// 确认 gh 真的找不到（测试前提条件）
+	if _, err := exec.LookPath("gh"); err == nil {
+		t.Skip("gh is in PATH even after clearing it, cannot test gh-not-found path")
+	}
+
+	// 验证 gh 不在 PATH 后，CloneWithFilter 应返回 gh_not_installed 错误
+	err := CloneWithFilter("https://github.com/example/repo.git", t.TempDir(), 0, "")
+	if err == nil {
+		t.Fatal("CloneWithFilter should return error when gh is not found")
+	}
+
+	// 验证错误码是 gh_not_installed
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *ipc.IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeGhNotInstalled {
+		t.Errorf("error code = %q, want %q", ipcErr.Code, ipc.CodeGhNotInstalled)
+	}
+	if ipcErr.Message == "" {
+		t.Error("error message should not be empty")
+	}
+	if ipcErr.Hint == "" {
+		t.Error("error hint should not be empty")
+	}
+
+	// 恢复 PATH（测试隔离，不影响其他测试）
+	t.Cleanup(func() { os.Setenv("PATH", origPath) })
 }

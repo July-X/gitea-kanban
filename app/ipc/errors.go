@@ -55,6 +55,7 @@ const (
 	CodeInternal             = "internal"
 	CodeKeychainUnavailable  = "keychain_unavailable"
 	CodeKeychainAccessDenied = "keychain_access_denied"
+	CodeGhNotInstalled       = "gh_not_installed"
 )
 
 // NewUnauthenticated 401 / token 失效
@@ -143,6 +144,19 @@ func NewGiteaError(message, cause string) *IpcError {
 		Code:    CodeGiteaError,
 		Message: message,
 		Hint:    "请稍候重试",
+		Cause:   cause,
+	}
+}
+
+// NewGhNotInstalled 系统未安装 gh CLI
+//
+// v0.7.20：GitHub 仓库走 gh partial clone 时，如果系统未安装 gh，返回此错误。
+// 前端捕获后展示"同步失败"toast + "打开安装页"按钮，引导用户安装 gh。
+func NewGhNotInstalled(cause string) *IpcError {
+	return &IpcError{
+		Code:    CodeGhNotInstalled,
+		Message: "系统未安装 GitHub CLI（gh）",
+		Hint:    "请先安装 gh CLI 后再同步 GitHub 仓库",
 		Cause:   cause,
 	}
 }

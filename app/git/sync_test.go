@@ -1,10 +1,13 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"gitea-kanban/app/ipc"
 
 	gogit "github.com/go-git/go-git/v5"
 )
@@ -244,4 +247,43 @@ func TestCountCommitsWithLimit_TreatsShallowBoundaryAsStop(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("countCommitsWithLimit = %d, want 1", count)
 	}
+}
+
+// TestFetchWithFilter_GhNotInstalled v0.7.20 回归测试：
+//
+//   - gh 未安装时 FetchWithFilter 返回 *ipc.IpcError{Code: "gh_not_installed"}
+//   - 前端捕获后展示"打开安装页"按钮
+//
+// 测试方法：临时清空 PATH 中的 gh（通过 t.Setenv 隔离，不影响主进程）
+func TestFetchWithFilter_GhNotInstalled(t *testing.T) {
+	barePath, localPath := createBareAndClone(t)
+	origPath := os.Getenv("PATH")
+	cleanPath := "/usr/bin:/bin"
+	t.Setenv("PATH", cleanPath)
+
+	if _, err := exec.LookPath("gh"); err == nil {
+		t.Skip("gh is in PATH even after clearing it, cannot test gh-not-found path")
+	}
+
+	err := FetchWithFilter(localPath, 0, "")
+	if err == nil {
+		t.Fatal("FetchWithFilter should return error when gh is not found")
+	}
+
+	var ipcErr *ipc.IpcError
+	if !errors.As(err, &ipcErr) {
+		t.Fatalf("expected *ipc.IpcError, got %T: %v", err, err)
+	}
+	if ipcErr.Code != ipc.CodeGhNotInstalled {
+		t.Errorf("error code = %q, want %q", ipcErr.Code, ipc.CodeGhNotInstalled)
+	}
+	if ipcErr.Message == "" {
+		t.Error("error message should not be empty")
+	}
+	if ipcErr.Hint == "" {
+		t.Error("error hint should not be empty")
+	}
+
+	t.Cleanup(func() { os.Setenv("PATH", origPath) })
+	_ = barePath
 }

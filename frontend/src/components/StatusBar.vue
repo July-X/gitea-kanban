@@ -57,6 +57,7 @@ import { useSettingsStore } from '@renderer/stores/settings';
 import { useUiStore, nextThemeInCycle, THEME_DISPLAY_NAME } from '@renderer/stores/ui';
 import { showToast } from '@renderer/lib/toast';
 import { formatLastUpdated } from '@renderer/lib/last-updated';
+import { buildGhInstallToastError } from '@renderer/lib/github-cli-guide';
 import type { SyncProgress } from '@renderer/types/sync-progress';
 import EmptyState from '@renderer/components/EmptyState.vue';
 import AccountManagerDialog from '@renderer/components/AccountManagerDialog.vue';
@@ -295,8 +296,13 @@ async function onSyncClick(r: RepoDto, e: Event): Promise<void> {
     await repo.loadRepos('', true);
     showToast({ type: 'success', message: '同步成功', description: `${r.fullName} 已同步到本地` });
   } catch (err) {
-    const e2 = err as { messageText?: string; message?: string };
-    showToast({ type: 'error', message: '同步失败', description: e2.messageText ?? e2.message ?? '请稍后重试' });
+    const e2 = err as { messageText?: string; message?: string; hint?: string; code?: string };
+    // v0.7.20：gh_not_installed 专用 toast（带"打开安装页"按钮）
+    if (e2.code === 'gh_not_installed') {
+      showToast(buildGhInstallToastError(e2.messageText, e2.hint));
+    } else {
+      showToast({ type: 'error', message: '同步失败', description: e2.messageText ?? e2.message ?? '请稍后重试' });
+    }
   } finally {
     busyRepoKey.value = null;
   }
@@ -336,8 +342,13 @@ async function onUpdateClick(r: RepoDto, e: Event): Promise<void> {
       description: added > 0 ? `${r.fullName} 新增 ${added} 个提交` : `${r.fullName} 已是最新`,
     });
   } catch (err) {
-    const e2 = err as { messageText?: string; message?: string };
-    showToast({ type: 'error', message: '更新失败', description: e2.messageText ?? e2.message ?? '请稍后重试' });
+    const e2 = err as { messageText?: string; message?: string; hint?: string; code?: string };
+    // v0.7.20：gh_not_installed 专用 toast（带"打开安装页"按钮）
+    if (e2.code === 'gh_not_installed') {
+      showToast(buildGhInstallToastError(e2.messageText, e2.hint));
+    } else {
+      showToast({ type: 'error', message: '更新失败', description: e2.messageText ?? e2.message ?? '请稍后重试' });
+    }
   } finally {
     busyRepoKey.value = null;
   }

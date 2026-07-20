@@ -63,6 +63,10 @@ export const IpcErrorCode = {
   /** 系统 keychain 拒绝访问（Windows ACL 拒绝 / macOS Keychain 拒绝） */
   KEYCHAIN_ACCESS_DENIED: 'keychain_access_denied',
 
+  // === v0.7.20 新增：GitHub CLI 未安装 ===
+  /** 系统未安装 GitHub CLI（gh）；同步失败时前端展示引导安装按钮 */
+  GH_NOT_INSTALLED: 'gh_not_installed',
+
 } as const;
 
 export type IpcErrorCodeValue = (typeof IpcErrorCode)[keyof typeof IpcErrorCode];

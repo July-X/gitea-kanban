@@ -35,6 +35,7 @@ import type { BasicCommit } from '@renderer/components/CommitDetailPanel.vue';
 import GitGraphFindWidget from '@renderer/components/GitGraphFindWidget.vue';
 import type { FindCommit, SearchState } from '@renderer/components/GitGraphFindWidget.vue';
 import { showToast } from '@renderer/lib/toast';
+import { buildGhInstallToastError } from '@renderer/lib/github-cli-guide';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
 import type { GraphResultDto } from '@renderer/types/dto';
@@ -1176,10 +1177,15 @@ async function goToLatest(): Promise<void> {
       mainScrollEl.value.scrollTo({ top: 0, behavior: 'smooth' });
     }
   } catch (e: unknown) {
-    const err = e as { messageText?: string; message?: string; hint?: string };
+    const err = e as { messageText?: string; message?: string; hint?: string; code?: string };
     const msg = err.messageText ?? err.message ?? String(e) ?? '刷新失败';
     logError('TimelineNewView.goToLatest', msg, e instanceof Error ? e.stack : undefined);
-    showToast({ type: 'error', message: msg });
+    // v0.7.20：gh_not_installed 专用 toast（带"打开安装页"按钮）
+    if (err.code === 'gh_not_installed') {
+      showToast(buildGhInstallToastError(msg, err.hint));
+    } else {
+      showToast({ type: 'error', message: msg });
+    }
   } finally {
     pulling.value = false;
     useGlobalLoadingStore().hide('timeline');
@@ -1218,10 +1224,16 @@ async function enableGitGraph(): Promise<void> {
     // 重新加载；Go binding 会从 projectId 反查本地路径并返回结构化 GraphResult。
     await loadGraph();
   } catch (e: unknown) {
-    const err = e as { messageText?: string; message?: string; hint?: string };
+    const err = e as { messageText?: string; message?: string; hint?: string; code?: string };
     const msg = err.messageText ?? err.message ?? String(e) ?? '启用失败';
-    cloneProgress.value = `启用失败：${msg}`;
-    logError('TimelineNewView.enableGitGraph', '启用 Git Graph 失败', e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e));
+    // v0.7.20：gh_not_installed 专用 toast（带"打开安装页"按钮）
+    if (err.code === 'gh_not_installed') {
+      cloneProgress.value = `启用失败：${msg}`;
+      showToast(buildGhInstallToastError(msg, err.hint));
+    } else {
+      cloneProgress.value = `启用失败：${msg}`;
+      logError('TimelineNewView.enableGitGraph', '启用 Git Graph 失败', e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e));
+    }
   } finally {
     cloning.value = false;
     useGlobalLoadingStore().hide('timeline');

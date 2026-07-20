@@ -83,7 +83,7 @@ export function isIpcErrorPayload(err: unknown): err is IpcErrorPayload {
   );
 }
 
-/**12 个已知 IpcErrorCode 值（与 src/shared/errors.ts IpcErrorCode同步） */
+/** 13 个已知 IpcErrorCode 值（与 src/shared/errors.ts IpcErrorCode 同步） */
 const KNOWN_ERROR_CODES = new Set<IpcErrorCodeValue>([
   'unauthenticated',
   'token_invalid',
@@ -97,6 +97,7 @@ const KNOWN_ERROR_CODES = new Set<IpcErrorCodeValue>([
   'internal',
   'keychain_unavailable',
   'keychain_access_denied',
+  'gh_not_installed', // v0.7.20
 ]);
 
 /**错误码 → 中文类别前缀（OVERRIDE §本项目专属规则 #3错误人话） */
@@ -113,6 +114,7 @@ const CODE_CATEGORY: Record<IpcErrorCodeValue, string> = {
   internal: '应用出错了',
   keychain_unavailable: '本机密钥库不可用',
   keychain_access_denied: '本机密钥库拒绝访问',
+  gh_not_installed: '环境问题', // v0.7.20
 };
 
 /**错误码 → 是否可恢复（引导用户重试 / 重连） */
@@ -129,6 +131,7 @@ const RECOVERABLE: Record<IpcErrorCodeValue, boolean> = {
   internal: true, //通用重试
   keychain_unavailable: false, //平台问题
   keychain_access_denied: true, //引导用户授权
+  gh_not_installed: true, // v0.7.20：安装 gh 后可恢复
 };
 
 /** 把 IpcErrorPayload 转成渲染端 UserFacingError（"人话"层）

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gitea-kanban/app/gitbinary"
+	"gitea-kanban/app/ipc"
 )
 
 const nativeGitTimeout = 5 * time.Minute
@@ -34,7 +35,8 @@ const nativeGitTimeout = 5 * time.Minute
 //   - 不支持进度回调（无法实时显示百分比）
 func CloneWithFilter(url, localPath string, depth int, token string) error {
 	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("系统未安装 gh 命令，无法快速加载 GitHub 超大仓库提交记录: %w", err)
+		// v0.7.20：返回结构化 IpcError，前端可识别 gh_not_installed 并展示引导安装页
+		return ipc.NewGhNotInstalled(err.Error())
 	}
 
 	// 确保父目录存在
@@ -103,7 +105,8 @@ func FetchWithFilter(localPath string, depth int, token string) error {
 		return fmt.Errorf("系统未安装 git 命令: %w", err)
 	}
 	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("系统未安装 gh 命令，无法快速加载 GitHub 超大仓库提交记录: %w", err)
+		// v0.7.20：返回结构化 IpcError，前端可识别 gh_not_installed 并展示引导安装页
+		return ipc.NewGhNotInstalled(err.Error())
 	}
 
 	// 检查仓库是否存在（兼容 bare 布局）
