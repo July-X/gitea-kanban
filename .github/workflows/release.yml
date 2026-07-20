@@ -80,7 +80,7 @@ jobs:
           version: 10
 
       - name: 安装 Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
         shell: bash
 
       - name: 前端依赖
@@ -107,25 +107,66 @@ jobs:
           GOARCH: ${{ matrix.arch }}
         run: go test ./... -count=1
 
-      # macOS / Windows 都用 wails build 加 -ldflags 注入版本号
+      # macOS 构建（不加 -nsis，macOS 走 hdiutil 构造 dmg）
       # 注意：不传 -o，wails build 默认输出到 build/bin/<appname>.app (mac)
       # 或 build/bin/<appname>.exe (windows)。早期传 -o gitea-kanban.app 时
       # go build 把 .app 当 binary 输出文件，wails packaging 想 mkdir 同名目录失败。
-      # v0.8.4 follow-up: Windows 加 -nsis 生成 NSIS installer (build/bin/gitea-kanban-setup.exe)。
-      # macOS 不加 -nsis (macOS 走 hdiutil 构造 dmg)。
-      # Windows runner (windows-2022) 预装 NSIS 3.10（见 GitHub runner-images Windows2022-Readme.md）。
-      - name: 构建（macOS / Windows 通用）
+      - name: 构建 macOS
+        if: matrix.platform == 'darwin'
         run: |
-          NSIS_FLAG=""
-          if [[ "${{ matrix.platform }}" == "windows" ]]; then
-            NSIS_FLAG="-nsis"
-          fi
           wails build \
             -platform ${{ matrix.platform }}/${{ matrix.arch }} \
             -clean \
-            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable" \
-            $NSIS_FLAG
+            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
         shell: bash
+
+      # Windows 构建（加 -nsis 生成 NSIS installer）
+      # Windows runner (windows-2022) 预装 NSIS 3.10（见 GitHub runner-images Windows2022-Readme.md）。
+      # 使用 PowerShell 以便直接调用 makensis.exe 做环境诊断。
+      - name: 构建 Windows
+        if: matrix.platform == 'windows'
+        run: |
+          Write-Host "==> wails version:"
+          wails version
+
+          Write-Host "==> NSIS 环境诊断:"
+          $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if (-not $makensis) {
+            Write-Host "makensis.exe 不在 PATH，检查 runner 常见安装位置..."
+            $nsisPaths = @(
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "C:\NSIS\makensis.exe"
+            )
+            foreach ($p in $nsisPaths) {
+              if (Test-Path $p) {
+                $makensis = $p
+                $dir = Split-Path $p
+                Write-Host "找到 makensis.exe: $p，加入 PATH"
+                Add-Content -Path $env:GITHUB_PATH -Value $dir
+                break
+              }
+            }
+          }
+          if ($makensis) {
+            Write-Host "makensis.exe 路径: $($makensis.Source)"
+            & makensis.exe /VERSION
+          } else {
+            Write-Error "ERROR: makensis.exe 找不到，NSIS 未安装"
+            exit 1
+          }
+
+          Write-Host "==> wails build -nsis (Windows NSIS installer)"
+          wails build `
+            -platform ${{ matrix.platform }}/${{ matrix.arch }} `
+            -clean `
+            -nsis `
+            -v 2 `
+            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
+
+          Write-Host "==> build/bin 产物清单:"
+          Get-ChildItem build/bin | Format-Table Name, Length, LastWriteTime
+        shell: pwsh
 
       # Windows：验证 NSIS installer 存在，禁止静默回退成 portable exe
       # wails build -nsis 输出文件名可能是 gitea-kanban-setup.exe 或 gitea-kanban-amd64-installer.exe，
@@ -136,19 +177,23 @@ jobs:
           set -euo pipefail
           cd build/bin
 
-          echo "==> build/bin 产物清单:"
+          echo "==> build/bin 产物清单 (含子目录):"
           ls -la
+          echo "---"
+          find . -name '*.exe' -o -name '*.nsi' -o -name '*.nsh' 2>/dev/null | head -20 || true
 
           # 查找 NSIS installer（兼容 gitea-kanban-setup.exe 和 gitea-kanban-amd64-installer.exe）
           INSTALLER=""
           if compgen -G '*installer*.exe' > /dev/null; then
             INSTALLER=$(ls -1 *installer*.exe | head -n 1)
+          elif compgen -G '*setup*.exe' > /dev/null; then
+            INSTALLER=$(ls -1 *setup*.exe | head -n 1)
           elif [[ -f gitea-kanban-setup.exe ]]; then
             INSTALLER="gitea-kanban-setup.exe"
           fi
 
           if [[ -z "$INSTALLER" ]]; then
-            echo "ERROR: Windows NSIS installer 找不到（期望 *installer*.exe 或 gitea-kanban-setup.exe）" >&2
+            echo "ERROR: Windows NSIS installer 找不到（期望 *installer*.exe 或 *setup*.exe）" >&2
             echo "build/bin 当前内容:" >&2
             ls -la >&2
             exit 1
@@ -263,8 +308,10 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           # 上传 NSIS installer（统一命名为 gitea-kanban-${TAG}-windows-amd64-installer.exe）。
-          # portable exe 作为辅助资产同时上传，但 release.sh 优先选 installer。
-          path: build/bin/*installer*.exe
+          # 兼容 *installer*.exe 和 *setup*.exe 两种命名。
+          path: |
+            build/bin/*installer*.exe
+            build/bin/*setup*.exe
           if-no-files-found: error
 
       # macOS dmg 在前一步构造好，单独上传（artifact name 改 -dmg 后缀）
@@ -355,7 +402,7 @@ jobs:
           # 期望的 gitea-kanban-<version>-<platform>-<arch>[.dmg|.exe] 一致
           TAG="${{ github.ref_name }}"
           MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
-          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64-installer.exe"
 
           # macOS：dmg 已经由 build step 用 hdiutil 构造好（包含完整 .app bundle）
           # 这里只需要 mv build/bin/*.dmg 到 build/release/ 带 tag 命名
@@ -373,15 +420,21 @@ jobs:
           fi
 
           # v0.8.5 follow-up: 优先选 NSIS installer，fallback portable exe
-          if [[ -f build/bin/gitea-kanban-setup.exe ]]; then
-            cp build/bin/gitea-kanban-setup.exe "$WIN_EXE"
-            echo "windows NSIS installer copied to $WIN_EXE (portable gitea-kanban.exe 也保留供 fallback)"
+          # 兼容新命名 gitea-kanban-${TAG}-windows-amd64-installer.exe 和老命名 *setup*.exe
+          INSTALLER=""
+          if compgen -G "build/bin/*installer*.exe" > /dev/null; then
+            INSTALLER=$(ls -1 build/bin/*installer*.exe | head -n 1)
+          elif compgen -G "build/bin/*setup*.exe" > /dev/null; then
+            INSTALLER=$(ls -1 build/bin/*setup*.exe | head -n 1)
+          fi
+          if [[ -n "$INSTALLER" ]]; then
+            cp "$INSTALLER" "$WIN_EXE"
+            echo "windows NSIS installer copied to $WIN_EXE ($INSTALLER)"
           elif [[ -f build/bin/gitea-kanban.exe ]]; then
-            # 兜底：NSIS 没产出时用 portable exe
             cp build/bin/gitea-kanban.exe "$WIN_EXE"
-            echo "WARN: gitea-kanban-setup.exe 找不到,fallback 用 portable gitea-kanban.exe"
+            echo "WARN: NSIS installer 找不到, fallback 用 portable gitea-kanban.exe"
           else
-            echo "WARN: gitea-kanban-setup.exe 和 gitea-kanban.exe 都找不到（CI windows build 可能 FAIL）"
+            echo "WARN: Windows installer 和 portable exe 都找不到（CI windows build 可能 FAIL）"
           fi
 
           # 写一个 minimal latest.json（无签名的 placeholder）

@@ -76,13 +76,13 @@ mkdir -p "$RELEASE_DIR"
 MACOS_DMG_BUILD=$(find "$BUILD_DIR" -maxdepth 1 -name '*.dmg' -type f | head -n 1 || true)
 # v0.8.5 follow-up: Windows 优先选 NSIS installer（*installer*.exe），fallback portable exe
 # NSIS installer 输出文件名可能是 gitea-kanban-setup.exe 或 gitea-kanban-amd64-installer.exe，
-# 用 *installer*.glob 兼容两种命名
+# 用 *installer*.glob + *setup*.glob 兼容两种命名
 WINDOWS_EXE_BUILD=""
 if compgen -G "$BUILD_DIR/*installer*.exe" > /dev/null; then
   WINDOWS_EXE_BUILD=$(ls -1 "$BUILD_DIR"/*installer*.exe | head -n 1)
   echo "==> Windows: 优先使用 NSIS installer ($WINDOWS_EXE_BUILD)"
-elif [[ -f "$BUILD_DIR/gitea-kanban-setup.exe" ]]; then
-  WINDOWS_EXE_BUILD="$BUILD_DIR/gitea-kanban-setup.exe"
+elif compgen -G "$BUILD_DIR/*setup*.exe" > /dev/null; then
+  WINDOWS_EXE_BUILD=$(ls -1 "$BUILD_DIR"/*setup*.exe | head -n 1)
   echo "==> Windows: 优先使用 NSIS installer ($WINDOWS_EXE_BUILD)"
 elif [[ -f "$BUILD_DIR/gitea-kanban.exe" ]]; then
   WINDOWS_EXE_BUILD="$BUILD_DIR/gitea-kanban.exe"
