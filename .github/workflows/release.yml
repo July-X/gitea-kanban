@@ -51,9 +51,7 @@ jobs:
             platform: windows
             arch: amd64
             artifact: gitea-kanban-windows-amd64
-            # v0.8.2 follow-up: output 改 gitea-kanban-setup.exe —— wails build -nsis 产物名
-            # 上传 artifact 走 NSIS installer（不再是便携版 gitea-kanban.exe）
-            output: gitea-kanban-setup.exe
+            output: gitea-kanban.exe
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -109,20 +107,12 @@ jobs:
       # 注意：不传 -o，wails build 默认输出到 build/bin/<appname>.app (mac)
       # 或 build/bin/<appname>.exe (windows)。早期传 -o gitea-kanban.app 时
       # go build 把 .app 当 binary 输出文件，wails packaging 想 mkdir 同名目录失败。
-      # v0.8.2 follow-up: Windows 加 -nsis 生成 NSIS installer (build/bin/gitea-kanban-setup.exe)。
-      # macOS 不加 -nsis (macOS 走 hdiutil 构造 dmg)。
-      # Windows runner (windows-2022) 预装 NSIS 3.10（见 GitHub runner-images Windows2022-Readme.md）。
       - name: 构建（macOS / Windows 通用）
         run: |
-          NSIS_FLAG=""
-          if [[ "${{ matrix.platform }}" == "windows" ]]; then
-            NSIS_FLAG="-nsis"
-          fi
           wails build \
             -platform ${{ matrix.platform }}/${{ matrix.arch }} \
             -clean \
-            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable" \
-            $NSIS_FLAG
+            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
         shell: bash
 
       # v0.8.0 rc30：macOS 改成出 dmg，不再出 zip。
@@ -289,7 +279,7 @@ jobs:
           # 期望的 gitea-kanban-<version>-<platform>-<arch>[.dmg|.exe] 一致
           TAG="${{ github.ref_name }}"
           MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
-          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64-setup.exe"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
 
           # macOS：dmg 已经由 build step 用 hdiutil 构造好（包含完整 .app bundle）
           # 这里只需要 mv build/bin/*.dmg 到 build/release/ 带 tag 命名
@@ -306,15 +296,11 @@ jobs:
             file "$MAC_DMG"
           fi
 
-          if [[ -f build/bin/gitea-kanban-setup.exe ]]; then
-            mv build/bin/gitea-kanban-setup.exe "$WIN_EXE"
-            echo "windows NSIS installer moved to $WIN_EXE"
-          elif [[ -f build/bin/gitea-kanban.exe ]]; then
-            # 兜底：NSIS 失败时退而求其次发 portable exe
+          if [[ -f build/bin/gitea-kanban.exe ]]; then
             mv build/bin/gitea-kanban.exe "$WIN_EXE"
-            echo "WARN: gitea-kanban-setup.exe 找不到,fallback 用 portable gitea-kanban.exe"
+            echo "windows raw build moved to $WIN_EXE"
           else
-            echo "WARN: gitea-kanban-setup.exe 和 gitea-kanban.exe 都找不到（CI windows build 可能 FAIL）"
+            echo "WARN: gitea-kanban.exe 找不到（CI windows build 可能 FAIL）"
           fi
 
           # 写一个 minimal latest.json（无签名的 placeholder）
@@ -359,7 +345,7 @@ jobs:
           #   - 现在 dmg 挂载直接看到完整 gitea-kanban.app bundle
           TAG="${{ github.ref_name }}"
           MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
-          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64-setup.exe"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
           if [[ -f "$MAC_DMG" ]]; then
             AVAILABLE_ASSETS+=("$MAC_DMG")
             AVAILABLE_ASSETS+=("$MAC_DMG.sig")
