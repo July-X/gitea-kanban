@@ -51,9 +51,10 @@ jobs:
             platform: windows
             arch: amd64
             artifact: gitea-kanban-windows-amd64
-            # v0.8.4 follow-up: output 改 gitea-kanban-setup.exe —— wails build -nsis 产物名
-            # 上传 artifact 走 NSIS installer（不再是便携版 gitea-kanban.exe）
-            output: gitea-kanban-setup.exe
+            # v0.8.5 follow-up: 简化 — matrix.output 回到 gitea-kanban.exe (portable exe 名字),
+            # step 13 上传 portable exe + NSIS installer(如果生成),publish job
+            # 优先选 setup.exe fallback portable exe。
+            output: gitea-kanban.exe
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -198,7 +199,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: build/bin/${{ matrix.output }}
+          # v0.8.5 follow-up: 上传 build/bin 下所有 .exe (NSIS installer + portable exe 同时),
+          # publish job 后续选 setup.exe 优先 / portable exe fallback。
+          path: build/bin/*.exe
           if-no-files-found: error
 
       # macOS dmg 在前一步构造好，单独上传（artifact name 改 -dmg 后缀）
@@ -306,14 +309,14 @@ jobs:
             file "$MAC_DMG"
           fi
 
-          # v0.8.4 follow-up: 用 NSIS installer (gitea-kanban-setup.exe) 作为主发布 asset
-          # 便携 exe 仍生成但不发到 GitHub release（installer 已包含相同可执行文件 + 安装体验）
+          # v0.8.5 follow-up: 不再 mv build/bin/ 下的 .exe（保持原文件名,让 step 13 上传 build/bin/*.exe），
+# publish job 在 build/release/ 阶段选 setup.exe 优先 / portable fallback。
           if [[ -f build/bin/gitea-kanban-setup.exe ]]; then
-            mv build/bin/gitea-kanban-setup.exe "$WIN_EXE"
-            echo "windows NSIS installer moved to $WIN_EXE"
+            cp build/bin/gitea-kanban-setup.exe "$WIN_EXE"
+            echo "windows NSIS installer copied to $WIN_EXE (portable gitea-kanban.exe 也保留供 fallback)"
           elif [[ -f build/bin/gitea-kanban.exe ]]; then
-            # 兜底：NSIS 失败时退而求其次发 portable exe
-            mv build/bin/gitea-kanban.exe "$WIN_EXE"
+            # 兜底：NSIS 没产出时用 portable exe
+            cp build/bin/gitea-kanban.exe "$WIN_EXE"
             echo "WARN: gitea-kanban-setup.exe 找不到,fallback 用 portable gitea-kanban.exe"
           else
             echo "WARN: gitea-kanban-setup.exe 和 gitea-kanban.exe 都找不到（CI windows build 可能 FAIL）"
