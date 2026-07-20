@@ -61,16 +61,16 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.22'
           cache: true
 
       - name: 安装 Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -324,7 +324,7 @@ jobs:
 
       - name: 上传构建产物
         if: matrix.os != 'macos-14'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           # 上传 NSIS installer（统一命名为 gitea-kanban-${TAG}-windows-amd64-installer.exe）。
@@ -337,7 +337,7 @@ jobs:
       # macOS dmg 在前一步构造好，单独上传（artifact name 改 -dmg 后缀）
       - name: 上传 macOS dmg 产物
         if: matrix.os == 'macos-14'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gitea-kanban-macos-amd64-dmg
           path: build/bin/gitea-kanban-${{ github.ref_name }}-macos-amd64.dmg
@@ -356,25 +356,25 @@ jobs:
     steps:
       # v0.8.2 fix: fetch-depth: 0 让 workflow 能调 `git push origin --delete tag`
       # 删除既有 release 对应的 git tag ref（gh release delete 不删 tag ref）
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: 安装 Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.22'
 
       # 下载 macOS dmg build（v0.8.0 rc30：从 zip 改成 dmg，artifact name 同步）
       - name: 下载 macOS amd64 dmg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: gitea-kanban-macos-amd64-dmg
           path: build/bin/
         continue-on-error: true
 
       - name: 下载 Windows amd64 build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: gitea-kanban-windows-amd64
           path: build/bin/
@@ -450,11 +450,8 @@ jobs:
           if [[ -n "$INSTALLER" ]]; then
             cp "$INSTALLER" "$WIN_EXE"
             echo "windows NSIS installer copied to $WIN_EXE ($INSTALLER)"
-          elif [[ -f build/bin/gitea-kanban.exe ]]; then
-            cp build/bin/gitea-kanban.exe "$WIN_EXE"
-            echo "WARN: NSIS installer 找不到, fallback 用 portable gitea-kanban.exe"
           else
-            echo "WARN: Windows installer 和 portable exe 都找不到（CI windows build 可能 FAIL）"
+            echo "WARN: Windows NSIS installer 找不到（CI windows build 可能 FAIL）"
           fi
 
           # 写一个 minimal latest.json（无签名的 placeholder）
@@ -499,7 +496,7 @@ jobs:
           #   - 现在 dmg 挂载直接看到完整 gitea-kanban.app bundle
           TAG="${{ github.ref_name }}"
           MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
-          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64-installer.exe"
           if [[ -f "$MAC_DMG" ]]; then
             AVAILABLE_ASSETS+=("$MAC_DMG")
             AVAILABLE_ASSETS+=("$MAC_DMG.sig")
@@ -584,4 +581,24 @@ jobs:
 
       - name: 清理临时私钥
         run: rm -f build/release/.private.b64
+        shell: bash
+
+      # 验证 release 资产（防止 Windows installer 漏传）
+      - name: 验证 release 资产
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "==> 验证 release ${{ github.ref_name }} 资产..."
+          RELEASE_ASSETS=$(gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json assets --jq '.assets[].name')
+          echo "Release 资产列表:"
+          echo "$RELEASE_ASSETS"
+
+          TAG="${{ github.ref_name }}"
+          WIN_EXE="gitea-kanban-${TAG}-windows-amd64-installer.exe"
+          if echo "$RELEASE_ASSETS" | grep -q "$WIN_EXE"; then
+            echo "✅ Windows installer 验证通过: $WIN_EXE"
+          else
+            echo "❌ ERROR: Windows installer 不在 release 资产中: $WIN_EXE" >&2
+            exit 1
+          fi
         shell: bash

@@ -114,11 +114,21 @@ else
   echo "WARN: macOS build missing (*.dmg in $BUILD_DIR) — skipping" >&2
 fi
 
-if [[ -f "$WINDOWS_EXE_BUILD" ]]; then
-  cp "$WINDOWS_EXE_BUILD" "$WINDOWS_EXE_OUT"
-  ASSETS+=("$WINDOWS_EXE_OUT")
+if [[ -n "$WINDOWS_EXE_BUILD" ]]; then
+  # 只有真正的 NSIS installer 才输出为 -installer.exe；
+  # portable exe 保持原名，不伪装成 installer
+  if [[ "$WINDOWS_EXE_BUILD" == *installer* ]] || [[ "$WINDOWS_EXE_BUILD" == *setup* ]]; then
+    cp "$WINDOWS_EXE_BUILD" "$WINDOWS_EXE_OUT"
+    ASSETS+=("$WINDOWS_EXE_OUT")
+  else
+    # portable exe：输出为 windows-amd64.exe（非 installer）
+    PORTABLE_OUT="$RELEASE_DIR/gitea-kanban-${TAG}-windows-amd64.exe"
+    cp "$WINDOWS_EXE_BUILD" "$PORTABLE_OUT"
+    ASSETS+=("$PORTABLE_OUT")
+    echo "WARN: Windows portable exe 输出为 $PORTABLE_OUT（非 installer）"
+  fi
 elif [[ -f "$WINDOWS_EXE_OUT" ]]; then
-  echo "==> 复用已存在的 Windows exe: $WINDOWS_EXE_OUT"
+  echo "==> 复用已存在的 Windows installer: $WINDOWS_EXE_OUT"
   ASSETS+=("$WINDOWS_EXE_OUT")
 else
   echo "WARN: Windows build missing ($WINDOWS_EXE_BUILD) — skipping" >&2
