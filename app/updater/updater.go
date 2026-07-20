@@ -300,7 +300,7 @@ func (u *Updater) Install() error {
 
 	switch runtime.GOOS {
 	case "windows":
-		return u.applyWindows(rec.Path)
+		return applyWindows(rec.Path, u.cfg.Logger)
 	case "darwin":
 		return u.applyMacOS(rec.Path)
 	default:
@@ -494,50 +494,29 @@ func (u *Updater) writeDownloadedRecord(rec downloadedRecord) error {
 
 // --- 平台 apply 函数 ---
 
-// applyWindows in-place replace + restart-helper.cmd 避开文件锁。
-func (u *Updater) applyWindows(newBinaryPath string) error {
+// applyWindows 启动 NSIS installer 安装更新（Windows 平台）。
+// v0.8.5 变更：Windows 产物从 portable exe 改为 NSIS installer，
+// 下载得到的 installerPath 是一个安装器 exe，需以 /S /D=<installDir> 参数启动静默安装。
+// 此函数只在 Windows 平台被调用（runtime.GOOS == "windows" 分支）。
+func applyWindows(installerPath string, logger func(level, format string, args ...any)) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrApplyFailed, err)
 	}
-	exeDir := filepath.Dir(exe)
-	exeName := filepath.Base(exe)
-
-	newPath := filepath.Join(exeDir, exeName+".new")
-	bakPath := filepath.Join(exeDir, exeName+".bak")
-	helperPath := filepath.Join(exeDir, "restart-helper.cmd")
-
-	body, err := os.ReadFile(newBinaryPath)
-	if err != nil {
-		return fmt.Errorf("%w: read new: %v", ErrApplyFailed, err)
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
 	}
-	if err := writeFileAtomic(newPath, body, 0o755); err != nil {
-		return fmt.Errorf("%w: %v", ErrApplyFailed, err)
+	installDir := filepath.Dir(exe)
+
+	if logger != nil {
+		logger("info", "update: Windows apply, launching NSIS installer: %s /S /D=%s", installerPath, installDir)
 	}
 
-	// 备份当前
-	currentBody, err := os.ReadFile(exe)
-	if err != nil {
-		return fmt.Errorf("%w: read current: %v", ErrApplyFailed, err)
+	// NSIS installer 启动参数：/S 静默安装，/D=<installDir> 指定安装目录（必须位于命令行末尾）
+	cmd := exec.Command(installerPath, "/S", "/D="+installDir)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("%w: launch NSIS installer: %v", ErrApplyFailed, err)
 	}
-	if err := writeFileAtomic(bakPath, currentBody, 0o755); err != nil {
-		return fmt.Errorf("%w: backup: %v", ErrApplyFailed, err)
-	}
-
-	// 写 restart helper
-	helper := fmt.Sprintf(`@echo off
-timeout /t 1 /nobreak >nul
-move /Y "%s" "%s"
-start "" "%s"
-del "%s"
-`, newPath, exe, exe, helperPath)
-	if err := writeFileAtomic(helperPath, []byte(helper), 0o644); err != nil {
-		return fmt.Errorf("%w: helper: %v", ErrApplyFailed, err)
-	}
-
-	// detach helper 后 exit
-	cmd := exec.Command("cmd", "/c", "start", "", helperPath)
-	_ = cmd.Start()
 	os.Exit(0)
 	return nil // unreachable
 }
@@ -558,7 +537,7 @@ func (u *Updater) applyMacOS(newBinaryPath string) error {
 
 // --- helpers ---
 
-// extractPlatformFromAssetName 从 "gitea-kanban-v0.8.0-windows-amd64.exe" 提取 "windows-amd64"。
+// extractPlatformFromAssetName 从 "gitea-kanban-v0.8.0-windows-amd64-installer.exe" 提取 "windows-amd64"。
 func extractPlatformFromAssetName(name string) (string, bool) {
 	const prefix = "gitea-kanban-"
 	if !strings.HasPrefix(name, prefix) {
@@ -569,6 +548,8 @@ func extractPlatformFromAssetName(name string) (string, bool) {
 	if idx := strings.LastIndex(rest, "."); idx > 0 {
 		rest = rest[:idx]
 	}
+	// 去掉 -installer 后缀（NSIS installer 标识）
+	rest = strings.TrimSuffix(rest, "-installer")
 	// rest 形如 "v0.8.0-windows-amd64"
 	idx := strings.Index(rest, "-")
 	if idx < 0 {

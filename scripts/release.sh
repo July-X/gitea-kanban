@@ -74,10 +74,14 @@ mkdir -p "$RELEASE_DIR"
 #   1. gitea-kanban-${TAG}-macos-amd64.dmg（tag 化命名，user 期望）
 #   2. *.dmg（带 tag 命名前的中间产物，artifact 上传后改名）
 MACOS_DMG_BUILD=$(find "$BUILD_DIR" -maxdepth 1 -name '*.dmg' -type f | head -n 1 || true)
-# v0.8.5 follow-up: Windows 优先选 NSIS installer（setup.exe），fallback portable exe
-# NSIS installer 输出文件名：gitea-kanban-setup.exe（wails build -nsis 默认命名）
+# v0.8.5 follow-up: Windows 优先选 NSIS installer（*installer*.exe），fallback portable exe
+# NSIS installer 输出文件名可能是 gitea-kanban-setup.exe 或 gitea-kanban-amd64-installer.exe，
+# 用 *installer*.glob 兼容两种命名
 WINDOWS_EXE_BUILD=""
-if [[ -f "$BUILD_DIR/gitea-kanban-setup.exe" ]]; then
+if compgen -G "$BUILD_DIR/*installer*.exe" > /dev/null; then
+  WINDOWS_EXE_BUILD=$(ls -1 "$BUILD_DIR"/*installer*.exe | head -n 1)
+  echo "==> Windows: 优先使用 NSIS installer ($WINDOWS_EXE_BUILD)"
+elif [[ -f "$BUILD_DIR/gitea-kanban-setup.exe" ]]; then
   WINDOWS_EXE_BUILD="$BUILD_DIR/gitea-kanban-setup.exe"
   echo "==> Windows: 优先使用 NSIS installer ($WINDOWS_EXE_BUILD)"
 elif [[ -f "$BUILD_DIR/gitea-kanban.exe" ]]; then
@@ -86,8 +90,9 @@ elif [[ -f "$BUILD_DIR/gitea-kanban.exe" ]]; then
 fi
 
 # 产物名带 TAG，跟 app/updater/manifest.go:158 AssetFilename() 一致
+# Windows 统一用 -installer.exe 后缀标识 NSIS installer（非 portable exe）
 MACOS_DMG="$RELEASE_DIR/gitea-kanban-${TAG}-macos-amd64.dmg"
-WINDOWS_EXE_OUT="$RELEASE_DIR/gitea-kanban-${TAG}-windows-amd64.exe"
+WINDOWS_EXE_OUT="$RELEASE_DIR/gitea-kanban-${TAG}-windows-amd64-installer.exe"
 
 ASSETS=()
 
@@ -172,8 +177,8 @@ echo ""
 echo "================ SHA256 checksums ================"
 sha256sum gitea-kanban-macos-amd64.dmg \
           gitea-kanban-macos-amd64.dmg.sig \
-          gitea-kanban-windows-amd64.exe \
-          gitea-kanban-windows-amd64.exe.sig \
+          gitea-kanban-windows-amd64-installer.exe \
+          gitea-kanban-windows-amd64-installer.exe.sig \
           latest.json \
           latest.json.sig 2>/dev/null || true
 echo "================================================="

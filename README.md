@@ -56,10 +56,30 @@ gitea-kanban 是一个**桌面应用**（不是网页、不是命令行），装
 
 | 平台 | 文件 | 大小 |
 |---|---|---|
-| macOS (Intel) | `gitea-kanban-v0.x.x-macos-amd64.zip` | ~21 MB |
-| Windows (x64) | `gitea-kanban-v0.x.x-windows-amd64.exe` | ~22 MB |
+| macOS (Intel) | `gitea-kanban-v0.x.x-macos-amd64.dmg` | ~21 MB |
+| Windows (x64) | `gitea-kanban-v0.x.x-windows-amd64-installer.exe` | ~22 MB |
 
 每个二进制旁边都有同名 `.sig`（ed25519 detached signature）+ `latest.json`（更新检查 manifest）。
+
+### macOS 安装
+
+1. 下载 `.dmg` 并双击打开。
+2. 将 `gitea-kanban.app` 拖到 `Applications` 文件夹。
+3. 首次打开若提示"无法验证开发者"，关闭提示。
+4. 打开 **系统设置 → 隐私与安全**，滚动到安全区域，点击对应 `gitea-kanban` 的"仍要打开/继续打开"。
+5. 在系统确认框中再次选择"打开"；通常只需首次执行。
+
+> ⚠️ 当前包未做 Apple Developer ID 签名和 notarization，因此出现 Gatekeeper 提示是预期行为；请勿关闭 Gatekeeper。
+> 
+> 终端备用方案（仅在系统设置入口不可用时使用）：`xattr -dr com.apple.quarantine /Applications/gitea-kanban.app`
+
+### Windows 安装
+
+1. 下载 `*-installer.exe`。
+2. 双击启动安装向导，选择安装目录。
+3. 安装后从开始菜单或桌面快捷方式启动。
+
+> ⚠️ 未做 Authenticode 签名，首次运行可能触发 SmartScreen 提示"Windows 已保护你的电脑"。点击"更多信息" → "仍要运行"即可继续；这是未签名构建的首次运行预期行为。
 
 ### 从源码编译
 
@@ -118,8 +138,8 @@ wails build -clean \
 
 产物在 `build/bin/`：
 
-- macOS: `gitea-kanban.app/` → 解压 zip 出 `gitea-kanban.app/` 完整 bundle
-- Windows: `gitea-kanban.exe` → 直接双击
+- macOS: `gitea-kanban.app/` → 用 hdiutil 构造 dmg（包含 Applications symlink 引导用户复制到 /Applications）
+- Windows: `gitea-kanban.exe`（portable）或 `gitea-kanban-setup.exe`（NSIS installer，用 `wails build -nsis` 生成）
 
 ## 开发
 
@@ -161,7 +181,7 @@ ${DATA_ROOT}/
 ├── state.json              # 业务态（账号 / 项目 / 看板 / 收藏）
 ├── workspace/
 │   └── repos/
-│       └── ${owner}__${repo}/  # Git Graph 仓库本地存储（go-git NoCheckout）
+│       └── ${username}/${owner}__${repo}/  # Git Graph 仓库本地存储（go-git NoCheckout，v2.5+ 按账号分层）
 ├── logs/
 │   └── main/
 │       └── main-YYYY-MM-DD.log  # slog 日志（按天切分）
@@ -246,7 +266,7 @@ ${DATA_ROOT}/
 1. Fork + Clone
 2. 创建 feature branch：`git checkout -b feat/your-feature`
 3. 提交：`commit message 中文，type 用 feat / fix / refactor / perf / chore / test / docs / style`
-4. Push + 开 Pull Request 到 `master`
+4. Push + 开 Pull Request 到 `main`
 
 **重要原则**（详见 [`AGENTS.md`](AGENTS.md)）：
 

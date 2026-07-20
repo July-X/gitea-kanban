@@ -127,6 +127,44 @@ jobs:
             $NSIS_FLAG
         shell: bash
 
+      # Windows：验证 NSIS installer 存在，禁止静默回退成 portable exe
+      # wails build -nsis 输出文件名可能是 gitea-kanban-setup.exe 或 gitea-kanban-amd64-installer.exe，
+      # 用 *installer*.glob 兼容两种命名；找不到时让 job 失败，避免用户双击后不进安装流程。
+      - name: Windows：验证 NSIS installer + 统一命名
+        if: matrix.platform == 'windows'
+        run: |
+          set -euo pipefail
+          cd build/bin
+
+          echo "==> build/bin 产物清单:"
+          ls -la
+
+          # 查找 NSIS installer（兼容 gitea-kanban-setup.exe 和 gitea-kanban-amd64-installer.exe）
+          INSTALLER=""
+          if compgen -G '*installer*.exe' > /dev/null; then
+            INSTALLER=$(ls -1 *installer*.exe | head -n 1)
+          elif [[ -f gitea-kanban-setup.exe ]]; then
+            INSTALLER="gitea-kanban-setup.exe"
+          fi
+
+          if [[ -z "$INSTALLER" ]]; then
+            echo "ERROR: Windows NSIS installer 找不到（期望 *installer*.exe 或 gitea-kanban-setup.exe）" >&2
+            echo "build/bin 当前内容:" >&2
+            ls -la >&2
+            exit 1
+          fi
+
+          TAG="${{ github.ref_name }}"
+          RENAME="gitea-kanban-${TAG}-windows-amd64-installer.exe"
+          if [[ "$INSTALLER" != "$RENAME" ]]; then
+            cp "$INSTALLER" "$RENAME"
+            echo "==> 重命名 installer: $INSTALLER → $RENAME"
+          fi
+
+          echo "==> Windows installer 验证 OK: $RENAME"
+          ls -la "$RENAME"
+        shell: bash
+
       # v0.8.0 rc30：macOS 改成出 dmg，不再出 zip。
       # 用户反馈"MacOS 包体不完整（解压只有 Contents/ 文件夹没有 .app 包装）"，
       # 改用 macOS runner 自带 hdiutil 构造完整 .dmg 镜像（双击挂载后能看到完整 .app bundle）。
@@ -224,9 +262,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          # v0.8.5 follow-up: 上传 build/bin 下所有 .exe (NSIS installer + portable exe 同时),
-          # publish job 后续选 setup.exe 优先 / portable exe fallback。
-          path: build/bin/*.exe
+          # 上传 NSIS installer（统一命名为 gitea-kanban-${TAG}-windows-amd64-installer.exe）。
+          # portable exe 作为辅助资产同时上传，但 release.sh 优先选 installer。
+          path: build/bin/*installer*.exe
           if-no-files-found: error
 
       # macOS dmg 在前一步构造好，单独上传（artifact name 改 -dmg 后缀）
