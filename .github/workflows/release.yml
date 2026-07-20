@@ -121,7 +121,8 @@ jobs:
         shell: bash
 
       # Windows 构建（加 -nsis 生成 NSIS installer）
-      # Windows runner (windows-2022) 预装 NSIS 3.10（见 GitHub runner-images Windows2022-Readme.md）。
+      # 注意：Windows runner 预装 NSIS 是历史行为，镜像内容可能变化；
+      # 为保证可复现性，显式安装 NSIS 并验证，不依赖预装状态。
       # 使用 PowerShell 以便直接调用 makensis.exe 做环境诊断。
       - name: 构建 Windows
         if: matrix.platform == 'windows'
@@ -129,30 +130,49 @@ jobs:
           Write-Host "==> wails version:"
           wails version
 
-          Write-Host "==> NSIS 环境诊断:"
-          $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
-          if (-not $makensis) {
-            Write-Host "makensis.exe 不在 PATH，检查 runner 常见安装位置..."
+          Write-Host "==> 安装 NSIS (choco install nsis):"
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ERROR: choco install nsis 失败，exit code: $LASTEXITCODE"
+            exit 1
+          }
+
+          Write-Host "==> 刷新 NSIS 到 PATH (当前 step + 后续 step):"
+          $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if ($command) {
+            $makensisPath = $command.Source
+            Write-Host "makensis.exe 已在 PATH: $makensisPath"
+          } else {
+            Write-Host "makensis.exe 不在 PATH，搜索 Chocolatey 安装目录..."
             $nsisPaths = @(
               "C:\Program Files (x86)\NSIS\makensis.exe",
               "C:\Program Files\NSIS\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe",
+              "C:\ProgramData\chocolatey\lib\nsis\tools\makensis.exe",
               "C:\NSIS\makensis.exe"
             )
             foreach ($p in $nsisPaths) {
               if (Test-Path $p) {
-                $makensis = $p
+                $makensisPath = $p
                 $dir = Split-Path $p
-                Write-Host "找到 makensis.exe: $p，加入 PATH"
+                Write-Host "找到 makensis.exe: $p"
+                $env:PATH = "$dir;$env:PATH"
                 Add-Content -Path $env:GITHUB_PATH -Value $dir
                 break
               }
             }
           }
-          if ($makensis) {
-            Write-Host "makensis.exe 路径: $($makensis.Source)"
-            & makensis.exe /VERSION
-          } else {
-            Write-Error "ERROR: makensis.exe 找不到，NSIS 未安装"
+
+          if (-not $makensisPath) {
+            Write-Error "ERROR: NSIS 安装后仍找不到 makensis.exe"
+            Write-Host "PATH: $env:PATH"
+            exit 1
+          }
+
+          Write-Host "makensis.exe 路径: $makensisPath"
+          & $makensisPath /VERSION
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ERROR: makensis.exe /VERSION 失败"
             exit 1
           }
 
