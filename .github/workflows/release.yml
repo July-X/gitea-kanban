@@ -156,17 +156,26 @@ jobs:
           ls -la gitea-kanban.app/
           ls -la gitea-kanban.app/Contents/MacOS/
 
+          # 构造 dmg staging 目录 = .app + /Applications symlink
+          # /Applications symlink 让 Finder 在挂载后显示"复制到应用程序"快捷方式
+          # 用户拖 .app 到 symlink = 复制到 /Applications = 标准 macOS 安装流程
+          STAGE_DIR="$(mktemp -d)"
+          trap 'rm -rf "$STAGE_DIR"' EXIT
+          echo "==> 构造 dmg staging: $STAGE_DIR"
+          cp -R gitea-kanban.app "$STAGE_DIR/"
+          # /Applications symlink：相对路径 dmg 挂载后也能解析到根 /Applications
+          ln -s /Applications "$STAGE_DIR/Applications"
+
           TAG="${{ github.ref_name }}"
           DMG="gitea-kanban-${TAG}-macos-amd64.dmg"
 
           # 用 hdiutil 构造 dmg 镜像：volatile 表示不预分配，UDZO 压缩。
-          # srcfolder 模式：直接把 .app bundle 拖进 dmg。
-          # iconfile：用 build/icon.icns（v0.8.0 build/ 下已有）
+          # srcfolder 模式：把 staging 目录（.app + Applications symlink）拖进 dmg。
           # 注意：-fs HFS+ 因为 Apple Silicon + Intel 双兼容（APFS dmg 在某些 macOS 版本不挂载）
-          echo "==> hdiutil 创建 dmg ..."
+          echo "==> hdiutil 创建 dmg（包含 .app + Applications symlink，引导用户复制到 /Applications）..."
           hdiutil create \
             -volname "Gitea Kanban" \
-            -srcfolder gitea-kanban.app \
+            -srcfolder "$STAGE_DIR" \
             -ov \
             -format UDZO \
             -fs HFS+ \
@@ -190,7 +199,22 @@ jobs:
             rmdir "$MOUNT_DIR"
             exit 1
           fi
-          echo "dmg 验证 OK：包含完整 gitea-kanban.app bundle"
+          # 验证 Applications symlink（这次改动新增的检查点）
+          if [[ ! -L "$MOUNT_DIR/Applications" ]]; then
+            echo "ERROR: dmg 内找不到 Applications symlink，Finder 不会显示'复制到应用程序'提示"
+            ls -la "$MOUNT_DIR/"
+            hdiutil detach "$MOUNT_DIR"
+            rmdir "$MOUNT_DIR"
+            exit 1
+          fi
+          APPS_TARGET=$(readlink "$MOUNT_DIR/Applications")
+          if [[ "$APPS_TARGET" != "/Applications" ]]; then
+            echo "ERROR: Applications symlink 指向 '$APPS_TARGET'，期望 '/Applications'"
+            hdiutil detach "$MOUNT_DIR"
+            rmdir "$MOUNT_DIR"
+            exit 1
+          fi
+          echo "dmg 验证 OK：包含完整 gitea-kanban.app bundle + Applications symlink"
           hdiutil detach "$MOUNT_DIR"
           rmdir "$MOUNT_DIR"
         shell: bash
