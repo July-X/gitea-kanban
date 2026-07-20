@@ -370,10 +370,10 @@ jobs:
           # v0.8.0 rc32 fix：用 REST API 直接删 release，gh release delete 不删 assets
           #   → 重跑时旧 assets 留下导致 "ReleaseAsset.name already exists"
           #   → REST API DELETE /releases/{id} 会同步清掉所有 assets
-          EXISTING_RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.id' 2>/dev/null || echo "")
-          if [[ -n "$EXISTING_RELEASE_ID" ]]; then
-            echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 REST API 删除并清掉 assets"
-            gh api -X DELETE "repos/${{ github.repository }}/releases/$EXISTING_RELEASE_ID" >/dev/null
+          EXISTING_RELEASE_ID=$(gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --jq '.id' 2>/dev/null || echo "")
+          if [[ "$EXISTING_RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 gh release delete 清掉 assets"
+            gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes >/dev/null
           fi
 
           # 优先用 maintainer 写的 docs/releases/<tag>.md，没有就 fallback --generate-notes
