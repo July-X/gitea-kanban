@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gitea-kanban/app/config"
 )
@@ -31,13 +32,23 @@ func TestApp_OnStartup_DataLayout(t *testing.T) {
 	t.Setenv("GITEA_KANBAN_DEV_KEYCHAIN", "1")
 
 	app := NewApp()
-	app.OnStartup(context.Background())
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("OnStartup PANIC: %v", r)
+			}
+		}()
+		app.OnStartup(context.Background())
+	}()
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
-	// 1. ${dataDir}/logs/main/main.log 必须存在
+	// 1. ${dataDir}/logs/main/main-YYYY-MM-DD.log 必须存在
+	//   v0.6.0 daily rotate 改文件名（user 拍板 2026-07-02）：main.log → main-YYYY-MM-DD.log
 	//   (state.json 由 localStore 在第一次 Mutate 时才写盘，
 	//    OnStartup 阶段只初始化内存默认值，不落盘)
-	logPath := filepath.Join(tmp, "logs", "main", "main.log")
+	today := time.Now().UTC().Format("2006-01-02")
+	logPath := filepath.Join(tmp, "logs", "main", "main-"+today+".log")
 	if _, err := os.Stat(logPath); err != nil {
 		t.Errorf("log file not created at %q: %v", logPath, err)
 	}
@@ -93,6 +104,7 @@ func TestApp_GetWorkspace_ReturnsRepoWorkspace(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// v2.x：用户选的是数据根目录 (DataRoot)，不是 workspace 子目录
@@ -121,9 +133,11 @@ func TestApp_SetWorkspace_AlwaysRejects(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
-	logPath := filepath.Join(tmp, "logs", "main", "main.log")
+	today := time.Now().UTC().Format("2006-01-02")
+	logPath := filepath.Join(tmp, "logs", "main", "main-"+today+".log")
 
 	// 任何 SetWorkspace 调用都应拒绝
 	err := app.SetWorkspace(SetWorkspaceArgs{Cwd: "/some/other/path"})
@@ -150,6 +164,7 @@ func TestApp_SetWorkspace_EmptyPath(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	err := app.SetWorkspace(SetWorkspaceArgs{Cwd: ""})
@@ -166,6 +181,7 @@ func TestApp_DataDir_ResolveConsistency(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	if config.ResolveDataDir() != app.dataDir {

@@ -1755,19 +1755,23 @@ func (a *GiteaAdapter) doMultipartRequest(
 	duration := time.Since(start)
 	if err != nil {
 		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
-		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea multipart %s %s: %s", method, fullURL, err.Error()))
+		// v0.8.0 security_review 修复：网络错误消息只包含 path（不含 host 完整 URL），
+		// 避免向前端暴露自部署 Gitea 内部地址
+		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea multipart %s %s: %s", method, path, err.Error()))
 	}
 	defer resp.Body.Close()
 	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return mapHTTPError(resp.StatusCode, string(bodyBytes), fullURL)
+		// v0.8.0 security_review 修复：限制错误响应 body 读上限为 8KB
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return mapHTTPError(resp.StatusCode, string(bodyBytes), path)
 	}
 	if out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	// v0.8.0 security_review 修复：JSON decode 用 io.LimitReader 限 16MB
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16*1024*1024)).Decode(out); err != nil {
 		return ipc.NewInternal("解析 Gitea multipart 响应失败: " + err.Error())
 	}
 	return nil
@@ -1855,7 +1859,9 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 		// 网络层错误（含 TLS、DNS、连接被拒、超时）
 		// 包成 IpcError，code=network_offline，前端能识别为"网络问题"而非"未知错误"
 		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
-		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea %s %s: %s", method, fullURL, err.Error()))
+		// v0.8.0 security_review 修复：网络错误消息只包含 path（不含 host 完整 URL），
+		// 避免向前端暴露自部署 Gitea 内部地址
+		return ipc.NewNetworkOffline(fmt.Sprintf("Gitea %s %s: %s", method, path, err.Error()))
 	}
 	defer resp.Body.Close()
 
@@ -1863,8 +1869,9 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 	platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return mapHTTPError(resp.StatusCode, string(bodyBytes), fullURL)
+		// v0.8.0 security_review 修复：限制错误响应 body 读上限为 8KB
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return mapHTTPError(resp.StatusCode, string(bodyBytes), path)
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
@@ -1872,7 +1879,8 @@ func (a *GiteaAdapter) doRequest(ctx context.Context, hostURL, token, method, pa
 	}
 
 	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		// v0.8.0 security_review 修复：JSON decode 用 io.LimitReader 限 16MB
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 16*1024*1024)).Decode(out); err != nil {
 			return ipc.NewInternal("解析 Gitea 响应失败: " + err.Error())
 		}
 	}

@@ -67,6 +67,7 @@ func TestApp_ListRepos_BasicFlow(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	hostURL, cleanup := mockGiteaReposServer(t)
@@ -139,6 +140,7 @@ func TestApp_ListRepos_MergesIsProject(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	hostURL, cleanup := mockGiteaReposServer(t)
@@ -196,6 +198,7 @@ func TestApp_ListRepos_AccountNotFound(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	_, err := app.ListRepos(ListReposArgs{GiteaAccountID: "nonexistent"})
@@ -223,6 +226,7 @@ func TestApp_AddProject_Idempotent(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	accountID := "acc-1"
@@ -263,6 +267,7 @@ func TestApp_RemoveProject(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 加一个 project

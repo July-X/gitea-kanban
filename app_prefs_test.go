@@ -14,6 +14,7 @@ func TestApp_GetUserPrefs_All(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 写入 2 个 prefs
@@ -44,6 +45,7 @@ func TestApp_GetUserPrefs_ByKeys(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	_ = app.localStore.Mutate(func(s *store.LocalState) {
@@ -145,6 +147,7 @@ func TestApp_SetUserPrefs_DeleteKey(t *testing.T) {
 
 	app := NewApp()
 	app.OnStartup(context.Background())
+	CleanupAppLogger(t, app)
 	defer app.OnShutdown(context.Background())
 
 	// 写入

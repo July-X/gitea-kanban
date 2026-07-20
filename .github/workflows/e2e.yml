@@ -3,6 +3,9 @@ on: [push, pull_request]
 jobs:
   e2e:
     runs-on: macos-14
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -12,7 +15,8 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
+          cache-dependency-path: 'frontend/pnpm-lock.yaml'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm e2e:all
+      - run: pnpm test
         env:
           KB_TOKEN: ${{ secrets.KB_TOKEN }}

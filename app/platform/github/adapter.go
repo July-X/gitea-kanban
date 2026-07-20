@@ -2328,15 +2328,21 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 		// 必须包成 IpcError，否则前端 normalizeError 落到 "未知错误" 占位文案
 		// 用户根本看不到真实原因（TLS handshake timeout / DNS 解析失败 / 502 等）
 		platform.LogHTTP(ctx, method, path, 0, duration, err, logx.FromContext(ctx)...)
-		return ipc.NewNetworkOffline(fmt.Sprintf("GitHub %s %s: %s", method, fullURL, err.Error()))
+		// v0.8.0 security_review 修复：网络错误消息只包含 path（不含 host 完整 URL），
+		// 避免向前端暴露 GHES 内部地址（自部署 GitHub Enterprise 用户的内部域名/IP）
+		return ipc.NewNetworkOffline(fmt.Sprintf("GitHub %s %s: %s", method, path, err.Error()))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		// v0.8.0 security_review 修复：限制错误响应 body 读上限为 8KB，
+		// 避免恶意 GHES server 返巨型 body 撑爆 OOM（之前 io.ReadAll 无上限）
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		// 关键诊断：每次非 2xx 都写一条 slog,这样用户报错时
 		// ${dataDir}/logs/main/main.log 里有完整 status + url + body
 		platform.LogHTTP(ctx, method, path, resp.StatusCode, duration, nil, logx.FromContext(ctx)...)
+		// v0.8.0 security_review 修复：mapHTTPError 只传截断到 200 字符的 cause
+		// （app/ipc/errors.go 的 TruncateCause 已限制），避免把原始 body 透出 UI
 		return mapHTTPError(resp.StatusCode, string(bodyBytes))
 	}
 
@@ -2347,7 +2353,9 @@ func (a *GitHubAdapter) doRequest(ctx context.Context, hostURL, token, method, p
 	}
 
 	if out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		// v0.8.0 security_review 修复：JSON decode 用 io.LimitReader 限 16MB，
+		// 避免恶意/异常 API 响应造成内存消耗
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 16*1024*1024)).Decode(out); err != nil {
 			return fmt.Errorf("解析响应失败: %w", err)
 		}
 	}

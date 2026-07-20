@@ -2,7 +2,10 @@
 
 package gitbinary
 
-import _ "embed"
+import (
+	_ "embed"
+	"runtime"
+)
 
 // v0.4.0 内嵌 Git 2.55.0 Windows 二进制（windows only，build tag 隔离）。
 //
@@ -15,3 +18,16 @@ import _ "embed"
 
 //go:embed binaries/git/gk-git-2.55.0-windows-amd64.exe
 var embeddedGitWindowsAmd64 []byte
+
+// embeddedGitBytes 在 windows 平台返嵌入二进制内容。
+func embeddedGitBytes() []byte {
+	if runtime.GOARCH == "amd64" {
+		return embeddedGitWindowsAmd64
+	}
+	return nil
+}
+
+// embeddedGitFileName 生成 windows 平台嵌入二进制文件名（带 .exe 后缀）。
+func embeddedGitFileName() string {
+	return "gk-git-" + gitVersion + "-windows-" + runtime.GOARCH + ".exe"
+}

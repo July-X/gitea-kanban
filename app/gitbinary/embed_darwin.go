@@ -2,7 +2,10 @@
 
 package gitbinary
 
-import _ "embed"
+import (
+	_ "embed"
+	"runtime"
+)
 
 // v0.4.0 内嵌 Git 2.55.0 macOS 二进制（darwin only，build tag 隔离）。
 //
@@ -11,8 +14,8 @@ import _ "embed"
 //   - macos-arm64: 同上（Apple Silicon 用 brew install git 装的二进制；或 git-scm.com universal .dmg）
 //
 // 当前为占位文件：
-//   - app/gitbinary/binaries/git/git-2.55.0-macos-amd64 由 sandbox /usr/local/bin/git 真实复制（3.85 MB）
-//   - app/gitbinary/binaries/git/git-2.55.0-macos-arm64 为 0 字节 placeholder
+//   - app/gitbinary/binaries/git/gk-git-2.55.0-macos-amd64 由 sandbox /usr/local/bin/git 真实复制（3.85 MB）
+//   - app/gitbinary/binaries/git/gk-git-2.55.0-macos-arm64 为 0 字节 placeholder
 //
 // Init() 检测 size==0 时跳过释放、降级到 exec.LookPath("git")，并写 WARNING 日志：
 //   「内嵌 git-${VER}-${GOOS}-${GOARCH} 大小为 0，请用真实二进制替换后重新 wails build」
@@ -26,3 +29,21 @@ var embeddedGitDarwinAmd64 []byte
 
 //go:embed binaries/git/gk-git-2.55.0-macos-arm64
 var embeddedGitDarwinArm64 []byte
+
+// embeddedGitBytes 在 darwin 平台返嵌入二进制内容。
+// 其他平台由 embed_other.go 提供（返 nil）。
+func embeddedGitBytes() []byte {
+	switch runtime.GOARCH {
+	case "amd64":
+		return embeddedGitDarwinAmd64
+	case "arm64":
+		return embeddedGitDarwinArm64
+	default:
+		return nil
+	}
+}
+
+// embeddedGitFileName 生成 darwin 平台嵌入二进制文件名（无 .exe 后缀）。
+func embeddedGitFileName() string {
+	return "gk-git-" + gitVersion + "-macos-" + runtime.GOARCH
+}

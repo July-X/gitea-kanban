@@ -566,21 +566,21 @@ type PullDTO struct {
 // 与 PullDTO 区分：列表接口轻量，详情接口完整。
 // 字段对齐前端 PullDto（frontend/src/types/dto.ts），前端 store 直接复用。
 type PullDetailDTO struct {
-	Index          int            `json:"index"`
-	Number         int            `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
-	Title          string         `json:"title"`
-	State          string         `json:"state"` // "open" | "closed"
-	Draft          bool           `json:"draft"`
-	Merged         bool           `json:"merged"`
-	Head           PullRefDTO     `json:"head"`
-	Base           PullRefDTO     `json:"base"`
-	Author         *PullUserDTO   `json:"author,omitempty"`
-	CreatedAt      string         `json:"createdAt"`    // ISO 8601
-	UpdatedAt      string         `json:"updatedAt"`    // ISO 8601
-	Mergeable      bool           `json:"mergeable"`    // false=有冲突/不可合并
-	HasConflicts   bool           `json:"hasConflicts"` // = !Mergeable（前端视图字段对齐）
-	Body           string         `json:"body,omitempty"`
-	CommentsCount  int            `json:"commentsCount"`
+	Index         int          `json:"index"`
+	Number        int          `json:"number"` // = Index；保留兼容 Gitea / GitHub 字段命名
+	Title         string       `json:"title"`
+	State         string       `json:"state"` // "open" | "closed"
+	Draft         bool         `json:"draft"`
+	Merged        bool         `json:"merged"`
+	Head          PullRefDTO   `json:"head"`
+	Base          PullRefDTO   `json:"base"`
+	Author        *PullUserDTO `json:"author,omitempty"`
+	CreatedAt     string       `json:"createdAt"`    // ISO 8601
+	UpdatedAt     string       `json:"updatedAt"`    // ISO 8601
+	Mergeable     bool         `json:"mergeable"`    // false=有冲突/不可合并
+	HasConflicts  bool         `json:"hasConflicts"` // = !Mergeable（前端视图字段对齐）
+	Body          string       `json:"body,omitempty"`
+	CommentsCount int          `json:"commentsCount"`
 	// v0.7.6：PR 头部分支信息显示 "请求将 N 次代码提交从 {head} 合并至 {base}" 用
 	// （对齐 Gitea web `templates/repo/issue/view_title.tmpl` 渲染）。
 	// Gitea 端 /repos/{owner}/{repo}/pulls/{index} 返回的 `commits` 字段（N=0 兜底"1 次"）。
@@ -600,7 +600,7 @@ type PullDetailDTO struct {
 	// 用于：
 	//   - 过期警告 "此分支相比基础分支已过期"
 	//   - "通过合并更新分支"按钮的 v-if 条件
-	CommitsBehind  int            `json:"commitsBehind,omitempty"`
+	CommitsBehind int `json:"commitsBehind,omitempty"`
 	// Milestone v0.6.0：get / patch 后填回（如设置过则填，否则 nil）
 	// Gitea 端 LongPoll 时间充裕（v0.7.0 漏映射，由 github 端补 PullDetailDTO 字段后可在 gitea adapter 也映射）
 	Milestone *MilestoneDTO `json:"milestone,omitempty"`
@@ -692,9 +692,9 @@ type TimelineItem struct {
 	Updated string       `json:"updated,omitempty"`
 
 	// type=22 评审事件专属字段
-	State    string `json:"state,omitempty"`     // "approved" / "changes_requested" / "commented"
-	CommitID string `json:"commitId,omitempty"`  // 评审针对的 commit SHA
-	Official bool   `json:"official,omitempty"`  // 是否是官方评审（有写权限）
+	State    string `json:"state,omitempty"`    // "approved" / "changes_requested" / "commented"
+	CommitID string `json:"commitId,omitempty"` // 评审针对的 commit SHA
+	Official bool   `json:"official,omitempty"` // 是否是官方评审（有写权限）
 
 	// type=29 推送事件专属
 	CommitSHA string `json:"commitSha,omitempty"` // 推送后 head 的最新 commit SHA
@@ -735,7 +735,7 @@ type TimelineItem struct {
 
 	// type=3 (issue_ref) / 5 (comment_ref) / 6 (pull_ref) / 33 (change_issue_ref) —— 跨引用
 	RefIssue     *IssueDTO `json:"refIssue,omitempty"`
-	RefAction    string    `json:"refAction,omitempty"`     // "close" / "reopen" / "cross" 之一
+	RefAction    string    `json:"refAction,omitempty"`    // "close" / "reopen" / "cross" 之一
 	RefCommitSHA string    `json:"refCommitSha,omitempty"` // type=4 commit ref 时引用到的 commit SHA
 
 	// type=19 (add_dependency) / 20 (remove_dependency) —— 依赖 issue

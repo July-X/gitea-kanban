@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,6 +10,30 @@ import (
 	"testing"
 	"time"
 )
+
+// cleanupLoggerClose 给 t 注册 cleanup 主动 Close logger handler。
+//
+// 解决 windows 上 testing.go:1464 TempDir RemoveAll cleanup:
+// unlinkat ... main-2026-07-19.log: The process cannot access the file because
+// it is being used by another process.
+//
+// app/config 测试直接调 NewLogger + t.TempDir 创建 dailyRotateHandler，
+// 写完后 *os.File handle 没有主动关闭 → windows 上 file lock → cleanup FAIL。
+//
+// 修复：t.Cleanup 里调 logger.Handler().Close() 释放 handle。
+func cleanupLoggerClose(t *testing.T, logger *slog.Logger) {
+	t.Helper()
+	t.Cleanup(func() {
+		if logger == nil {
+			return
+		}
+		if h := logger.Handler(); h != nil {
+			if closer, ok := h.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}
+	})
+}
 
 func TestResolveDataDir_EnvVar(t *testing.T) {
 	dir := t.TempDir()
@@ -44,6 +69,7 @@ func TestNewLogger_BasicWrite(t *testing.T) {
 	if logger == nil {
 		t.Fatal("NewLogger returned nil")
 	}
+	cleanupLoggerClose(t, logger)
 
 	logger.Info("test message", "key", "value")
 
@@ -72,6 +98,7 @@ func TestNewLogger_DebugLevel(t *testing.T) {
 	if logger == nil {
 		t.Fatal("NewLogger returned nil")
 	}
+	cleanupLoggerClose(t, logger)
 
 	logger.Debug("debug message visible")
 
@@ -129,6 +156,18 @@ func TestDailyRotateHandler_WithAttrs(t *testing.T) {
 	dir := t.TempDir()
 	h := newDailyRotateHandler(dir, slog.LevelInfo)
 	defer h.Close()
+
+	// v0.8.0 rc19 fix：t.Cleanup 主动 Close handler 释放 windows file handle
+	//（跟 cleanupLoggerClose 同理 — testing.go:1464 TempDir RemoveAll cleanup
+	// 在 windows 上要求 *os.File 已关闭，否则 "file in use" FAIL）
+	// 这里 defer h.Close() 已经注册，但 defer 在 testing framework 调
+	// t.Cleanup → t.TempDir RemoveAll 之前/之后顺序依赖 LIFO 不够稳，
+	// 显式 t.Cleanup 兜底。
+	t.Cleanup(func() {
+		if err := h.Close(); err != nil {
+			t.Logf("h.Close: %v (ignored)", err)
+		}
+	})
 
 	// 模拟子 logger 加 attrs（绑定 platform / reqID 等）
 	sub := slog.New(h).With("platform", "github", "reqID", "abc-123")
