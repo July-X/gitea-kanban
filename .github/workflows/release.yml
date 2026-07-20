@@ -370,8 +370,11 @@ jobs:
           # v0.8.0 rc32 fix：用 REST API 直接删 release，gh release delete 不删 assets
           #   → 重跑时旧 assets 留下导致 "ReleaseAsset.name already exists"
           #   → REST API DELETE /releases/{id} 会同步清掉所有 assets
-          EXISTING_RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.id' 2>/dev/null || echo "")
-          if [[ -n "$EXISTING_RELEASE_ID" ]]; then
+          # v0.8.0 rc32.1 fix：jq 拿 id 失败时可能返 error JSON {"message":"Not Found"...}，
+          #   EXISTING_RELEASE_ID 是 dict 不是数字，DELETE 路径编码后报
+          #   "unsupported protocol scheme"。只在 EXISTING_RELEASE_ID 是纯数字时才删。
+          EXISTING_RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.id // empty' 2>/dev/null || true)
+          if [[ "$EXISTING_RELEASE_ID" =~ ^[0-9]+$ ]]; then
             echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 REST API 删除并清掉 assets"
             gh api -X DELETE "repos/${{ github.repository }}/releases/$EXISTING_RELEASE_ID" >/dev/null
           fi
