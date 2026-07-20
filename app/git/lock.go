@@ -8,13 +8,15 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const staleGitLockAge = 10 * time.Minute
 
 // pathLocks 内存级 per-path 锁（保护同进程内并发）
 //
-// 文件级锁（flock / LockFileEx）由 lockFilePath 提供（保护跨进程并发）。
+// 文件级锁（flock）由 lockFilePath 提供（保护跨进程并发）。
 // 两层组合：先拿内存锁（快速），再拿文件锁（防多进程）。
 var pathLocks sync.Map // map[string]*sync.Mutex
 
@@ -27,7 +29,7 @@ func lockPath(localPath string) (func(), error) {
 	mu := v.(*sync.Mutex)
 	mu.Lock()
 
-	// 2. 文件锁（platform-specific flock on lockFilePath）
+	// 2. 文件锁（flock on lockFilePath）
 	lockFilePath := localPath + ".lock"
 	if err := os.MkdirAll(filepath.Dir(lockFilePath), 0o755); err != nil {
 		mu.Unlock()
@@ -40,15 +42,15 @@ func lockPath(localPath string) (func(), error) {
 		return nil, fmt.Errorf("打开锁文件失败: %w", err)
 	}
 
-	if err := flockAcquire(f); err != nil {
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
 		f.Close()
 		mu.Unlock()
 		return nil, fmt.Errorf("flock 失败: %w", err)
 	}
 
 	return func() {
-		_ = flockRelease(f)
-		_ = f.Close()
+		unix.Flock(int(f.Fd()), unix.LOCK_UN)
+		f.Close()
 		mu.Unlock()
 	}, nil
 }
