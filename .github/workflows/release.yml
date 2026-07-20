@@ -69,31 +69,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # v0.8.2 follow-up: GitHub Actions runner 升级后 actions/setup-node 的
-          # `cache: 'pnpm'` 选项在新 runner 上 validate 失败导致 job 立刻 fail。
-          # 关闭 pnpm cache（pnpm install 自身速度足够，依赖 workspace 缓存已覆盖）。
-          cache: ''
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: 缓存 Wails CLI（命中则跳过 go install，节省 ~2 分钟）
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/wails
-          key: wails-cli-v2.12.0-${{ runner.os }}-${{ matrix.arch }}
-
-      - name: 安装 Wails CLI（缓存命中时跳过）
-        run: |
-          export GOBIN="$HOME/.cache/wails"
-          if [[ ! -x "$GOBIN/wails" ]]; then
-            go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-          else
-            echo "==> Wails CLI 已命中缓存（$GOBIN/wails），跳过 go install"
-          fi
-          export PATH="$GOBIN:$PATH"
+      - name: 安装 Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
         shell: bash
 
       - name: 前端依赖
@@ -387,11 +370,8 @@ jobs:
           # v0.8.0 rc32 fix：用 REST API 直接删 release，gh release delete 不删 assets
           #   → 重跑时旧 assets 留下导致 "ReleaseAsset.name already exists"
           #   → REST API DELETE /releases/{id} 会同步清掉所有 assets
-          # v0.8.0 rc32.1 fix：jq 拿 id 失败时可能返 error JSON {"message":"Not Found"...}，
-          #   EXISTING_RELEASE_ID 是 dict 不是数字，DELETE 路径编码后报
-          #   "unsupported protocol scheme"。只在 EXISTING_RELEASE_ID 是纯数字时才删。
-          EXISTING_RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.id // empty' 2>/dev/null || true)
-          if [[ "$EXISTING_RELEASE_ID" =~ ^[0-9]+$ ]]; then
+          EXISTING_RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.id' 2>/dev/null || echo "")
+          if [[ -n "$EXISTING_RELEASE_ID" ]]; then
             echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 REST API 删除并清掉 assets"
             gh api -X DELETE "repos/${{ github.repository }}/releases/$EXISTING_RELEASE_ID" >/dev/null
           fi
@@ -405,27 +385,12 @@ jobs:
             NOTES_ARGS=(--generate-notes)
           fi
 
-          # v0.8.0 rc34 fix：gh release create 偶发 HTTP 503（GitHub API 临时挂），
-          # 加 retry 5 次 + 指数 backoff（10s / 30s / 90s / 270s / 810s，总计约 20 分钟）
-          for attempt in 1 2 3 4 5; do
-            echo "==> gh release create attempt $attempt/5"
-            if gh release create "${{ github.ref_name }}" \
-              --repo "${{ github.repository }}" \
-              --title "gitea-kanban ${{ github.ref_name }}" \
-              $PRE_RELEASE_FLAG \
-              "${NOTES_ARGS[@]}" \
-              "${AVAILABLE_ASSETS[@]}"; then
-              echo "release 创建成功"
-              break
-            fi
-            # rc33 rc34 报 HTTP 503 只 sleep 后 retry（其他错误立即 fail）
-            echo "WARN: gh release create attempt $attempt 失败，sleep $((10 * 3**(attempt-1)))s 后重试"
-            sleep "$((10 * 3**(attempt-1)))"
-            if [[ $attempt -eq 5 ]]; then
-              echo "ERROR: gh release create 5 次都失败" >&2
-              exit 1
-            fi
-          done
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "gitea-kanban ${{ github.ref_name }}" \
+            $PRE_RELEASE_FLAG \
+            "${NOTES_ARGS[@]}" \
+            "${AVAILABLE_ASSETS[@]}"
         shell: bash
 
       - name: 清理临时私钥
