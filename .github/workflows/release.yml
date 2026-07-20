@@ -21,15 +21,12 @@
 
 name: release
 on:
-  # v0.8.5 follow-up: 显式排除 default branch 触发 release workflow（避免 master push
-  # 改动 release.yml 文件本身时重新评估 trigger,触发空 jobs 跑失败）。
-  # push:
-  #   tags: ['v*']
-  #   branches-ignore: ['master']  # 默认分支 push 不触发（只用 tag push）
-  # 实际上 GitHub Actions 默认 branches-ignore 包含 default branch,所以 `tags: ['v*']`
-  # 已经隐式排除了 master push。
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+    branches-ignore:
+      - master
+      - feat/v0.8.0
   workflow_dispatch:
     inputs:
       tag:
