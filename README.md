@@ -3,7 +3,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/July-X/gitea-kanban)](https://github.com/July-X/gitea-kanban/releases/latest)
 [![Platform: macOS+Windows](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](https://github.com/July-X/gitea-kanban/releases)
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Wails v2](https://img.shields.io/badge/Wails-v2.12-red)](https://wails.io)
 
 > 基于 **Gitea / GitHub** 的桌面端 Git Graph + 看板工具。
@@ -90,7 +90,7 @@ cd gitea-kanban
 
 **前置依赖**：
 
-- Go 1.22+
+- Go 1.26+
 - Node.js 20 LTS
 - pnpm 10+
 - Wails CLI v2.12+：`go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`

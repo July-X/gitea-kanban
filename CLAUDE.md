@@ -64,7 +64,7 @@
 >
 > **v3.0–v3.14 历史**：Git Graph 严格 1:1 复刻 vscode-git-graph（已上述 v0.5.3 为准）
 
-- 运行时：Go 1.22+ + Wails v2.12（用系统 WebView，非 Chromium）
+- 运行时：Go 1.26+ + Wails v2.12（用系统 WebView，非 Chromium）
 - git 客户端：go-git v5（纯 Go，无 CGO，替代旧的 spawn('git')；v2.4 走 NoCheckout 轻量模式）
 - 凭证：zalando/go-keyring（纯 Go，替代旧的 @napi-rs/keyring napi 二进制）
 - 本地库：**JSON 文件 + 文件 KV**（延续 ADR-0003 零 SQLite 决策）

@@ -66,7 +66,7 @@ jobs:
       - name: 安装 Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.22'
+          go-version: '1.26'
           cache: true
 
       - name: 安装 Node.js
@@ -363,7 +363,7 @@ jobs:
       - name: 安装 Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.22'
+          go-version: '1.26'
 
       # 下载 macOS dmg build（v0.8.0 rc30：从 zip 改成 dmg，artifact name 同步）
       - name: 下载 macOS amd64 dmg
