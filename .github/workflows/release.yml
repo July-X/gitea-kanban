@@ -293,7 +293,7 @@ jobs:
           # 期望的 gitea-kanban-<version>-<platform>-<arch>[.dmg|.exe] 一致
           TAG="${{ github.ref_name }}"
           MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
-          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64-setup.exe"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
 
           # macOS：dmg 已经由 build step 用 hdiutil 构造好（包含完整 .app bundle）
           # 这里只需要 mv build/bin/*.dmg 到 build/release/ 带 tag 命名
@@ -310,8 +310,7 @@ jobs:
             file "$MAC_DMG"
           fi
 
-          # v0.8.5 follow-up: 不再 mv build/bin/ 下的 .exe（保持原文件名,让 step 13 上传 build/bin/*.exe），
-          # publish job 在 build/release/ 阶段选 setup.exe 优先 / portable fallback。
+          # v0.8.5 follow-up: 优先选 NSIS installer，fallback portable exe
           if [[ -f build/bin/gitea-kanban-setup.exe ]]; then
             cp build/bin/gitea-kanban-setup.exe "$WIN_EXE"
             echo "windows NSIS installer copied to $WIN_EXE (portable gitea-kanban.exe 也保留供 fallback)"
@@ -365,7 +364,7 @@ jobs:
           #   - 现在 dmg 挂载直接看到完整 gitea-kanban.app bundle
           TAG="${{ github.ref_name }}"
           MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
-          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64-setup.exe"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
           if [[ -f "$MAC_DMG" ]]; then
             AVAILABLE_ASSETS+=("$MAC_DMG")
             AVAILABLE_ASSETS+=("$MAC_DMG.sig")
