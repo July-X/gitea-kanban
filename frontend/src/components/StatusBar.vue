@@ -45,6 +45,11 @@ import {
   Search,
   User,
   Loader2,
+  // v0.7.48：StatusBar 底部"去 gitea/GitHub 添加新仓库"链接用 ExternalLink icon
+  //（"在浏览器打开"语义，对齐 lucide ExternalLink）—— 修前模板用 <ExternalLink />
+  // 但 import 漏了，devtool console 一直报 "Failed to resolve component: ExternalLink"
+  // at <StatusBar>" 警告（每次渲染 10 条 × isMac 2 种状态 = 20 条）
+  ExternalLink,
 } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';

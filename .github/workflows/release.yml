@@ -1,0 +1,430 @@
+# release.yml —— v0.8.0 自动发版 workflow
+#
+# 触发条件：推送 tag `v*`（如 v0.8.0 / v0.8.0-rc1）时自动跑：
+#   1. matrix build（macOS amd64 + windows amd64 双平台，不含 Linux 和 arm64）
+#   2. 收集所有 build artifacts 到单一 job（release-publish）
+#   3. 对每个 asset 跑 cmd/sign sign 生成 .sig 文件
+#   4. 跑 cmd/sign manifest 生成 latest.json
+#   5. 调 gh release create 上传所有产物 + 删除 pre-release tag 的旧 release
+#
+# ⚠️ 必需 GitHub Secrets：
+#   - SIGN_PRIVATE_KEY：cmd/sign genkey 生成的加密私钥（base64 单行）
+#   - SIGN_PASSWORD：解密私钥的密码（argon2id 派生）
+#
+# Maintainer 首次 setup：
+#   1. go run ./cmd/sign genkey ./keys --password "$pwd"
+#   2. cat ./keys/gitea-kanban-private.b64 | pbcopy
+#   3. GitHub → Settings → Secrets → New repository secret
+#      Name: SIGN_PRIVATE_KEY  Value: <粘贴>
+#   4. Name: SIGN_PASSWORD     Value: <pwd>
+#   5. 把公钥粘到 app/updater/verify.go 的 PublicKeyB64 常量并 commit
+
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.8.0 / v0.8.0-rc1)'
+        required: true
+
+permissions:
+  contents: write  # 允许 gh release create / upload
+
+jobs:
+  # ===== Stage 1: 跨平台 build matrix =====
+  build:
+    name: build (${{ matrix.os }}-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # v0.8.0 仅 stable + Windows/macOS 双平台 + Intel (amd64) 单架构
+        # Linux / arm64 暂不在 v0.8.0 范围（plan v0.8.0.md 红线）
+        include:
+          - os: macos-14
+            platform: darwin
+            arch: amd64
+            artifact: gitea-kanban-macos-amd64
+            output: gitea-kanban.app
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+            artifact: gitea-kanban-windows-amd64
+            output: gitea-kanban.exe
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 缓存 Wails CLI（命中则跳过 go install，节省 ~2 分钟）
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/wails
+          key: wails-cli-v2.12.0-${{ runner.os }}-${{ matrix.arch }}
+
+      - name: 安装 Wails CLI（缓存命中时跳过）
+        run: |
+          export GOBIN="$HOME/.cache/wails"
+          if [[ ! -x "$GOBIN/wails" ]]; then
+            go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          else
+            echo "==> Wails CLI 已命中缓存（$GOBIN/wails），跳过 go install"
+          fi
+          export PATH="$GOBIN:$PATH"
+        shell: bash
+
+      - name: 前端依赖
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: 前端 build（生成 dist/ 给 Go embed）
+        working-directory: frontend
+        run: pnpm run build
+
+      - name: 前端 typecheck
+        working-directory: frontend
+        run: pnpm run typecheck
+
+      # 必须放在 pnpm build 之后：main.go 用 //go:embed all:frontend/dist 嵌入前端资源，
+      # 没有 dist/ 会导致 go build 和 go test 一起 setup failed（FAIL: pattern all:frontend/dist: no matching files）
+      # 用 GOOS/GOARCH env 显式指定（windows runner 默认 GOARCH=amd64 但 darwin-14 runner 是 arm64；
+      # 必须显式 amd64 才能嵌入 windows 二进制 + macOS Intel 二进制）
+      # 注意：windows runner 的 shell 是 PowerShell，GOOS=windows go test 这种 env inline 写法不可用，
+      # 必须用 GitHub Actions env 字段（PowerShell 通过 $env:GOOS 读）
+      - name: Go 测试（含 cmd/sign + app/updater）
+        env:
+          GOOS: ${{ matrix.platform }}
+          GOARCH: ${{ matrix.arch }}
+        run: go test ./... -count=1
+
+      # macOS / Windows 都用 wails build 加 -ldflags 注入版本号
+      # 注意：不传 -o，wails build 默认输出到 build/bin/<appname>.app (mac)
+      # 或 build/bin/<appname>.exe (windows)。早期传 -o gitea-kanban.app 时
+      # go build 把 .app 当 binary 输出文件，wails packaging 想 mkdir 同名目录失败。
+      - name: 构建（macOS / Windows 通用）
+        run: |
+          wails build \
+            -platform ${{ matrix.platform }}/${{ matrix.arch }} \
+            -clean \
+            -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
+        shell: bash
+
+      # v0.8.0 rc30：macOS 改成出 dmg，不再出 zip。
+      # 用户反馈"MacOS 包体不完整（解压只有 Contents/ 文件夹没有 .app 包装）"，
+      # 改用 macOS runner 自带 hdiutil 构造完整 .dmg 镜像（双击挂载后能看到完整 .app bundle）。
+      # windows 不受影响（继续产 .exe）。
+      - name: macOS：构造 .app 包装 + hdiutil 出 dmg
+        if: matrix.os == 'macos-14'
+        run: |
+          set -euo pipefail
+          cd build/bin
+
+          # v0.8.0 rc30 fix：wails build 在 macos-14 runner 上的产物形态是
+          # build/bin/Contents/MacOS/gitea-kanban（Contents 在 bin 下，没 .app 包装）。
+          # 但 wails build 默认应该产生 .app bundle，理论上 build/ 下应当
+          # 有 build/bin/gitea-kanban.app。两种情况都要 handle：
+          if [[ ! -d gitea-kanban.app && -d Contents ]]; then
+            echo "==> 检测到 loose Contents/，包装成 gitea-kanban.app/"
+            mkdir -p gitea-kanban.app
+            cp -R Contents gitea-kanban.app/
+          fi
+
+          if [[ ! -d gitea-kanban.app ]]; then
+            echo "ERROR: build/bin/gitea-kanban.app 找不到（wails build 失败）" >&2
+            exit 1
+          fi
+
+          echo "==> .app bundle 结构验证:"
+          ls -la gitea-kanban.app/
+          ls -la gitea-kanban.app/Contents/MacOS/
+
+          TAG="${{ github.ref_name }}"
+          DMG="gitea-kanban-${TAG}-macos-amd64.dmg"
+
+          # 用 hdiutil 构造 dmg 镜像：volatile 表示不预分配，UDZO 压缩。
+          # srcfolder 模式：直接把 .app bundle 拖进 dmg。
+          # iconfile：用 build/icon.icns（v0.8.0 build/ 下已有）
+          # 注意：-fs HFS+ 因为 Apple Silicon + Intel 双兼容（APFS dmg 在某些 macOS 版本不挂载）
+          echo "==> hdiutil 创建 dmg ..."
+          hdiutil create \
+            -volname "Gitea Kanban" \
+            -srcfolder gitea-kanban.app \
+            -ov \
+            -format UDZO \
+            -fs HFS+ \
+            -noanyowners \
+            -imagekey zlib-level=9 \
+            "$DMG"
+
+          echo "==> dmg output:"
+          ls -la "$DMG"
+          file "$DMG"
+
+          # 验证 dmg 挂载后确实能看到 .app bundle（不是裸 Contents/）
+          echo "==> dmg 验证：挂载测试"
+          MOUNT_DIR=$(mktemp -d)
+          hdiutil attach -readonly -nobrowse -noverify -mountpoint "$MOUNT_DIR" "$DMG"
+          ls -la "$MOUNT_DIR"
+          if [[ ! -d "$MOUNT_DIR/gitea-kanban.app" ]]; then
+            echo "ERROR: dmg 内找不到 gitea-kanban.app bundle，挂载得到:"
+            ls -la "$MOUNT_DIR/"
+            hdiutil detach "$MOUNT_DIR"
+            rmdir "$MOUNT_DIR"
+            exit 1
+          fi
+          echo "dmg 验证 OK：包含完整 gitea-kanban.app bundle"
+          hdiutil detach "$MOUNT_DIR"
+          rmdir "$MOUNT_DIR"
+        shell: bash
+
+      - name: 上传构建产物
+        if: matrix.os != 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: build/bin/${{ matrix.output }}
+          if-no-files-found: error
+
+      # macOS dmg 在前一步构造好，单独上传（artifact name 改 -dmg 后缀）
+      - name: 上传 macOS dmg 产物
+        if: matrix.os == 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitea-kanban-macos-amd64-dmg
+          path: build/bin/gitea-kanban-${{ github.ref_name }}-macos-amd64.dmg
+          if-no-files-found: error
+
+  # ===== Stage 2: sign + publish =====
+  publish:
+    name: sign · manifest · publish
+    # v0.8.0 rc17 fix：if: always() 让 windows FAIL 也能 release macOS
+    #（master HEAD windows 7 个 bug 未修，强行等 build 全 PASS → publish 永远 skipped）
+    needs: build
+    if: always()
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      # 下载 macOS dmg build（v0.8.0 rc30：从 zip 改成 dmg，artifact name 同步）
+      - name: 下载 macOS amd64 dmg
+        uses: actions/download-artifact@v4
+        with:
+          name: gitea-kanban-macos-amd64-dmg
+          path: build/bin/
+        continue-on-error: true
+
+      - name: 下载 Windows amd64 build
+        uses: actions/download-artifact@v4
+        with:
+          name: gitea-kanban-windows-amd64
+          path: build/bin/
+        continue-on-error: true
+
+      - name: 检查必需 secrets（可选：缺失时 release raw build 不签名）
+        env:
+          SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
+          SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
+        run: |
+          # v0.8.0 rc18 fix：secrets 缺失只 warn 不 exit 1
+          #（CI 上 maintainer 还没设 secrets，但用户仍想看 raw build 能否 release）
+          if [[ -z "$SIGN_PRIVATE_KEY" ]]; then
+            echo "WARN: SIGN_PRIVATE_KEY secret is empty — release raw build（无签名）"
+          fi
+          if [[ -z "$SIGN_PASSWORD" ]]; then
+            echo "WARN: SIGN_PASSWORD secret is empty — release raw build（无签名）"
+          fi
+          # 列出可用 asset
+          echo "==> 可用 build artifacts:"
+          ls -la build/bin/ 2>&1 || echo "(build/bin/ 为空 — 所有 build matrix 都 FAIL)"
+
+      # 调用 scripts/release.sh 集成 zip + sign + manifest + verify 链
+      #   v0.8.0：替换原本零碎的 8 个 bash step（step 167-219），减少 70+ 行重复
+      #   并集中 future 维护点。CI 上 release.sh 默认产物写到 build/release/
+      #   （RELEASE_DIR env override）。
+      - name: 集成 sign + manifest（scripts/release.sh）
+        if: env.SIGN_PRIVATE_KEY != '' && env.SIGN_PASSWORD != ''
+        env:
+          SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
+          SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          NOTES_FILE: docs/releases/${{ github.ref_name }}.md
+          RELEASE_DIR: build/release
+        run: bash scripts/release.sh "${{ github.ref_name }}"
+
+      # raw build fallback（secrets 缺失时）：把 macOS dmg + windows .exe 直接发布，不签名
+      # v0.8.0 rc30：macOS 改成 .dmg（之前是 zip 的 bug：解压得到裸 Contents/）
+      - name: raw build fallback（无签名）
+        if: env.SIGN_PRIVATE_KEY == '' || env.SIGN_PASSWORD == ''
+        run: |
+          mkdir -p build/release
+
+          # v0.8.0 rc25 review nit：产物名带 tag，跟 app/updater/manifest.go:158 AssetFilename()
+          # 期望的 gitea-kanban-<version>-<platform>-<arch>[.dmg|.exe] 一致
+          TAG="${{ github.ref_name }}"
+          MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
+
+          # macOS：dmg 已经由 build step 用 hdiutil 构造好（包含完整 .app bundle）
+          # 这里只需要 mv build/bin/*.dmg 到 build/release/ 带 tag 命名
+          if compgen -G 'build/bin/*.dmg' > /dev/null; then
+            mv build/bin/*.dmg "$MAC_DMG"
+            echo "macOS raw dmg moved to $MAC_DMG"
+          else
+            echo "WARN: macOS dmg 找不到（CI macos build 可能 FAIL）"
+          fi
+
+          # 验证 dmg 格式（带 sanity check：file 命令看格式对不对）
+          if [[ -f "$MAC_DMG" ]]; then
+            echo "==> dmg info:"
+            file "$MAC_DMG"
+          fi
+
+          if [[ -f build/bin/gitea-kanban.exe ]]; then
+            mv build/bin/gitea-kanban.exe "$WIN_EXE"
+            echo "windows raw build moved to $WIN_EXE"
+          else
+            echo "WARN: gitea-kanban.exe 找不到（CI windows build 可能 FAIL）"
+          fi
+
+          # 写一个 minimal latest.json（无签名的 placeholder）
+          cat > build/release/latest.json << 'EOF'
+          {
+            "version": "${{ github.ref_name }}",
+            "notes": "release built without signature (SIGN_PRIVATE_KEY secret missing) — see docs/releases/${{ github.ref_name }}.md",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "channel": "stable",
+            "assets": []
+          }
+          EOF
+
+          # 占位 .sig 文件（0 字节 + 注释），让 gh release create 检测到
+          # （fallback 模式 release 是无签名的 raw build，sig 只是 placeholder
+          # 防止 gh release create 报 "no matches found for *.sig"）
+          for asset in "$MAC_DMG" "$WIN_EXE" "build/release/latest.json"; do
+            if [[ -f "$asset" ]]; then
+              echo "# placeholder signature (SIGN_PRIVATE_KEY secret missing)" > "${asset}.sig"
+            fi
+          done
+
+          echo "==> build/release/ 内容:"
+          ls -la build/release/
+
+      # gh release create（v0.8.0：动态检测可用 asset，windows FAIL 也能 release macOS）
+      - name: 创建 / 更新 GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 兼容 rc tag（如 v0.8.0-rc1）使用 --prerelease
+          if [[ "${{ github.ref_name }}" == *"-rc"* ]] || [[ "${{ github.ref_name }}" == *"-beta"* ]]; then
+            PRE_RELEASE_FLAG="--prerelease"
+          else
+            PRE_RELEASE_FLAG=""
+          fi
+
+          # 动态检测可用 asset（脚本 release.sh 已经把可用 asset sign/manifest 完成）
+          AVAILABLE_ASSETS=()
+          # v0.8.0 rc30：macOS 产物从 zip 改成 dmg（构造完整 .app bundle）
+          #   - 之前 zip 解压得到裸 Contents/，用户需要手动包装成 .app bundle
+          #   - 现在 dmg 挂载直接看到完整 gitea-kanban.app bundle
+          TAG="${{ github.ref_name }}"
+          MAC_DMG="build/release/gitea-kanban-${TAG}-macos-amd64.dmg"
+          WIN_EXE="build/release/gitea-kanban-${TAG}-windows-amd64.exe"
+          if [[ -f "$MAC_DMG" ]]; then
+            AVAILABLE_ASSETS+=("$MAC_DMG")
+            AVAILABLE_ASSETS+=("$MAC_DMG.sig")
+          else
+            echo "WARN: $MAC_DMG 缺失（macOS build FAIL）"
+          fi
+          if [[ -f "$WIN_EXE" ]]; then
+            AVAILABLE_ASSETS+=("$WIN_EXE")
+            AVAILABLE_ASSETS+=("$WIN_EXE.sig")
+          else
+            echo "WARN: $WIN_EXE 缺失（windows build FAIL）"
+          fi
+          if [[ -f build/release/latest.json ]]; then
+            AVAILABLE_ASSETS+=(build/release/latest.json)
+            AVAILABLE_ASSETS+=(build/release/latest.json.sig)
+          fi
+
+          if [[ ${#AVAILABLE_ASSETS[@]} -eq 0 ]]; then
+            echo "ERROR: 无任何可用 asset，发布中止" >&2
+            exit 1
+          fi
+          echo "==> 将上传 ${#AVAILABLE_ASSETS[@]} 个 asset:"
+          printf '  %s\n' "${AVAILABLE_ASSETS[@]}"
+
+          # 先看 release 是否已存在（workflow_dispatch 重跑场景）
+          # v0.8.0 rc32 fix：用 REST API 直接删 release，gh release delete 不删 assets
+          #   → 重跑时旧 assets 留下导致 "ReleaseAsset.name already exists"
+          #   → REST API DELETE /releases/{id} 会同步清掉所有 assets
+          # v0.8.0 rc32.1 fix：jq 拿 id 失败时可能返 error JSON {"message":"Not Found"...}，
+          #   EXISTING_RELEASE_ID 是 dict 不是数字，DELETE 路径编码后报
+          #   "unsupported protocol scheme"。只在 EXISTING_RELEASE_ID 是纯数字时才删。
+          EXISTING_RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.id // empty' 2>/dev/null || true)
+          if [[ "$EXISTING_RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "Release ${{ github.ref_name }} 已存在（id=$EXISTING_RELEASE_ID），用 REST API 删除并清掉 assets"
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$EXISTING_RELEASE_ID" >/dev/null
+          fi
+
+          # 优先用 maintainer 写的 docs/releases/<tag>.md，没有就 fallback --generate-notes
+          NOTES_ARGS=()
+          if [[ -f "docs/releases/${{ github.ref_name }}.md" ]]; then
+            NOTES_ARGS=(--notes-file "docs/releases/${{ github.ref_name }}.md")
+          else
+            echo "WARN: docs/releases/${{ github.ref_name }}.md 不存在，用 --generate-notes"
+            NOTES_ARGS=(--generate-notes)
+          fi
+
+          # v0.8.0 rc34 fix：gh release create 偶发 HTTP 503（GitHub API 临时挂），
+          # 加 retry 5 次 + 指数 backoff（10s / 30s / 90s / 270s / 810s，总计约 20 分钟）
+          for attempt in 1 2 3 4 5; do
+            echo "==> gh release create attempt $attempt/5"
+            if gh release create "${{ github.ref_name }}" \
+              --repo "${{ github.repository }}" \
+              --title "gitea-kanban ${{ github.ref_name }}" \
+              $PRE_RELEASE_FLAG \
+              "${NOTES_ARGS[@]}" \
+              "${AVAILABLE_ASSETS[@]}"; then
+              echo "release 创建成功"
+              break
+            fi
+            # rc33 rc34 报 HTTP 503 只 sleep 后 retry（其他错误立即 fail）
+            echo "WARN: gh release create attempt $attempt 失败，sleep $((10 * 3**(attempt-1)))s 后重试"
+            sleep "$((10 * 3**(attempt-1)))"
+            if [[ $attempt -eq 5 ]]; then
+              echo "ERROR: gh release create 5 次都失败" >&2
+              exit 1
+            fi
+          done
+        shell: bash
+
+      - name: 清理临时私钥
+        run: rm -f build/release/.private.b64
+        shell: bash

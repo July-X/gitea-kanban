@@ -231,3 +231,33 @@ func SetGitBinaryPath(s *LocalStore, path string) error {
 		}
 	})
 }
+
+// GetPrefBool 读 boolean 偏好，缺失/类型不对返 defaultVal。
+//
+// 用法：app_updater_app.go 的 checkUpdatesAtStartup 读 prefs["app.checkUpdates"]。
+func GetPrefBool(s *LocalStore, key string, defaultVal bool) bool {
+	if s == nil {
+		return defaultVal
+	}
+	state := s.Get()
+	if state == nil || state.Prefs == nil {
+		return defaultVal
+	}
+	if v, ok := state.Prefs[key].(bool); ok {
+		return v
+	}
+	return defaultVal
+}
+
+// SetPrefBool 把 boolean 偏好写到 prefs。
+func SetPrefBool(s *LocalStore, key string, val bool) error {
+	return s.Mutate(func(state *LocalState) {
+		if state.Prefs == nil {
+			state.Prefs = map[string]any{}
+		}
+		state.Prefs[key] = val
+	})
+}
+
+// CheckUpdatesPrefKey v0.8.0 启动检查更新开关的 pref key。
+const CheckUpdatesPrefKey = "app.checkUpdates"

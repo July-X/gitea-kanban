@@ -938,3 +938,64 @@ export interface GitGraphPullResp {
   /** git fetch / pull 的 stdout（用户可见，便于诊断冲突） */
   stdout: string;
 }
+
+// ============================================================
+// ===== 自动更新命名空间（v0.8.0 引入）=====
+// ============================================================
+
+/**
+ * 自动更新信息（CheckUpdate 返回）
+ *
+ * 对齐 Go 端 updater.UpdateInfo json tag（camelCase）。
+ *
+ * - available: 是否有可用更新
+ * - current: 当前运行版本（如 "v0.8.0" 或 "dev"）
+ * - latest: 最新版本
+ * - notes: release notes markdown
+ * - channel: 发布通道（v0.8.0 仅 "stable"）
+ * - canSelfUpdate: 是否支持自动 in-place apply（macOS 未签名 build 返 false）
+ * - manualOnly: 只能手动去 release 页下载
+ * - manualReason: 手动下载的可读原因
+ * - downloaded: 缓存里是否已有这个版本的安装包
+ * - downloadUrl: 安装包 URL
+ * - assetSize: 安装包大小（字节）
+ * - err: 内部错误（前端拿来显示人话）
+ */
+export interface UpdateInfo {
+  available: boolean;
+  current: string;
+  latest: string;
+  notes?: string;
+  channel: string;
+  canSelfUpdate: boolean;
+  manualOnly?: boolean;
+  manualReason?: string;
+  downloaded: boolean;
+  downloadUrl?: string;
+  assetSize?: number;
+  err?: string;
+}
+
+/**
+ * 下载完成结果（DownloadUpdate 返回）
+ */
+export interface UpdateDownloadResult {
+  version: string;
+  channel: string;
+  platform: string;
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+/**
+ * 更新进度（updater:progress 事件 payload）
+ *
+ * phase: 'downloading' | 'verifying' | 'downloaded' | 'installing' | 'done' | 'error'
+ */
+export interface UpdateProgress {
+  phase: string;
+  received: number;
+  total: number;
+  err?: string;
+}

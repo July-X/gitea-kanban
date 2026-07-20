@@ -50,18 +50,13 @@ const gitVersion = "2.55.0"
 //   - windows/amd64 → embeddedGitWindowsAmd64
 //
 // 其他平台 (linux、freebsd 等) 返回 nil，Init 跳过释放。
-func embeddedGitBytes() []byte {
-	switch runtime.GOOS + "/" + runtime.GOARCH {
-	case "darwin/amd64":
-		return embeddedGitDarwinAmd64
-	case "darwin/arm64":
-		return embeddedGitDarwinArm64
-	case "windows/amd64":
-		return embeddedGitWindowsAmd64
-	default:
-		return nil
-	}
-}
+//
+// 关键修复（v0.8.0 CI 跑通）：把所有 build-tag-specific 变量引用拆到对应 build-tag 文件里，
+// 避免 windows runner 编译时引用 darwin-only 变量报 undefined。
+//
+// embed_darwin.go (//go:build darwin) 定义 embeddedGitBytes() + embeddedGitFileName() darwin 分支
+// embed_windows.go (//go:build windows) 定义 embeddedGitBytes() + embeddedGitFileName() windows 分支
+// embed_other.go (//go:build !darwin && !windows) 定义 embeddedGitBytes() + embeddedGitFileName() 兜底
 
 // embeddedGitFileName 按平台生成嵌入二进制在 ${dataDir}/tools/git/ 下的文件名：
 //
@@ -75,16 +70,9 @@ func embeddedGitBytes() []byte {
 //		命名方案：gk-git-<ver>-<os>-<arch>[.exe]（gk = gitea-kanban 前缀，避免 git- 开头）
 //	  - macos：gk-git-<ver>-macos-<arch>（无后缀）
 //	  - windows：gk-git-<ver>-windows-<arch>.exe
-func embeddedGitFileName() string {
-	os := runtime.GOOS
-	arch := runtime.GOARCH
-	switch os {
-	case "windows":
-		return fmt.Sprintf("gk-git-%s-windows-%s.exe", gitVersion, arch)
-	default:
-		return fmt.Sprintf("gk-git-%s-macos-%s", gitVersion, arch)
-	}
-}
+//
+// embeddedGitFileName 的实现按 build tag 拆到 embed_darwin.go / embed_windows.go / embed_other.go。
+// 这里保留注释避免下游 reader 困惑。
 
 // initOnce 用 atomic.Bool 守护 Init() 幂等
 var initialized atomic.Bool

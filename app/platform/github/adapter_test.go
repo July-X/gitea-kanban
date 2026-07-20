@@ -2043,6 +2043,160 @@ func TestGitHubAdapter_GetPull_NoMilestone(t *testing.T) {
 	}
 }
 
+// TestGitHubAdapter_GetPull_RefLabel 验证 v0.7.28 修复：GitHub head.label
+// 是 "owner:branch" 格式（不是完整 ref 路径），需要 split 拿 branch 名
+//
+// 根因：v0.7.9 写代码时注释错说"GitHub 端 label == ref（都是 refs/heads/main 路径）"，
+// user 反馈 PR header 显示 "July-X:main" / "July-X:int-test-..." 把 owner 前缀
+// 拼进去了。v0.7.28 加 githubRefLabel helper split(":") 拿 branch 部分。
+func TestGitHubAdapter_GetPull_RefLabel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"number": 19,
+			"title":  "int test",
+			"state":  "closed",
+			"head": map[string]interface{}{
+				"label": "July-X:int-test-1782998094151278000", // owner:branch 格式
+				"ref":   "int-test-1782998094151278000",        // 纯 branch 名
+				"sha":   "aaa",
+			},
+			"base": map[string]interface{}{
+				"label": "July-X:main", // owner:branch 格式
+				"ref":   "main",        // 纯 branch 名
+				"sha":   "bbb",
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	pull, err := adapter.GetPull(context.Background(), server.URL, "alice", "ghp", "alice", "kanban-test", 19)
+	if err != nil {
+		t.Fatalf("GetPull failed: %v", err)
+	}
+
+	// head label 应该是纯 branch 名（v0.7.28 修复：去 owner 前缀）
+	if pull.Head.Label != "int-test-1782998094151278000" {
+		t.Errorf("Head.Label = %q, want int-test-1782998094151278000 (v0.7.28 修复：去 owner 前缀)", pull.Head.Label)
+	}
+	if pull.Head.Ref != "int-test-1782998094151278000" {
+		t.Errorf("Head.Ref = %q, want int-test-1782998094151278000", pull.Head.Ref)
+	}
+
+	// base label 应该是纯 branch 名
+	if pull.Base.Label != "main" {
+		t.Errorf("Base.Label = %q, want main (v0.7.28 修复：去 owner 前缀)", pull.Base.Label)
+	}
+	if pull.Base.Ref != "main" {
+		t.Errorf("Base.Ref = %q, want main", pull.Base.Ref)
+	}
+}
+
+// TestGitHubAdapter_RestorePullBranch 验证 v0.7.28 恢复 head 分支端点
+// GitHub 端点跟 Gitea 一致：POST /repos/{owner}/{repo}/git/refs
+// body {ref: "refs/heads/{branch}", sha: "..."}
+func TestGitHubAdapter_RestorePullBranch(t *testing.T) {
+	refsPath := "/repos/alice/dolphin/git/refs"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != refsPath || r.Method != "POST" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body failed: %v", err)
+		}
+		if body["ref"] != "refs/heads/feature-branch" {
+			t.Errorf("body.ref = %q, want refs/heads/feature-branch", body["ref"])
+		}
+		if body["sha"] != "abc123def" {
+			t.Errorf("body.sha = %q, want abc123def", body["sha"])
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"ref":"refs/heads/feature-branch","node_id":"...","url":"...","object":{"sha":"abc123def"}}`)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "feature-branch", "abc123def"); err != nil {
+		t.Errorf("RestorePullBranch failed: %v", err)
+	}
+
+	// 验证 validation
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "", "abc"); err == nil {
+		t.Error("empty branch should fail validation")
+	}
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "feature", ""); err == nil {
+		t.Error("empty sha should fail validation")
+	}
+}
+
+// TestGitHubAdapter_DeletePullBranch 验证 v0.7.29 "Delete branch" 按钮端点
+// GitHub 走 DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}（路径里不带 refs/heads/ 前缀）
+func TestGitHubAdapter_DeletePullBranch(t *testing.T) {
+	expectedPath := "/repos/alice/dolphin/git/refs/heads/feature-branch"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != expectedPath || r.Method != "DELETE" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", "feature-branch"); err != nil {
+		t.Errorf("DeletePullBranch failed: %v", err)
+	}
+	// 验证空 branch 走 validation
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", ""); err == nil {
+		t.Error("empty branch should fail validation")
+	}
+}
+
+// TestGitHubAdapter_HeadRefRestored 验证 v0.7.29 head_ref_restored event 改独立
+// type="restore_branch"（v0.7.27.1 用 type=delete_branch 兜底错的）
+func TestGitHubAdapter_HeadRefRestored(t *testing.T) {
+	item, ok := githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        1,
+		Event:     "head_ref_restored",
+		CreatedAt: "2024-06-05T10:00:00Z",
+		Actor:     &githubUserRaw{Login: "alice"},
+	})
+	if !ok {
+		t.Fatalf("head_ref_restored should be rendered")
+	}
+	if item.Type != "restore_branch" {
+		t.Errorf("Type = %q, want restore_branch (v0.7.29 改独立 type，v0.7.27.1 用 delete_branch 兜底错的)", item.Type)
+	}
+}
+
+// TestGitHubAdapter_GithubRefLabel 单元测 githubRefLabel helper
+func TestGitHubAdapter_GithubRefLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+		ref   string
+		want  string
+	}{
+		{"owner:branch", "July-X:int-test-178...", "int-test-178...", "int-test-178..."},
+		{"branch only (no colon)", "main", "main", "main"},
+		{"empty label, ref fallback", "", "main", "main"},
+		{"multi-colon (defensive)", "owner:sub:branch", "branch", "branch"},
+		{"empty label and ref", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := githubRefLabel(tt.label, tt.ref)
+			if got != tt.want {
+				t.Errorf("githubRefLabel(%q, %q) = %q, want %q", tt.label, tt.ref, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestGitHubAdapter_UploadIssueAttachment 验证 multipart/form-data 上传到
 // POST /repos/{owner}/{repo}/issues/{issue_number}/assets。form field 必须是 'file'
 // （与 Gitea 的 'attachment' 不同——adapter 层翻译）。
@@ -2160,18 +2314,19 @@ func TestGitHubAdapter_ListPullTimeline_CommentAndReview(t *testing.T) {
 		t.Fatalf("len(items) = %d, want 5 (3 comment + 2 review)", len(items))
 	}
 
-	// 验证按时间倒序：14:00 -> 13:00 -> 11:30 -> 10:00 -> 09:00
+	// v0.7.33 验证按时间升序（对齐 GitHub web PR timeline 实际渲染顺序）：
+	// 09:00 first comment → 10:00 LGTM → 11:30 second comment → 13:00 fix this → 14:00 third comment
 	wantOrder := []struct {
 		Type      string
 		Body      string
 		CreatedAt string
 		State     string
 	}{
-		{"comment", "third comment", "2024-06-05T14:00:00Z", ""},
-		{"review", "fix this", "2024-06-05T13:00:00Z", "changes_requested"},
-		{"comment", "second comment", "2024-06-05T11:30:00Z", ""},
-		{"review", "LGTM", "2024-06-05T10:00:00Z", "approved"},
 		{"comment", "first comment", "2024-06-05T09:00:00Z", ""},
+		{"review", "LGTM", "2024-06-05T10:00:00Z", "approved"},
+		{"comment", "second comment", "2024-06-05T11:30:00Z", ""},
+		{"review", "fix this", "2024-06-05T13:00:00Z", "changes_requested"},
+		{"comment", "third comment", "2024-06-05T14:00:00Z", ""},
 	}
 	for i, w := range wantOrder {
 		if items[i].Type != w.Type {
@@ -2249,5 +2404,508 @@ func TestGitHubAdapter_ListPullTimeline_CommentsFailureFallback(t *testing.T) {
 	}
 	if items[0].Type != "review" {
 		t.Errorf("items[0].Type = %q, want review", items[0].Type)
+	}
+}
+
+// ============== v0.7.27 GitHub Issue Events API 集成测试 ==============
+//
+// v0.7.27 根因修复：v0.7.26 follow-up 注释错误地认为"GitHub REST v3 没对等
+// /timeline 聚合端点"，导致 PR 系统事件（labeled / assigned / closed / merged /
+// renamed / head_ref_deleted / cross-referenced 等）全不显示。
+// 实际 GitHub 公开的 Issue Events API（GET /repos/{owner}/{repo}/issues/{number}/events）
+// 就是 PR timeline 事件来源，本测试组覆盖端到端集成。
+
+// TestGitHubAdapter_ListPullTimeline_IssueEvents 验证完整事件流：
+// comments + reviews + Issue Events 三端点组合 + event type 映射
+//
+//	labeled → label (LabelAction=add)
+//	unlabeled → label (LabelAction=remove)
+//	assigned → assignees (RemovedAssignee=false)
+//	closed (无 commit_id) → close
+//	closed (有 commit_id) → merge
+//	reopened → reopen
+//	renamed → change_title
+//	head_ref_deleted → delete_branch
+//	review_requested → review_request
+//	cross-referenced → pull_ref (RefAction=cross)
+//	pinned → pin
+//	locked → lock
+//
+// 不渲染：mentioned / subscribed / commented / reviewed（评论和评审已走其他端点）
+func TestGitHubAdapter_ListPullTimeline_IssueEvents(t *testing.T) {
+	commentsPath := "/repos/alice/dolphin/issues/42/comments"
+	reviewsPath := "/repos/alice/dolphin/pulls/42/reviews"
+	eventsPath := "/repos/alice/dolphin/issues/42/events"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case commentsPath:
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 101, "body": "comment 1", "user": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T09:00:00Z", "updated_at": "2024-06-05T09:00:00Z"},
+			})
+		case reviewsPath:
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 201, "state": "APPROVED", "body": "LGTM", "user": map[string]interface{}{"login": "dave"}, "commit_id": "abc", "submitted_at": "2024-06-05T10:00:00Z"},
+			})
+		case eventsPath:
+			// 13 个 events：12 个渲染 + 1 个不渲染 (mentioned)
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				// 不渲染类型测试
+				{"id": 301, "event": "mentioned", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T08:00:00Z"},
+				{"id": 302, "event": "subscribed", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T08:00:00Z"},
+				{"id": 303, "event": "commented", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T08:00:00Z"},
+				// 渲染类型
+				{"id": 304, "event": "locked", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T08:30:00Z"},
+				{"id": 305, "event": "assigned", "actor": map[string]interface{}{"login": "alice"}, "assignee": map[string]interface{}{"login": "bob"}, "created_at": "2024-06-05T08:35:00Z"},
+				{"id": 306, "event": "head_ref_deleted", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T08:40:00Z", "commit_id": "feature-branch-123"},
+				{"id": 307, "event": "review_requested", "actor": map[string]interface{}{"login": "alice"}, "assignee": map[string]interface{}{"login": "carol"}, "created_at": "2024-06-05T08:45:00Z"},
+				{"id": 308, "event": "cross-referenced", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T08:50:00Z", "source": map[string]interface{}{"type": "pull_request", "issue": map[string]interface{}{"number": 10, "title": "other PR", "state": "open"}}},
+				{"id": 309, "event": "labeled", "actor": map[string]interface{}{"login": "alice"}, "label": map[string]interface{}{"name": "bug", "color": "f29513"}, "created_at": "2024-06-05T08:55:00Z"},
+				{"id": 310, "event": "renamed", "actor": map[string]interface{}{"login": "alice"}, "rename": map[string]interface{}{"from": "old title", "to": "new title"}, "created_at": "2024-06-05T11:00:00Z"},
+				{"id": 311, "event": "closed", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T12:00:00Z"},
+				{"id": 312, "event": "reopened", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T13:00:00Z"},
+				{"id": 313, "event": "merged", "actor": map[string]interface{}{"login": "alice"}, "commit_id": "merge-sha-abc123", "created_at": "2024-06-05T14:00:00Z"},
+				{"id": 314, "event": "pinned", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T15:00:00Z"},
+				{"id": 315, "event": "unlabeled", "actor": map[string]interface{}{"login": "alice"}, "label": map[string]interface{}{"name": "bug", "color": "f29513"}, "created_at": "2024-06-05T16:00:00Z"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	// 期望：1 comment + 1 review + 12 个 events (15 events - 3 不渲染 mentioned/subscribed/commented)
+	expectedTotal := 14
+	if len(items) != expectedTotal {
+		t.Fatalf("len(items) = %d, want %d", len(items), expectedTotal)
+	}
+
+	// v0.7.33 验证按时间升序（对齐 GitHub web PR timeline 实际渲染顺序）：
+	// 08:30 locked → 08:35 assigned → 08:40 head_ref_deleted → 08:45 review_requested →
+	// 08:50 cross-referenced → 08:55 labeled → 09:00 comment → 10:00 review →
+	// 11:00 renamed → 12:00 closed → 13:00 reopened → 14:00 closed+commit_id (merge) →
+	// 15:00 pinned → 16:00 unlabeled
+	wantOrder := []struct {
+		Type string
+	}{
+		{"lock"},           // 08:30 locked
+		{"assignees"},      // 08:35 assigned
+		{"delete_branch"},  // 08:40 head_ref_deleted
+		{"review_request"}, // 08:45 review_requested
+		{"pull_ref"},       // 08:50 cross-referenced
+		{"label"},          // 08:55 labeled
+		{"comment"},        // 09:00 comment
+		{"review"},         // 10:00 review
+		{"change_title"},   // 11:00 renamed
+		{"close"},          // 12:00 closed (no commit_id)
+		{"reopen"},         // 13:00 reopened
+		{"merge"},          // 14:00 closed+commit_id → merge
+		{"pin"},            // 15:00 pinned
+		{"label"},          // 16:00 unlabeled → label
+	}
+	for i, w := range wantOrder {
+		if items[i].Type != w.Type {
+			t.Errorf("items[%d].Type = %q, want %q (created=%s)", i, items[i].Type, w.Type, items[i].Created)
+		}
+	}
+
+	// 验证特定字段（v0.7.33 索引按升序更新）
+	// unlabeled (16:00): LabelAction=remove, RemovedLabels=[bug] → items[13]
+	if items[13].LabelAction != "remove" {
+		t.Errorf("items[13] (unlabeled).LabelAction = %q, want remove", items[13].LabelAction)
+	}
+	if len(items[13].RemovedLabels) != 1 || items[13].RemovedLabels[0].Name != "bug" {
+		t.Errorf("items[13] (unlabeled) RemovedLabels = %+v, want [bug]", items[13].RemovedLabels)
+	}
+
+	// closed+commit_id (14:00): Type=merge, CommitID=merge-sha-abc123 → items[11]
+	mergeItem := items[11]
+	if mergeItem.Type != "merge" || mergeItem.CommitID != "merge-sha-abc123" {
+		t.Errorf("merge item = Type=%q, CommitID=%q, want Type=merge, CommitID=merge-sha-abc123",
+			mergeItem.Type, mergeItem.CommitID)
+	}
+
+	// renamed (11:00): OldTitle=old title, NewTitle=new title → items[8]
+	renamedItem := items[8]
+	if renamedItem.OldTitle != "old title" || renamedItem.NewTitle != "new title" {
+		t.Errorf("renamed item = OldTitle=%q, NewTitle=%q, want old title / new title",
+			renamedItem.OldTitle, renamedItem.NewTitle)
+	}
+
+	// labeled (08:55): LabelAction=add, AddedLabels=[bug] → items[5]
+	labeledItem := items[5]
+	if labeledItem.LabelAction != "add" {
+		t.Errorf("labeled item LabelAction = %q, want add", labeledItem.LabelAction)
+	}
+	if len(labeledItem.AddedLabels) != 1 || labeledItem.AddedLabels[0].Name != "bug" {
+		t.Errorf("labeled item AddedLabels = %+v, want [bug]", labeledItem.AddedLabels)
+	}
+
+	// cross-referenced (08:50): Type=pull_ref, RefAction=cross, RefIssue.Number=10 → items[4]
+	crossItem := items[4]
+	if crossItem.Type != "pull_ref" {
+		t.Errorf("cross-ref item Type = %q, want pull_ref", crossItem.Type)
+	}
+	if crossItem.RefAction != "cross" {
+		t.Errorf("cross-ref item RefAction = %q, want cross", crossItem.RefAction)
+	}
+	if crossItem.RefIssue == nil || crossItem.RefIssue.Index != 10 {
+		t.Errorf("cross-ref item RefIssue = %+v, want Index=10", crossItem.RefIssue)
+	}
+
+	// review_requested (08:45): Assignee.Username=carol → items[3]
+	reviewReqItem := items[3]
+	if reviewReqItem.Assignee == nil || reviewReqItem.Assignee.Username != "carol" {
+		t.Errorf("review_request item Assignee = %+v, want Username=carol", reviewReqItem.Assignee)
+	}
+	if reviewReqItem.RemovedAssignee {
+		t.Errorf("review_request item RemovedAssignee = true, want false")
+	}
+
+	// head_ref_deleted (08:40): OldRef="" (v0.7.27.1 修正) → items[2]
+	deleteItem := items[2]
+	if deleteItem.OldRef != "" {
+		t.Errorf("head_ref_deleted item OldRef = %q, want empty (v0.7.27.1 修复)", deleteItem.OldRef)
+	}
+
+	// assigned (08:35): Assignee.Username=bob, RemovedAssignee=false → items[1]
+	assignItem := items[1]
+	if assignItem.Assignee == nil || assignItem.Assignee.Username != "bob" {
+		t.Errorf("assigned item Assignee = %+v, want Username=bob", assignItem.Assignee)
+	}
+	if assignItem.RemovedAssignee {
+		t.Errorf("assigned item RemovedAssignee = true, want false")
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_EventsFailureFallback 验证 events 端点失败时
+// 不阻断评论+评审（单边容错）
+func TestGitHubAdapter_ListPullTimeline_EventsFailureFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/alice/dolphin/issues/42/comments":
+			fmt.Fprint(w, `[{"id": 1, "body": "c", "user": {"login": "alice"}, "created_at": "2024-06-05T09:00:00Z", "updated_at": "2024-06-05T09:00:00Z"}]`)
+		case "/repos/alice/dolphin/pulls/42/reviews":
+			fmt.Fprint(w, `[{"id": 1, "state": "APPROVED", "body": "ok", "user": {"login": "dave"}, "commit_id": "x", "submitted_at": "2024-06-05T10:00:00Z"}]`)
+		case "/repos/alice/dolphin/issues/42/events":
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline 不应在 events 失败时中断: %v", err)
+	}
+	if len(items) != 2 {
+		t.Errorf("len(items) = %d, want 2 (评论+评审 fallback)", len(items))
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_RenamedWipToggle 验证 GitHub renamed 事件
+// 命中 WIP toggle 检测（前端走"已将合并请求标记为进行中" / "可评审"特殊渲染）
+func TestGitHubAdapter_ListPullTimeline_RenamedWipToggle(t *testing.T) {
+	// 单元测 githubEventToTimelineItem 转换函数，不走 HTTP server
+
+	// 单元测 githubEventToTimelineItem 转换函数
+	// case 1: 加 WIP: 前缀 → IsWipToggle=true, IsWip=true
+	item, ok := githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        1,
+		Event:     "renamed",
+		CreatedAt: "2024-06-05T10:00:00Z",
+		Rename: &struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}{From: "fix bug", To: "WIP: fix bug"},
+	})
+	if !ok {
+		t.Fatalf("renamed event should be rendered")
+	}
+	if !item.IsWipToggle {
+		t.Errorf("IsWipToggle = false, want true (加了 WIP: 前缀)")
+	}
+	if !item.IsWip {
+		t.Errorf("IsWip = false, want true (NewTitle 有 WIP: 前缀)")
+	}
+
+	// case 2: 去 WIP: 前缀 → IsWipToggle=true, IsWip=false
+	item, ok = githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        2,
+		Event:     "renamed",
+		CreatedAt: "2024-06-05T10:00:00Z",
+		Rename: &struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}{From: "WIP: fix bug", To: "fix bug"},
+	})
+	if !ok {
+		t.Fatalf("renamed event should be rendered")
+	}
+	if !item.IsWipToggle {
+		t.Errorf("IsWipToggle = false, want true (去 WIP: 前缀)")
+	}
+	if item.IsWip {
+		t.Errorf("IsWip = true, want false (NewTitle 无 WIP: 前缀)")
+	}
+
+	// case 3: 普通标题修改 → IsWipToggle=false
+	item, ok = githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        3,
+		Event:     "renamed",
+		CreatedAt: "2024-06-05T10:00:00Z",
+		Rename: &struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}{From: "fix bug", To: "fix bug 2"},
+	})
+	if !ok {
+		t.Fatalf("renamed event should be rendered")
+	}
+	if item.IsWipToggle {
+		t.Errorf("IsWipToggle = true, want false (普通标题修改)")
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_NotRenderedEventTypes 验证不渲染 event 类型
+// （commented / reviewed / mentioned / subscribed / converted_to_discussion 等）
+// 都跳过，timeline 数组不包含这些 item
+func TestGitHubAdapter_ListPullTimeline_NotRenderedEventTypes(t *testing.T) {
+	// 单元测转换函数：所有不渲染 event 返回 (zero, false)
+	notRendered := []string{
+		"commented", "reviewed", "mentioned", "subscribed", "unsubscribed",
+		"converted_to_discussion", "marked_as_duplicate", "unmarked_as_duplicate",
+		"transferred", "added_to_project", "moved_columns_in_project",
+		"removed_from_project",
+	}
+	for _, evt := range notRendered {
+		t.Run(evt, func(t *testing.T) {
+			_, ok := githubEventToTimelineItem(githubIssueEventRaw{
+				ID:        1,
+				Event:     evt,
+				CreatedAt: "2024-06-05T10:00:00Z",
+			})
+			if ok {
+				t.Errorf("event %q should NOT be rendered (returns false)", evt)
+			}
+		})
+	}
+}
+
+// ============== v0.7.27.1 GitHub Issue Events 补全测试 ==============
+//
+// v0.7.27 漏了 6 个 event type：
+//   - `merged`（独立 event，不是 closed+commit_id 推断）
+//   - `committed`（push 事件，GitHub 端独立 event）
+//   - `head_ref_force_pushed`（强制推送）
+//   - `head_ref_deleted`（v0.7.27 用 commit SHA 填 OldRef 是错的）
+//   - `base_ref_changed`（改 base branch）
+//   - `ready_for_review` / `convert_to_draft`（draft 状态切换）
+// 补全测试覆盖。
+
+// TestGitHubAdapter_ListPullTimeline_MergedAndPush 验证：
+//   - `merged` 独立 event（v0.7.27.1 修正，不再用 closed 推断）→ type=merge + CommitID=真实 merge SHA
+//   - `closed` event 没有 commit_id 推断逻辑（v0.7.27 错逻辑已删）→ type=close
+//   - `committed` event（push 提交）→ type=push + CommitIDs=[commit_id] 单元素数组
+//   - `head_ref_force_pushed` event（强制 push）→ type=push + IsForcePush=true + CommitIDs=[commit_id]
+//
+// TestGitHubAdapter_ListPullTimeline_HeadRefDeletedThenRestored 验证 v0.7.34
+// "head_ref_deleted → head_ref_restored" 完整流程，timeline 同时包含这 2 个 event。
+// 前端 isBranchCurrentlyDeleted computed 用这个数据判断"分支当前是否被删"：
+//   - 最后一次是 head_ref_restored → 分支当前存在
+//   - 最后一次是 head_ref_deleted（无后续 restore）→ 分支当前被删
+//
+// 这个测试覆盖 event 流转，让前端能正确显示 Restore/Delete branch 按钮。
+func TestGitHubAdapter_ListPullTimeline_HeadRefDeletedThenRestored(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/alice/dolphin/issues/42/comments":
+			fmt.Fprint(w, "[]")
+		case "/repos/alice/dolphin/pulls/42/reviews":
+			fmt.Fprint(w, "[]")
+		case "/repos/alice/dolphin/issues/42/events":
+			// 时间升序：先 close (10:00) → 后 delete branch (11:00) → 最后 restore branch (12:00)
+			// 最后一次是 restore_branch → 分支当前存在
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 501, "event": "closed", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T10:00:00Z"},
+				{"id": 502, "event": "head_ref_deleted", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T11:00:00Z"},
+				{"id": 503, "event": "head_ref_restored", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T12:00:00Z"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3 (close + delete_branch + restore_branch)", len(items))
+	}
+
+	// 升序：close (10:00) → delete_branch (11:00) → restore_branch (12:00)
+	if items[0].Type != "close" {
+		t.Errorf("items[0].Type = %q, want close", items[0].Type)
+	}
+	if items[1].Type != "delete_branch" {
+		t.Errorf("items[1].Type = %q, want delete_branch", items[1].Type)
+	}
+	if items[2].Type != "restore_branch" {
+		t.Errorf("items[2].Type = %q, want restore_branch", items[2].Type)
+	}
+
+	// 验证时间顺序让前端能正确判断分支状态
+	// 最后一次是 restore_branch (12:00) → 分支当前存在
+	if items[1].Created >= items[2].Created {
+		t.Errorf("delete_branch (%s) 应该在 restore_branch (%s) 之前", items[1].Created, items[2].Created)
+	}
+}
+
+func TestGitHubAdapter_ListPullTimeline_MergedAndPush(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/alice/dolphin/issues/42/comments":
+			fmt.Fprint(w, "[]")
+		case "/repos/alice/dolphin/pulls/42/reviews":
+			fmt.Fprint(w, "[]")
+		case "/repos/alice/dolphin/issues/42/events":
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				// 关闭但没合并（commit_id 应该不被当作 merge 触发）
+				{"id": 401, "event": "closed", "actor": map[string]interface{}{"login": "alice"}, "created_at": "2024-06-05T10:00:00Z"},
+				// 独立 merge event（commit_id 是真实 merge commit SHA）
+				{"id": 402, "event": "merged", "actor": map[string]interface{}{"login": "alice"}, "commit_id": "merge-sha-real-abc123def456", "created_at": "2024-06-05T11:00:00Z"},
+				// push 事件（committed）
+				{"id": 403, "event": "committed", "actor": map[string]interface{}{"login": "alice"}, "commit_id": "push-commit-sha-xyz789", "created_at": "2024-06-05T12:00:00Z"},
+				// 强制 push（head_ref_force_pushed）
+				{"id": 404, "event": "head_ref_force_pushed", "actor": map[string]interface{}{"login": "alice"}, "commit_id": "force-push-sha-987xyz", "created_at": "2024-06-05T13:00:00Z"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewGitHubAdapter()
+	items, err := adapter.ListPullTimeline(context.Background(), server.URL, "alice", "ghp-test-token", "alice", "dolphin", 42)
+	if err != nil {
+		t.Fatalf("ListPullTimeline failed: %v", err)
+	}
+	if len(items) != 4 {
+		t.Fatalf("len(items) = %d, want 4", len(items))
+	}
+
+	// 时间升序（v0.7.33 改）：10:00 close → 11:00 merge → 12:00 push → 13:00 force push
+	// 对齐 GitHub web PR timeline 实际渲染顺序（first 最早，last 最新）。
+	if items[0].Type != "close" {
+		t.Errorf("items[0] Type=%q IsForcePush=%v, want close", items[0].Type, items[0].IsForcePush)
+	}
+	if items[0].IsForcePush {
+		t.Errorf("items[0] IsForcePush=true, want false")
+	}
+	if items[1].Type != "merge" || items[1].CommitID != "merge-sha-real-abc123def456" {
+		t.Errorf("items[1] Type=%q CommitID=%q, want merge+merge-sha-real-abc123def456", items[1].Type, items[1].CommitID)
+	}
+	if items[2].Type != "push" || items[2].IsForcePush || len(items[2].CommitIDs) != 1 || items[2].CommitIDs[0] != "push-commit-sha-xyz789" {
+		t.Errorf("items[2] Type=%q IsForcePush=%v CommitIDs=%v, want push+false+[push-commit-sha-xyz789]", items[2].Type, items[2].IsForcePush, items[2].CommitIDs)
+	}
+	if items[3].Type != "push" || !items[3].IsForcePush || len(items[3].CommitIDs) != 1 || items[3].CommitIDs[0] != "force-push-sha-987xyz" {
+		t.Errorf("items[3] Type=%q IsForcePush=%v CommitIDs=%v, want push+true+[force-push-sha-987xyz]", items[3].Type, items[3].IsForcePush, items[3].CommitIDs)
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_HeadRefDeletedFix 验证 v0.7.27.1 修复：
+// head_ref_deleted event **不**填 OldRef（v0.7.27 错把 commit SHA 当 branch name）
+func TestGitHubAdapter_ListPullTimeline_HeadRefDeletedFix(t *testing.T) {
+	item, ok := githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        1,
+		Event:     "head_ref_deleted",
+		CreatedAt: "2024-06-05T10:00:00Z",
+		CommitID:  "d52a39c-deadbeef-1234-5678-abcdef",
+		Actor:     &githubUserRaw{Login: "alice"},
+	})
+	if !ok {
+		t.Fatalf("head_ref_deleted should be rendered")
+	}
+	if item.Type != "delete_branch" {
+		t.Errorf("Type = %q, want delete_branch", item.Type)
+	}
+	if item.OldRef != "" {
+		t.Errorf("OldRef = %q, want empty (v0.7.27.1 修复：commit_id 是 SHA 不是 branch name，"+
+			"branch name 由前端 selectedPR.head.label 兜底)", item.OldRef)
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_DraftToggle 验证 v0.7.27.1 新增：
+// `ready_for_review` / `convert_to_draft` event 触发 IsWipToggle 检测，
+// 前端走 "已将合并请求标记为可评审/进行中" verb 渲染
+func TestGitHubAdapter_ListPullTimeline_DraftToggle(t *testing.T) {
+	// ready_for_review: user 取消 draft → IsWipToggle=true, IsWip=false
+	item, ok := githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        1,
+		Event:     "ready_for_review",
+		CreatedAt: "2024-06-05T10:00:00Z",
+	})
+	if !ok {
+		t.Fatalf("ready_for_review should be rendered")
+	}
+	if item.Type != "change_title" {
+		t.Errorf("Type = %q, want change_title", item.Type)
+	}
+	if !item.IsWipToggle {
+		t.Errorf("IsWipToggle = false, want true (draft toggle 事件)")
+	}
+	if item.IsWip {
+		t.Errorf("IsWip = true, want false (ready_for_review = 取消 draft)")
+	}
+
+	// convert_to_draft: user 标记 draft → IsWipToggle=true, IsWip=true
+	item, ok = githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        2,
+		Event:     "convert_to_draft",
+		CreatedAt: "2024-06-05T11:00:00Z",
+	})
+	if !ok {
+		t.Fatalf("convert_to_draft should be rendered")
+	}
+	if !item.IsWipToggle {
+		t.Errorf("IsWipToggle = false, want true (draft toggle 事件)")
+	}
+	if !item.IsWip {
+		t.Errorf("IsWip = false, want true (convert_to_draft = 进入 draft)")
+	}
+}
+
+// TestGitHubAdapter_ListPullTimeline_BaseRefChanged 验证 v0.7.27.1 新增：
+// `base_ref_changed` event → type=change_target_branch
+// GitHub events 端不返 base ref name，OldRef/NewRef 留空，前端用 selectedPR.base.label 兜底
+func TestGitHubAdapter_ListPullTimeline_BaseRefChanged(t *testing.T) {
+	item, ok := githubEventToTimelineItem(githubIssueEventRaw{
+		ID:        1,
+		Event:     "base_ref_changed",
+		CreatedAt: "2024-06-05T10:00:00Z",
+	})
+	if !ok {
+		t.Fatalf("base_ref_changed should be rendered")
+	}
+	if item.Type != "change_target_branch" {
+		t.Errorf("Type = %q, want change_target_branch", item.Type)
+	}
+	if item.OldRef != "" || item.NewRef != "" {
+		t.Errorf("OldRef=%q NewRef=%q, want empty (v0.7.27.1：events 端不返 base ref name)",
+			item.OldRef, item.NewRef)
 	}
 }

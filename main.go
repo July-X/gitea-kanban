@@ -18,6 +18,18 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
+	// v0.8.0 · appVersion / appChannel 编译期注入
+	//
+	// 标准 wails build 用法：
+	//   wails build -ldflags "-X main.appVersion=v0.8.0 -X main.appChannel=stable"
+	//
+	// wails build -ldflags "-s -w -X main.appVersion=$(git describe --tags) -X main.appChannel=stable"
+	// 也可以从 git tag 自动注入（CI 里常用）。
+	//
+	// dev build（wails dev）不传 -ldflags，落到 var 的零值（"dev" / "stable"）。
+	//
+	// appVersion = "dev" 时，updater.Check 自动跳过检查（避免噪音），前端 banner 不显示。
+
 	// 创建后端应用实例
 	app := NewApp()
 

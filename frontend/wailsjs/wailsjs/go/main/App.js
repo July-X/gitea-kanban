@@ -30,6 +30,10 @@ export function AuthSwitchAccount(arg1) {
   return window['go']['main']['App']['AuthSwitchAccount'](arg1);
 }
 
+export function CheckUpdate() {
+  return window['go']['main']['App']['CheckUpdate']();
+}
+
 export function CloneRepo(arg1) {
   return window['go']['main']['App']['CloneRepo'](arg1);
 }
@@ -54,8 +58,16 @@ export function CreatePullReviewComment(arg1) {
   return window['go']['main']['App']['CreatePullReviewComment'](arg1);
 }
 
+export function DeletePullBranch(arg1) {
+  return window['go']['main']['App']['DeletePullBranch'](arg1);
+}
+
 export function DeletePullComment(arg1) {
   return window['go']['main']['App']['DeletePullComment'](arg1);
+}
+
+export function DownloadUpdate() {
+  return window['go']['main']['App']['DownloadUpdate']();
 }
 
 export function ExportLogs(arg1) {
@@ -68,6 +80,10 @@ export function FetchRepo(arg1) {
 
 export function GetAppInfo() {
   return window['go']['main']['App']['GetAppInfo']();
+}
+
+export function GetCheckUpdatesPref() {
+  return window['go']['main']['App']['GetCheckUpdatesPref']();
 }
 
 export function GetCommitDetail(arg1) {
@@ -108,6 +124,10 @@ export function GetUserPrefs(arg1) {
 
 export function GetWorkspace() {
   return window['go']['main']['App']['GetWorkspace']();
+}
+
+export function InstallUpdate() {
+  return window['go']['main']['App']['InstallUpdate']();
 }
 
 export function IsRepoCloned(arg1) {
@@ -190,6 +210,10 @@ export function OpenDesktopFolder() {
   return window['go']['main']['App']['OpenDesktopFolder']();
 }
 
+export function OpenDownloadPage() {
+  return window['go']['main']['App']['OpenDownloadPage']();
+}
+
 export function OpenGitBinaryPicker() {
   return window['go']['main']['App']['OpenGitBinaryPicker']();
 }
@@ -212,6 +236,14 @@ export function RemovePullCommentReaction(arg1) {
 
 export function RemoveWorkspaceRepos(arg1) {
   return window['go']['main']['App']['RemoveWorkspaceRepos'](arg1);
+}
+
+export function RestorePullBranch(arg1) {
+  return window['go']['main']['App']['RestorePullBranch'](arg1);
+}
+
+export function SetCheckUpdatesPref(arg1) {
+  return window['go']['main']['App']['SetCheckUpdatesPref'](arg1);
 }
 
 export function SetGitBinaryPath(arg1) {
@@ -272,4 +304,8 @@ export function UpdatePullTitle(arg1) {
 
 export function UploadPullAttachment(arg1) {
   return window['go']['main']['App']['UploadPullAttachment'](arg1);
+}
+
+export function Version() {
+  return window['go']['main']['App']['Version']();
 }

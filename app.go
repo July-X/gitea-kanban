@@ -11,7 +11,9 @@ import (
 	"gitea-kanban/app/platform/github"
 	"gitea-kanban/app/secret"
 	"gitea-kanban/app/store"
+	"gitea-kanban/app/updater"
 	"github.com/google/uuid"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -37,6 +39,8 @@ type App struct {
 	// secretStore token 凭证存储（go-keyring / dev 文件 fallback）
 	// v2.0 新增：AuthConnect 把 token 写进这里 + localStore 持久化账号元信息
 	secretStore *secret.Store
+	// updater v0.8.0 自动更新核心（initUpdater 初始化，checkUpdatesAtStartup 触发检查）
+	updater *updater.Updater
 }
 
 // NewApp 创建后端应用实例
@@ -165,6 +169,16 @@ func (a *App) OnStartup(ctx context.Context) {
 			"defaultBin", gitbinary.DefaultBinaryPath(),
 		)
 	}
+
+	// 9. v0.8.0 · 自动更新核心初始化 + 启动期异步检查
+	//
+	// 必须在 localStore / dataDir / logger 都就绪后调用（initUpdater 读 cacheDir + logger；
+	// checkUpdatesAtStartup 读 prefs["app.checkUpdates"]）。
+	//
+	// checkUpdatesAtStartup 内部异步执行（go func），不阻塞 Wails 启动。
+	// 网络错误仅记 slog，**绝不**把网络错误弹到 UI（避免用户联网失败就被打扰）。
+	a.initUpdater()
+	a.checkUpdatesAtStartup()
 }
 
 // runLegacyWorkspaceMigration 执行一次性的 v2.4 → v2.5 旧布局迁移
@@ -233,4 +247,15 @@ func (a *App) OnShutdown(ctx context.Context) {
 	if a.logger != nil {
 		a.logger.Info("gitea-kanban shutting down")
 	}
+	// v0.8.0 修 windows CI file lock：主动 Close logger handler 释放文件句柄
+	// dailyRotateHandler.Close() → TextHandler → *os.File.Close()
+	// 解决 testing.go:1464 TempDir RemoveAll cleanup: file in use 的 windows-only FAIL
+	if a.logger != nil {
+		if h := a.logger.Handler(); h != nil {
+			if closer, ok := h.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}
+	}
+	_ = ctx
 }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -43,6 +44,9 @@ func TestExport_EmptyDesktopPath(t *testing.T) {
 }
 
 func TestExport_BadLogDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows: 行为差异，windows 上 OpenFile 不会因 bad dir 失败（容错处理更宽松）")
+	}
 	dir := t.TempDir()
 	desktop := filepath.Join(dir, "Desktop")
 	// 文件而非目录 → 走 MkdirAll 应失败

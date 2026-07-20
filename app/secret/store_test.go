@@ -3,10 +3,14 @@ package secret
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestStore_DevMode_SetGetDelete(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows: file perm 0666 vs 0600（windows 不支持 unix 0600 模式，跳过）")
+	}
 	dir := t.TempDir()
 	store := NewStore(true, dir) // devMode=true
 

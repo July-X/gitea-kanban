@@ -627,6 +627,20 @@ export namespace main {
 	        this.line = source["line"];
 	    }
 	}
+	export class DeletePullBranchArgs {
+	    projectId: string;
+	    branch: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletePullBranchArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.branch = source["branch"];
+	    }
+	}
 	export class DeletePullCommentArgs {
 	    projectId: string;
 	    commentId: number;
@@ -1513,6 +1527,22 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.removedCount = source["removedCount"];
 	        this.message = source["message"];
+	    }
+	}
+	export class RestorePullBranchArgs {
+	    projectId: string;
+	    branch: string;
+	    sha: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RestorePullBranchArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.branch = source["branch"];
+	        this.sha = source["sha"];
 	    }
 	}
 	export class SetGitBinaryPathArgs {
@@ -2435,6 +2465,67 @@ export namespace store {
 	        this.defaultBranch = source["defaultBranch"];
 	        this.lastSyncAt = source["lastSyncAt"];
 	        this.createdAt = source["createdAt"];
+	    }
+	}
+
+}
+
+export namespace updater {
+	
+	export class UpdateDownloadResult {
+	    version: string;
+	    channel: string;
+	    platform: string;
+	    path: string;
+	    size: number;
+	    sha256: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateDownloadResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.channel = source["channel"];
+	        this.platform = source["platform"];
+	        this.path = source["path"];
+	        this.size = source["size"];
+	        this.sha256 = source["sha256"];
+	    }
+	}
+	export class UpdateInfo {
+	    available: boolean;
+	    current: string;
+	    latest: string;
+	    notes?: string;
+	    channel: string;
+	    canSelfUpdate: boolean;
+	    manualOnly?: boolean;
+	    manualReason?: string;
+	    downloadUrl?: string;
+	    assetSize?: number;
+	    downloaded: boolean;
+	    err?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.notes = source["notes"];
+	        this.channel = source["channel"];
+	        this.canSelfUpdate = source["canSelfUpdate"];
+	        this.manualOnly = source["manualOnly"];
+	        this.manualReason = source["manualReason"];
+	        this.downloadUrl = source["downloadUrl"];
+	        this.assetSize = source["assetSize"];
+	        this.downloaded = source["downloaded"];
+	        this.err = source["err"];
 	    }
 	}
 

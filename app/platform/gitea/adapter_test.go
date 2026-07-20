@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1267,13 +1268,13 @@ func TestGiteaAdapter_ListPullTimeline_LabelAction(t *testing.T) {
 // 根因：v0.7.5/v0.7.7 凭印象假设 Gitea /timeline 端点 type 字符串是 "push" / "merge"，
 // 实际 Gitea 1.26+ 返回 snake_case 命名 "pull_push" / "merge_pull"，导致前端模板
 // 永远不进 push/merge 渲染分支。同时 commit 信息在 body JSON 字符串里
-//（{"is_force_push":false,"commit_ids":["sha1"]}），不在顶层独立字段。
+// （{"is_force_push":false,"commit_ids":["sha1"]}），不在顶层独立字段。
 //
 // 修复：giteaTimelineToItem 做两层归一化 ——
-//   1. type 字符串：pull_push → push / merge_pull → merge
-//   2. push 事件 body JSON 解析：commit_ids → CommitIDs 数组 / is_force_push → IsForcePush
-//   3. 删 v0.7.7 假设的 4 个独立顶层字段（OldCommit / NewCommit / CommitsNum / IsForcePush
-//      在 API 里都不存在）
+//  1. type 字符串：pull_push → push / merge_pull → merge
+//  2. push 事件 body JSON 解析：commit_ids → CommitIDs 数组 / is_force_push → IsForcePush
+//  3. 删 v0.7.7 假设的 4 个独立顶层字段（OldCommit / NewCommit / CommitsNum / IsForcePush
+//     在 API 里都不存在）
 func TestGiteaAdapter_ListPullTimeline_PushMergeTypeNormalization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]interface{}{
@@ -1448,8 +1449,8 @@ func TestGiteaAdapter_GetPull_RefLabel(t *testing.T) {
 				"sha":   "aaaa",
 			},
 			"base": map[string]interface{}{
-				"label": "main",  // base 通常 label == ref
-				"ref":   "main",  // Gitea base 不带 refs/heads/ 前缀（已对齐）
+				"label": "main", // base 通常 label == ref
+				"ref":   "main", // Gitea base 不带 refs/heads/ 前缀（已对齐）
 				"sha":   "bbbb",
 			},
 		})
@@ -1476,5 +1477,70 @@ func TestGiteaAdapter_GetPull_RefLabel(t *testing.T) {
 	}
 	if pull.Base.Ref != "main" {
 		t.Errorf("Base.Ref = %q, want main", pull.Base.Ref)
+	}
+}
+
+// TestGiteaAdapter_RestorePullBranch 验证 v0.7.28 恢复 head 分支端点
+// 调 POST /repos/{owner}/{repo}/git/refs body {ref: "refs/heads/{branch}", sha: "..."}
+// Gitea 端点带 /api/v1 前缀
+func TestGiteaAdapter_RestorePullBranch(t *testing.T) {
+	refsPath := "/api/v1/repos/alice/dolphin/git/refs"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != refsPath || r.Method != "POST" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		// 验证 body
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body failed: %v", err)
+		}
+		if body["ref"] != "refs/heads/feature-branch" {
+			t.Errorf("body.ref = %q, want refs/heads/feature-branch", body["ref"])
+		}
+		if body["sha"] != "abc123def" {
+			t.Errorf("body.sha = %q, want abc123def", body["sha"])
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"ref":"refs/heads/feature-branch","node_id":"...","url":"...","object":{"sha":"abc123def"}}`)
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "feature-branch", "abc123def"); err != nil {
+		t.Errorf("RestorePullBranch failed: %v", err)
+	}
+
+	// 验证空 branch / sha 走 validation 错误
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "", "abc"); err == nil {
+		t.Error("empty branch should fail validation")
+	}
+	if err := adapter.RestorePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "feature", ""); err == nil {
+		t.Error("empty sha should fail validation")
+	}
+}
+
+// TestGiteaAdapter_DeletePullBranch 验证 v0.7.29 "Delete branch" 按钮端点
+// Gitea 走 DELETE /api/v1/repos/{owner}/{repo}/git/refs/refs/heads/{branch}（路径里带 refs/heads/ 前缀）
+func TestGiteaAdapter_DeletePullBranch(t *testing.T) {
+	expectedPath := "/api/v1/repos/alice/dolphin/git/refs/refs/heads/feature-branch"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != expectedPath || r.Method != "DELETE" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	adapter := NewGiteaAdapter()
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", "feature-branch"); err != nil {
+		t.Errorf("DeletePullBranch failed: %v", err)
+	}
+	// 验证空 branch 走 validation
+	if err := adapter.DeletePullBranch(context.Background(), server.URL, "alice", "test-token", "alice", "dolphin", ""); err == nil {
+		t.Error("empty branch should fail validation")
 	}
 }
