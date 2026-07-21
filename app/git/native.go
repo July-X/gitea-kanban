@@ -84,6 +84,11 @@ func CloneWithFilter(url, localPath string, depth int, token string) error {
 		return fmt.Errorf("gh repo clone 失败: %w\n输出: %s", err, string(output))
 	}
 
+	// v0.7.22：gh clone 退出只代表 refs 拉完，commit 对象在 blobless 模式下懒加载。
+	// 等待 commit DAG 真正可用再返回，避免前端 StageDone 后 loadGraph() 拿到 truncated=true。
+	if err := waitForCommitsAvailable(localPath, 20*time.Minute); err != nil {
+		return fmt.Errorf("gh clone 后等待 commit 可用失败: %w", err)
+	}
 	return nil
 }
 
@@ -263,7 +268,59 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 		return fmt.Errorf("git fetch %s 失败: %w\n输出: %s", remote, err, string(output))
 	}
 
+	// v0.7.22：fetch 成功后 commit 对象可能还在后台深化（blobless 懒加载）。
+	// 等待 commit DAG 可用，避免前端 StageDone 后 loadGraph() 拿到 truncated=true。
+	if err := waitForCommitsAvailable(localPath, 20*time.Minute); err != nil {
+		return fmt.Errorf("fetch 后等待 commit 可用失败: %w", err)
+	}
 	return nil
+}
+
+// waitForCommitsAvailable 轮询 git rev-list --all --count，直到 commit 数 > 0 才返回。
+//
+// 用于 gh partial clone / git fetch blobless 场景：命令退出只代表 refs 拉完，
+// commit 对象是懒加载的（git 后台异步下载 commit 对象）。
+// 必须等待 commit DAG 真正可用后再返回，否则前端 loadGraph() 拿到 truncated=true。
+//
+// 超大仓库（UnrealEngine 264k commits）懒加载可能持续 10+ 分钟，timeout 设为 20 分钟。
+//
+// 轮询间隔 2 秒：太短会过度消耗 git rev-list CPU（每次都要读 .git/objects）；
+// 太长会让 StageDone 发出后用户感觉"卡住"。2 秒是经验值。
+//
+// 注：本函数只对 git CLI / gh CLI 路径生效（native.go 内的 CloneWithFilter /
+// fetchRemoteWithFilter 调用方）。Gitea 路径走 go-git PlainClone + sideband writer
+// （app/git/clone.go / app/git/sync.go），不经过本函数——Gitea 路径的同类问题由
+// commit 0cc8d10 修复（StageDone 从 FetchRepo 末尾挪到 PullRepo 末尾）。
+func waitForCommitsAvailable(localPath string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return fmt.Errorf("gitbinary: %w", err)
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待 commit 可用超时（%s）", timeout)
+		case <-ticker.C:
+			cmd := exec.CommandContext(ctx, bin, "-C", localPath, "rev-list", "--all", "--count")
+			out, err := cmd.Output()
+			if err != nil {
+				// rev-list 失败（可能 .git 还没初始化完成 / lock 文件存在 / 临时错误）
+				// 不立即放弃，2 秒后重试
+				continue
+			}
+			count := strings.TrimSpace(string(out))
+			if count != "" && count != "0" {
+				return nil
+			}
+		}
+	}
 }
 
 // configureGHCommandEnv 给 gh 命令注入 env（GH_TOKEN + 防认证锁）。
