@@ -200,8 +200,24 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 	}
 
 	slog.Default().Info("git fetch 完成", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds())
-	// v0.7.21：完成时显式发 StageDone，让前端 1200ms setTimeout 清理 progressByRepo
-	EmitProgress(opts.Progress, StageDone, 100, "fetched")
+	// v0.7.22：撤回 commit 0e476a1 在这里发的 StageDone。
+	//
+	// Gitea 路径下 FetchRepo 是 git.PullRepo 的子步骤（PullRepo → FetchRepo → remote.FetchContext +
+	// sideband → FetchRepo 返回 → PullRepo 继续做"更新 HEAD ref + countCommitsWithLimit"）。
+	// countCommitsWithLimit 遍历 UnrealEngine 264k commits 要 10-30s，PullRepo 真正完成
+	// 还要再过这么久。如果 FetchRepo 一返回就发 StageDone，前端 1.2s 后清 progressByRepo，
+	// 进度条立刻消失、按钮文字变 "更新"——但 PullRepo 实际还在跑，用户看到"100% 还在跑"的
+	// 误导状态。
+	//
+	// 修法：把"真正完成"事件挪到 git.PullRepo 末尾（所有步骤完成后才发）。FetchRepo 这里
+	// 不再主动发 done，让 progressByRepo 保持最后帧（一般是 sideband "Total" 收尾行的
+	// stage=unknown + percent=-1），按钮文字显示 "更新中…" + 进度条 indeterminate 真正反映
+	// PullRepo 后续步骤在跑。
+	//
+	// 副作用（已知问题）：切回旧仓库时 indeterminate 进度条会复活（commit 0e476a1 修过的那个
+	// bug 部分回退）。完整修法见 commit message 末尾的 follow-up 章节。
+	//
+	// 注：失败路径（StageError）保留——失败需要立即清进度条让前端显示错误。
 	return &FetchResult{Updated: true}, nil
 }
 
@@ -318,6 +334,20 @@ func PullRepo(opts PullOptions) (*PullResult, error) {
 	}
 
 	slog.Default().Info("git pull 完成", "localPath", opts.LocalPath, "addedCommits", afterCount-beforeCount, "headChanged", headBefore != headAfter)
+	// v0.7.22：所有步骤（fetch + 解析 origin HEAD + 写本地 HEAD ref + countCommitsWithLimit）
+	// 都完成后再发 StageDone。这把"完成"语义从 FetchRepo 末尾挪到 PullRepo 末尾——
+	//
+	// 修法动机：commit 0e476a1 在 FetchRepo 末尾发 done，但 Gitea 路径下 PullRepo 在
+	// FetchRepo 返回后还要跑 countCommitsWithLimit（UnrealEngine 264k commit 遍历
+	// 10-30s），导致前端 1.2s 后误显示"完成"——但实际 PullRepo 还在跑，用户报"100%
+	// 还在跑 + Git Graph 没信息"。
+	//
+	// 前端链路：PullRepo 末尾 done 帧 → repo.ts:440 done 分支 → progressByRepo 写入
+	// → setTimeout 1.2s 后防御 cur.stage === 'done' 成立 → 删 key → 进度条消失 +
+	// busyRepoKey=null（onUpdateClick finally）→ 按钮文字回 "更新"。
+	//
+	// 失败路径（err != nil）由 caller 负责，不在 PullRepo 内部发。
+	EmitProgress(opts.Progress, StageDone, 100, "pulled")
 	return &PullResult{
 		BeforeCount:  beforeCount,
 		AfterCount:   afterCount,
