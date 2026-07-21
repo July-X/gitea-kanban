@@ -161,12 +161,28 @@ func (a *App) OnStartup(ctx context.Context) {
 	if err := gitbinary.Init(a.dataDir, a.logger); err != nil {
 		a.logger.Warn("gitbinary.Init 失败，仍可启动；后续 git 调用回退到 PATH git", "err", err.Error())
 	}
-	gitbinary.SetUserOverride(store.GetGitBinaryPath(a.localStore))
+	// v0.7.21 · 扫描常见 gh 安装路径 + 追加到当前进程 PATH
+	//
+	// 为什么放在 gitbinary.Init 后面：先让 Init 释放嵌入 git，再扫描 gh 路径
+	// （不影响 Init；两者独立）
+	//
+	// macOS .app 由 launchd 派生时 PATH 只有 /usr/bin:/usr/sbin:/bin:/sbin，
+	// 不含 /usr/local/bin 或 /opt/homebrew/bin——这是用户已装 gh 但应用找不到的根因。
+	gitbinary.EnsureGhInPath()
+
+	// v0.7.21 · 把 prefs["app.ghBinaryPath"] 推给 gitbinary 全局
+	// （与 app.gitBinaryPath 完全对称的模式）
+	gitbinary.SetGhOverride(store.GetGhBinaryPath(a.localStore))
 
 	if a.logger != nil {
-		a.logger.Info("git binary 配置就绪",
-			"userOverride", gitbinary.UserOverride(),
-			"defaultBin", gitbinary.DefaultBinaryPath(),
+		a.logger.Info("gh 配置就绪",
+			"userOverride", gitbinary.GhOverride(),
+			"resolvedPath", func() string {
+				if p, err := gitbinary.ResolveGhPath(); err == nil {
+					return p
+				}
+				return "(未找到)"
+			}(),
 		)
 	}
 

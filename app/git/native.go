@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,8 +35,12 @@ const nativeGitTimeout = 5 * time.Minute
 //   - 需要系统安装 gh（gh 内部调用 git）
 //   - 不支持进度回调（无法实时显示百分比）
 func CloneWithFilter(url, localPath string, depth int, token string) error {
-	if _, err := exec.LookPath("gh"); err != nil {
-		// v0.7.20：返回结构化 IpcError，前端可识别 gh_not_installed 并展示引导安装页
+	if _, err := gitbinary.ResolveGhPath(); err != nil {
+		// v0.7.21：gh 未找到时返回结构化 IpcError，前端引导用户安装
+		var ghNotFound *gitbinary.GhNotFoundError
+		if errors.As(err, &ghNotFound) {
+			return ipc.NewGhNotInstalled(ghNotFound.Cause)
+		}
 		return ipc.NewGhNotInstalled(err.Error())
 	}
 
@@ -104,8 +109,11 @@ func FetchWithFilter(localPath string, depth int, token string) error {
 	if _, err := gitbinary.ResolveGitBinaryPath(""); err != nil {
 		return fmt.Errorf("系统未安装 git 命令: %w", err)
 	}
-	if _, err := exec.LookPath("gh"); err != nil {
-		// v0.7.20：返回结构化 IpcError，前端可识别 gh_not_installed 并展示引导安装页
+	if _, err := gitbinary.ResolveGhPath(); err != nil {
+		var ghNotFound *gitbinary.GhNotFoundError
+		if errors.As(err, &ghNotFound) {
+			return ipc.NewGhNotInstalled(ghNotFound.Cause)
+		}
 		return ipc.NewGhNotInstalled(err.Error())
 	}
 

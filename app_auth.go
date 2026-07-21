@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"gitea-kanban/app/git"
+	"gitea-kanban/app/gitbinary"
 	"gitea-kanban/app/ipc"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/platform/github"
@@ -12,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -116,13 +116,13 @@ func (a *App) AuthConnect(args ConnectArgs) (ConnectResult, error) {
 	//   - GitHubAPIBase 常量定义在 app/platform/github/adapter.go
 	//   - 这里直接引用,避免硬编码漂移
 	if platformName == string(platformAdapter.GitHub) {
-		if _, err := exec.LookPath("gh"); err != nil {
-			return ConnectResult{}, &ipc.IpcError{
-				Code:    ipc.CodeValidationFailed,
-				Message: "使用 GitHub 仓库需要先安装 GitHub CLI（gh）",
-				Hint:    "请安装 gh 后重新连接 GitHub 账号；本应用会用它快速加载超大仓库提交记录",
-				Cause:   err.Error(),
+		if _, err := gitbinary.ResolveGhPath(); err != nil {
+			// v0.7.21：Connect 入口也用 gh_not_installed 错误码，前端 toast 一致
+			var ghNotFound *gitbinary.GhNotFoundError
+			if errors.As(err, &ghNotFound) {
+				return ConnectResult{}, ipc.NewGhNotInstalled(ghNotFound.Cause)
 			}
+			return ConnectResult{}, ipc.NewGhNotInstalled(err.Error())
 		}
 		giteaURL = github.GitHubAPIBase
 	} else {

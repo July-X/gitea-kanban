@@ -88,6 +88,15 @@ type LocalState struct {
 // 读取入口：app.GetGitBinaryPath / app.gitbinary.ResolveGitBinaryPath
 const GitBinaryPathPrefKey = "app.gitBinaryPath"
 
+// GhBinaryPathPrefKey prefs 中 gh 二进制路径的 key（v0.7.21 新增）
+//
+//   - 空字符串或不在 prefs：使用进程 PATH 探测（macOS .app 启动时已补全）
+//   - 非空字符串：用户填的 gh 二进制绝对路径（覆盖自动探测）
+//
+// 写入入口：app.SetGhBinaryPath（SettingsView "gh 二进制"卡片调用）
+// 读取入口：app.GetGhBinaryPath / app.gitbinary.ResolveGhPath
+const GhBinaryPathPrefKey = "app.ghBinaryPath"
+
 // LocalStore 业务态存储（原子写 + 并发安全）
 type LocalStore struct {
 	mu   sync.RWMutex
@@ -228,6 +237,41 @@ func SetGitBinaryPath(s *LocalStore, path string) error {
 			delete(state.Prefs, GitBinaryPathPrefKey)
 		} else {
 			state.Prefs[GitBinaryPathPrefKey] = path
+		}
+	})
+}
+
+// GetGhBinaryPath 读 prefs["app.ghBinaryPath"]（gh CLI 覆盖路径）
+//
+// 不存在 / 空 / 非 string 类型时返空字符串（= 走 gitbinary.ResolveGhPath 默认）。
+func GetGhBinaryPath(s *LocalStore) string {
+	if s == nil {
+		return ""
+	}
+	state := s.Get()
+	if state == nil || state.Prefs == nil {
+		return ""
+	}
+	if v, ok := state.Prefs[GhBinaryPathPrefKey].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// SetGhBinaryPath 把用户填的 gh 二进制路径写到 prefs。
+//
+// 空字符串 = 清空用户配置（运行时回退到 PATH 探测，macOS 启动期已补 PATH）
+// 非空字符串 = 强校验 stat 存在且非目录
+func SetGhBinaryPath(s *LocalStore, path string) error {
+	return s.Mutate(func(state *LocalState) {
+		if state.Prefs == nil {
+			state.Prefs = map[string]any{}
+		}
+		path = strings.TrimSpace(path)
+		if path == "" {
+			delete(state.Prefs, GhBinaryPathPrefKey)
+		} else {
+			state.Prefs[GhBinaryPathPrefKey] = path
 		}
 	})
 }

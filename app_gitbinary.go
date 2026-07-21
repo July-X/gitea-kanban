@@ -6,6 +6,7 @@ import (
 	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/store"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -119,15 +120,7 @@ func (a *App) OpenGitBinaryPicker() (string, error) {
 		a.logger.Info("OpenGitBinaryPicker")
 	}
 
-	// v0.5-mid3 优先让文件对话框初始目录落在系统 git 所在目录（开箱体验）
-	//
-	// 优先级：
-	//   1. exec.LookPath("git") 找到的路径取 dir（如 /usr/bin、/opt/homebrew/bin）
-	//   2. ${dataDir}/tools/git/    释放的嵌入式 binary 所在目录
-	//   3. dataDir 本身             隐含 fallback，让用户可手动导航
-	//
-	// 为什么不直接固定 home：很多 mac git 装在 /opt/homebrew/bin，不在 $HOME
-	// 为什么不依赖环境变量 GITHUB_PATH：易被 .zshrc 覆盖，绕开更鲁棒
+	// v0.5-mid3 优先让文件对话框初始目录落在系统 git 所在目录
 	initialDir := a.pickInitialDirForGitBinary()
 
 	options := func(title string, filters []wailsruntime.FileFilter) (string, error) {
@@ -140,20 +133,72 @@ func (a *App) OpenGitBinaryPicker() (string, error) {
 
 	switch runtime.GOOS {
 	case "windows":
-		return options("选择 git.exe 路径",
+		return options("选择 gh.exe 路径",
 			[]wailsruntime.FileFilter{
-				{DisplayName: "Git 可执行文件 (*.exe)", Pattern: "*.exe;*.EXE"},
+				{DisplayName: "GitHub CLI 可执行文件 (*.exe)", Pattern: "*.exe;*.EXE"},
 			})
 	case "darwin":
-		// macOS NSOpenPanel bug: Pattern: "*" 只匹配有扩展名的文件 + alias，
-		// Unix executable（如 /usr/bin/git, /opt/homebrew/Cellar/git/2.55.0/bin/git）
-		// 无扩展名，被 Pattern:"*" 过滤掉。
-		// 修复:传 nil filters → NSOpenPanel 显示所有文件（含 extensionless Unix exec）。
-		return options("选择 git 二进制路径", nil)
+		return options("选择 gh 二进制路径", nil)
 	default:
-		// Linux: git 通常无扩展名，不设过滤器
-		return options("选择 git 二进制路径", nil)
+		return options("选择 gh 二进制路径", nil)
 	}
+}
+
+// ===== v0.7.21 gh 二进制设置（GitHub CLI）=====
+//
+// 流程：
+//   1. OnStartup 调 gitbinary.EnsureGhInPath() → 扫描常见位置 + 追加到 PATH
+//   2. OnStartup 调 gitbinary.SetGhOverride(store.GetGhBinaryPath(a.localStore))
+//   3. 用户在 SettingsView 改路径：App.SetGhBinaryPath → store.SetGhBinaryPath
+//      + gitbinary.SetGhOverride
+//   4. 用户点「测试」：App.TestGhBinary 调 gitbinary.TestGhBinary 验证
+//   5. macOS 上二进制被 Gatekeeper 拦截：TestGhBinary 返 quarantine 提示
+
+// GetGhBinaryConfig 读取当前 gh binary 配置 + 当前实际生效路径
+func (a *App) GetGhBinaryConfig() gitbinary.GhBinaryResult {
+	userOverride := store.GetGhBinaryPath(a.localStore)
+	effective, _ := gitbinary.ResolveGhPath()
+	gitbinary.SetGhOverride(userOverride)
+	version := ""
+	if effective != "" {
+		if out, err := exec.Command(effective, "--version").Output(); err == nil {
+			fields := strings.Fields(string(out))
+			if len(fields) >= 3 && fields[0] == "gh" && fields[1] == "version" {
+				version = fields[2]
+			}
+		}
+	}
+	return gitbinary.GhBinaryResult{
+		UserOverride:     userOverride,
+		EffectivePath:    effective,
+		EffectiveVersion: version,
+		Found:            effective != "",
+	}
+}
+
+// SetGhBinaryPathArgs 写入参数
+type SetGhBinaryPathArgs struct {
+	Path string `json:"path"` // "" = 清空用户覆盖
+}
+
+// SetGhBinaryPath 持久化用户填的 gh binary 路径，并立刻让本次进程生效。
+func (a *App) SetGhBinaryPath(args SetGhBinaryPathArgs) error {
+	if a.logger != nil {
+		a.logger.Info("SetGhBinaryPath", "path", args.Path)
+	}
+	if err := store.SetGhBinaryPath(a.localStore, args.Path); err != nil {
+		return ipc.NewInternal("保存 gh 二进制路径失败: " + err.Error())
+	}
+	gitbinary.SetGhOverride(args.Path)
+	return nil
+}
+
+// TestGhBinary 验证给定 gh 二进制路径是否可执行
+func (a *App) TestGhBinary(args SetGhBinaryPathArgs) gitbinary.TestGhResult {
+	if a.logger != nil {
+		a.logger.Info("TestGhBinary", "path", args.Path)
+	}
+	return gitbinary.TestGhBinary(args.Path)
 }
 
 // pickInitialDirForGitBinary 决策 git binary 文件选择对话框的初始目录。
