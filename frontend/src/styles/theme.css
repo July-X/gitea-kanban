@@ -244,9 +244,6 @@ html[data-theme='dark'] {
   --color-series-16-14: #103aad;
   --color-series-16-15: #982e85;
 
-  /* Git Graph lane canvas: dark theme uses a VSCode-like track, not hardcoded in the view. */
-  --color-graph-bg: #1e1e1e;
-
   --color-info-soft: rgba(79, 196, 214, 0.16);
 
   /* === 时间轴分支色（8 lane · 8 颜色，对应 5 种分支类型 + 主色/强调/info）===
@@ -368,9 +365,6 @@ html[data-theme='light'] {
   --color-series-16-13: #439d73;
   --color-series-16-14: #103aad;
   --color-series-16-15: #982e85;
-
-  /* Git Graph lane canvas: light theme stays distinct from the table body without a black block. */
-  --color-graph-bg: #eef4f7;
 
   --color-info-soft: rgba(21, 122, 145, 0.14);
 
