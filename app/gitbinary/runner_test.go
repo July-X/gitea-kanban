@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -259,14 +260,32 @@ func TestTestGitBinary_QuarantineHint(t *testing.T) {
 
 // TestResolveBinaryPath_EmbeddedSentinel 验证 v0.5 sentinel magic string
 // userOverride == EMBEDDED_SENTINEL → 强制走 defaultBinaryPath（不 fallback PATH）
+//
+// v0.8.2 新增：embedded binary 不可用时（0 字节占位 / cross-arch 部署）
+// 验证 sentinel 能 fallback 到 PATH git 而不是报错。
 func TestResolveBinaryPath_EmbeddedSentinel(t *testing.T) {
 	resetInitFlag(t)
 	// Init 释放 embedded binary
 	if err := Init(t.TempDir(), nil); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
+
+	// v0.8.2：embedded binary 不可用时，sentinel 应 fallback 到 PATH git
 	if DefaultBinaryPath() == "" {
-		t.Skip("无 embedded binary（0 字节 placeholder）")
+		// 0 字节占位场景（Windows CI / cross-arch 部署）
+		resolved, err := ResolveGitBinaryPath(EMBEDDED_SENTINEL)
+		if err != nil {
+			t.Fatalf("sentinel 模式下 embedded 不可用，应 fallback PATH git 而非报错: %v", err)
+		}
+		if resolved == "" {
+			t.Fatal("sentinel fallback 返空路径")
+		}
+		// 验证返的是 PATH git（不是 embedded）
+		if path, lookErr := exec.LookPath("git"); lookErr == nil && resolved != path {
+			t.Logf("sentinel fallback 路径 %q 与 PATH git %q 不同（可能系统有多 git）", resolved, path)
+		}
+		t.Logf("sentinel fallback 到 PATH git: %s", resolved)
+		return
 	}
 
 	embeddedPath := DefaultBinaryPath()

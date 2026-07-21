@@ -258,7 +258,12 @@ func ResolveGitBinaryPath(callerOverride string) (string, error) {
 				return def, nil
 			}
 		}
-		return "", fmt.Errorf("「使用内嵌」模式下内嵌 git 二进制不可用；请切换到「使用系统安装的 git」或重装应用")
+		// v0.8.2 fix：embedded binary 不可用时（占位文件 / cross-arch 部署）
+		// 降级到 PATH git 而不是报错。否则用户点"使用内嵌"看到"切换失败"但无法使用。
+		if path, err := exec.LookPath("git"); err == nil {
+			return path, nil
+		}
+		return "", fmt.Errorf("「使用内嵌」模式下内嵌 git 二进制不可用（可能应用未完整安装）；请切换到「使用系统安装的 git」或重装应用")
 	}
 	if effective != "" {
 		// user custom path：stat 校验失败仍返该值

@@ -124,6 +124,44 @@ jobs:
       # 注意：Windows runner 预装 NSIS 是历史行为，镜像内容可能变化；
       # 为保证可复现性，显式安装 NSIS 并验证，不依赖预装状态。
       # 使用 PowerShell 以便直接调用 makensis.exe 做环境诊断。
+      # v0.8.2：下载真实 MinGit 2.55.0 替换 0 字节占位文件，让内嵌 git 在 Windows 可用。
+      # 占位文件 app/gitbinary/binaries/git/gk-git-2.55.0-windows-amd64.exe 当前 0 字节，
+      # 导致 Init() 跳过释放 + 用户选"使用内嵌"失败。
+      - name: Windows：下载 MinGit 2.55.0 替换占位文件
+        if: matrix.platform == 'windows'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $embedDir = "app/gitbinary/binaries/git"
+          $target = "$embedDir/gk-git-2.55.0-windows-amd64.exe"
+
+          Write-Host "==> 下载 MinGit 2.55.0-64-bit.zip..."
+          $zipUrl = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.1/MinGit-2.55.0-64-bit.zip"
+          $zipPath = "$env:TEMP\MinGit-2.55.0-64-bit.zip"
+          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+          Write-Host "下载完成: $zipPath ($((Get-Item $zipPath).Length) bytes)"
+
+          Write-Host "==> 解压 cmd/git.exe..."
+          $extractDir = "$env:TEMP\MinGit-extract"
+          if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+          $gitExe = Get-ChildItem -Path $extractDir -Recurse -Filter "git.exe" | Select-Object -First 1
+          if (-not $gitExe) {
+            Write-Error "ERROR: 解压后找不到 git.exe"
+            Get-ChildItem $extractDir -Recurse | Format-Table FullName
+            exit 1
+          }
+          Write-Host "找到 git.exe: $($gitExe.FullName) ($($gitExe.Length) bytes)"
+
+          Write-Host "==> 复制到 embed 路径: $target"
+          Copy-Item -Path $gitExe.FullName -Destination $target -Force
+          $final = Get-Item $target
+          Write-Host "==> 替换完成: $($final.Name) ($($final.Length) bytes)"
+
+          # 清理
+          Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+          Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+        shell: pwsh
       - name: 构建 Windows
         if: matrix.platform == 'windows'
         run: |
