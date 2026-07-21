@@ -812,34 +812,29 @@ onMounted(async () => {
       <!-- v0.7.x: 应用数据目录 + 故障排查 同行左右布局 -->
       <section class="settings__card">
         <h2>应用数据目录</h2>
-        <div class="settings__workspace-row">
-          <div class="settings__workspace-info">
-            <div class="settings__info-row">
-              <span class="settings__info-label">当前路径</span>
-              <span class="settings__info-value mono" :title="dataRootPath">
-                {{ maskedDataRootPath }}
-              </span>
-            </div>
-            <div class="settings__info-row">
-              <span class="settings__info-label">状态</span>
-              <span class="settings__info-value">
-                <span v-if="dataRootValidated" class="settings__status settings__status--ok">✓ 可用</span>
-                <span v-else class="settings__status settings__status--warn">⚠ 路径不可用</span>
-              </span>
-            </div>
-          </div>
-          <div class="settings__workspace-actions">
-            <button
-              type="button"
-              class="settings__save"
-              :disabled="openingDataDir || !dataRootPath"
-              :title="dataRootPath ? '用系统文件管理器打开 ' + dataRootPath : '尚无数据目录'"
-              @click="onOpenDataDir"
-            >
-              <span>{{ openingDataDir ? '打开中…' : '打开应用数据目录' }}</span>
-            </button>
-          </div>
+        <div class="settings__info-row">
+          <span class="settings__info-label">当前路径</span>
+          <span class="settings__info-value mono" :title="dataRootPath">
+            {{ maskedDataRootPath }}
+          </span>
         </div>
+        <div class="settings__info-row">
+          <span class="settings__info-label">状态</span>
+          <span class="settings__info-value">
+            <span v-if="dataRootValidated" class="settings__status settings__status--ok">✓ 可用</span>
+            <span v-else class="settings__status settings__status--warn">⚠ 路径不可用</span>
+          </span>
+        </div>
+        <button
+          type="button"
+          class="settings__save"
+          style="margin-top: var(--space-2); align-self: flex-start;"
+          :disabled="openingDataDir || !dataRootPath"
+          :title="dataRootPath ? '用系统文件管理器打开 ' + dataRootPath : '尚无数据目录'"
+          @click="onOpenDataDir"
+        >
+          <span>{{ openingDataDir ? '打开中…' : '打开应用数据目录' }}</span>
+        </button>
       </section>
 
       <!-- v0.6.0: 故障排查卡片 -->
@@ -1260,26 +1255,6 @@ onMounted(async () => {
 }
 .settings__info-value.mono {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-}
-
-/* 工作区布局 */
-.settings__workspace-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
-  justify-content: space-between;
-}
-.settings__workspace-info {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-.settings__workspace-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-shrink: 0;
 }
 
 /* badge + 状态 */
