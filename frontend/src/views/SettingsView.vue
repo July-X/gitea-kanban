@@ -300,6 +300,30 @@ const workspacePathInternal = ref('');
 /** "打开应用数据目录" 按钮的 loading 态（避免双击） */
 const openingDataDir = ref(false);
 
+/**
+ * 脱敏后的应用数据目录路径（把用户目录替换成 ~）
+ *
+ * - Windows:  C:\Users\xxx  →  ~
+ * - macOS:    /Users/xxx     →  ~
+ * - Linux:    /home/xxx      →  ~
+ *
+ * 显示用（title 属性仍保留完整路径供用户查看原文）。
+ */
+const maskedDataRootPath = computed(() => {
+  if (!dataRootPath.value) return '—';
+  const p = dataRootPath.value;
+  // Windows: C:\Users\username  or  C:/Users/username
+  const win = p.match(/^([A-Za-z]:[\\/]+Users[\\/]+[^\\/]+)/);
+  if (win) return '~' + p.slice(win[1].length);
+  // macOS: /Users/username
+  const mac = p.match(/^(\/Users\/[^\/]+)/);
+  if (mac) return '~' + p.slice(mac[1].length);
+  // Linux: /home/username
+  const linux = p.match(/^(\/home\/[^\/]+)/);
+  if (linux) return '~' + p.slice(linux[1].length);
+  return p;
+});
+
 /** 启动期加载当前 dataRoot 信息（只读） */
 (async (): Promise<void> => {
   try {
@@ -793,7 +817,7 @@ onMounted(async () => {
             <div class="settings__info-row">
               <span class="settings__info-label">当前路径</span>
               <span class="settings__info-value mono" :title="dataRootPath">
-                {{ dataRootPath || '—' }}
+                {{ maskedDataRootPath }}
               </span>
             </div>
             <div class="settings__info-row">
