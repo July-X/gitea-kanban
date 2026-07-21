@@ -89,6 +89,8 @@ type UpdateInfo struct {
 	Downloaded bool `json:"downloaded"`
 	// Err 内部错误（前端拿来显示人话）
 	Err string `json:"err,omitempty"`
+	// DevBuild dev build 不支持自动更新
+	DevBuild bool `json:"devBuild"`
 }
 
 // UpdateDownloadResult 下载完成结果（前端用来显示文件大小、SHA256、缓存路径）。
@@ -121,7 +123,7 @@ func (u *Updater) Check(ctx context.Context) (*UpdateInfo, error) {
 
 	// dev build 不提示
 	if NormalizeVersion(u.cfg.RunningVersion) == "" {
-		info.Err = "dev build 不提示更新"
+		info.DevBuild = true
 		return info, nil
 	}
 

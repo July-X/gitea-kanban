@@ -212,6 +212,12 @@ func TestEvaluateRunningAndLatest(t *testing.T) {
 		if info.Available {
 			t.Errorf("dev build should never be available")
 		}
+		if !info.DevBuild {
+			t.Errorf("dev build should set DevBuild=true")
+		}
+		if info.Err != "" {
+			t.Errorf("dev build Err should be empty, got %q", info.Err)
+		}
 	})
 }
 
@@ -538,6 +544,7 @@ func (u *Updater) checkFromAPI(apiURL string) (*UpdateInfo, error) {
 		Channel: u.cfg.Channel,
 	}
 	if NormalizeVersion(u.cfg.RunningVersion) == "" {
+		info.DevBuild = true
 		return info, nil
 	}
 	m, err := u.fetchFromURL(apiURL)

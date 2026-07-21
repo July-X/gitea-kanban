@@ -34,6 +34,7 @@ export type UpdateStatus =
   | { kind: 'downloaded'; info: UpdateInfo }
   | { kind: 'installing' }
   | { kind: 'done' }
+  | { kind: 'devBuild' }
   | { kind: 'error'; message: string };
 
 // ---------- Singleton 状态 ----------
@@ -106,6 +107,10 @@ export function useUpdate() {
       const info = await b.CheckUpdate();
       if (!info) {
         status.value = { kind: 'error', message: '检查更新失败' };
+        return;
+      }
+      if (info.devBuild) {
+        status.value = { kind: 'devBuild' };
         return;
       }
       if (info.err) {

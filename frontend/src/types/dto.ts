@@ -974,6 +974,7 @@ export interface UpdateInfo {
   downloadUrl?: string;
   assetSize?: number;
   err?: string;
+  devBuild?: boolean;
 }
 
 /**

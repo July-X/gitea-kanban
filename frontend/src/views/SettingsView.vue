@@ -572,9 +572,12 @@ const updateStateLabel = computed(() => {
   }
 });
 
+const devBuild = computed(() => update.status.value.kind === 'devBuild');
+
 const checkButtonText = computed(() => {
-  if (checking.value || installingState.value) return '正在检查…';
+  if (checking.value || installingState.value || devBuild.value) return '正在检查…';
   const s = update.status.value;
+  if (s.kind === 'devBuild') return 'dev build 不支持检查更新';
   if (s.kind === 'available') return '下载更新';
   if (s.kind === 'downloaded') return '重启并安装';
   return '检查更新';
@@ -772,6 +775,9 @@ onMounted(async () => {
           </label>
           <p v-if="updateStateLabel" class="settings__hint settings__hint--muted">
             {{ updateStateLabel }}
+          </p>
+          <p v-if="devBuild" class="settings__hint settings__hint--warn">
+            dev build 不支持检查更新，请使用 release 版本
           </p>
         </div>
       </section>
