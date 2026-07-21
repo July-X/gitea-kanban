@@ -5,6 +5,9 @@
 .opencode/
 .claude/
 
+# patch 工具的备份文件（patch / git apply 失败时自动生成）
+*.orig
+
 # === Go / Wails 构建产物 ===
 build/
 !build/
