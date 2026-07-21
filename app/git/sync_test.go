@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"gitea-kanban/app/ipc"
@@ -258,11 +259,22 @@ func TestCountCommitsWithLimit_TreatsShallowBoundaryAsStop(t *testing.T) {
 func TestFetchWithFilter_GhNotInstalled(t *testing.T) {
 	barePath, localPath := createBareAndClone(t)
 	origPath := os.Getenv("PATH")
-	cleanPath := "/usr/bin:/bin"
+
+	var cleanPath string
+	switch runtime.GOOS {
+	case "windows":
+		cleanPath = `C:\Windows\System32`
+	default:
+		cleanPath = "/usr/bin:/bin"
+	}
 	t.Setenv("PATH", cleanPath)
 
+	// 先检查 git 是否在 cleanPath 中——不在则 skip (Windows CI 等环境可能缺少 git)
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not in clean PATH, cannot test gh-not-found path: " + err.Error())
+	}
 	if _, err := exec.LookPath("gh"); err == nil {
-		t.Skip("gh is in PATH even after clearing it, cannot test gh-not-found path")
+		t.Skip("gh is in clean PATH, cannot test gh-not-found path")
 	}
 
 	err := FetchWithFilter(localPath, 0, "")

@@ -343,6 +343,7 @@ func RunGitWithEnv(ctx context.Context, binPath string, localPath string, envVar
 	fullArgs = append(fullArgs, args...)
 
 	cmd := exec.CommandContext(ctx, binPath, fullArgs...)
+	configureCmdHideWindow(cmd)
 	baseEnv := []string{"GIT_TERMINAL_PROMPT=0"}
 	cmd.Env = append(os.Environ(), baseEnv...)
 	for k, v := range envVars {
