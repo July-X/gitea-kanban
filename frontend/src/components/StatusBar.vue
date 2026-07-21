@@ -358,6 +358,8 @@ async function onUpdateClick(r: RepoDto, e: Event): Promise<void> {
 async function pickRepo(r: RepoDto): Promise<void> {
   pickerOpen.value = false;
   pickerSearch.value = '';
+  // 切仓库立即清 busyRepoKey：避免旧仓库同步 / 拉取的进度条错位显示在新仓库上下文下
+  busyRepoKey.value = null;
   await selectProject(r);
 }
 
