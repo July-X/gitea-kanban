@@ -323,6 +323,95 @@ func waitForCommitsAvailable(localPath string, timeout time.Duration) error {
 	}
 }
 
+// gitClone 用 git CLI clone 仓库（blobless + NoCheckout）
+//
+// v0.7.22 替代 go-git.PlainClone 的统一方案：
+//   - git CLI 对 HTTP progress 支持更好（sideband progress 输出稳定）
+//   - Gitea HTTPS 走此路径，行为一致 + blobless 省 28GB blob 下载
+//   - git clone --filter=blob:none --no-checkout --no-single-branch
+//
+// 参数：
+//   - url: 仓库 URL（https / file）
+//   - localPath: 本地目标路径
+//   - depth: 深度限制（0 = 无限制）
+//   - token: HTTPS 认证 token（空 = 不传，依赖 ~/.netrc 或 SSH）
+//   - progress: 可选 progress 回调（nil = 静默，向后兼容）
+//
+// 鉴权策略：
+//   - HTTPS + token：用 -c credential.helper=!f("...") 注入 token
+//   - SSH：依赖 ~/.ssh/config + ssh-agent（不传 token，不做 key 检测）
+//   - file://：无鉴权
+//
+// 失败模式：
+//   - 超时（5 分钟）：返回 timeout 错误
+//   - git 退出非 0：返回 CombinedOutput 内容
+//   - 失败时清理半成品目录（避免下次 clone 误判"已存在"）
+//
+// 注：本 helper 只支持 HTTPS / file，**不**翻译 go-git 的 `transport.AuthMethod`
+// 到 git CLI 的 SSH key 路径。SSH 鉴权的 Gitea 仓库仍走原 go-git 链路
+// （app/git/clone.go:PlainClone + SSH 失败回退 HTTPS）。
+func gitClone(url, localPath string, depth int, token string, progress ProgressCallback) error {
+	parentDir := filepath.Dir(localPath)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		return fmt.Errorf("创建父目录失败: %w", err)
+	}
+
+	args := []string{
+		"clone",
+		"--filter=blob:none", // 关键：不下载 blob（文件内容）
+		"--no-checkout",      // 不 checkout 到工作区
+		"--no-single-branch", // 保留所有分支 refs
+	}
+	if depth > 0 {
+		args = append(args, fmt.Sprintf("--depth=%d", depth))
+	}
+	args = append(args, url, localPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), nativeGitTimeout)
+	defer cancel()
+
+	bin, err := gitbinary.ResolveGitBinaryPath("")
+	if err != nil {
+		return fmt.Errorf("gitbinary: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = "" // 不预设 Dir——git clone 的 <local_path> 参数会自己处理
+
+	// env: token 注入用 credential helper（一次性 inline，不污染 ~/.gitconfig）
+	env := os.Environ()
+	env = append(env, "GIT_TERMINAL_PROMPT=0")
+	if token != "" && !strings.HasPrefix(url, "file://") && !strings.HasPrefix(url, "git@") {
+		// HTTPS 鉴权：用一次性 credential helper（不写 .gitconfig）
+		// helper 格式：!cmd 输出 username=xxx / password=xxx 行
+		// 用 single-quote 包裹避免 password 含特殊字符被 shell 解析
+		escaped := strings.ReplaceAll(token, "'", "'\\''")
+		helper := fmt.Sprintf("!f() { echo username=oauth2; echo password='%s'; }; f", escaped)
+		env = append(env, "GIT_ASKPASS=true", "GIT_CONFIG_COUNT=1",
+			"credential.helper="+helper)
+	}
+	cmd.Env = env
+
+	// progress 回调：把 git CLI 的 stderr 输出包装成 io.Writer，
+	// 走 ParseProgress → cb(SyncProgress)。格式仿 go-git sideband。
+	// git CLI 的 sideband 输出格式与 go-git 类似（"Receiving objects: N% (cur/total)\r"）
+	if progress != nil {
+		cmd.Stderr = NewSidebandWriter(SafeWrap(progress))
+		cmd.Stdout = NewSidebandWriter(SafeWrap(progress))
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// 清理失败的克隆
+		os.RemoveAll(localPath)
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("git clone 超时（%s）：%w", nativeGitTimeout, ctx.Err())
+		}
+		return fmt.Errorf("git clone 失败: %w\n输出: %s", err, string(output))
+	}
+	return nil
+}
+
 // configureGHCommandEnv 给 gh 命令注入 env（GH_TOKEN + 防认证锁）。
 //
 // v0.4.0：原名 configureGitHubCLIEnv（2.10 引入），重命名后语义更明确（与
