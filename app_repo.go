@@ -357,7 +357,7 @@ type FileChangeDTO struct {
 
 // GetCommitDetailArgs 获取 commit 详情参数
 type GetCommitDetailArgs struct {
-	LocalPath string `json:"localPath"`
+	ProjectID string `json:"projectId"`
 	SHA       string `json:"sha"`
 }
 
@@ -366,8 +366,21 @@ type GetCommitDetailArgs struct {
 // v2.15 扩展：除了元信息（message / author），还调 GetCommitDiff 拿文件变更列表，
 // 计算 totals（Additions / Deletions / FilesChanged）填到 DTO。
 // 修复"展开 commit 后手风琴无文件信息"bug —— 之前 handler 只填元信息字段。
+//
+// v2.4 对齐：接受 projectId（业务态概念），Go 端反查 localPath。
 func (a *App) GetCommitDetail(args GetCommitDetailArgs) (CommitDetailDTO, error) {
-	repo, err := git.OpenRepo(args.LocalPath)
+	if args.ProjectID == "" {
+		return CommitDetailDTO{}, ipc.NewValidationFailed("projectId 不能为空", "")
+	}
+
+	// v2.4：按 projectId 反查 localPath（对齐 GetGitGraph / PullRepoByProjectId 链路）
+	project, account, err := a.findProjectAndAccount(args.ProjectID)
+	if err != nil {
+		return CommitDetailDTO{}, err
+	}
+	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
+
+	repo, err := git.OpenRepo(localPath)
 	if err != nil {
 		return CommitDetailDTO{}, err
 	}

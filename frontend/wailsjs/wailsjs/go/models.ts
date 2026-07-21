@@ -767,7 +767,7 @@ export namespace main {
 	}
 	
 	export class GetCommitDetailArgs {
-	    localPath: string;
+	    projectId: string;
 	    sha: string;
 	
 	    static createFrom(source: any = {}) {
@@ -776,7 +776,7 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.localPath = source["localPath"];
+	        this.projectId = source["projectId"];
 	        this.sha = source["sha"];
 	    }
 	}
@@ -2557,6 +2557,7 @@ export namespace updater {
 	    assetSize?: number;
 	    downloaded: boolean;
 	    err?: string;
+	    devBuild: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
@@ -2576,6 +2577,7 @@ export namespace updater {
 	        this.assetSize = source["assetSize"];
 	        this.downloaded = source["downloaded"];
 	        this.err = source["err"];
+	        this.devBuild = source["devBuild"];
 	    }
 	}
 

@@ -117,7 +117,7 @@ type WailsApp = {
     cloned: boolean;
   }>;
   /** v2.15：按本地仓库路径读取 commit 详情（含 files / +/- stats） */
-  GetCommitDetail?: (args: { localPath: string; sha: string }) => Promise<unknown>;
+  GetCommitDetail?: (args: { projectId: string; sha: string }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token）
    *
    * v0.6.3 修复：补 `offset` 字段（之前 shim 漏传导致滚动加载更多每次都拉首屏）。
@@ -498,16 +498,15 @@ const apiShim = {
             hint: '请在 Wails 桌面窗口中操作',
           }),
         async (app) => {
-          if (!app.GetRepoById || !app.GetCommitDetail) {
+          if (!app.GetCommitDetail) {
             return Promise.reject({
               code: 'internal',
-              message: 'Wails 绑定缺失 GetRepoById / GetCommitDetail',
+              message: 'Wails 绑定缺失 GetCommitDetail',
               hint: '请重新构建应用',
             });
           }
-          const repoInfo = await app.GetRepoById({ projectId: a.projectId ?? '' });
           return app.GetCommitDetail({
-            localPath: repoInfo.localPath ?? '',
+            projectId: a.projectId ?? '',
             sha: a.sha ?? '',
           });
         },
