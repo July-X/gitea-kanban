@@ -151,6 +151,13 @@ func (a *App) buildSyncProgressCallback(repoKey string) git.ProgressCallback {
 		// 没初始化 context 时 EventsEmit 不能用，返 no-op（避免 nil panic）
 		return func(p git.SyncProgress) {}
 	}
+	// 测试场景（app.OnStartup(context.Background())）拿不到 Wails events，
+	// wails runtime.EventsEmit 内部 log.Fatalf → os.Exit(1) 会让测试进程 abort。
+	// 检查 ctx 中是否注册了 events key（Wails app_production.go:77 / app_dev.go:225
+	// 都会 context.WithValue(ctx, "events", eventHandler)），没有则返 no-op。
+	if a.ctx.Value("events") == nil {
+		return func(p git.SyncProgress) {}
+	}
 	return func(p git.SyncProgress) {
 		payload := GitSyncProgressPayload{
 			Stage:   string(p.Stage),
