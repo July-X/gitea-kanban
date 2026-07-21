@@ -343,6 +343,7 @@ func RunGitWithEnv(ctx context.Context, binPath string, localPath string, envVar
 	fullArgs = append(fullArgs, args...)
 
 	cmd := exec.CommandContext(ctx, binPath, fullArgs...)
+	configureCmdHideWindow(cmd)
 	baseEnv := []string{"GIT_TERMINAL_PROMPT=0"}
 	cmd.Env = append(os.Environ(), baseEnv...)
 	for k, v := range envVars {
@@ -409,7 +410,9 @@ func TestGitBinary(binPath string) TestGitResult {
 	// 调用 --version
 	ctx, cancel := context.WithTimeout(context.Background(), 10*1e9) // 10s
 	defer cancel()
-	output, err := exec.CommandContext(ctx, binPath, "--version").CombinedOutput()
+	cmd := exec.CommandContext(ctx, binPath, "--version")
+	configureCmdHideWindow(cmd)
+	output, err := cmd.CombinedOutput()
 	outStr := strings.TrimSpace(string(output))
 	if err != nil {
 		return TestGitResult{
