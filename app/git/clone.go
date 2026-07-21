@@ -184,8 +184,13 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 		err = CloneWithFilter(nativeURL, localPath, opts.Depth, nativeToken)
 		if err == nil {
 			// gh + partial clone 成功，直接返回
+			// v0.7.21：完成时显式发 StageDone，让前端 1200ms setTimeout 清理 progressByRepo
+			// （之前不显式发 done，前端 repo.ts:440 的清理路径走不到，进度条 indeterminate 永远跑）
+			EmitProgress(opts.Progress, StageDone, 100, "synchronized (gh partial clone)")
 			return &CloneResult{LocalPath: localPath}, nil
 		}
+		// gh 失败：发 StageError 让前端立刻知道失败（不再 indeterminate 永远跑）
+		EmitProgress(opts.Progress, StageError, 0, err.Error())
 		return nil, fmt.Errorf("GitHub 仓库走 gh partial clone 失败: %w", err)
 	}
 
@@ -262,8 +267,12 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 				)
 				// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
 				os.RemoveAll(localPath)
+				// v0.7.21：失败时显式发 StageError，让前端 1200ms setTimeout 清理 progressByRepo
+				EmitProgress(opts.Progress, StageError, 0, err.Error())
 				return nil, fmt.Errorf("go-git clone 失败: %w", err)
 			}
+			// v0.7.21：SSH→HTTPS 回退成功后补发 StageDone（成功但走 fallback 路径也需前端归位）
+			EmitProgress(opts.Progress, StageDone, 100, "synchronized (ssh→https fallback)")
 		} else {
 			slog.Default().Error("git clone 失败",
 				"platform", opts.Platform, "owner", opts.Owner, "repo", opts.Repo,
@@ -273,6 +282,8 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 			)
 			// 失败时清理半成品目录（避免下次 clone 误判"已存在"）
 			os.RemoveAll(localPath)
+			// v0.7.21：失败时显式发 StageError，让前端 1200ms setTimeout 清理 progressByRepo
+			EmitProgress(opts.Progress, StageError, 0, err.Error())
 			return nil, fmt.Errorf("go-git clone 失败: %w", err)
 		}
 	}
@@ -289,6 +300,10 @@ func CloneRepo(opts CloneOptions) (*CloneResult, error) {
 			"ms", duration.Milliseconds(),
 		)
 	}
+
+	// v0.7.21：完成时显式发 StageDone，让前端 1200ms setTimeout 清理 progressByRepo
+	// （之前不显式发 done，前端 repo.ts:440 的清理路径走不到，进度条 indeterminate 永远跑）
+	EmitProgress(opts.Progress, StageDone, 100, "synchronized")
 
 	return &CloneResult{LocalPath: localPath}, nil
 }

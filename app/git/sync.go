@@ -128,8 +128,12 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 		// GitHub 仓库走 gh + partial clone（v2.9 引入，stable）
 		err := FetchWithFilter(opts.LocalPath, opts.Depth, opts.Token)
 		if err == nil {
+			// v0.7.21：完成时显式发 StageDone，让前端 1200ms setTimeout 清理 progressByRepo
+			EmitProgress(opts.Progress, StageDone, 100, "fetched (gh partial fetch)")
 			return &FetchResult{Updated: true}, nil
 		}
+		// gh 失败：发 StageError
+		EmitProgress(opts.Progress, StageError, 0, err.Error())
 		return nil, fmt.Errorf("GitHub 仓库走 gh partial fetch 失败: %w", err)
 	}
 
@@ -179,17 +183,25 @@ func FetchRepo(opts PullOptions) (*FetchResult, error) {
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			slog.Default().Warn("git fetch 超时", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds())
+			// v0.7.21：超时发 StageError
+			EmitProgress(opts.Progress, StageError, 0, "同步超时：此仓库可能过大")
 			return nil, fmt.Errorf("同步超时（2分钟）：此仓库可能过大，建议减少 Depth 或使用在线版本查看")
 		}
 		if err == git.NoErrAlreadyUpToDate {
 			slog.Default().Info("git fetch 已是最新", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds())
+			// v0.7.21：已是最新也是成功，发 StageDone 让前端归位
+			EmitProgress(opts.Progress, StageDone, 100, "已是最新")
 			return &FetchResult{Updated: false}, nil
 		}
 		slog.Default().Error("git fetch 失败", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds(), "err", err.Error())
+		// v0.7.21：失败发 StageError
+		EmitProgress(opts.Progress, StageError, 0, err.Error())
 		return nil, fmt.Errorf("fetch 失败: %w", err)
 	}
 
 	slog.Default().Info("git fetch 完成", "localPath", opts.LocalPath, "remote", remoteName, "ms", duration.Milliseconds())
+	// v0.7.21：完成时显式发 StageDone，让前端 1200ms setTimeout 清理 progressByRepo
+	EmitProgress(opts.Progress, StageDone, 100, "fetched")
 	return &FetchResult{Updated: true}, nil
 }
 
