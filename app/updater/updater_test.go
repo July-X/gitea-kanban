@@ -358,27 +358,7 @@ func TestApplyWindowsMock(t *testing.T) {
 	_ = filepath.Dir(exe)
 }
 
-// TestApplyMacOSSkipped 未签名 macOS 应走 manual update error。
-func TestApplyMacOSSkipped(t *testing.T) {
-	u := &Updater{cfg: UpdaterConfig{Logger: func(string, string, ...any) {}}}
-	dir := t.TempDir()
-	src := filepath.Join(dir, "fake.zip")
-	if err := os.WriteFile(src, []byte("fake"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	if runtime.GOOS == "darwin" {
-		err := u.applyMacOS(src)
-		if !errors.Is(err, ErrManualUpdateOnly) {
-			t.Errorf("expected ErrManualUpdateOnly on darwin, got %v", err)
-		}
-	} else {
-		err := u.applyMacOS(src)
-		if !errors.Is(err, ErrApplyFailed) {
-			t.Errorf("expected ErrApplyFailed on non-darwin, got %v", err)
-		}
-	}
-}
+// TestApplyMacOSSkipped v0.8.0.1 已删除：applyMacOS 拆到 updater_darwin.go 后直接调会 os.Exit，不适合单元测试。
 
 // TestCacheInvalidOnChannelOrPlatformChange 缓存失效逻辑。
 func TestCacheInvalidOnChannelOrPlatformChange(t *testing.T) {

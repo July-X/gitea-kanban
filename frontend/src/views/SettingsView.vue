@@ -24,8 +24,9 @@
  *   - 数值输入框 + 步进按钮，避免自由输入整数错误
  *   - 外观分组用 `.settings-group`（与 polling 的 `.settings__section` BEM 解耦）
  */
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { RefreshCw } from 'lucide-vue-next';
 import { useSettingsStore, SETTINGS_LIMITS } from '@renderer/stores/settings';
 import { useUiStore, THEME_DISPLAY_NAME, type Theme } from '@renderer/stores/ui';
 import { useAuthStore } from '@renderer/stores/auth';
@@ -52,6 +53,12 @@ import {
   GITHUB_CLI_REQUIRED_HINT,
   GITHUB_CLI_REQUIRED_MESSAGE,
 } from '@renderer/lib/github-cli-guide';
+import { useUpdate } from '@renderer/composables/useUpdate';
+import {
+  Version,
+  GetCheckUpdatesPref,
+  SetCheckUpdatesPref,
+} from '../../wailsjs/wailsjs/go/main/App';
 // v2.2：WorkspaceMigrateDialog 已移除（workspace 路径不可改）
 
 const settings = useSettingsStore();
@@ -499,6 +506,109 @@ const accountErrorMessage = computed(() => {
 const accountErrorHint = computed(() => auth.error?.hint ?? null);
 const currentAccountPlatform = computed(() => auth.accounts[0]?.platform ?? 'gitea');
 const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === 'github');
+
+// ============================================================
+// ===== v0.8.0 UI 收尾：应用更新卡片 =====
+// ============================================================
+//
+// 设计：复用 v0.8.0 已有的 useUpdate composable + App.Version/GetCheckUpdatesPref/SetCheckUpdatesPref binding。
+// 包含：当前版本号 + 手动检查更新按钮 + 是否自动检查开关。
+const update = useUpdate();
+const version = ref('dev');
+const checkUpdatesPref = ref(true);
+const prefSaving = ref(false);
+
+const checking = computed(() => update.status.value.kind === 'checking');
+const installingState = computed(() => update.status.value.kind === 'installing');
+
+const updateStateLabel = computed(() => {
+  const s = update.status.value;
+  switch (s.kind) {
+    case 'idle':
+    case 'checking':
+      return '正在检查更新...';
+    case 'upToDate':
+      return `已是最新版本 v${s.current}`;
+    case 'available':
+      return `发现新版本 v${s.info.latest}，点击下载`;
+    case 'downloading': {
+      const pct = s.total > 0 ? Math.round((s.received / s.total) * 100) : 0;
+      return `下载中：${pct}% (${(s.received / 1024 / 1024).toFixed(1)}/${(s.total / 1024 / 1024).toFixed(1)} MB)`;
+    }
+    case 'verifying':
+      return '正在校验签名...';
+    case 'downloaded':
+      return '新版本已就绪，点击下方按钮重启并安装';
+    case 'installing':
+      return '正在重启并安装...';
+    case 'error':
+      return `检查失败：${s.message}（可手动重试）`;
+    default:
+      return '';
+  }
+});
+
+const checkButtonText = computed(() => {
+  if (checking.value || installingState.value) return '正在检查…';
+  const s = update.status.value;
+  if (s.kind === 'available') return '下载更新';
+  if (s.kind === 'downloaded') return '重启并安装';
+  return '检查更新';
+});
+
+async function onLoadCurrentVersion(): Promise<void> {
+  try {
+    version.value = await Version();
+  } catch (err) {
+    logError('settings', '获取版本号失败', err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function onLoadCheckPref(): Promise<void> {
+  try {
+    checkUpdatesPref.value = await GetCheckUpdatesPref();
+  } catch (err) {
+    logError('settings', '读取自动更新偏好失败', err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function onCheckUpdateClick(): Promise<void> {
+  const s = update.status.value;
+  if (checking.value || installingState.value) return;
+  if (s.kind === 'available') {
+    await update.download();
+    return;
+  }
+  if (s.kind === 'downloaded') {
+    await update.install();
+    return;
+  }
+  await update.check();
+}
+
+async function onToggleAutoUpdate(event: Event): Promise<void> {
+  const checked = (event.target as HTMLInputElement).checked;
+  prefSaving.value = true;
+  try {
+    await SetCheckUpdatesPref(checked);
+    checkUpdatesPref.value = checked;
+    showToast({
+      type: 'success',
+      message: `已${checked ? '开启' : '关闭'}自动检查更新`,
+      duration: 1800,
+    });
+  } catch (e) {
+    const err = e as { message?: string };
+    showToast({ type: 'error', message: '保存失败', description: err.message ?? '请稍后重试' });
+    await onLoadCheckPref();
+  } finally {
+    prefSaving.value = false;
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([onLoadCurrentVersion(), onLoadCheckPref()]);
+});
 </script>
 
 <template>
@@ -607,6 +717,38 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
               <span class="settings__theme-label">{{ opt.label }}</span>
             </label>
           </div>
+        </div>
+      </section>
+
+      <!-- v0.8.0 UI 收尾：应用更新卡片 -->
+      <section class="settings__card settings__card--compact">
+        <h2>应用更新</h2>
+        <div class="settings__inline-row">
+          <label class="settings__label">当前版本</label>
+          <span class="settings__info-value mono">{{ version }}</span>
+          <button
+            type="button"
+            class="settings__save settings__save--inline"
+            :disabled="checking || installingState"
+            @click="onCheckUpdateClick"
+          >
+            <RefreshCw :class="{ spin: checking }" :size="14" />
+            {{ checkButtonText }}
+          </button>
+        </div>
+        <div class="settings__field">
+          <label class="settings__hint settings__hint--compact">
+            <input
+              type="checkbox"
+              :checked="checkUpdatesPref"
+              :disabled="prefSaving"
+              @change="onToggleAutoUpdate"
+            />
+            启动时自动检查更新
+          </label>
+          <p v-if="updateStateLabel" class="settings__hint settings__hint--muted">
+            {{ updateStateLabel }}
+          </p>
         </div>
       </section>
 
@@ -1351,6 +1493,14 @@ const currentAccountIsGitHub = computed(() => currentAccountPlatform.value === '
 @keyframes account-modal-pop {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+/* v0.8.0 UI 收尾：spin icon animation */
+.spin {
+  animation: settings-spin 1s linear infinite;
+  display: inline-block;
+}
+@keyframes settings-spin {
+  to { transform: rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
   .account-modal__backdrop,

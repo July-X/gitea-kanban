@@ -3,8 +3,8 @@
 import {main} from '../models';
 import {platform} from '../models';
 import {updater} from '../models';
-import {git} from '../models';
 import {gitbinary} from '../models';
+import {git} from '../models';
 
 export function AddProject(arg1:main.AddProjectArgs):Promise<main.AddProjectResult>;
 
@@ -49,6 +49,8 @@ export function GetAppInfo():Promise<main.AppInfo>;
 export function GetCheckUpdatesPref():Promise<boolean>;
 
 export function GetCommitDetail(arg1:main.GetCommitDetailArgs):Promise<main.CommitDetailDTO>;
+
+export function GetGhBinaryConfig():Promise<gitbinary.GhBinaryResult>;
 
 export function GetGitBinaryConfig():Promise<main.GitBinaryConfig>;
 
@@ -128,6 +130,8 @@ export function RestorePullBranch(arg1:main.RestorePullBranchArgs):Promise<void>
 
 export function SetCheckUpdatesPref(arg1:boolean):Promise<void>;
 
+export function SetGhBinaryPath(arg1:main.SetGhBinaryPathArgs):Promise<void>;
+
 export function SetGitBinaryPath(arg1:main.SetGitBinaryPathArgs):Promise<void>;
 
 export function SetUserPrefs(arg1:main.SetUserPrefsArgs):Promise<Record<string, any>>;
@@ -137,6 +141,8 @@ export function SetWorkspace(arg1:main.SetWorkspaceArgs):Promise<void>;
 export function StarBranch(arg1:main.StarBranchArgs):Promise<void>;
 
 export function StripGitBinaryQuarantine(arg1:main.StripGitBinaryQuarantineArgs):Promise<void>;
+
+export function TestGhBinary(arg1:main.SetGhBinaryPathArgs):Promise<gitbinary.TestGhResult>;
 
 export function TestGitBinary(arg1:main.SetGitBinaryPathArgs):Promise<gitbinary.TestGitResult>;
 

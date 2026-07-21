@@ -168,6 +168,44 @@ export namespace git {
 
 export namespace gitbinary {
 	
+	export class GhBinaryResult {
+	    userOverride: string;
+	    effectivePath: string;
+	    effectiveVersion: string;
+	    found: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GhBinaryResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.userOverride = source["userOverride"];
+	        this.effectivePath = source["effectivePath"];
+	        this.effectiveVersion = source["effectiveVersion"];
+	        this.found = source["found"];
+	    }
+	}
+	export class TestGhResult {
+	    ok: boolean;
+	    version: string;
+	    path: string;
+	    message: string;
+	    hint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TestGhResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.version = source["version"];
+	        this.path = source["path"];
+	        this.message = source["message"];
+	        this.hint = source["hint"];
+	    }
+	}
 	export class TestGitResult {
 	    ok: boolean;
 	    version: string;
@@ -1543,6 +1581,18 @@ export namespace main {
 	        this.projectId = source["projectId"];
 	        this.branch = source["branch"];
 	        this.sha = source["sha"];
+	    }
+	}
+	export class SetGhBinaryPathArgs {
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SetGhBinaryPathArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
 	    }
 	}
 	export class SetGitBinaryPathArgs {

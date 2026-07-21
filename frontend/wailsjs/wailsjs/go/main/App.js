@@ -90,6 +90,10 @@ export function GetCommitDetail(arg1) {
   return window['go']['main']['App']['GetCommitDetail'](arg1);
 }
 
+export function GetGhBinaryConfig() {
+  return window['go']['main']['App']['GetGhBinaryConfig']();
+}
+
 export function GetGitBinaryConfig() {
   return window['go']['main']['App']['GetGitBinaryConfig']();
 }
@@ -246,6 +250,10 @@ export function SetCheckUpdatesPref(arg1) {
   return window['go']['main']['App']['SetCheckUpdatesPref'](arg1);
 }
 
+export function SetGhBinaryPath(arg1) {
+  return window['go']['main']['App']['SetGhBinaryPath'](arg1);
+}
+
 export function SetGitBinaryPath(arg1) {
   return window['go']['main']['App']['SetGitBinaryPath'](arg1);
 }
@@ -264,6 +272,10 @@ export function StarBranch(arg1) {
 
 export function StripGitBinaryQuarantine(arg1) {
   return window['go']['main']['App']['StripGitBinaryQuarantine'](arg1);
+}
+
+export function TestGhBinary(arg1) {
+  return window['go']['main']['App']['TestGhBinary'](arg1);
 }
 
 export function TestGitBinary(arg1) {

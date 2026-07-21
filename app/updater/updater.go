@@ -43,6 +43,9 @@ type UpdaterConfig struct {
 	// 接收方：app_updater_app.go 把这个回调桥接到 wruntime.EventsEmit(ctx, "updater:progress", ...)
 	//        前端 UpdateBanner.vue 订阅 Wails 'updater:progress' 事件更新进度条。
 	Progress func(phase string, received, total int64, errMsg string)
+	// MirrorURLs 多源 fallback 地址列表（按顺序尝试，第一个成功即停）
+	// v0.8.0.1 对齐 DeepSeek-Reasonix：GitHub + 自建 mirror 串行 fallback
+	MirrorURLs []string
 }
 
 // Updater 是 v0.8.0 自动更新的核心 orchestrator。
@@ -286,23 +289,27 @@ func (u *Updater) emitProgress(phase string, received, total int64, errMsg strin
 	}
 }
 
-// Install 把缓存的 binary 应用到当前平台。
+// Install 把缓存的 binary 应用到当前平台（各平台 different file）
 func (u *Updater) Install() error {
 	plat := CurrentPlatform()
 	rec, err := u.readDownloadedRecord("", u.cfg.Channel, plat)
 	if err != nil {
-		return fmt.Errorf("%w: no cached update: %v", ErrApplyFailed, err)
+		return fmt.Errorf("%w: %v", ErrApplyFailed, err)
 	}
-
 	if _, err := os.Stat(rec.Path); err != nil {
 		return fmt.Errorf("%w: cached file missing: %v", ErrApplyFailed, err)
 	}
+	return apply(rec.Path, u.cfg.Logger, u.cfg.OpenBrowser)
+}
 
+// apply 按平台拆分为 applyMacOS (updater_darwin.go) / applyWindows (updater_windows.go)
+// 定义为统一入口 + 各平台文件的 go:build 实现
+func apply(installerPath string, logger func(level, format string, args ...any), openBrowser func(url string) error) error {
 	switch runtime.GOOS {
-	case "windows":
-		return applyWindows(rec.Path, u.cfg.Logger)
 	case "darwin":
-		return u.applyMacOS(rec.Path)
+		return applyMacOS(installerPath, logger, openBrowser)
+	case "windows":
+		return applyWindows(installerPath, logger)
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedOS, runtime.GOOS)
 	}
@@ -316,9 +323,9 @@ func (u *Updater) OpenDownloadPage() error {
 
 // canSelfUpdate 当前平台是否支持自动 in-place apply。
 //
-// v0.8.0 规则：
-//   - Windows: 支持
-//   - macOS: 不支持（未签名 build；签名+notarize 后会变成 true）
+// v0.8.0.1 规则（对齐 DeepSeek-Reasonix）：
+//   - Windows: 支持（NSIS installer）
+//   - macOS:   支持（需要签名+notarize 才能让 .app 内 binary 替换生效）
 func (u *Updater) canSelfUpdate() bool {
 	switch runtime.GOOS {
 	case "windows":
@@ -341,11 +348,35 @@ func (u *Updater) manualUpdateReason() string {
 	}
 }
 
-// fetchLatestManifest 调 GitHub releases/latest 端点。
+// fetchLatestManifest 拉取 latest manifest，多源 fallback（对齐 DeepSeek-Reasonix）
 //
-// ⚠️ v0.8.0 stub：用 owner/repo 写死为本仓库。Phase 5 cmd/sign 工具和 CI 发版脚本会同步这个 owner/repo。
+// 尝试顺序：
+//  1. UpdaterConfig.MirrorURLs（按顺序尝试，第一个成功即停）
+//  2. GitHub releases/latest API（兜底）
+//  3. 所有源都失败 → 返 ErrManifestFetch
 func (u *Updater) fetchLatestManifest(ctx context.Context) (*Manifest, error) {
-	url := GitHubLatestReleaseAPI
+	// 收集所有尝试的 URL（mirror 优先，GitHub 兜底）
+	urls := make([]string, 0, len(u.cfg.MirrorURLs)+1)
+	urls = append(urls, u.cfg.MirrorURLs...)
+	urls = append(urls, GitHubLatestReleaseAPI)
+
+	var lastErr error
+	for i, url := range urls {
+		m, err := u.fetchManifestFrom(ctx, url)
+		if err == nil {
+			if i > 0 {
+				u.cfg.Logger("info", "update: mirror fallback succeeded at %s", url)
+			}
+			return m, nil
+		}
+		lastErr = err
+		u.cfg.Logger("warn", "update: manifest fetch attempt %d/%d failed: %v", i+1, len(urls), err)
+	}
+	return nil, fmt.Errorf("%w: %v", ErrManifestFetch, lastErr)
+}
+
+// fetchManifestFrom 从单个 URL 拉取 manifest
+func (u *Updater) fetchManifestFrom(ctx context.Context, url string) (*Manifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrManifestFetch, err)
@@ -355,17 +386,17 @@ func (u *Updater) fetchLatestManifest(ctx context.Context) (*Manifest, error) {
 
 	resp, err := u.hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrManifestFetch, err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d", ErrManifestFetch, resp.StatusCode)
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrManifestFetch, err)
+		return nil, err
 	}
 
 	var raw struct {
@@ -379,7 +410,7 @@ func (u *Updater) fetchLatestManifest(ctx context.Context) (*Manifest, error) {
 		} `json:"assets"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrManifestParse, err)
+		return nil, err
 	}
 
 	m := &Manifest{
@@ -389,7 +420,6 @@ func (u *Updater) fetchLatestManifest(ctx context.Context) (*Manifest, error) {
 		Assets:  map[string]Asset{},
 	}
 	for _, a := range raw.Assets {
-		// 从 asset name 推断 platform key（约定：gitea-kanban-v0.8.0-windows-amd64.exe）
 		pk, ok := extractPlatformFromAssetName(a.Name)
 		if !ok {
 			continue
@@ -401,7 +431,7 @@ func (u *Updater) fetchLatestManifest(ctx context.Context) (*Manifest, error) {
 		}
 	}
 	if m.Version == "" {
-		return nil, fmt.Errorf("%w: empty tag_name", ErrManifestParse)
+		return nil, fmt.Errorf("empty tag_name")
 	}
 	return m, nil
 }
@@ -490,49 +520,6 @@ func (u *Updater) writeDownloadedRecord(rec downloadedRecord) error {
 		return err
 	}
 	return writeFileAtomic(path, body, 0o644)
-}
-
-// --- 平台 apply 函数 ---
-
-// applyWindows 启动 NSIS installer 安装更新（Windows 平台）。
-// v0.8.5 变更：Windows 产物从 portable exe 改为 NSIS installer，
-// 下载得到的 installerPath 是一个安装器 exe，需以 /S /D=<installDir> 参数启动静默安装。
-// 此函数只在 Windows 平台被调用（runtime.GOOS == "windows" 分支）。
-func applyWindows(installerPath string, logger func(level, format string, args ...any)) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrApplyFailed, err)
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	installDir := filepath.Dir(exe)
-
-	if logger != nil {
-		logger("info", "update: Windows apply, launching NSIS installer: %s /S /D=%s", installerPath, installDir)
-	}
-
-	// NSIS installer 启动参数：/S 静默安装，/D=<installDir> 指定安装目录（必须位于命令行末尾）
-	cmd := exec.Command(installerPath, "/S", "/D="+installDir)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("%w: launch NSIS installer: %v", ErrApplyFailed, err)
-	}
-	os.Exit(0)
-	return nil // unreachable
-}
-
-// applyMacOS 未签名 build 直接返 manual update error，签名后改 in-place replace。
-func (u *Updater) applyMacOS(newBinaryPath string) error {
-	// v0.8.0 暂不支持自动 in-place（需要签名 + notarize 才能让 .app 内 binary 替换生效）
-	if !u.canSelfUpdate() {
-		return fmt.Errorf("%w: %s", ErrManualUpdateOnly, u.manualUpdateReason())
-	}
-	// 签名+notarize 后这里实现：
-	// 1. 拿 .app/Contents/MacOS/gitea-kanban 路径
-	// 2. 写新 binary 到 .app/Contents/MacOS/gitea-kanban.new
-	// 3. rename 覆盖
-	// 4. exec.Command(os.Executable()) relaunch + os.Exit(0)
-	return fmt.Errorf("%w: macOS in-place not yet implemented", ErrApplyFailed)
 }
 
 // --- helpers ---
