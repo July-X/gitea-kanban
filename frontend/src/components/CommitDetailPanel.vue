@@ -13,7 +13,7 @@
  *   - variant:    'panel'（默认，inline 用）| 'dialog'（弹窗内用，meta 间距更宽松）
  *
  * 数据加载策略：
- *   - module 级 detailCache（跨 CommitDetailPanel 实例共享，弹窗和手风琴互不重复请求）
+ *   - 已删除本地 detailCache，改用 ipc-client 的 resolvedCache（watcher 同步读，零骨架屏）
  *   - watch(commit) 切 commit 时清 detail → 重新加载
  */
 
@@ -33,7 +33,7 @@ import {
   ShieldQuestion,
   KeyRound,
 } from 'lucide-vue-next';
-import { commitsGet } from '@renderer/lib/ipc-client';
+import { commitsGet, getCachedCommit } from '@renderer/lib/ipc-client';
 import type { CommitGpgDto, CommitFileChangeDto } from '@renderer/types/dto';
 import { showToast } from '@renderer/lib/toast';
 // Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL（window.open 在 Wails
@@ -90,33 +90,27 @@ interface CommitDetail {
   /** GPG 签名状态（commitsGet 单条详情才有） */
   gpg?: CommitGpgDto;
 }
-const detailCache = new Map<string, CommitDetail>();
-
 const loading = ref(false);
+const filesLoading = ref(false);
 const detail = ref<CommitDetail | null>(null);
 
-/** 加载 commit 详情（带缓存）。失败回退到 subject 作为 message */
+/** 已删除本地 detailCache，改用 ipc-client 的 resolvedCache（watcher 同步读） */
+
+/** 加载 commit 详情。失败回退到 subject 作为 message */
 async function loadDetail(): Promise<void> {
   if (!props.commit) return;
   const sha = props.commit.sha;
 
-  // 缓存命中
-  const cached = detailCache.get(sha);
-  if (cached) {
-    detail.value = cached;
-    return;
-  }
-
   if (!props.projectId) {
-    // 没传 projectId → 跳过懒加载，detail 留空（调用方决定是否显示 loading）
     detail.value = null;
     return;
   }
 
   loading.value = true;
+  filesLoading.value = true;
   try {
     const dto = await commitsGet({ projectId: props.projectId, sha });
-    const d: CommitDetail = {
+    detail.value = {
       message: dto.message,
       additions: dto.additions,
       deletions: dto.deletions,
@@ -124,30 +118,44 @@ async function loadDetail(): Promise<void> {
       files: dto.files,
       linkedCards: dto.linkedCards,
     };
-    detailCache.set(sha, d);
-    detail.value = d;
+    filesLoading.value = false;
   } catch {
-    // 失败时用基本信息（subject 作为 message）
-    const fallback: CommitDetail = {
-      message: props.commit.subject,
-    };
-    detail.value = fallback;
+    detail.value = { message: props.commit.subject };
+    filesLoading.value = false;
   } finally {
     loading.value = false;
   }
 }
 
-// commit 切换 → 重新加载
+// commit 切换 → 重新加载（优先读 ipc-client resolvedCache，同步命中 → 零骨架屏）
 watch(
   () => props.commit?.sha,
-  async (_newSha, oldSha) => {
-    if (!props.commit) {
+  (newSha, oldSha) => {
+    if (!props.commit || !newSha) {
       detail.value = null;
       return;
     }
-    if (props.commit.sha === oldSha) return;
+    if (newSha === oldSha) return;
+
+    // v0.9.x：同步读 resolvedCache（prefetch 已写好 → 命中则零骨架屏）
+    const cached = getCachedCommit(props.projectId, newSha);
+    if (cached) {
+      detail.value = {
+        message: cached.message,
+        additions: cached.additions,
+        deletions: cached.deletions,
+        filesChanged: cached.filesChanged,
+        files: cached.files,
+        linkedCards: cached.linkedCards,
+      };
+      loading.value = false;
+      filesLoading.value = false;
+      return;
+    }
+
+    // 未命中 → 后台异步走 IPC
     detail.value = null;
-    await loadDetail();
+    void loadDetail();
   },
   { immediate: true },
 );
@@ -503,7 +511,36 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
            files 列表很长时只在 .cd-files__scroll 内部出滚动条，
            cards 始终贴底可见，不会被 files 列表挤出右栏。-->
       <div class="cd-panel__right" @wheel="onPanelWheel($event, $event.currentTarget as HTMLElement)">
-        <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
+        <!-- v0.9.x：filesLoading 独立控制右栏文件区骨架屏，避免跟 message 一起闪烁 -->
+        <div v-if="filesLoading" class="cd-files">
+          <div class="cd-section-title">
+            <FileText :size="13" />
+            加载文件列表…
+          </div>
+          <div class="cd-files__scroll">
+            <div class="cd-files__list cd-files__skeleton">
+              <div class="cd-file-record cd-file-record--skeleton-single">
+                <svg class="cd-file-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="14" viewBox="0 0 30 30" aria-hidden="true">
+                  <path d="M24.707,8.793l-6.5-6.5C18.019,2.105,17.765,2,17.5,2H7C5.895,2,5,2.895,5,4v22c0,1.105,0.895,2,2,2h16c1.105,0,2-0.895,2-2V9.5C25,9.235,24.895,8.981,24.707,8.793z M18,10c-0.552,0-1-0.448-1-1V3.904L23.096,10H18z"/>
+                </svg>
+                <span class="cd-file-name">
+                  <span class="cd-file-basename cd-skeleton-line" style="width: 50%;" />
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- v0.9.x：files 为空时显示占位，不再留白 -->
+        <div v-else-if="detail && detail.files && detail.files.length === 0" class="cd-files cd-files--empty">
+          <div class="cd-section-title">
+            <FileText :size="13" />
+            文件变更
+          </div>
+          <div class="cd-files__empty-hint">
+            本次提交没有文件改动（纯元数据 / merge commit）
+          </div>
+        </div>
+        <div v-else-if="detail?.files && detail.files.length > 0" class="cd-files">
           <div class="cd-section-title">
             <FileText :size="13" />
             文件变更（{{ detail.files.length }}）
@@ -648,11 +685,20 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
         </div>
       </div>
 
-      <!-- 加载中 -->
-      <div v-if="loading" class="cd-loading">加载详情中…</div>
+      <!-- 加载中 (dialog 变体：filesLoading 独立控制) -->
+      <div v-if="filesLoading" class="cd-loading">加载文件列表…</div>
 
-      <!-- 文件变更列表 -->
-      <div v-if="detail?.files && detail.files.length > 0" class="cd-files">
+      <!-- 文件变更列表（files 为空时显示占位） -->
+      <div v-if="!filesLoading && detail && detail.files && detail.files.length === 0" class="cd-files cd-files--empty">
+        <div class="cd-section-title">
+          <FileText :size="13" />
+          文件变更
+        </div>
+        <div class="cd-files__empty-hint">
+          本次提交没有文件改动（纯元数据 / merge commit）
+        </div>
+      </div>
+      <div v-if="!filesLoading && detail?.files && detail.files.length > 0" class="cd-files">
         <div class="cd-section-title">
           <FileText :size="13" />
           文件变更（{{ detail.files.length }}）
@@ -725,11 +771,13 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
  *   - v3.7：改 flex: 1 1 auto → display: block
  *     之前 flex:1 撑满 accordion 容器（=300px），导致 cd-panel__left/right 强制撑到容器高度，
  *     内容 < 容器时空滚动条出现。现在 accordion 自己 max-height + overflow: auto 控制滚动，
- *     panel 用 block 让内容自然撑高。*/
+ *     panel 用 block 让内容自然撑高。
+ *   - v0.9.x：加 padding-bottom: 6px，accordion 的圆角 border + box-shadow 区域
+ *     不要切到 panel 最后一行内容（之前底部贴边线有遮挡）*/
 .cd-panel--panel {
   background: transparent;
   border-top: none;
-  padding: 0;
+  padding: 0 0 6px;
   display: block;
   min-height: 0;
 }
@@ -871,6 +919,8 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 .cd-panel--panel .cd-cards {
   border-bottom: none;
   flex-shrink: 0;
+  /* v0.9.x：卡片区底部 3px 安全距，避免文字贴边线被遮挡 */
+  padding: 6px var(--space-3, 12px) 3px;
 }
 .cd-panel--panel .cd-message__body {
   flex: 1;
@@ -879,6 +929,8 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   /* v3.8：限制 body 最大高度 —— 超出时 body 自身滚动，不把左栏撑爆。
    * 150px 给多行 commit message 留足阅读空间；单行消息不受影响。*/
   max-height: 150px;
+  /* v0.9.x：底部 8px padding，避免滚到底时最后一行文字贴 <pre> 边缘被遮挡 */
+  padding-bottom: 8px;
 }
 .cd-panel__header-left {
   display: flex;
@@ -934,7 +986,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 
 /* ===== Message ===== */
 .cd-panel__message {
-  padding: var(--space-2, 8px) var(--space-3, 12px);
+  padding: var(--space-2, 8px) var(--space-3, 12px) 3px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   /* 关键：overflow:hidden 让 flex column 约束子元素宽度，
@@ -943,7 +995,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   overflow: hidden;
 }
 .cd-panel--dialog .cd-panel__message {
-  padding: var(--space-3, 12px) var(--space-4, 16px);
+  padding: var(--space-3, 12px) var(--space-4, 16px) 3px;
 }
 .cd-message__title {
   font-size: 13px;
@@ -972,6 +1024,8 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-family: inherit;
   max-height: 120px;
   overflow-y: auto;
+  /* v0.9.x：底部 8px padding，避免滚到底时最后一行文字贴 <pre> 边缘被遮挡 */
+  padding-bottom: 8px;
 }
 
 /* v3.7：紧凑 inline meta（panel 变体专用，替代 .cd-panel__meta 独立区块）
@@ -1222,12 +1276,12 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 /* ===== Files ===== */
 .cd-files {
   /* v3.7：紧凑排版，顶部 2px gap */
-  padding: 2px 8px 4px 0;
+  padding: 2px 8px 3px 0;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 .cd-panel--dialog .cd-files {
-  padding: var(--space-3, 12px) var(--space-4, 16px);
+  padding: var(--space-3, 12px) var(--space-4, 16px) 3px;
 }
 .cd-section-title {
   display: flex;
@@ -1254,6 +1308,8 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   background: transparent;
   border: none;
   border-radius: 0;
+  /* v0.9.x：底部 8px padding，避免滚到底时最后一个文件行贴边缘被遮挡 */
+  padding-bottom: 8px;
 }
 /* v2.56：dialog 变体下保留独立的卡片样式（弹窗壳外层是 dialog 背景，
    files__list 需要 border + background 才能跟周围内容区分） */
@@ -1298,6 +1354,43 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   max-height: none;
   overflow-y: visible;
 }
+
+/* v0.8.x：文件列表骨架屏（加载中占位，避免空白感） */
+.cd-files__skeleton {
+  pointer-events: none;
+}
+.cd-skeleton-line {
+  display: inline-block;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(90deg,
+    var(--color-bg-hover, rgba(255,255,255,0.06)) 25%,
+    rgba(255,255,255,0.12) 50%,
+    var(--color-bg-hover, rgba(255,255,255,0.06)) 75%
+  );
+  background-size: 200% 100%;
+  animation: cd-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes cd-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* v0.9.x：files 为空时占位 */
+.cd-files--empty .cd-files__empty-hint {
+  padding: 16px 12px;
+  color: var(--color-text-secondary, #888);
+  font-size: 12px;
+  font-style: italic;
+}
+.cd-file-record--skeleton-single {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
 /* v3.8：复刻 vscode main.ts:480 #cdvFiles li
  * - display: flex —— 建立 flex 格式化上下文，让子元素 .cd-file 获得明确宽度约束
  *   vscode 用 <li> 自然建立块级宽度约束；我们用 flex 容器达到同样效果

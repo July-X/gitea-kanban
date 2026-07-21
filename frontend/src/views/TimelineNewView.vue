@@ -968,6 +968,11 @@ async function loadGraph(_offset = 0): Promise<void> {
     }
 
     expandedSha.value = null;
+
+    // v0.8.x 已删除 prefetch，不再批量预加载 commit 详情。
+    // 触发条件：用户点开具体的 commit 时，才按需调 commitsGet。
+    // 好处：消除首屏报错噪声（"object not found" 因为 commit 对象本地没有）。
+    // 代价：点开 commit 时走骨架屏过渡（已优化为不阻塞 UI）。 
   } catch (e: unknown) {
     const err = e as {
       code?: string;
@@ -3875,7 +3880,7 @@ function refBadgeClass(refType?: string): string {
        * overflow-x:auto 允许文件列表横向滚动（vscode 原始 #cdvFiles li 无横向滚动但保留设置）。
        * max-height: min(70vh, 600px) 限制 accordion 高度上限，超出时内容被裁剪，
        * 由左右栏自身滚动接管 —— 跟 vscode 行为一致。 */
-      max-height: min(70vh, 600px);
+      max-height: min(70vh, 610px);
       overflow: hidden auto; /* x=hidden 禁止纵向滚动；y=auto 内容超限时栏内滚动 */
       /* v3.8：去掉 scrollbar-width——accordion 不再有纵向滚动条，滚动由 .cd-panel__left/right 接管 */
       scrollbar-width: none; /* 隐藏纵向滚动条 */

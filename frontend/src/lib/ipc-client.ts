@@ -518,9 +518,80 @@ export function commitsList(args: {
   return getIpcClient().invoke('commits', 'list', args);
 }
 
+/**
+ * commit 详情的缓存（module 级，跨 CommitDetailPanel / CommitDetailDialog 共享）。
+ *
+ * 三缓存设计：
+ *   - successCache：缓存 pending Promise（dedup 并发请求 + 自动缓存 resolved value）
+ *   - failureCache：缓存失败时间戳（30s TTL，期内直接抛错不发 IPC，防 noise）
+ *   - resolvedCache：缓存已 resolved 的 DTO（含 files）→ watcher 同步读，零骨架屏
+ *
+ * key = `${projectId}::${sha}`（防跨项目串味）
+ */
+const successCache = new Map<string, Promise<CommitDetailDTO>>();
+const failureCache = new Map<string, number>();
+/** 已 resolved 的 DTO 缓存（prefetch 写入，watcher 同步读 → 零骨架屏） */
+const resolvedCache = new Map<string, CommitDetailDTO>();
+const FAILURE_TTL_MS = 30_000;
+
 /** 拿单个 commit 详情（gitea /repos/{owner}/{repo}/git/commits/{sha}，含 stats） */
 export function commitsGet(args: { projectId: string; sha: string }): Promise<CommitDetailDTO> {
-  return getIpcClient().invoke('commits', 'get', args);
+  const key = `${args.projectId}::${args.sha}`;
+
+  // 命中 pending Promise → 直接返回（dedup 并发请求）
+  const existing = successCache.get(key);
+  if (existing) return existing;
+
+  // 命中 failureCache（30s 期内）→ 直接抛错，不发 IPC，防日志刷屏
+  const failedAt = failureCache.get(key);
+  if (failedAt !== undefined && Date.now() - failedAt < FAILURE_TTL_MS) {
+    return Promise.reject(
+      new Error(`commit ${args.sha} 加载失败，已缓存，${Math.ceil((FAILURE_TTL_MS - (Date.now() - failedAt)) / 1000)}s 后重试`)
+    );
+  }
+
+  const rawPromise = getIpcClient().invoke('commits', 'get', args) as Promise<CommitDetailDTO>;
+  const p = rawPromise
+    .then((dto) => {
+      successCache.delete(key);
+      failureCache.delete(key);
+      resolvedCache.set(key, dto); // 写入 resolvedCache，watcher 同步读 → 零骨架屏
+      return dto;
+    })
+    .catch((err) => {
+      successCache.delete(key);
+      failureCache.set(key, Date.now());
+      throw err;
+    });
+
+  successCache.set(key, p);
+  return p;
+}
+
+/**
+ * 同步读已缓存的 CommitDetailDTO（含 files）。
+ * 用于 watcher immediate 路径，避免组件挂载瞬间出现骨架屏。
+ * - prefetch 已经写过 key → 直接返 DTO，前端同步赋值
+ * - 没写过 → 返 undefined，由 panel 走 loadDetail 异步路径
+ */
+export function getCachedCommit(
+  projectId: string | null,
+  sha: string,
+): CommitDetailDTO | undefined {
+  if (!projectId) return undefined;
+  const key = `${projectId}::${sha}`;
+  return resolvedCache.get(key);
+}
+
+export function hasCachedCommit(projectId: string | null, sha: string): boolean {
+  return getCachedCommit(projectId, sha) !== undefined;
+}
+
+/** 强制清空 commit 详情缓存（给"重新加载仓库"按钮调，下次点 commit 走 fresh 请求） */
+export function clearCommitCache(): void {
+  successCache.clear();
+  failureCache.clear();
+  resolvedCache.clear();
 }
 
 /** 拿结构化 Git Graph（Go 端基于 go-git commit DAG 生成 nodes + edges） */

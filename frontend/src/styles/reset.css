@@ -82,3 +82,17 @@ button {
 [hidden] {
   display: none !important;
 }
+
+/* v0.9.x：全局禁止鼠标按住选择文本复制（不影响 input/textarea 正常输入） */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}

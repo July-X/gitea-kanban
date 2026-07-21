@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"gitea-kanban/app/git"
 	"gitea-kanban/app/ipc"
 	"gitea-kanban/app/logx"
 	platformAdapter "gitea-kanban/app/platform"
 	"gitea-kanban/app/store"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/uuid"
 	"time"
 )
@@ -387,6 +389,21 @@ func (a *App) GetCommitDetail(args GetCommitDetailArgs) (CommitDetailDTO, error)
 
 	commit, err := repo.GetCommit(args.SHA)
 	if err != nil {
+		// v0.8.x 降级：commit 对象在本地裸仓库找不到时（例如 shallow clone、
+		// force-push 抹掉的历史 commit），返回空 DTO 而非 error。
+		// 前端走 fallback：显示 subject（来自 graph 数据）+ 提示"详情暂不可用"。
+		if errors.Is(err, plumbing.ErrObjectNotFound) {
+			a.logger.Warn("GetCommitDetail: commit not found locally, returning empty DTO",
+				"sha", args.SHA, "projectID", args.ProjectID)
+			return CommitDetailDTO{
+				SHA:          args.SHA,
+				Subject:      "（该提交详情暂不可用）",
+				Parents:      []string{},
+				Additions:    0,
+				Deletions:    0,
+				FilesChanged: 0,
+			}, nil
+		}
 		return CommitDetailDTO{}, err
 	}
 

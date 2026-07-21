@@ -135,7 +135,7 @@ onUnmounted(() => {
   border-radius: var(--radius-lg, 12px);
   box-shadow: var(--shadow-lg, 0 16px 48px rgba(0, 0, 0, 0.32));
   width: min(640px, 100%);
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh - 38px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
