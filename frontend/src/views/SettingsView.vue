@@ -177,7 +177,7 @@ const EMBEDDED_MODE_MARKER = '$EMBEDDED$'
  * 默认 'custom' 是兼容老 user state.json（prefs["app.gitBinaryPath"] 非空路径）；
  * 如果 state.json 是空 / sentinel，启动期 GitHub 设定仍未跑过时本 UI 默认空。
  */
-const gitBinaryMode = ref<'embedded' | 'custom'>('custom');
+const gitBinaryMode = ref<'embedded' | 'custom'>('embedded');
 const gitBinaryModeLoading = ref(false);
 
 /** 默认版本号：仅 UI 陪字节用，有 TestGitBinaryResult 时会被实际覆盖 */
@@ -199,14 +199,7 @@ async function onSelectEmbedded(): Promise<void> {
     const cfg = await settings.saveGitBinaryPath(EMBEDDED_MODE_MARKER);
     gitBinaryMode.value = 'embedded';
     gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
-    if (gitBinaryTestResult.value?.ok) {
-      showToast({
-        type: 'success',
-        message: '已切换到内嵌 Git',
-        description: `git ${gitBinaryEffectiveVersion.value} · v0.4.0 内嵌`,
-        duration: 2200,
-      });
-    } else {
+    if (gitBinaryTestResult.value?.ok === false) {
       showToast({
         type: 'warn',
         message: '内嵌 git 未能跑通',
@@ -214,13 +207,6 @@ async function onSelectEmbedded(): Promise<void> {
         duration: 4000,
       });
     }
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    showToast({
-      type: 'error',
-      message: '切换失败',
-      description: err.messageText ?? err.message ?? '请稍后重试',
-    });
   } finally {
     gitBinaryModeLoading.value = false;
   }
@@ -251,27 +237,6 @@ async function onPickAndUseSystemGit(): Promise<void> {
     const cfg = await settings.saveGitBinaryPath(picked);
     gitBinaryMode.value = 'custom';
     gitBinaryTestResult.value = await testGitBinary(cfg.effectivePath);
-    if (gitBinaryTestResult.value?.ok) {
-      showToast({
-        type: 'success',
-        message: '已使用选中的 git',
-        description: `git ${gitBinaryEffectiveVersion.value} · ${cfg.effectivePath}`,
-        duration: 2500,
-      });
-    } else {
-      showToast({
-        type: 'error',
-        message: '选中的 git 二进制不能跑',
-        description: `${gitBinaryTestResult.value?.message}\n${gitBinaryTestResult.value?.hint ?? ''}`,
-      });
-    }
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    showToast({
-      type: 'error',
-      message: '保存失败',
-      description: err.messageText ?? err.message ?? '请稍后重试',
-    });
   } finally {
     gitBinaryModeLoading.value = false;
   }
@@ -696,31 +661,42 @@ onMounted(async () => {
         </p>
 
         <!--
-          v0.5 主交互区：仅两个 toggle button
+          v0.7.21 主交互区：radio 单选（对齐外观主题 / gh 二进制卡片）
           - 互斥：只有选中态高亮
-          - 简单明了的 segmented control
+          - 与外观主题共用 .settings__theme-opt 样式
         -->
-        <div class="settings__mode-toggle" role="group" aria-label="Git 二进制来源">
-          <button
-            type="button"
-            class="settings__mode-btn"
-            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'embedded' }"
-            :disabled="gitBinaryModeLoading"
-            @click="onSelectEmbedded"
+        <div class="settings__theme-options" role="radiogroup" aria-label="Git 二进制来源">
+          <label
+            class="settings__theme-opt"
+            :class="{ 'settings__theme-opt--active': gitBinaryMode === 'embedded' }"
           >
-            使用内嵌 Git
-          </button>
-          <button
-            type="button"
-            class="settings__mode-btn"
-            :class="{ 'settings__mode-btn--active': gitBinaryMode === 'custom' }"
-            :disabled="gitBinaryModeLoading"
-            @click="onPickAndUseSystemGit"
+            <input
+              type="radio"
+              name="gitBinary"
+              value="embedded"
+              :checked="gitBinaryMode === 'embedded'"
+              class="settings__theme-radio"
+              @change="onSelectEmbedded"
+            />
+            <span class="settings__theme-label">使用内嵌 Git</span>
+          </label>
+          <label
+            class="settings__theme-opt"
+            :class="{ 'settings__theme-opt--active': gitBinaryMode === 'custom' }"
           >
-            使用系统安装的 Git
-          </button>
+            <input
+              type="radio"
+              name="gitBinary"
+              value="custom"
+              :checked="gitBinaryMode === 'custom'"
+              class="settings__theme-radio"
+              @change="onPickAndUseSystemGit"
+            />
+            <span class="settings__theme-label">使用系统安装的 Git</span>
+          </label>
         </div>
       </section>
+
 
       <!-- 外观 -->
       <section class="settings__card settings__card--compact">

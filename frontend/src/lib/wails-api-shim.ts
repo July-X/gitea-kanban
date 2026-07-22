@@ -206,6 +206,25 @@ type WailsApp = {
   StripGitBinaryQuarantine?: (args: { path: string }) => Promise<void>;
   OpenGitBinaryPicker?: () => Promise<string>;
 
+  // ===== v0.7.21：gh 二进制设置（SettingsView "gh 二进制" 卡片）=====
+  /** 读当前 gh 配置（found / userOverride / effectiveVersion / effectivePath） */
+  GetGhBinaryConfig?: () => Promise<{
+    found: boolean;
+    userOverride: string;
+    effectiveVersion: string;
+    effectivePath: string;
+  }>;
+  /** 持久化 prefs["app.ghBinaryPath"] + 进程内立即生效 */
+  SetGhBinaryPath?: (args: { path: string }) => Promise<void>;
+  /** 验证 path 是否合法 gh binary */
+  TestGhBinary?: (args: { path: string }) => Promise<{
+    ok: boolean;
+    version: string;
+    path: string;
+    message: string;
+    hint: string;
+  }>;
+
   // ===== v0.6.0 日志导出 / Bug 上报（Wails bindings）=====
   /** 一键导出日志 zip 到桌面 */
   ExportLogs?: (args: { maxLogs?: number }) => Promise<{
@@ -1503,6 +1522,84 @@ const apiShim = {
             return Promise.resolve('');
           }
           return app.OpenGitBinaryPicker();
+        },
+      ),
+  },
+
+  /**
+   * v0.7.21：gh binary 子 namespace（"settings.ghBinary"）
+   *
+   *   - getConfig(): 读当前 gh 配置（found / userOverride / effectiveVersion）
+   *   - setPath({path}): 持久化 + 立即生效
+   *   - test({path}): 验证 path 是否合法 gh binary
+   */
+  ghBinary: {
+    getConfig: (): Promise<{
+      found: boolean;
+      userOverride: string;
+      effectiveVersion: string;
+      effectivePath: string;
+    }> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'ghBinary.getConfig 尚未连接到 Go 后端（Wails 未启动）',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.GetGhBinaryConfig) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 GetGhBinaryConfig',
+              hint: '请重新构建应用（wails build）',
+            });
+          }
+          return app.GetGhBinaryConfig();
+        },
+      ),
+    setPath: (args: { path: string }): Promise<void> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'ghBinary.setPath 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.SetGhBinaryPath) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 SetGhBinaryPath',
+              hint: '请重新构建应用（wails build）',
+            });
+          }
+          return app.SetGhBinaryPath(args);
+        },
+      ),
+    test: (args: { path: string }): Promise<{
+      ok: boolean;
+      version: string;
+      path: string;
+      message: string;
+      hint: string;
+    }> =>
+      forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'ghBinary.test 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        (app) => {
+          if (!app.TestGhBinary) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 TestGhBinary',
+              hint: '请重新构建应用（wails build）',
+            });
+          }
+          return app.TestGhBinary(args);
         },
       ),
   },

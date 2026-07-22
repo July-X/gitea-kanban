@@ -1198,6 +1198,48 @@ export function openGitBinaryPicker(): Promise<string> {
 }
 
 // ============================================================
+// ===== v0.7.21 gh 二进制设置（SettingsView "gh 二进制" 卡片）=====
+// ============================================================
+//
+// 把 app_gitbinary.go 暴露的 gh 相关 binding 包装为前端调用函数：
+//   - getGhBinaryConfig: 读 userOverride / effectivePath / effectiveVersion / found
+//   - setGhBinaryPath: 持久化 prefs["app.ghBinaryPath"] + 进程内立即生效
+//   - testGhBinary: 验证 path 是否可执行（macOS quarantine 检测）
+
+/** gh 二进制配置（对齐 Go 端 gitbinary.GhBinaryResult） */
+export interface GhBinaryResult {
+  /** 用户填的路径；空字符串 = 用默认（PATH 探测） */
+  userOverride: string;
+  /** 当前进程实际用的 gh 路径（= ResolveGhPath 解析结果） */
+  effectivePath: string;
+  /** gh --version 输出的版本号（探测失败时为空） */
+  effectiveVersion: string;
+  /** 是否找到 gh（PATH 探测 + 常见位置扫描） */
+  found: boolean;
+}
+
+/** gh 二进制测试结果（对齐 Go 端 gitbinary.TestGhResult） */
+export interface TestGhResult {
+  ok: boolean;
+  version: string;
+  path: string;
+  message: string;
+  hint: string;
+}
+
+export function getGhBinaryConfig(): Promise<GhBinaryResult> {
+  return getIpcClient().invoke('ghBinary', 'getConfig', {});
+}
+
+export function setGhBinaryPath(path: string): Promise<void> {
+  return getIpcClient().invoke('ghBinary', 'setPath', { path });
+}
+
+export function testGhBinary(path: string): Promise<TestGhResult> {
+  return getIpcClient().invoke('ghBinary', 'test', { path });
+}
+
+// ============================================================
 // ===== v0.6.0 日志导出 / Bug 上报 =====
 // ============================================================
 //
