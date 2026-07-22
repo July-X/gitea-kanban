@@ -118,6 +118,10 @@ func TestExtractPlatformFromAssetName(t *testing.T) {
 		{"gitea-kanban-v0.8.0-windows-amd64.exe", "windows-amd64", true},
 		{"gitea-kanban-v0.8.0-darwin-arm64.zip", "darwin-arm64", true},
 		{"gitea-kanban-v0.8.0-darwin-universal.zip", "darwin-universal", true},
+		// v0.8.20：兼容 CI 实际命名 macos-* → darwin-* 归一化
+		{"gitea-kanban-v0.8.20-macos-amd64.dmg", "darwin-amd64", true},
+		{"gitea-kanban-v0.8.20-macos-arm64.dmg", "darwin-arm64", true},
+		{"gitea-kanban-v0.8.20-macos-universal.dmg", "darwin-universal", true},
 		{"random-file.txt", "", false},
 		{"gitea-kanban-v0.8.0.zip", "", false},
 	}

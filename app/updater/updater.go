@@ -526,7 +526,13 @@ func (u *Updater) writeDownloadedRecord(rec downloadedRecord) error {
 
 // --- helpers ---
 
-// extractPlatformFromAssetName 从 "gitea-kanban-v0.8.0-windows-amd64-installer.exe" 提取 "windows-amd64"。
+// extractPlatformFromAssetName 从 asset 文件名提取平台 key。
+//
+// 兼容历史命名（v0.8.20 修）：
+//   - 当前约定: gitea-kanban-v0.8.0-darwin-amd64.dmg / -windows-amd64-installer.exe
+//   - CI 实际:  gitea-kanban-v0.8.0-macos-amd64.dmg  （v0.8.0 release.yml 用 macos- 前缀）
+//
+// 统一归一化为 manifest.go PlatformKey 的输出（"darwin-*" / "windows-*"）。
 func extractPlatformFromAssetName(name string) (string, bool) {
 	const prefix = "gitea-kanban-"
 	if !strings.HasPrefix(name, prefix) {
@@ -549,7 +555,10 @@ func extractPlatformFromAssetName(name string) (string, bool) {
 	if !strings.HasPrefix(rest, "v") {
 		return "", false
 	}
-	// afterVer 现在是 "windows-amd64" 或 "darwin-arm64"
+	// v0.8.20：兼容 CI 历史命名 macos-* → darwin-*。
+	// Gitea 下载器必须正确识别 darwin-amd64 用户应该下的 macos-amd64.dmg，
+	// 否则 manualOnly=true 会让 amd64 用户永远只能走 manual download 路径。
+	afterVer = strings.Replace(afterVer, "macos-", "darwin-", 1)
 	return afterVer, true
 }
 
