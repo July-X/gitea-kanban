@@ -968,6 +968,8 @@ export interface UpdateInfo {
   notes?: string;
   channel: string;
   canSelfUpdate: boolean;
+  /** v0.8.22：当前平台 key（如 darwin-amd64 / windows-amd64），前端用来决定按钮文案 */
+  platform?: string;
   manualOnly?: boolean;
   manualReason?: string;
   downloaded: boolean;

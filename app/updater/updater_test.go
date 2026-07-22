@@ -321,10 +321,21 @@ func TestDownloadVerifyMock(t *testing.T) {
 }
 
 // TestCanSelfUpdate 平台判断。
+//
+// v0.8.22：darwin 现在返 true（自动下载 dmg + 打开 Finder），windows 返 true
+// （NSIS in-place 替换），其他返 false。
 func TestCanSelfUpdate(t *testing.T) {
 	u := &Updater{cfg: UpdaterConfig{}}
-	if u.canSelfUpdate() != (runtime.GOOS == "windows") {
-		t.Errorf("canSelfUpdate = %v, want %v", u.canSelfUpdate(), runtime.GOOS == "windows")
+	got := u.canSelfUpdate()
+	var want bool
+	switch runtime.GOOS {
+	case "windows", "darwin":
+		want = true
+	default:
+		want = false
+	}
+	if got != want {
+		t.Errorf("canSelfUpdate = %v, want %v", got, want)
 	}
 }
 

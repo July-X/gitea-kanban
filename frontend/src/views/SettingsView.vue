@@ -550,11 +550,14 @@ const checkButtonText = computed(() => {
   const s = update.status.value;
   if (s.kind === 'devBuild') return 'dev build 不支持检查更新';
   if (s.kind === 'available') {
-    // manualOnly（无预编译安装包 / 未签名 macOS build）按钮文案走「前往下载页」，
-    // 跟顶部 UpdateBanner.vue 的 isMacUnsigned 分支保持一致；点击后调 openDownloadPage。
+    // v0.8.22：manualOnly 文案更精准确（CI 失败时 fallback 才会出现）
     return s.info.manualOnly ? '前往下载页' : '下载更新';
   }
-  if (s.kind === 'downloaded') return '重启并安装';
+  if (s.kind === 'downloading') return '下载中…';
+  if (s.kind === 'downloaded') {
+    // macOS dmg 已下载 → 按钮走「打开 Finder 安装」；Windows 走「重启并安装」
+    return s.info.platform?.startsWith('darwin') ? '打开 Finder 安装' : '重启并安装';
+  }
   return '检查更新';
 });
 

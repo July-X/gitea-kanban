@@ -38,6 +38,12 @@ const info = computed(() => {
 
 const isMacUnsigned = computed(() => info.value?.manualOnly === true);
 
+const isMacDmgDownload = computed(() => {
+  // v0.8.22：macOS dmg 下载完成（走 InstallUpdate 路径打开 Finder），
+  // 按钮文案走「打开 Finder 引导安装」而非「重启以安装」。
+  return !isMacUnsigned.value && info.value?.platform === 'darwin-amd64';
+});
+
 const progressPercent = computed(() => {
   const k = status.value.kind;
   if (k !== 'downloading') return 0;
@@ -130,7 +136,11 @@ function onRefreshClick(): void {
           class="update-banner__btn update-banner__btn--primary"
           @click="onInstallClick"
         >
-          {{ isMacUnsigned ? '前往下载页' : '重启以安装' }}
+          <!-- v0.8.22：macOS dmg 已下载，按钮走「打开 Finder 引导安装」；
+               实际调 InstallUpdate → applyMacOS('open' dmgPath) Finder 弹窗，
+               user 看到 .app + Applications symlink，拖 .app 到 /Applications 即可。
+               user 需要先关闭当前 app 才能覆盖 /Applications 里的旧版本。 -->
+          {{ isMacDmgDownload ? '打开 Finder 安装' : (isMacUnsigned ? '前往下载页' : '重启以安装') }}
         </button>
         <button class="update-banner__btn" @click="onDismissClick">
           稍后

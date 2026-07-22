@@ -85,6 +85,9 @@ type UpdateInfo struct {
 	ManualReason  string `json:"manualReason,omitempty"`
 	DownloadURL   string `json:"downloadUrl,omitempty"`
 	AssetSize     int64  `json:"assetSize,omitempty"`
+	// v0.8.22：当前 platform key（"darwin-amd64" / "windows-amd64" 等），
+	// 前端 UpdateBanner 用它判断按钮文案走 macOS dmg 引导安装 vs Windows 重启以安装
+	Platform string `json:"platform,omitempty"`
 	// Downloaded 表示本地缓存里已有这个版本的安装包（重启后可直接 install）
 	Downloaded bool `json:"downloaded"`
 	// Err 内部错误（前端拿来显示人话）
@@ -154,6 +157,7 @@ func (u *Updater) Check(ctx context.Context) (*UpdateInfo, error) {
 	}
 
 	info.Available = true
+	info.Platform = plat
 	info.DownloadURL = asset.URL
 	info.AssetSize = asset.Size
 	info.CanSelfUpdate = u.canSelfUpdate()
@@ -325,26 +329,33 @@ func (u *Updater) OpenDownloadPage() error {
 
 // canSelfUpdate 当前平台是否支持自动 in-place apply。
 //
-// v0.8.0.1 规则（对齐 DeepSeek-Reasonix）：
-//   - Windows: 支持（NSIS installer）
-//   - macOS:   支持（需要签名+notarize 才能让 .app 内 binary 替换生效）
+// v0.8.22 规则：
+//   - Windows: 支持（NSIS installer in-place 替换）
+//   - macOS:   支持（v0.8.22 改为"下载 dmg + 打开 Finder 引导 user 双击安装"，
+//     不是 in-place binary 替换；原因是 macOS Gatekeeper 会拦未签名 binary 替换）
 func (u *Updater) canSelfUpdate() bool {
 	switch runtime.GOOS {
 	case "windows":
 		return true
 	case "darwin":
-		// 真实判断需要 build tag（v0.8.0 暂用 stub，签名发布时由 maintainer 改）
-		return false
+		// v0.8.22：return true 让前端走 download 路径。
+		// 实际不是 in-place 替换而是「下载 dmg → 打开 Finder 让 user 拖到 /Applications」，
+		// 见 updater_darwin.go 的 openDmgInstaller。
+		return true
 	default:
 		return false
 	}
 }
 
-// manualUpdateReason macOS 未签名 build 的可读原因。
+// manualUpdateReason macOS manual-only 状态的可读原因。
+//
+// v0.8.22：保留（用于既无 dmg 又不可下载的极端情况 fallback），但正常情况下
+// Check() 不再把 macOS 标 manualOnly（canSelfUpdate() 已返 true），所以这条
+// 文案基本只在 CI 出错（release 没产物）时才出现。
 func (u *Updater) manualUpdateReason() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "macOS build 未签名+notarize，请手动前往 GitHub release 页下载"
+		return "当前 release 没有 macOS dmg 资产，请前往 GitHub release 页查看"
 	default:
 		return ""
 	}
