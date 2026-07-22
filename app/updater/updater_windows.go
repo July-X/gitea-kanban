@@ -9,7 +9,41 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unsafe"
 )
+
+// getShortPathNameW 调用 kernel32!GetShortPathNameW 把含空格的路径转成 8.3 短路径
+//
+// NSIS installer 的 /D=<dir> 参数不支持引号且遇到空格会截断（例如
+// "C:\Program Files\Gitea Kanban\" 会被截成 "C:\Program" 导致安装失败）。
+// Windows 8.3 短路径没有空格（如 C:\PROGRA~1\GITEA-K~1\），是 Win32 子系统的标准方案。
+func getShortPathNameW(longPath string) string {
+	kernel32, err := syscall.LoadDLL("kernel32.dll")
+	if err != nil {
+		return longPath // 回退：原样返回，让后续逻辑保守处理
+	}
+	proc, err := kernel32.FindProc("GetShortPathNameW")
+	if err != nil {
+		return longPath
+	}
+	// 调用 GetShortPathNameW(longPath, buf, bufSize)
+	longPtr, err := syscall.UTF16PtrFromString(longPath)
+	if err != nil {
+		return longPath
+	}
+	// 先传 nil 缓冲区获取所需大小（UTF-16 rune 数）
+	n, _, _ := proc.Call(uintptr(unsafe.Pointer(longPtr)), 0, 0)
+	if n == 0 {
+		return longPath // 路径不存在或其他错误，返回原值
+	}
+	// 分配 n+1 个 UTF-16 rune（+1 for null terminator）
+	buf := make([]uint16, n+1)
+	ret, _, _ := proc.Call(uintptr(unsafe.Pointer(longPtr)), uintptr(unsafe.Pointer(&buf[0])), uintptr(n+1))
+	if ret == 0 {
+		return longPath
+	}
+	return syscall.UTF16ToString(buf[:ret])
+}
 
 const installerArgSilent = "/S"
 
@@ -47,13 +81,16 @@ func applyWindows(installerPath string, logger func(level, format string, args .
 	}
 	installDir := filepath.Dir(exe)
 
+	// NSIS /D= 参数不支持引号且遇空格会截断，转成 8.3 短路径避免空格问题
+	shortDir := getShortPathNameW(installDir)
+
 	if logger != nil {
-		logger("info", "update: Windows apply, launching NSIS installer: %s /S /D=%s", installerPath, installDir)
+		logger("info", "update: Windows apply, launching NSIS installer: %s /S /D=%s (orig: %s)", installerPath, shortDir, installDir)
 	}
 
 	cmd := exec.Command(installerPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine:    installerCommandLine(installerPath, installDir),
+		CmdLine:    installerCommandLine(installerPath, shortDir),
 		HideWindow: true,
 	}
 	if err := cmd.Start(); err != nil {
