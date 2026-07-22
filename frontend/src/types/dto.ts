@@ -326,9 +326,9 @@ export interface PullDto {
   // ===== v1.1 补充字段（对齐 gitea PR 详情页属性块） =====
   labels?: Array<{ id: number; name: string; color: string }>;
   milestone?: { id: number; title: string } | null;
-  assignee?: { username: string } | null;
-  assignees?: Array<{ username: string }>;
-  reviewers?: Array<{ username: string }>;
+  assignee?: { username: string; avatarUrl?: string } | null;
+  assignees?: Array<{ username: string; avatarUrl?: string }>;
+  reviewers?: Array<{ username: string; avatarUrl?: string }>;
   mergedBy?: { username: string } | null;
   commentsCount?: number;
   body?: string;

@@ -2642,7 +2642,25 @@ function formatRelative(iso: string | undefined): string {
             <dt>{{ isGithub ? 'Milestone' : '里程碑' }}</dt><dd>{{ selectedPR.milestone.title }}</dd>
           </div>
           <div class="pr-detail-meta__item" v-if="(selectedPR.assignees ?? []).length > 0">
-            <dt>{{ isGithub ? 'Assignees' : '指派人' }}</dt><dd>{{ (selectedPR.assignees ?? []).map(a => a.username).join(isGithub ? ', ' : '、') }}</dd>
+            <dt>{{ isGithub ? 'Assignees' : '指派人' }}</dt>
+            <dd class="pr-detail-meta__assignees">
+              <span
+                v-for="a in (selectedPR.assignees ?? [])"
+                :key="a.username"
+                class="pr-detail-meta__assignee"
+              >
+                <span class="pr-detail-meta__assignee-avatar">
+                  <img
+                    v-if="a.avatarUrl"
+                    :src="a.avatarUrl"
+                    :alt="a.username"
+                    class="pr-detail-meta__assignee-avatar-img"
+                  />
+                  <span v-else>{{ a.username.charAt(0).toUpperCase() }}</span>
+                </span>
+                <span class="pr-detail-meta__assignee-name">{{ a.username }}</span>
+              </span>
+            </dd>
           </div>
           <button
             type="button"
@@ -3993,7 +4011,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                   :key="r.username"
                   class="pr-sidebar-block__user"
                 >
-                  <div class="pr-sidebar-block__avatar">{{ r.username.charAt(0).toUpperCase() }}</div>
+                  <div class="pr-sidebar-block__avatar">
+                    <img
+                      v-if="r.avatarUrl"
+                      :src="r.avatarUrl"
+                      :alt="r.username"
+                      class="pr-sidebar-block__avatar-img"
+                    />
+                    <span v-else>{{ r.username.charAt(0).toUpperCase() }}</span>
+                  </div>
                   <span class="pr-sidebar-block__username">{{ r.username }}</span>
                 </div>
               </div>
@@ -4011,7 +4037,15 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
                   :key="a.username"
                   class="pr-sidebar-block__user"
                 >
-                  <div class="pr-sidebar-block__avatar">{{ a.username.charAt(0).toUpperCase() }}</div>
+                  <div class="pr-sidebar-block__avatar">
+                    <img
+                      v-if="a.avatarUrl"
+                      :src="a.avatarUrl"
+                      :alt="a.username"
+                      class="pr-sidebar-block__avatar-img"
+                    />
+                    <span v-else>{{ a.username.charAt(0).toUpperCase() }}</span>
+                  </div>
                   <span class="pr-sidebar-block__username">{{ a.username }}</span>
                 </div>
               </div>
@@ -6837,6 +6871,13 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.pr-sidebar-block__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .pr-sidebar-block__username {
   color: var(--color-text);
@@ -6946,6 +6987,41 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   color: var(--color-text);
   font-weight: 500;
   margin: 0;
+}
+.pr-detail-meta__assignees {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pr-detail-meta__assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pr-detail-meta__assignee-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-shell-main-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.pr-detail-meta__assignee-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pr-detail-meta__assignee-name {
+  color: var(--color-text);
+  font-weight: 500;
 }
 .pr-detail__branch {
   font-size: 10px;
@@ -7952,8 +8028,10 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   /* v0.7.51：system event rail 缩进到 line 位置 (x=80)，event-content 需要
      padding-left 把文字推到 icon 右边（rail spans x=66-94, center 80）。
      58px = 30px (rail 距 li 左 30px) + 28px (rail width) = 文字从 x=36+58=94 开始，
-     正好接 rail 右边，避免文字被 icon 盖住。*/
-  padding-left: 58px;
+    正好接 rail 右边，避免文字被 icon 盖住。
+    实际留白仅 0px（与 dot 右边缘齐平），user 反馈 icon 和文字贴太近，
+    故加 8px 缓冲（66px = dot 右边缘 ul+94 + 8px 空白 = 文字起点 ul+102）。*/
+  padding-left: 66px;
   /* v0.7.17 根因修复：pr-detail__event-content 内部子块（主行 + inline + block）
      各自保持 1 行渲染，超出部分溢出隐藏 —— user 反馈"pr-detail__event-content
      当中内容，应该尽量 1 行显示完，不要多行显示"。主行 / inline 块强制不换行
@@ -8116,10 +8194,11 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
    *   - rail position:absolute left:30px（锚 padding edge）→ rail 在 ul+66~94，dot 22px 居中在 ul+69~91
    *   - text 起点 ul+100 - dot 右边缘 ul+91 = 9px 干净空隙（之前 50px padding 让 text 在 ul+86，侵入 dot 区是这次"轻微遮挡"根因）
    * rail 是 absolute 不受 padding 影响（仍 li-border + 30 = ul+80 竖线位置）
-   *
+   * v0.7.51 padding-left: 64px → 文字 ul+100 与 dot 右边缘 ul+94 间隔 6px，
+   * user 反馈 icon 和文字贴太近，同步加 8px 缓冲 → 72px。
    * 其他事件类型（push/merge/label/reference）故意让文字穿过 dot 是 GitHub/Gitea web 设计
    * （dot 是节点符号，文字横向连贯是 timeline 主轴语义），不动。 */
-  padding-left: 64px;
+  padding-left: 72px;
 }
 .pr-detail__event-line .pr-detail__event-text {
   display: inline-flex;
