@@ -866,7 +866,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   overscroll-behavior: contain;
   /* 滚动条样式 */
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 .cd-panel__left::-webkit-scrollbar,
 .cd-panel__right::-webkit-scrollbar {
@@ -874,7 +874,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 }
 .cd-panel__left::-webkit-scrollbar-track,
 .cd-panel__right::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 .cd-panel__left::-webkit-scrollbar-thumb,
 .cd-panel__right::-webkit-scrollbar-thumb {

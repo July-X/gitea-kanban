@@ -5466,7 +5466,7 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   /* 独立响应：滚动到顶部/底部时不冒泡到外层 .merges__list */
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-divider) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   background: var(--color-bg);
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
@@ -5476,14 +5476,14 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   width: 6px;
 }
 .merge-item__comment-list::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 .merge-item__comment-list::-webkit-scrollbar-thumb {
-  background: var(--color-divider);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 .merge-item__comment-list::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* 单条评论 li：聊天气泡布局（v0.6.26）
