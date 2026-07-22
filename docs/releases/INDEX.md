@@ -31,7 +31,7 @@
 | **v0.8.18** | commit `4f2a80c` | 设置页 Git 二进制 radio 单选 + gh 信息修复 + 移除 gh 独立卡片 | [v0.8.18.md](./v0.8.18.md) |
 | **v0.8.19** | tag `06b7196` | PR 对话区 timeline icon 留白 + 头像渲染 + 暗色滚动条 + manualOnly 修复 | [v0.8.19.md](./v0.8.19.md) |
 | **v0.8.20** | commit `3f02752` | 修复 darwin-amd64 用户下载更新 / manualOnly 误报（macos- → darwin- 归一化） | [v0.8.20.md](./v0.8.20.md) |
-| **v0.8.21** | commit `待 push 后回填` | 安装版（macOS dmg）暗色滚动条白底修复（全局 color-scheme + 重复声明清理） | [v0.8.21.md](./v0.8.21.md) |
+| **v0.8.21** | commit `79fad0e` | 安装版（macOS dmg）暗色滚动条白底修复（全局 color-scheme + 重复声明清理） | [v0.8.21.md](./v0.8.21.md) |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 
