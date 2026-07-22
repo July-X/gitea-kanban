@@ -782,39 +782,6 @@ onMounted(async () => {
         </div>
       </section>
 
-      <!-- 账号 -->
-      <section class="settings__card">
-        <h2>账号</h2>
-        <div class="settings__info-row">
-          <span class="settings__info-label">地址</span>
-          <span class="settings__info-value mono" :title="auth.currentGiteaUrl">
-            {{ auth.currentGiteaUrl || '—' }}
-          </span>
-        </div>
-        <div class="settings__info-row">
-          <span class="settings__info-label">用户</span>
-          <span class="settings__info-value">
-            {{ auth.currentUser?.login ?? '—' }}
-          </span>
-        </div>
-        <p v-if="currentAccountIsGitHub" class="settings__gh-guide">
-          <strong>{{ GITHUB_CLI_REQUIRED_MESSAGE }}</strong>
-          <span>{{ GITHUB_CLI_REQUIRED_HINT }}</span>
-          <a :href="GITHUB_CLI_INSTALL_URL" target="_blank" rel="noopener noreferrer">
-            {{ GITHUB_CLI_INSTALL_LABEL }}
-          </a>
-        </p>
-        <button
-          type="button"
-          class="settings__save"
-          :disabled="!auth.isConnected"
-          :title="auth.isConnected ? '更新 gitea 地址或令牌' : '尚未连接'"
-          @click="openAccountModal"
-        >
-          更新连接
-        </button>
-      </section>
-
       <!-- v0.7.x: 应用数据目录 + 故障排查 同行左右布局 -->
       <section class="settings__card">
         <h2>应用数据目录</h2>
@@ -876,6 +843,39 @@ onMounted(async () => {
           导出包含最近 5 个日志文件 + 当前应用状态（脱敏 token/password），
           一键「复制最近日志」适合贴到 GitHub issue 反馈问题。
         </p>
+      </section>
+
+      <!-- 账号（v0.9.x：放到最末，标识"基础信息/全局配置"，无关体验优先级） -->
+      <section class="settings__card">
+        <h2>账号</h2>
+        <div class="settings__info-row">
+          <span class="settings__info-label">地址</span>
+          <span class="settings__info-value mono" :title="auth.currentGiteaUrl">
+            {{ auth.currentGiteaUrl || '—' }}
+          </span>
+        </div>
+        <div class="settings__info-row">
+          <span class="settings__info-label">用户</span>
+          <span class="settings__info-value">
+            {{ auth.currentUser?.login ?? '—' }}
+          </span>
+        </div>
+        <p v-if="currentAccountIsGitHub" class="settings__gh-guide">
+          <strong>{{ GITHUB_CLI_REQUIRED_MESSAGE }}</strong>
+          <span>{{ GITHUB_CLI_REQUIRED_HINT }}</span>
+          <a :href="GITHUB_CLI_INSTALL_URL" target="_blank" rel="noopener noreferrer">
+            {{ GITHUB_CLI_INSTALL_LABEL }}
+          </a>
+        </p>
+        <button
+          type="button"
+          class="settings__save"
+          :disabled="!auth.isConnected"
+          :title="auth.isConnected ? '更新 gitea 地址或令牌' : '尚未连接'"
+          @click="openAccountModal"
+        >
+          更新连接
+        </button>
       </section>
     </div>
   </div>

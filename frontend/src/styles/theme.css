@@ -276,10 +276,18 @@ html[data-theme='dark'] {
   --shadow-rgb: 0, 0, 0;
   /* --shadow-xs/sm/md/lg 在 [data-theme="dark"] 单独块提档（v1.6.1） */
 
-  /* === 滚动条（v1.6 弱化 · 去 glow · 走主色软底 + hover 实色） === */
+  /* === 滚动条（v1.6 弱化 · 去 glow · 走主色软底 + hover 实色） ===
+   * v0.9.x：加 --scrollbar-track（之前 track 在暗色下透明 + elevated 卡片底色不协调
+   * → 改成"略亮于底层基底"的 4% alpha 冷白，让滚动条与 UI 同层次但仍可识别）
+   * thumb 默认态：主色 22% alpha 软底（呼应 dot / 装饰角）
+   * thumb hover 态：主色 50% alpha + 主色光晕（dark 6px 外环 / light 1px 实色描边）
+   * 圆角 4px；8px 细条
+   * Firefox 兼容：scrollbar-color + scrollbar-width: thin
+   * 过渡 150ms（沿用 --t-fast 体系） */
   --scrollbar-thumb: rgba(116, 184, 48, 0.22);
   --scrollbar-thumb-hover: rgba(116, 184, 48, 0.5);
   --scrollbar-thumb-active: #74b830; /* thumb active 态 = 主色实色 */
+  --scrollbar-track: rgba(220, 233, 240, 0.04); /* 暗色下 track：4% alpha 冷白，与 elevated 同层次 */
 }
 
 /* ==========================================================================
@@ -409,10 +417,13 @@ html[data-theme='light'] {
   --color-shell-main-bg: #f8fafc;
 
   /* === 滚动条（v1.6 弱化 · 走主色软底 + hover 实色 · 无 glow） ===
-   * 亮色换色：thumb 在冷蓝底（#E8F1F5）需与主色（teal）协调 */
+   * 亮色换色：thumb 在冷蓝底（#E8F1F5）需与主色（teal）协调
+   * v0.9.x：加 --scrollbar-track（透明 track 在亮色下跟 elevated (#F8FAFC) 略不协调，
+   * 改成"略暗于底层基底"的 5% alpha 冷黑，让滚动条嵌入 UI） */
   --scrollbar-thumb: rgba(70, 107, 22, 0.25);
   --scrollbar-thumb-hover: rgba(70, 107, 22, 0.55);
   --scrollbar-thumb-active: #466b16;
+  --scrollbar-track: rgba(0, 0, 0, 0.05); /* 亮色下 track：5% alpha 冷黑，跟 elevated 协调 */
 }
 
 /* ==========================================================================
@@ -630,7 +641,8 @@ p {
  * 视觉公式：
  *   - thumb 默认态：主色 22-25% alpha 软底（呼应 dot / 装饰角）
  *   - thumb hover 态：主色 42-50% alpha + 主色光晕（dark 6px 外环 / light 1px 实色描边）
- *   - 圆角 4px；8px 细条；track 透明
+ *   - 圆角 4px；8px 细条；track 用主题色软底（v0.9.x：从透明改为 --scrollbar-track，
+ *     让滚动条与底层 UI 同层次，不再"悬浮"）
  *   - Firefox 兼容：scrollbar-color + scrollbar-width: thin
  *   - 过渡 150ms（沿用 --t-fast 体系）
  * ========================================================================== */
@@ -641,7 +653,7 @@ p {
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
@@ -660,9 +672,9 @@ p {
   background: var(--scrollbar-thumb-active);
 }
 
-/* Firefox 兼容（scrollbar-color 接受 color + color；track 用 transparent） */
+/* Firefox 兼容（scrollbar-color 接受 color + color；track 用主题色软底） */
 * {
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
 }
 
