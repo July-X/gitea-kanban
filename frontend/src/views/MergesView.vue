@@ -25,7 +25,7 @@ import {
   GitMerge, GitPullRequestArrow, GitPullRequestClosed, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
   XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
   // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
-  RotateCcw, Bookmark, Tag, Milestone, Calendar,
+  RotateCcw, Tag, Milestone, Calendar,
   Lock, Key, Eye, ArrowLeftRight, Folder, Pin,
   MessageCircle,
   // v0.7.3: 评审事件状态图标
@@ -1497,7 +1497,10 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  *   - restore_branch (octicon-git-branch)   → OcticonGitBranch（同上，跟 delete_branch
  *                                                       走同一个 octicon + 同颜色，靠
  *                                                       Restore branch 按钮 + verb 区分）
- *   - commit_ref (octicon-bookmark)         → Bookmark（v0.7.2 已有）
+ *   - commit_ref (octicon-bookmark)         → CrossReference（v0.9.x：原用 lucide Bookmark，
+ *                                                    现统一用自定义 octicon-bookmark 组件，
+ *                                                    1:1 复刻 GitHub Primer 路径，
+ *                                                    所有引用类事件视觉一致）
  *   - label (octicon-tag)                   → Tag（v0.7.2 已有）
  *   - milestone (octicon-milestone)         → Milestone（v0.7.2 已有）
  *   - assignees (octicon-person)           → OcticonPerson（v0.7.46 自定义组件，1:1
@@ -1510,10 +1513,10 @@ function displayName(user: { fullName?: string; username: string } | null | unde
  *                                                    平台通用——Gitea/GitHub 都是
  *                                                    OcticonPerson，不分平台）
  *   - title / change_title (octicon-pencil) → Pencil（v0.7.35 改 Type → Pencil，GitHub web 实际）
- *   - issue_ref / pull_ref (octicon-cross-reference) → CrossReference（v0.7.41 自定义组件，
- *                                                            复刻 octicon 路径；v0.7.35
- *                                                            错用 LinkIcon 视觉是 chain link 不对）
- *   - change_issue_ref (octicon-cross-reference)    → CrossReference（同上）
+ *   - issue_ref / pull_ref (octicon-bookmark) → CrossReference（v0.9.x：原用 octicon-cross-reference
+ *                                                            方块+箭头，现统一改用 octicon-bookmark
+ *                                                            书签形状——所有引用事件视觉一致）
+ *   - change_issue_ref (octicon-bookmark)         → CrossReference（同上）
  *   - add_dependency / remove_dependency            → CrossReference（同上）
  *   - due_date (octicon-clock)              → Calendar（v0.7.2 已有）
  *   - lock (octicon-lock)                   → Lock（v0.7.2 已有）
@@ -1535,7 +1538,7 @@ const SYSTEM_EVENT_ICON: Record<string, Component> = {
   // → GitBranch（git-branch 3 圆点）→ GitMerge（git-merge merge 图），都跟实际 SVG 不符。
   // 现在用 GitPullRequestClosed（lucide 也有同名 icon）才对得上。
   close: GitPullRequestClosed,
-  commit_ref: Bookmark,
+  commit_ref: CrossReference,
   label: Tag,
   milestone: Milestone,
   // v0.7.46 + v0.7.47：assignees 事件 timeline dot 用自定义 octicon-person
@@ -8106,6 +8109,17 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 /* ===== 评审事件（review_event，单行） ===== */
 .pr-detail__timeline-item--review {
   font-size: var(--font-sm);
+  /* v0.9.x：左 64px 让 reviewer 文本从 timeline 竖线右侧 8px 开始（不遮挡 dot）
+   * —— ul padding 36 + dot 右边缘 ~ ul+91 + 8px 缓冲 = 64
+   *   - ul padding-left  36  → li 起点 ul+36
+   *   - li padding-left  64  → flex 内容起点 li-border + 64 = ul+100
+   *   - rail position:absolute left:30px（锚 padding edge）→ rail 在 ul+66~94，dot 22px 居中在 ul+69~91
+   *   - text 起点 ul+100 - dot 右边缘 ul+91 = 9px 干净空隙（之前 50px padding 让 text 在 ul+86，侵入 dot 区是这次"轻微遮挡"根因）
+   * rail 是 absolute 不受 padding 影响（仍 li-border + 30 = ul+80 竖线位置）
+   *
+   * 其他事件类型（push/merge/label/reference）故意让文字穿过 dot 是 GitHub/Gitea web 设计
+   * （dot 是节点符号，文字横向连贯是 timeline 主轴语义），不动。 */
+  padding-left: 64px;
 }
 .pr-detail__event-line .pr-detail__event-text {
   display: inline-flex;

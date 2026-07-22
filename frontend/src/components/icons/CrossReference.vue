@@ -1,23 +1,18 @@
 <script setup lang="ts">
 /**
- * octicon-cross-reference 自定义 Vue 组件
+ * octicon-bookmark 自定义 Vue 组件
  *
- * 用途：mentioned / 引用事件（issue_ref / pull_ref / change_issue_ref /
- *       add_dependency / remove_dependency 等）的 timeline dot icon
+ * 用途：所有 timeline 引用类事件（commit_ref / issue_ref / pull_ref /
+ *       change_issue_ref / add_dependency / remove_dependency 等）的 timeline dot icon
  *
- * 选型原因（v0.7.41 user 拍板）：
- *   GitHub web 实际用的是 octicon-cross-reference（方块 + 箭头），
- *   lucide 没同名 icon，最近的 Link / Link2 视觉上是 chain link（圆环链），
- *   跟 cross-reference 形状差太多。1:1 复刻 octicon 路径最稳。
+ * v0.9.x 替换：原本用 octicon-cross-reference（方块+箭头），现改用 octicon-bookmark（书签）
+ * —— 跟 lucide 的 Bookmark 形状一致，但路径 1:1 复刻 GitHub Primer octicon-bookmark SVG。
  *
- * SVG path 来自 user 23:15 给的 GitHub Primer octicon-cross-reference：
- *   <path d="M2.75 3.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1
- *            .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-2.5
- *            a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 13H9.06l-2.573 2.573A1.458
- *            1.458 0 0 1 4 14.543V13H2.75A1.75 1.75 0 0 1 1 11.25v-7.5C1 2.784 1.784 2
- *            2.75 2h5.5a.75.75 0 0 1 0 1.5ZM16 1.25v4.146a.25.25 0 0 1-.427.177L14.03
- *            4.03l-3.75 3.75a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l3.75
- *            -3.75-1.543-1.543A.25.25 0 0 1 11.604 1h4.146a.25.25 0 0 1 .25.25Z"/>
+ * SVG path 来源 user 给的 GitHub Primer octicon-bookmark：
+ *   <path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5
+ *            a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25
+ *            Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0
+ *            l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"></path>
  *
  * octicon 风格：用 fill="currentColor"（实心填色），不是 lucide 的 stroke 描边模式。
  * props.size / props.strokeWidth 保留跟 lucide 一样的接口兼容性（strokeWidth
@@ -38,6 +33,6 @@ defineProps<{
     fill="currentColor"
     aria-hidden="true"
   >
-    <path d="M2.75 3.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 13H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 14.543V13H2.75A1.75 1.75 0 0 1 1 11.25v-7.5C1 2.784 1.784 2 2.75 2h5.5a.75.75 0 0 1 0 1.5ZM16 1.25v4.146a.25.25 0 0 1-.427.177L14.03 4.03l-3.75 3.75a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l3.75-3.75-1.543-1.543A.25.25 0 0 1 11.604 1h4.146a.25.25 0 0 1 .25.25Z" />
+    <path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z" />
   </svg>
 </template>
