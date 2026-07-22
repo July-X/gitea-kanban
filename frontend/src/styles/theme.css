@@ -46,7 +46,18 @@
  * ========================================================================== */
 
 :root {
-  /* === 边角（v1.6 中等柔化 · Linear / Notion / GitHub 主流 6-8px 范围） === */
+  /* v0.9.x：显式声明 color-scheme，让 macOS WKWebView overlay scrollbar mode
+   * 在暗色主题下渲染暗色滚动条外观（而不是 fall back 到 system light 滚动条）。
+   * 这是安装版（.app bundle WKWebView）暗色滚动条白底问题的关键兜底。
+   * dev 模式（Vite + 系统 WebView）下也统一行为。 */
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  /* v0.9.x：亮色主题切到 light color-scheme，让 WKWebView overlay scrollbar
+   * fall back 到 system light appearance（与亮色主题一致） */
+  color-scheme: light;
+}
   --radius-xs: 4px;        /* 标签 / chip · 极小 */
   --radius-sm: 6px;        /* 按钮 / 输入框 / 小型 chip */
   --radius-md: 8px;        /* 卡片 / 弹窗 / 抽屉 */
@@ -676,6 +687,16 @@ p {
 * {
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
+}
+
+/* v0.9.x：跟随系统 color-scheme 但尊重用户主动选择。
+ * 当 system 在 light 模式而 user 选了 dark（或反之），WKWebView 按 system 的
+ * color-scheme 渲染 scrollbar 容器底色。这个 media query 让 system light 时
+ * 默认走 light color-scheme，但 user 主动选 dark 时仍走 dark。 */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

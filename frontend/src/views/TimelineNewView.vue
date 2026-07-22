@@ -3902,7 +3902,7 @@ function refBadgeClass(refType?: string): string {
   width: 8px;
 }
 .commit-accordion::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 .commit-accordion::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);

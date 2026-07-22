@@ -5509,16 +5509,6 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
 .merge-item__comment-list::-webkit-scrollbar {
   width: 6px;
 }
-.merge-item__comment-list::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-}
-.merge-item__comment-list::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 3px;
-}
-.merge-item__comment-list::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-}
 
 /* 单条评论 li：聊天气泡布局（v0.6.26）
  * 默认 = 他人：左对齐，max-width 95%

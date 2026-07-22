@@ -850,7 +850,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   overscroll-behavior: contain;
   border-right: 1px solid var(--color-divider);
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 .cd-panel__right {
   display: flex;
@@ -867,23 +867,6 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   /* 滚动条样式 */
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-}
-.cd-panel__left::-webkit-scrollbar,
-.cd-panel__right::-webkit-scrollbar {
-  width: 8px;
-}
-.cd-panel__left::-webkit-scrollbar-track,
-.cd-panel__right::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-}
-.cd-panel__left::-webkit-scrollbar-thumb,
-.cd-panel__right::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 4px;
-}
-.cd-panel__left::-webkit-scrollbar-thumb:hover,
-.cd-panel__right::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
 }
 /* panel 变体：message 区占满左栏剩余空间（flex:1），body 内部滚动
  * v3.7 重构：
