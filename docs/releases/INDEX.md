@@ -25,6 +25,10 @@
 | **v0.8.11** | commit `5f098a5` | 修复 Windows installer 发布断链 + 升级 GitHub Actions 到 Node 24（release.yml + scripts/release.sh） | [待补] |
 | **v0.8.12** | commit `ac451dd` | 全项目升级到 Go 1.26（build.yml + release.yml + AGENTS.md + CLAUDE.md + README.md） | [待补] |
 | **v0.8.14** | commit `9f62253` | Windows git 子进程隐藏 console 窗口（Windows 安装包模式下不再闪黑框）：runner_windows.go + runner_other.go + sync_test.go | [待补] |
+| **v0.8.15** | commit `ef1db7b` | Windows 快捷方式白色底框修复：快捷方式指定自定义图标 | [待补] |
+| **v0.8.16** | commit `e7ed7b1` | Windows NSIS installer 启动失败修复：installDir 含空格导致 /D= 参数截断 | [待补] |
+| **v0.8.17** | commit `dea6ed8` | PR 详情 timeline 评审事件对齐 + 引用事件统一 octicon-bookmark | [待补] |
+| **v0.8.18** | commit `4f2a80c` | 设置页 Git 二进制 radio 单选 + gh 信息修复 + 移除 gh 独立卡片 | [v0.8.18.md](./v0.8.18.md) |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 
