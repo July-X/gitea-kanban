@@ -15,9 +15,16 @@ build/*
 !build/appicon.png
 !build/appicon.svg
 build/bin/
-build/windows/
 build/darwin/
 build/linux/
+# Windows 构建产物：保留 icon.ico 和 installer 配置（project.nsi + icon.ico）
+!build/windows/
+build/windows/*
+!build/windows/icon.ico
+!build/windows/installer/
+build/windows/installer/*
+!build/windows/installer/project.nsi
+!build/windows/installer/icon.ico
 *.exe
 *.dll
 *.so
