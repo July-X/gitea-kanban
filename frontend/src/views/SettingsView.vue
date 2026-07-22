@@ -519,6 +519,12 @@ const updateStateLabel = computed(() => {
     case 'upToDate':
       return `已是最新版本 v${s.current}`;
     case 'available':
+      // manualOnly = true 表示当前平台没有预编译安装包（如未跑 CI 的 release / 未签名 macOS build），
+      // 按钮走 OpenDownloadPage（跳 GitHub release 页手动下），不调 DownloadUpdate。
+      // manualReason 由后端 Check() 拼好（如「当前平台 darwin-amd64 没有预编译安装包」）。
+      if (s.info.manualOnly) {
+        return `发现新版本 v${s.info.latest}：${s.info.manualReason ?? '请前往下载页'}`;
+      }
       return `发现新版本 v${s.info.latest}，点击下载`;
     case 'downloading': {
       const pct = s.total > 0 ? Math.round((s.received / s.total) * 100) : 0;
@@ -543,7 +549,11 @@ const checkButtonText = computed(() => {
   if (checking.value || installingState.value || devBuild.value) return '正在检查…';
   const s = update.status.value;
   if (s.kind === 'devBuild') return 'dev build 不支持检查更新';
-  if (s.kind === 'available') return '下载更新';
+  if (s.kind === 'available') {
+    // manualOnly（无预编译安装包 / 未签名 macOS build）按钮文案走「前往下载页」，
+    // 跟顶部 UpdateBanner.vue 的 isMacUnsigned 分支保持一致；点击后调 openDownloadPage。
+    return s.info.manualOnly ? '前往下载页' : '下载更新';
+  }
   if (s.kind === 'downloaded') return '重启并安装';
   return '检查更新';
 });
@@ -568,6 +578,13 @@ async function onCheckUpdateClick(): Promise<void> {
   const s = update.status.value;
   if (checking.value || installingState.value) return;
   if (s.kind === 'available') {
+    // manualOnly 走 OpenDownloadPage（打开浏览器到 GitHub release 页手动下载），
+    // 不调 DownloadUpdate —— 后端在 manualOnly 时会返 ErrManualUpdateOnly，
+    // 不区分就出现「点了按钮无反应」的 dead click bug（v0.8.18 反馈）。
+    if (s.info.manualOnly) {
+      await update.openDownloadPage();
+      return;
+    }
     await update.download();
     return;
   }
