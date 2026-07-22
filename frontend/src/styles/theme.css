@@ -51,13 +51,8 @@
    * 这是安装版（.app bundle WKWebView）暗色滚动条白底问题的关键兜底。
    * dev 模式（Vite + 系统 WebView）下也统一行为。 */
   color-scheme: dark;
-}
 
-html[data-theme='light'] {
-  /* v0.9.x：亮色主题切到 light color-scheme，让 WKWebView overlay scrollbar
-   * fall back 到 system light appearance（与亮色主题一致） */
-  color-scheme: light;
-}
+  /* === 边角（v1.6 中等柔化 · Linear / Notion / GitHub 主流 6-8px 范围） === */
   --radius-xs: 4px;        /* 标签 / chip · 极小 */
   --radius-sm: 6px;        /* 按钮 / 输入框 / 小型 chip */
   --radius-md: 8px;        /* 卡片 / 弹窗 / 抽屉 */
@@ -140,6 +135,12 @@ html[data-theme='light'] {
   --progress-track-bg: rgba(96, 153, 38, 0.08);
   --progress-track-border: 1px solid rgba(96, 153, 38, 0.2);
   --progress-fill-bg: #609926; /* 去渐变 · 走主色实色 */
+}
+
+html[data-theme='light'] {
+  /* v0.9.x：亮色主题切到 light color-scheme，让 WKWebView overlay scrollbar
+   * fall back 到 system light appearance（与亮色主题一致） */
+  color-scheme: light;
 }
 
 /* ==========================================================================
