@@ -78,7 +78,11 @@ export function ListBranches(arg1:main.ListBranchesArgs):Promise<Array<main.Bran
 
 export function ListIssues(arg1:main.ListIssuesArgs):Promise<Array<main.IssueDTO>>;
 
-export function ListMilestones(arg1:main.ListMilestonesArgs):Promise<Array<platform.MilestoneDTO>>;
+export function ListLabels(arg1:main.ListLabelsArgs):Promise<main.ListLabelsResp>;
+
+export function ListMembers(arg1:main.ListMembersArgs):Promise<main.ListMembersResp>;
+
+export function ListMilestones(arg1:main.ListMilestonesArgs):Promise<main.ListMilestonesResp>;
 
 export function ListPullCommentReactions(arg1:main.ListPullCommentReactionsArgs):Promise<Array<platform.ReactionDTO>>;
 

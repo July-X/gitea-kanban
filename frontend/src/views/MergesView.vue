@@ -23,7 +23,7 @@
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import {
   GitMerge, GitPullRequestArrow, GitPullRequestClosed, GitBranch, GitCommit, RefreshCw, Search, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
-  XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy,
+  XCircle, Pencil, MessageSquare, Send, Loader2, Quote, Copy, Settings, Check,
   // v0.7.2 + v0.7.35: 系统事件图标（对齐 Gitea web + GitHub web octicon-* 体系）
   RotateCcw, Tag, Milestone, Calendar,
   Lock, Key, Eye, ArrowLeftRight, Folder, Pin,
@@ -796,14 +796,17 @@ const confirmCloseOpen = ref(false);
 
 // ===== 属性编辑器 =====
 
-/** 属性编辑器状态 */
-const attrEditorOpen = ref(false);
-const attrEditorSaving = ref(false);
-const editingPull = ref<PullDto | null>(null);
+/** 侧边栏下拉状态 */
+const openDropdown = ref<'reviewers' | 'assignees' | 'labels' | 'milestone' | null>(null);
+const reviewerSearch = ref('');
+const assigneeSearch = ref('');
+const labelSearch = ref('');
+const milestoneSearch = ref('');
 const editingLabels = ref<string[]>([]);
 const editingAssignees = ref<string[]>([]);
 const editingReviewers = ref<string[]>([]);
 const editingMilestone = ref('');
+const isLoadingDropdown = ref(false);
 
 /** 可用标签列表（从 store 或 IPC 获取） */
 const availableLabels = ref<{ name: string; color: string }[]>([]);
@@ -821,71 +824,125 @@ const newLabelName = ref('');
 const newLabelColor = ref('#fbca04');
 const creatingLabel = ref(false);
 
-/** 打开属性编辑器 */
-async function openAttrEditor(p: PullDto): Promise<void> {
-  editingPull.value = p;
+/** 打开/关闭侧边栏下拉，并同步当前 PR 的编辑快照。 */
+async function toggleDropdown(name: 'reviewers' | 'assignees' | 'labels' | 'milestone'): Promise<void> {
+  if (openDropdown.value === name) {
+    openDropdown.value = null;
+    return;
+  }
+  const p = selectedPR.value;
+  if (!p) return;
+  if (!activeProjectId.value) return;
+  openDropdown.value = name;
   editingLabels.value = (p.labels ?? []).map(l => l.name);
   editingAssignees.value = (p.assignees ?? []).map(a => a.username);
   editingReviewers.value = (p.reviewers ?? []).map(r => r.username);
-  attrEditorOpen.value = true;
-
-  // 加载可用标签和成员
-  if (activeProjectId.value) {
-    try {
-      const labelsResp = await labelsList({ projectId: String(activeProjectId.value) });
-      availableLabels.value = labelsResp.items ?? [];
-    } catch { /* 忽略 */ }
-    // v0.6+ bugfix：复用 loadMembers，避免重复代码
+  editingMilestone.value = p.milestone?.title ?? '';
+  isLoadingDropdown.value = true;
+  try {
+    const labelsResp = await labelsList({ projectId: String(activeProjectId.value) });
+    availableLabels.value = labelsResp.items ?? [];
     await loadMembers();
-    // v0.7.0：加载里程碑 / 成员（gitea state='all' / github state='open'）
-    // loadAttrEditorData 内部按 platform 派发 state，不再需前端 v-if 守护。
-    try {
-      await pullStore.loadAttrEditorData(String(activeProjectId.value));
-      availableMilestones.value = pullStore.availableMilestones;
-      // loadMembers 已设置 availableMembers = string[]；这里覆盖为 rich 对象
-      availableMembers.value = pullStore.availableMembers.map((m) => m.username ?? '');
-    } catch { /* 静默 */ }
+    await pullStore.loadAttrEditorData(String(activeProjectId.value));
+    availableMilestones.value = pullStore.availableMilestones;
+    availableMembers.value = pullStore.availableMembers.map(m => m.username ?? '');
+  } catch {
+    // 下拉数据加载失败时保留当前已显示内容，不阻塞详情页。
+  } finally {
+    isLoadingDropdown.value = false;
   }
 }
 
-/** 关闭属性编辑器 */
-function closeAttrEditor(): void {
-  attrEditorOpen.value = false;
-  editingPull.value = null;
+function isNonReviewable(username: string): boolean {
+  return nonReviewableMembers.value.has(username);
 }
 
-/** 切换标签选择 */
-function toggleLabel(name: string): void {
-  const idx = editingLabels.value.indexOf(name);
-  if (idx >= 0) editingLabels.value.splice(idx, 1);
-  else editingLabels.value.push(name);
+function hasReviewer(username: string): boolean { return editingReviewers.value.includes(username); }
+function hasAssignee(username: string): boolean { return editingAssignees.value.includes(username); }
+function hasLabel(name: string): boolean { return editingLabels.value.includes(name); }
+
+const filteredReviewerMembers = computed(() => {
+  const query = reviewerSearch.value.trim().toLowerCase();
+  return availableMembers.value.filter(m => !query || m.toLowerCase().includes(query));
+});
+const filteredAssigneeMembers = computed(() => {
+  const query = assigneeSearch.value.trim().toLowerCase();
+  return availableMembers.value.filter(m => !query || m.toLowerCase().includes(query));
+});
+const filteredLabels = computed(() => {
+  const query = labelSearch.value.trim().toLowerCase();
+  return availableLabels.value.filter(l => !query || l.name.toLowerCase().includes(query));
+});
+const filteredMilestones = computed(() => {
+  const query = milestoneSearch.value.trim().toLowerCase();
+  return availableMilestones.value.filter(m => !query || m.title.toLowerCase().includes(query));
+});
+
+async function updateSidebarAttr(kind: 'labels' | 'assignees' | 'reviewers' | 'milestone'): Promise<void> {
+  if (!activeProjectId.value || !selectedPR.value) return;
+  const projectId = String(activeProjectId.value);
+  const index = selectedPR.value.index;
+  try {
+    if (kind === 'labels') await pullStore.updateLabels(projectId, index, editingLabels.value);
+    if (kind === 'assignees') await pullStore.updateAssignees(projectId, index, editingAssignees.value);
+    if (kind === 'reviewers') await pullStore.updateReviewers(projectId, index, editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r)));
+    if (kind === 'milestone') await pullStore.updateMilestone(projectId, index, editingMilestone.value);
+    await pull.refresh();
+  } catch (e) {
+    const err = e as { messageText?: string; message?: string };
+    showToast({ type: 'error', message: err.messageText ?? err.message ?? '属性更新失败', persistent: true });
+  }
 }
 
-/** 切换评审人选择 */
-function toggleReviewer(name: string): void {
-  const idx = editingReviewers.value.indexOf(name);
-  if (idx >= 0) editingReviewers.value.splice(idx, 1);
-  else editingReviewers.value.push(name);
+async function toggleReviewerMember(username: string): Promise<void> {
+  if (nonReviewableMembers.value.has(username)) return;
+  editingReviewers.value = editingReviewers.value.includes(username)
+    ? editingReviewers.value.filter(r => r !== username)
+    : [...editingReviewers.value, username];
+  await updateSidebarAttr('reviewers');
+}
+async function toggleAssigneeMember(username: string): Promise<void> {
+  editingAssignees.value = editingAssignees.value.includes(username)
+    ? editingAssignees.value.filter(a => a !== username)
+    : [...editingAssignees.value, username];
+  await updateSidebarAttr('assignees');
+}
+
+async function toggleLabelMember(name: string): Promise<void> {
+  editingLabels.value = editingLabels.value.includes(name)
+    ? editingLabels.value.filter(l => l !== name)
+    : [...editingLabels.value, name];
+  await updateSidebarAttr('labels');
+}
+
+async function selectMilestone(title: string): Promise<void> {
+  editingMilestone.value = title;
+  await updateSidebarAttr('milestone');
+  openDropdown.value = null;
+}
+async function clearReviewers(): Promise<void> { editingReviewers.value = []; await updateSidebarAttr('reviewers'); }
+async function clearAssignees(): Promise<void> { editingAssignees.value = []; await updateSidebarAttr('assignees'); }
+async function clearLabels(): Promise<void> { editingLabels.value = []; await updateSidebarAttr('labels'); }
+async function clearMilestone(): Promise<void> {
+  editingMilestone.value = '';
+  await updateSidebarAttr('milestone');
+  openDropdown.value = null;
 }
 
 /** 创建新标签（同步到 gitea） */
 async function createNewLabel(): Promise<void> {
-  if (!activeProjectId.value || !newLabelName.value.trim()) return;
   creatingLabel.value = true;
   try {
-    // 去掉 # 前缀
     const color = newLabelColor.value.replace(/^#/, '');
     const newLabel = await labelsCreate({
       projectId: String(activeProjectId.value),
       name: newLabelName.value.trim(),
       color,
     });
-    // 立即加到可用列表和已选列表
     availableLabels.value = [...availableLabels.value, { name: newLabel.name, color: newLabel.color }];
     if (!editingLabels.value.includes(newLabel.name)) {
       editingLabels.value = [...editingLabels.value, newLabel.name];
     }
-    // 隐藏输入框 + 重置
     showNewLabelInput.value = false;
     newLabelName.value = '';
     showToast({ type: 'success', message: `标签 "${newLabel.name}" 已创建` });
@@ -897,66 +954,6 @@ async function createNewLabel(): Promise<void> {
   }
 }
 
-/** 保存属性（逐字段尝试，一个失败不影响其他） */
-async function saveAttrs(p: PullDto): Promise<void> {
-  if (!activeProjectId.value) return;
-  const projectId = String(activeProjectId.value); // 显式解 ref
-  attrEditorSaving.value = true;
-  const errors: string[] = [];
-
-  // 1. 更新标签（替换所有标签）
-  try {
-    await pullStore.updateLabels(projectId, p.index, editingLabels.value);
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    errors.push(`标签: ${err.messageText ?? err.message ?? '失败'}`);
-  }
-
-  // 2. 更新指派人（多选，空数组 = 清除指派人）
-  try {
-    await pullStore.updateAssignees(projectId, p.index, editingAssignees.value);
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    errors.push(`指派人: ${err.messageText ?? err.message ?? '失败'}`);
-  }
-
-  // 3. 更新评审人（过滤掉组织账号——gitea 1.x 不允许）
-  const validReviewers = editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r));
-  try {
-    await pullStore.updateReviewers(projectId, p.index, validReviewers);
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    const msg = err.messageText ?? err.message ?? '失败';
-    // 保留 messageText 完整内容（含 gitea 真实原因）
-    errors.push(`评审人: ${msg}`);
-  }
-
-  // 4. 更新里程碑（v0.6.0）
-  try {
-    await pullStore.updateMilestone(projectId, p.index, editingMilestone.value);
-  } catch (e) {
-    const err = e as { messageText?: string; message?: string };
-    errors.push(`里程碑: ${err.messageText ?? err.message ?? '失败'}`);
-  }
-
-  attrEditorSaving.value = false;
-
-  if (errors.length > 0) {
-    // 错误（业务/系统）→ persistent toast（不自动消失，必须用户点击关闭）
-    showToast({
-      type: 'error',
-      message: errors.join('\n'),
-      persistent: true,
-    });
-  } else {
-    showToast({ type: 'success', message: `#${p.index} 属性已更新` });
-    closeAttrEditor();
-  }
-  // 始终刷新列表（部分成功也能看到最新状态）
-  await pull.refresh();
-}
-
-/** 点击关闭按钮 → 弹二次确认 */
 function requestClose(p: PullDto): void {
   closingPull.value = p;
   confirmCloseOpen.value = true;
@@ -2152,11 +2149,15 @@ function onDocumentClick(_e: MouseEvent): void {
   if (!target) {
     commentSmileOpen.value = null;
     commentMenuOpen.value = null;
+    openDropdown.value = null;
     return;
   }
   if (target.closest('.pr-detail__comment-action-wrap')) return;
+  if (target.closest('.pr-sidebar-block__menu')) return;
+  if (target.closest('.pr-sidebar-block__dropdown')) return;
   commentSmileOpen.value = null;
   commentMenuOpen.value = null;
+  openDropdown.value = null;
 }
 
 onMounted(() => {
@@ -2662,14 +2663,6 @@ function formatRelative(iso: string | undefined): string {
               </span>
             </dd>
           </div>
-          <button
-            type="button"
-            class="pr-detail__edit-attrs"
-            @click="openAttrEditor(selectedPR)"
-          >
-            <Pencil :size="12" :stroke-width="2" aria-hidden="true" />
-            <span>{{ isGithub ? 'Edit' : '编辑属性' }}</span>
-          </button>
           <!-- 操作按钮（靠右贴边） -->
           <div class="pr-detail-meta__actions">
             <span
@@ -3992,95 +3985,42 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
           </div>
         </div>
           </div>
-          <!-- v0.7.28：右侧 sidebar（GitHub web 风格：Reviewers / Assignees / Labels /
-               Projects / Milestone / Development / Notifications）
-               v0.7.28 简版：渲染 4 个常用块（Reviewers / Assignees / Labels / Milestone）。
-               Projects / Development / Notifications 留 v0.7.29 补（Projects 端点要
-               调 GitHub GraphQL 拿 issue/71 项目关联，scope 较大）。 -->
-          <aside class="pr-detail-sidebar" v-if="selectedPR">
+          <!-- 侧边栏属性：对齐 Gitea issue-sidebar-combo，点击区块直接编辑 -->
+          <aside class="pr-detail-sidebar" v-if="selectedPR" @click.stop>
             <!-- Reviewers -->
             <div class="pr-sidebar-block">
-              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Reviewers' : '审阅人' }}</h3>
-              <div class="pr-sidebar-block__content">
-                <div
-                  v-if="(selectedPR.reviewers ?? []).length === 0"
-                  class="pr-sidebar-block__empty"
-                >{{ isGithub ? 'No reviews' : '暂无审阅人' }}</div>
-                <div
-                  v-for="r in (selectedPR.reviewers ?? [])"
-                  :key="r.username"
-                  class="pr-sidebar-block__user"
-                >
-                  <div class="pr-sidebar-block__avatar">
-                    <img
-                      v-if="r.avatarUrl"
-                      :src="r.avatarUrl"
-                      :alt="r.username"
-                      class="pr-sidebar-block__avatar-img"
-                    />
-                    <span v-else>{{ r.username.charAt(0).toUpperCase() }}</span>
-                  </div>
-                  <span class="pr-sidebar-block__username">{{ r.username }}</span>
+              <button type="button" class="pr-sidebar-block__dropdown" @click="toggleDropdown('reviewers')">
+                <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Reviewers' : '审阅人' }} <Settings :size="14" :stroke-width="2" /></h3>
+              </button>
+              <div v-if="openDropdown === 'reviewers'" class="pr-sidebar-block__menu">
+                <div v-if="isLoadingDropdown" class="pr-sidebar-block__loading">加载中…</div>
+                <template v-else>
+                <div class="pr-sidebar-block__search"><Search :size="14" /><input v-model="reviewerSearch" class="pr-sidebar-block__search-input" type="text" :placeholder="isGithub ? 'Filter reviewers...' : '搜索审阅人...'" /></div>
+                <div class="pr-sidebar-block__options">
+                  <button type="button" class="pr-sidebar-block__option" @click="clearReviewers"><span class="pr-sidebar-block__check"></span>{{ isGithub ? 'Clear selection' : '清除选择' }}</button>
+                  <button v-for="member in filteredReviewerMembers" :key="member" type="button" class="pr-sidebar-block__option" :class="{ 'pr-sidebar-block__option--disabled': isNonReviewable(member) }" :disabled="isNonReviewable(member)" @click="toggleReviewerMember(member)"><span class="pr-sidebar-block__check" :class="{ 'pr-sidebar-block__check--checked': hasReviewer(member) }"><Check v-if="hasReviewer(member)" :size="12" /></span>{{ member }}{{ isNonReviewable(member) ? ' (组织)' : '' }}</button>
                 </div>
+                </template>
               </div>
+              <div class="pr-sidebar-block__content"><div v-if="!(selectedPR.reviewers ?? []).length" class="pr-sidebar-block__empty">{{ isGithub ? 'No reviews' : '暂无审阅人' }}</div><div v-for="r in (selectedPR.reviewers ?? [])" :key="r.username" class="pr-sidebar-block__user"><div class="pr-sidebar-block__avatar"><img v-if="r.avatarUrl" :src="r.avatarUrl" :alt="r.username" class="pr-sidebar-block__avatar-img" /><span v-else>{{ r.username.charAt(0).toUpperCase() }}</span></div><span class="pr-sidebar-block__username">{{ r.username }}</span></div></div>
             </div>
             <!-- Assignees -->
             <div class="pr-sidebar-block">
-              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Assignees' : '指派人' }}</h3>
-              <div class="pr-sidebar-block__content">
-                <div
-                  v-if="(selectedPR.assignees ?? []).length === 0"
-                  class="pr-sidebar-block__empty"
-                >{{ isGithub ? 'No one—' : '尚未指派 — ' }}<span class="pr-sidebar-block__assign-link">{{ isGithub ? 'assign yourself' : '指派自己' }}</span></div>
-                <div
-                  v-for="a in (selectedPR.assignees ?? [])"
-                  :key="a.username"
-                  class="pr-sidebar-block__user"
-                >
-                  <div class="pr-sidebar-block__avatar">
-                    <img
-                      v-if="a.avatarUrl"
-                      :src="a.avatarUrl"
-                      :alt="a.username"
-                      class="pr-sidebar-block__avatar-img"
-                    />
-                    <span v-else>{{ a.username.charAt(0).toUpperCase() }}</span>
-                  </div>
-                  <span class="pr-sidebar-block__username">{{ a.username }}</span>
-                </div>
-              </div>
+              <button type="button" class="pr-sidebar-block__dropdown" @click="toggleDropdown('assignees')"><h3 class="pr-sidebar-block__title">{{ isGithub ? 'Assignees' : '指派人' }} <Settings :size="14" :stroke-width="2" /></h3></button>
+              <div v-if="openDropdown === 'assignees'" class="pr-sidebar-block__menu"><div class="pr-sidebar-block__search"><Search :size="14" /><input v-model="assigneeSearch" class="pr-sidebar-block__search-input" type="text" :placeholder="isGithub ? 'Filter assignees...' : '搜索指派人...'" /></div><div class="pr-sidebar-block__options"><button type="button" class="pr-sidebar-block__option" @click="clearAssignees"><span class="pr-sidebar-block__check"></span>{{ isGithub ? 'Clear selection' : '清除选择' }}</button><button v-for="member in filteredAssigneeMembers" :key="member" type="button" class="pr-sidebar-block__option" @click="toggleAssigneeMember(member)"><span class="pr-sidebar-block__check" :class="{ 'pr-sidebar-block__check--checked': hasAssignee(member) }"><Check v-if="hasAssignee(member)" :size="12" /></span>{{ member }}</button></div></div>
+              <div class="pr-sidebar-block__content"><div v-if="!(selectedPR.assignees ?? []).length" class="pr-sidebar-block__empty">{{ isGithub ? 'No one—' : '尚未指派 — ' }}<span class="pr-sidebar-block__assign-link">{{ isGithub ? 'assign yourself' : '指派自己' }}</span></div><div v-for="a in (selectedPR.assignees ?? [])" :key="a.username" class="pr-sidebar-block__user"><div class="pr-sidebar-block__avatar"><img v-if="a.avatarUrl" :src="a.avatarUrl" :alt="a.username" class="pr-sidebar-block__avatar-img" /><span v-else>{{ a.username.charAt(0).toUpperCase() }}</span></div><span class="pr-sidebar-block__username">{{ a.username }}</span></div></div>
             </div>
             <!-- Labels -->
             <div class="pr-sidebar-block">
-              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Labels' : '标签' }}</h3>
-              <div class="pr-sidebar-block__content">
-                <div
-                  v-if="(selectedPR.labels ?? []).length === 0"
-                  class="pr-sidebar-block__empty"
-                >{{ isGithub ? 'None yet' : '暂无标签' }}</div>
-                <div class="pr-sidebar-block__label-list">
-                  <span
-                    v-for="label in (selectedPR.labels ?? [])"
-                    :key="label.id"
-                    class="pr-sidebar-block__label"
-                    :style="labelStyle(label.color)"
-                  >{{ label.name }}</span>
-                </div>
-              </div>
+              <button type="button" class="pr-sidebar-block__dropdown" @click="toggleDropdown('labels')"><h3 class="pr-sidebar-block__title">{{ isGithub ? 'Labels' : '标签' }} <Settings :size="14" :stroke-width="2" /></h3></button>
+              <div v-if="openDropdown === 'labels'" class="pr-sidebar-block__menu"><div class="pr-sidebar-block__search"><Search :size="14" /><input v-model="labelSearch" class="pr-sidebar-block__search-input" type="text" :placeholder="isGithub ? 'Filter labels...' : '搜索标签...'" /></div><div class="pr-sidebar-block__options"><button type="button" class="pr-sidebar-block__option" @click="clearLabels"><span class="pr-sidebar-block__check"></span>{{ isGithub ? 'Clear selection' : '清除选择' }}</button><button type="button" class="pr-sidebar-block__option" @click="createNewLabel"><span>＋</span>{{ isGithub ? 'Create label' : '新建标签' }}</button><button v-for="label in filteredLabels" :key="label.name" type="button" class="pr-sidebar-block__option" @click="toggleLabelMember(label.name)"><span class="pr-sidebar-block__check" :class="{ 'pr-sidebar-block__check--checked': hasLabel(label.name) }"><Check v-if="hasLabel(label.name)" :size="12" /></span><span class="pr-sidebar-block__label" :style="labelStyle(label.color)">{{ label.name }}</span></button></div></div>
+              <div class="pr-sidebar-block__content"><div v-if="!(selectedPR.labels ?? []).length" class="pr-sidebar-block__empty">{{ isGithub ? 'None yet' : '暂无标签' }}</div><div class="pr-sidebar-block__label-list"><span v-for="label in (selectedPR.labels ?? [])" :key="label.id" class="pr-sidebar-block__label" :style="labelStyle(label.color)">{{ label.name }}</span></div></div>
             </div>
             <!-- Milestone -->
             <div class="pr-sidebar-block">
-              <h3 class="pr-sidebar-block__title">{{ isGithub ? 'Milestone' : '里程碑' }}</h3>
-              <div class="pr-sidebar-block__content">
-                <div
-                  v-if="!selectedPR.milestone"
-                  class="pr-sidebar-block__empty"
-                >{{ isGithub ? 'No milestone' : '暂无里程碑' }}</div>
-                <div v-else class="pr-sidebar-block__milestone">
-                  <GitBranch :size="14" :stroke-width="2" aria-hidden="true" />
-                  <span>{{ selectedPR.milestone.title }}</span>
-                </div>
-              </div>
+              <button type="button" class="pr-sidebar-block__dropdown" @click="toggleDropdown('milestone')"><h3 class="pr-sidebar-block__title">{{ isGithub ? 'Milestone' : '里程碑' }} <Settings :size="14" :stroke-width="2" /></h3></button>
+              <div v-if="openDropdown === 'milestone'" class="pr-sidebar-block__menu"><div class="pr-sidebar-block__search"><Search :size="14" /><input v-model="milestoneSearch" class="pr-sidebar-block__search-input" type="text" :placeholder="isGithub ? 'Filter milestones...' : '搜索里程碑...'" /></div><div class="pr-sidebar-block__options"><button type="button" class="pr-sidebar-block__option" @click="clearMilestone"><span class="pr-sidebar-block__check"></span>{{ isGithub ? 'Clear selection' : '清除选择' }}</button><button v-for="milestone in filteredMilestones" :key="milestone.title" type="button" class="pr-sidebar-block__option" @click="selectMilestone(milestone.title)"><span class="pr-sidebar-block__check" :class="{ 'pr-sidebar-block__check--checked': editingMilestone === milestone.title }"><Check v-if="editingMilestone === milestone.title" :size="12" /></span>{{ milestone.title }}</button></div></div>
+              <div class="pr-sidebar-block__content"><div v-if="!selectedPR.milestone" class="pr-sidebar-block__empty">{{ isGithub ? 'No milestone' : '暂无里程碑' }}</div><div v-else class="pr-sidebar-block__milestone"><GitBranch :size="14" :stroke-width="2" aria-hidden="true" /><span>{{ selectedPR.milestone.title }}</span></div></div>
             </div>
           </aside>
         </div>
@@ -4207,130 +4147,6 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
       @confirm="performClose"
       @cancel="cancelClose"
     />
-
-    <!-- ============== 属性编辑弹窗 ============== -->
-    <ConfirmDialog
-      :open="attrEditorOpen"
-      title="编辑属性"
-      :description="editingPull ? `编辑 #${editingPull.index} 的标签、指派人、评审人` : ''"
-      confirm-label="保存"
-      @update:open="attrEditorOpen = $event"
-      @confirm="editingPull && saveAttrs(editingPull)"
-      @cancel="closeAttrEditor"
-    >
-      <div class="attr-editor">
-        <!-- 标签选择 -->
-        <div class="attr-editor__section">
-          <div class="attr-editor__label-row">
-            <label class="attr-editor__label">标签：</label>
-            <button
-              type="button"
-              class="attr-editor__add-btn"
-              @click="showNewLabelInput = !showNewLabelInput"
-              title="新建标签"
-            >+ 新建</button>
-          </div>
-          <div v-if="showNewLabelInput" class="attr-editor__new-label">
-            <input
-              v-model="newLabelName"
-              type="text"
-              class="attr-editor__new-label-input"
-              placeholder="标签名"
-              autocomplete="off"
-            />
-            <input
-              v-model="newLabelColor"
-              type="color"
-              class="attr-editor__new-label-color"
-              title="标签颜色"
-            />
-            <button
-              type="button"
-              class="attr-editor__new-label-confirm"
-              :disabled="!newLabelName.trim()"
-              @click="createNewLabel"
-            >{{ creatingLabel ? '创建中…' : '创建' }}</button>
-          </div>
-          <div class="attr-editor__tags">
-            <label
-              v-for="label in availableLabels"
-              :key="label.name"
-              class="attr-editor__tag"
-              :class="{ 'attr-editor__tag--selected': editingLabels.includes(label.name) }"
-              :style="{ '--tag-color': '#' + label.color, '--tag-bg': '#' + label.color + '22' }"
-            >
-              <input
-                type="checkbox"
-                :value="label.name"
-                :checked="editingLabels.includes(label.name)"
-                class="attr-editor__checkbox"
-                @change="toggleLabel(label.name)"
-              />
-              <span>{{ label.name }}</span>
-            </label>
-          </div>
-        </div>
-        <!-- 指派人 -->
-        <div class="attr-editor__section">
-          <label class="attr-editor__label" for="attr-assignee">指派人：</label>
-          <select
-            id="attr-assignee"
-            v-model="editingAssignees"
-            class="attr-editor__select"
-            multiple
-          >
-            <option
-              v-for="member in availableMembers"
-              :key="member"
-              :value="member"
-            >{{ member }}</option>
-          </select>
-          <span class="attr-editor__hint">按住 ⌘/Ctrl 多选</span>
-        </div>
-        <!-- 里程碑：v0.7.0 起 GitHub 数据源也开放（加载 GitHub milestones） -->
-        <div class="attr-editor__section">
-          <label class="attr-editor__label" for="attr-milestone">里程碑：</label>
-          <select
-            id="attr-milestone"
-            v-model="editingMilestone"
-            class="attr-editor__select"
-          >
-            <option value="">无</option>
-            <option
-              v-for="ms in availableMilestones"
-              :key="ms.title"
-              :value="ms.title"
-            >{{ ms.title }}</option>
-          </select>
-        </div>
-        <!-- 评审人 -->
-        <div class="attr-editor__section">
-          <label class="attr-editor__label">评审人：<span class="attr-editor__hint" v-if="nonReviewableMembers.size > 0">（组织账号不可作评审人）</span></label>
-          <div class="attr-editor__tags">
-            <label
-              v-for="member in availableMembers"
-              :key="member"
-              class="attr-editor__tag"
-              :class="{
-                'attr-editor__tag--selected': editingReviewers.includes(member),
-                'attr-editor__tag--disabled': nonReviewableMembers.has(member),
-              }"
-              :title="nonReviewableMembers.has(member) ? '组织账号不能作评审人' : ''"
-            >
-              <input
-                type="checkbox"
-                :value="member"
-                :checked="editingReviewers.includes(member)"
-                :disabled="nonReviewableMembers.has(member)"
-                class="attr-editor__checkbox"
-                @change="toggleReviewer(member)"
-              />
-              <span>{{ member }}{{ nonReviewableMembers.has(member) ? ' (组织)' : '' }}</span>
-            </label>
-          </div>
-        </div>
-      </div>
-    </ConfirmDialog>
   </div>
 </template>
 
@@ -6822,9 +6638,92 @@ git push origin {{ baseLabel(selectedPR) }}</pre>
   overflow-y: auto;
   background: var(--color-shell-main-bg);
 }
+/* 侧边栏下拉交互：对齐 Gitea issue-sidebar-combo */
 .pr-sidebar-block {
-  margin-bottom: var(--space-4);
+  position: relative;
 }
+.pr-sidebar-block__dropdown {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.pr-sidebar-block__dropdown .pr-sidebar-block__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pr-sidebar-block__menu {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  width: max-content;
+  min-width: 100%;
+  max-width: 280px;
+  margin-top: 2px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+.pr-sidebar-block__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-divider);
+}
+.pr-sidebar-block__search-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-sm);
+}
+.pr-sidebar-block__options { overflow-y: auto; overscroll-behavior: contain; }
+.pr-sidebar-block__option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  white-space: normal;
+  word-break: break-word;
+}
+.pr-sidebar-block__option:hover { background: var(--color-bg-hover); }
+.pr-sidebar-block__option--disabled { opacity: 0.5; cursor: not-allowed; }
+.pr-sidebar-block__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 1px solid var(--color-divider);
+  border-radius: 3px;
+}
+.pr-sidebar-block__loading {
+  padding: 12px 10px;
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+.pr-sidebar-block__check--checked { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
 .pr-sidebar-block__title {
   font-size: var(--font-sm);
   font-weight: 600;

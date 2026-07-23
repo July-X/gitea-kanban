@@ -265,6 +265,7 @@ type WailsApp = {
   ClosePull?: (args: { projectId: string; index: number }) => Promise<unknown>;
   UpdatePullLabels?: (args: { projectId: string; index: number; labels: string[] }) => Promise<unknown>;
   UpdatePullAssignee?: (args: { projectId: string; index: number; assignee: string }) => Promise<unknown>;
+  UpdatePullMilestone?: (args: { projectId: string; index: number; milestone: string }) => Promise<unknown>;
   UpdatePullReviewers?: (args: { projectId: string; index: number; reviewers: string[] }) => Promise<unknown>;
   // v0.7.25：修改 PR 标题（WIP toggle 去掉 "WIP:" 前缀用）
   UpdatePullTitle?: (args: { projectId: string; index: number; title: string }) => Promise<unknown>;
@@ -327,6 +328,9 @@ type WailsApp = {
     newPosition?: number;
   }) => Promise<unknown>;
   /** 取单文件 unified diff（含 hunks） */
+  ListMembers?: (args: { projectId: string }) => Promise<unknown>;
+  ListLabels?: (args: { projectId: string }) => Promise<unknown>;
+  ListMilestones?: (args: { projectId: string; state?: string }) => Promise<unknown>;
   GetPullFileDiff?: (args: { projectId: string; index: number; filePath: string }) => Promise<unknown>;
   /** 打开桌面文件夹（v0.5.x 故障排查按钮） */
   OpenDesktopFolder?: () => Promise<void>;
@@ -864,6 +868,25 @@ const apiShim = {
       );
     },
     /**
+     * pulls.updateMilestone —— 替换 PR 里程碑（空 = 清空）
+     */
+    updateMilestone: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId: string; index: number; milestone: string };
+      return forwardToWails(
+        () => notImplemented('pulls', 'updateMilestone'),
+        (app) => {
+          if (!app.UpdatePullMilestone) {
+            return notImplemented('pulls', 'updateMilestone');
+          }
+          return app.UpdatePullMilestone({
+            projectId: a.projectId,
+            index: a.index,
+            milestone: a.milestone,
+          });
+        },
+      );
+    },
+    /**
      * pulls.updateAssignee —— 替换 PR 指派人（空 = 清空）
      */
     updateAssignee: (args: unknown): Promise<unknown> => {
@@ -1337,16 +1360,49 @@ const apiShim = {
   },
 
   labels: {
-    list: (_args: unknown): Promise<unknown> => stubEmpty({ items: [], hasMore: false }),
+    list: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId?: string };
+      return forwardToWails(
+        () => stubEmpty({ items: [], hasMore: false }),
+        (app) => {
+          if (!app.ListLabels) {
+            return stubEmpty({ items: [], hasMore: false });
+          }
+          return app.ListLabels({ projectId: a.projectId ?? '' });
+        },
+      );
+    },
     create: (_args: unknown): Promise<unknown> => notImplemented('labels', 'create'),
   },
 
   members: {
-    list: (_args: unknown): Promise<unknown> => stubEmpty([]),
+    list: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId?: string };
+      return forwardToWails(
+        () => stubEmpty([]),
+        (app) => {
+          if (!app.ListMembers) {
+            return stubEmpty([]);
+          }
+          return app.ListMembers({ projectId: a.projectId ?? '' });
+        },
+      );
+    },
   },
 
   milestones: {
-    list: (_args: unknown): Promise<unknown> => stubEmpty({ items: [], hasMore: false }),
+    list: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId?: string; state?: string };
+      return forwardToWails(
+        () => stubEmpty({ items: [], hasMore: false }),
+        (app) => {
+          if (!app.ListMilestones) {
+            return stubEmpty({ items: [], hasMore: false });
+          }
+          return app.ListMilestones({ projectId: a.projectId ?? '', state: a.state });
+        },
+      );
+    },
   },
 
   user: {

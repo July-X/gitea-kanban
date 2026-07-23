@@ -222,11 +222,36 @@ type ListMilestonesArgs struct {
 	State     string `json:"state"` // "open" | "closed" | "all"（空 = open）
 }
 
+// ListMilestonesResp ListMilestones 响应
+type ListMilestonesResp struct {
+	Items []platformAdapter.MilestoneDTO `json:"items"`
+}
+
+// ListLabelsArgs 列出仓库标签（v0.6.0）
+type ListLabelsArgs struct {
+	ProjectID string `json:"projectId"`
+}
+
+// ListLabelsResp ListLabels 响应
+type ListLabelsResp struct {
+	Items []platformAdapter.LabelDTO `json:"items"`
+}
+
+// ListMembersArgs 列出仓库成员（v0.6.0）
+type ListMembersArgs struct {
+	ProjectID string `json:"projectId"`
+}
+
+// ListMembersResp ListMembers 响应
+type ListMembersResp struct {
+	Items []platformAdapter.MemberDTO `json:"items"`
+}
+
 // UpdatePullMilestoneArgs 给合并请求关联里程碑（v0.6.0）
 type UpdatePullMilestoneArgs struct {
 	ProjectID string `json:"projectId"`
 	Index     int    `json:"index"`
-	Milestone string `json:"milestone"` // "" 清空
+	Milestone string `json:"milestone"` // 里程碑 title（空 = 清空）
 }
 
 // UpdatePullLabels 替换合并请求所有标签（替换语义）
@@ -874,19 +899,51 @@ type GetPullFileDiffArgs struct {
 }
 
 // ListMilestones 列出仓库里程碑（v0.6.0）
-func (a *App) ListMilestones(args ListMilestonesArgs) ([]platformAdapter.MilestoneDTO, error) {
+func (a *App) ListMilestones(args ListMilestonesArgs) (ListMilestonesResp, error) {
 	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
 	if err != nil {
-		return nil, err
+		return ListMilestonesResp{}, err
 	}
 	d, err := adapter.ListMilestones(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.State)
 	if err != nil {
 		if errors.Is(err, platformAdapter.ErrNotSupported) {
-			return []platformAdapter.MilestoneDTO{}, nil
+			return ListMilestonesResp{}, nil
 		}
-		return nil, err
+		return ListMilestonesResp{}, err
 	}
-	return d, nil
+	return ListMilestonesResp{Items: d}, nil
+}
+
+// ListLabels 列出仓库标签（v0.6.0）
+func (a *App) ListLabels(args ListLabelsArgs) (ListLabelsResp, error) {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return ListLabelsResp{}, err
+	}
+	d, err := adapter.ListLabels(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			return ListLabelsResp{}, nil
+		}
+		return ListLabelsResp{}, err
+	}
+	return ListLabelsResp{Items: d}, nil
+}
+
+// ListMembers 列出仓库成员（v0.6.0）
+func (a *App) ListMembers(args ListMembersArgs) (ListMembersResp, error) {
+	project, account, token, adapter, err := a.resolvePullContext(args.ProjectID)
+	if err != nil {
+		return ListMembersResp{}, err
+	}
+	d, err := adapter.ListMembers(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name)
+	if err != nil {
+		if errors.Is(err, platformAdapter.ErrNotSupported) {
+			return ListMembersResp{}, nil
+		}
+		return ListMembersResp{}, err
+	}
+	return ListMembersResp{Items: d}, nil
 }
 
 func (a *App) UpdatePullMilestone(args UpdatePullMilestoneArgs) (PullDetailAppDTO, error) {

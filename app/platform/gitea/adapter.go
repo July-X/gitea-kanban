@@ -478,14 +478,10 @@ func (a *GiteaAdapter) ClosePull(ctx context.Context, hostURL, username, token, 
 
 // UpdatePullLabels 替换合并请求标签（PUT /api/v1/repos/{owner}/{repo}/pulls/{index}/labels）
 //
-// gitea 端点 PUT body: {labels: [{name: "..."}]}（替换语义）。
-// 为简化，前端传 label 名称数组；gitea 会按 name 自动解析为 id。
+// gitea 端点 PUT body: {labels: ["label1","label2"]}（替换语义）。
+// 注意：Gitea 期望 labels 是字符串数组（label name 或 id），不是对象数组。
 func (a *GiteaAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, token, owner, repo string, index int, labelNames []string) (*platform.PullDetailDTO, error) {
-	labels := make([]map[string]any, 0, len(labelNames))
-	for _, n := range labelNames {
-		labels = append(labels, map[string]any{"name": n})
-	}
-	body := map[string]any{"labels": labels}
+	body := map[string]any{"labels": labelNames}
 	reader, err := encodeJSONBody(body)
 	if err != nil {
 		return nil, err
@@ -499,65 +495,22 @@ func (a *GiteaAdapter) UpdatePullLabels(ctx context.Context, hostURL, username, 
 	return &d, nil
 }
 
-// UpdatePullAssignee 替换合并请求指派人（Gitea 端点为 POST/DELETE /pulls/{index}/assignees 追加/移除）
+// UpdatePullAssignee 替换合并请求指派人（Gitea 端点为 PATCH /api/v1/repos/{owner}/{repo}/pulls/{index}）
 //
-// 为与前端契约（"替换所有"）一致：先 GET 现状，diff 后做 1 次 DELETE + 1 次 POST。
-// v0.6.0 支持多人 assignees
+// 直接通过 PATCH PR 的方式替换 assignees 字段，避免 DELETE/POST 双请求的竞态问题。
 func (a *GiteaAdapter) UpdatePullAssignee(ctx context.Context, hostURL, username, token, owner, repo string, index int, assignees []string) (*platform.PullDetailDTO, error) {
-	cur, err := a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	body := map[string]any{"assignees": assignees}
+	reader, err := encodeJSONBody(body)
 	if err != nil {
 		return nil, err
 	}
-	existing := make([]string, 0, len(cur.Assignees))
-	for _, u := range cur.Assignees {
-		existing = append(existing, u.Username)
+	var raw giteaPullRaw
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
+	if err := a.doRequest(ctx, hostURL, token, "PATCH", path, reader, &raw); err != nil {
+		return nil, err
 	}
-	target := make(map[string]bool, len(assignees))
-	for _, u := range assignees {
-		target[u] = true
-	}
-	toRemove := []string{}
-	for _, u := range existing {
-		if !target[u] {
-			toRemove = append(toRemove, u)
-		}
-	}
-	toAdd := []string{}
-	for _, u := range assignees {
-		found := false
-		for _, e := range existing {
-			if e == u {
-				found = true
-				break
-			}
-		}
-		if !found {
-			toAdd = append(toAdd, u)
-		}
-	}
-	if len(toRemove) > 0 {
-		body := map[string]any{"assignees": toRemove}
-		reader, err := encodeJSONBody(body)
-		if err != nil {
-			return nil, err
-		}
-		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/assignees", owner, repo, index)
-		if err := a.doRequest(ctx, hostURL, token, "DELETE", path, reader, nil); err != nil {
-			return nil, err
-		}
-	}
-	if len(toAdd) > 0 {
-		body := map[string]any{"assignees": toAdd}
-		reader, err := encodeJSONBody(body)
-		if err != nil {
-			return nil, err
-		}
-		path := fmt.Sprintf("/repos/%s/%s/pulls/%d/assignees", owner, repo, index)
-		if err := a.doRequest(ctx, hostURL, token, "POST", path, reader, nil); err != nil {
-			return nil, err
-		}
-	}
-	return a.GetPull(ctx, hostURL, username, token, owner, repo, index)
+	d := giteaPullToDetail(raw)
+	return &d, nil
 }
 
 // UpdatePullReviewers 替换合并请求审查者（POST/DELETE /api/v1/repos/{owner}/{repo}/pulls/{index}/requested_reviewers）
@@ -831,9 +784,28 @@ func giteaMilestoneToDTO(r giteaMilestoneRaw) platform.MilestoneDTO {
 }
 
 // UpdatePullMilestone 给合并请求关联里程碑（PATCH /repos/{owner}/{repo}/pulls/{index} {"milestone": <title>|""}）
+// UpdatePullMilestone 给合并请求关联里程碑（PATCH /repos/{owner}/{repo}/pulls/{index} {"milestone": <id>|0}）
+//
+// Gitea 端点期望 milestone 字段为 int64 ID（0 表示清空），所以需要先按 title 查找 ID。
 func (a *GiteaAdapter) UpdatePullMilestone(ctx context.Context, hostURL, username, token, owner, repo string, index int, milestone string) (*platform.PullDetailDTO, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, index)
-	body := map[string]any{"milestone": milestone}
+	var milestoneID int64
+	if milestone != "" {
+		milestones, err := a.ListMilestones(ctx, hostURL, username, token, owner, repo, "all")
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range milestones {
+			if m.Title == milestone {
+				milestoneID = m.ID
+				break
+			}
+		}
+		if milestoneID == 0 {
+			return nil, fmt.Errorf("milestone not found: %s", milestone)
+		}
+	}
+	body := map[string]any{"milestone": milestoneID}
 	reader, err := encodeJSONBody(body)
 	if err != nil {
 		return nil, err

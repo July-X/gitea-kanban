@@ -1171,6 +1171,90 @@ export namespace main {
 	        this.state = source["state"];
 	    }
 	}
+	export class ListLabelsArgs {
+	    projectId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListLabelsArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	    }
+	}
+	export class ListLabelsResp {
+	    items: platform.LabelDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ListLabelsResp(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], platform.LabelDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ListMembersArgs {
+	    projectId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListMembersArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	    }
+	}
+	export class ListMembersResp {
+	    items: platform.MemberDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ListMembersResp(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], platform.MemberDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ListMilestonesArgs {
 	    projectId: string;
 	    state: string;
@@ -1184,6 +1268,36 @@ export namespace main {
 	        this.projectId = source["projectId"];
 	        this.state = source["state"];
 	    }
+	}
+	export class ListMilestonesResp {
+	    items: platform.MilestoneDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ListMilestonesResp(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], platform.MilestoneDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ListPullCommentReactionsArgs {
 	    projectId: string;
@@ -1974,6 +2088,38 @@ export namespace platform {
 	        this.is_pull = source["is_pull"];
 	    }
 	}
+	export class LabelDTO {
+	    id: number;
+	    name: string;
+	    color: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LabelDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.color = source["color"];
+	        this.description = source["description"];
+	    }
+	}
+	export class MemberDTO {
+	    login: string;
+	    permission: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MemberDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.login = source["login"];
+	        this.permission = source["permission"];
+	    }
+	}
 	export class MilestoneDTO {
 	    id: number;
 	    title: string;
@@ -2555,6 +2701,7 @@ export namespace updater {
 	    manualReason?: string;
 	    downloadUrl?: string;
 	    assetSize?: number;
+	    platform?: string;
 	    downloaded: boolean;
 	    err?: string;
 	    devBuild: boolean;
@@ -2575,6 +2722,7 @@ export namespace updater {
 	        this.manualReason = source["manualReason"];
 	        this.downloadUrl = source["downloadUrl"];
 	        this.assetSize = source["assetSize"];
+	        this.platform = source["platform"];
 	        this.downloaded = source["downloaded"];
 	        this.err = source["err"];
 	        this.devBuild = source["devBuild"];
