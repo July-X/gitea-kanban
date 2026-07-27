@@ -70,6 +70,10 @@ import {
   labelsList,
   membersList,
   pullsReviewCreate,
+  pullsUpdateAssignee,
+  pullsUpdateLabels,
+  pullsUpdateMilestone,
+  pullsUpdateReviewers,
   pullsUploadAttachment,
 } from '@renderer/lib/ipc-client';
 import EmptyState from '@renderer/components/EmptyState.vue';
@@ -906,20 +910,28 @@ async function updateSidebarAttr(kind: 'labels' | 'assignees' | 'reviewers' | 'm
   const projectId = String(activeProjectId.value);
   const index = selectedPR.value.index;
   try {
-    // 直接用后端返回的最新数据同步 selectedPR（拷贝新对象打断响应式链，
-    // 避免当前 selectedPR 引用仍是旧 PullDto 对象导致 UI 显示脏数据）。
+    // 直接调底层 IPC（不走 store 中转）确保拿到返回值，
+    // 然后拷贝新对象打断旧 PullDto 引用链，避免 UI 短暂显示脏数据。
     if (kind === 'labels') {
-      const { labels } = await pullStore.updateLabels(projectId, index, editingLabels.value);
-      selectedPR.value = { ...selectedPR.value, labels };
+      const labels = editingLabels.value;
+      const updated = await pullsUpdateLabels({ projectId, index, labels });
+      pullStore.patchItem(index, { labels: updated.labels });
+      selectedPR.value = { ...selectedPR.value, labels: updated.labels };
     } else if (kind === 'assignees') {
-      const { assignees } = await pullStore.updateAssignees(projectId, index, editingAssignees.value);
-      selectedPR.value = { ...selectedPR.value, assignees };
+      const assignees = editingAssignees.value;
+      const updated = await pullsUpdateAssignee({ projectId, index, assignees });
+      pullStore.patchItem(index, { assignees: updated.assignees });
+      selectedPR.value = { ...selectedPR.value, assignees: updated.assignees };
     } else if (kind === 'reviewers') {
-      const { reviewers } = await pullStore.updateReviewers(projectId, index, editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r)));
-      selectedPR.value = { ...selectedPR.value, reviewers };
+      const reviewers = editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r));
+      const updated = await pullsUpdateReviewers({ projectId, index, reviewers });
+      pullStore.patchItem(index, { reviewers: updated.reviewers });
+      selectedPR.value = { ...selectedPR.value, reviewers: updated.reviewers };
     } else if (kind === 'milestone') {
-      const { milestone } = await pullStore.updateMilestone(projectId, index, editingMilestone.value);
-      selectedPR.value = { ...selectedPR.value, milestone };
+      const milestone = editingMilestone.value;
+      const updated = await pullsUpdateMilestone({ projectId, index, milestone });
+      pullStore.patchItem(index, { milestone: updated.milestone });
+      selectedPR.value = { ...selectedPR.value, milestone: updated.milestone };
     }
     openDropdown.value = null;
   } catch (e) {
