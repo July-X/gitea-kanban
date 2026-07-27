@@ -908,7 +908,10 @@ async function updateSidebarAttr(kind: 'labels' | 'assignees' | 'reviewers' | 'm
     if (kind === 'assignees') await pullStore.updateAssignees(projectId, index, editingAssignees.value);
     if (kind === 'reviewers') await pullStore.updateReviewers(projectId, index, editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r)));
     if (kind === 'milestone') await pullStore.updateMilestone(projectId, index, editingMilestone.value);
-    await pull.refresh();
+    // patchItem 已经同步更新了 items + currentSelectedItem，这里只需把 selectedPR 跟 store 对齐
+    if (pullStore.currentSelectedItem?.index === index) {
+      selectedPR.value = pullStore.currentSelectedItem;
+    }
     openDropdown.value = null;
   } catch (e) {
     const err = e as { messageText?: string; message?: string };

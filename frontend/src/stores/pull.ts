@@ -488,6 +488,10 @@ export const usePullStore = defineStore('pull', () => {
   function patchItem(index: number, patch: Partial<PullDto>): void {
     const i = items.value.findIndex(p => p.index === index);
     if (i >= 0) items.value[i] = { ...items.value[i], ...patch } as PullDto;
+    // v0.8.x: 同步更新 currentSelectedItem，避免右侧详情面板信息滞后
+    if (currentSelectedItem.value?.index === index) {
+      currentSelectedItem.value = { ...currentSelectedItem.value, ...patch } as PullDto;
+    }
   }
 
   /** 更新标签（替换所有标签） */
