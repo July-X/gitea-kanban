@@ -504,6 +504,8 @@ const tabLoading = computed(() => ({
 
 function selectPR(p: PullDto): void {
   selectedPR.value = p;
+  // v0.8.x: 同步 store 的 currentSelectedItem，让 patchItem/updateSidebarAttr 能找到当前 PR
+  pullStore.select(p);
   void loadComments(p);
   // v0.7.x: loadReviews -> store
   if (activeProjectId.value) {
