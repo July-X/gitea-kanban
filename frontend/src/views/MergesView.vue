@@ -906,16 +906,24 @@ async function updateSidebarAttr(kind: 'labels' | 'assignees' | 'reviewers' | 'm
   const projectId = String(activeProjectId.value);
   const index = selectedPR.value.index;
   try {
-    if (kind === 'labels') await pullStore.updateLabels(projectId, index, editingLabels.value);
-    if (kind === 'assignees') await pullStore.updateAssignees(projectId, index, editingAssignees.value);
-    if (kind === 'reviewers') await pullStore.updateReviewers(projectId, index, editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r)));
-    if (kind === 'milestone') await pullStore.updateMilestone(projectId, index, editingMilestone.value);
-    // patchItem 已经同步更新了 items + currentSelectedItem，这里只需把 selectedPR 跟 store 对齐
-    if (pullStore.currentSelectedItem?.index === index) {
-      selectedPR.value = pullStore.currentSelectedItem;
+    // 直接用后端返回的最新数据同步 selectedPR（拷贝新对象打断响应式链，
+    // 避免当前 selectedPR 引用仍是旧 PullDto 对象导致 UI 显示脏数据）。
+    if (kind === 'labels') {
+      const { labels } = await pullStore.updateLabels(projectId, index, editingLabels.value);
+      selectedPR.value = { ...selectedPR.value, labels };
+    } else if (kind === 'assignees') {
+      const { assignees } = await pullStore.updateAssignees(projectId, index, editingAssignees.value);
+      selectedPR.value = { ...selectedPR.value, assignees };
+    } else if (kind === 'reviewers') {
+      const { reviewers } = await pullStore.updateReviewers(projectId, index, editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r)));
+      selectedPR.value = { ...selectedPR.value, reviewers };
+    } else if (kind === 'milestone') {
+      const { milestone } = await pullStore.updateMilestone(projectId, index, editingMilestone.value);
+      selectedPR.value = { ...selectedPR.value, milestone };
     }
     openDropdown.value = null;
   } catch (e) {
+    console.error('[updateSidebarAttr] failed', e);
     const err = e as { messageText?: string; message?: string };
     showToast({ type: 'error', message: err.messageText ?? err.message ?? '属性更新失败', persistent: true });
   }

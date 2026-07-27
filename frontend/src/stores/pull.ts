@@ -495,27 +495,35 @@ export const usePullStore = defineStore('pull', () => {
   }
 
   /** 更新标签（替换所有标签） */
-  async function updateLabels(projectId: string, index: number, labels: string[]): Promise<void> {
+  async function updateLabels(projectId: string, index: number, labels: string[]): Promise<{ labels: NonNullable<PullDto['labels']> }> {
     const updated = await pullsUpdateLabels({ projectId, index, labels });
-    patchItem(index, { labels: updated.labels });
+    const next = (updated.labels ?? []) as NonNullable<PullDto['labels']>;
+    patchItem(index, { labels: next });
+    return { labels: next };
   }
 
   /** 更新指派人（多选，空数组 = 清除）—— store 暴露复数名对齐 MergesView 调用 */
-  async function updateAssignees(projectId: string, index: number, assignees: string[]): Promise<void> {
+  async function updateAssignees(projectId: string, index: number, assignees: string[]): Promise<{ assignees: NonNullable<PullDto['assignees']> }> {
     const updated = await pullsUpdateAssignee({ projectId, index, assignees });
-    patchItem(index, { assignees: updated.assignees });
+    const next = (updated.assignees ?? []) as NonNullable<PullDto['assignees']>;
+    patchItem(index, { assignees: next });
+    return { assignees: next };
   }
 
   /** 更新评审人（空数组 = 清除） */
-  async function updateReviewers(projectId: string, index: number, reviewers: string[]): Promise<void> {
+  async function updateReviewers(projectId: string, index: number, reviewers: string[]): Promise<{ reviewers: NonNullable<PullDto['reviewers']> }> {
     const updated = await pullsUpdateReviewers({ projectId, index, reviewers });
-    patchItem(index, { reviewers: updated.reviewers });
+    const next = (updated.reviewers ?? []) as NonNullable<PullDto['reviewers']>;
+    patchItem(index, { reviewers: next });
+    return { reviewers: next };
   }
 
   /** 关联里程碑（空串 = 清除；v0.6.0 Gitea / v0.7.0 GitHub） */
-  async function updateMilestone(projectId: string, index: number, milestone: string): Promise<void> {
+  async function updateMilestone(projectId: string, index: number, milestone: string): Promise<{ milestone: PullDto['milestone'] }> {
     const updated = await pullsUpdateMilestone({ projectId, index, milestone });
-    patchItem(index, { milestone: updated.milestone });
+    const next = (updated.milestone ?? null) as PullDto['milestone'];
+    patchItem(index, { milestone: next });
+    return { milestone: next };
   }
 
   /** v0.7.25：修改 PR 标题（用于 WIP toggle 去掉 "WIP:" 前缀） */
