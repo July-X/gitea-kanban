@@ -371,7 +371,7 @@ jobs:
               delay 2
             end tell
           end tell
-APPLESCRIPT
+          APPLESCRIPT
           sync
           test -f "$MOUNT_DIR/.background/dmg-background.png"
           test -f "$MOUNT_DIR/.DS_Store"
