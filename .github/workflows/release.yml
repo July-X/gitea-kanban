@@ -507,18 +507,26 @@ jobs:
         continue-on-error: true
 
       - name: 检查必需 secrets（可选：缺失时 release raw build 不签名）
+        id: secrets-check
         env:
           SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
           SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
         run: |
           # v0.8.0 rc18 fix：secrets 缺失只 warn 不 exit 1
           #（CI 上 maintainer 还没设 secrets，但用户仍想看 raw build 能否 release）
+          # 用 job-level env 变量做后续 step 的 if 条件（step env 不跨 step 生效，
+          # 否则会踩 v0.8.23 的坑：sign 和 fallback 两个 step 同时跑，placeholder sig 覆盖真实 sig）
+          HAS_SIGN_SECRETS=1
           if [[ -z "$SIGN_PRIVATE_KEY" ]]; then
             echo "WARN: SIGN_PRIVATE_KEY secret is empty — release raw build（无签名）"
+            HAS_SIGN_SECRETS=0
           fi
           if [[ -z "$SIGN_PASSWORD" ]]; then
             echo "WARN: SIGN_PASSWORD secret is empty — release raw build（无签名）"
+            HAS_SIGN_SECRETS=0
           fi
+          echo "HAS_SIGN_SECRETS=$HAS_SIGN_SECRETS" >> "$GITHUB_ENV"
+          echo "==> HAS_SIGN_SECRETS=$HAS_SIGN_SECRETS"
           # 列出可用 asset
           echo "==> 可用 build artifacts:"
           ls -la build/bin/ 2>&1 || echo "(build/bin/ 为空 — 所有 build matrix 都 FAIL)"
@@ -528,7 +536,7 @@ jobs:
       #   并集中 future 维护点。CI 上 release.sh 默认产物写到 build/release/
       #   （RELEASE_DIR env override）。
       - name: 集成 sign + manifest（scripts/release.sh）
-        if: env.SIGN_PRIVATE_KEY != '' && env.SIGN_PASSWORD != ''
+        if: env.HAS_SIGN_SECRETS == '1'
         env:
           SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
           SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
@@ -540,7 +548,7 @@ jobs:
       # raw build fallback（secrets 缺失时）：把 macOS dmg + windows .exe 直接发布，不签名
       # v0.8.0 rc30：macOS 改成 .dmg（之前是 zip 的 bug：解压得到裸 Contents/）
       - name: raw build fallback（无签名）
-        if: env.SIGN_PRIVATE_KEY == '' || env.SIGN_PASSWORD == ''
+        if: env.HAS_SIGN_SECRETS == '0'
         run: |
           mkdir -p build/release
 
