@@ -329,19 +329,25 @@ jobs:
 
           # Finder 的图标坐标和背景属于卷宗的 .DS_Store 元数据，hdiutil -srcfolder 本身不会生成。
           # 临时挂载可写镜像后由 Finder 写入，最终再压缩成发布用 UDZO。
-          MOUNT_DIR=$(mktemp -d)
+          # 必须走默认 /Volumes/<volname> 挂载路径（不能 -mountpoint），否则 Finder 会以挂载点目录名
+          # （mktemp 随机名）注册卷，导致 AppleScript tell disk "Gitea Kanban" 找不到目标。
           MOUNTED=0
           cleanup_dmg_mount() {
             if [[ "$MOUNTED" == "1" ]]; then
               hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
             fi
-            rm -rf "$MOUNT_DIR"
             rm -f "$DMG_RW"
           }
           trap cleanup_dmg_mount EXIT
 
-          hdiutil attach -readwrite -noverify -noautoopen -mountpoint "$MOUNT_DIR" "$DMG_RW"
+          # 防御 runner 上残留同名卷导致 hdiutil 自动改名成 "Gitea Kanban 1"
+          hdiutil detach "/Volumes/Gitea Kanban" >/dev/null 2>&1 || true
+
+          ATTACH_OUT="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW")"
+          MOUNT_DIR="$(printf '%s\n' "$ATTACH_OUT" | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
+          test -n "$MOUNT_DIR"
           MOUNTED=1
+          echo "==> dmg 挂载点: $MOUNT_DIR"
           # Finder 可能需要短暂时间注册刚挂载的卷；保留输出便于诊断 Apple Events 权限和卷名格式。
           DISKS_OUT=""
           for attempt in {1..20}; do
@@ -388,7 +394,6 @@ jobs:
             -o "$DMG"
           rm -f "$DMG_RW"
           trap - EXIT
-          rm -rf "$MOUNT_DIR"
 
           echo "==> dmg output:"
           ls -la "$DMG"
