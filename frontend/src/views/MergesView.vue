@@ -798,6 +798,8 @@ const confirmCloseOpen = ref(false);
 
 /** 侧边栏下拉状态 */
 const openDropdown = ref<'reviewers' | 'assignees' | 'labels' | 'milestone' | null>(null);
+/** 关闭下拉时需要保存的属性类型（多选场景：labels/assignees/reviewers） */
+const pendingSaveKind = ref<'labels' | 'assignees' | 'reviewers' | null>(null);
 const reviewerSearch = ref('');
 const assigneeSearch = ref('');
 const labelSearch = ref('');
@@ -824,11 +826,29 @@ const newLabelName = ref('');
 const newLabelColor = ref('#fbca04');
 const creatingLabel = ref(false);
 
+/** 关闭下拉 + 保存未提交的多选属性 */
+async function closeDropdown(): Promise<void> {
+  const kind = pendingSaveKind.value;
+  pendingSaveKind.value = null;
+  openDropdown.value = null;
+  commentSmileOpen.value = null;
+  commentMenuOpen.value = null;
+  if (kind) {
+    await updateSidebarAttr(kind);
+  }
+}
+
 /** 打开/关闭侧边栏下拉，并同步当前 PR 的编辑快照。 */
 async function toggleDropdown(name: 'reviewers' | 'assignees' | 'labels' | 'milestone'): Promise<void> {
   if (openDropdown.value === name) {
-    openDropdown.value = null;
+    await closeDropdown();
     return;
+  }
+  // 切换到另一个下拉：先保存当前未提交的属性
+  const pending = pendingSaveKind.value;
+  if (pending) {
+    pendingSaveKind.value = null;
+    await updateSidebarAttr(pending);
   }
   const p = selectedPR.value;
   if (!p) return;
@@ -838,6 +858,7 @@ async function toggleDropdown(name: 'reviewers' | 'assignees' | 'labels' | 'mile
   editingAssignees.value = (p.assignees ?? []).map(a => a.username);
   editingReviewers.value = (p.reviewers ?? []).map(r => r.username);
   editingMilestone.value = p.milestone?.title ?? '';
+  pendingSaveKind.value = null;
   isLoadingDropdown.value = true;
   try {
     const labelsResp = await labelsList({ projectId: String(activeProjectId.value) });
@@ -888,6 +909,7 @@ async function updateSidebarAttr(kind: 'labels' | 'assignees' | 'reviewers' | 'm
     if (kind === 'reviewers') await pullStore.updateReviewers(projectId, index, editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r)));
     if (kind === 'milestone') await pullStore.updateMilestone(projectId, index, editingMilestone.value);
     await pull.refresh();
+    openDropdown.value = null;
   } catch (e) {
     const err = e as { messageText?: string; message?: string };
     showToast({ type: 'error', message: err.messageText ?? err.message ?? '属性更新失败', persistent: true });
@@ -899,20 +921,20 @@ async function toggleReviewerMember(username: string): Promise<void> {
   editingReviewers.value = editingReviewers.value.includes(username)
     ? editingReviewers.value.filter(r => r !== username)
     : [...editingReviewers.value, username];
-  await updateSidebarAttr('reviewers');
+  pendingSaveKind.value = 'reviewers';
 }
 async function toggleAssigneeMember(username: string): Promise<void> {
   editingAssignees.value = editingAssignees.value.includes(username)
     ? editingAssignees.value.filter(a => a !== username)
     : [...editingAssignees.value, username];
-  await updateSidebarAttr('assignees');
+  pendingSaveKind.value = 'assignees';
 }
 
 async function toggleLabelMember(name: string): Promise<void> {
   editingLabels.value = editingLabels.value.includes(name)
     ? editingLabels.value.filter(l => l !== name)
     : [...editingLabels.value, name];
-  await updateSidebarAttr('labels');
+  pendingSaveKind.value = 'labels';
 }
 
 async function selectMilestone(title: string): Promise<void> {
@@ -920,9 +942,9 @@ async function selectMilestone(title: string): Promise<void> {
   await updateSidebarAttr('milestone');
   openDropdown.value = null;
 }
-async function clearReviewers(): Promise<void> { editingReviewers.value = []; await updateSidebarAttr('reviewers'); }
-async function clearAssignees(): Promise<void> { editingAssignees.value = []; await updateSidebarAttr('assignees'); }
-async function clearLabels(): Promise<void> { editingLabels.value = []; await updateSidebarAttr('labels'); }
+async function clearReviewers(): Promise<void> { editingReviewers.value = []; pendingSaveKind.value = 'reviewers'; }
+async function clearAssignees(): Promise<void> { editingAssignees.value = []; pendingSaveKind.value = 'assignees'; }
+async function clearLabels(): Promise<void> { editingLabels.value = []; pendingSaveKind.value = 'labels'; }
 async function clearMilestone(): Promise<void> {
   editingMilestone.value = '';
   await updateSidebarAttr('milestone');
@@ -943,6 +965,7 @@ async function createNewLabel(): Promise<void> {
     if (!editingLabels.value.includes(newLabel.name)) {
       editingLabels.value = [...editingLabels.value, newLabel.name];
     }
+    pendingSaveKind.value = 'labels';
     showNewLabelInput.value = false;
     newLabelName.value = '';
     showToast({ type: 'success', message: `标签 "${newLabel.name}" 已创建` });
@@ -2147,17 +2170,13 @@ async function copyCommentLink(commentId: number): Promise<void> {
 function onDocumentClick(_e: MouseEvent): void {
   const target = _e.target as HTMLElement | null;
   if (!target) {
-    commentSmileOpen.value = null;
-    commentMenuOpen.value = null;
-    openDropdown.value = null;
+    void closeDropdown();
     return;
   }
   if (target.closest('.pr-detail__comment-action-wrap')) return;
   if (target.closest('.pr-sidebar-block__menu')) return;
   if (target.closest('.pr-sidebar-block__dropdown')) return;
-  commentSmileOpen.value = null;
-  commentMenuOpen.value = null;
-  openDropdown.value = null;
+  void closeDropdown();
 }
 
 onMounted(() => {
