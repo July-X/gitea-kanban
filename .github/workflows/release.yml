@@ -342,14 +342,17 @@ jobs:
 
           hdiutil attach -readwrite -noverify -noautoopen -mountpoint "$MOUNT_DIR" "$DMG_RW"
           MOUNTED=1
-          # Finder 可能需要短暂时间注册刚挂载的卷；在操作前轮询挂载点和背景文件。
+          # Finder 可能需要短暂时间注册刚挂载的卷；保留输出便于诊断 Apple Events 权限和卷名格式。
+          DISKS_OUT=""
           for attempt in {1..20}; do
-            if osascript -e 'tell application "Finder" to get name of disks' 2>/dev/null | grep -Fxq 'Gitea Kanban'; then
+            DISKS_OUT="$(osascript -e 'tell application "Finder" to get name of disks' 2>&1)" || true
+            if printf '%s\n' "$DISKS_OUT" | grep -q 'Gitea Kanban'; then
               break
             fi
             sleep 1
           done
-          osascript -e 'tell application "Finder" to get name of disks' 2>/dev/null | grep -Fxq 'Gitea Kanban'
+          echo "==> Finder disks: $DISKS_OUT"
+          printf '%s\n' "$DISKS_OUT" | grep -q 'Gitea Kanban'
           osascript <<APPLESCRIPT
           tell application "Finder"
             tell disk "Gitea Kanban"
