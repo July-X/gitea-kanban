@@ -64,7 +64,7 @@ gitea-kanban 是一个**桌面应用**（不是网页、不是命令行），装
 ### macOS 安装
 
 1. 下载 `.dmg` 并双击打开。
-2. 将 `gitea-kanban.app` 拖到 `Applications` 文件夹。
+2. 安装窗口会显示拖拽引导：左侧 `gitea-kanban.app`、右侧 `Applications`、中间箭头，按提示将应用拖入 `Applications` 文件夹即可（v0.8.23+ 新增引导界面）。
 3. 首次打开若提示"无法验证开发者"，关闭提示。
 4. 打开 **系统设置 → 隐私与安全**，滚动到安全区域，点击对应 `gitea-kanban` 的"仍要打开/继续打开"。
 5. 在系统确认框中再次选择"打开"；**每台 Mac 只需做一次**，之后双击即开。
@@ -78,6 +78,19 @@ gitea-kanban 是一个**桌面应用**（不是网页、不是命令行），装
 当前自动更新会从 dmg 提取新的 `.app` 覆盖到 `/Applications`。macOS 会重新对"来源属性"做评估，正常情况下**覆盖安装后不会再弹**（Gatekeeper 记录的是 app 路径 + 签名状态）。若个别机器升级后仍提示，重新走一次上面第 4~5 步即可。
 
 > 💡 根治方案（需要 Apple Developer Program 账号，$99/年）：在仓库配置 `APPLE_CERT_P12` / `APPLE_CERT_PASSWORD` / `APPLE_API_KEY_P8` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER_ID` 5 个 secrets 后，CI 自动切换为 Developer ID 签名 + 公证，下载与升级后均无任何提示（参考 DeepSeek-Reasonix 的 `HAS_APPLE_CERT` 双轨方案，CI 门控已预留）。
+
+### 应用内自动更新（v0.8.23+）
+
+启动后应用会在后台检查更新；发现新版本时顶部出现横幅，或到 **设置 → 应用更新** 查看。
+
+操作方式（macOS / Windows 一致）：
+
+1. 点「下载更新」→ 等待下载完成（带 ed25519 签名校验，断点续传）。
+2. 点「重启以安装」→ **应用自动退出、原位替换、自动重启**，全程无需手动操作（v0.8.23.2+）。
+3. 重启后版本号变为新版本，即更新完成。
+
+> ⚠️ 升级失败会自动回滚到旧版本并重新打开，不会留下不可用的状态。
+> macOS 首次升级后如遇 Gatekeeper 提示，按上面"macOS 安装"第 4~5 步再走一次即可。
 
 ### Windows 安装
 
