@@ -555,8 +555,8 @@ const checkButtonText = computed(() => {
   }
   if (s.kind === 'downloading') return '下载中…';
   if (s.kind === 'downloaded') {
-    // macOS dmg 已下载 → 按钮走「打开 Finder 安装」；Windows 走「重启并安装」
-    return s.info.platform?.startsWith('darwin') ? '打开 Finder 安装' : '重启并安装';
+    // v0.8.23.2：macOS 也走自动安装（helper 替换 .app + 重启），统一「重启并安装」
+    return '重启并安装';
   }
   return '检查更新';
 });

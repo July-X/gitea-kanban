@@ -33,6 +33,8 @@
 | **v0.8.20** | commit `3f02752` | 修复 darwin-amd64 用户下载更新 / manualOnly 误报（macos- → darwin- 归一化） | [v0.8.20.md](./v0.8.20.md) |
 | **v0.8.21** | commit `79fad0e` | 安装版（macOS dmg）暗色滚动条白底修复（全局 color-scheme + 重复声明清理） | [v0.8.21.md](./v0.8.21.md) |
 | **v0.8.22** | commit `eac5831` | macOS 自动下载 dmg + 打开 Finder 引导安装（canSelfUpdate + applyMacOS 改造） | [v0.8.22.md](./v0.8.22.md) |
+| **v0.8.23** | **待补** | macOS DMG 拖拽安装引导界面 + release workflow 3 项修复（YAML heredoc 缩进、Finder 卷检测、默认挂载路径） | [待补] |
+| **v0.8.23.1** | **待补** | 修复 release.yml sign/fallback 分支同时执行导致 placeholder sig 覆盖真实签名（自动更新 signature invalid） | [待补] |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 

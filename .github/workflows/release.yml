@@ -307,22 +307,93 @@ jobs:
           # /Applications symlink：相对路径 dmg 挂载后也能解析到根 /Applications
           ln -s /Applications "$STAGE_DIR/Applications"
 
+          # 生成参考常见 macOS 安装盘的引导背景：应用在左、Applications 在右、中央弧形箭头。
+          # 脚本只使用 Python 标准库，避免 CI 为一张背景图引入 Pillow/ImageMagick。
+          python3 ../../scripts/generate-dmg-background.py "$STAGE_DIR/.background/dmg-background.png"
+          chmod 644 "$STAGE_DIR/.background/dmg-background.png"
+
           TAG="${{ github.ref_name }}"
           DMG="gitea-kanban-${TAG}-macos-amd64.dmg"
+          DMG_RW="gitea-kanban-${TAG}-macos-amd64-rw.dmg"
 
-          # 用 hdiutil 构造 dmg 镜像：volatile 表示不预分配，UDZO 压缩。
-          # srcfolder 模式：把 staging 目录（.app + Applications symlink）拖进 dmg。
-          # 注意：-fs HFS+ 因为 Apple Silicon + Intel 双兼容（APFS dmg 在某些 macOS 版本不挂载）
+          # 先创建可写 HFS+ 镜像，让 Finder 写入背景和图标坐标；完成后再转为 UDZO 发布镜像。
           echo "==> hdiutil 创建 dmg（包含 .app + Applications symlink，引导用户复制到 /Applications）..."
           hdiutil create \
             -volname "Gitea Kanban" \
             -srcfolder "$STAGE_DIR" \
             -ov \
-            -format UDZO \
+            -format UDRW \
             -fs HFS+ \
             -noanyowners \
+            "$DMG_RW"
+
+          # Finder 的图标坐标和背景属于卷宗的 .DS_Store 元数据，hdiutil -srcfolder 本身不会生成。
+          # 临时挂载可写镜像后由 Finder 写入，最终再压缩成发布用 UDZO。
+          # 必须走默认 /Volumes/<volname> 挂载路径（不能 -mountpoint），否则 Finder 会以挂载点目录名
+          # （mktemp 随机名）注册卷，导致 AppleScript tell disk "Gitea Kanban" 找不到目标。
+          MOUNTED=0
+          cleanup_dmg_mount() {
+            if [[ "$MOUNTED" == "1" ]]; then
+              hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+            fi
+            rm -f "$DMG_RW"
+          }
+          trap cleanup_dmg_mount EXIT
+
+          # 防御 runner 上残留同名卷导致 hdiutil 自动改名成 "Gitea Kanban 1"
+          hdiutil detach "/Volumes/Gitea Kanban" >/dev/null 2>&1 || true
+
+          ATTACH_OUT="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW")"
+          MOUNT_DIR="$(printf '%s\n' "$ATTACH_OUT" | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
+          test -n "$MOUNT_DIR"
+          MOUNTED=1
+          echo "==> dmg 挂载点: $MOUNT_DIR"
+          # Finder 可能需要短暂时间注册刚挂载的卷；保留输出便于诊断 Apple Events 权限和卷名格式。
+          DISKS_OUT=""
+          for attempt in {1..20}; do
+            DISKS_OUT="$(osascript -e 'tell application "Finder" to get name of disks' 2>&1)" || true
+            if printf '%s\n' "$DISKS_OUT" | grep -q 'Gitea Kanban'; then
+              break
+            fi
+            sleep 1
+          done
+          echo "==> Finder disks: $DISKS_OUT"
+          printf '%s\n' "$DISKS_OUT" | grep -q 'Gitea Kanban'
+          osascript <<APPLESCRIPT
+          tell application "Finder"
+            tell disk "Gitea Kanban"
+              open
+              set current view of container window to icon view
+              set toolbar visible of container window to false
+              set statusbar visible of container window to false
+              set bounds of container window to {120, 120, 780, 540}
+              set theViewOptions to the icon view options of container window
+              set arrangement of theViewOptions to not arranged
+              set icon size of theViewOptions to 112
+              set text size of theViewOptions to 13
+              set background picture of theViewOptions to POSIX file "$MOUNT_DIR/.background/dmg-background.png"
+              set position of item "gitea-kanban.app" of container window to {170, 185}
+              set position of item "Applications" of container window to {490, 185}
+              close
+              open
+              update without registering applications
+              delay 2
+            end tell
+          end tell
+          APPLESCRIPT
+          sync
+          test -f "$MOUNT_DIR/.background/dmg-background.png"
+          test -f "$MOUNT_DIR/.DS_Store"
+          hdiutil detach "$MOUNT_DIR"
+          MOUNTED=0
+
+          hdiutil convert "$DMG_RW" \
+            -format UDZO \
             -imagekey zlib-level=9 \
-            "$DMG"
+            -ov \
+            -o "$DMG"
+          rm -f "$DMG_RW"
+          trap - EXIT
 
           echo "==> dmg output:"
           ls -la "$DMG"
@@ -331,7 +402,16 @@ jobs:
           # 验证 dmg 挂载后确实能看到 .app bundle（不是裸 Contents/）
           echo "==> dmg 验证：挂载测试"
           MOUNT_DIR=$(mktemp -d)
+          VERIFY_MOUNTED=0
+          cleanup_verify_mount() {
+            if [[ "$VERIFY_MOUNTED" == "1" ]]; then
+              hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+            fi
+            rm -rf "$MOUNT_DIR"
+          }
+          trap cleanup_verify_mount EXIT
           hdiutil attach -readonly -nobrowse -noverify -mountpoint "$MOUNT_DIR" "$DMG"
+          VERIFY_MOUNTED=1
           ls -la "$MOUNT_DIR"
           if [[ ! -d "$MOUNT_DIR/gitea-kanban.app" ]]; then
             echo "ERROR: dmg 内找不到 gitea-kanban.app bundle，挂载得到:"
@@ -355,10 +435,18 @@ jobs:
             rmdir "$MOUNT_DIR"
             exit 1
           fi
-          echo "dmg 验证 OK：包含完整 gitea-kanban.app bundle + Applications symlink"
+          if [[ ! -f "$MOUNT_DIR/.background/dmg-background.png" || ! -f "$MOUNT_DIR/.DS_Store" ]]; then
+            echo "ERROR: dmg 缺少安装引导背景或 Finder 布局元数据" >&2
+            ls -la "$MOUNT_DIR/"
+            hdiutil detach "$MOUNT_DIR"
+            rmdir "$MOUNT_DIR"
+            exit 1
+          fi
+          echo "dmg 验证 OK：包含完整 gitea-kanban.app bundle + Applications symlink + 拖拽安装引导"
           hdiutil detach "$MOUNT_DIR"
+          VERIFY_MOUNTED=0
           rmdir "$MOUNT_DIR"
-        shell: bash
+          trap - EXIT
 
       - name: 上传构建产物
         if: matrix.os != 'macos-14'
@@ -419,18 +507,26 @@ jobs:
         continue-on-error: true
 
       - name: 检查必需 secrets（可选：缺失时 release raw build 不签名）
+        id: secrets-check
         env:
           SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
           SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
         run: |
           # v0.8.0 rc18 fix：secrets 缺失只 warn 不 exit 1
           #（CI 上 maintainer 还没设 secrets，但用户仍想看 raw build 能否 release）
+          # 用 job-level env 变量做后续 step 的 if 条件（step env 不跨 step 生效，
+          # 否则会踩 v0.8.23 的坑：sign 和 fallback 两个 step 同时跑，placeholder sig 覆盖真实 sig）
+          HAS_SIGN_SECRETS=1
           if [[ -z "$SIGN_PRIVATE_KEY" ]]; then
             echo "WARN: SIGN_PRIVATE_KEY secret is empty — release raw build（无签名）"
+            HAS_SIGN_SECRETS=0
           fi
           if [[ -z "$SIGN_PASSWORD" ]]; then
             echo "WARN: SIGN_PASSWORD secret is empty — release raw build（无签名）"
+            HAS_SIGN_SECRETS=0
           fi
+          echo "HAS_SIGN_SECRETS=$HAS_SIGN_SECRETS" >> "$GITHUB_ENV"
+          echo "==> HAS_SIGN_SECRETS=$HAS_SIGN_SECRETS"
           # 列出可用 asset
           echo "==> 可用 build artifacts:"
           ls -la build/bin/ 2>&1 || echo "(build/bin/ 为空 — 所有 build matrix 都 FAIL)"
@@ -440,7 +536,7 @@ jobs:
       #   并集中 future 维护点。CI 上 release.sh 默认产物写到 build/release/
       #   （RELEASE_DIR env override）。
       - name: 集成 sign + manifest（scripts/release.sh）
-        if: env.SIGN_PRIVATE_KEY != '' && env.SIGN_PASSWORD != ''
+        if: env.HAS_SIGN_SECRETS == '1'
         env:
           SIGN_PRIVATE_KEY: ${{ secrets.SIGN_PRIVATE_KEY }}
           SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
@@ -452,7 +548,7 @@ jobs:
       # raw build fallback（secrets 缺失时）：把 macOS dmg + windows .exe 直接发布，不签名
       # v0.8.0 rc30：macOS 改成 .dmg（之前是 zip 的 bug：解压得到裸 Contents/）
       - name: raw build fallback（无签名）
-        if: env.SIGN_PRIVATE_KEY == '' || env.SIGN_PASSWORD == ''
+        if: env.HAS_SIGN_SECRETS == '0'
         run: |
           mkdir -p build/release
 
