@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"time"
 
 	"gitea-kanban/app/logx"
 	"gitea-kanban/app/store"
@@ -68,13 +69,29 @@ func (a *App) DownloadUpdate() (*updater.UpdateDownloadResult, error) {
 
 // InstallUpdate Wails binding — 把缓存的 binary 应用到当前平台
 //
-// 注意：applyWindows 末尾调 os.Exit(0)，调用方拿不到返回值。
+// 注意：
+//   - applyWindows 末尾调 os.Exit(0)，调用方拿不到返回值。
+//   - macOS（v0.8.23.2 起）applyMacOS 启动 detached helper 脚本后立即返回 nil；
+//     helper 轮询等待当前进程退出后替换 .app 并 open 重启。因此本方法返回后
+//     由 Go 侧主动 Quit 退出，前端无需（也无法）再操作。
 func (a *App) InstallUpdate() error {
 	if a.updater == nil {
 		return fmt.Errorf("updater not initialized")
 	}
 	a.logger.Info("update install start", "version", a.updaterRunningVersion())
-	return a.updater.Install()
+	if err := a.updater.Install(); err != nil {
+		return err
+	}
+	// macOS：helper 已在后台等待，主进程退出触发替换。
+	// Windows：applyWindows 已 os.Exit(0)，走不到这里。
+	// wruntime.Quit 触发 OnShutdown 正常清理后退出进程。
+	go func() {
+		// 给前端留一点时间把 RPC 响应发完（否则会报 connection lost）。
+		// Quit 是异步关闭窗口，300ms 足够 IPC 往返。
+		<-time.After(300 * time.Millisecond)
+		wruntime.Quit(a.ctx)
+	}()
+	return nil
 }
 
 // OpenDownloadPage Wails binding — 打开浏览器到 GitHub release 页
