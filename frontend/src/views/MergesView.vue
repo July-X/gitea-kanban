@@ -722,6 +722,10 @@ function giteaPullUrl(p: PullDto): string {
  * 中分支链接的格式 /{owner}/{repo}/src/branch/{ref}。
  *
  * GitHub web URL 用 /{owner}/{repo}/tree/{ref}（不是 branch）。
+ *
+ * 分支名编码：不能整体 encodeURIComponent —— 它会把 `feature/foo` 的 `/`
+ * 编成 `%2F`，GitHub 端 `/tree/feature%2Ffoo` 404（路径段里的编码斜杠不解码）。
+ * 正确做法：按 `/` 分段后逐段 encodeURIComponent 再拼回，保留路径分隔语义。
  */
 function branchWebUrl(ref: string): string {
   if (!activeRepo.value) return '#';
@@ -730,7 +734,8 @@ function branchWebUrl(ref: string): string {
   if (!baseUrl) return '#';
   // Gitea: /{owner}/{repo}/src/branch/{ref} | GitHub: /{owner}/{repo}/tree/{ref}
   const pathSegment = platform === 'github' ? 'tree' : 'src/branch';
-  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/${pathSegment}/${encodeURIComponent(ref)}`;
+  const encodedRef = ref.split('/').map(encodeURIComponent).join('/');
+  return `${baseUrl}/${activeRepo.value.owner}/${activeRepo.value.name}/${pathSegment}/${encodedRef}`;
 }
 
 /** 在系统浏览器打开合并请求页面（Wails BrowserOpenURL，window.open / <a target=_blank>
@@ -832,29 +837,43 @@ const newLabelName = ref('');
 const newLabelColor = ref('#fbca04');
 const creatingLabel = ref(false);
 
-/** 关闭下拉 + 保存未提交的多选属性 */
-async function closeDropdown(): Promise<void> {
+/**
+ * 关闭下拉 + 保存未提交的多选属性
+ *
+ * v0.8.x 性能修复：函数改为同步 —— 下拉立即关闭（openDropdown 同步置 null），
+ * 保存异步派发（void，不 await IPC）。updateSidebarAttr 内部走乐观更新，
+ * 侧边栏新值即时可见，IPC 往返不再阻塞 UI。
+ */
+function closeDropdown(): void {
   const kind = pendingSaveKind.value;
   pendingSaveKind.value = null;
   openDropdown.value = null;
   commentSmileOpen.value = null;
   commentMenuOpen.value = null;
   if (kind) {
-    await updateSidebarAttr(kind);
+    void updateSidebarAttr(kind);
   }
 }
 
-/** 打开/关闭侧边栏下拉，并同步当前 PR 的编辑快照。 */
+/**
+ * 打开/关闭侧边栏下拉，并同步当前 PR 的编辑快照。
+ *
+ * v0.8.x 性能修复（两处串行链路拆除）：
+ *   1. 切换下拉时不再 await 上一次保存的 IPC —— 异步派发后立即打开新下拉
+ *      （updateSidebarAttr 同步段的乐观写入已保证 p 快照拿到新值）；
+ *   2. 下拉数据（labels / members / milestones）Promise.all 并行加载，
+ *      耗时从三者之和降为三者最大值。
+ */
 async function toggleDropdown(name: 'reviewers' | 'assignees' | 'labels' | 'milestone'): Promise<void> {
   if (openDropdown.value === name) {
-    await closeDropdown();
+    closeDropdown();
     return;
   }
-  // 切换到另一个下拉：先保存当前未提交的属性
+  // 切换到另一个下拉：异步保存当前未提交的属性（乐观更新已即时反馈，不阻塞新下拉打开）
   const pending = pendingSaveKind.value;
   if (pending) {
     pendingSaveKind.value = null;
-    await updateSidebarAttr(pending);
+    void updateSidebarAttr(pending);
   }
   const p = selectedPR.value;
   if (!p) return;
@@ -867,10 +886,12 @@ async function toggleDropdown(name: 'reviewers' | 'assignees' | 'labels' | 'mile
   pendingSaveKind.value = null;
   isLoadingDropdown.value = true;
   try {
-    const labelsResp = await labelsList({ projectId: String(activeProjectId.value) });
+    const [labelsResp] = await Promise.all([
+      labelsList({ projectId: String(activeProjectId.value) }),
+      loadMembers(),
+      pullStore.loadAttrEditorData(String(activeProjectId.value)),
+    ]);
     availableLabels.value = labelsResp.items ?? [];
-    await loadMembers();
-    await pullStore.loadAttrEditorData(String(activeProjectId.value));
     availableMilestones.value = pullStore.availableMilestones;
     availableMembers.value = pullStore.availableMembers.map(m => m.username ?? '');
   } catch {
@@ -905,36 +926,127 @@ const filteredMilestones = computed(() => {
   return availableMilestones.value.filter(m => !query || m.title.toLowerCase().includes(query));
 });
 
+/**
+ * 每类侧边栏属性的保存序号（乐观更新并发防护，非响应式）。
+ *
+ * 快速连续编辑同一属性时（关下拉 → 重开 → 再改 → 再关），前一次保存的 IPC
+ * 可能晚于后一次返回。只有序号等于当前值的响应才允许 reconcile / 回滚，
+ * 防止旧响应覆盖新值。
+ */
+const attrSaveSeq: Record<'labels' | 'assignees' | 'reviewers' | 'milestone', number> = {
+  labels: 0,
+  assignees: 0,
+  reviewers: 0,
+  milestone: 0,
+};
+
+/**
+ * 保存侧边栏属性（乐观更新版）。
+ *
+ * v0.8.x 根因修复：旧实现先 await IPC（500ms~2s）再 patchItem + selectedPR，
+ * 用户关闭下拉后侧边栏长时间显示旧值，感知为“异步刷新缓慢”。
+ *
+ * 新流程（对齐 pull.ts addCommentReaction 的 snapshot/rollback 模式）：
+ *   1. 同步段：快照当前值 → 把编辑值立即写入 patchItem + selectedPR（UI 即时反馈）
+ *      → 关闭下拉（milestone 单选场景点完即关）；
+ *   2. 后台 IPC，返回后用服务端权威值 reconcile（拿到真实 label id / 颜色等）；
+ *   3. 失败回滚快照 + toast。
+ *
+ * 注意：
+ *   - 直接调底层 IPC（不走 store 中转）确保拿到返回值；
+ *   - reconcile / 回滚前检查 selectedPR.index，防止 IPC 飞行中用户切换 PR 后
+ *     把旧 PR 的属性写到新选中的 PR 上（旧实现存在此隐患）；
+ *   - attrSaveSeq 防止快速连续编辑时旧响应覆盖新值。
+ */
 async function updateSidebarAttr(kind: 'labels' | 'assignees' | 'reviewers' | 'milestone'): Promise<void> {
-  if (!activeProjectId.value || !selectedPR.value) return;
+  const pr = selectedPR.value;
+  if (!activeProjectId.value || !pr) return;
   const projectId = String(activeProjectId.value);
-  const index = selectedPR.value.index;
+  const index = pr.index;
+  const seq = ++attrSaveSeq[kind];
+
+  // 1. 快照 + 乐观写入（编辑值优先复用现有对象，保留 id / 颜色 / 头像等字段）
+  let snapshot: PullDto['labels'] | PullDto['assignees'] | PullDto['reviewers'] | PullDto['milestone'];
+  if (kind === 'labels') {
+    snapshot = pr.labels;
+    const optimistic = editingLabels.value.map(
+      name =>
+        pr.labels?.find(l => l.name === name) ?? {
+          id: 0,
+          name,
+          color: availableLabels.value.find(l => l.name === name)?.color ?? '#888888',
+        },
+    );
+    pullStore.patchItem(index, { labels: optimistic });
+    selectedPR.value = { ...pr, labels: optimistic };
+  } else if (kind === 'assignees') {
+    snapshot = pr.assignees;
+    const optimistic = editingAssignees.value.map(
+      username => pr.assignees?.find(a => a.username === username) ?? { username },
+    );
+    pullStore.patchItem(index, { assignees: optimistic });
+    selectedPR.value = { ...pr, assignees: optimistic };
+  } else if (kind === 'reviewers') {
+    snapshot = pr.reviewers;
+    const optimistic = editingReviewers.value
+      .filter(r => !nonReviewableMembers.value.has(r))
+      .map(username => pr.reviewers?.find(r => r.username === username) ?? { username });
+    pullStore.patchItem(index, { reviewers: optimistic });
+    selectedPR.value = { ...pr, reviewers: optimistic };
+  } else {
+    snapshot = pr.milestone;
+    const title = editingMilestone.value;
+    const optimistic =
+      title === '' ? null : pr.milestone?.title === title ? pr.milestone : { id: 0, title };
+    pullStore.patchItem(index, { milestone: optimistic });
+    selectedPR.value = { ...pr, milestone: optimistic };
+  }
+  // 多选场景 closeDropdown 已同步置 null；milestone 单选在此立即关闭
+  openDropdown.value = null;
+
+  /** 回滚仅恢复本属性字段；序号过期（已有更新的保存）时跳过 */
+  const rollback = (): void => {
+    if (seq !== attrSaveSeq[kind]) return;
+    pullStore.patchItem(index, { [kind]: snapshot } as Partial<PullDto>);
+    if (selectedPR.value?.index === index) {
+      selectedPR.value = { ...selectedPR.value, [kind]: snapshot };
+    }
+  };
+
   try {
-    // 直接调底层 IPC（不走 store 中转）确保拿到返回值，
-    // 然后拷贝新对象打断旧 PullDto 引用链，避免 UI 短暂显示脏数据。
+    // 2. 后台 IPC + 服务端权威值 reconcile
     if (kind === 'labels') {
-      const labels = editingLabels.value;
-      const updated = await pullsUpdateLabels({ projectId, index, labels });
+      const updated = await pullsUpdateLabels({ projectId, index, labels: editingLabels.value });
+      if (seq !== attrSaveSeq[kind]) return;
       pullStore.patchItem(index, { labels: updated.labels });
-      selectedPR.value = { ...selectedPR.value, labels: updated.labels };
+      if (selectedPR.value?.index === index) {
+        selectedPR.value = { ...selectedPR.value, labels: updated.labels };
+      }
     } else if (kind === 'assignees') {
-      const assignees = editingAssignees.value;
-      const updated = await pullsUpdateAssignee({ projectId, index, assignees });
+      const updated = await pullsUpdateAssignee({ projectId, index, assignees: editingAssignees.value });
+      if (seq !== attrSaveSeq[kind]) return;
       pullStore.patchItem(index, { assignees: updated.assignees });
-      selectedPR.value = { ...selectedPR.value, assignees: updated.assignees };
+      if (selectedPR.value?.index === index) {
+        selectedPR.value = { ...selectedPR.value, assignees: updated.assignees };
+      }
     } else if (kind === 'reviewers') {
       const reviewers = editingReviewers.value.filter(r => !nonReviewableMembers.value.has(r));
       const updated = await pullsUpdateReviewers({ projectId, index, reviewers });
+      if (seq !== attrSaveSeq[kind]) return;
       pullStore.patchItem(index, { reviewers: updated.reviewers });
-      selectedPR.value = { ...selectedPR.value, reviewers: updated.reviewers };
-    } else if (kind === 'milestone') {
-      const milestone = editingMilestone.value;
-      const updated = await pullsUpdateMilestone({ projectId, index, milestone });
+      if (selectedPR.value?.index === index) {
+        selectedPR.value = { ...selectedPR.value, reviewers: updated.reviewers };
+      }
+    } else {
+      const updated = await pullsUpdateMilestone({ projectId, index, milestone: editingMilestone.value });
+      if (seq !== attrSaveSeq[kind]) return;
       pullStore.patchItem(index, { milestone: updated.milestone });
-      selectedPR.value = { ...selectedPR.value, milestone: updated.milestone };
+      if (selectedPR.value?.index === index) {
+        selectedPR.value = { ...selectedPR.value, milestone: updated.milestone };
+      }
     }
-    openDropdown.value = null;
   } catch (e) {
+    rollback();
     console.error('[updateSidebarAttr] failed', e);
     const err = e as { messageText?: string; message?: string };
     showToast({ type: 'error', message: err.messageText ?? err.message ?? '属性更新失败', persistent: true });
@@ -964,16 +1076,15 @@ async function toggleLabelMember(name: string): Promise<void> {
 
 async function selectMilestone(title: string): Promise<void> {
   editingMilestone.value = title;
-  await updateSidebarAttr('milestone');
-  openDropdown.value = null;
+  // 乐观更新同步段已立即关闭下拉 + 更新侧边栏，无需 await、无需重复置 null
+  void updateSidebarAttr('milestone');
 }
 async function clearReviewers(): Promise<void> { editingReviewers.value = []; pendingSaveKind.value = 'reviewers'; }
 async function clearAssignees(): Promise<void> { editingAssignees.value = []; pendingSaveKind.value = 'assignees'; }
 async function clearLabels(): Promise<void> { editingLabels.value = []; pendingSaveKind.value = 'labels'; }
 async function clearMilestone(): Promise<void> {
   editingMilestone.value = '';
-  await updateSidebarAttr('milestone');
-  openDropdown.value = null;
+  void updateSidebarAttr('milestone');
 }
 
 /** 创建新标签（同步到 gitea） */

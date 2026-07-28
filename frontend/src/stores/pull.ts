@@ -52,7 +52,13 @@ export type PullFilter = 'all' | 'open' | 'merged' | 'closed';
  *
  * 复杂度：O(n)，最多遍历 2 次（一次累加，一次标 merged）。
  *
- * @returns 新的 TimelineItemDto 数组（不修改原数组）
+ * 注意（副作用）：返回的是新数组，但数组**元素**与入参共享引用——函数会
+ * 原地修改元素的 merged 标志和前驱事件的 addedLabels/removedLabels。
+ * 当前唯一调用方 fetchTimeline 每次都重新拉数据覆盖 panel.items，安全；
+ * 若未来在非赋值场景调用（如 `mergeLabelEvents(panel.items)` 后继续用
+ * panel.items 旧引用），会看到被合并污染的数据，届时需改深拷贝。
+ *
+ * @returns 新的 TimelineItemDto 数组（元素引用与入参共享，merged 字段已被修改）
  */
 function mergeLabelEvents(items: TimelineItemDto[]): TimelineItemDto[] {
   const out: TimelineItemDto[] = [];

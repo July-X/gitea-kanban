@@ -130,6 +130,9 @@ func (a *App) GetPull(args GetPullArgs) (PullDetailAppDTO, error) {
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
+	}
 	return *d, nil
 }
 
@@ -175,6 +178,9 @@ func (a *App) MergePull(args MergePullArgs) (PullDetailAppDTO, error) {
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
+	}
 	return *d, nil
 }
 
@@ -203,6 +209,9 @@ func (a *App) ClosePull(args ClosePullArgs) (PullDetailAppDTO, error) {
 	d, err := adapter.ClosePull(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index)
 	if err != nil {
 		return PullDetailAppDTO{}, err
+	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
 	}
 	return *d, nil
 }
@@ -268,6 +277,9 @@ func (a *App) UpdatePullLabels(args UpdatePullLabelsArgs) (PullDetailAppDTO, err
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
+	}
 	return *d, nil
 }
 
@@ -293,6 +305,9 @@ func (a *App) UpdatePullAssignee(args UpdatePullAssigneeArgs) (PullDetailAppDTO,
 	d, err := adapter.UpdatePullAssignee(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Assignees)
 	if err != nil {
 		return PullDetailAppDTO{}, err
+	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
 	}
 	return *d, nil
 }
@@ -320,6 +335,9 @@ func (a *App) UpdatePullReviewers(args UpdatePullReviewersArgs) (PullDetailAppDT
 	if err != nil {
 		return PullDetailAppDTO{}, err
 	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
+	}
 	return *d, nil
 }
 
@@ -346,6 +364,9 @@ func (a *App) UpdatePullTitle(args UpdatePullTitleArgs) (PullDetailAppDTO, error
 	d, err := adapter.UpdatePullTitle(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Title)
 	if err != nil {
 		return PullDetailAppDTO{}, err
+	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
 	}
 	return *d, nil
 }
@@ -399,6 +420,9 @@ func (a *App) UpdatePullBranch(args UpdatePullBranchArgs) (PullDetailAppDTO, err
 	d, err := adapter.UpdatePullBranch(a.ctx, account.GiteaURL, account.Username, token, project.Owner, project.Name, args.Index, args.Style)
 	if err != nil {
 		return PullDetailAppDTO{}, err
+	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
 	}
 	return *d, nil
 }
@@ -958,6 +982,9 @@ func (a *App) UpdatePullMilestone(args UpdatePullMilestoneArgs) (PullDetailAppDT
 		}
 		return PullDetailAppDTO{}, err
 	}
+	if d == nil {
+		return PullDetailAppDTO{}, nil
+	}
 	return *d, nil
 }
 
@@ -972,6 +999,9 @@ func (a *App) GetPullFileDiff(args GetPullFileDiffArgs) (platformAdapter.PullFil
 			return platformAdapter.PullFileDiffDTO{}, nil
 		}
 		return platformAdapter.PullFileDiffDTO{}, err
+	}
+	if d == nil {
+		return platformAdapter.PullFileDiffDTO{}, nil
 	}
 	return *d, nil
 }

@@ -697,6 +697,11 @@ type TimelineItem struct {
 	Official bool   `json:"official,omitempty"` // 是否是官方评审（有写权限）
 
 	// type=29 推送事件专属
+	//
+	// CommitSHA 从 Gitea timeline 端点 `commit_sha` 字段映射（部分版本返回）。
+	// 注意：前端当前**不消费**此字段 —— push 事件渲染走 v0.7.8 的 CommitIDs
+	// 数组（从 body JSON 解析）。字段保留不删：删除属 Wails binding 契约变更
+	// （AGENTS §13 需用户拍板），且旧版 Gitea 可能返回该字段，保留向后兼容。
 	CommitSHA string `json:"commitSha,omitempty"` // 推送后 head 的最新 commit SHA
 
 	// v0.7.2：Gitea /timeline 端点暴露的二级详情字段。
