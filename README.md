@@ -67,11 +67,17 @@ gitea-kanban 是一个**桌面应用**（不是网页、不是命令行），装
 2. 将 `gitea-kanban.app` 拖到 `Applications` 文件夹。
 3. 首次打开若提示"无法验证开发者"，关闭提示。
 4. 打开 **系统设置 → 隐私与安全**，滚动到安全区域，点击对应 `gitea-kanban` 的"仍要打开/继续打开"。
-5. 在系统确认框中再次选择"打开"；通常只需首次执行。
+5. 在系统确认框中再次选择"打开"；**每台 Mac 只需做一次**，之后双击即开。
 
 > ⚠️ 当前包未做 Apple Developer ID 签名和 notarization，因此出现 Gatekeeper 提示是预期行为；请勿关闭 Gatekeeper。
-> 
+>
 > 终端备用方案（仅在系统设置入口不可用时使用）：`xattr -dr com.apple.quarantine /Applications/gitea-kanban.app`
+
+#### 升级后再次提示？
+
+当前自动更新会从 dmg 提取新的 `.app` 覆盖到 `/Applications`。macOS 会重新对"来源属性"做评估，正常情况下**覆盖安装后不会再弹**（Gatekeeper 记录的是 app 路径 + 签名状态）。若个别机器升级后仍提示，重新走一次上面第 4~5 步即可。
+
+> 💡 根治方案（需要 Apple Developer Program 账号，$99/年）：在仓库配置 `APPLE_CERT_P12` / `APPLE_CERT_PASSWORD` / `APPLE_API_KEY_P8` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER_ID` 5 个 secrets 后，CI 自动切换为 Developer ID 签名 + 公证，下载与升级后均无任何提示（参考 DeepSeek-Reasonix 的 `HAS_APPLE_CERT` 双轨方案，CI 门控已预留）。
 
 ### Windows 安装
 

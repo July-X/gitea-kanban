@@ -113,11 +113,50 @@ jobs:
       # go build 把 .app 当 binary 输出文件，wails packaging 想 mkdir 同名目录失败。
       - name: 构建 macOS
         if: matrix.platform == 'darwin'
+        env:
+          # Developer ID 签名 + 公证门控（5 个 secrets 全非空才为 true）。
+          # 参考 DeepSeek-Reasonix release-desktop.yml 的 HAS_APPLE_CERT 模式：
+          # 未配置 secrets 时 dmg 步骤走 ad-hoc 签名分支，CI 不炸；
+          # 将来配置 APPLE_CERT_P12 / APPLE_CERT_PASSWORD / APPLE_API_KEY_P8 /
+          # APPLE_API_KEY_ID / APPLE_API_ISSUER_ID 后自动升级 Developer ID + 公证。
+          HAS_APPLE_CERT: ${{ secrets.APPLE_CERT_P12 != '' && secrets.APPLE_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' }}
         run: |
           wails build \
             -platform ${{ matrix.platform }}/${{ matrix.arch }} \
             -clean \
             -ldflags "-X main.appVersion=${{ github.ref_name }} -X main.appChannel=stable"
+        shell: bash
+
+      # 导入 Apple 签名证书（仅 HAS_APPLE_CERT=true 时执行；
+      # 参考 DeepSeek-Reasonix release-desktop.yml:198-224 的临时 keychain 方案）
+      - name: macOS：导入 Apple 签名证书
+        if: matrix.platform == 'darwin' && env.HAS_APPLE_CERT == 'true'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          # p12 证书导入临时 keychain，p8 公证密钥落 $RUNNER_TEMP
+          CERT_PATH="$RUNNER_TEMP/apple-cert.p12"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$CERT_PATH"
+          echo "$APPLE_API_KEY_P8" | base64 --decode > "$NOTARY_KEY_PATH"
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          # 授权 codesign 免交互使用私钥
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          echo "APPLE_API_KEY_PATH=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
+          echo "==> Apple 证书已导入临时 keychain（job 结束自动销毁）"
         shell: bash
 
       # Windows 构建（加 -nsis 生成 NSIS installer）
@@ -297,6 +336,28 @@ jobs:
           ls -la gitea-kanban.app/
           ls -la gitea-kanban.app/Contents/MacOS/
 
+          # ===== 签名（参考 DeepSeek-Reasonix scripts/desktop-build.sh 双轨方案）=====
+          # HAS_APPLE_CERT=true（配置了 APPLE_CERT_P12 等 5 个 secrets）时走
+          # Developer ID 签名 + 公证，下载后零 Gatekeeper 提示；
+          # 未配置 secrets 时走 ad-hoc 签名：缓解"已损坏"类报错，但 Gatekeeper
+          # "无法验证开发者"提示仍在（用户按 README 一次性点"仍要打开"或跑
+          # xattr -dr com.apple.quarantine /Applications/gitea-kanban.app 即可）。
+          # 将来配置 secrets 后此分支自动升级，无需改 workflow。
+          if [[ "${HAS_APPLE_CERT:-false}" == "true" ]]; then
+            identity="$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+            if [[ -z "$identity" ]]; then
+              echo "ERROR: HAS_APPLE_CERT=true 但 keychain 里找不到 'Developer ID Application' 证书" >&2
+              exit 1
+            fi
+            echo "==> codesign (Developer ID): $identity"
+            codesign --force --deep --timestamp --options runtime \
+              --entitlements ../../build/darwin/entitlements.plist \
+              -s "$identity" gitea-kanban.app
+          else
+            echo "==> codesign (ad-hoc，无 Developer ID 证书)"
+            codesign --force --deep -s - gitea-kanban.app
+          fi
+
           # 构造 dmg staging 目录 = .app + /Applications symlink
           # /Applications symlink 让 Finder 在挂载后显示"复制到应用程序"快捷方式
           # 用户拖 .app 到 symlink = 复制到 /Applications = 标准 macOS 安装流程
@@ -394,6 +455,17 @@ jobs:
             -o "$DMG"
           rm -f "$DMG_RW"
           trap - EXIT
+
+          # dmg 本身也是独立下载物：Developer ID 分支下对 dmg 再签名 + 公证 + staple，
+          # 挂载出的 .app 在离线机器上也能通过 Gatekeeper 校验（staple 票据跟随 dmg）。
+          if [[ "${HAS_APPLE_CERT:-false}" == "true" ]]; then
+            echo "==> codesign + notarize dmg (Developer ID)"
+            codesign --force --timestamp -s "$identity" "$DMG"
+            xcrun notarytool submit "$DMG" \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER_ID" --wait
+            xcrun stapler staple "$DMG"
+          fi
 
           echo "==> dmg output:"
           ls -la "$DMG"

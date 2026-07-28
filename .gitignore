@@ -16,6 +16,9 @@ build/*
 !build/appicon.svg
 build/bin/
 build/darwin/
+!build/darwin/
+build/darwin/*
+!build/darwin/entitlements.plist
 build/linux/
 # Windows 构建产物：保留 icon.ico 和 installer 配置（project.nsi + icon.ico）
 !build/windows/

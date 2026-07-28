@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Wails（Go + WKWebView）应用公证所需的 hardened runtime 开口。
+	     WebView 的 JS 引擎需要 JIT 和可写可执行内存；Go 二进制链接的
+	     系统库不带团队签名。保持最小集 —— 不包含网络/文件权限，这不是
+	     App Sandbox 配置而是 hardened runtime 豁免。
+
+	     当前阶段（未购买 Apple Developer Program）：仅做 ad-hoc 签名，
+	     本文件暂不被 CI 引用；将来配置 APPLE_* secrets 走 Developer ID +
+	     公证（HAS_APPLE_CERT=true）时自动生效。 -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
