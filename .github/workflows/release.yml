@@ -354,8 +354,13 @@ jobs:
               --entitlements ../../build/darwin/entitlements.plist \
               -s "$identity" gitea-kanban.app
           else
+            # ad-hoc 签名：--deep 会触发 codesign 对整个 bundle 做 codesign_allocate
+            # 扫描，hdiutil create -srcfolder 读取 staging 里的 bundle 时可能撞上
+            # "Resource busy"。对未公证的 dmg 来说 ad-hoc 深层签名收益很小
+            # （Gatekeeper 只看最外层签名），故只签主二进制避免 race。
             echo "==> codesign (ad-hoc，无 Developer ID 证书)"
-            codesign --force --deep -s - gitea-kanban.app
+            codesign --force -s - gitea-kanban.app/Contents/MacOS/gitea-kanban
+            codesign --force -s - gitea-kanban.app
           fi
 
           # 构造 dmg staging 目录 = .app + /Applications symlink
