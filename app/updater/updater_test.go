@@ -427,6 +427,29 @@ func TestCacheInvalidOnChannelOrPlatformChange(t *testing.T) {
 	}
 }
 
+func TestDownloadUsesDedicatedLongTimeout(t *testing.T) {
+	// 回归：API client 的短 Timeout 不得限制大文件下载。服务端延迟响应头，
+	// 旧实现直接使用 hc.Do 会 Client.Timeout；新实现 clone client 并由
+	// downloadRequestTimeout 控制，应成功返回。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(80 * time.Millisecond)
+		_, _ = w.Write([]byte("slow success"))
+	}))
+	defer srv.Close()
+
+	u := &Updater{
+		cfg: UpdaterConfig{Logger: func(string, string, ...any) {}},
+		hc:  &http.Client{Timeout: 20 * time.Millisecond},
+	}
+	body, err := u.downloadOnce(contextBackground(), srv.URL, 0, 1024)
+	if err != nil {
+		t.Fatalf("downloadOnce should ignore API client timeout for large files: %v", err)
+	}
+	if string(body) != "slow success" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
 // TestRetryOnTransientError httptest 第一次 500 → 第二次 200。
 func TestRetryOnTransientError(t *testing.T) {
 	var attempts int

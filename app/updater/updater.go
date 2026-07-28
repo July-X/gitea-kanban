@@ -20,8 +20,15 @@ import (
 // 默认 3 次 retry
 const defaultMaxRetries = 3
 
-// defaultHTTPTimeout HTTP 请求单次超时
+// defaultHTTPTimeout manifest/API 请求单次超时。
+//
+// 不用于 dmg/exe 大文件下载：HTTP Client.Timeout 覆盖请求头 + 整个 body 读取，
+// 慢网下 8~20MB 安装包容易在 30 秒内未收到响应头而失败。下载请求由
+// downloadOnce 使用独立 10 分钟 context deadline。
 const defaultHTTPTimeout = 30 * time.Second
+
+// downloadRequestTimeout 大文件下载单次尝试的总时限。
+const downloadRequestTimeout = 10 * time.Minute
 
 // UpdaterConfig 启动 updater 所需的所有外部依赖。
 type UpdaterConfig struct {
@@ -461,20 +468,36 @@ func (u *Updater) downloadWithRetry(ctx context.Context, url string, start int64
 		}
 		lastErr = err
 		u.cfg.Logger("warn", "update: download attempt %d/%d failed: %v", attempt, defaultMaxRetries, err)
-		time.Sleep(time.Duration(attempt) * time.Second)
+		if attempt == defaultMaxRetries {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt) * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return nil, lastErr
 }
 
 func (u *Updater) downloadOnce(ctx context.Context, url string, start, maxSize int64) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// API client 的 30 秒 Timeout 不适合大文件；保留其 Transport/redirect 配置，
+	// 清零全局 Timeout，并用单次 10 分钟 context 控制安装包请求。
+	client := *u.hc
+	client.Timeout = 0
+	downloadCtx, cancel := context.WithTimeout(ctx, downloadRequestTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	if start > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", start))
 	}
-	resp, err := u.hc.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
