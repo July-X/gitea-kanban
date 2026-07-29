@@ -37,7 +37,7 @@
 | **v0.8.23.1** | tag `b2a1d74` | 修复 release.yml sign/fallback 分支同时执行导致 placeholder sig 覆盖真实签名（自动更新 signature invalid） | — |
 | **v0.8.23.2** | tag `2a1eb5a` | macOS 下载更新后一键自动安装（helper 替换 .app + 失败自动回滚）+ PR 属性编辑乐观更新 4 项修复（updateSidebarAttr 直接调 IPC / selectedPR 直接接收后端数据 / selectPR 同步 store / 属性保存只刷新右侧） | — |
 | **v0.8.23.3** | tag `37a225f` | macOS dmg 加 ad-hoc 签名缓解 Gatekeeper 拦截（hdiutil Resource busy fix + Developer ID 公证门控预留）+ GitHub 数据源合并请求界面文案汉化 + 合并请求 review 问题修复与侧边栏属性编辑 | — |
-| **v0.8.23.4** | **待 push 后回填** | 修复 Windows 自动更新 apply 阶段 Win32 740 ERROR_ELEVATION_REQUIRED（`CreateProcess` 不会触发 UAC → 改走 `ShellExecuteExW + lpVerb="runas"`；UAC 取消静默；其他失败 fallback 到 `explorer.exe /select` 打开下载目录） | [v0.8.23.4.md](./v0.8.23.4.md) |
+| **v0.8.23.4** | tag `e7328a16`（commit `6d15af8`） | 修复 Windows 自动更新 apply 阶段 Win32 740 ERROR_ELEVATION_REQUIRED（`CreateProcess` 不会触发 UAC → 改走 `ShellExecuteExW + lpVerb="runas"`；UAC 取消静默；其他失败 fallback 到 `explorer.exe /select` 打开下载目录） | [v0.8.23.4.md](./v0.8.23.4.md) |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 
