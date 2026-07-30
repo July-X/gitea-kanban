@@ -199,7 +199,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	if len(sorted) > 0 {
 		cur := sorted[0]
 		for _, candidate := range sorted {
-			if !hasPrimaryBranchRef(candidate) {
+			if !HasPrimaryBranchRef(candidate) {
 				continue
 			}
 			cur = candidate
@@ -661,7 +661,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	}
 }
 
-func hasPrimaryBranchRef(commit git.CommitInfo) bool {
+func HasPrimaryBranchRef(commit git.CommitInfo) bool {
 	for i, refName := range commit.Refs {
 		refType := git.RefType("")
 		if i < len(commit.RefTypes) {
