@@ -148,6 +148,21 @@ func TestBuildGraphGitlens_RealWorldScenario(t *testing.T) {
 	for _, n := range result.Nodes {
 		t.Logf("  node %s Lane=%d", n.ShortSHA, n.Lane)
 	}
+	// v0.8.25.3 debug：打印 branches lines + edges 找孤立点根因
+	for i, b := range result.Branches {
+		t.Logf("  branch %d Color=%d End=%d Lines=%d", i, b.Color, b.End, len(b.Lines))
+		for _, l := range b.Lines {
+			t.Logf("    line (%d,%d)→(%d,%d) LockedFirst=%v", l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+		}
+	}
+	t.Logf("=== edges: %d total ===", len(result.Edges))
+	for i, e := range result.Edges {
+		if i >= 15 {
+			t.Logf("  ... (%d more edges)", len(result.Edges)-15)
+			break
+		}
+		t.Logf("  edge row %d→%d lane %d→%d type=%d", e.FromRow, e.ToRow, e.FromLane, e.ToLane, e.Type)
+	}
 }
 
 // TestBuildGraphGitlens_VsVscodeGitGraph_LaneConvergence v0.8.25.1

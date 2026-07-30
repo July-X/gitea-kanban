@@ -63,6 +63,7 @@ type gitlensReserverInfo struct {
 type gitlensSegmentBuilder struct {
 	column     int
 	mergeSha   string // 空字符串表示 own-row claim（不是 merge 入口）
+	branchSha  string // v0.8.25.3 新增：branch-off 源 commit sha（空字符串表示无 branch-off）
 	commitShas []string
 }
 
@@ -72,6 +73,7 @@ type gitlensLaneSegment struct {
 	tipSha     string
 	forkSha    string   // 空字符串表示 end-of-rows 收尾
 	mergeSha   string
+	branchSha  string   // v0.8.25.3 新增：branch-off 源 commit sha
 	column     int
 	commitShas []string
 }
@@ -108,7 +110,10 @@ func newGitlensLayoutState(pinnedColumns map[string]int) *gitlensLayoutState {
 
 // finalizeSegment 对齐 layout.ts:65-77
 func finalizeSegment(builder *gitlensSegmentBuilder, forkSha string) *gitlensLaneSegment {
-	if len(builder.commitShas) < 2 {
+	// v0.8.25.3 fix：原版 < 2 直接丢，导致单 commit lane（feature branch 孤立 commit /
+	// merge commit 顶点 / stash / tag head）不生成 segment，前端画线缺孤立点 + merge 弧线。
+	// 现在改成 < 1 才丢（空 segment 才丢）。
+	if len(builder.commitShas) < 1 {
 		return nil
 	}
 	return &gitlensLaneSegment{
@@ -116,6 +121,7 @@ func finalizeSegment(builder *gitlensSegmentBuilder, forkSha string) *gitlensLan
 		tipSha:     builder.commitShas[0],
 		forkSha:    forkSha,
 		mergeSha:   builder.mergeSha,
+		branchSha:  builder.branchSha,
 		column:     builder.column,
 		commitShas: append([]string(nil), builder.commitShas...),
 	}
@@ -208,9 +214,32 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 // ——pinned head 不会进 segment，lane 0 上的 pinned head 没有 line 渲染，
 // 导致 main chain 在前端显示成"孤立 commit"。
 	if _, ok := s.segmentByColumn[column]; !ok {
+		// v0.8.25.3 fix：新开的 segment 如果当前 row 有 first parent 且 first parent
+		// 不在同一 column，记录 branchSha（branch-off 源 commit sha），后续
+		// segmentToLines 用 branchSha 画跨 lane 转场线（branch 分离线）。
+		//
+		// 注意：仅当当前 column 不是 pinned head 的主 trunk（lane 0）才记录 branchSha。
+		// pinned head 自己就是 trunk 起点，first parent 跟它在同一 lane，不需要
+		// branch-off 线。
+		var branchSha string
+		if len(row.parents) > 0 && column > 0 {
+			firstParent := row.parents[0]
+			// 只有当 first parent 已经被分配了 column（即 row 在它之后处理）才记录
+			// branchSha。如果 first parent 还没分配 column（在 rows 中 row 在 parent 之后，
+			// latest-first 拓扑序），那 branchSha 由后续 assignColumnForRow(parent) 处理
+			// —— 但那种情况 parent 在同一 lane（first-parent 主链），不会开新 segment。
+			// 所以这里只记录 own-reservation / fresh-claim 时的 branchSha 即可。
+			if hasOwnRes || hasPinned {
+				// 已经被 reservation/pinned 占用 column 的 row —— 通常是 HEAD/tip，
+				// first parent 是它的祖先（first-parent chain），但祖先 column 通常
+				// 跟 row 不同（HEAD 在 lane 1，祖先在 lane 0），需要 branch-off 线。
+				branchSha = firstParent
+			}
+		}
 		s.segmentByColumn[column] = &gitlensSegmentBuilder{
 			column:     column,
 			mergeSha:   "",
+			branchSha:  branchSha,
 			commitShas: []string{},
 		}
 	}
@@ -429,9 +458,9 @@ func toGitlensRows(commits []git.CommitInfo) []*gitlensGraphRow {
 // 改用 colOf[mergeSha] 真实列号 + rowOf[mergeSha] 真实行号；mergeSha 缺失时
 // 兜底 seg.column-1（merge 来自相邻 lane）。
 func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[string]int) []GraphBranchLine {
-	if len(seg.commitShas) < 2 {
-		return nil
-	}
+	// v0.8.25.3 fix：原版 < 2 直接丢，导致单 commit lane 没有 vertical line 渲染，
+	// 孤立 commit 完全消失。现在改成：单 commit 时也至少画 merge stitch 跨 lane 转场线
+	// （如果 mergeSha != ""），否则返回空 lines（让 commit 自己显示成孤立点，由 edges 兜底）。
 	var lines []GraphBranchLine
 	// merge stitch 入口：跨 lane 转场首条 line
 	if seg.mergeSha != "" {
@@ -456,6 +485,27 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 			LockedFirst: lockedFirst,
 			IsCommitted: true,
 		})
+	} else if seg.branchSha != "" {
+		// v0.8.25.3 fix：branch-off 入口（HEAD/tip 从某条 lane 分离出来）——
+		// 画一条从 branchSha 所在 column 到本 segment 第一行的跨 lane 线。
+		branchCol, ok := colOf[seg.branchSha]
+		if !ok {
+			// branch 源 commit 不在可见行（被分页截断），兜底到 lane 0
+			branchCol = 0
+		}
+		branchRow, branchRowOk := rowOf[seg.branchSha]
+		firstRow, firstRowOk := rowOf[seg.commitShas[0]]
+		if branchRowOk && firstRowOk {
+			// branch-off 线：从 branchSha 行 (X=branchCol) 到 firstRow (X=seg.column)
+			// 方向：Y 从小到大（branchRow 通常 > firstRow，因为 branchSha 是祖先，
+			// 在 latest-first 拓扑序中祖先 row 更大）
+			lines = append(lines, GraphBranchLine{
+				X1: branchCol, Y1: branchRow,
+				X2: seg.column, Y2: firstRow,
+				LockedFirst: false,
+				IsCommitted: true,
+			})
+		}
 	}
 	// segment 内部 vertical lines
 	for i := 0; i+1 < len(seg.commitShas); i++ {
