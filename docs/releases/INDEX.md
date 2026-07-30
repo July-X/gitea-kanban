@@ -4,7 +4,9 @@
 
 ## 阅读路径
 
-- 当前最新 release note：[v0.8.0.md](./v0.8.0.md)（自动更新全链路）
+- 当前最新 release note：[v0.8.24.md](./v0.8.24.md)（Git Graph main chain lane 0 锚定，修复 vscode 原版幽灵 line bug）
+- 上一版本：[v0.8.23.4.md](./v0.8.23.4.md)（Windows 自动更新 UAC 提权修复）
+- 自动更新全链路：[v0.8.0.md](./v0.8.0.md)
 - 设计 plan：[v0.8.0-plan.md](./v0.8.0-plan.md)
 - 历史归档：本目录 v0.4.0 ~ v0.7.21 全部 30 个 release note
 - 早期重大重构（v2.0 / v2.4 / v2.5）：见 `docs/adr/0005` / `0006` / `0007`
@@ -38,6 +40,7 @@
 | **v0.8.23.2** | tag `2a1eb5a` | macOS 下载更新后一键自动安装（helper 替换 .app + 失败自动回滚）+ PR 属性编辑乐观更新 4 项修复（updateSidebarAttr 直接调 IPC / selectedPR 直接接收后端数据 / selectPR 同步 store / 属性保存只刷新右侧） | — |
 | **v0.8.23.3** | tag `37a225f` | macOS dmg 加 ad-hoc 签名缓解 Gatekeeper 拦截（hdiutil Resource busy fix + Developer ID 公证门控预留）+ GitHub 数据源合并请求界面文案汉化 + 合并请求 review 问题修复与侧边栏属性编辑 | — |
 | **v0.8.23.4** | tag `e7328a16`（commit `6d15af8`） | 修复 Windows 自动更新 apply 阶段 Win32 740 ERROR_ELEVATION_REQUIRED（`CreateProcess` 不会触发 UAC → 改走 `ShellExecuteExW + lpVerb="runas"`；UAC 取消静默；其他失败 fallback 到 `explorer.exe /select` 打开下载目录） | [v0.8.23.4.md](./v0.8.23.4.md) |
+| **v0.8.24** | tag （待打） | Git Graph main chain lane 0 锚定（修复 vscode-git-graph v1.30.0 原版幽灵 line bug：merge stitch 抢占 lane 0 导致 first-parent 链 commit 被推到 lane 2+ + lane 0 出现贯穿 49 行的"幽灵 line"。复用 layout.go 的 main chain 强制 lane=0 + feature lane ≥1 策略，新增 `TestBuildGraphVscode_MainChainLaneZero` 钉住行为） | [v0.8.24.md](./v0.8.24.md) |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 

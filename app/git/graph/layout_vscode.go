@@ -188,6 +188,13 @@ type graphVscode struct {
 	availableColours []int // graph.ts:342; size = 已用颜色数,每元素是该颜色最后一次被使用时的行
 	nextColor        int   // 顺序取色计数器 (g.nextColor)
 	maxColorSeen     int
+
+	// v0.8.24 修复：vscode-git-graph v1.30.0 原版算法在 main chain commit
+	// 被 merge stitch 抢占 lane 0 时，会把所有 first-parent 链 commit 推到
+	// lane 2+，并画出一条 lane 0 的贯穿"幽灵 line"（line 段穿过 row 但
+	// 该 row 没有 dot）。这是 vscode 原生 bug。我们预先识别 main chain
+	// 并在 determinePath 里强制 lane=0，对齐 Gitea web 的字符流渲染。
+	mainChain map[string]bool // sha -> 是否在 main chain（first-parent 从 primary head 到 root）
 }
 
 // newGraphVscode mirrors graph.ts: initial state
@@ -267,6 +274,13 @@ func (g *graphVscode) determinePath(startAt int) {
 				foundPointToParent = true
 			} else {
 				cp := vsPoint{x: curVertex.nextX, y: curVertex.id}
+				// v0.8.24 修复：main chain curVertex 强制 lane 0；
+				// 其他 vertex 至少 lane 1（避免抢占 main lane 0）。
+				if g.mainChain[curVertex.sha] {
+					cp.x = 0
+				} else if cp.x == 0 {
+					cp.x = 1
+				}
 				curPoint = &cp
 			}
 			lockedFirst := true
@@ -287,6 +301,14 @@ func (g *graphVscode) determinePath(startAt int) {
 	// === Normal: open a new branch ===
 	// graph.ts:731-762
 	branch := &vsBranch{colour: g.getAvailableColour(startAt)}
+	// v0.8.24 修复：main chain vertex 强制 lane 0。
+	// 原版 vscode 算法不约束 main chain 在 lane 0，被 merge stitch 抢占后会
+	// 把 first-parent 链 commit 推到 lane 2+，并留下 lane 0 幽灵 line。
+	// 这里在 addToBranch 前修正 vertex.nextX，使 main chain vertex 落 lane 0。
+	if g.mainChain[vertex.sha] {
+		vertex.nextX = 0
+		lastPoint = vsPoint{x: 0, y: vertex.id}
+	}
 	vertex.addToBranch(branch, lastPoint.x)
 	vertex.registerUnavailablePoint(lastPoint.x, vertex, branch)
 	lastJ := startAt
@@ -296,7 +318,15 @@ func (g *graphVscode) determinePath(startAt int) {
 		if parentVertex == curVertex && !parentVertex.isNotOnBranch() {
 			curPoint = vsPoint{x: curVertex.x, y: curVertex.id}
 		} else {
-			curPoint = vsPoint{x: curVertex.nextX, y: curVertex.id}
+			cp := vsPoint{x: curVertex.nextX, y: curVertex.id}
+			// v0.8.24 修复：main chain curVertex 强制 lane 0；
+			// 其他 vertex 至少 lane 1（避免抢占 main lane 0）。
+			if g.mainChain[curVertex.sha] {
+				cp.x = 0
+			} else if cp.x == 0 {
+				cp.x = 1
+			}
+			curPoint = cp
 		}
 		branch.addLine(lastPoint, curPoint, vertex.isCommitted, lastPoint.x < curPoint.x)
 		curVertex.registerUnavailablePoint(curPoint.x, parentVertex, branch)
@@ -386,6 +416,16 @@ func (g *graphVscode) loadCommits(commits []git.CommitInfo, head string) {
 			g.vertices[row].isCurrent = true
 		}
 	}
+
+	// 4.5) v0.8.24 修复：预先识别 main chain（first-parent 从 primary branch
+	// head 一路到底的 commit 集合）。在 determinePath 入口强制 main chain
+	// 顶点 lane=0，避免 vscode 原版算法在 merge stitch 抢占 lane 0 时把
+	// first-parent 链 commit 推到 lane 2+ 并产生"幽灵 line"。
+	// 策略与 layout.go (BuildGraph) 的 isMainChain 预计算一致：
+	//   1) 优先从显式 primary branch ref (main/master/origin/main/origin/master)
+	//      对应的最新 commit 开始；找不到再退回 sorted[0]
+	//   2) 沿 first-parent (Parents[0]) 一路到底，全部标记
+	g.mainChain = computeMainChain(g.sorted)
 
 	// 5) Main loop: walk top-down, call determinePath on un-resolved vertices
 	// graph.ts:432-439
@@ -564,4 +604,47 @@ func BuildGraphVscodeWithHead(commits []git.CommitInfo, head string, truncated b
 	g := newGraphVscode(defaultMaxColors)
 	g.loadCommits(commits, head)
 	return g.buildResultWithTruncated(truncated)
+}
+
+// computeMainChain 识别 main chain —— 从显式 primary branch ref
+// (main/master/origin/main/origin/master) 对应的最新 commit 开始，沿 first-parent
+// 一路到底标记的 commit 集合。找不到 primary ref 时退回 sorted[0]（latest commit）。
+//
+// 与 layout.go (BuildGraph) 的 isMainChain 策略一致：
+//   - latest commit 默认视为 main head
+//   - primary ref 出现则把起点改到该 ref 指向的 commit
+//   - 沿 first-parent 一路到底（Parents[0]），off-graph 时停止
+//
+// 返回的 map 用于 determinePath 入口的 lane=0 强制。
+func computeMainChain(commits []git.CommitInfo) map[string]bool {
+	result := make(map[string]bool, len(commits))
+	if len(commits) == 0 {
+		return result
+	}
+	// 1) 找 primary ref 对应的 commit（latest 优先：按 sorted 顺序遍历）
+	cur := commits[0]
+	for _, candidate := range commits {
+		if hasPrimaryBranchRef(candidate) {
+			cur = candidate
+			break
+		}
+	}
+	// 2) 沿 first-parent 一路标记
+	shaToRow := make(map[string]int, len(commits))
+	for i, c := range commits {
+		shaToRow[c.SHA] = i
+	}
+	for {
+		result[cur.SHA] = true
+		if len(cur.Parents) == 0 {
+			break
+		}
+		fp := cur.Parents[0]
+		row, ok := shaToRow[fp]
+		if !ok {
+			break // off-graph (truncated boundary)
+		}
+		cur = commits[row]
+	}
+	return result
 }
