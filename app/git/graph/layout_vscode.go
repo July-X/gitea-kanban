@@ -624,7 +624,7 @@ func computeMainChain(commits []git.CommitInfo) map[string]bool {
 	// 1) 找 primary ref 对应的 commit（latest 优先：按 sorted 顺序遍历）
 	cur := commits[0]
 	for _, candidate := range commits {
-		if hasPrimaryBranchRef(candidate) {
+		if HasPrimaryBranchRef(candidate) {
 			cur = candidate
 			break
 		}
