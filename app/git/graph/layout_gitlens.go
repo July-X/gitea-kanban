@@ -357,6 +357,15 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 		} else if !hasParentRes {
 			_, isParentPinned := s.pinnedColumns[parentSha]
 
+			// v0.8.26.x fix：非 pinned lane 的 first-parent 链汇入 pinned 主线时，
+			// 原版 GKC edge 状态机里这条边自然存在（ending @ child lane 斜入主线 dot），
+			// 但本实现的渲染靠 segment 线 —— 必须在这里标记 lane 释放，让 segment
+			// 在 parent 行 finalize 出 forkSha，否则 fork 汇入线整段缺失
+			// （实测症状：feature 分支链尾端「断头」，看不到汇回主线的斜插线）。
+			if index == 0 && isParentPinned && column >= s.pinnedColumnCount {
+				s.columnsToFreeWhenFound[parentSha] = append(s.columnsToFreeWhenFound[parentSha], column)
+			}
+
 			var ownReservationNewest int64
 			if hasOwnRes && ownReservation.column == column {
 				if ownReservation != nil {
@@ -621,10 +630,46 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 		lines = append(lines, GraphBranchLine{
 			X1: c1, Y1: r1,
 			X2: c2, Y2: r2,
-			LockedFirst: false,
+			// v0.8.26.x fix：跨 lane 内线（lane 压缩造成的转场）锁 p1 ——
+			// GitLens 实测转场在上端（child 行下方一个行高内完成 lane 切换，
+			// 然后竖直进入 parent 行）；之前 LockedFirst=false 画成「先竖后斜」，
+			// 与 GitLens 形态相反。
+			LockedFirst: c1 != c2,
 			IsCommitted: true,
 		})
 	}
+
+	// fork 端 stitch：向下汇入其它 lane（通常主线）的斜插线。
+	// v0.8.26.x fix：之前整段缺失 —— seg.forkSha 有值但没生成线，导致
+	// 所有「分支汇回主线」的斜插线在前端消失（用户实测：lane 看起来一直延伸，
+	// 看不到汇入点）。颜色跟随本 segment（child 端链色），与 GitLens 实测一致
+	// （fork 边 = child branch 色；merge 边才是 parent 色）。
+	// LockedFirst=false：转场在下端 —— 线沿本 lane 竖直下行，在 parent 行上方
+	// 一个行高内斜切到 parent lane（GitLens「先竖后斜」形态）。
+	if seg.forkSha != "" && len(seg.commitShas) > 0 {
+		last := seg.commitShas[len(seg.commitShas)-1]
+		lastRow, okLast := rowOf[last]
+		forkRow, okFork := rowOf[seg.forkSha]
+		if okLast && okFork && forkRow > lastRow {
+			lastCol := seg.column
+			if c, ok := colOf[last]; ok {
+				lastCol = c
+			}
+			forkCol := 0
+			if c, ok := colOf[seg.forkSha]; ok {
+				forkCol = c
+			}
+			lines = append(lines, GraphBranchLine{
+				X1:          lastCol,
+				Y1:          lastRow,
+				X2:          forkCol,
+				Y2:          forkRow,
+				LockedFirst: false,
+				IsCommitted: true,
+			})
+		}
+	}
+
 	return lines
 }
 
@@ -764,8 +809,11 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 			parentColor := colorColOf[parentSHA] % 16
 
 			edgeColor := childColor
-			if childLane != parentLane && parentColor == 0 && parentIdx > 0 {
-				edgeColor = childColor
+			if parentIdx > 0 {
+				// v0.8.26.x fix：merge 边（second+ parent）颜色 = parent（被合入方）链色，
+				// 对齐 GitLens 实测（例：1348ba6→cfcf339 汇入主线，边为主线蓝色而非
+				// child 的绿色）。之前恒为 childColor，方向反了。
+				edgeColor = parentColor
 			}
 			edgeType := EdgeNormal
 			if childLane != parentLane {
@@ -787,6 +835,51 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 	}
 
 	branches := segmentsToBranches(segments, rowOf, colOf, colorColOf)
+
+	// v0.8.26.x fix：merge 合入线补全 —— merge commit 的 second+ parent 已经在
+	// 其它 lane 有归属（如「Merge branch 'master'」把主线 cfcf339 合入 feature
+	// 分支 1348ba6）时，segment 模型不会为它开新 segment，也就没有任何 stitch，
+	// 这条边在 branches 里完全丢失（edges 里有但前端优先用 branches 渲染）。
+	// GitLens 实测这条边存在：从 merge dot 斜切到 parent lane 后竖直到 parent dot，
+	// 颜色 = parent 链色。这里按 edge 数据补成独立单线 branch。
+	for i, c := range commits {
+		if len(c.Parents) < 2 {
+			continue
+		}
+		for _, parentSHA := range c.Parents[1:] {
+			parentRow, ok := rowOf[parentSHA]
+			if !ok {
+				continue
+			}
+			// 已有 merge stitch 的（parent 是本 merge 新开 segment 的 tip）跳过
+			covered := false
+			for _, seg := range segments {
+				if seg.mergeSha == c.SHA && seg.tipSha == parentSHA {
+					covered = true
+					break
+				}
+			}
+			if covered {
+				continue
+			}
+			childLane := colOf[c.SHA]
+			parentLane := colOf[parentSHA]
+			if childLane == parentLane {
+				// 同 lane：与既有竖线重叠，视觉无增量，跳过
+				continue
+			}
+			branches = append(branches, GraphBranch{
+				Color: colorColOf[parentSHA] % 16,
+				End:   parentRow + 1,
+				Lines: []GraphBranchLine{{
+					X1: childLane, Y1: i,
+					X2: parentLane, Y2: parentRow,
+					LockedFirst: true, // 转场在上端：merge dot 下方立即斜切到 parent lane
+					IsCommitted: true,
+				}},
+			})
+		}
+	}
 
 	if maxCol < 0 {
 		maxCol = 0

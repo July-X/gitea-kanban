@@ -540,3 +540,153 @@ func TestBuildGraphGitlens_LaneCompactMatchesGitlens(t *testing.T) {
 
 // fmt import guard for clarity
 var _ = fmt.Sprintf
+// TestBuildGraphGitlens_ForkStitchIntoPinnedTrunk v0.8.26.x fix
+//
+// 回归场景（TRex 实测还原）：feature 分支链尾端的 first parent 是 pinned 主线
+// commit，且该 commit 的 pinned child 在 rows 中排在本 row 之后（还没被处理），
+// 因此 parent 没有 reservation —— 走 else if (!hasParentRes) 分支。
+// 旧实现只 reserve 不标记 lane 释放，segment 永远 drain，forkSha="" →
+// fork 汇入线整段缺失（前端看不到分支汇回主线的斜插线）。
+//
+// 构造：H(main) → M(merge [A, F]) → A → B → C(pinned 链)；F → B。
+// F(row 2) 处理时 B 无 reservation（A 在 row 3 才处理）→ 新 fix 标记
+// columnsToFreeWhenFound[B]=[1]，row 4(B) 释放 lane 1 并 finalize fork=B。
+func TestBuildGraphGitlens_ForkStitchIntoPinnedTrunk(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{SHA: sha, ShortSHA: sha, Subject: sha, AuthorWhen: t0, Parents: parents}
+	}
+	commits := []git.CommitInfo{
+		mk("H", []string{"M"}),      // row 0: lane 0 (pinned head)
+		mk("M", []string{"A", "F"}), // row 1: lane 0 (merge)
+		mk("F", []string{"B"}),      // row 2: lane 1 (feature tip)
+		mk("A", []string{"B"}),      // row 3: lane 0
+		mk("B", []string{"C"}),      // row 4: lane 0
+		mk("C", nil),                // row 5: lane 0 root
+	}
+	commits[0].Refs = []string{"main"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "H", []string{"H"})
+
+	// 断言 fork stitch (1,2)→(0,4) 存在，且 LockedFirst=false（转场在下端）
+	var forkFound bool
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			if l.X1 == 1 && l.Y1 == 2 && l.X2 == 0 && l.Y2 == 4 {
+				forkFound = true
+				if l.LockedFirst {
+					t.Errorf("fork stitch LockedFirst = true, want false（转场在下端，先竖后斜）")
+				}
+			}
+		}
+	}
+	if !forkFound {
+		t.Errorf("expected fork stitch (1,2)→(0,4)（feature 链汇入 pinned 主线 B）; got none")
+		for _, b := range result.Branches {
+			for _, l := range b.Lines {
+				t.Logf("  branch color=%d line (%d,%d)→(%d,%d) LockedFirst=%v", b.Color, l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+			}
+		}
+	}
+}
+
+// TestBuildGraphGitlens_MergeIncomingLineToExistingLane v0.8.26.x fix
+//
+// 回归场景（TRex 实测还原：1348ba6「Merge branch 'master'」→ cfcf339）：
+// merge commit 的 second parent 已经在其它 lane 有归属（pinned 主线 lane 0），
+// segment 模型不会为它开新 segment → 旧实现这条 merge 合入边在 branches 里
+// 完全丢失。新实现补独立单线 branch，颜色 = parent 链色。
+//
+// 构造：H(main) → P1 → P2(pinned 链)；M(feature 分支 merge commit) → F → P2，
+// M 的 second parent = P1（已在 lane 0）。
+func TestBuildGraphGitlens_MergeIncomingLineToExistingLane(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{SHA: sha, ShortSHA: sha, Subject: sha, AuthorWhen: t0, Parents: parents}
+	}
+	commits := []git.CommitInfo{
+		mk("H", []string{"P1"}),      // row 0: lane 0 (pinned head)
+		mk("M", []string{"F", "P1"}), // row 1: lane 1 (feature 分支 merge commit)
+		mk("P1", []string{"P2"}),     // row 2: lane 0
+		mk("F", []string{"P2"}),      // row 3: lane 1
+		mk("P2", nil),                // row 4: lane 0 root
+	}
+	commits[0].Refs = []string{"main"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "H", []string{"H"})
+
+	// 断言 merge 合入线 (1,1)→(0,2) 存在：LockedFirst=true（转场在上端）、
+	// 所在 branch.Color=0（parent 主线色，而非 child 的 lane 1 色）
+	var incomingFound bool
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			if l.X1 == 1 && l.Y1 == 1 && l.X2 == 0 && l.Y2 == 2 {
+				incomingFound = true
+				if !l.LockedFirst {
+					t.Errorf("merge 合入线 LockedFirst = false, want true（转场在上端，先斜后竖）")
+				}
+				if b.Color != 0 {
+					t.Errorf("merge 合入线 branch.Color = %d, want 0（parent 主线链色）", b.Color)
+				}
+			}
+		}
+	}
+	if !incomingFound {
+		t.Errorf("expected merge 合入线 (1,1)→(0,2)（M 合入已有主线 P1）; got none")
+		for _, b := range result.Branches {
+			for _, l := range b.Lines {
+				t.Logf("  branch color=%d line (%d,%d)→(%d,%d) LockedFirst=%v", b.Color, l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+			}
+		}
+	}
+}
+
+// TestBuildGraphGitlens_MergeEdgeUsesParentColor v0.8.26.x fix
+//
+// GitLens 实测：merge 边（second+ parent）颜色 = parent（被合入方）链色；
+// first-parent 边颜色 = child 链色。旧实现 edges 恒为 childColor。
+func TestBuildGraphGitlens_MergeEdgeUsesParentColor(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{SHA: sha, ShortSHA: sha, Subject: sha, AuthorWhen: t0, Parents: parents}
+	}
+	commits := []git.CommitInfo{
+		mk("H", []string{"P1"}),
+		mk("M", []string{"F", "P1"}),
+		mk("P1", []string{"P2"}),
+		mk("F", []string{"P2"}),
+		mk("P2", nil),
+	}
+	commits[0].Refs = []string{"main"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "H", []string{"H"})
+
+	// M(row 1, lane 1) → P1(row 2, lane 0) 是 second-parent 边：颜色应为 P1 的 0
+	var mergeEdge *GraphEdge
+	// M(row 1, lane 1) → F(row 3, lane 1) 是 first-parent 边：颜色应为 M 链色（1）
+	var firstParentEdge *GraphEdge
+	for i := range result.Edges {
+		e := &result.Edges[i]
+		if e.FromRow == 1 && e.ToRow == 2 {
+			mergeEdge = e
+		}
+		if e.FromRow == 1 && e.ToRow == 3 {
+			firstParentEdge = e
+		}
+	}
+	if mergeEdge == nil {
+		t.Fatalf("missing edge M→P1")
+	}
+	if mergeEdge.Color != 0 {
+		t.Errorf("merge 边 M→P1 Color = %d, want 0（parent 主线链色）", mergeEdge.Color)
+	}
+	if firstParentEdge == nil {
+		t.Fatalf("missing edge M→F")
+	}
+	if firstParentEdge.Color != 1 {
+		t.Errorf("first-parent 边 M→F Color = %d, want 1（child 链色）", firstParentEdge.Color)
+	}
+}

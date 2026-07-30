@@ -271,6 +271,32 @@ export function renderGraphVscode(
 			lockedFirst: boolean;
 			isCommitted: boolean;
 		}> = [];
+		// v0.8.26.x fix：跨 lane 且跨多行的线拆成「转场段(≤1 行高) + 竖直段」，
+		// 对齐 GitLens edge 渲染 —— lane 切换在一个行间隙内完成，中间行是纯竖线。
+		// 之前整条线画贝塞尔，斜切被摊到全部行高上（长对角线），与 GitLens
+		// 「先斜后竖 / 先竖后斜」的形态不符。
+		const pushSplit = (
+			sx1: number,
+			sy1: number,
+			sx2: number,
+			sy2: number,
+			lockedFirst: boolean,
+			isCommitted: boolean,
+		): void => {
+			if (sx1 !== sx2 && Math.abs(sy2 - sy1) > gridY * 1.5) {
+				if (lockedFirst) {
+					// 转场在上端（merge 边 / lane 压缩内线）：斜切段 → 竖直段
+					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy1 + gridY }, lockedFirst, isCommitted });
+					placed.push({ p1: { x: sx2, y: sy1 + gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+				} else {
+					// 转场在下端（fork 汇入边）：竖直段 → 斜切段
+					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx1, y: sy2 - gridY }, lockedFirst, isCommitted });
+					placed.push({ p1: { x: sx1, y: sy2 - gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+				}
+				return;
+			}
+			placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+		};
 		for (const line of lines) {
 			let x1 = line.x1 * gridX + offsetX;
 			let y1 = line.y1 * gridY + offsetY;
@@ -321,7 +347,7 @@ export function renderGraphVscode(
 					}
 				}
 			}
-			placed.push({ p1: { x: x1, y: y1 }, p2: { x: x2, y: y2 }, lockedFirst: line.lockedFirst, isCommitted });
+			pushSplit(x1, y1, x2, y2, line.lockedFirst, isCommitted);
 		}
 
 		// 2) 简化共线中间点 (vscode Branch.draw:106-116)

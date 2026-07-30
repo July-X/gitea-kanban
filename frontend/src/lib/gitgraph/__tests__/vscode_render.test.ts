@@ -343,6 +343,50 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 			'展开后下方 dot 仍 +expandY',
 		);
 	});
+
+	test('v0.8.26.x: 跨 lane 跨多行的线拆成「转场段(≤1 行高) + 竖直段」（GitLens 形态）', () => {
+		// lockedFirst=true（merge 边）：斜切段在上端，竖直段随后
+		const mergeLike: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(3, 1, 0, 'b')],
+			edges: [],
+			branches: [
+				{
+					color: 1,
+					end: 4,
+					lines: [{ x1: 0, y1: 0, x2: 1, y2: 3, lockedFirst: true }],
+				},
+			],
+			maxLane: 1,
+			truncated: false,
+		};
+		const r1 = renderGraphVscode(mergeLike);
+		const d1 = r1.paths[0]?.d ?? '';
+		// 转场段 (0,0)→(1,1)：贝塞尔 M 16 12 C 16 31.2 32 16.8 32 36.0
+		assert.ok(d1.includes('C 16 31.2 32 16.8 32 36.0'), `转场段应集中在首行，实际: ${d1}`);
+		// 竖直段 (1,1)→(1,3)：L 32 84（y = 3*24+12）
+		assert.ok(d1.includes('L 32 84'), `转场后应为纯竖直段到目标行，实际: ${d1}`);
+
+		// lockedFirst=false（fork 汇入边）：竖直段先行，斜切段在下端
+		const forkLike: GraphResultDto = {
+			nodes: [node(0, 1, 0, 'a'), node(3, 0, 0, 'b')],
+			edges: [],
+			branches: [
+				{
+					color: 1,
+					end: 4,
+					lines: [{ x1: 1, y1: 0, x2: 0, y2: 3, lockedFirst: false }],
+				},
+			],
+			maxLane: 1,
+			truncated: false,
+		};
+		const r2 = renderGraphVscode(forkLike);
+		const d2 = r2.paths[0]?.d ?? '';
+		// 竖直段 (1,0)→(1,2)：M 32 12.0 L 32 60.0（y = 2*24+12）
+		assert.ok(d2.includes('M 32 12.0 L 32 60.0'), `fork 线应先竖直到末段前，实际: ${d2}`);
+		// 转场段 (1,2)→(0,3)：贝塞尔 C 32 79.2 16 64.8 16 84.0
+		assert.ok(d2.includes('C 32 79.2 16 64.8 16 84.0'), `fork 转场段应集中在末行，实际: ${d2}`);
+	});
 });
 
 describe('gitgraph vscode-render UNCOMMITTED 灰色虚线 (v3.x)', () => {
