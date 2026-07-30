@@ -34,19 +34,23 @@ export const VSCODE_OFFSET_Y = 12;
 export const VSCODE_VERTEX_RADIUS = 4;
 export const VSCODE_EXPAND_Y = 250; // vscode config.ts:278 expandY 默认值
 
-// 对齐 vscode-git-graph web/graph.ts config.colours 默认 16 色
-// (与 layout.go 注释里提到的 graphColours 数组一致)
+// 基础取自 vscode-git-graph web/graph.ts config.colours 默认 12 色，但
+// v0.8.26.x 用户拍板：lane 颜色排除红色系，三处红色系已替换——
+//   原 #ff0000（纯红）  → #00d95e（翠绿，填补绿/青色相间最大空档）
+//   原 #dc5b23（橙红）  → #3d5ad9（靛蓝，与 #0085d9 亮蓝靠明度/色相区分）
+//   原 #d9008f（玫红）  → #7cb342（草绿，hue≈92° 填补黄绿/绿之间空档）
+// 其余 9 色与 vscode-git-graph 默认一致。
 export const VSCODE_COLORS = [
 	'#0085d9', // 0
-	'#d9008f', // 1
+	'#7cb342', // 1 草绿（原 #d9008f 玫红，用户拍板排除红色系）
 	'#00d90a', // 2
 	'#d98500', // 3
 	'#a300d9', // 4
-	'#ff0000', // 5
+	'#00d95e', // 5 翠绿（原 #ff0000 纯红，用户拍板排除红色系）
 	'#00d9cc', // 6
 	'#e138e8', // 7
 	'#85d900', // 8
-	'#dc5b23', // 9
+	'#3d5ad9', // 9 靛蓝（原 #dc5b23 橙红，用户拍板排除红色系）
 	'#6f24d6', // 10
 	'#ffcc00', // 11
 ];
