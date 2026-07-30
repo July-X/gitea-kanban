@@ -603,13 +603,17 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 		branchRow, branchRowOk := rowOf[seg.branchSha]
 		firstRow, firstRowOk := rowOf[seg.commitShas[0]]
 		if branchRowOk && firstRowOk {
-			// branch-off 线：从 branchSha 行 (X=branchCol) 到 firstRow (X=firstCol)
-			// 方向：Y 从小到大（branchRow 通常 > firstRow，因为 branchSha 是祖先，
-			// 在 latest-first 拓扑序中祖先 row 更大）
+			// v0.8.27 fix：branch-off 入线（HEAD/tip 从某条 lane 分离出来）——
+			// 几何与 merge stitch 完全等价：parent 在上端（branchSha row），
+			// child 在下端（firstCol commit row）。LockedFirst 用 branchCol<firstCol
+			// 计算，与 merge stitch `mergeCol<firstCol` 同语义，与 GitLens 实测一致
+			// （main 在左 feature 在右 → 转场在上端 / child 端 LockedFirst=true）。
+			// v0.8.25.3 写死 false 与 merge stitch 几何相反，已被实测对标修复。
+			lockedFirst := branchCol < firstCol
 			lines = append(lines, GraphBranchLine{
 				X1: branchCol, Y1: branchRow,
 				X2: firstCol, Y2: firstRow,
-				LockedFirst: false,
+				LockedFirst: lockedFirst,
 				IsCommitted: true,
 			})
 		}

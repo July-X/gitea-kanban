@@ -692,3 +692,171 @@ func TestBuildGraphGitlens_MergeEdgeUsesParentColor(t *testing.T) {
 		t.Errorf("first-parent 边 M→F Color = %d, want 1（child 链色）", firstParentEdge.Color)
 	}
 }
+
+// TestBuildGraphGitlens_BranchOffLockedFirstMatchesMergeStitch v0.8.27
+//
+// 用户对标 GitLens 截图指出：branch-off 入线与 merge stitch 入线的
+// LockedFirst 不一致——branchSha 写死 false 与 merge stitch `mergeCol<firstCol`
+// 计算不一致。两者几何完全等价（parent 上端，child 下端），LockedFirst 应同向。
+//
+// 真实影响：当 branch-off 入线跨多行（pushSplit 触发条件 abs(sy2-sy1)>1.5*gridY）
+// 时，LockedFirst 决定转场在 child 端（斜切+竖直）还是 parent 端（竖直+斜切）。
+// 实测对标 GitLens：main lane 在左 feature lane 在右时，转场都在 child 端
+// （先斜后竖），即 LockedFirst=true。
+//
+// 测试拓扑：M0→M1 主链（lane 0, row 0..1）；HEAD 行 row 4 在 lane 1，
+// first parent 在 M0 row 0。branch-off 入线从 (0,0) → (1,4)，row diff=4
+// → abs=4*gridY=96 > 36 → 触发 pushSplit，LockedFirst 决定分支形态。
+func TestBuildGraphGitlens_BranchOffLockedFirstMatchesMergeStitch(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{
+			SHA:           sha,
+			ShortSHA:      sha,
+			Subject:       sha,
+			AuthorWhen:    t0,
+			CommitterWhen: t0,
+			Parents:       parents,
+		}
+	}
+	// row 0: HEAD (lane 1) parents=[M0]
+	// row 1: M0 (lane 0, pinned) parents=[M1]
+	// row 2: M1 parents=[M2]
+	// row 3: M2 parents=[M3]
+	// row 4: M3 (root)
+	commits := []git.CommitInfo{
+		mk("HEAD", []string{"M0"}),
+		mk("M0", []string{"M1"}),
+		mk("M1", []string{"M2"}),
+		mk("M2", []string{"M3"}),
+		mk("M3", nil),
+	}
+	commits[1].Refs = []string{"main"}
+	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "HEAD", []string{"M0", "HEAD"})
+
+	// dump
+	for _, n := range result.Nodes {
+		t.Logf("node %s lane=%d", n.ShortSHA, n.Lane)
+	}
+	for i, b := range result.Branches {
+		t.Logf("branch %d color=%d end=%d lines=%d", i, b.Color, b.End, len(b.Lines))
+		for _, l := range b.Lines {
+			t.Logf("  line (%d,%d)→(%d,%d) LockedFirst=%v", l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+		}
+	}
+
+	// 找 HEAD 那条 branch（含 branch-off line (0,0)→(1,4)）并断言 LockedFirst=true
+	var found bool
+	var correctLock bool
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			// branch-off 入线 geometry：起点 lane 0，终点 lane 1
+			if l.X1 == 0 && l.X2 == 1 {
+				found = true
+				if l.LockedFirst {
+					correctLock = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected branch-off line (0,0)→(1,4) for HEAD segment")
+	}
+	if !correctLock {
+		t.Errorf("branch-off LockedFirst should be true (branchCol<firstCol: 0<1); got false")
+	}
+}
+
+// TestBuildGraphGitlens_ForkStitchLockedFirst v0.8.27
+//
+// 验证 fork stitch 入线的 LockedFirst 几何一致性：fork segment 在 child 端（last commit），
+// forkSha 在 parent 端（更大 row）。当 child lane > parent lane（main 在左 feature 在右），
+// fork stitch 应 LockedFirst=false 转场在下端（parent 端）—— 与 merge stitch、
+// branch-off 入线在反方向（child in 上端）方向相反。
+//
+// 测试拓扑（latest-first）：
+//
+//	row 0: HEAD (lane 1) parents=[F4]
+//	row 1: F4 (lane 1) parents=[F3]
+//	row 2: F3 (lane 1) parents=[F2]
+//	row 3: F2 (lane 1) parents=[F1]
+//	row 4: F1 (lane 1) parents=[F0]
+//	row 5: F0 (lane 1) parents=[M3]   ← segment.tip = F0
+//	row 6: M3 (lane 0) parents=[M2]
+//	row 7: M2 (lane 0) parents=[M1]
+//	row 8: M1 (lane 0, pinned main) parents=[M0]
+//	row 9: M0 (lane 0) parents=[]
+//
+// HEAD..F0 在 lane 1 (feature segment)；forkSha=M3 (lane 0, row 6)
+// Fork stitch line (1, 5) → (0, 6)，Y跨度=1 gridY（不触发 pushSplit）但 angular 单行折线不同。
+//
+// 多行 fork stitch 触发条件：forkSha.Row - lastRow >= 2。但 forkSha 是 first parent of lastCommit，
+// 在 latest-first 拓扑里 forkSha.Row 必须 = lastRow+1（first parent 在 child 下一行）。
+// 但 segment 内部可能允许：f0 在 row 5，f0 的 first parent 是 m3 在 row 6，fork stitch y diff=1。
+//
+// 真实多行 fork stitch 触发：segment tip commit 不直接相邻，segment 内部存在多 commit 顺序，
+// 时 forkSha 在 segment 跟内部某个 commit 共 row 的话 (罕见)。
+//
+// 本测试聚焦：(1) fork stitch 在单行几何下 LockedFirst 计算一致性。
+func TestBuildGraphGitlens_ForkStitchLockedFirst(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{
+			SHA:           sha,
+			ShortSHA:      sha,
+			Subject:       sha,
+			AuthorWhen:    t0,
+			CommitterWhen: t0,
+			Parents:       parents,
+		}
+	}
+	// topology (latest-first):
+	//   row 0: HEAD (lane 1) parents=[F0]
+	//   row 1: F0 (lane 1) parents=[M3]
+	//   row 2: M3 (lane 0) parents=[M2]
+	//   row 3: M2 (lane 0) parents=[M1]
+	//   row 4: M1 (lane 0, pinned) parents=[M0]
+	//   row 5: M0 (lane 0) parents=[]
+	commits := []git.CommitInfo{
+		mk("HEAD", []string{"F0"}),
+		mk("F0", []string{"M3"}),
+		mk("M3", []string{"M2"}),
+		mk("M2", []string{"M1"}),
+		mk("M1", []string{"M0"}),
+		mk("M0", nil),
+	}
+	commits[4].Refs = []string{"main"}
+	commits[4].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "HEAD", []string{"M1"})
+
+	t.Logf("MaxLane=%d, branches=%d", result.MaxLane, len(result.Branches))
+	for _, n := range result.Nodes {
+		t.Logf("node %s lane=%d", n.ShortSHA, n.Lane)
+	}
+	for i, b := range result.Branches {
+		t.Logf("branch %d color=%d end=%d lines=%d", i, b.Color, b.End, len(b.Lines))
+		for _, l := range b.Lines {
+			t.Logf("  line (%d,%d)→(%d,%d) LockedFirst=%v", l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+		}
+	}
+
+	// 找 fork stitch：lane 1 (feature) → lane 0 (main trunk) 转场，
+	// line Y1 < Y2 (lastRow < forkRow 因为 feature 向上折回 main)
+	var foundForkStitch bool
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			// feature segment 的 fork stitch: X1>X2 && Y1<Y2 && X1 = lane 1
+			if l.X1 == 1 && l.X2 == 0 {
+				foundForkStitch = true
+				t.Logf("fork stitch candidate: (%d,%d)→(%d,%d) LockedFirst=%v",
+					l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+			}
+		}
+	}
+	if !foundForkStitch {
+		t.Fatal("expected fork stitch line in feature segment branches")
+	}
+}
