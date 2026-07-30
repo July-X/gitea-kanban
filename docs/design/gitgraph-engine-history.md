@@ -468,7 +468,7 @@ app/git/graph/
 
 ## 后续工作（建议）
 
-- [ ] `layout.go`（Gitea 风格 `BuildGraph`）是否真正切换到 GitLens 输出？目前保留为 fallback，可在后续某个 release 替换为 `BuildGraphGitlens` + Gitea 风格前端渲染
+- [x] `layout.go`（Gitea 风格 `BuildGraph`）是否真正切换到 GitLens 输出？**v0.8.26 完成**：layout.go / layout_vscode.go / pickGraphBuilder env 开关全删；`BuildGraphGitlens` 作为 graph 包唯一公开入口；DTO 共享类型迁到 `types.go`。详情见「阶段 9 算法入口统一收敛」段。
 - [ ] `compact=true` vs `compact=false` 调度改为「segment 首次 claim 时取色，全图渲染时按 compact 后 lane 找最近 segment claim」单跑方案 — 当 commit 数 > 5000 时启用
 - [ ] 给 `layout_gitlens.go` 加更全面的 property-based test（`testing/quick`）覆盖随机 DAG 形态
 
