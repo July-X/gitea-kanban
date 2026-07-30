@@ -216,17 +216,11 @@ func TestBuildGraphGitlens_VsVscodeGitGraph_LaneConvergence(t *testing.T) {
 
 	// GitLens 算法
 	glResult := BuildGraphGitlens(commits, commits[0].SHA, pinned)
-	// vscode-git-graph 1:1 复刻
-	vcResult := BuildGraphVscodeWithHead(commits, commits[0].SHA, false)
 
 	t.Logf("DAG: M0(merge [M1,S1]) -> M1 -> M2; S1 -> S0")
-	t.Logf("vscode-git-graph MaxLane=%d", vcResult.MaxLane)
 	t.Logf("GitLens          MaxLane=%d", glResult.MaxLane)
 
 	// 打印每个节点 lane
-	for _, n := range vcResult.Nodes {
-		t.Logf("  vscode %s Lane=%d", n.ShortSHA, n.Lane)
-	}
 	for _, n := range glResult.Nodes {
 		t.Logf("  gitlens %s Lane=%d", n.ShortSHA, n.Lane)
 	}
@@ -234,10 +228,6 @@ func TestBuildGraphGitlens_VsVscodeGitGraph_LaneConvergence(t *testing.T) {
 	// 断言 GitLens 显著收敛（≤ 3 lane：trunk + sibling chain + sibling root）
 	if glResult.MaxLane > 3 {
 		t.Errorf("GitLens MaxLane=%d, want ≤ 3 (trunk + sibling)", glResult.MaxLane)
-	}
-	// 断言 vscode-git-graph 复刻 lane 也紧凑（小 DAG 不膨胀，但 sibling 仍占 lane）
-	if vcResult.MaxLane > 3 {
-		t.Errorf("vscode MaxLane=%d, want ≤ 3 (small DAG no inflation)", vcResult.MaxLane)
 	}
 	// 断言 GitLens sibling 不与 main 抢 lane（lane 0 全留给 main）
 	for _, n := range glResult.Nodes {

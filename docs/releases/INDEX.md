@@ -4,8 +4,8 @@
 
 ## 阅读路径
 
-- 当前最新 release note：[v0.8.25.md](./v0.8.25.md)（GitLens GKC 算法移植 + fork/merge 连线修复；lane 数从 ~35 → ~10-15；配套技术文档 [docs/design/gitgraph-engine.md](../design/gitgraph-engine.md)）
-- 上一版本：[v0.8.24.md](./v0.8.24.md)（Git Graph main chain lane 0 锚定，修复 vscode 原版幽灵 line bug）
+- 当前最新 release note：[v0.8.26.md](./v0.8.26.md)（Graph 算法入口统一收敛到 GitLens — 删 layout_vscode.go / layout.go / pickGraphBuilder env 开关 / 5 个 vscode 配套测试 / e2e baseline 对照块；净减 ~1700 行；DTO 共享类型迁到 types.go）
+- 上一版本：[v0.8.25.md](./v0.8.25.md)（GitLens GKC 算法移植 + fork/merge 连线修复；lane 数从 ~35 → ~10-15；配套技术文档 [docs/design/gitgraph-engine.md](../design/gitgraph-engine.md)）
 - 自动更新全链路：[v0.8.0.md](./v0.8.0.md)
 - 设计 plan：[v0.8.0-plan.md](./v0.8.0-plan.md)
 - 历史归档：本目录 v0.4.0 ~ v0.7.21 全部 30 个 release note
@@ -42,6 +42,7 @@
 | **v0.8.23.4** | tag `e7328a16`（commit `6d15af8`） | 修复 Windows 自动更新 apply 阶段 Win32 740 ERROR_ELEVATION_REQUIRED（`CreateProcess` 不会触发 UAC → 改走 `ShellExecuteExW + lpVerb="runas"`；UAC 取消静默；其他失败 fallback 到 `explorer.exe /select` 打开下载目录） | [v0.8.23.4.md](./v0.8.23.4.md) |
 | **v0.8.24** | tag （待打） | Git Graph main chain lane 0 锚定（修复 vscode-git-graph v1.30.0 原版幽灵 line bug：merge stitch 抢占 lane 0 导致 first-parent 链 commit 被推到 lane 2+ + lane 0 出现贯穿 49 行的"幽灵 line"。复用 layout.go 的 main chain 强制 lane=0 + feature lane ≥1 策略，新增 `TestBuildGraphVscode_MainChainLaneZero` 钉住行为） | [v0.8.24.md](./v0.8.24.md) |
 | **v0.8.25** | merge commit `2e0cefc` + fixup `54d1850`（master HEAD） | GitLens GKC 算法 Go 1:1 移植（`layout_gitlens.go` 896 行 + 4 个测试文件 1318 行）；双轨布局（visual compact=true + color compact=false）；fork stitch / merge incoming / merge edge parent 色 / 跨 lane 长线 pushSplit 4 个核心修复；DAG 排序 author→committer date；lane 配色优化（蓝/橙/绿高对比，移除红色系）；lane 数从 ~35 收敛到 ~10-15，对齐 GitLens / GitKraken 桌面端视觉。配套技术文档 [docs/design/gitgraph-engine.md](../design/gitgraph-engine.md) + [docs/design/gitgraph-engine-history.md](../design/gitgraph-engine-history.md) | [v0.8.25.md](./v0.8.25.md) |
+| **v0.8.26** | （待 push 后回填） | Graph 算法入口统一收敛到 GitLens。删 `app/git/graph/layout_vscode.go` (650 行) + `layout.go` (749 行) 孤儿代码 + 4 个 vscode 配套测试 + `pickGraphBuilder` env 开关 + e2e baseline 对照块；DTO 共享类型（GraphNode / GraphEdge / GraphBranchLine / GraphBranch / EdgeType 常量 / GraphResult）迁到 `types.go`；净减 ~1700 行；`BuildGraphGitlens` 作为 graph 包唯一入口 | [v0.8.26.md](./v0.8.26.md) |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 

@@ -16,7 +16,8 @@
 | **为什么不用 vscode-git-graph 默认算法** | 实测在 master 旁支密集的仓库上 lane 撑到 35+（无回收），视觉极差；其 `vertex.nextX` 单调递增，merge 后 lane 不回收 |
 | **为什么最终选 GitLens** | GitLens `columnsUsed` Set + `columnsToFreeWhenFound` Map **真正回收 column**，目标是「赛道计数视觉上 ~15 条」；且其 lane segment 模型天然支持 fork/merge stitch 转场线 |
 | **为什么后端跑两遍算法** | GitLens GKC 算法无法兼顾「视觉 lane 紧凑」与「颜色按 claim 时的 lane 分配」（压缩会改 lane 编号而颜色已写入 segment）。采用双跑：visual pass 用 compressed（紧凑 lane），color pass 用 uncompressed（按 segment 首次 claim 时的 lane 取色） |
-| **为什么连 vscode 视图也在用 GitLens 输出** | 整个项目就一个 graph 视图了（master 之前 vscode/gitea 并存），统一收口到 GitLens 输出 + vscode 前端渲染器（复用 SVG 路径算法） |
+| **为什么前端渲染器复用 vscode-git-graph 而不是自己写** | GitLens TS 原版的渲染层是 React 组件，不能直接复用；vscode-git-graph `Branch.draw` 1:1 复刻到 TS（`vscode-render.ts`）能输出稳定 SVG path；用同一套 DTO（X1/Y1/X2/Y2 像素坐标 + LockedFirst）算法可换渲染器不变 |
+| **v0.8.26 入口统一后的 graph 包结构** | `types.go`（237 行共享 DTO）+ `layout_gitlens.go`（896 行主算法）+ 5 个测试文件 / dump 工具；`BuildGraphGitlens` 是唯一公开入口，layout.go / layout_vscode.go 与 pickGraphBuilder env 开关全删 |
 | **关键不变量** | 每行 row 0 一定有 commit（latest first 排序保证）；fork/merge stitch 都走 `LockedFirst` 转场线（GitLens 形态：先竖后斜或先斜后竖 ≤1 行高） |
 
 ---

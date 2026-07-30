@@ -15,7 +15,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -218,25 +217,13 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		head = resolveLocalHead(localPath)
 	}
 
-	// v0.8.25.1 feat：默认走 GitLens GKC 算法（columnsUsed Set + columnsToFreeWhenFound
-	// Map + claimNextColumn 最低空位），lane 数比 vscode-git-graph 原版显著收敛。
-	// 环境变量 GITEA_KANBAN_GRAPH_ALGO=vscode 切回 vscode-git-graph 1:1 复刻 fallback。
-	// 详见 app/git/graph/layout_gitlens.go（GitLens layout.ts 1:1 移植）。
-	graphResult := pickGraphBuilder(logResult.Commits, head, logResult.Truncated)
-	graphResult.LocalExhausted = logResult.LocalExhausted
-	graphResult.DeepenTriggered = logResult.DeepenTriggered
-
-	return graphResultToDTO(graphResult), nil
-}
-
-// pickGraphBuilder 默认走 GitLens GKC；GITEA_KANBAN_GRAPH_ALGO=vscode 退回 vscode-git-graph
-func pickGraphBuilder(commits []git.CommitInfo, head string, truncated bool) *graph.GraphResult {
-	if os.Getenv("GITEA_KANBAN_GRAPH_ALGO") == "vscode" {
-		return graph.BuildGraphVscodeWithHead(commits, head, truncated)
-	}
+	// v0.8.26：layout 算法统一收敛到 GitLens GKC（columnsUsed Set +
+	// columnsToFreeWhenFound Map + claimNextColumn 最低空位）。
+	// v0.8.25 起的 env 切换开关（GITEA_KANBAN_GRAPH_ALGO=vscode）已删除，
+	// 不再有 fallback：layout_vscode.go 与 layout.go 在同 commit 删除。
 	// pinned heads: trunk head (main/master) 排最前；当前 branch head 排第二
 	var pinned []string
-	for _, c := range commits {
+	for _, c := range logResult.Commits {
 		if graph.HasPrimaryBranchRef(c) {
 			pinned = append(pinned, c.SHA)
 			break
@@ -245,7 +232,11 @@ func pickGraphBuilder(commits []git.CommitInfo, head string, truncated bool) *gr
 	if head != "" && (len(pinned) == 0 || pinned[0] != head) {
 		pinned = append(pinned, head)
 	}
-	return graph.BuildGraphGitlens(commits, head, pinned)
+	graphResult := graph.BuildGraphGitlens(logResult.Commits, head, pinned)
+	graphResult.LocalExhausted = logResult.LocalExhausted
+	graphResult.DeepenTriggered = logResult.DeepenTriggered
+
+	return graphResultToDTO(graphResult), nil
 }
 
 // resolveLocalHead 用 go-git 读本地 HEAD hash, 失败返回 ""

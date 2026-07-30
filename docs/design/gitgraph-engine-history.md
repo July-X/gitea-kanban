@@ -354,6 +354,75 @@ for i, c := range commits {
 
 ---
 
+## 阶段 9 — 算法入口统一收敛（v0.8.26，user 拍板）
+
+**动机**：v0.8.25 默认切到 GitLens GKC 后，vscode-git-graph 1:1 复刻 fallback 成为「历史包袱」—— 2 周内没触发，但仍然占 ~1700 行代码 + 一堆测试维护成本。graph 包从「两条算法并存」收敛为「BuildGraphGitlens 唯一入口」。
+
+**User 拍板**：全删干净一刀（不保留 hidden fallback、不保留代码只删 env 开关）。
+
+### 9.1 改动范围
+
+| 资产 | 处置 |
+|---|---|
+| `app/git/graph/layout_vscode.go`（650 行） | 删 |
+| `app/git/graph/layout.go`（749 行孤儿代码） | 删 |
+| `app/git/graph/v0824_main_chain_test.go` | 删 |
+| `app/git/graph/layout_uncommitted_test.go` | 删 |
+| `app/git/graph/layout_test.go` | 删 |
+| `app/git/graph/v27_regression_test.go` | 删 |
+| `layout_gitlens_e2e_test.go:220` vscode baseline 对照块 | 删 |
+| `app/platform/gitea/adapter.go:pickGraphBuilder` | 收敛为 `BuildGraphGitlens` 单调用 |
+| `app/platform/github/adapter.go:pickGitHubGraphBuilder` | 同上 |
+| `GITEA_KANBAN_GRAPH_ALGO` env 开关 | 删 |
+| `os` import 在两 adapter 中 | 删 |
+| `app/git/graph/types.go`（新建 237 行） | 承载共享 DTO（GraphNode / GraphEdge / GraphBranchLine / GraphBranch / EdgeType 常量 / GraphResult）+ `HasPrimaryBranchRef` 函数 |
+
+### 9.2 净代码量
+
+```text
+删 -1700 行：
+  layout_vscode.go          -650
+  layout.go                 -749
+  v0824_main_chain_test.go  (-v0.8.24 main chain 测试)
+  layout_uncommitted_test.go (-Uncommitted 行渲染测试)
+  layout_test.go            (BuildGraph 单元测试)
+  v27_regression_test.go    (v2.7 first-parent 回归)
+  layout_gitlens_e2e_test.go:220  (-vscode baseline 对照块)
+  2 个 adapter pickGraphBuilder 函数 (-30)
+  ───────────────────────
+  约 -1700
+
+加 +237 行：
+  types.go (共享 DTO + HasPrimaryBranchRef)
+```
+
+### 9.3 v0.8.24 幽灵 line 修复的延续性
+
+| 修复点 | v0.8.24 实现 | v0.8.26 中等价实现 |
+|---|---|---|
+| main chain 锚定 | `layout_vscode.go:191-199` 新增 `mainChain map[string]bool` 字段 | `layout_gitlens.go` 的 `assignColumnForRow` main chain reservation |
+| ghost line 消除 | `determinePath` 强制 `cp.x=0` | `columnsToFreeWhenFound[parentSha]` 显式释放 lane |
+| 回归测试 | `TestBuildGraphVscode_MainChainLaneZero` | `TestBuildGraphGitlens_*` 系列覆盖等价拓扑 |
+
+**v0.8.24 release note 不删除** — 它仍是 vscode-git-graph 原版幽灵 line bug 的事实记录 + 调研过程。但 v0.8.26 中相关代码 + 测试都删除，故 v0.8.24 是「对历史问题的修复」，v0.8.26 是「用更好的算法重新实现等价逻辑」。
+
+### 9.4 改动后 graph 包结构（终极态）
+
+```text
+app/git/graph/
+├── types.go                     # 共享 DTO + HasPrimaryBranchRef
+├── layout_gitlens.go            # 主算法（BuildGraphGitlens / gitlensAssignColumns 等 60+ 函数）
+├── layout_gitlens_test.go       # 单元测试
+├── layout_gitlens_dto_test.go   # DTO 转换测试
+├── layout_gitlens_e2e_test.go   # 真实 TRex 仓库端到端
+├── debug_dump_test.go           # 调试 dump
+└── dump_branches_test.go        # 调试 dump
+```
+
+`BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult` 是 graph 包**唯一公开入口**。
+
+---
+
 ## 完整 commit 列表（v0.8.25 → v0.8.26.x）
 
 | commit | 类型 | 主题 |

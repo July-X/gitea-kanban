@@ -8,11 +8,12 @@
 //   - canReplaceReservation 严格按 GitLens 规则（多 parent / merge-child / pinned parent → 不可替换）
 //   - commit kind 含 'stash' / 'workdir' / 'commit' / 'merge'；date 用于 stash tie-break
 //
-// 入口契约（与 BuildGraphVscodeWithHead 一致）：
+// 入口契约：
 //   BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult
-// 输出复用现有 GraphResult（前端 vscode-render.ts 兼容）。
+// 输出复用 GraphResult（前端 vscode-render.ts 兼容，DTO 见 types.go）。
 //
-// 旧 BuildGraphVscodeWithHead（vscode-git-graph 1:1 复刻）保留为 fallback。
+// v0.8.26：layout_vscode.go / layout.go / pickGraphBuilder env 开关全删，
+// 本文件为 graph 包唯一入口。
 package graph
 
 import (
@@ -715,7 +716,7 @@ func segmentsToBranches(segments []gitlensLaneSegment, rowOf map[string]int, col
 	return branches
 }
 
-// BuildGraphGitlens 公共入口（与 BuildGraphVscodeWithHead 签名对齐）
+// BuildGraphGitlens graph 包公共入口（v0.8.26 唯一）
 // pinnedHeadShas 由 caller 提供（base-first：trunk head 最先）。
 // 典型用法：trunk head (main/master) + 当前 branch head。
 func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult {
