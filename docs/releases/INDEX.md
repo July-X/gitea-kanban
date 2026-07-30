@@ -4,7 +4,7 @@
 
 ## 阅读路径
 
-- 当前最新 release note：[v0.8.26.md](./v0.8.26.md)（Graph 算法入口统一收敛到 GitLens — 删 layout_vscode.go / layout.go / pickGraphBuilder env 开关 / 5 个 vscode 配套测试 / e2e baseline 对照块；净减 ~1700 行；DTO 共享类型迁到 types.go）
+- 当前最新 release note：[v0.8.28.md](./v0.8.28.md)（GitLens 风格已合并 PR 灰化 —— dimmedShaSet 驱动 commit row + svg 节点 + svg path 三处 opacity，对应 GitLens `dimCommitsWithPullRequests` 视觉）
 - 上一版本：[v0.8.25.md](./v0.8.25.md)（GitLens GKC 算法移植 + fork/merge 连线修复；lane 数从 ~35 → ~10-15；配套技术文档 [docs/design/gitgraph-engine.md](../design/gitgraph-engine.md)）
 - 自动更新全链路：[v0.8.0.md](./v0.8.0.md)
 - 设计 plan：[v0.8.0-plan.md](./v0.8.0-plan.md)
@@ -44,6 +44,7 @@
 | **v0.8.25** | merge commit `2e0cefc` + fixup `54d1850`（master HEAD） | GitLens GKC 算法 Go 1:1 移植（`layout_gitlens.go` 896 行 + 4 个测试文件 1318 行）；双轨布局（visual compact=true + color compact=false）；fork stitch / merge incoming / merge edge parent 色 / 跨 lane 长线 pushSplit 4 个核心修复；DAG 排序 author→committer date；lane 配色优化（蓝/橙/绿高对比，移除红色系）；lane 数从 ~35 收敛到 ~10-15，对齐 GitLens / GitKraken 桌面端视觉。配套技术文档 [docs/design/gitgraph-engine.md](../design/gitgraph-engine.md) + [docs/design/gitgraph-engine-history.md](../design/gitgraph-engine-history.md) | [v0.8.25.md](./v0.8.25.md) |
 | **v0.8.26** | （待 push 后回填） | Graph 算法入口统一收敛到 GitLens。删 `app/git/graph/layout_vscode.go` (650 行) + `layout.go` (749 行) 孤儿代码 + 4 个 vscode 配套测试 + `pickGraphBuilder` env 开关 + e2e baseline 对照块；DTO 共享类型（GraphNode / GraphEdge / GraphBranchLine / GraphBranch / EdgeType 常量 / GraphResult）迁到 `types.go`；净减 ~1700 行；`BuildGraphGitlens` 作为 graph 包唯一入口 | [v0.8.26.md](./v0.8.26.md) |
 | **v0.8.27** | （待 push 后回填） | branch-off 入线 `LockedFirst` 对齐 merge stitch（v0.8.25.3 写死 `false` 与 `mergeCol<firstCol` 等价几何相反）。修复后单文件 +8/-4 改动：feature 分支顶端从主干分叉时转场从「lane 0 竖直到 commit 行附近才斜切（凭印象）」变成「child 行立即斜切再竖直」，对齐 GitLens Commit Graph 实测；新加 `TestBuildGraphGitlens_BranchOffLockedFirstMatchesMergeStitch` + `TestBuildGraphGitlens_ForkStitchLockedFirst` 回归。同步审视其余 4 处 `LockedFirst`（merge stitch / merge incoming / lane 压缩内线 / fork stitch）确认几何一致 | [v0.8.27.md](./v0.8.27.md) |
+| **v0.8.28** | （待 push 后回填） | 对齐 GitLens `dimCommitsWithPullRequests` 风格 —— 已合并 PR 链 commit 行整段灰化。新增 `frontend/src/lib/graph-dimmed.ts` 纯函数（first-parent BFS + main trunk 截断点，13 个 vitest 单测覆盖普通 merge / squash / PR head 不在 graph / 共享段去重 / PR head 与 main 重合等 8 类边界）；`TimelineNewView.vue` 后台非阻塞调 `pullsList(state='closed')` 拿 merged PR 列表（AbortController 切 repo 时取消旧请求），`dimmedShaSet` 通过响应式 computed 同时驱动 3 处渲染：commit row 文字 opacity 0.45（ref badge + subject + author + date 同步） + 节点 circle stroke/fill opacity 降 0.35 + SVG path 经 `pathCoveredRows` 解析 `d` 字符串后命中 dimmed row 时整 path 降 opacity（shadow 0.18 / line 0.35，对齐 GitLens "该行 lane line 同步灰"）。不动 Go 端 binding / DTO 契约（AGENTS §13） | [v0.8.28.md](./v0.8.28.md) |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 
