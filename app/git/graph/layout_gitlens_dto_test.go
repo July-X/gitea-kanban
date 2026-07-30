@@ -142,6 +142,93 @@ func TestBuildGraphGitlens_MergeStitchLineUsesRealColumn(t *testing.T) {
 	}
 }
 
+// TestBuildGraphGitlens_UncommittedSharesHeadLane v0.8.25.5 fix
+//
+// 用户实测（xdolphin/TRex 仓库截图）：Uncommitted 被分到 lane 1（紫色独立 lane），
+// 顶部多一条紫色斜线；且其 lane 永不释放（first parent HEAD 被 pinned 时不触发
+// columnsToFreeWhenFound），lane 泄漏导致后续 branch lane 分配连锁偏移、
+// local-dev-AJL 链绿线长斜跨。
+//
+// GitLens 渲染语义：Uncommitted 空心圆与 HEAD 同 lane 0（它是 HEAD 的工作区附属）。
+//
+// 修法：assignPinnedColumns 把 kind=workdir 且 first parent 是 pinned head 的 row
+// 也 pin 到同一 column。
+//
+// 测试拓扑（对齐用户仓库）：
+//   row 0: UNC (workdir)      parents=[M0]
+//   row 1: M0 (merge, HEAD)   parents=[P1, B1]   pinned（trunk head）
+//   row 2: B1 (dev tip)       parents=[B2]
+//   row 3: P1                 parents=[BASE]
+//   row 4: B2                 parents=[BASE]
+//   row 5: BASE               parents=[]
+//
+// 预期：UNC/M0/P1/BASE lane 0（trunk）；B1/B2 lane 1（dev 链）；
+// 关键：MaxLane==1 —— 修复前 lane 泄漏时 B1 会被挤到 lane 2（MaxLane==2）。
+func TestBuildGraphGitlens_UncommittedSharesHeadLane(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{
+			SHA:        sha,
+			ShortSHA:   sha,
+			Subject:    sha,
+			AuthorWhen: t0,
+			Parents:    parents,
+		}
+	}
+	commits := []git.CommitInfo{
+		mk(git.UNCOMMITTED_HASH, []string{"M0"}),
+		mk("M0", []string{"P1", "B1"}),
+		mk("B1", []string{"B2"}),
+		mk("P1", []string{"BASE"}),
+		mk("B2", []string{"BASE"}),
+		mk("BASE", nil),
+	}
+	commits[1].Refs = []string{"main"}
+	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "M0", []string{"M0"})
+
+	laneOf := make(map[string]int, len(result.Nodes))
+	for _, n := range result.Nodes {
+		laneOf[n.SHA] = n.Lane
+	}
+
+	// 核心断言：Uncommitted 与 HEAD 同 lane 0
+	if laneOf[git.UNCOMMITTED_HASH] != 0 {
+		t.Errorf("UNC lane=%d, want 0 (Uncommitted 必须与 HEAD 同 lane，对齐 GitLens)", laneOf[git.UNCOMMITTED_HASH])
+	}
+	if laneOf["M0"] != 0 {
+		t.Errorf("M0 lane=%d, want 0 (pinned trunk head)", laneOf["M0"])
+	}
+	// dev 链 lane 1；lane 泄漏时 B1 会被挤到 lane 2
+	if laneOf["B1"] != 1 {
+		t.Errorf("B1 lane=%d, want 1 (extra parent fresh claim；lane 泄漏时会变 2)", laneOf["B1"])
+	}
+	if laneOf["B2"] != 1 {
+		t.Errorf("B2 lane=%d, want 1 (dev chain first parent 无条件继承)", laneOf["B2"])
+	}
+	if laneOf["P1"] != 0 || laneOf["BASE"] != 0 {
+		t.Errorf("P1/BASE lane=%d/%d, want 0/0 (trunk pinned chain)", laneOf["P1"], laneOf["BASE"])
+	}
+	// lane 泄漏兜底断言：整个图最多 2 个 lane
+	if result.MaxLane != 1 {
+		t.Errorf("MaxLane=%d, want 1（修复前 lane 泄漏 → MaxLane==2）", result.MaxLane)
+	}
+
+	// segment 断言：lane 1 的 branch 应有 merge stitch（mergeSha=M0 在 lane 0）
+	var mergeStitchFound bool
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			if l.X1 == 0 && l.X2 == 1 && l.LockedFirst {
+				mergeStitchFound = true
+			}
+		}
+	}
+	if !mergeStitchFound {
+		t.Errorf("expected merge stitch line (0,*)→(1,*) for dev branch segment; got none")
+	}
+}
+
 // TestBuildGraphGitlens_BranchEndIsRowNumberPlusOne v0.8.25.2 fix
 //
 // planner 已证 End 填 len(seg.commitShas)（commit 计数），错——vscode branch 契约要求

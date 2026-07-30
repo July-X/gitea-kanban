@@ -360,6 +360,17 @@ func assignPinnedColumns(rows []*gitlensGraphRow, pinnedHeadShas []string) map[s
 		}
 		col := nextColumn
 		nextColumn++
+		// v0.8.25.5 fix：Uncommitted（工作区虚拟 commit）是 HEAD 的附属，
+		// 必须与 HEAD 同 lane —— 否则它 fresh claim 会从 pinnedColumnCount 起扫
+		// 拿到 lane 1；且其 first parent 被 pinned 时无冲突、不触发
+		// columnsToFreeWhenFound，lane 1 永不释放（lane 泄漏），后续 branch
+		// lane 分配连锁偏移（用户实测：绿线 lane 长斜跨、顶部多紫色斜线）。
+		// 对齐 GitLens 渲染：Uncommitted 空心圆与 HEAD 同 lane 0。
+		for _, r := range rows {
+			if r.kind == gitlensKindWorkdir && len(r.parents) > 0 && r.parents[0] == head {
+				columns[r.sha] = col
+			}
+		}
 		cur := head
 		safety := len(rows) + 1
 		for cur != "" && safety > 0 {
