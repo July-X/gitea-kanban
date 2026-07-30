@@ -88,9 +88,13 @@ type gitlensLayoutState struct {
 	pinnedColumnCount      int
 	segmentByColumn        map[int]*gitlensSegmentBuilder
 	finalizedSegments      []gitlensLaneSegment
+	// compact v0.8.25.7：lane 释放后是否做「左移压缩」（GitLens/GKC 实测行为——
+	// 空出的 lane 立即由更右侧的 reservation/segment 递补，长分支链自动靠左、
+	// 孤立 commit 靠右）。只调整「未来」状态，已渲染行的 column 不变。
+	compact bool
 }
 
-func newGitlensLayoutState(pinnedColumns map[string]int) *gitlensLayoutState {
+func newGitlensLayoutState(pinnedColumns map[string]int, compact bool) *gitlensLayoutState {
 	pinnedColumnCount := 0
 	for _, c := range pinnedColumns {
 		if c+1 > pinnedColumnCount {
@@ -105,6 +109,69 @@ func newGitlensLayoutState(pinnedColumns map[string]int) *gitlensLayoutState {
 		pinnedColumns:          pinnedColumns,
 		pinnedColumnCount:      pinnedColumnCount,
 		segmentByColumn:        make(map[int]*gitlensSegmentBuilder),
+		compact:                compact,
+	}
+}
+
+// compactLanes v0.8.25.7：lane 释放后把更右的活跃 lane 整体左移一格（lane 压缩）。
+//
+// 背景：对照 GitLens Commit Graph 实测渲染（用户 xdolphin/TRex 仓库逐像素比对）发现，
+// GKC 的 lane 在释放后不会留空洞——更右侧的 reservation/segment 立即左移递补。
+// 效果：长分支链自动占据靠左 lane（视觉稳定），孤立 commit（无 first-parent 延续的
+// segment）被挤到靠右 lane。不压缩时孤立 commit 会抢刚释放的 lane 1，把长链挤到
+// lane 2，lane 1/2 角色与 GitLens 正好相反。
+//
+// 只调整「未来」状态（columnsUsed / reserverInfoBySha / columnsToFreeWhenFound /
+// segmentByColumn 的 key 与 builder.column）；已渲染行的 column 固定不变，连线
+// 自然形成斜跨（segmentToLines 按 commit 各自 column 画线）。
+//
+// pinned 保护区（lane < pinnedColumnCount，trunk 主链）不参与压缩。
+func (s *gitlensLayoutState) compactLanes(freedLane int) {
+	if !s.compact || freedLane < s.pinnedColumnCount {
+		return
+	}
+	shift := func(lane int) int {
+		if lane > freedLane {
+			return lane - 1
+		}
+		return lane
+	}
+
+	// 1) columnsUsed 重建（map key 无法原地改，整体重放）
+	used := make([]int, 0, len(s.columnsUsed))
+	for col := range s.columnsUsed {
+		used = append(used, col)
+	}
+	for _, col := range used {
+		delete(s.columnsUsed, col)
+	}
+	for _, col := range used {
+		s.columnsUsed[shift(col)] = true
+	}
+
+	// 2) reservation column 同步（未来行的占位左移）
+	for _, res := range s.reserverInfoBySha {
+		res.column = shift(res.column)
+	}
+
+	// 3) columnsToFreeWhenFound 待释放 lane 值同步（历史决策的 lane 编号已变）
+	for sha, lanes := range s.columnsToFreeWhenFound {
+		for i, col := range lanes {
+			lanes[i] = shift(col)
+		}
+		s.columnsToFreeWhenFound[sha] = lanes
+	}
+
+	// 4) segmentByColumn key + builder.column 同步（segment 延续不断链；
+	//    shift 是双射，不会撞 key）
+	if len(s.segmentByColumn) > 0 {
+		rebuilt := make(map[int]*gitlensSegmentBuilder, len(s.segmentByColumn))
+		for col, builder := range s.segmentByColumn {
+			nc := shift(col)
+			builder.column = nc
+			rebuilt[nc] = builder
+		}
+		s.segmentByColumn = rebuilt
 	}
 }
 
@@ -191,6 +258,17 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 			delete(s.columnsUsed, col)
 		}
 		delete(s.columnsToFreeWhenFound, row.sha)
+
+		// v0.8.25.7：lane 压缩——释放后更右的活跃 lane 左移填坑（GitLens 实测行为）。
+		// 多个 freed lane 按升序逐个压缩：每压一格右侧整体左移，下一个 freed lane
+		// 的编号相应减 delta（与先行释放造成的位移对齐）。
+		if s.compact {
+			sorted := append([]int(nil), toFree...)
+			sort.Ints(sorted)
+			for delta, col := range sorted {
+				s.compactLanes(col - delta)
+			}
+		}
 	}
 
 	// 2) 选 column
@@ -390,9 +468,13 @@ func assignPinnedColumns(rows []*gitlensGraphRow, pinnedHeadShas []string) map[s
 }
 
 // gitlensAssignColumns 对齐 layout.ts:493-510 computeColumnsAndSegments
-func gitlensAssignColumns(rows []*gitlensGraphRow, pinnedHeadShas []string) (map[string]int, []gitlensLaneSegment, int) {
+//
+// v0.8.25.7：compact 参数控制是否启用「lane 左移压缩」（GitLens 实测视觉行为）。
+// BuildGraphGitlens 双跑：compact=false 产出逻辑 lane（颜色语义），compact=true
+// 产出视觉 lane（渲染位置）。
+func gitlensAssignColumns(rows []*gitlensGraphRow, pinnedHeadShas []string, compact bool) (map[string]int, []gitlensLaneSegment, int) {
 	pinnedColumns := assignPinnedColumns(rows, pinnedHeadShas)
-	state := newGitlensLayoutState(pinnedColumns)
+	state := newGitlensLayoutState(pinnedColumns, compact)
 
 	columns := make(map[string]int, len(rows))
 	for _, row := range rows {
@@ -467,13 +549,21 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 	// 孤立 commit 完全消失。现在改成：单 commit 时也至少画 merge stitch 跨 lane 转场线
 	// （如果 mergeSha != ""），否则返回空 lines（让 commit 自己显示成孤立点，由 edges 兜底）。
 	var lines []GraphBranchLine
+	// v0.8.25.7：lane 压缩后 segment 可能跨 lane（历史 commit 的视觉 column 固定、
+	// segment 后续 commit 落在压缩后的新 lane），线的 X 一律用 commit 各自的
+	// 视觉 column（colOf[sha]），不再用 seg.column——同 lane 竖线、跨 lane 斜线，
+	// 对齐 GitLens 实测渲染（7783396 lane2 → 34b10d6 lane1 的绿色斜线）。
+	firstCol := seg.column
+	if c, ok := colOf[seg.commitShas[0]]; ok {
+		firstCol = c
+	}
 	// merge stitch 入口：跨 lane 转场首条 line
 	if seg.mergeSha != "" {
 		mergeCol, ok := colOf[seg.mergeSha]
 		if !ok {
 			// merge commit 不在可见行（被分页截断），兜底到相邻 lane
-			if seg.column > 0 {
-				mergeCol = seg.column - 1
+			if firstCol > 0 {
+				mergeCol = firstCol - 1
 			} else {
 				mergeCol = 0
 			}
@@ -483,10 +573,10 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 		if mergeRow >= firstRow {
 			mergeRow = firstRow - 1
 		}
-		lockedFirst := mergeCol < seg.column
+		lockedFirst := mergeCol < firstCol
 		lines = append(lines, GraphBranchLine{
 			X1: mergeCol, Y1: mergeRow,
-			X2: seg.column, Y2: firstRow,
+			X2: firstCol, Y2: firstRow,
 			LockedFirst: lockedFirst,
 			IsCommitted: true,
 		})
@@ -501,27 +591,36 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 		branchRow, branchRowOk := rowOf[seg.branchSha]
 		firstRow, firstRowOk := rowOf[seg.commitShas[0]]
 		if branchRowOk && firstRowOk {
-			// branch-off 线：从 branchSha 行 (X=branchCol) 到 firstRow (X=seg.column)
+			// branch-off 线：从 branchSha 行 (X=branchCol) 到 firstRow (X=firstCol)
 			// 方向：Y 从小到大（branchRow 通常 > firstRow，因为 branchSha 是祖先，
 			// 在 latest-first 拓扑序中祖先 row 更大）
 			lines = append(lines, GraphBranchLine{
 				X1: branchCol, Y1: branchRow,
-				X2: seg.column, Y2: firstRow,
+				X2: firstCol, Y2: firstRow,
 				LockedFirst: false,
 				IsCommitted: true,
 			})
 		}
 	}
 	// segment 内部 vertical lines
+	// v0.8.25.7：X 用相邻 commit 各自的视觉 column（lane 压缩可能跨 lane 形成斜线）
 	for i := 0; i+1 < len(seg.commitShas); i++ {
 		r1, ok1 := rowOf[seg.commitShas[i]]
 		r2, ok2 := rowOf[seg.commitShas[i+1]]
 		if !ok1 || !ok2 {
 			continue
 		}
+		c1, cok1 := colOf[seg.commitShas[i]]
+		c2, cok2 := colOf[seg.commitShas[i+1]]
+		if !cok1 {
+			c1 = seg.column
+		}
+		if !cok2 {
+			c2 = seg.column
+		}
 		lines = append(lines, GraphBranchLine{
-			X1: seg.column, Y1: r1,
-			X2: seg.column, Y2: r2,
+			X1: c1, Y1: r1,
+			X2: c2, Y2: r2,
 			LockedFirst: false,
 			IsCommitted: true,
 		})
@@ -533,9 +632,11 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 //
 // v0.8.25.2 fix：End 改为 rowOf[seg.commitShas[len-1]]+1（行号+1，对齐 vscode
 // branch 契约 layout.go:109 "branch 覆盖的最后一行 + 1"），不是 len(commitShas) commit 计数。
-// Color 按 seg.column % 16（同 lane 同色，对齐 GitLens lane 着色），不再按 segIdx
-// ——GitLens 同一 column 上多个 segment 共用颜色，前端按 lane 一致着色。
-func segmentsToBranches(segments []gitlensLaneSegment, rowOf map[string]int, colOf map[string]int) []GraphBranch {
+//
+// v0.8.25.7：颜色改用 colorColOf[首个 commit]（未压缩逻辑 lane），不再用 seg.column
+// ——lane 压缩后 seg.column 是视觉位置，GitLens 的颜色语义是「segment 首次 claim 的 lane」
+// （如 34b10d6 链视觉左移到 lane 1，但保留 claim 时 lane 2 的绿色）。
+func segmentsToBranches(segments []gitlensLaneSegment, rowOf map[string]int, colOf map[string]int, colorColOf map[string]int) []GraphBranch {
 	branches := make([]GraphBranch, 0, len(segments))
 	for _, seg := range segments {
 		lines := segmentToLines(seg, rowOf, colOf)
@@ -553,8 +654,15 @@ func segmentsToBranches(segments []gitlensLaneSegment, rowOf map[string]int, col
 				}
 			}
 		}
+		// v0.8.25.7：segment 颜色 = 首个 commit 的逻辑 lane；fallback 到视觉 lane
+		colorLane := seg.column
+		if len(seg.commitShas) > 0 {
+			if cl, ok := colorColOf[seg.commitShas[0]]; ok {
+				colorLane = cl
+			}
+		}
 		branches = append(branches, GraphBranch{
-			Color: seg.column % 16,
+			Color: colorLane % 16,
 			End:   end,
 			Lines: lines,
 		})
@@ -588,7 +696,13 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 		}
 	}
 
-	columns, segments, maxCol := gitlensAssignColumns(rows, pinned)
+	columns, segments, maxCol := gitlensAssignColumns(rows, pinned, true)
+
+	// v0.8.25.7：双轨布局——再跑一遍「未压缩」GKC 原版，产出逻辑 lane（颜色语义）。
+	// 逐像素比对 GitLens 实测渲染证实：位置按压缩后 lane（columns），但颜色按
+	// segment 首次 claim 时的未压缩 lane（例：孤立 commit b2139fe 视觉在 lane 2，
+	// 颜色却是 lane 1 的橙——它原版 claim 的就是 lane 1）。
+	colorCols, _, _ := gitlensAssignColumns(rows, pinned, false)
 
 	// rowOf：SHA → row 索引
 	rowOf := make(map[string]int, len(commits))
@@ -599,15 +713,19 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 	for sha, col := range columns {
 		colOf[sha] = col
 	}
+	// colorColOf：SHA → 未压缩逻辑 lane（仅用于取色）
+	colorColOf := make(map[string]int, len(commits))
+	for sha, col := range colorCols {
+		colorColOf[sha] = col
+	}
 
 	// Nodes
-	// v0.8.25.2 fix：颜色按 column % 16 取（同 lane 同色），不再按 segIdx % 16
-	// ——GitLens 同一 column 上多个 segment 共用颜色，前端按 lane 一致着色。
-	// sha 命中后用 found flag 跳出双层循环（之前的 break 只 break 内层）。
+	// v0.8.25.7：Lane 用视觉 lane（colOf），Color 用逻辑 lane（colorColOf）——
+	// 位置与颜色分离，对齐 GitLens 实测（孤立 commit 位置靠右但保留原 claim lane 的颜色）。
 	nodes := make([]GraphNode, len(commits))
 	for i, c := range commits {
 		col := colOf[c.SHA]
-		color := col % 16
+		color := colorColOf[c.SHA] % 16
 		nodes[i] = GraphNode{
 			Row:         i,
 			Lane:        col,
@@ -628,8 +746,7 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 	}
 
 	// Edges
-	// v0.8.25.2 fix：color 也按 lane（childLane % 16 / parentLane % 16），
-	// 不再扫 segment 取色——更简单更稳。
+	// v0.8.25.7：lane 位置用视觉 lane（colOf），edge 颜色用逻辑 lane（colorColOf）。
 	edges := make([]GraphEdge, 0, len(commits)*2)
 	for i, c := range commits {
 		if len(c.Parents) == 0 {
@@ -637,14 +754,14 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 		}
 		childRow := i
 		childLane := colOf[c.SHA]
-		childColor := childLane % 16
+		childColor := colorColOf[c.SHA] % 16
 		for parentIdx, parentSHA := range c.Parents {
 			parentRow, ok := rowOf[parentSHA]
 			if !ok {
 				continue
 			}
 			parentLane := colOf[parentSHA]
-			parentColor := parentLane % 16
+			parentColor := colorColOf[parentSHA] % 16
 
 			edgeColor := childColor
 			if childLane != parentLane && parentColor == 0 && parentIdx > 0 {
@@ -669,7 +786,7 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 		}
 	}
 
-	branches := segmentsToBranches(segments, rowOf, colOf)
+	branches := segmentsToBranches(segments, rowOf, colOf, colorColOf)
 
 	if maxCol < 0 {
 		maxCol = 0
