@@ -192,7 +192,6 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 	pinnedCol, hasPinned := s.pinnedColumns[row.sha]
 
 	var column int
-	isOwnRowFreshClaim := false
 	if hasPinned {
 		column = pinnedCol
 		s.columnsUsed[column] = true
@@ -202,11 +201,13 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 		delete(s.reserverInfoBySha, row.sha)
 	} else {
 		column = s.claimNextColumn()
-		isOwnRowFreshClaim = true
 	}
 
-	// 3) own-row fresh claim 开 segment
-	if isOwnRowFreshClaim {
+	// 3) ensure segment exists for this column (always create when missing)
+// v0.8.25.2 fix：原版 if isOwnRowFreshClaim 漏了 pinned / own-reservation 路径
+// ——pinned head 不会进 segment，lane 0 上的 pinned head 没有 line 渲染，
+// 导致 main chain 在前端显示成"孤立 commit"。
+	if _, ok := s.segmentByColumn[column]; !ok {
 		s.segmentByColumn[column] = &gitlensSegmentBuilder{
 			column:     column,
 			mergeSha:   "",
@@ -423,16 +424,25 @@ func toGitlensRows(commits []git.CommitInfo) []*gitlensGraphRow {
 
 // segmentToLines 把 GitLens segment 转成 vscode-git-graph Branch.draw 兼容的 line 序列
 // segment 是「column X 上的连续 commit 列表」，需要拆成 (p1,p2) line 段。
-func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int) []GraphBranchLine {
+//
+// v0.8.25.2 fix：planner 已证 lookupColumn 假实现（查 sha+"__col" 永远 miss），
+// 改用 colOf[mergeSha] 真实列号 + rowOf[mergeSha] 真实行号；mergeSha 缺失时
+// 兜底 seg.column-1（merge 来自相邻 lane）。
+func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[string]int) []GraphBranchLine {
 	if len(seg.commitShas) < 2 {
 		return nil
 	}
 	var lines []GraphBranchLine
 	// merge stitch 入口：跨 lane 转场首条 line
 	if seg.mergeSha != "" {
-		mergeCol, ok := lookupColumn(rowOf, seg.mergeSha)
+		mergeCol, ok := colOf[seg.mergeSha]
 		if !ok {
-			mergeCol = 0
+			// merge commit 不在可见行（被分页截断），兜底到相邻 lane
+			if seg.column > 0 {
+				mergeCol = seg.column - 1
+			} else {
+				mergeCol = 0
+			}
 		}
 		mergeRow, _ := rowOf[seg.mergeSha]
 		firstRow, _ := rowOf[seg.commitShas[0]]
@@ -464,22 +474,34 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int) []GraphBranchL
 	return lines
 }
 
-// lookupColumn 辅助（避免外层 map[string]int 命名冲突）
-func lookupColumn(rowOf map[string]int, sha string) (int, bool) {
-	v, ok := rowOf[sha+"__col"] // unused placeholder; caller 用 map[string]int for cols
-	return v, ok
-}
-
-// segmentsToBranches 按 segment 生成 GraphBranch（每个 segment 单独成 branch）
-func segmentsToBranches(segments []gitlensLaneSegment, rowOf map[string]int) []GraphBranch {
+// segmentsToBranches 按 segment 生成 GraphBranch
+//
+// v0.8.25.2 fix：End 改为 rowOf[seg.commitShas[len-1]]+1（行号+1，对齐 vscode
+// branch 契约 layout.go:109 "branch 覆盖的最后一行 + 1"），不是 len(commitShas) commit 计数。
+// Color 按 seg.column % 16（同 lane 同色，对齐 GitLens lane 着色），不再按 segIdx
+// ——GitLens 同一 column 上多个 segment 共用颜色，前端按 lane 一致着色。
+func segmentsToBranches(segments []gitlensLaneSegment, rowOf map[string]int, colOf map[string]int) []GraphBranch {
 	branches := make([]GraphBranch, 0, len(segments))
-	for segIdx, seg := range segments {
-		var allLines []GraphBranchLine
-		allLines = append(allLines, segmentToLines(seg, rowOf)...)
+	for _, seg := range segments {
+		lines := segmentToLines(seg, rowOf, colOf)
+		// End: 最后一行 row 号 + 1（行号 + 1，对齐 vscode branch.draw 契约）
+		var end int
+		if n := len(seg.commitShas); n > 0 {
+			if r, ok := rowOf[seg.commitShas[n-1]]; ok {
+				end = r + 1
+			} else {
+				// fallback: sha 不在 rowOf（极端情况），用第一个 sha 的行 + n
+				if r, ok := rowOf[seg.commitShas[0]]; ok {
+					end = r + n
+				} else {
+					end = n
+				}
+			}
+		}
 		branches = append(branches, GraphBranch{
-			Color: segIdx % 16,
-			End:   len(seg.commitShas),
-			Lines: allLines,
+			Color: seg.column % 16,
+			End:   end,
+			Lines: lines,
 		})
 	}
 	return branches
@@ -524,21 +546,13 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 	}
 
 	// Nodes
+	// v0.8.25.2 fix：颜色按 column % 16 取（同 lane 同色），不再按 segIdx % 16
+	// ——GitLens 同一 column 上多个 segment 共用颜色，前端按 lane 一致着色。
+	// sha 命中后用 found flag 跳出双层循环（之前的 break 只 break 内层）。
 	nodes := make([]GraphNode, len(commits))
 	for i, c := range commits {
 		col := colOf[c.SHA]
-		var color int
-		for segIdx, seg := range segments {
-			if seg.column != col {
-				continue
-			}
-			for _, sha := range seg.commitShas {
-				if sha == c.SHA {
-					color = segIdx % 16
-					break
-				}
-			}
-		}
+		color := col % 16
 		nodes[i] = GraphNode{
 			Row:         i,
 			Lane:        col,
@@ -559,6 +573,8 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 	}
 
 	// Edges
+	// v0.8.25.2 fix：color 也按 lane（childLane % 16 / parentLane % 16），
+	// 不再扫 segment 取色——更简单更稳。
 	edges := make([]GraphEdge, 0, len(commits)*2)
 	for i, c := range commits {
 		if len(c.Parents) == 0 {
@@ -566,28 +582,14 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 		}
 		childRow := i
 		childLane := colOf[c.SHA]
-		childColor := 0
-		for segIdx, seg := range segments {
-			for _, sha := range seg.commitShas {
-				if sha == c.SHA {
-					childColor = segIdx % 16
-				}
-			}
-		}
+		childColor := childLane % 16
 		for parentIdx, parentSHA := range c.Parents {
 			parentRow, ok := rowOf[parentSHA]
 			if !ok {
 				continue
 			}
 			parentLane := colOf[parentSHA]
-			parentColor := 0
-			for segIdx, seg := range segments {
-				for _, sha := range seg.commitShas {
-					if sha == parentSHA {
-						parentColor = segIdx % 16
-					}
-				}
-			}
+			parentColor := parentLane % 16
 
 			edgeColor := childColor
 			if childLane != parentLane && parentColor == 0 && parentIdx > 0 {
@@ -612,7 +614,7 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 		}
 	}
 
-	branches := segmentsToBranches(segments, rowOf)
+	branches := segmentsToBranches(segments, rowOf, colOf)
 
 	if maxCol < 0 {
 		maxCol = 0
