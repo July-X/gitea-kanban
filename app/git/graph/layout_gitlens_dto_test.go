@@ -29,10 +29,10 @@ func TestBuildGraphGitlens_FreshClaimBranchOffLine(t *testing.T) {
 	}
 	// A → B → C（主链 lane 0）；D 从 B 分出（lane 1）
 	commits := []git.CommitInfo{
-		mk("D", []string{"B"}),   // row 0: lane 1（fresh claim）
-		mk("A", []string{"B"}),   // row 1: lane 0（pinned head）
-		mk("B", []string{"C"}),   // row 2: lane 0
-		mk("C", nil),             // row 3: lane 0 root
+		mk("D", []string{"B"}), // row 0: lane 1（fresh claim）
+		mk("A", []string{"B"}), // row 1: lane 0（pinned head）
+		mk("B", []string{"C"}), // row 2: lane 0
+		mk("C", nil),           // row 3: lane 0 root
 	}
 	commits[1].Refs = []string{"main"}
 	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
@@ -155,12 +155,13 @@ func TestBuildGraphGitlens_MergeStitchLineUsesRealColumn(t *testing.T) {
 // 也 pin 到同一 column。
 //
 // 测试拓扑（对齐用户仓库）：
-//   row 0: UNC (workdir)      parents=[M0]
-//   row 1: M0 (merge, HEAD)   parents=[P1, B1]   pinned（trunk head）
-//   row 2: B1 (dev tip)       parents=[B2]
-//   row 3: P1                 parents=[BASE]
-//   row 4: B2                 parents=[BASE]
-//   row 5: BASE               parents=[]
+//
+//	row 0: UNC (workdir)      parents=[M0]
+//	row 1: M0 (merge, HEAD)   parents=[P1, B1]   pinned（trunk head）
+//	row 2: B1 (dev tip)       parents=[B2]
+//	row 3: P1                 parents=[BASE]
+//	row 4: B2                 parents=[BASE]
+//	row 5: BASE               parents=[]
 //
 // 预期：UNC/M0/P1/BASE lane 0（trunk）；B1/B2 lane 1（dev 链）；
 // 关键：MaxLane==1 —— 修复前 lane 泄漏时 B1 会被挤到 lane 2（MaxLane==2）。
@@ -381,15 +382,15 @@ func TestBuildGraphGitlens_MergeStitchColumnNotZero(t *testing.T) {
 	// 重新构造：M0..M3 主链 lane 0；S0..S2 sibling lane 1；M4..M5 lane 2
 	// S2 合并到 M4（lane 2）
 	commits := []git.CommitInfo{
-		mk("M5", []string{"M4"}),                 // row 0: lane 2
-		mk("M4", []string{"M3", "S2"}),           // row 1: lane 2 merge
-		mk("M3", []string{"M2"}),                 // row 2: lane 0
-		mk("M2", []string{"M1"}),                 // row 3: lane 0
-		mk("M1", []string{"M0"}),                 // row 4: lane 0
-		mk("M0", nil),                            // row 5: lane 0 root
-		mk("S2", []string{"S1"}),                 // row 6: lane 1
-		mk("S1", []string{"S0"}),                 // row 7: lane 1
-		mk("S0", nil),                            // row 8: lane 1 root
+		mk("M5", []string{"M4"}),       // row 0: lane 2
+		mk("M4", []string{"M3", "S2"}), // row 1: lane 2 merge
+		mk("M3", []string{"M2"}),       // row 2: lane 0
+		mk("M2", []string{"M1"}),       // row 3: lane 0
+		mk("M1", []string{"M0"}),       // row 4: lane 0
+		mk("M0", nil),                  // row 5: lane 0 root
+		mk("S2", []string{"S1"}),       // row 6: lane 1
+		mk("S1", []string{"S0"}),       // row 7: lane 1
+		mk("S0", nil),                  // row 8: lane 1 root
 	}
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
@@ -540,6 +541,7 @@ func TestBuildGraphGitlens_LaneCompactMatchesGitlens(t *testing.T) {
 
 // fmt import guard for clarity
 var _ = fmt.Sprintf
+
 // TestBuildGraphGitlens_ForkStitchIntoPinnedTrunk v0.8.26.x fix
 //
 // 回归场景（TRex 实测还原）：feature 分支链尾端的 first parent 是 pinned 主线

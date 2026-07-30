@@ -9,7 +9,9 @@
 //   - commit kind 含 'stash' / 'workdir' / 'commit' / 'merge'；date 用于 stash tie-break
 //
 // 入口契约：
-//   BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult
+//
+//	BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult
+//
 // 输出复用 GraphResult（前端 vscode-render.ts 兼容，DTO 见 types.go）。
 //
 // v0.8.26：layout_vscode.go / layout.go / pickGraphBuilder env 开关全删，
@@ -50,7 +52,7 @@ const (
 // gitlensRowEdge 对齐 GitLens engine/types.ts RowEdges（单条 edge）
 type gitlensRowEdge struct {
 	toSha string
-	kind gitlensEdgeKind
+	kind  gitlensEdgeKind
 }
 
 // gitlensReserverInfo 对齐 layout.ts:11-16 ReserverInfo
@@ -70,11 +72,11 @@ type gitlensSegmentBuilder struct {
 
 // gitlensLaneSegment 对齐 layout.ts LaneSegment（finalizeSegment 输出）
 type gitlensLaneSegment struct {
-	id         string   // tipSha
+	id         string // tipSha
 	tipSha     string
-	forkSha    string   // 空字符串表示 end-of-rows 收尾
+	forkSha    string // 空字符串表示 end-of-rows 收尾
 	mergeSha   string
-	branchSha  string   // v0.8.25.3 新增：branch-off 源 commit sha
+	branchSha  string // v0.8.25.3 新增：branch-off 源 commit sha
 	column     int
 	commitShas []string
 }
@@ -289,9 +291,9 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 	}
 
 	// 3) ensure segment exists for this column (always create when missing)
-// v0.8.25.2 fix：原版 if isOwnRowFreshClaim 漏了 pinned / own-reservation 路径
-// ——pinned head 不会进 segment，lane 0 上的 pinned head 没有 line 渲染，
-// 导致 main chain 在前端显示成"孤立 commit"。
+	// v0.8.25.2 fix：原版 if isOwnRowFreshClaim 漏了 pinned / own-reservation 路径
+	// ——pinned head 不会进 segment，lane 0 上的 pinned head 没有 line 渲染，
+	// 导致 main chain 在前端显示成"孤立 commit"。
 	if _, ok := s.segmentByColumn[column]; !ok {
 		// v0.8.25.3 fix：新开的 segment 如果当前 row 有 first parent 且 first parent
 		// 不在同一 column，记录 branchSha（branch-off 源 commit sha），后续

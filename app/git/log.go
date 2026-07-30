@@ -25,8 +25,8 @@ type CommitInfo struct {
 	// v0.8.25.6：DAG 排序必须用它（对齐 git log --date-order 的 commit date 语义），
 	// 用 author date 排序会把 cherry-pick 来的 commit 沉到历史深处（author date 保留原始时间）。
 	CommitterWhen time.Time
-	Parents     []string  // parent SHA 列表
-	IsMerge     bool      // 是否 merge commit（parents >= 2）
+	Parents       []string // parent SHA 列表
+	IsMerge       bool     // 是否 merge commit（parents >= 2）
 	// Refs 关联的 ref 名称列表（branch / tag / PR 编号等）
 	// 顺序固定：本地分支 → 远程跟踪分支 → tag（collectRefNamesByHash 已排序）。
 	// 名称已剥掉 `refs/heads/`、`refs/remotes/origin/`、`refs/tags/` 前缀；
@@ -179,17 +179,17 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 			}
 
 			commits = append(commits, CommitInfo{
-				SHA:         c.Hash.String(),
-				ShortSHA:    c.Hash.String()[:7],
-				Subject:     extractSubject(c.Message),
-				AuthorName:  c.Author.Name,
-				AuthorEmail: c.Author.Email,
-				AuthorWhen:  c.Author.When,
+				SHA:           c.Hash.String(),
+				ShortSHA:      c.Hash.String()[:7],
+				Subject:       extractSubject(c.Message),
+				AuthorName:    c.Author.Name,
+				AuthorEmail:   c.Author.Email,
+				AuthorWhen:    c.Author.When,
 				CommitterWhen: c.Committer.When,
-				Parents:     parents,
-				IsMerge:     len(parents) >= 2,
-				Refs:        refDataByHash[c.Hash.String()].Names,
-				RefTypes:    refDataByHash[c.Hash.String()].Types,
+				Parents:       parents,
+				IsMerge:       len(parents) >= 2,
+				Refs:          refDataByHash[c.Hash.String()].Names,
+				RefTypes:      refDataByHash[c.Hash.String()].Types,
 			})
 			return nil
 		})
@@ -204,17 +204,17 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 					parents[i] = h.String()
 				}
 				commits = append(commits, CommitInfo{
-					SHA:         commit.Hash.String(),
-					ShortSHA:    commit.Hash.String()[:7],
-					Subject:     extractSubject(commit.Message),
-					AuthorName:  commit.Author.Name,
-					AuthorEmail: commit.Author.Email,
-					AuthorWhen:  commit.Author.When,
+					SHA:           commit.Hash.String(),
+					ShortSHA:      commit.Hash.String()[:7],
+					Subject:       extractSubject(commit.Message),
+					AuthorName:    commit.Author.Name,
+					AuthorEmail:   commit.Author.Email,
+					AuthorWhen:    commit.Author.When,
 					CommitterWhen: commit.Committer.When,
-					Parents:     parents,
-					IsMerge:     len(parents) >= 2,
-					Refs:        refDataByHash[commit.Hash.String()].Names,
-					RefTypes:    refDataByHash[commit.Hash.String()].Types,
+					Parents:       parents,
+					IsMerge:       len(parents) >= 2,
+					Refs:          refDataByHash[commit.Hash.String()].Names,
+					RefTypes:      refDataByHash[commit.Hash.String()].Types,
 				})
 			}
 			continue

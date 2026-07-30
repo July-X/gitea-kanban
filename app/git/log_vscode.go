@@ -177,17 +177,17 @@ func LogCommitsVscode(ctx context.Context, opts LogOptions) (*LogResult, error) 
 // 由 layout 端检测 SHA == UNCOMMITTED_HASH 写出 IsCommitted=false。
 func buildUncommittedCommit(headSHA string, dirtyCount int) CommitInfo {
 	return CommitInfo{
-		SHA:         UNCOMMITTED_HASH,
-		ShortSHA:    UNCOMMITTED_HASH,
-		Subject:     fmt.Sprintf("Uncommitted changes (%d files)", dirtyCount),
-		AuthorName:  "*",
-		AuthorEmail: "",
+		SHA:           UNCOMMITTED_HASH,
+		ShortSHA:      UNCOMMITTED_HASH,
+		Subject:       fmt.Sprintf("Uncommitted changes (%d files)", dirtyCount),
+		AuthorName:    "*",
+		AuthorEmail:   "",
 		AuthorWhen:    time.Now(),
 		CommitterWhen: time.Now(),
 		Parents:       []string{headSHA},
-		IsMerge:     false,
-		Refs:        nil,
-		RefTypes:    nil,
+		IsMerge:       false,
+		Refs:          nil,
+		RefTypes:      nil,
 	}
 }
 

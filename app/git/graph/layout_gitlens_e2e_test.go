@@ -18,10 +18,10 @@ import (
 // GitLens 截图也是 4 lanes（蓝/蓝/橙/绿），所以期望 lane 数 ≤ 4。
 //
 // v0.8.25.1 验证：BuildGraphGitlens 在该 DAG 上：
-//   1. MaxLane ≤ 4（vs vscode-git-graph 复刻的 ~35）
-//   2. trunk (first-parent chain) 全部 lane 0
-//   3. HEAD feature 独立 lane（≥1）
-//   4. local-dev-A3 merge commit 的 secondary parent 占独立 lane
+//  1. MaxLane ≤ 4（vs vscode-git-graph 复刻的 ~35）
+//  2. trunk (first-parent chain) 全部 lane 0
+//  3. HEAD feature 独立 lane（≥1）
+//  4. local-dev-A3 merge commit 的 secondary parent 占独立 lane
 func TestBuildGraphGitlens_RealWorldScenario(t *testing.T) {
 	t0 := time.Now()
 	mk := func(idx int, when time.Time, parents []string) git.CommitInfo {
