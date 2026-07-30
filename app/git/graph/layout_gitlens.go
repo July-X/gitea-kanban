@@ -223,18 +223,10 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 		// branch-off 线。
 		var branchSha string
 		if len(row.parents) > 0 && column > 0 {
-			firstParent := row.parents[0]
-			// 只有当 first parent 已经被分配了 column（即 row 在它之后处理）才记录
-			// branchSha。如果 first parent 还没分配 column（在 rows 中 row 在 parent 之后，
-			// latest-first 拓扑序），那 branchSha 由后续 assignColumnForRow(parent) 处理
-			// —— 但那种情况 parent 在同一 lane（first-parent 主链），不会开新 segment。
-			// 所以这里只记录 own-reservation / fresh-claim 时的 branchSha 即可。
-			if hasOwnRes || hasPinned {
-				// 已经被 reservation/pinned 占用 column 的 row —— 通常是 HEAD/tip，
-				// first parent 是它的祖先（first-parent chain），但祖先 column 通常
-				// 跟 row 不同（HEAD 在 lane 1，祖先在 lane 0），需要 branch-off 线。
-				branchSha = firstParent
-			}
+			// v0.8.25.3 扩展：fresh claim 路径也记录 branchSha ——
+			// feature branch 第一个 commit 走 claimNextColumn()，没有 own-reservation，
+			// 但也需要 branch-off 线（从 first parent 所在 lane 连过来）。
+			branchSha = row.parents[0]
 		}
 		s.segmentByColumn[column] = &gitlensSegmentBuilder{
 			column:     column,

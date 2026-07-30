@@ -8,6 +8,66 @@ import (
 	"gitea-kanban/app/git"
 )
 
+// TestBuildGraphGitlens_FreshClaimBranchOffLine v0.8.25.3 fix
+//
+// planner 调研：原版 assignColumnForRow 只在 own-reservation / pinned 路径记录
+// branchSha，fresh claim 路径（claimNextColumn()）不记录——导致 feature branch
+// 第一个 commit 没有 branch-off 跨 lane 线，前端显示成孤立 commit。
+//
+// 构造：主链 lane 0 有 3 个 commit，第 2 个 commit 分支出 1 个 feature commit
+// （fresh claim 到 lane 1）——feature commit 应该有从 lane 0 连过来的 branch-off 线。
+func TestBuildGraphGitlens_FreshClaimBranchOffLine(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{
+			SHA:        sha,
+			ShortSHA:   sha,
+			Subject:    sha,
+			AuthorWhen: t0,
+			Parents:    parents,
+		}
+	}
+	// A → B → C（主链 lane 0）；D 从 B 分出（lane 1）
+	commits := []git.CommitInfo{
+		mk("D", []string{"B"}),   // row 0: lane 1（fresh claim）
+		mk("A", []string{"B"}),   // row 1: lane 0（pinned head）
+		mk("B", []string{"C"}),   // row 2: lane 0
+		mk("C", nil),             // row 3: lane 0 root
+	}
+	commits[1].Refs = []string{"main"}
+	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "A", []string{"A"})
+
+	t.Logf("=== branches ===")
+	for _, b := range result.Branches {
+		t.Logf("branch Color=%d End=%d Lines=%d", b.Color, b.End, len(b.Lines))
+		for _, l := range b.Lines {
+			t.Logf("  line (%d,%d)→(%d,%d) LockedFirst=%v", l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+		}
+	}
+
+	// 关键断言：lane 1 的 branch（D）应该有 1 条 branch-off 线，
+	// 从 lane 0（B 的 column）到 lane 1（D 的 column）。
+	var branchOffFound bool
+	for _, b := range result.Branches {
+		if b.Color == 1 {
+			for _, l := range b.Lines {
+				if l.X1 == 0 && l.X2 == 1 {
+					branchOffFound = true
+					// branch-off 线应该从 B 的 row（row 2）到 D 的 row（row 0）
+					if l.Y1 != 2 || l.Y2 != 0 {
+						t.Errorf("branch-off line (%d,%d)→(%d,%d), want (0,2)→(1,0)", l.X1, l.Y1, l.X2, l.Y2)
+					}
+				}
+			}
+		}
+	}
+	if !branchOffFound {
+		t.Errorf("expected branch-off line from lane 0 to lane 1 (D branch off from B); got none")
+	}
+}
+
 // TestBuildGraphGitlens_MergeStitchLineUsesRealColumn v0.8.25.2 fix
 //
 // planner 已证 lookupColumn 假实现（查 sha+"__col" 永远 miss）导致
