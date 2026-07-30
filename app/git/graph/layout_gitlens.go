@@ -435,8 +435,10 @@ func toGitlensRows(commits []git.CommitInfo) []*gitlensGraphRow {
 			kind = gitlensKindMerge
 		}
 		var dateMs int64
-		if !c.AuthorWhen.IsZero() {
-			dateMs = c.AuthorWhen.UnixMilli()
+		// v0.8.25.6：reservation 的新旧比较必须和全局排序同时间源（committer date），
+		// 否则 author date 远老的 cherry-pick commit 会被当成「更旧的 lane 候选」错误复用。
+		if !c.SortTime().IsZero() {
+			dateMs = c.SortTime().UnixMilli()
 		}
 		// UNCOMMITTED 虚拟 commit 标为 workdir
 		if c.SHA == git.UNCOMMITTED_HASH {

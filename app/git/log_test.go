@@ -497,3 +497,136 @@ func TestLogCommits_IncludesRecentRemoteBranchWithinMaxCount(t *testing.T) {
 		t.Fatalf("vscode default truncated = true, want false for 62 commits under default 300")
 	}
 }
+
+// TestLogCommits_SortByCommitterDate 回归测试（v0.8.25.6）：
+// cherry-pick / rebase 来的 commit，author date 保留原始创作时间（可能远老于 committer date）。
+// 全局排序必须用 committer date（对齐 git log --date-order），否则这类 commit 沉到历史深处，
+// 在 Git Graph 上表现为「单 commit branch tip 出现在错误行、lane 斜跨错位」。
+//
+// 实测案例：xdolphin/TRex 的 b2139fef（author 1785209939 / committer 1785237482，差 7.6 小时），
+// 按 author date 排 row 19（错），按 committer date 排 row 11（与 GitLens 一致）。
+//
+// 拓扑：
+//
+//	A (merge, committer 13:00)  ← master HEAD
+//	├─ B (trunk, committer 11:00)
+//	└─ C (cherry-pick tip: author 09:00 远老!, committer 12:00)
+//	D (base, committer 10:00)   ← B、C 的共同 parent
+//
+// 按 committer date：A(13) C(12) B(11) D(10) —— C 紧跟 merge
+// 按 author date（旧 bug）：A(13) B(11) D(10) C(09) —— C 沉底
+func TestLogCommits_SortByCommitterDate(t *testing.T) {
+	dir := t.TempDir()
+
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	commitWithDates := func(msg, authorDate, committerDate string) {
+		env := append(os.Environ(),
+			"GIT_AUTHOR_DATE="+authorDate,
+			"GIT_COMMITTER_DATE="+committerDate,
+		)
+		cmd := exec.Command("git", "commit", "-m", msg)
+		cmd.Dir = dir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit %q: %v\n%s", msg, err, out)
+		}
+	}
+	mergeWithDates := func(msg, branch, date string) {
+		env := append(os.Environ(),
+			"GIT_AUTHOR_DATE="+date,
+			"GIT_COMMITTER_DATE="+date,
+		)
+		cmd := exec.Command("git", "merge", "--no-ff", "-m", msg, branch)
+		cmd.Dir = dir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git merge %q: %v\n%s", msg, err, out)
+		}
+	}
+	writeAndAdd := func(name, content string) {
+		os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)
+		runGit("add", name)
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test User")
+
+	// D (base, committer 10:00)
+	writeAndAdd("d.txt", "d")
+	commitWithDates("base commit D", "2026-01-01T10:00:00Z", "2026-01-01T10:00:00Z")
+
+	// cherry 分支：C 的 author date 远老（09:00，比 D 还老！）但 committer date 是 12:00
+	runGit("checkout", "-b", "cherry")
+	writeAndAdd("c.txt", "c")
+	commitWithDates("cherry-picked commit C", "2026-01-01T09:00:00Z", "2026-01-01T12:00:00Z")
+
+	// 回 master：B (committer 11:00)
+	runGit("checkout", "master")
+	writeAndAdd("b.txt", "b")
+	commitWithDates("trunk commit B", "2026-01-01T11:00:00Z", "2026-01-01T11:00:00Z")
+
+	// A (merge, committer 13:00)
+	mergeWithDates("merge cherry A", "cherry", "2026-01-01T13:00:00Z")
+
+	result, err := LogCommits(LogOptions{LocalPath: dir})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+	if len(result.Commits) != 4 {
+		t.Fatalf("expected 4 commits, got %d", len(result.Commits))
+	}
+
+	// 按 committer date 排序：A(13) C(12) B(11) D(10)
+	// 若退回 author date 排序则 C(author 09:00) 沉底到 index 3
+	wantOrder := []string{
+		"merge cherry A",
+		"cherry-picked commit C",
+		"trunk commit B",
+		"base commit D",
+	}
+	for i, want := range wantOrder {
+		if result.Commits[i].Subject != want {
+			t.Errorf("commits[%d].Subject = %q, want %q（完整顺序: %v）",
+				i, result.Commits[i].Subject, want, subjectsOf(result.Commits))
+		}
+	}
+
+	// CommitterWhen 字段必须被填充且与 author date 不同（cherry commit C）
+	cherryCommit := result.Commits[1]
+	if cherryCommit.CommitterWhen.IsZero() {
+		t.Errorf("CommitterWhen 未填充（zero value）")
+	}
+	expectedCommitter, _ := time.Parse(time.RFC3339, "2026-01-01T12:00:00Z")
+	if !cherryCommit.CommitterWhen.Equal(expectedCommitter) {
+		t.Errorf("cherry C CommitterWhen = %v, want %v", cherryCommit.CommitterWhen, expectedCommitter)
+	}
+	expectedAuthor, _ := time.Parse(time.RFC3339, "2026-01-01T09:00:00Z")
+	if !cherryCommit.AuthorWhen.Equal(expectedAuthor) {
+		t.Errorf("cherry C AuthorWhen = %v, want %v", cherryCommit.AuthorWhen, expectedAuthor)
+	}
+
+	// SortTime() 应优先返回 committer date
+	if !cherryCommit.SortTime().Equal(expectedCommitter) {
+		t.Errorf("SortTime() = %v, want committer date %v", cherryCommit.SortTime(), expectedCommitter)
+	}
+	// zero CommitterWhen 时回退 author date（兼容外部构造的旧数据）
+	legacy := CommitInfo{AuthorWhen: expectedAuthor}
+	if !legacy.SortTime().Equal(expectedAuthor) {
+		t.Errorf("SortTime() with zero CommitterWhen = %v, want fallback author date %v", legacy.SortTime(), expectedAuthor)
+	}
+}
+
+func subjectsOf(commits []CommitInfo) []string {
+	subjects := make([]string, len(commits))
+	for i, c := range commits {
+		subjects[i] = c.Subject
+	}
+	return subjects
+}

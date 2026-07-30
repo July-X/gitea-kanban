@@ -14,9 +14,10 @@ import (
 
 // v3.9 修复：%ct（committer date）→ %at（author date）
 // 旧版用 %ct 导致 rebase/cherry-pick/force-push 后所有 commit 显示同一次操作时间
-// （committer date 在 rebase 等操作后会被更新为操作时间，author date 保留原始创作时间）
-// 对齐 go-git 路径（log.go）的 c.Author.When（author date）+ vscode-git-graph 默认展示 author date
-const vscodeLogFormat = "%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s"
+// v0.8.25.6：追加 %ct（committer timestamp）填 CommitterWhen，供 DAG 排序用
+// （对齐 git --date-order 的 commit date 语义；author date 在 cherry-pick/rebase 后
+// 保留原始创作时间，不能用于排序）。
+const vscodeLogFormat = "%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%s"
 const defaultVscodeInitialLoadCommits = 300
 
 // UNCOMMITTED_HASH 虚拟 commit 哨兵（对齐 vscode-git-graph 的 '*'）。
@@ -181,8 +182,9 @@ func buildUncommittedCommit(headSHA string, dirtyCount int) CommitInfo {
 		Subject:     fmt.Sprintf("Uncommitted changes (%d files)", dirtyCount),
 		AuthorName:  "*",
 		AuthorEmail: "",
-		AuthorWhen:  time.Now(),
-		Parents:     []string{headSHA},
+		AuthorWhen:    time.Now(),
+		CommitterWhen: time.Now(),
+		Parents:       []string{headSHA},
 		IsMerge:     false,
 		Refs:        nil,
 		RefTypes:    nil,
@@ -231,28 +233,33 @@ func parseVscodeLogOutput(output []byte, refDataByHash map[string]refData) []Com
 		if raw == "" {
 			continue
 		}
-		parts := strings.SplitN(raw, "\x1f", 6)
-		if len(parts) != 6 {
+		parts := strings.SplitN(raw, "\x1f", 7)
+		if len(parts) != 7 {
 			continue
 		}
 		sha := parts[0]
 		parentFields := strings.Fields(parts[1])
-		commitUnix, err := strconv.ParseInt(parts[4], 10, 64)
+		authorUnix, err := strconv.ParseInt(parts[4], 10, 64)
 		if err != nil {
-			commitUnix = 0
+			authorUnix = 0
+		}
+		committerUnix, err := strconv.ParseInt(parts[5], 10, 64)
+		if err != nil {
+			committerUnix = 0
 		}
 		refs := refDataByHash[sha]
 		commits = append(commits, CommitInfo{
-			SHA:         sha,
-			ShortSHA:    shortSHA(sha),
-			Subject:     parts[5],
-			AuthorName:  parts[2],
-			AuthorEmail: parts[3],
-			AuthorWhen:  time.Unix(commitUnix, 0),
-			Parents:     parentFields,
-			IsMerge:     len(parentFields) >= 2,
-			Refs:        refs.Names,
-			RefTypes:    refs.Types,
+			SHA:           sha,
+			ShortSHA:      shortSHA(sha),
+			Subject:       parts[6],
+			AuthorName:    parts[2],
+			AuthorEmail:   parts[3],
+			AuthorWhen:    time.Unix(authorUnix, 0),
+			CommitterWhen: time.Unix(committerUnix, 0),
+			Parents:       parentFields,
+			IsMerge:       len(parentFields) >= 2,
+			Refs:          refs.Names,
+			RefTypes:      refs.Types,
 		})
 	}
 	return commits
