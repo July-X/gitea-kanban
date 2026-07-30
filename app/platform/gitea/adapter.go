@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -217,11 +218,34 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 		head = resolveLocalHead(localPath)
 	}
 
-	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, head, logResult.Truncated)
+	// v0.8.25.1 feat：默认走 GitLens GKC 算法（columnsUsed Set + columnsToFreeWhenFound
+	// Map + claimNextColumn 最低空位），lane 数比 vscode-git-graph 原版显著收敛。
+	// 环境变量 GITEA_KANBAN_GRAPH_ALGO=vscode 切回 vscode-git-graph 1:1 复刻 fallback。
+	// 详见 app/git/graph/layout_gitlens.go（GitLens layout.ts 1:1 移植）。
+	graphResult := pickGraphBuilder(logResult.Commits, head, logResult.Truncated)
 	graphResult.LocalExhausted = logResult.LocalExhausted
 	graphResult.DeepenTriggered = logResult.DeepenTriggered
 
 	return graphResultToDTO(graphResult), nil
+}
+
+// pickGraphBuilder 默认走 GitLens GKC；GITEA_KANBAN_GRAPH_ALGO=vscode 退回 vscode-git-graph
+func pickGraphBuilder(commits []git.CommitInfo, head string, truncated bool) *graph.GraphResult {
+	if os.Getenv("GITEA_KANBAN_GRAPH_ALGO") == "vscode" {
+		return graph.BuildGraphVscodeWithHead(commits, head, truncated)
+	}
+	// pinned heads: trunk head (main/master) 排最前；当前 branch head 排第二
+	var pinned []string
+	for _, c := range commits {
+		if graph.HasPrimaryBranchRef(c) {
+			pinned = append(pinned, c.SHA)
+			break
+		}
+	}
+	if head != "" && (len(pinned) == 0 || pinned[0] != head) {
+		pinned = append(pinned, head)
+	}
+	return graph.BuildGraphGitlens(commits, head, pinned)
 }
 
 // resolveLocalHead 用 go-git 读本地 HEAD hash, 失败返回 ""

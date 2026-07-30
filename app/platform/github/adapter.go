@@ -26,6 +26,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -346,10 +347,29 @@ func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts pla
 		return nil, err
 	}
 
-	graphResult := graph.BuildGraphVscodeWithHead(logResult.Commits, opts.Head, logResult.Truncated)
+	// v0.8.25.1 feat：默认走 GitLens GKC；GITEA_KANBAN_GRAPH_ALGO=vscode 退回 vscode-git-graph
+	graphResult := pickGitHubGraphBuilder(logResult.Commits, opts.Head, logResult.Truncated)
 	graphResult.LocalExhausted = logResult.LocalExhausted
 	graphResult.DeepenTriggered = logResult.DeepenTriggered
 	return graphResultToDTO(graphResult), nil
+}
+
+// pickGitHubGraphBuilder GitHub 平台用：默认 GitLens GKC；env=vscode 退回 vscode-git-graph
+func pickGitHubGraphBuilder(commits []git.CommitInfo, head string, truncated bool) *graph.GraphResult {
+	if os.Getenv("GITEA_KANBAN_GRAPH_ALGO") == "vscode" {
+		return graph.BuildGraphVscodeWithHead(commits, head, truncated)
+	}
+	var pinned []string
+	for _, c := range commits {
+		if graph.HasPrimaryBranchRef(c) {
+			pinned = append(pinned, c.SHA)
+			break
+		}
+	}
+	if head != "" && (len(pinned) == 0 || pinned[0] != head) {
+		pinned = append(pinned, head)
+	}
+	return graph.BuildGraphGitlens(commits, head, pinned)
 }
 
 // ===== Pull Request 完整字段映射（v0.6+） =====

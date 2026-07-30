@@ -20,7 +20,11 @@ type CommitInfo struct {
 	Subject     string // commit message 第一行
 	AuthorName  string
 	AuthorEmail string
-	AuthorWhen  time.Time // 作者时间
+	AuthorWhen  time.Time // 作者时间（author date，rebase/cherry-pick 后保留原始创作时间）
+	// CommitterWhen 提交时间（committer date，rebase/cherry-pick 后刷新为操作时间）。
+	// v0.8.25.6：DAG 排序必须用它（对齐 git log --date-order 的 commit date 语义），
+	// 用 author date 排序会把 cherry-pick 来的 commit 沉到历史深处（author date 保留原始时间）。
+	CommitterWhen time.Time
 	Parents     []string  // parent SHA 列表
 	IsMerge     bool      // 是否 merge commit（parents >= 2）
 	// Refs 关联的 ref 名称列表（branch / tag / PR 编号等）
@@ -31,6 +35,15 @@ type CommitInfo struct {
 	// RefTypes 与 Refs 一一对应的 ref 类型（v2.8 新增）
 	// 让前端严格区分 branch / remoteBranch / tag，不再用启发式猜。
 	RefTypes []RefType
+}
+
+// SortTime 返回 DAG 排序用的时间：优先 committer date（对齐 git log --date-order），
+// CommitterWhen 为零值（旧测试数据 / 外部构造）时回退 author date。
+func (c CommitInfo) SortTime() time.Time {
+	if !c.CommitterWhen.IsZero() {
+		return c.CommitterWhen
+	}
+	return c.AuthorWhen
 }
 
 // RefType ref 类型
@@ -172,6 +185,7 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				AuthorName:  c.Author.Name,
 				AuthorEmail: c.Author.Email,
 				AuthorWhen:  c.Author.When,
+				CommitterWhen: c.Committer.When,
 				Parents:     parents,
 				IsMerge:     len(parents) >= 2,
 				Refs:        refDataByHash[c.Hash.String()].Names,
@@ -196,6 +210,7 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 					AuthorName:  commit.Author.Name,
 					AuthorEmail: commit.Author.Email,
 					AuthorWhen:  commit.Author.When,
+					CommitterWhen: commit.Committer.When,
 					Parents:     parents,
 					IsMerge:     len(parents) >= 2,
 					Refs:        refDataByHash[commit.Hash.String()].Names,
@@ -206,12 +221,14 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 		}
 	}
 
-	// 按时间降序排序（所有分支合并后需要重排）
+	// 按提交时间（committer date）降序排序（所有分支合并后需要重排）
+	// v0.8.25.6：从 author date 改为 committer date，对齐 git log --date-order。
+	// author date 在 cherry-pick/rebase 后保留原始创作时间，会把这类 commit
+	// 排到历史深处（实测 xdolphin/TRex 的 cherry-pick commit 错位 8 行，图 lane 错乱）。
 	// 用 SHA 作为 tie-breaker 保证稳定顺序（避免 layout 算法因不稳定顺序而 lane 错位）
-	// SliceStable 保持 SHA 字典序相同时的原始顺序
 	sort.Slice(commits, func(i, j int) bool {
-		if !commits[i].AuthorWhen.Equal(commits[j].AuthorWhen) {
-			return commits[i].AuthorWhen.After(commits[j].AuthorWhen)
+		if !commits[i].SortTime().Equal(commits[j].SortTime()) {
+			return commits[i].SortTime().After(commits[j].SortTime())
 		}
 		return commits[i].SHA < commits[j].SHA
 	})

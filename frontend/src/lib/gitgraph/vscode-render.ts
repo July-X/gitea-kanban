@@ -34,19 +34,25 @@ export const VSCODE_OFFSET_Y = 12;
 export const VSCODE_VERTEX_RADIUS = 4;
 export const VSCODE_EXPAND_Y = 250; // vscode config.ts:278 expandY 默认值
 
-// 对齐 vscode-git-graph web/graph.ts config.colours 默认 16 色
-// (与 layout.go 注释里提到的 graphColours 数组一致)
+// 基础取自 vscode-git-graph web/graph.ts config.colours 默认 12 色，但
+// v0.8.26.x 用户拍板：lane 颜色排除红色系，三处红色系已替换——
+//   原 #ff0000（纯红）  → #00d95e（翠绿，填补绿/青色相间最大空档）
+//   原 #dc5b23（橙红）  → #3d5ad9（靛蓝，与 #0085d9 亮蓝靠明度/色相区分）
+//   原 #d9008f（玫红）  → #e8890c（亮橙，与 lane 0 蓝互补 / lane 2 绿强对比，
+//                          对齐 GitLens 蓝-橙-绿高区分效果；曾用草绿 #7cb342 但与
+//                          lane 2 亮绿 hue 仅差 22° 分不开，用户拍板再换）
+// 其余 9 色与 vscode-git-graph 默认一致。
 export const VSCODE_COLORS = [
 	'#0085d9', // 0
-	'#d9008f', // 1
+	'#e8890c', // 1 亮橙（原 #d9008f 玫红，用户拍板排除红色系；与蓝/绿 lane 高对比）
 	'#00d90a', // 2
 	'#d98500', // 3
 	'#a300d9', // 4
-	'#ff0000', // 5
+	'#00d95e', // 5 翠绿（原 #ff0000 纯红，用户拍板排除红色系）
 	'#00d9cc', // 6
 	'#e138e8', // 7
 	'#85d900', // 8
-	'#dc5b23', // 9
+	'#3d5ad9', // 9 靛蓝（原 #dc5b23 橙红，用户拍板排除红色系）
 	'#6f24d6', // 10
 	'#ffcc00', // 11
 ];
@@ -271,6 +277,32 @@ export function renderGraphVscode(
 			lockedFirst: boolean;
 			isCommitted: boolean;
 		}> = [];
+		// v0.8.26.x fix：跨 lane 且跨多行的线拆成「转场段(≤1 行高) + 竖直段」，
+		// 对齐 GitLens edge 渲染 —— lane 切换在一个行间隙内完成，中间行是纯竖线。
+		// 之前整条线画贝塞尔，斜切被摊到全部行高上（长对角线），与 GitLens
+		// 「先斜后竖 / 先竖后斜」的形态不符。
+		const pushSplit = (
+			sx1: number,
+			sy1: number,
+			sx2: number,
+			sy2: number,
+			lockedFirst: boolean,
+			isCommitted: boolean,
+		): void => {
+			if (sx1 !== sx2 && Math.abs(sy2 - sy1) > gridY * 1.5) {
+				if (lockedFirst) {
+					// 转场在上端（merge 边 / lane 压缩内线）：斜切段 → 竖直段
+					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy1 + gridY }, lockedFirst, isCommitted });
+					placed.push({ p1: { x: sx2, y: sy1 + gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+				} else {
+					// 转场在下端（fork 汇入边）：竖直段 → 斜切段
+					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx1, y: sy2 - gridY }, lockedFirst, isCommitted });
+					placed.push({ p1: { x: sx1, y: sy2 - gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+				}
+				return;
+			}
+			placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+		};
 		for (const line of lines) {
 			let x1 = line.x1 * gridX + offsetX;
 			let y1 = line.y1 * gridY + offsetY;
@@ -321,7 +353,7 @@ export function renderGraphVscode(
 					}
 				}
 			}
-			placed.push({ p1: { x: x1, y: y1 }, p2: { x: x2, y: y2 }, lockedFirst: line.lockedFirst, isCommitted });
+			pushSplit(x1, y1, x2, y2, line.lockedFirst, isCommitted);
 		}
 
 		// 2) 简化共线中间点 (vscode Branch.draw:106-116)

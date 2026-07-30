@@ -143,7 +143,7 @@ type GraphResult struct {
 // 输出：结构化 GraphNode(Lane) + GraphEdge(FromLane, ToLane)
 //
 // v2.8 算法（从 latest 向 root 遍历，对齐 git log --graph 语义）：
-//  1. 内部按 AuthorWhen 降序稳定排序（latest → root，row 0 = latest）
+//  1. 内部按 SortTime()（优先 committer date）降序稳定排序（latest → root，row 0 = latest）
 //  2. 遍历顺序 = 显示顺序（row 0..N-1），无需二次重映射
 //  3. 第一个 commit（最新，通常是 HEAD）→ lane 0（main 起点）
 //  4. first-parent 接力：若 first-parent 在可见列表且已被分配 lane → 同 lane（EdgeNormal）
@@ -165,11 +165,13 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	}
 
 	// 降序稳定排序（latest → root）。用 SHA 做 tie-breaker 保证稳定。
+	// v0.8.25.6：排序键从 AuthorWhen 改为 SortTime()（优先 committer date，
+	// 对齐 git log --date-order；cherry-pick commit 的 author date 保留原始时间会沉底）。
 	sorted := make([]git.CommitInfo, len(commits))
 	copy(sorted, commits)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		if !sorted[i].AuthorWhen.Equal(sorted[j].AuthorWhen) {
-			return sorted[i].AuthorWhen.After(sorted[j].AuthorWhen)
+		if !sorted[i].SortTime().Equal(sorted[j].SortTime()) {
+			return sorted[i].SortTime().After(sorted[j].SortTime())
 		}
 		return sorted[i].SHA < sorted[j].SHA
 	})
@@ -199,7 +201,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	if len(sorted) > 0 {
 		cur := sorted[0]
 		for _, candidate := range sorted {
-			if !hasPrimaryBranchRef(candidate) {
+			if !HasPrimaryBranchRef(candidate) {
 				continue
 			}
 			cur = candidate
@@ -661,7 +663,7 @@ func buildGraphWithMaxColors(commits []git.CommitInfo, maxColors int) *GraphResu
 	}
 }
 
-func hasPrimaryBranchRef(commit git.CommitInfo) bool {
+func HasPrimaryBranchRef(commit git.CommitInfo) bool {
 	for i, refName := range commit.Refs {
 		refType := git.RefType("")
 		if i < len(commit.RefTypes) {
