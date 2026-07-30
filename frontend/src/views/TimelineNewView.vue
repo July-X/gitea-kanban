@@ -29,7 +29,7 @@ import {
 } from '@renderer/lib/ipc-client';
 import { GitSyncProgressEvent } from '@renderer/types/sync-progress';
 import type { GraphResultDto, PullDto } from '@renderer/types/dto';
-import { dimMergedPullCommits, EMPTY_DIMMED_SET } from '@renderer/lib/graph-dimmed';
+import { dimNonMainReachableCommits, EMPTY_DIMMED_SET } from '@renderer/lib/graph-dimmed';
 // v0.4.0：删除 deepenRepo 「加载更多」 import + 调用（GitHub 仓库 UI 与 Gitea 对齐，
 //         「加载更多」按钮 + 滚动监听整段移除；commit ba0b41c 一次性收口）
 import EmptyState from '@renderer/components/EmptyState.vue';
@@ -1762,7 +1762,7 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
 const dimmedShaSet = computed<ReadonlySet<string>>(() => {
   const dto = graphDto.value;
   if (!dto) return EMPTY_DIMMED_SET;
-  return dimMergedPullCommits(dto.nodes, mergedPulls.value);
+  return dimNonMainReachableCommits(dto.nodes);
 });
 
 /**
