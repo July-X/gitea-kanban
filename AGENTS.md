@@ -558,6 +558,8 @@ UI 文本禁止直接出现以下原词，必须走翻译表（与 v1 相同）�
 | **v0.5.0 PR 评论模块** | `docs/adr/0008-pr-comment-v05-enhancement.md` | **v0.5.0 新增**：PR 文件评论 + 对话流 + 三 Tab 布局，对齐 Gitea / GitHub 双端 |
 | **Commit message 纪律** | `docs/adr/0009-commit-message-discipline.md` | **v0.5.0 复盘新增**：防 docs commit 伪装 + 实际改动文件清单必须真实 |
 | **git / gh / go-git 使用规范** | `docs/adr/0010-go-git-vs-git-cli.md` | **v0.7.22 新增**：写操作（clone/fetch）按平台分 git / gh，读 DAG 全 go-git |
+| **GitGraph 算法技术文档** | `docs/design/gitgraph-engine.md` | **v0.8.25 新增**：GitLens GKC 算法 Go 移植原理 + 数据结构 + 6 步骤 AI 借鉴指南 + 6 项"别照抄"坑清单 |
+| **GitGraph 引擎演进历程** | `docs/design/gitgraph-engine-history.md` | **v0.8.25 新增**：四阶段演进（字符流→layout.go→vscode 1:1→GitLens 移植）+ 5 个具体 bug 修复（cherry-pick 排序 / uncommitted lane 泄漏 / 单 commit 不画线 / DTO 转换 4 bug / 连线形态 4 错）+ 配色优化过程 |
 | 设计系统 | `design-system/gitea-kanban/OVERRIDE.md` | 颜色、字体、零术语、二次确认（v2 仍有效） |
 | 本文件 | `AGENTS.md` | agent 入口规范 |
 
