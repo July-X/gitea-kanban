@@ -1,0 +1,2 @@
+# Marker file - Windows helper directory must exist for embed
+# (Init() extracts helpers from here at first run)

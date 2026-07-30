@@ -30,6 +30,7 @@ package gitbinary
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,12 +102,17 @@ var userBinaryOverride atomic.Value // string
 //  1. 按当前 runtime.GOOS + runtime.GOARCH 把嵌入的 git 二进制释放到
 //     ${dataDir}/tools/git/<fileName>，parent 目录自动 MkdirAll 0755
 //  2. 释放后 chmod 0755（darwin/linux；windows 跳过）
-//  3. macOS 平台启动 `xattr -p <path>` 检查 com.apple.quarantine，
+//  3. 把嵌入的 Windows remote helper + DLL 依赖（git-remote-https.exe 等）释放到
+//     tools/git/ 同目录（仅 windows 平台有嵌入 helper；详见 embed_windows.go）
+//  4. macOS 平台启动 `xattr -p <path>` 检查 com.apple.quarantine，
 //     有则 `xattr -d com.apple.quarantine <path>` 尝试自动剥离（仍可能触发 Gatekeeper 弹窗，
 //     见 macOS_GATEKEEPER_NOTES.md，由 UI hint 兜底引导用户「系统设置 → 隐私与安全 → 仍要打开」）
-//  4. 二进制内容为空（dev 期 0 字节 placeholder）→ 跳过释放，
+//  5. 二进制内容为空（dev 期 0 字节 placeholder）→ 跳过释放，
 //     WARNING 日志：内嵌二进制缺失，请 wails build 前替换
-//  5. 释放成功 → defaultBinaryPath.Set(absPath)
+//  6. 释放成功 → defaultBinaryPath.Set(absPath)
+//  7. smoke test <bin> --version（失败仅 WARN 不报错，跨 arch 部署场景）
+//     Windows 平台额外测 `git ls-remote <public repo>`，验证 remote helper 能找到
+//     （helper 缺失会立刻报 'remote-https is not a git command'）
 //
 // 不要并发调。App.OnStartup 在所有 git/go-git 子包初始化后调用一次。
 func Init(dataDir string, logger *slog.Logger) error {
@@ -154,6 +160,58 @@ func Init(dataDir string, logger *slog.Logger) error {
 			if logger != nil {
 				logger.Warn("gitbinary: chmod 0755 失败",
 					"target", target, "err", err.Error())
+			}
+		}
+	}
+
+	// v0.8.27+：释放 Windows git remote helper + DLL 依赖到同目录。
+	//
+	// 根因：内嵌 git 主二进制（cmd/git.exe 单文件）不带 git-remote-https.exe 等
+	// remote helper，也不带 libcurl/libssl 等 DLL 依赖。Windows 上 `git fetch <https>`
+	// 会 fork git-remote-https.exe，helper 查找路径 <argv0>/../mingw64/libexec/git-core
+	// （单文件布局不存在）→ PATH（用户没装系统 git）→ 报错。
+	//
+	// 修法：把 helper + DLL 释放到 tools/git/ 同目录，RunGit / RunGitWithEnv 时注入
+	// GIT_EXEC_PATH=<toolsDir> 让 git 能找到 helper。
+	//
+	// 失败处理：仅 WARN 不阻断应用启动——helper 缺失不会让 `git log` / `git rev-parse`
+	// 等本地命令失败，只有 fetch / pull / push 这种需要远程通信的命令才会失败。
+	if helperReleased := releaseHelpers(target, toolsDir, logger); !helperReleased {
+		if logger != nil {
+			logger.Warn("gitbinary: remote helper 释放失败/未嵌入；fetch/pull/push 到 https remote 将失败",
+				"platform", runtime.GOOS, "hint", "确认 app/gitbinary/binaries/git/windows-helper/ 含 .exe + .dll")
+		}
+	}
+
+	// v0.8.27+：在 Windows 上创建 git.exe shim（同目录的 gk-git exe 复制成 git.exe）。
+	//
+	// 根因 2：git 主进程 fork `git remote-https` 时，OS 用 execvp("git", ...)，
+	// 在 PATH 中找 `git.exe`。我们的 git 名字是 gk-git-2.55.0-windows-amd64.exe，
+	// 子进程 PATH 找不到。两种修法：
+	//   1. 在调用方注入 PATH 前置 tools/git/ → GitEnvFor 实现
+	//   2. 在 tools/git/ 创建 `git.exe` shim（gk-git 复制成 git.exe）→ OS 在
+	//      PATH 找到 shim
+	//
+	// 两条都要做：GIT_EXEC_PATH 用于 git 内部 exec-path 解析（child process 找
+	// 自己的 argv0 目录时），git.exe shim 用于 OS 层面 PATH 查找。少任何一条都会
+	// 在某种场景下撞回原 bug。
+	if runtime.GOOS == "windows" {
+		shimPath := filepath.Join(toolsDir, "git.exe")
+		if _, err := os.Stat(shimPath); os.IsNotExist(err) {
+			// 复制 target (gk-git-2.55.0-windows-amd64.exe) 到 git.exe
+			if data, readErr := os.ReadFile(target); readErr == nil {
+				if writeErr := os.WriteFile(shimPath, data, 0o644); writeErr == nil {
+					if logger != nil {
+						logger.Info("gitbinary: 创建 git.exe shim 成功（让子进程 PATH 查找找到内嵌 git）",
+							"shim", shimPath, "size", len(data))
+					}
+				} else if logger != nil {
+					logger.Warn("gitbinary: 创建 git.exe shim 失败（写 shim 错误）",
+						"shim", shimPath, "err", writeErr.Error())
+				}
+			} else if logger != nil {
+				logger.Warn("gitbinary: 创建 git.exe shim 失败（读主二进制错误）",
+					"target", target, "err", readErr.Error())
 			}
 		}
 	}
@@ -207,6 +265,31 @@ func Init(dataDir string, logger *slog.Logger) error {
 		// 清空让 ResolveGitBinaryPath 走 PATH git（用户 OS 自带）
 		defaultBinaryPath.Store("")
 		// Init 本身不报错：跨 arch 是部署问题，不阻断应用启动
+		return nil
+	}
+
+	// v0.8.27+：Windows 平台额外 smoke test helper 链路。
+	//
+	// 用 `ls-remote https://github.com/git/git.git HEAD` 测：触发 git 实际 fork
+	// git-remote-https.exe 走 HTTPS 通道。如果 helper 没正确释放或 GIT_EXEC_PATH
+	// 没注入，会立刻报 'remote-https is not a git command'。失败仅 WARN 不阻断
+	// 启动——离线环境用户可能不需要马上 fetch。
+	if runtime.GOOS == "windows" {
+		helperCtx, helperCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer helperCancel()
+		// ls-remote 不修改本地仓库，纯净探测
+		helperCmd := exec.CommandContext(helperCtx, target, "ls-remote", "https://github.com/git/git.git", "HEAD")
+		helperCmd.Env = GitEnvFor(target, nil)
+		if helperOutput, helperErr := helperCmd.CombinedOutput(); helperErr != nil {
+			if logger != nil {
+				logger.Warn("gitbinary: helper smoke test 失败（remote helper 可能缺失或 GIT_EXEC_PATH 未生效）",
+					"target", target,
+					"err", helperErr.Error(),
+					"output-truncated", truncateForLog(string(helperOutput), 400),
+					"hint", "fetch/pull/push 到 https remote 将失败；检查 app/gitbinary/binaries/git/windows-helper/ 内容")
+			}
+			// 仅 WARN 不清空 defaultBinaryPath：本地命令（log / rev-parse / diff-tree）仍可用
+		}
 	}
 	return nil
 }
@@ -349,14 +432,10 @@ func RunGitWithEnv(ctx context.Context, binPath string, localPath string, envVar
 
 	cmd := exec.CommandContext(ctx, binPath, fullArgs...)
 	configureCmdHideWindow(cmd)
-	baseEnv := []string{"GIT_TERMINAL_PROMPT=0"}
-	cmd.Env = append(os.Environ(), baseEnv...)
-	for k, v := range envVars {
-		if k == "" {
-			continue
-		}
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	// v0.8.27+：用 GitEnvFor 注入 GIT_EXEC_PATH（Windows 内嵌二进制需要让 git 找到
+	// git-remote-https.exe 等 helper）+ GIT_TERMINAL_PROMPT=0，caller 的 envVars
+	// 覆盖同名 key。
+	cmd.Env = GitEnvFor(binPath, envVars)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return output, fmt.Errorf("git 调用失败（%s %s）：%w\n输出: %s", binPath, strings.Join(args, " "), err, string(output))
@@ -500,4 +579,159 @@ func stripQuarantine(path string) error {
 		return err
 	}
 	return nil
+}
+
+// releaseHelpers 把嵌入的 remote helper + DLL 依赖释放到 git 主二进制同目录。
+//
+// 背景：Windows 上内嵌 git（MinGit 单文件 exe）不带 git-remote-https.exe 等 helper，
+// 也不带 libcurl/libssl 等 DLL 依赖。`git fetch <https remote>` 会 fork helper，
+// helper 查找路径 <argv0>/../mingw64/libexec/git-core（不存在）→ PATH（无系统 git）→
+// 报错 'remote-https is not a git command'。
+//
+// 修法：把 helper 释放到 git 主二进制同目录，RunGitWithEnv 注入 GIT_EXEC_PATH 让 git
+// 能找到 helper。
+//
+// 返回 true 表示至少成功释放了一个 helper 文件；false 表示当前平台无嵌入 helper 或
+// 释放失败（其他平台总是 false，因为只有 windows 嵌入）。
+func releaseHelpers(target string, toolsDir string, logger *slog.Logger) bool {
+	if !embeddedHelperAvailable() {
+		return false
+	}
+	helperFS := embeddedHelperFS()
+	if helperFS == nil {
+		return false
+	}
+
+	count := 0
+	err := fs.WalkDir(helperFS, ".", func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		// 读嵌入内容
+		data, readErr := fs.ReadFile(helperFS, p)
+		if readErr != nil {
+			return fmt.Errorf("读嵌入 helper %s 失败: %w", p, readErr)
+		}
+		// 直接释放到 toolsDir（不重建子目录——helper 都在 helperFS 根目录下）
+		dst := filepath.Join(toolsDir, filepath.Base(p))
+		if writeErr := os.WriteFile(dst, data, 0o644); writeErr != nil {
+			return fmt.Errorf("释放 helper %s → %s 失败: %w", p, dst, writeErr)
+		}
+		count++
+		return nil
+	})
+
+	if err != nil {
+		if logger != nil {
+			logger.Error("gitbinary: helper 释放失败",
+				"target", target, "err", err.Error())
+		}
+		return false
+	}
+	if logger != nil {
+		logger.Info("gitbinary: remote helper + DLL 释放成功",
+			"target", target, "files", count, "dir", toolsDir)
+	}
+	return count > 0
+}
+
+// GitEnvFor 构造 git 子进程 env，注入 GIT_EXEC_PATH + PATH 前置让 git 找到 remote helper。
+//
+// v0.8.27+ 引入：Windows 内嵌 git 是 MinGit 单文件布局，git 主进程 fork
+// `git remote-https` 时按以下顺序查找 helper：
+//
+//	1. <argv0>/../mingw64/libexec/git-core/  ← 单文件布局不存在
+//	2. GIT_EXEC_PATH env（如果设置）        ← 我们注入
+//	3. execvp("git") in PATH                  ← 我们把 tools/git 加到 PATH 前置
+//
+// 修法（双保险）：当 binPath 位于 ${dataDir}/tools/git/ 下时（即内嵌二进制），强制
+// 注入 GIT_EXEC_PATH=<binPath dir>，并把 <binPath dir> 追加到 PATH 最前面，让 OS
+// execvp("git") 优先找到我们创建的 git.exe shim（Init() 复制 gk-git 释放）。
+// 系统 git / 用户自定义路径不注入——它们的相对 exec-path 解析依赖 PATH 上的兄弟
+// 目录结构，强行覆盖反而会破坏。
+//
+// extraEnv 为 nil 时只注入 GIT_EXEC_PATH + GIT_TERMINAL_PROMPT=0；
+// 非 nil 时把 extraEnv 合并进结果（覆盖同名 key）。
+func GitEnvFor(binPath string, extraEnv map[string]string) []string {
+	binDir := filepath.Dir(binPath)
+	defBinPath := DefaultBinaryPath()
+	// 只有当 binPath 就在内嵌二进制目录里（即 binDir == defBinPath 所在 dir）时注入
+	shouldInject := defBinPath != "" && strings.EqualFold(filepath.Clean(binDir), filepath.Clean(filepath.Dir(defBinPath)))
+
+	env := os.Environ()
+	// 去重：保留第一次出现的 key，移除后续重复项（避免 cmd.Env 出现两个 GIT_EXEC_PATH）
+	if shouldInject {
+		// PATH 前置：让 execvp("git") 优先找到 tools/git/git.exe shim
+		// 保留原 PATH 中其它 entry（user git / gh / scoop shims 等）
+		env = prependPathToEnv(env, binDir)
+		// GIT_EXEC_PATH：让 git 内部 exec-path 解析找到 helper
+		env = dedupAndAppend(env, "GIT_EXEC_PATH="+binDir)
+	}
+	env = dedupAndAppend(env, "GIT_TERMINAL_PROMPT=0")
+
+	// extraEnv 由 caller 注入（如 GH_TOKEN / GIT_CONFIG_*）
+	// 同样去重：保留 caller 覆盖
+	for k, v := range extraEnv {
+		if k == "" {
+			continue
+		}
+		env = dedupAndAppend(env, k+"="+v)
+	}
+	return env
+}
+
+// prependPathToEnv 把 dir 插入到 env 中 PATH= 后面第一位。
+//
+// Windows PATH 分号分隔（大小写不敏感）；unix 冒号分隔。去重（如果 dir 已在 PATH
+// 中则不重复插入）。这是 GitEnvFor 专用的内部 helper。
+func prependPathToEnv(env []string, dir string) []string {
+	const key = "PATH="
+	// 找出现有 PATH entry（大小写不敏感）
+	for i, e := range env {
+		upper := strings.ToUpper(e)
+		if !strings.HasPrefix(upper, "PATH=") {
+			continue
+		}
+		val := e[len(key):]
+		// 检查 dir 是否已在 PATH 中
+		sep := ":"
+		if runtime.GOOS == "windows" {
+			sep = ";"
+		}
+		parts := strings.Split(val, sep)
+		for _, p := range parts {
+			if strings.EqualFold(strings.TrimSpace(p), dir) {
+				return env // already present, no prepend needed
+			}
+		}
+		// 插入 dir 到 PATH 最前
+		newVal := dir
+		if val != "" {
+			newVal = dir + sep + val
+		}
+		env[i] = key + newVal
+		return env
+	}
+	// 没找到 PATH，添加新的
+	return append(env, key+dir)
+}
+
+// dedupAndAppend 移除 env 中所有以 "key=" 开头的 entry，追加新 entry。
+// 用于避免 cmd.Env 出现两个 GIT_EXEC_PATH（一个是基础，一个是 caller override）。
+func dedupAndAppend(env []string, entry string) []string {
+	eq := strings.Index(entry, "=")
+	if eq < 0 {
+		return env
+	}
+	prefix := entry[:eq+1]
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env = append(env[:i], env[i+1:]...)
+			break
+		}
+	}
+	return append(env, entry)
 }

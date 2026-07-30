@@ -114,13 +114,9 @@ func FetchWithFilter(localPath string, depth int, token string) error {
 	if _, err := gitbinary.ResolveGitBinaryPath(""); err != nil {
 		return fmt.Errorf("系统未安装 git 命令: %w", err)
 	}
-	if _, err := gitbinary.ResolveGhPath(); err != nil {
-		var ghNotFound *gitbinary.GhNotFoundError
-		if errors.As(err, &ghNotFound) {
-			return ipc.NewGhNotInstalled(ghNotFound.Cause)
-		}
-		return ipc.NewGhNotInstalled(err.Error())
-	}
+	// v0.8.27+：fetch 不再依赖 gh（之前用 `!gh auth git-credential` 走 credential helper，
+	// 但 Windows MinGit 没 sh.exe，且 gh 不是内嵌的）。改用 env-based extraHeader 注入
+	// Authorization 头即可。gh 仍由 CloneRepo（首次 clone 大仓库）路径使用。
 
 	// 检查仓库是否存在（兼容 bare 布局）
 	// 旧代码只 os.Stat(.git)，但 gh blobless clone / 旧版 mirror clone 产出的是
@@ -226,8 +222,20 @@ func repoIsShallow(localPath string) bool {
 }
 
 func fetchRemoteWithFilter(localPath, remote string, depth int, token string) error {
+	// v0.8.27+：鉴权从「-c credential.helper=!gh auth git-credential」改为
+	// 「GIT_CONFIG_* env 注入 http.extraHeader」。两个根因：
+	//   1. gh credential helper 需要 sh.exe 调用 ! 内部命令——MinGit 单文件布局
+	//      没带 sh.exe，且即使修复也依赖外部 gh CLI；Windows 用户大概率没装
+	//   2. 修好 remote-https helper 后，credential helper 还要走另一条链路，
+	//      整体维护成本高
+	//
+	// 改用 git ≥ 2.31 支持的 GIT_CONFIG_COUNT/KEY_n/VALUE_n env 注入：
+	//   - 限定 url http.https://github.com.extraHeader（不污染其它 remote 的 token 泄露）
+	//   - token 走 env 不进命令行 / stderr 输出（符合 AGENTS §8.1 鉴权铁律）
+	//   - fetch 不再依赖 gh / sh，CloneRepo 仍走 gh repo clone（首次 clone 大仓库）
+	//
+	// clone 链路不动，仍走 gh repo clone（带 sideband progress）。
 	args := []string{
-		"-c", "credential.helper=!gh auth git-credential",
 		"fetch",
 		"--filter=blob:none", // 不下载 blob
 	}
@@ -257,15 +265,24 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 		return fmt.Errorf("gitbinary: %w", err)
 	}
 	envVars := map[string]string{}
+	// GitHub 私有仓库鉴权：env-based git config 注入
+	//   限定 url 是 http.https://github.com.extraHeader 而不是 http.extraHeader
+	//   避免 token 发给所有 remote host（其它 gitea 服务器的请求可能仍走 token 鉴权
+	//   但绝不能让 token 暴露在非 GitHub host 上）。
+	// token 为空时不注入——公开仓库 fetch 无需鉴权。
 	if token != "" {
-		envVars["GH_TOKEN"] = token
+		envVars["GIT_CONFIG_COUNT"] = "1"
+		envVars["GIT_CONFIG_KEY_0"] = "http.https://github.com.extraHeader"
+		envVars["GIT_CONFIG_VALUE_0"] = "Authorization: Bearer " + token
 	}
-	output, err := gitbinary.RunGitWithEnv(ctx, bin, localPath, envVars, args...)
+	_, err = gitbinary.RunGitWithEnv(ctx, bin, localPath, envVars, args...)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("git fetch 超时（%s）：%w", nativeGitTimeout, ctx.Err())
 		}
-		return fmt.Errorf("git fetch %s 失败: %w\n输出: %s", remote, err, string(output))
+		// v0.8.27+ 修复：不再额外拼「输出: %s」——RunGitWithEnv 的 err 已经包含
+		// 「输出: %s」，重复拼接会让用户看到两遍「输出: ...」。
+		return fmt.Errorf("git fetch %s 失败: %w", remote, err)
 	}
 
 	// v0.7.22：fetch 成功后 commit 对象可能还在后台深化（blobless 懒加载）。

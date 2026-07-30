@@ -69,9 +69,40 @@ go-git 的**优势**：
 | Gitea `CloneRepo` | **go-git PlainClone**（**未切到 git CLI，**待迁移） | `app/git/clone.go:240` |
 | GitHub `CloneRepo` (走 `UseGitHubCLI=true`) | `gh repo clone -- --filter=blob:none --no-checkout --no-single-branch` | `app/git/clone.go:184` → `app/git/native.go:CloneWithFilter` |
 | `FetchRepo` go-git 路径 | `remote.FetchContext` + sideband | `app/git/sync.go:177` |
-| `FetchRepo` gh 路径 | `gh auth git-credential` + `git fetch --filter=blob:none` | `app/git/sync.go:129` → `app/git/native.go:FetchWithFilter` |
+| `FetchRepo` gh 路径（**v0.8.27+ 改**） | `git fetch --filter=blob:none` + `GIT_CONFIG_*` env 注入 `http.https://github.com.extraHeader=Authorization: Bearer <token>`（**不再走 gh credential helper**） | `app/git/sync.go:129` → `app/git/native.go:FetchWithFilter` |
 | `LogCommits` / `CountCommits` / 读 HEAD | **go-git** | `app/git/log.go` / `app/git/repo.go` |
-| Graph layout（vscode-git-graph 复刻） | **go-git** 输入 + 自研 layout | `app/git/graph/layout.go` |
+| Graph layout（GitLens GKC 移植） | **go-git** 输入 + 自研 layout | `app/git/graph/layout_gitlens.go` |
+
+### v0.8.27+ 修订
+
+**fetch 鉴权从 gh credential helper 改为 env-based extraHeader**（user 2026-07-30 反馈）：
+
+- 旧方案：`git -c credential.helper=!gh auth git-credential fetch --filter=blob:none`
+  - 根因 1：内嵌 git 是 MinGit 单文件布局，没带 `sh.exe` 解析 `!` 前缀，Windows 用户跑不动
+  - 根因 2：依赖外部 gh CLI——但 gh 不是内嵌的，Windows 用户大概率没装
+  - 根因 3：每次 Windows 重新装好 helper 后，credential helper 还要走另一条链路
+- 新方案：env-based git config 注入（git ≥ 2.31 支持 `GIT_CONFIG_COUNT/KEY_n/VALUE_n`）
+  - `GIT_CONFIG_KEY_0=http.https://github.com.extraHeader` 限定到 github.com 域（避免 token 泄露给其它 remote）
+  - `GIT_CONFIG_VALUE_0=Authorization: Bearer <token>` 经 env 传入（不进命令行 / stderr 输出，符合 §8.1 鉴权铁律）
+  - fetch 完全自包含（不依赖 gh / sh），clone 仍走 gh repo clone（首次大仓库）
+
+**Windows 内嵌 git 携带 remote helper**（v0.8.27+ 同步修复）：
+
+- 旧现象：Windows 用户切到 GitHub 数据源后点刷新，fetch 报 `git: 'remote-https' is not a git command` / `fatal: remote helper 'https' aborted session`
+- 根因：内嵌 `gk-git-2.55.0-windows-amd64.exe` 是 MinGit 提取的 `cmd/git.exe` 单文件，不带 `git-remote-https.exe` / `git-remote-http.exe` 等 remote helper，也不带 `libcurl` / `libssl` 等 DLL 依赖
+- 修法：
+  1. 从 MinGit-2.55.0-64-bit.zip 解压 `mingw64/bin/` 下 helper exes + 16 个 DLL 依赖
+  2. 入库到 `app/gitbinary/binaries/git/windows-helper/`（子目录 `.gitignore` 白名单 `!*.exe` / `!*.dll`）
+  3. `embed_windows.go` 加 `//go:embed binaries/git/windows-helper` 嵌入到 `embed.FS`
+  4. `runner.go` Init 释放 helper + DLL 到 `${dataDir}/tools/git/` 同目录
+  5. 新增 `GitEnvFor(binPath, extraEnv)` 函数：当 `binPath` 在内嵌目录时注入 `GIT_EXEC_PATH=<tools/git>`（系统 git / 用户自定义路径不注入，避免破坏相对 exec-path 解析）
+  6. Windows 平台 Init 末尾额外跑 `git ls-remote https://github.com/git/git.git HEAD` smoke test 验证 helper 链通（失败仅 WARN，离线环境不阻断启动）
+
+**代码路径跨平台通用**：
+
+- `app/gitbinary/embed_windows.go`（//go:build windows）定义 `embeddedHelperFS()` / `embeddedHelperAvailable()`（嵌入 helper）
+- `app/gitbinary/helper_darwin.go`（//go:build darwin）/ `helper_other.go`（!darwin && !windows）stub 返 `nil`
+- 若未来 macOS 用户撞同类 bug（sandbox git 是 universal 单文件而非 homebrew Cellar 完整布局），可直接扩展 `helper_darwin.go` 嵌入 homebrew helper 链，**不需改 runner.go**
 
 ## 迁移计划（Gitea 切到 git CLI）
 

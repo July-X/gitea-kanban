@@ -1,0 +1,8 @@
+# 子目录白名单：允许本目录（windows-helper/）下的 .exe + .dll 入库
+# 根目录 .gitignore 黑名单 *.exe / *.dll（防误提交用户本地构建产物）
+# 本目录是 MinGit 2.55.0 windows 64-bit 提取的 git remote helper exe + DLL 依赖：
+#   git-remote-https.exe / git-remote-http.exe / git-http-fetch.exe / git-http-push.exe
+#   libcurl-openssl-4.dll / libssl-3-x64.dll / libcrypto-3-x64.dll 等
+# Init() 释放到 ${dataDir}/tools/git/ 后用 GIT_EXEC_PATH 让 git 能找到 remote helper。
+!*.exe
+!*.dll
