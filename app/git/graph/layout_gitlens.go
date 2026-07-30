@@ -654,26 +654,45 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 	// LockedFirst=false：转场在下端 —— 线沿本 lane 竖直下行，在 parent 行上方
 	// 一个行高内斜切到 parent lane（GitLens「先竖后斜」形态）。
 	if seg.forkSha != "" && len(seg.commitShas) > 0 {
-		last := seg.commitShas[len(seg.commitShas)-1]
-		lastRow, okLast := rowOf[last]
-		forkRow, okFork := rowOf[seg.forkSha]
-		if okLast && okFork && forkRow > lastRow {
-			lastCol := seg.column
-			if c, ok := colOf[last]; ok {
-				lastCol = c
+		// v0.8.30 fix：跳过自指 / 重复情况。单 commit segment + forkSha 与
+		// branchSha 双重存在时（int-test 这种 fresh claim：parent=main_head
+		// 同时是 branch-off 源 + fork 汇入目标）会重复画同一坐标的两条反向 line
+		// （branch-off + fork stitch 视觉叠加 stroke 2 倍），导致用户反馈
+		// "绘制多次 lane 的 bug"。
+		//
+		// 跳过条件：
+		//   - forkSha == branchSha（branch-off 起点与 fork 汇入目标重合）
+		//   - forkSha == tipSha（fork 自己）
+		//   - forkSha == tip commit（单 commit segment 时是该 fork 等于 tip commit
+		//     自身任何父项，即 tip = branchSha = forkSha 同时成立）
+		//
+		// 真实场景：fresh claim segment 只该画 1 条 branch-off line，fork stitch
+		// 等真正 merge 入主线时才有意义。
+		isSelfRef := seg.forkSha == seg.branchSha ||
+			seg.forkSha == seg.tipSha ||
+			seg.forkSha == seg.commitShas[0]
+		if !isSelfRef {
+			last := seg.commitShas[len(seg.commitShas)-1]
+			lastRow, okLast := rowOf[last]
+			forkRow, okFork := rowOf[seg.forkSha]
+			if okLast && okFork && forkRow > lastRow {
+				lastCol := seg.column
+				if c, ok := colOf[last]; ok {
+					lastCol = c
+				}
+				forkCol := 0
+				if c, ok := colOf[seg.forkSha]; ok {
+					forkCol = c
+				}
+				lines = append(lines, GraphBranchLine{
+					X1:          lastCol,
+					Y1:          lastRow,
+					X2:          forkCol,
+					Y2:          forkRow,
+					LockedFirst: false,
+					IsCommitted: true,
+				})
 			}
-			forkCol := 0
-			if c, ok := colOf[seg.forkSha]; ok {
-				forkCol = c
-			}
-			lines = append(lines, GraphBranchLine{
-				X1:          lastCol,
-				Y1:          lastRow,
-				X2:          forkCol,
-				Y2:          forkRow,
-				LockedFirst: false,
-				IsCommitted: true,
-			})
 		}
 	}
 

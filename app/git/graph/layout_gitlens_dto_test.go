@@ -860,3 +860,113 @@ func TestBuildGraphGitlens_ForkStitchLockedFirst(t *testing.T) {
 		t.Fatal("expected fork stitch line in feature segment branches")
 	}
 }
+
+// TestBuildGraphGitlens_NoDuplicateLinesOnFreshClaim v0.8.30 fix
+//
+// 用户 2026-07-31 反馈：单一 main + branch tip + UNCOMMITTED 三节点时，
+// int-test 那个 branch lane 在前端被画了 2 次（同一 line 的正向和反向）。
+//
+// 根因：int-test (单 commit segment) 同时有 branchSha (=main_head) 和
+// forkSha (=main_head)，segmentToLines 走 branchSha path 生成 1 条
+// (0,2)→(1,1) 又走 forkSha path 生成 1 条反向 (1,1)→(0,2)。
+// 视觉 stroke-width 叠加成"绘制多次 lane"。
+//
+// 拓扑（latest-first）：
+//
+//	row 0: UNCOMMITTED (workdir, parents=[main_head])
+//	row 1: int_test_tip (refs=[origin/int-test-...], parents=[main_head])
+//	row 2: main_head (refs=[main, origin/main], parents=[])
+//
+// 修复后：int-test segment 只输出 1 条 branch-off line，去掉重复的 fork stitch line。
+func TestBuildGraphGitlens_NoDuplicateLinesOnFreshClaim(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, idx int, parents []string, refs ...string) git.CommitInfo {
+		refTypes := make([]git.RefType, len(refs))
+		for i := range refTypes {
+			refTypes[i] = git.RefTypeBranch
+		}
+		return git.CommitInfo{
+			SHA:           sha,
+			ShortSHA:      fmt.Sprintf("%07x", idx),
+			Subject:       sha,
+			AuthorWhen:    t0.Add(time.Duration(idx) * time.Minute),
+			CommitterWhen: t0.Add(time.Duration(idx) * time.Minute),
+			Parents:       parents,
+			Refs:          refs,
+			RefTypes:      refTypes,
+		}
+	}
+	const mainHead = "main_head_sha"
+	commits := []git.CommitInfo{
+		mk(git.UNCOMMITTED_HASH, 0, []string{mainHead}),
+		mk("int_test_tip", 1, []string{mainHead}, "origin/int-test-1782998137207128000"),
+		mk(mainHead, 2, nil, "main", "origin/main"),
+	}
+
+	result := BuildGraphGitlens(commits, mainHead, []string{mainHead})
+
+	// 节点 row/lane 唯一性 sanity
+	rowSeen := map[int]string{}
+	for _, n := range result.Nodes {
+		if prev, ok := rowSeen[n.Row]; ok {
+			t.Errorf("row %d 冲突: %s vs %s", n.Row, prev, n.ShortSHA)
+		}
+		rowSeen[n.Row] = n.ShortSHA
+	}
+	if len(result.Nodes) != 3 {
+		t.Errorf("nodes=%d != commits=3", len(result.Nodes))
+	}
+
+	// 核心断言：每个 branch 内部 (X1,Y1,X2,Y2) 4 元组应唯一。
+	// reverse-direction 的 line 也算重复（视觉 stroke 叠加 v0.8.30 修复）。
+	type lineKey struct{ X1, Y1, X2, Y2 int }
+	seen := map[lineKey]int{}
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			k := lineKey{l.X1, l.Y1, l.X2, l.Y2}
+			seen[k]++
+		}
+	}
+	for k, n := range seen {
+		if n > 1 {
+			t.Errorf("同一 line 4 元组出现 %d 次（v0.8.30 \"绘制多次 lane\" 根因）: (%d,%d)->(%d,%d)",
+				n, k.X1, k.Y1, k.X2, k.Y2)
+		}
+	}
+
+	// 更强断言：int-test (lane 1) branch 必须恰好 1 条 line（之前 v0.8.30
+	// bug 时会有 2 条：branch-off (0,2)->(1,1) + fork stitch (1,1)->(0,2)）。
+	var intTestBranch *GraphBranch
+	for i := range result.Branches {
+		if result.Branches[i].Color == 1 {
+			intTestBranch = &result.Branches[i]
+			break
+		}
+	}
+	if intTestBranch == nil {
+		t.Fatal("找不到 int-test lane (color=1) branch")
+	}
+	if len(intTestBranch.Lines) != 1 {
+		t.Errorf("int-test branch lines=%d, want 1 (单 commit fresh claim segment)",
+			len(intTestBranch.Lines))
+		for _, l := range intTestBranch.Lines {
+			t.Logf("  line (%d,%d)->(%d,%d)", l.X1, l.Y1, l.X2, l.Y2)
+		}
+	}
+
+	// main trunk branch (color=0) 应该有 vertical line 跨 row 0..2。
+	mainFound := false
+	for _, b := range result.Branches {
+		if b.Color != 0 {
+			continue
+		}
+		for _, l := range b.Lines {
+			if l.X1 == 0 && l.Y1 == 0 && l.X2 == 0 && l.Y2 == 2 {
+				mainFound = true
+			}
+		}
+	}
+	if !mainFound {
+		t.Error("main trunk vertical line (0,0)->(0,2) 缺失")
+	}
+}

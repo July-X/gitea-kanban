@@ -4,7 +4,7 @@
 
 ## 阅读路径
 
-- 当前最新 release note：[v0.8.29.md](./v0.8.29.md)（dim 算法语义翻新 — non-mainReachable 而非 merged PR 链，与 GitLens 实测对齐；2 行核心 diff 翻语义）
+- 当前最新 release note：[v0.8.30.md](./v0.8.30.md)（fresh claim 单 commit segment 的双重 stitch 重复绘制 lane 修复 —— fork path 加自指跳过，避免 branch-off + 反向 fork stitch 叠加 stroke-width）
 - 上一版本：[v0.8.25.md](./v0.8.25.md)（GitLens GKC 算法移植 + fork/merge 连线修复；lane 数从 ~35 → ~10-15；配套技术文档 [docs/design/gitgraph-engine.md](../design/gitgraph-engine.md)）
 - 自动更新全链路：[v0.8.0.md](./v0.8.0.md)
 - 设计 plan：[v0.8.0-plan.md](./v0.8.0-plan.md)
@@ -46,6 +46,7 @@
 | **v0.8.27** | （待 push 后回填） | branch-off 入线 `LockedFirst` 对齐 merge stitch（v0.8.25.3 写死 `false` 与 `mergeCol<firstCol` 等价几何相反）。修复后单文件 +8/-4 改动：feature 分支顶端从主干分叉时转场从「lane 0 竖直到 commit 行附近才斜切（凭印象）」变成「child 行立即斜切再竖直」，对齐 GitLens Commit Graph 实测；新加 `TestBuildGraphGitlens_BranchOffLockedFirstMatchesMergeStitch` + `TestBuildGraphGitlens_ForkStitchLockedFirst` 回归。同步审视其余 4 处 `LockedFirst`（merge stitch / merge incoming / lane 压缩内线 / fork stitch）确认几何一致 | [v0.8.27.md](./v0.8.27.md) |
 | **v0.8.28** | （待 push 后回填） | 对齐 GitLens `dimCommitsWithPullRequests` 风格 —— 已合并 PR 链 commit 行整段灰化。新增 `frontend/src/lib/graph-dimmed.ts` 纯函数（first-parent BFS + main trunk 截断点，13 个 vitest 单测覆盖普通 merge / squash / PR head 不在 graph / 共享段去重 / PR head 与 main 重合等 8 类边界）；`TimelineNewView.vue` 后台非阻塞调 `pullsList(state='closed')` 拿 merged PR 列表（AbortController 切 repo 时取消旧请求），`dimmedShaSet` 通过响应式 computed 同时驱动 3 处渲染：commit row 文字 opacity 0.45（ref badge + subject + author + date 同步） + 节点 circle stroke/fill opacity 降 0.35 + SVG path 经 `pathCoveredRows` 解析 `d` 字符串后命中 dimmed row 时整 path 降 opacity（shadow 0.18 / line 0.35，对齐 GitLens "该行 lane line 同步灰"）。不动 Go 端 binding / DTO 契约（AGENTS §13） | [v0.8.28.md](./v0.8.28.md) |
 | **v0.8.29** | （待 push 后回填） | dim 算法语义翻新：v0.8.28 的"已合并 PR 链 dim" → v0.8.29 的"未与 main 接合的 dangling commit dim"（与 GitLens 实测对齐 —— merged PR 链已被 main 接合，不应 dim；独立 draft 分支才 dim）。**2 行核心 diff**：`import { dimMergedPullCommits }` → `import { dimNonMainReachableCommits }` + `dimmedShaSet` 计算去掉 `mergedPulls.value` 第二参数。新算法走 `ancestorsAllParents(mainHead)` 走**所有 parents**（含 main trunk + 全部 merge 接入的旁支链），dim = nodes - mainReachable。CSS class + SVG opacity 计算 + path 灰化（pathCoveredRows 解析 d 字符串）全部沿用 v0.8.28，零视觉层改动，仅 dim 集合范围语义翻新。10 个 vitest 覆盖 5 类场景（含 mainReachable + dangling + 独立 draft）。`mergedPulls` ref + `fetchMergedPullsAsync` 函数保留作未来兜底（技术债清理留 v0.8.30） | [v0.8.29.md](./v0.8.29.md) |
+| **v0.8.30** | （待 push 后回填） | fresh claim 单 commit segment 双重 stitch 重复绘制 lane 修复（用户报告"绘制多次 lane"）—— `layout_gitlens.go` `segmentToLines` fork path 加 `isSelfRef` 跳过（forkSha == branchSha / tipSha / 第一个 commit SHA 时不输出 fork stitch line，避免与同坐标的 branch-off 反向叠加 stroke-width）。**4 行核心 diff** + 一个新回归测试 `TestBuildGraphGitlens_NoDuplicateLinesOnFreshClaim`（复刻用户截图拓扑：UNCOMMITTED + int-test + main_head 三节点，断言 int-test branch 恰好 1 条 line 且 branches 内部 4 元组唯一）。根因：v0.8.26.x fork 引入 `index==0 && isParentPinned` 触发 + v0.8.25.3 单 commit 也画线两者叠加产生 corner case。修复后真 fork / merge stitch 场景不回归（forkSha 与 branchSha 不重合时不触发跳过） | [v0.8.30.md](./v0.8.30.md) |
 
 > ⚠️ **v0.8.13**：无 tag 记录，git 历史中无对应 commit。
 
