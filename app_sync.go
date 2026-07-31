@@ -96,7 +96,12 @@ func (a *App) PullRepoByProjectId(args PullRepoByProjectIdArgs) (PullRepoResult,
 
 	if account.Platform == "github" {
 		if gh, ok := a.githubAdapter.(*github.GitHubAdapter); ok {
-			_ = gh.EnsureForkParentRemote(a.ctx, account.GiteaURL, token, project.Owner, project.Name, localPath)
+			// v0.8.33+ 移除 EnsureForkParentRemote 调用：原行为会拉 fork parent
+			// （esengine/DeepSeek-Reasonix 等）所有 refs/heads/* 含 23 个 dependabot
+			// PR branch，让 50e77137 这类上游 bot commit 混进用户 fork 仓库的
+			// git graph（maxLane 从 14 涨到 15、出现非用户工作的 commit 行）。
+			// 现在设计原则：只同步当前账号仓库基本信息，不关心 fork 源信息。
+			_ = gh
 		}
 	}
 
