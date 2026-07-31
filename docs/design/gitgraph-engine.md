@@ -1,6 +1,9 @@
-# GitGraph 布局算法：GitLens GKC 移植 + vscode-git-graph 复刻对照
+# GitGraph 布局算法：vscode-office 1:1 移植（v0.8.36 起）+ GitLens 历史对照
 
-> **生效版本**：v0.8.25 起（master commit `54d1850`）
+> **生效版本**：v0.8.36 起（master commit `98df580`）
+> **历史版本**：v0.8.25 起（master commit `54d1850`）首次引入 GitLens GKC 算法
+> **当前生效入口**：`BuildGraphOffice`（`app/git/graph/layout_office.go`）
+> **历史 reference 入口**：`BuildGraphGitlens`（`app/git/graph/layout_gitlens.go`，v0.8.36 起保留为 dead code，便于回退）
 > **前序文档**：[./06-gitgraph.md](./06-gitgraph.md)（高层设计/数据流/前端渲染）｜[./gitgraph-engine-history.md](./gitgraph-engine-history.md)（四阶段算法演进 + 5 个具体 bug fix 经历）
 > **目标读者**：要复用本项目 Graph 算法的 AI / 工程师、需要理解 lane 分配与 stitch 渲染的代码维护者
 
@@ -388,3 +391,104 @@ merge edge 颜色从 `colOf[parent] % VSCODE_COLORS.length` 取（**parent 色�
 | v0.8.25 | 引入 GitLens GKC 算法 Go 移植 | `5caa347` ~ `1bc9fbc` |
 | v0.8.25.x | merge edge 颜色 / fork 漏 stitch / pinned 汇入不释放 等 5 bug 修 | `1acdfcb` ~ `64499be` |
 | v0.8.26.x | lane 0/1/2 红绿冲突 → 玫红换草绿再换亮橙 | `1075a95` ~ `07f3fb6` |
+| v0.8.36 | **算法对标从 vscode-gitlens 切到 vscode-office**：`BuildGraphOffice` 1:1 移植 `layoutEngine.ts` Branch/Vertex/Line 范式，`BuildGraphGitlens` 降级为 dead code 保留 | `98df580` |
+| v0.8.37（计划） | 前端 UI 复刻 vscode-office 视觉：去掉 shadow 双层 + ref badge 走 CSS var 染色 + dot 半径 4/HEAD 6 + 保留手风琴 | — |
+
+---
+
+## 10. v0.8.36 算法对标切换：vscode-gitlens → vscode-office
+
+### 10.1 用户原意
+
+CLAUDE.md 长期记录 v0.8.25~v0.8.35 一直在对标 `vscode-gitlens`（`packages/plus/commit-graph/src/engine/layout.ts` GKC 算法）。但用户的真实对标意愿是 `vscode-office`（`src/react/view/gitHistory/graph/layoutEngine.ts` 455 行 Branch/Vertex/Line 范式）—— 之前的 gitgraph-engine.md 文档与现实工作目标不一致。v0.8.36 做算法对标切换（`98df580`），前置章节 §1-9 保留为「GitLens 移植历史 reference」，本节是当前生效算法的入口。
+
+### 10.2 范式对比
+
+| 维度 | vscode-gitlens（v0.8.25-v0.8.35） | vscode-office（v0.8.36 起） |
+|---|---|---|
+| **lane 数据结构** | `state.columnsUsed: Set<int>` + `state.columnsToFreeWhenFound: Map<SHA, int[]>` | `vertex.connections: Map<int, Connection>` + `vertex.nextX` 单调游标 |
+| **column 分配** | `state.claimNextColumn()` 从 `pinnedColumnCount` 起找最低空闲 | `vertex.getNextPoint()` 沿用 office 简单 `nextX++` 累加 |
+| **颜色回收** | `availableColours[i] > startAt` 简单判断 | `branch.end` 设定后 + new branch 重新 `getAvailableColour()` 复用 |
+| **merge stitch** | `visitPath` 状态机 + `mergeSha` 锚点 | `determinePath` 沿 column 找 `getPointConnectingTo` 命中点斜切 |
+| **代码规模** | 871 行 Go（layout_gitlens.go） | 479 行 Go（layout_office.go）/ 455 行 TS（layoutEngine.ts） |
+| **范式归类** | GitLens 桌面端的 reference graph 风格 | vscode-git-graph v1.30.0 原版（layoutEngine.ts 注释反复写 `graph.ts:50-60` 等行号对齐） |
+
+vscode-office 跟 vscode-git-graph v1.30.0 原版几乎一致，跟 vscode-gitlens 范式有本质差异。**两者不是同一类算法** —— 切对标仓库是切换实现范式，不是同范式下换个 implementation。
+
+### 10.3 vscode-office 核心算法
+
+**三件类**（`app/git/graph/layout_office.go`）：
+
+- `officeVertex`（对齐 `Vertex` class）：id + isStash + x + children + parents + nextParent + onBranch + isCommitted + isCurrent + nextX + connections[]
+- `officeBranch`（对齐 `Branch` class）：colour + lines[] + end + numUncommitted
+- `officeGraphEngine`（对齐 `GraphEngine` class）：vertices[] + branches[] + availableColours[] + onCurrentBranch[]
+
+**三件算法**（`layoutEngine.ts:267-432` 1:1 复刻）：
+
+- `compute(commits, commitHead, config, ...)`：主入口，建图 + 跑主循环 + 出 `maxX`
+- `determinePath(startAt)`：两分支——
+  - **merge stitch**（line 373-393）：merge vertex 已挂 branch 且 parent 也挂 branch 时，沿 column 找 `getPointConnectingTo` 命中点斜切
+  - **new branch**（line 394-422）：开新 Branch + 沿 parent 走到底
+- `getAvailableColour(startAt)`：回收 `availableColours[i] < startAt` 的颜色槽位
+
+**主循环**（layoutEngine.ts:331-338 1:1 复刻）：
+
+```go
+for i := 0; i < len(vertices); {
+    if vertices[i].getNextParent() != nil || vertices[i].isNotOnBranch() {
+        // 死循环保护：Go 版特有，TS 原版主循环假设 commit 时序倒序
+        // 乱序输入下 vertex 不会消费 nextParent 也未挂 branch → 主循环死循环
+        // Go 没有 TS 栈溢出兜底，必须显式判定进度
+        prevNextParent := vertices[i].getNextParent()
+        prevOnBranch := vertices[i].getBranch()
+        e.determinePath(i)
+        advanced := vertices[i].getNextParent() != prevNextParent ||
+            vertices[i].getBranch() != prevOnBranch
+        if !advanced {
+            i++ // 跳过这个 vertex（office 原版假设下不会触发；保护用）
+        }
+    } else {
+        i++
+    }
+}
+```
+
+### 10.4 DTO 转换层（同文件内）
+
+跟 `BuildGraphGitlens` 一样输出 `GraphResult`：
+
+- `Nodes[i].Lane = officeVertex.x`，`Color = Lane % 16`（对齐 Gitea Color16 + 现有 gitlens 路由）
+- `Edges[i].Color` 跟 gitlens 现行一致（merge 边用 parent 色），`Type = EdgeNormal/Branch/Merge` 由 lane 差决定
+- `Branches[i].Lines[i].IsCommitted = (lineIndex >= numUncommitted)`（office `Branch.addLine` 维护规则 line 89-93）
+- `MaxLane = max(vertex.x)`，`MaxColor = 16`，`Truncated` 透传
+
+### 10.5 关键不变量（vscode-office 视角）
+
+跟 §5.1 既有 GitLens 不变量**都等价**（同一 DTO 协议），但 root cause 不一样：
+
+- **每行必有 commit**：跟 gitlens 一样，靠 `git.Log` 倒序保证
+- **first-parent 链不打断**：office 走 `vertex.nextX` 单调（不释放），gitlens 走 `claimNextColumn` 复用最低空位 —— **前者偏左对齐（新 branch 立即占最低空位），后者偏右平均分配（pinned trunk 占定 lane 0 后剩下的按出现顺序分配）**
+- **merge edge 颜色 = parent 色**：跟 gitlens 修过的 v0.8.26.x fix 一致
+- **pinned head 兼容**：office 主算法只用 `commits[0].SHA` 当 head，但 `pinnedHeadShas` 入参保留以便 adapter 一键切换
+
+### 10.6 已知风险（v0.8.36 实测）
+
+1. **深历史仓库 lane 分布差异**：office 走 `vertex.nextX` 单调游标，gitlens 走 `columnsUsed` Set 真正回收。深历史仓库（>300 commit 旁支密集）实测会有 lane 差异——office 偏左（左对齐新 branch），gitlens 偏右平均分配。需要用户真仓库验证是否符合预期。
+2. **color 维度**：office 走 `branch.getColour() % 16`（branch end 后的颜色回收），gitlens 走 `colOf[sha] % 16`（SHA → column 映射）。两条路径在常见 DAG 上等价，但极端拓扑（如 16+ 同时活着的 branch）会有细微差异。
+3. **乱序输入死循环保护**：实测真实 git log 倒序不会触发。但子代理测试中构造乱序 fixture 时发现 office 主循环潜在死循环——已加 `prevNextParent` / `prevOnBranch` 进度判定兜底。
+
+### 10.7 不要做的事
+
+- **不要**修改 `layout_gitlens.go` 任何一行（已 v0.8.36 标记为 dead code，便于回退）
+- **不要**修改 `types.go` 任何一行（DTO `GraphResult` / `GraphBranch` / `GraphBranchLine` 是 gitlens/office 双算法共用契约）
+- **不要**在前端 UI 改动时**顺手**调 office 后端算法（v0.8.37 独立任务）
+- **不要**把「v0.8.25-v0.8.35 GitLens 移植」细节从 §1-9 删除（保留为历史 reference，便于未来 AI/工程师理解双算法演进）
+
+### 10.8 后续 commit 计划
+
+| 版本 | 任务 | 范围 |
+|---|---|---|
+| v0.8.37 | 前端 UI 复刻 vscode-office 视觉 | `vscode-render.ts` 去 shadow 双层 + `TimelineNewView.vue` ref badge CSS var 染色 + dot 半径 4/HEAD 6 + 保留手风琴 |
+| v0.8.38 | 清理 `layout_gitlens.go` 871 行 dead code | 用户确认后删 |
+
+详细 release note 见 [../releases/v0.8.36.md](../releases/v0.8.36.md)。
