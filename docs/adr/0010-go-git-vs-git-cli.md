@@ -69,7 +69,7 @@ go-git 的**优势**：
 | Gitea `CloneRepo` | **go-git PlainClone**（**未切到 git CLI，**待迁移） | `app/git/clone.go:240` |
 | GitHub `CloneRepo` (走 `UseGitHubCLI=true`) | `gh repo clone -- --filter=blob:none --no-checkout --no-single-branch` | `app/git/clone.go:184` → `app/git/native.go:CloneWithFilter` |
 | `FetchRepo` go-git 路径 | `remote.FetchContext` + sideband | `app/git/sync.go:177` |
-| `FetchRepo` gh 路径（**v0.8.32+ 改**） | `git fetch --filter=blob:none` + `GIT_CONFIG_*` env 注入 `http.https://github.com.extraHeader=Authorization: Bearer <token>`（**不再走 gh credential helper**） | `app/git/sync.go:129` → `app/git/native.go:FetchWithFilter` |
+| `FetchRepo` gh 路径（**v0.8.32+ / v0.8.32.1 修订**） | `git fetch --filter=blob:none` + `GIT_CONFIG_*` env 注入 `http.https://github.com.extraHeader=Authorization: Basic base64(x-access-token:<pat>)`（**不再走 gh credential helper**） | `app/git/sync.go:129` → `app/git/native.go:FetchWithFilter` |
 | `LogCommits` / `CountCommits` / 读 HEAD | **go-git** | `app/git/log.go` / `app/git/repo.go` |
 | Graph layout（GitLens GKC 移植） | **go-git** 输入 + 自研 layout | `app/git/graph/layout_gitlens.go` |
 
@@ -83,8 +83,25 @@ go-git 的**优势**：
   - 根因 3：每次 Windows 重新装好 helper 后，credential helper 还要走另一条链路
 - 新方案：env-based git config 注入（git ≥ 2.31 支持 `GIT_CONFIG_COUNT/KEY_n/VALUE_n`）
   - `GIT_CONFIG_KEY_0=http.https://github.com.extraHeader` 限定到 github.com 域（避免 token 泄露给其它 remote）
-  - `GIT_CONFIG_VALUE_0=Authorization: Bearer <token>` 经 env 传入（不进命令行 / stderr 输出，符合 §8.1 鉴权铁律）
+  - `GIT_CONFIG_VALUE_0=Authorization: Basic <base64>` 经 env 传入（不进命令行 / stderr 输出，符合 §8.1 鉴权铁律）
   - fetch 完全自包含（不依赖 gh / sh），clone 仍走 gh repo clone（首次大仓库）
+
+### v0.8.32.1 修订
+
+**fetch 鉴权头从 `Authorization: Bearer` 改为 `Authorization: Basic`**（user 2026-07-31 反馈）：
+
+- 旧方案（v0.8.32）：`GIT_CONFIG_VALUE_0=Authorization: Bearer <pat>`
+  - 根因：v0.8.32 调研时把 GitHub REST API 的 `Bearer` 鉴权方式"凭印象"写到了 Git Smart HTTP 协议上
+  - 现象：GitHub 私有仓库 fetch 永远返 `remote: invalid credentials` / `Authentication failed for`
+  - 验证盲点：v0.8.32 smoke test 只跑 `ls-remote` 公开仓库（不传 token），未覆盖私有仓库带 token fetch
+- 新方案：`GIT_CONFIG_VALUE_0=Authorization: Basic base64(x-access-token:<pat>)`
+  - GitHub Smart HTTP 协议层（git fetch 走 `git-receive-pack` / `git-upload-pack` over HTTPS）要求 Basic credential
+  - username 固定为 `x-access-token`，password 是 PAT 原文
+  - base64 只是 HTTP Basic 的传输编码，**不是脱敏**——任何能拿到 env 的代码都能还原 token
+- 错误识别 + 人话提示：
+  - `isGitHubAuthFailure(err)` 关键字识别（`remote: invalid credentials` / `Authentication failed for` / `fatal: authentication failed`）
+  - 匹配时返 `ipc.NewGitHubAuthFailed` 引导重连（前端 toast 「账号权限：GitHub 凭证无效...请重新连接...」）
+  - `truncateForHint` 截断 cause 到 200 字符，避免暴露完整 env / 命令行 / 堆栈
 
 **Windows 内嵌 git 携带 remote helper**（v0.8.32+ 同步修复）：
 

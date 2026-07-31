@@ -56,6 +56,7 @@ const (
 	CodeKeychainUnavailable  = "keychain_unavailable"
 	CodeKeychainAccessDenied = "keychain_access_denied"
 	CodeGhNotInstalled       = "gh_not_installed"
+	CodeGitHubAuthFailed     = "github_auth_failed" // v0.8.32
 )
 
 // NewUnauthenticated 401 / token 失效
@@ -157,6 +158,24 @@ func NewGhNotInstalled(cause string) *IpcError {
 		Code:    CodeGhNotInstalled,
 		Message: "系统未安装 GitHub CLI（gh）",
 		Hint:    "请先安装 gh CLI 后再同步 GitHub 仓库",
+		Cause:   cause,
+	}
+}
+
+// NewGitHubAuthFailed GitHub 仓库 fetch 时凭证无效 / 无权限（v0.8.32）
+//
+// 触发场景：
+//   - PAT 过期 / 被撤销
+//   - 当前账号没有该私有仓库的读权限
+//   - 组织仓库要求 SSO 但本机未完成授权
+//
+// cause 仅截断到 200 字符的 git 输出（去掉路径/env/堆栈敏感信息），
+// 不暴露 token、base64 header 或内部环境变量。
+func NewGitHubAuthFailed(cause string) *IpcError {
+	return &IpcError{
+		Code:    CodeGitHubAuthFailed,
+		Message: "GitHub 凭证无效，或当前账号没有读取该仓库的权限",
+		Hint:    "请重新连接 GitHub 账号；私有仓库 token 需要读取权限，组织仓库可能还需要完成 SSO 授权",
 		Cause:   cause,
 	}
 }

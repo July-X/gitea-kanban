@@ -1,10 +1,12 @@
 package git
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
 	"gitea-kanban/app/gitbinary"
+	"gitea-kanban/app/ipc"
 )
 
 // TestFetchRemoteWithFilter_NoCredentialHelperArgs 验证 fetchRemoteWithFilter
@@ -42,9 +44,13 @@ func TestFetchRemoteWithFilter_NoCredentialHelperArgs(t *testing.T) {
 
 // TestFetchRemoteWithFilter_EnvHasExtraHeader 验证 token 非空时 envVars 注入
 // GIT_CONFIG_COUNT / GIT_CONFIG_KEY_0 / GIT_CONFIG_VALUE_0。
+//
+// v0.8.32 关键回归：v0.8.27+ 误用 `Authorization: Bearer <pat>`（REST API 鉴权
+// 方式），导致私有仓库 fetch 永远 401。正确格式是 Git Smart HTTP 要求的
+// `Authorization: Basic base64(x-access-token:<pat>)`。
 func TestFetchRemoteWithFilter_EnvHasExtraHeader(t *testing.T) {
 	const token = "ghp_FakeTestToken_1234567890abcdef"
-	env := buildFetchEnvForTest(token)
+	env := buildGitHubFetchAuthEnv(token)
 
 	if env["GIT_CONFIG_COUNT"] != "1" {
 		t.Errorf("env[GIT_CONFIG_COUNT] 应为 '1', got %q", env["GIT_CONFIG_COUNT"])
@@ -52,9 +58,25 @@ func TestFetchRemoteWithFilter_EnvHasExtraHeader(t *testing.T) {
 	if env["GIT_CONFIG_KEY_0"] != "http.https://github.com.extraHeader" {
 		t.Errorf("env[GIT_CONFIG_KEY_0] 应限定到 github.com 域，避免 token 泄露给其它 host: got %q", env["GIT_CONFIG_KEY_0"])
 	}
-	expectedValue := "Authorization: Bearer " + token
-	if env["GIT_CONFIG_VALUE_0"] != expectedValue {
-		t.Errorf("env[GIT_CONFIG_VALUE_0] 应为 %q, got %q", expectedValue, env["GIT_CONFIG_VALUE_0"])
+	// v0.8.32：必须是 Basic(x-access-token:token)，不是 Bearer
+	header := env["GIT_CONFIG_VALUE_0"]
+	const wantPrefix = "Authorization: Basic "
+	if !strings.HasPrefix(header, wantPrefix) {
+		t.Errorf("env[GIT_CONFIG_VALUE_0] 应以 %q 开头（v0.8.32 改 Basic），got %q", wantPrefix, header)
+	}
+	// 反向断言：v0.8.27+ 误用的 Bearer 不应再出现
+	if strings.HasPrefix(header, "Authorization: Bearer ") {
+		t.Errorf("env[GIT_CONFIG_VALUE_0] 不能再用 Bearer 头（v0.8.32 已改 Basic），got %q", header)
+	}
+	// 解码 base64 部分，断言内容是 'x-access-token:<token>'
+	encoded := strings.TrimPrefix(header, wantPrefix)
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("base64 解码失败（说明构造格式错）：%v, encoded=%q", err, encoded)
+	}
+	wantDecoded := "x-access-token:" + token
+	if string(decoded) != wantDecoded {
+		t.Errorf("base64 解码后应为 %q, got %q", wantDecoded, string(decoded))
 	}
 	// 兼容断言：不注入 GH_TOKEN（fetch 不再依赖 gh）
 	if _, ok := env["GH_TOKEN"]; ok {
@@ -66,10 +88,102 @@ func TestFetchRemoteWithFilter_EnvHasExtraHeader(t *testing.T) {
 //
 // 公开仓库 fetch 无需鉴权——保留纯环境，避免误把空 Authorization 头发给 GitHub。
 func TestFetchRemoteWithFilter_EnvNoToken(t *testing.T) {
-	env := buildFetchEnvForTest("")
+	env := buildGitHubFetchAuthEnv("")
 	for k := range env {
 		if strings.HasPrefix(k, "GIT_CONFIG_") {
 			t.Errorf("token 为空时不应注入任何 GIT_CONFIG_*，got: %s=%q", k, env[k])
+		}
+	}
+}
+
+// TestFetchRemoteWithFilter_EnvTokenTrimmed 验证 token 前后空白会被 trim。
+//
+// 用户从 Gitea Web 复制 PAT 时偶尔会带换行 / 空格，不 trim 会让 base64 编码
+// 出错（base64 不容忍内部空白），fetch 会以 'fatal: bad config' 失败。
+func TestFetchRemoteWithFilter_EnvTokenTrimmed(t *testing.T) {
+	const token = "ghp_TokenNoWhitespace"
+	env := buildGitHubFetchAuthEnv("  \n" + token + "\t\n  ")
+	header := env["GIT_CONFIG_VALUE_0"]
+	encoded := strings.TrimPrefix(header, "Authorization: Basic ")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("trim 后 base64 仍应可解码，got err: %v, encoded=%q", err, encoded)
+	}
+	if string(decoded) != "x-access-token:"+token {
+		t.Errorf("trim 后解码应为 'x-access-token:%s', got %q", token, string(decoded))
+	}
+}
+
+// TestFetchRemoteWithFilter_EnvOnlyWhitespaceToken 验证 token 全空白时当作空 token。
+//
+// 防御：避免 'x-access-token:   ' 被 base64 编码成无意义的空 credential。
+func TestFetchRemoteWithFilter_EnvOnlyWhitespaceToken(t *testing.T) {
+	env := buildGitHubFetchAuthEnv("   \n\t  ")
+	for k := range env {
+		if strings.HasPrefix(k, "GIT_CONFIG_") {
+			t.Errorf("token 全空白时不应注入任何 GIT_CONFIG_*，got: %s=%q", k, env[k])
+		}
+	}
+}
+
+// TestIsGitHubAuthFailure 验证关键字识别 3 个 GitHub 401 文案。
+func TestIsGitHubAuthFailure(t *testing.T) {
+	cases := []struct {
+		name   string
+		errMsg string
+		want   bool
+	}{
+		{"github 401 标准文案", "exit status 128\n输出: remote: invalid credentials\nfatal: Authentication failed for 'https://github.com/...'", true},
+		{"git 包裹后文案", "exit status 128\n输出: fatal: Authentication failed for 'https://github.com/x/y.git/'", true},
+		{"fatal: Authentication failed 小写变体", "fatal: authentication failed for ...", true},
+		{"网络错误（无关）", "exit status 128\n输出: Could not resolve host: github.com", false},
+		{"shallow lock（无关）", "could not lock ... shallow.lock", false},
+		{"nil 错误", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.errMsg != "" {
+				err = &fakeErr{msg: tc.errMsg}
+			}
+			got := isGitHubAuthFailure(err)
+			if got != tc.want {
+				t.Errorf("isGitHubAuthFailure() = %v, want %v (input: %q)", got, tc.want, tc.errMsg)
+			}
+		})
+	}
+}
+
+// fakeErr 是测试用的简单 error 实现，让 isGitHubAuthFailure 走真实 Error() 路径。
+type fakeErr struct{ msg string }
+
+func (e *fakeErr) Error() string { return e.msg }
+
+// TestNewGitHubAuthFailed 验证 IpcError 字段。
+func TestNewGitHubAuthFailed(t *testing.T) {
+	cause := "exit status 128\n输出: remote: invalid credentials"
+	e := ipc.NewGitHubAuthFailed(cause)
+	if e.Code != "github_auth_failed" {
+		t.Errorf("Code 应为 'github_auth_failed', got %q", e.Code)
+	}
+	if e.Message == "" {
+		t.Error("Message 不应为空（前端 user-facing 摘要）")
+	}
+	if e.Hint == "" {
+		t.Error("Hint 不应为空（人话操作建议）")
+	}
+	if e.Cause != cause {
+		t.Errorf("Cause 应透传，got %q want %q", e.Cause, cause)
+	}
+	// 防御：不能把 token / base64 header / env 暴露在 message / hint 里
+	for _, field := range []struct {
+		name, val string
+	}{
+		{"Message", e.Message},
+		{"Hint", e.Hint},
+	} {
+		if strings.Contains(field.val, "ghp_") || strings.Contains(field.val, "Authorization: Basic ") {
+			t.Errorf("%s 不应包含 token 或 base64 header: %q", field.name, field.val)
 		}
 	}
 }
@@ -139,17 +253,6 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
-// buildFetchEnvForTest 镜像 fetchRemoteWithFilter 的 envVars 构造逻辑。
-func buildFetchEnvForTest(token string) map[string]string {
-	env := map[string]string{}
-	if token != "" {
-		env["GIT_CONFIG_COUNT"] = "1"
-		env["GIT_CONFIG_KEY_0"] = "http.https://github.com.extraHeader"
-		env["GIT_CONFIG_VALUE_0"] = "Authorization: Bearer " + token
-	}
-	return env
-}
-
 // TestGitEnvFor_InjectsExecPathForEmbedded 验证 binPath 在内嵌二进制目录时
 // 自动注入 GIT_EXEC_PATH。
 //
@@ -208,9 +311,9 @@ func TestGitEnvFor_NoExecPathForSystemGit(t *testing.T) {
 // TestGitEnvFor_ExtraEnvOverrides 验证 extraEnv 同 key 覆盖基础 env。
 func TestGitEnvFor_ExtraEnvOverrides(t *testing.T) {
 	extra := map[string]string{
-		"GIT_CONFIG_COUNT": "1",
-		"GIT_CONFIG_KEY_0": "http.extraHeader",
-		"GIT_CONFIG_VALUE_0": "Authorization: Bearer fake",
+		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_KEY_0":   "http.extraHeader",
+		"GIT_CONFIG_VALUE_0": "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:fake")),
 	}
 	env := gitbinary.GitEnvFor("/usr/bin/git", extra)
 	// extraEnv 应出现在 env 中（无重复）

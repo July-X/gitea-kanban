@@ -67,6 +67,10 @@ export const IpcErrorCode = {
   /** 系统未安装 GitHub CLI（gh）；同步失败时前端展示引导安装按钮 */
   GH_NOT_INSTALLED: 'gh_not_installed',
 
+  // === v0.8.32 新增：GitHub 仓库刷新时鉴权失败 ===
+  /** GitHub 仓库 fetch 返回 401 / Authentication failed —— PAT 过期、权限不足、组织未授权 SSO */
+  GITHUB_AUTH_FAILED: 'github_auth_failed',
+
 } as const;
 
 export type IpcErrorCodeValue = (typeof IpcErrorCode)[keyof typeof IpcErrorCode];

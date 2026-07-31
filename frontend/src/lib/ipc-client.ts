@@ -98,6 +98,7 @@ const KNOWN_ERROR_CODES = new Set<IpcErrorCodeValue>([
   'keychain_unavailable',
   'keychain_access_denied',
   'gh_not_installed', // v0.7.20
+  'github_auth_failed', // v0.8.32
 ]);
 
 /**错误码 → 中文类别前缀（OVERRIDE §本项目专属规则 #3错误人话） */
@@ -115,6 +116,7 @@ const CODE_CATEGORY: Record<IpcErrorCodeValue, string> = {
   keychain_unavailable: '本机密钥库不可用',
   keychain_access_denied: '本机密钥库拒绝访问',
   gh_not_installed: '环境问题', // v0.7.20
+  github_auth_failed: '账号权限', // v0.8.32
 };
 
 /**错误码 → 是否可恢复（引导用户重试 / 重连） */
@@ -132,6 +134,7 @@ const RECOVERABLE: Record<IpcErrorCodeValue, boolean> = {
   keychain_unavailable: false, //平台问题
   keychain_access_denied: true, //引导用户授权
   gh_not_installed: true, // v0.7.20：安装 gh 后可恢复
+  github_auth_failed: true, // v0.8.32：重连 GitHub 账号后可恢复
 };
 
 /** 把 IpcErrorPayload 转成渲染端 UserFacingError（"人话"层）

@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -222,15 +223,18 @@ func repoIsShallow(localPath string) bool {
 }
 
 func fetchRemoteWithFilter(localPath, remote string, depth int, token string) error {
-	// v0.8.27+：鉴权从「-c credential.helper=!gh auth git-credential」改为
-	// 「GIT_CONFIG_* env 注入 http.extraHeader」。两个根因：
-	//   1. gh credential helper 需要 sh.exe 调用 ! 内部命令——MinGit 单文件布局
-	//      没带 sh.exe，且即使修复也依赖外部 gh CLI；Windows 用户大概率没装
-	//   2. 修好 remote-https helper 后，credential helper 还要走另一条链路，
-	//      整体维护成本高
+	// v0.8.32 鉴权方式修正：GitHub Smart HTTP 不接受 `Authorization: Bearer <pat>`，
+	// 必须使用 Basic credential，username 固定为 `x-access-token`，password 是 PAT 原文。
+	// （Bearer 是 GitHub REST API 的鉴权方式，但 git 的 HTTP transport 走的是 Smart HTTP 协议。）
+	// 走 env-based git config 注入，限定到 http.https://github.com.extraHeader
+	// （不是 http.extraHeader），避免 token 泄露给其它 remote host。
+	//
+	// 历史：
+	//   v0.8.27+ 用 Bearer（误用 REST API 鉴权方式）→ 私有仓库 fetch 返回
+	//   "remote: invalid credentials" / "Authentication failed for https://github.com/..."
+	//   v0.8.32 改 Basic(x-access-token:PAT) → 对齐 git Smart HTTP 协议
 	//
 	// 改用 git ≥ 2.31 支持的 GIT_CONFIG_COUNT/KEY_n/VALUE_n env 注入：
-	//   - 限定 url http.https://github.com.extraHeader（不污染其它 remote 的 token 泄露）
 	//   - token 走 env 不进命令行 / stderr 输出（符合 AGENTS §8.1 鉴权铁律）
 	//   - fetch 不再依赖 gh / sh，CloneRepo 仍走 gh repo clone（首次 clone 大仓库）
 	//
@@ -264,21 +268,18 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 	if err != nil {
 		return fmt.Errorf("gitbinary: %w", err)
 	}
-	envVars := map[string]string{}
-	// GitHub 私有仓库鉴权：env-based git config 注入
-	//   限定 url 是 http.https://github.com.extraHeader 而不是 http.extraHeader
-	//   避免 token 发给所有 remote host（其它 gitea 服务器的请求可能仍走 token 鉴权
-	//   但绝不能让 token 暴露在非 GitHub host 上）。
-	// token 为空时不注入——公开仓库 fetch 无需鉴权。
-	if token != "" {
-		envVars["GIT_CONFIG_COUNT"] = "1"
-		envVars["GIT_CONFIG_KEY_0"] = "http.https://github.com.extraHeader"
-		envVars["GIT_CONFIG_VALUE_0"] = "Authorization: Bearer " + token
-	}
+	envVars := buildGitHubFetchAuthEnv(token)
 	_, err = gitbinary.RunGitWithEnv(ctx, bin, localPath, envVars, args...)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("git fetch 超时（%s）：%w", nativeGitTimeout, ctx.Err())
+		}
+		// v0.8.32：识别 GitHub 401 / 鉴权失败的 stderr 关键字，把"git 内部错误"翻译成
+		// 结构化 IpcError（code=github_auth_failed + 人话 hint）。原本这条错误
+		// 直接 fmt 包出去，前端 normalizeError 走 'internal' 兜底，
+		// 用户看到"应用出错了: <一大坨 git 输出>"。
+		if isGitHubAuthFailure(err) {
+			return ipc.NewGitHubAuthFailed(truncateForHint(err.Error()))
 		}
 		// v0.8.27+ 修复：不再额外拼「输出: %s」——RunGitWithEnv 的 err 已经包含
 		// 「输出: %s」，重复拼接会让用户看到两遍「输出: ...」。
@@ -291,6 +292,72 @@ func fetchRemoteWithFilter(localPath, remote string, depth int, token string) er
 		return fmt.Errorf("fetch 后等待 commit 可用失败: %w", err)
 	}
 	return nil
+}
+
+// buildGitHubFetchAuthEnv 生成 git fetch 鉴权用的 env map（GitHub Smart HTTP Basic credential）。
+//
+// v0.8.32：把 v0.8.27+ 的 Bearer 改成 Basic(x-access-token:PAT)，对齐 git 协议。
+//
+// 行为：
+//   - token 为空（公开仓库）→ 返回空 map，不注入任何 GIT_CONFIG_*
+//   - token 前后空白会被 trim；trim 后为空 → 同样返回空 map
+//   - 非空时注入：
+//     GIT_CONFIG_COUNT=1
+//     GIT_CONFIG_KEY_0=http.https://github.com.extraHeader（限定到 github.com 域，
+//     避免 token 泄露给其它 remote host）
+//     GIT_CONFIG_VALUE_0=Authorization: Basic <base64(x-access-token:token)>
+//
+// token 和 base64 后的 header 都不得写日志 / 错误信息（base64 是编码不是脱敏，
+// 任何能拿到 env 的代码都能还原 token）。
+func buildGitHubFetchAuthEnv(token string) map[string]string {
+	env := map[string]string{}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return env
+	}
+	// GitHub Smart HTTP 要求 Basic credential，username 固定为 x-access-token，
+	// password 是 PAT 原文。base64 只是 HTTP Basic 的传输编码，不是脱敏。
+	cred := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	env["GIT_CONFIG_COUNT"] = "1"
+	env["GIT_CONFIG_KEY_0"] = "http.https://github.com.extraHeader"
+	env["GIT_CONFIG_VALUE_0"] = "Authorization: Basic " + cred
+	return env
+}
+
+// isGitHubAuthFailure 检测 git fetch stderr / err 是否属于 GitHub 鉴权失败。
+//
+// 识别的关键字（与 GitHub Smart HTTP 在 401 时的典型输出对齐）：
+//   - "remote: invalid credentials"（GitHub 标准 401 输出）
+//   - "Authentication failed for"（git 本地 transport 包裹后的通用 401 文案）
+//   - "fatal: Authentication failed"（旧版 git 表述）
+//
+// 返回 true 时，调用方应翻译成 IpcError(github_auth_failed)，
+// 而不是把 git 内部输出原样抛给用户。
+func isGitHubAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, kw := range []string{
+		"remote: invalid credentials",
+		"authentication failed for",
+		"fatal: authentication failed",
+	} {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateForHint 把原始 git 错误截断到 200 字符内（与 ipc.TruncateCause 对齐），
+// 避免 hint / cause 字段把完整 env / 命令行 / 堆栈暴露给前端。
+func truncateForHint(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 200 {
+		return s[:200] + "..."
+	}
+	return s
 }
 
 // waitForCommitsAvailable 轮询 git rev-list --all --count，直到 commit 数 > 0 才返回。
