@@ -3790,26 +3790,20 @@ function refBadgeClass(refType?: string): string {
   align-items: center;
   gap: 0;
   padding: 0;
-  /* VSCode Git Graph .gitRef 默认样式：灰底 + 灰边框 + 圆角 5px */
   border-radius: 5px;
-  border: 1px solid rgba(128, 128, 128, 0.75);
-  font-size: 12px;
+  border: 1px solid var(--row-lane-color, rgba(128, 128, 128, 0.5));
+  font-size: 13px;
   font-weight: 500;
   flex-shrink: 0;
   white-space: nowrap;
-  background-color: rgba(128, 128, 128, 0.15);
-  color: #E6EDF3;
-  /* v0.8.35.2：badge 高度 18 → 22（跟 row 28 对齐，badge 占 79% 行高），font-size 12 → 13，padding 0 6px → 0 8px 0 0（色块贴左缘、右侧 8px 跟后面文字间距，对齐示意图）。 */
+  /* v0.8.35.3：badge 默认就是"hover 后的样子"——lane 色填充背景 + 深色文字，不再有 hover 变体 */
+  background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
+  color: var(--color-shell-main-bg, #0f1115);
+  /* v0.8.35.2：badge 高度 22（跟 row 28 对齐，badge 占 79% 行高）；padding 0 8px 0 0（色块贴左缘、右侧 8px 跟后面文字间距） */
   line-height: 22px;
   height: 22px;
   padding: 0 8px 0 0;
-  background-color: transparent;
-  border-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
   overflow: hidden;
-}
-.ref-badge:hover {
-  background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
-  color: var(--color-shell-main-bg, #0f1115);
 }
 /* 图标容器（VSCode .gitRef > svg）：
  * - 图标背景 = lane 色（--row-lane-color，来自 commit 所在 lane）
@@ -3835,10 +3829,6 @@ function refBadgeClass(refType?: string): string {
   justify-content: center;
 }
 /* dot-hover 时 border 变 lane 色（对齐 VSCode .gitRef.active） */
-.commit-row--dot-active .ref-badge {
-  border-color: var(--row-lane-color);
-}
-
 /* commit-refs 容器：多个 badge 横向排列，按 VSCode 风格放在 subject 前面。*/
 .commit-refs {
   display: inline-flex;
