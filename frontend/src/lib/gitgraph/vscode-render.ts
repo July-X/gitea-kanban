@@ -29,12 +29,17 @@ import type { GraphNodeDto, GraphResultDto } from '@renderer/types/dto';
 // vscode-git-graph config.ts:278 默认值
 export const VSCODE_GRID_X = 16;
 /**
- * v0.8.35.2：行高 24 → 28（+17%），给 ref badge 22px 色块更多垂直呼吸空间，
- * 又不撑爆 commit row 文字基线。用户截图反馈 v0.8.35.1 (badge 18px)
- * 略小，示意图显示色块明显更高——选 28 + badge 22 平衡两者。
+ * v0.8.37：GRID_Y 28 → 24（对齐 vscode-office defaultGrid `{ x: 16, y: 24, offsetX: 8, offsetY: 12 }`，
+ * gitHistory.css:47-50 DEFAULT_GRAPH_GRID）。28 是 v0.8.35.2 给 ref badge 22px 色块
+ * 留垂直呼吸空间引入的，跟 vscode-office 不一致；24 紧凑 row 模型 + 22px badge
+ * 视觉上 badge 略压 row，但跟 office 1:1 对齐更重要。
  */
-export const VSCODE_GRID_Y = 28;
-export const VSCODE_OFFSET_X = 16;
+export const VSCODE_GRID_Y = 24;
+/**
+ * v0.8.37：offsetX 16 → 8（vscode-office offsetX=8）。原 16 是为了"dot 居中在 graph 列中央"，
+ * 但 8 让 dot 更靠左缘，跟 office defaultGraph 1:1 对齐。
+ */
+export const VSCODE_OFFSET_X = 8;
 export const VSCODE_OFFSET_Y = 12;
 export const VSCODE_VERTEX_RADIUS = 4;
 export const VSCODE_EXPAND_Y = 250; // vscode config.ts:278 expandY 默认值
@@ -78,11 +83,10 @@ export interface VscodeSvgPath {
 	colorHex: string;
 	order: number;
 	/**
-	 * 'line' (默认实色, stroke-width=2) 或 'shadow' (半透明描边, stroke-width=4)
-	 * vscode Branch.drawPath (graph.ts:149-159) 每个 path 画 2 遍:
-	 * shadow (暗背景下光晕) + line (实色)。
+	 * v0.8.37：vscode-office 风格去掉 shadow 双层，kind 永远 'line'（保留字段是
+	 * 防止 pathGroups 列表 id 冲突 + 向前兼容旧测试代码）。
 	 */
-	kind?: 'line' | 'shadow';
+	kind?: 'line';
 	/**
 	 * v3.x：isCommitted=false 时该 path 走 #808080 灰色 + stroke-dasharray: 2px（虚线）。
 	 * 对齐 vscode Branch.drawPath (graph.ts:152-155)。
@@ -243,6 +247,13 @@ export function renderGraphVscode(
 	//
 	// v3.x：isCommitted=false 时改走 #808080 + stroke-dasharray='2px'，对齐
 	// vscode Branch.drawPath (graph.ts:152-155)。
+	// v0.8.37：对齐 vscode-office 风格 —— 单层 path（无 shadow 双层）。
+	// vscode-office GraphSvg.tsx 渲染线段只画一遍 stroke-width=2，对齐
+	// office 的 CommitTable 不画"光晕底"（vscode-git-graph Branch.drawPath:149-159
+	// 描边宽 4 + 半透明 + 描 stroke-width=2 实色的双层画法是 vscode-git-graph 风格）。
+	//
+	// 保留 isCommitted 副作用：UNCOMMITTED 段 (isCommitted=false) 走 #808080 + dasharray，
+	// 对齐 vscode-office Branch.drawPath。
 	const addPath = (color: number, dStr: string, order: number, isCommitted: boolean): void => {
 		const baseHex = VSCODE_COLORS[color % VSCODE_COLORS.length] ?? VSCODE_COLORS[0]!;
 		const finalHex = isCommitted ? baseHex : VSCODE_UNCOMMITTED_COLOR;
@@ -252,17 +263,9 @@ export function renderGraphVscode(
 			colorIndex: color,
 			colorHex: finalHex,
 			order,
-			kind: 'shadow',
-			isCommitted,
-			// v3.x：UNCOMMITTED 段 (isCommitted=false) 的 shadow 也带 dasharray，
-			// 保持和 line 一致 —— shadow 是粗描边光晕，半透明背景下视觉上也能看到虚线。
-			dasharray: finalDasharray,
-		});
-		paths.push({
-			d: dStr,
-			colorIndex: color,
-			colorHex: finalHex,
-			order,
+			// v0.8.37：去掉 'shadow' 双层，只剩 'line'（vscode-office 风格）。保留
+			// kind 字段是 TimelineNewView.vue 路径 class 判定的最小侵入方案，避免
+			// 改动模板分支逻辑。
 			kind: 'line',
 			isCommitted,
 			dasharray: finalDasharray,

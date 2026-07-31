@@ -1434,7 +1434,9 @@ interface PathGroup {
   colorClass: string; // 'flow-color-16-N'
   colorHex?: string;
   d: string; // 单条 path 的 d
-  kind?: 'line' | 'shadow'; // vscode Branch.drawPath: shadow (stroke-width=4) + line (stroke-width=2)
+  /** v0.8.37：vscode-office 风格去掉 shadow 双层，pg.kind 永远 'line'。保留字段
+   *  是为向前兼容（vscode-render.ts 仍写 kind）+ 防止 pathGroups 列表 id 冲突。 */
+  kind?: 'line';
   /** v3.x：UNCOMMITTED 触发的灰色段。true 走 lane 色, false 走 #808080 + dasharray。 */
   isCommitted?: boolean;
   /** stroke-dasharray 属性值；isCommitted=false 时固定为 '2px'。 */
@@ -1445,7 +1447,7 @@ const pathGroups = computed<PathGroup[]>(() => {
   const r = svgRender.value;
   if (!r) return [];
   // 保持后端 edge 原始顺序，避免按颜色重排后改变 path 覆盖层级。
-  // 每个 vscode path 拆成 shadow + line 两条 (Branch.drawPath:149-159)
+  // v0.8.37：去掉 shadow 双层拆分（vscode-office 单层 path），透传 line 即可。
   // v3.x：透传 isCommitted / dasharray，让 UNCOMMITTED 灰色虚线段
   return r.paths.map((p) => ({
     id: `structured-${p.kind ?? 'line'}-${p.order}`,
@@ -1712,6 +1714,12 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
     // 误触发。
     const isUncommittedVertex = node.sha === '*';
     const isCurrent = node.isCurrent || isUncommittedVertex;
+    // v0.8.37：对齐 vscode-office GraphSvg.tsx dot 半径（GraphSvg.tsx:65）
+    //   - 普通 commit: r=4
+    //   - HEAD (isCurrent): r=6（空心圆 + stroke-width=2.5）
+    //   - stash: 我们保留 r=4.5（vscode-office 是"外圈 r=5 + 内圈 r=4"双圈，外圈
+    //           在 svgCircleNodes 之外由模板渲染一个外圈 circle 实现）
+    const r = isCurrent ? 6 : (node.isStash ? 4.5 : 4);
     return {
       sha: node.sha,
       shortSha: node.shortSha,
@@ -1720,7 +1728,7 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
       row: node.row,
       cx: node.cx,
       cy: node.cy,
-      r: node.isStash ? 4.5 : 4,
+      r,
       colorHex: node.colorHex,
       isCurrent,
       isStash: node.isStash && !isUncommittedVertex,
@@ -1729,8 +1737,10 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
       refTypes: node.refTypes,
       authorName: node.authorName,
       date: node.date,
+      // v0.8.37：HEAD dot stroke 走 2.5（对齐 vscode-office GraphSvg.tsx:68 HEAD
+      // 描边粗一档），普通 dot 走 1 描边（office 默认）。
       stroke: isCurrent ? node.colorHex : 'rgba(30, 30, 30, 0.75)',
-      strokeWidth: isCurrent ? 2 : 1,
+      strokeWidth: isCurrent ? 2.5 : 1,
       strokeOpacity: isCurrent ? 1 : 0.75,
       // v3.x: 走 vscode-git-graph ancestor-of-HEAD 语义, 不再用 isCurrent
       inHead: inHeadShaSet.value.has(node.sha),
@@ -2588,23 +2598,19 @@ function refBadgeClass(refType?: string): string {
                     class="flow-group"
                     :class="[
                       pg.colorClass,
-                      { 'flow-group--shadow': pg.kind === 'shadow',
-                        /* v0.8.28：path 经过任何 dimmed row（merged PR 链）→ 整条 path 灰化
-                         * (GitLens dimCommitsWithPullRequests 风格) */
-                        'flow-group--dimmed': pathGroupsDimmed.has(pg.id) }]"
+                      /* v0.8.37：去掉 flow-group--shadow 判定（vscode-office 单层 path，
+                        * 渲染端不再接收 shadow 双层，pg.kind 永远是 'line'）。保留
+                        * flow-group--dimmed 灰化判定（GitLens 风格） */
+                      { 'flow-group--dimmed': pathGroupsDimmed.has(pg.id) }]"
                     :data-color="pg.colorIndex"
                   >
                     <path
                       v-if="pg.d"
                       :d="pg.d"
-                      :stroke="pg.kind === 'shadow'
-                        ? 'var(--color-graph-bg, var(--color-shell-main-bg))'
-                        : (pg.colorHex ?? '#888')"
-                      :stroke-width="pg.kind === 'shadow' ? 4 : 2"
-                      :stroke-opacity="pg.kind === 'shadow'
-                        ? (pathGroupsDimmed.has(pg.id) ? 0.18 : 0.75)
-                        : (pathGroupsDimmed.has(pg.id) ? 0.35 : 1)"
-                      :stroke-dasharray="pg.kind === 'shadow' ? undefined : pg.dasharray"
+                      :stroke="pg.colorHex ?? '#888'"
+                      :stroke-width="2"
+                      :stroke-opacity="pathGroupsDimmed.has(pg.id) ? 0.35 : 1"
+                      :stroke-dasharray="pg.dasharray"
                       fill="none"
                       stroke-linecap="round"
                       vector-effect="non-scaling-stroke"
@@ -2622,6 +2628,22 @@ function refBadgeClass(refType?: string): string {
                         @mouseenter="dotEnter($event, c)"
                         @mouseleave="dotLeave"
                       >
+                        <!-- v0.8.37：stash 双圈（vscode-office GraphSvg.tsx:50-60）
+                             - 外圈 r=5 stroke-only + 内圈 r=4 实色
+                             - 顺序：先外圈（避免压住内圈）
+                             - isStash && !isCurrent 触发（HEAD 自带空心大圆，stash 风格被吸收） -->
+                        <circle
+                          v-if="c.isStash && !c.isCurrent"
+                          class="commit-vertex commit-vertex--stash-ring"
+                          :class="{ 'commit-vertex--dimmed': c.isDimmed }"
+                          :cx="c.cx"
+                          :cy="c.cy"
+                          :r="5"
+                          fill="transparent"
+                          :stroke="c.colorHex ?? '#888'"
+                          :stroke-width="1.5"
+                          :stroke-opacity="c.isDimmed ? 0.35 : 0.75"
+                        />
                         <circle
                           class="commit-vertex"
                           :class="{
@@ -2636,7 +2658,7 @@ function refBadgeClass(refType?: string): string {
                           :r="c.r"
                           :fill="c.isCurrent ? 'transparent' : (c.colorHex ?? '#888')"
                           :stroke="c.isCommitted === false ? '#808080' : (c.isCurrent ? (c.colorHex ?? '#888') : 'rgba(30, 30, 30, 0.75)')"
-                          :stroke-width="c.isCurrent ? 2 : 1"
+                          :stroke-width="c.strokeWidth"
                           :stroke-opacity="c.isCurrent ? 1 : (c.isDimmed ? 0.35 : 0.75)"
                           :fill-opacity="c.isDimmed && !c.isCurrent ? 0.35 : 1"
                         >
