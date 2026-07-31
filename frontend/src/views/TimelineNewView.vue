@@ -2762,13 +2762,13 @@ function refBadgeClass(refType?: string): string {
                       >
                         <Tag
                           v-if="r.commit.refTypes?.[idx] === 'tag'"
-                          :size="10"
+                          :size="9"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
                         <GitBranch
                           v-else
-                          :size="10"
+                          :size="9"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
@@ -3811,17 +3811,17 @@ function refBadgeClass(refType?: string): string {
  * dot hover 时通过 .commit-row--dot-active .ref-badge 变 border-color */
 .ref-badge__icon {
   flex: 0 0 auto;
-  /* v0.8.35.2：图标容器 16x16 → 22x22（撑满 badge 高度），margin-right 4 → 6（色块 + 文字间距，示意图色块贴左缘、6px 到文字） */
-  width: 22px;
-  height: 22px;
+  /* v0.8.35.4：图标容器 22x22 → 20x20（-10% 整体缩小），margin-right 6 → 5（按比例缩），stroke-width 1.5 → 1.4（微调让 icon 视觉跟容器缩小匹配） */
+  width: 20px;
+  height: 20px;
   padding: 0;
-  margin-right: 6px;
-  /* 紧贴 badge 左缘 + badge border-radius=5px 衔接：左两圆角 5px、右两圆角 0 */
+  margin-right: 5px;
+  /* 紧贴 badge 左缘 + badge border-radius=5px 衔接：左两圆角 4px、右两圆角 0 */
   border-top-left-radius: 4px;
   border-bottom-left-radius: 4px;
   background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: 1.4;
   fill: none;
   box-sizing: content-box;
   display: inline-flex;
