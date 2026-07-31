@@ -281,6 +281,15 @@ export function renderGraphVscode(
 		// 对齐 GitLens edge 渲染 —— lane 切换在一个行间隙内完成，中间行是纯竖线。
 		// 之前整条线画贝塞尔，斜切被摊到全部行高上（长对角线），与 GitLens
 		// 「先斜后竖 / 先竖后斜」的形态不符。
+		//
+		// v0.8.31 修复记录（已回退）：
+		// 最初尝试用 splitLineByExpandedAt 把跨边界 line 拆为 upper+lower 两段，
+		// 但拆段后两段各自走 pushSplit 导致双重转场 + 端点偏离 dot（断线）。
+		// 正确方案：expandY 偏移只看端点行号，与 lane 无关：
+		//   if (line.y1 > expandedAt) y1 += expandY;
+		//   if (line.y2 > expandedAt) y2 += expandY;
+		// pushSplit 不动：lockedFirst 转场点 sy1+gridY（上端行底）、
+		// sy2-gridY（下端行顶），竖直段天然连续穿过 expandY 空隙。
 		const pushSplit = (
 			sx1: number,
 			sy1: number,
@@ -288,14 +297,13 @@ export function renderGraphVscode(
 			sy2: number,
 			lockedFirst: boolean,
 			isCommitted: boolean,
+			gridY: number,
 		): void => {
 			if (sx1 !== sx2 && Math.abs(sy2 - sy1) > gridY * 1.5) {
 				if (lockedFirst) {
-					// 转场在上端（merge 边 / lane 压缩内线）：斜切段 → 竖直段
 					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy1 + gridY }, lockedFirst, isCommitted });
 					placed.push({ p1: { x: sx2, y: sy1 + gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
 				} else {
-					// 转场在下端（fork 汇入边）：竖直段 → 斜切段
 					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx1, y: sy2 - gridY }, lockedFirst, isCommitted });
 					placed.push({ p1: { x: sx1, y: sy2 - gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
 				}
@@ -308,52 +316,15 @@ export function renderGraphVscode(
 			let y1 = line.y1 * gridY + offsetY;
 			let x2 = line.x2 * gridX + offsetX;
 			let y2 = line.y2 * gridY + offsetY;
-			// v3.x: 缺省视作已提交（Go 端老 DTO 没有 isCommitted 字段，fallback 分支
-			// edgesToFallbackBranches 也会写 true），与 vscode 默认行为一致。
 			const isCommitted = line.isCommitted !== false;
-
-			// expandAt 处理: 展开 commit 详情时,下方所有 line 自动"延伸"
-			// (vscode Branch.draw:85-101)
+			// v0.8.31 正确修复：expandY 偏移只看端点行号，与 lane 无关。
+			// pushSplit 的 lockedFirst 转场点（sy1+gridY / sy2-gridY）天然
+			// 处理跨边界 lane 切换，竖直段连续穿过 expandY 空隙，无断线。
 			if (expandedAt !== null && expandedAt >= 0) {
-				if (line.y1 > expandedAt) {
-					y1 += expandY;
-					y2 += expandY;
-				} else if (line.y2 > expandedAt) {
-					if (x1 === x2) {
-						// 垂直线 - 终点延伸
-						y2 += expandY;
-					} else {
-						// 跨 lane - 锁定方向延伸
-						if (line.lockedFirst) {
-							// 转场在 p1 端:保持原转场,再延伸到 p2 端
-							placed.push({
-								p1: { x: x1, y: y1 },
-								p2: { x: x2, y: y2 },
-								lockedFirst: line.lockedFirst,
-								isCommitted,
-							});
-							placed.push({
-								p1: { x: x2, y: y1 + gridY },
-								p2: { x: x2, y: y2 + expandY },
-								lockedFirst: line.lockedFirst,
-								isCommitted,
-							});
-							continue;
-						} else {
-							// 转场在 p2 端:先延伸到 p2 上方,再做转场
-							placed.push({
-								p1: { x: x1, y: y1 },
-								p2: { x: x1, y: y2 - gridY + expandY },
-								lockedFirst: line.lockedFirst,
-								isCommitted,
-							});
-							y1 += expandY;
-							y2 += expandY;
-						}
-					}
-				}
+				if (line.y1 > expandedAt) y1 += expandY;
+				if (line.y2 > expandedAt) y2 += expandY;
 			}
-			pushSplit(x1, y1, x2, y2, line.lockedFirst, isCommitted);
+			pushSplit(x1, y1, x2, y2, line.lockedFirst, isCommitted, gridY);
 		}
 
 		// 2) 简化共线中间点 (vscode Branch.draw:106-116)

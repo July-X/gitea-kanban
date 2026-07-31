@@ -24,9 +24,12 @@ import {
   commitsGitgraphLines,
   commitsGitgraphCloneRepo,
   commitsGitgraphPull,
+  pullsList,
   getIpcClient,
 } from '@renderer/lib/ipc-client';
 import { GitSyncProgressEvent } from '@renderer/types/sync-progress';
+import type { GraphResultDto, PullDto } from '@renderer/types/dto';
+import { dimNonMainReachableCommits, EMPTY_DIMMED_SET } from '@renderer/lib/graph-dimmed';
 // v0.4.0：删除 deepenRepo 「加载更多」 import + 调用（GitHub 仓库 UI 与 Gitea 对齐，
 //         「加载更多」按钮 + 滚动监听整段移除；commit ba0b41c 一次性收口）
 import EmptyState from '@renderer/components/EmptyState.vue';
@@ -38,7 +41,6 @@ import { showToast } from '@renderer/lib/toast';
 import { buildGhInstallToastError } from '@renderer/lib/github-cli-guide';
 
 import { useGlobalLoadingStore } from '@renderer/stores/global-loading';
-import type { GraphResultDto } from '@renderer/types/dto';
 import {
   renderGraphVscode,
   VSCODE_EXPAND_Y,
@@ -105,6 +107,20 @@ const localExhausted = ref(false);
 const deepenInProgress = ref(false);
 /** 等待 deepen 完成的重试定时器（避免内存泄漏） */
 let deepenRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * v0.8.28：已合并 PR 列表（merged pull request）。
+ * loadGraph 完成后**非阻塞**后台拉一次（state='closed'），仅取 merged=true，
+ * 用于驱动 GitLens 风格的"已合并分支 commit 行灰化"。
+ *
+ * 设计权衡：
+ *   - 不强依赖 pulls store —— TimelineNewView 应独立可用，不强制要求 user 先访问 Merges tab
+ *   - 一次拉一页（limit=100 覆盖绝大多数仓库），hasMore 时不循环（少 merged PR 仓库一般页够用）
+ *   - 错误时静默吃掉（merged 灰化是视觉特性，不应阻塞 / 报错）
+ *   - 切换 repo 时通过 watch(activeProjectId) 触发清空 + 重拉
+ */
+const mergedPulls = ref<PullDto[]>([]);
+let mergedPullsAbortController: AbortController | null = null;
 
 // ============================================================
 // v3.x 提交搜索（复刻 vscode-git-graph Find Widget）
@@ -969,6 +985,12 @@ async function loadGraph(_offset = 0): Promise<void> {
 
     expandedSha.value = null;
 
+    // v0.8.28：后台非阻塞拉取已合并 PR（驱动 GitLens 灰化效果）。
+    // - 不 await：拉取过程不影响 graph 主流程（遵守 §14.3 非阻塞铁律）
+    // - 切换 repo 时旧请求被 AbortController 取消（避免 stale data 覆盖新仓库）
+    // - 错误静默：灰化是视觉特效，不应阻塞 / 上报错误
+    void fetchMergedPullsAsync(activeProjectId.value);
+
     // v0.8.x 已删除 prefetch，不再批量预加载 commit 详情。
     // 触发条件：用户点开具体的 commit 时，才按需调 commitsGet。
     // 好处：消除首屏报错噪声（"object not found" 因为 commit 对象本地没有）。
@@ -1024,6 +1046,45 @@ async function loadGraph(_offset = 0): Promise<void> {
  *   - 用户继续从原有视线位置往下翻即可
  *   - 保留 400ms 冷却时间避免 IntersectionObserver 链式触发
  */
+
+/**
+ * v0.8.28：后台非阻塞拉取已合并 PR（GitLens 灰化效果的输入）。
+ *
+ * - 取消旧 repo 的旧请求（避免 stale data 覆盖新仓库）
+ * - 错误静默：灰化是视觉特效，不应阻塞 / 上报
+ * - hasMore=true 时不循环（单页够常见仓库用；后续可按用户统计扩展）
+ *
+ * 拉去频率上限：loadGraph 调用一次就拉一次；切换 repo 时旧请求 abort。
+ */
+async function fetchMergedPullsAsync(projectId: string | null): Promise<void> {
+  if (!projectId) {
+    mergedPulls.value = [];
+    return;
+  }
+  // 取消旧请求（如果还有）
+  if (mergedPullsAbortController) {
+    mergedPullsAbortController.abort();
+  }
+  const ac = new AbortController();
+  mergedPullsAbortController = ac;
+  try {
+    // state='closed' 覆盖 merged+closed-unmerged 两类，过滤由 dimMergedPullCommits 内部 .merged 二次处理
+    const resp = (await pullsList({
+      projectId,
+      state: 'closed',
+      limit: 100,
+      page: 1,
+    })) as { items: PullDto[] };
+    if (ac.signal.aborted) return; // 用户已切到别的 repo，丢弃
+    mergedPulls.value = resp.items;
+  } catch {
+    // 静默吞掉（merged 灰化是视觉特效，不能让 graph 报错）
+    if (!ac.signal.aborted) {
+      mergedPulls.value = [];
+    }
+  }
+}
+
 async function loadMoreGraph(): Promise<void> {
   if (loadingMore.value || allLoaded.value || !graphDto.value) return;
   // v0.7.4：冷却时间防抖，避免链式触发
@@ -1581,6 +1642,11 @@ interface SvgCircleNode {
    * 从 HEAD 沿 parents 走一遍算出祖先集合,所有 visited 节点标 true。
    */
   inHead?: boolean;
+  /**
+   * v0.8.28：节点是否属于已 merged PR 链（GitLens 风格灰化效果）。
+   * true 时该节点 + 经过的 row 视觉降 opacity，与 GitLens/Gitea web 对齐。
+   */
+  isDimmed?: boolean;
 }
 
 function dotTitle(subject: string, refs?: string[], refTypes?: string[]): string {
@@ -1668,8 +1734,98 @@ const svgCircleNodes = computed<SvgCircleNode[]>(() => {
       strokeOpacity: isCurrent ? 1 : 0.75,
       // v3.x: 走 vscode-git-graph ancestor-of-HEAD 语义, 不再用 isCurrent
       inHead: inHeadShaSet.value.has(node.sha),
+      // v0.8.28：GitLens 风格"已合并分支灰化" —— 节点是否属于已 merged PR 链
+      // (dimMed mergedShaSet 见下方 computed)
+      isDimmed: dimmedShaSet.value.has(node.sha),
     };
   });
+});
+
+/**
+ * v0.8.28：dimmed SHA 集合（GitLens 风格 "已合并分支灰化" 视觉特性）。
+ *
+ * 由 graphDto + mergedPulls 派生：
+ *   - graphDto 提供完整 DAG (sha → parents) + refs（含 main/master 的 trunk head）
+ *   - mergedPulls 由后台 fetchMergedPullsAsync 异步拉取，loadGraph 完成后非阻塞触发
+ *
+ * 算法见 frontend/src/lib/graph-dimmed.ts:
+ *   - main trunk 祖先集合（用于 BFS 截断）
+ *   - 每个 merged PR：head.sha 出发 first-parent BFS，遇 main trunk 上 commit 停止
+ *
+ * 性能：
+ *   - graphDto 变化（loadMore 重拉）→ 重算（O(N + M·D)）
+ *   - mergedPulls 后台拉到位 → 自动重算（Vue computed 响应式依赖）
+ *   - loadMore 间隔默认 400ms + INITIAL_GRAPH_LIMIT 300 +25%/重算，硬件不重要
+ *
+ * EMPTY_DIMMED_SET fallback 防止 graphDto 为空时 has() 返回 undefined 误判。
+ */
+const dimmedShaSet = computed<ReadonlySet<string>>(() => {
+  const dto = graphDto.value;
+  if (!dto) return EMPTY_DIMMED_SET;
+  return dimNonMainReachableCommits(dto.nodes);
+});
+
+/**
+ * v0.8.28：dimmed row 集合（派生自 dimmedShaSet，简化 path 灰化判断）。
+ * 拿到每个 sha → row 的索引，dimmed sha 的 row 集合。
+ * path 解析后若 y 坐标落在 dimmed row pixel 区间内 → 该 path 走 dimmed opacity。
+ */
+const dimmedRowSet = computed<Set<number>>(() => {
+  const dto = graphDto.value;
+  const set = dimmedShaSet.value;
+  if (!dto || set.size === 0) return new Set();
+  const rows = new Set<number>();
+  for (const n of dto.nodes) {
+    if (set.has(n.sha)) rows.add(n.row);
+  }
+  return rows;
+});
+
+/**
+ * v0.8.28：判断某条 path d 字符串的覆盖 row 区间内是否有任何 dimmed row。
+ * 实现：解析 path d，提取所有坐标 (x,y)，y 单位是像素，需要换算 row = round(y / gridY)。
+ * 注意 gridY 可能被 dynamicGridY 覆盖（行高自适应），这里默认用 VSCODE_GRID_Y。
+ *
+ * 边界：path 在 row k 与 row k+1 之间斜切时，解析出的 y 可能落在边缘像素，round 仍然能命中其一。
+ */
+function pathCoveredRows(d: string, gridY: number): Set<number> {
+  const rows = new Set<number>();
+  // 解析所有数字（包括 'L 12 24'、'C 12 24 12 48 32 48'）
+  const coords = d.match(/-?\d+(?:\.\d+)?/g);
+  if (!coords) return rows;
+  for (let i = 0; i < coords.length - 1; i += 2) {
+    const xStr = coords[i];
+    const yStr = coords[i + 1];
+    if (xStr === undefined || yStr === undefined) continue;
+    const y = parseFloat(yStr);
+    if (!Number.isFinite(y)) continue;
+    // 截断到 [0, maxRows] 内
+    const row = Math.round(y / gridY);
+    if (row >= 0) rows.add(row);
+  }
+  return rows;
+}
+
+const pathGroupsDimmed = computed<Set<string>>(() => {
+  // 返回一组 path id（pattern "structured-{kind}-{order}"），对应 pathGroups 里的 id
+  // 有 dimmed row 的 path。渲染时按 id Set 判定。
+  const dimmedRows = dimmedRowSet.value;
+  if (dimmedRows.size === 0) return new Set();
+  const groups = pathGroups.value;
+  const gridY = VSCODE_GRID_Y; // 与 svgRender 同步
+  const ids = new Set<string>();
+  for (const pg of groups) {
+    const rows = pathCoveredRows(pg.d, gridY);
+    let hit = false;
+    for (const r of rows) {
+      if (dimmedRows.has(r)) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) ids.add(pg.id);
+  }
+  return ids;
 });
 
 // ============================================================
@@ -2430,7 +2586,12 @@ function refBadgeClass(refType?: string): string {
                     v-for="pg in pathGroups"
                     :key="pg.id"
                     class="flow-group"
-                    :class="[pg.colorClass, { 'flow-group--shadow': pg.kind === 'shadow' }]"
+                    :class="[
+                      pg.colorClass,
+                      { 'flow-group--shadow': pg.kind === 'shadow',
+                        /* v0.8.28：path 经过任何 dimmed row（merged PR 链）→ 整条 path 灰化
+                         * (GitLens dimCommitsWithPullRequests 风格) */
+                        'flow-group--dimmed': pathGroupsDimmed.has(pg.id) }]"
                     :data-color="pg.colorIndex"
                   >
                     <path
@@ -2440,7 +2601,9 @@ function refBadgeClass(refType?: string): string {
                         ? 'var(--color-graph-bg, var(--color-shell-main-bg))'
                         : (pg.colorHex ?? '#888')"
                       :stroke-width="pg.kind === 'shadow' ? 4 : 2"
-                      :stroke-opacity="pg.kind === 'shadow' ? 0.75 : 1"
+                      :stroke-opacity="pg.kind === 'shadow'
+                        ? (pathGroupsDimmed.has(pg.id) ? 0.18 : 0.75)
+                        : (pathGroupsDimmed.has(pg.id) ? 0.35 : 1)"
                       :stroke-dasharray="pg.kind === 'shadow' ? undefined : pg.dasharray"
                       fill="none"
                       stroke-linecap="round"
@@ -2464,6 +2627,9 @@ function refBadgeClass(refType?: string): string {
                           :class="{
                             'commit-vertex--head': c.isCurrent,
                             'commit-vertex--stash': c.isStash && !c.isCurrent,
+                            /* v0.8.28：已合并 PR 链节点 visual demote
+                             * (GitLens dimCommitsWithPullRequests 风格) */
+                            'commit-vertex--dimmed': c.isDimmed,
                           }"
                           :cx="c.cx"
                           :cy="c.cy"
@@ -2471,7 +2637,8 @@ function refBadgeClass(refType?: string): string {
                           :fill="c.isCurrent ? 'transparent' : (c.colorHex ?? '#888')"
                           :stroke="c.isCommitted === false ? '#808080' : (c.isCurrent ? (c.colorHex ?? '#888') : 'rgba(30, 30, 30, 0.75)')"
                           :stroke-width="c.isCurrent ? 2 : 1"
-                          :stroke-opacity="c.isCurrent ? 1 : 0.75"
+                          :stroke-opacity="c.isCurrent ? 1 : (c.isDimmed ? 0.35 : 0.75)"
+                          :fill-opacity="c.isDimmed && !c.isCurrent ? 0.35 : 1"
                         >
                           <title>{{ c.title }}</title>
                         </circle>
@@ -2554,6 +2721,8 @@ function refBadgeClass(refType?: string): string {
                   'commit-row--search-current': r.commit && searchCurrentSha === r.commit.sha,
                   /* v0.7.5：搜索匹配（非当前选中）的 commit 行 */
                   'commit-row--search-match': r.commit && searchMatchShaSet.has(r.commit.sha) && searchCurrentSha !== r.commit.sha,
+                  /* v0.8.28：已合并 PR 链 commit 行灰化（GitLens 风格） */
+                  'commit-row--dimmed': r.commit && dimmedShaSet.has(r.commit.sha),
                 }"
                 :style="{
                   /* VSCode row model：第一行固定 ROW_H，展开面板作为第二行插入。
@@ -2946,6 +3115,29 @@ function refBadgeClass(refType?: string): string {
 .commit-row--search-current .commit-subject__find-match {
   background-color: color-mix(in srgb, var(--color-warning, #e3b341) 70%, transparent);
   outline-color: color-mix(in srgb, var(--color-warning, #e3b341) 90%, transparent);
+}
+
+/**
+ * v0.8.28：已合并 PR 链 commit 行灰化（GitLens dimCommitsWithPullRequests 风格）
+ *
+ * - 文字降到 ~62% opacity（接近 GitLens 默认 dimming 系数的 0.4～0.65 区间，
+ *   对应整行 #6c6c6c 视觉等价于 vscode-git-graph "faded commit" 渲染）
+ * - ref-badge 与 commit-row col-3/4 同步降（结构用 .commit-row__col 嵌套）
+ * - 行高不变（避免布局抖动）
+ * - 用 opacity 而非 color-mix 简化（行内子元素多，opacity 一次搞定整行），
+ *   与 .commit-row--dot-active 不冲突（后者走 .commit-row__col--graph 局部背景）
+ */
+.commit-row--dimmed,
+.commit-row--dimmed .commit-subject,
+.commit-row--dimmed .commit-time,
+.commit-row--dimmed .commit-author,
+.commit-row--dimmed .commit-short-sha,
+.commit-row--dimmed .ref-badge {
+  opacity: 0.45;
+}
+.commit-row--dimmed .commit-subject--uncommitted {
+  /* UNCOMMITTED 不变（已是未提交状态，不需 dim） */
+  opacity: inherit;
 }
 
 /*

@@ -69,11 +69,11 @@ go-git 的**优势**：
 | Gitea `CloneRepo` | **go-git PlainClone**（**未切到 git CLI，**待迁移） | `app/git/clone.go:240` |
 | GitHub `CloneRepo` (走 `UseGitHubCLI=true`) | `gh repo clone -- --filter=blob:none --no-checkout --no-single-branch` | `app/git/clone.go:184` → `app/git/native.go:CloneWithFilter` |
 | `FetchRepo` go-git 路径 | `remote.FetchContext` + sideband | `app/git/sync.go:177` |
-| `FetchRepo` gh 路径（**v0.8.27+ 改**） | `git fetch --filter=blob:none` + `GIT_CONFIG_*` env 注入 `http.https://github.com.extraHeader=Authorization: Bearer <token>`（**不再走 gh credential helper**） | `app/git/sync.go:129` → `app/git/native.go:FetchWithFilter` |
+| `FetchRepo` gh 路径（**v0.8.32+ 改**） | `git fetch --filter=blob:none` + `GIT_CONFIG_*` env 注入 `http.https://github.com.extraHeader=Authorization: Bearer <token>`（**不再走 gh credential helper**） | `app/git/sync.go:129` → `app/git/native.go:FetchWithFilter` |
 | `LogCommits` / `CountCommits` / 读 HEAD | **go-git** | `app/git/log.go` / `app/git/repo.go` |
 | Graph layout（GitLens GKC 移植） | **go-git** 输入 + 自研 layout | `app/git/graph/layout_gitlens.go` |
 
-### v0.8.27+ 修订
+### v0.8.32+ 修订
 
 **fetch 鉴权从 gh credential helper 改为 env-based extraHeader**（user 2026-07-30 反馈）：
 
@@ -86,7 +86,7 @@ go-git 的**优势**：
   - `GIT_CONFIG_VALUE_0=Authorization: Bearer <token>` 经 env 传入（不进命令行 / stderr 输出，符合 §8.1 鉴权铁律）
   - fetch 完全自包含（不依赖 gh / sh），clone 仍走 gh repo clone（首次大仓库）
 
-**Windows 内嵌 git 携带 remote helper**（v0.8.27+ 同步修复）：
+**Windows 内嵌 git 携带 remote helper**（v0.8.32+ 同步修复）：
 
 - 旧现象：Windows 用户切到 GitHub 数据源后点刷新，fetch 报 `git: 'remote-https' is not a git command` / `fatal: remote helper 'https' aborted session`
 - 根因：内嵌 `gk-git-2.55.0-windows-amd64.exe` 是 MinGit 提取的 `cmd/git.exe` 单文件，不带 `git-remote-https.exe` / `git-remote-http.exe` 等 remote helper，也不带 `libcurl` / `libssl` 等 DLL 依赖

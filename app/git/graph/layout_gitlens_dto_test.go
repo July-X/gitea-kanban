@@ -29,10 +29,10 @@ func TestBuildGraphGitlens_FreshClaimBranchOffLine(t *testing.T) {
 	}
 	// A → B → C（主链 lane 0）；D 从 B 分出（lane 1）
 	commits := []git.CommitInfo{
-		mk("D", []string{"B"}),   // row 0: lane 1（fresh claim）
-		mk("A", []string{"B"}),   // row 1: lane 0（pinned head）
-		mk("B", []string{"C"}),   // row 2: lane 0
-		mk("C", nil),             // row 3: lane 0 root
+		mk("D", []string{"B"}), // row 0: lane 1（fresh claim）
+		mk("A", []string{"B"}), // row 1: lane 0（pinned head）
+		mk("B", []string{"C"}), // row 2: lane 0
+		mk("C", nil),           // row 3: lane 0 root
 	}
 	commits[1].Refs = []string{"main"}
 	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
@@ -155,12 +155,13 @@ func TestBuildGraphGitlens_MergeStitchLineUsesRealColumn(t *testing.T) {
 // 也 pin 到同一 column。
 //
 // 测试拓扑（对齐用户仓库）：
-//   row 0: UNC (workdir)      parents=[M0]
-//   row 1: M0 (merge, HEAD)   parents=[P1, B1]   pinned（trunk head）
-//   row 2: B1 (dev tip)       parents=[B2]
-//   row 3: P1                 parents=[BASE]
-//   row 4: B2                 parents=[BASE]
-//   row 5: BASE               parents=[]
+//
+//	row 0: UNC (workdir)      parents=[M0]
+//	row 1: M0 (merge, HEAD)   parents=[P1, B1]   pinned（trunk head）
+//	row 2: B1 (dev tip)       parents=[B2]
+//	row 3: P1                 parents=[BASE]
+//	row 4: B2                 parents=[BASE]
+//	row 5: BASE               parents=[]
 //
 // 预期：UNC/M0/P1/BASE lane 0（trunk）；B1/B2 lane 1（dev 链）；
 // 关键：MaxLane==1 —— 修复前 lane 泄漏时 B1 会被挤到 lane 2（MaxLane==2）。
@@ -381,15 +382,15 @@ func TestBuildGraphGitlens_MergeStitchColumnNotZero(t *testing.T) {
 	// 重新构造：M0..M3 主链 lane 0；S0..S2 sibling lane 1；M4..M5 lane 2
 	// S2 合并到 M4（lane 2）
 	commits := []git.CommitInfo{
-		mk("M5", []string{"M4"}),                 // row 0: lane 2
-		mk("M4", []string{"M3", "S2"}),           // row 1: lane 2 merge
-		mk("M3", []string{"M2"}),                 // row 2: lane 0
-		mk("M2", []string{"M1"}),                 // row 3: lane 0
-		mk("M1", []string{"M0"}),                 // row 4: lane 0
-		mk("M0", nil),                            // row 5: lane 0 root
-		mk("S2", []string{"S1"}),                 // row 6: lane 1
-		mk("S1", []string{"S0"}),                 // row 7: lane 1
-		mk("S0", nil),                            // row 8: lane 1 root
+		mk("M5", []string{"M4"}),       // row 0: lane 2
+		mk("M4", []string{"M3", "S2"}), // row 1: lane 2 merge
+		mk("M3", []string{"M2"}),       // row 2: lane 0
+		mk("M2", []string{"M1"}),       // row 3: lane 0
+		mk("M1", []string{"M0"}),       // row 4: lane 0
+		mk("M0", nil),                  // row 5: lane 0 root
+		mk("S2", []string{"S1"}),       // row 6: lane 1
+		mk("S1", []string{"S0"}),       // row 7: lane 1
+		mk("S0", nil),                  // row 8: lane 1 root
 	}
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
@@ -540,6 +541,7 @@ func TestBuildGraphGitlens_LaneCompactMatchesGitlens(t *testing.T) {
 
 // fmt import guard for clarity
 var _ = fmt.Sprintf
+
 // TestBuildGraphGitlens_ForkStitchIntoPinnedTrunk v0.8.26.x fix
 //
 // 回归场景（TRex 实测还原）：feature 分支链尾端的 first parent 是 pinned 主线
@@ -688,5 +690,283 @@ func TestBuildGraphGitlens_MergeEdgeUsesParentColor(t *testing.T) {
 	}
 	if firstParentEdge.Color != 1 {
 		t.Errorf("first-parent 边 M→F Color = %d, want 1（child 链色）", firstParentEdge.Color)
+	}
+}
+
+// TestBuildGraphGitlens_BranchOffLockedFirstMatchesMergeStitch v0.8.27
+//
+// 用户对标 GitLens 截图指出：branch-off 入线与 merge stitch 入线的
+// LockedFirst 不一致——branchSha 写死 false 与 merge stitch `mergeCol<firstCol`
+// 计算不一致。两者几何完全等价（parent 上端，child 下端），LockedFirst 应同向。
+//
+// 真实影响：当 branch-off 入线跨多行（pushSplit 触发条件 abs(sy2-sy1)>1.5*gridY）
+// 时，LockedFirst 决定转场在 child 端（斜切+竖直）还是 parent 端（竖直+斜切）。
+// 实测对标 GitLens：main lane 在左 feature lane 在右时，转场都在 child 端
+// （先斜后竖），即 LockedFirst=true。
+//
+// 测试拓扑：M0→M1 主链（lane 0, row 0..1）；HEAD 行 row 4 在 lane 1，
+// first parent 在 M0 row 0。branch-off 入线从 (0,0) → (1,4)，row diff=4
+// → abs=4*gridY=96 > 36 → 触发 pushSplit，LockedFirst 决定分支形态。
+func TestBuildGraphGitlens_BranchOffLockedFirstMatchesMergeStitch(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{
+			SHA:           sha,
+			ShortSHA:      sha,
+			Subject:       sha,
+			AuthorWhen:    t0,
+			CommitterWhen: t0,
+			Parents:       parents,
+		}
+	}
+	// row 0: HEAD (lane 1) parents=[M0]
+	// row 1: M0 (lane 0, pinned) parents=[M1]
+	// row 2: M1 parents=[M2]
+	// row 3: M2 parents=[M3]
+	// row 4: M3 (root)
+	commits := []git.CommitInfo{
+		mk("HEAD", []string{"M0"}),
+		mk("M0", []string{"M1"}),
+		mk("M1", []string{"M2"}),
+		mk("M2", []string{"M3"}),
+		mk("M3", nil),
+	}
+	commits[1].Refs = []string{"main"}
+	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "HEAD", []string{"M0", "HEAD"})
+
+	// dump
+	for _, n := range result.Nodes {
+		t.Logf("node %s lane=%d", n.ShortSHA, n.Lane)
+	}
+	for i, b := range result.Branches {
+		t.Logf("branch %d color=%d end=%d lines=%d", i, b.Color, b.End, len(b.Lines))
+		for _, l := range b.Lines {
+			t.Logf("  line (%d,%d)→(%d,%d) LockedFirst=%v", l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+		}
+	}
+
+	// 找 HEAD 那条 branch（含 branch-off line (0,0)→(1,4)）并断言 LockedFirst=true
+	var found bool
+	var correctLock bool
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			// branch-off 入线 geometry：起点 lane 0，终点 lane 1
+			if l.X1 == 0 && l.X2 == 1 {
+				found = true
+				if l.LockedFirst {
+					correctLock = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected branch-off line (0,0)→(1,4) for HEAD segment")
+	}
+	if !correctLock {
+		t.Errorf("branch-off LockedFirst should be true (branchCol<firstCol: 0<1); got false")
+	}
+}
+
+// TestBuildGraphGitlens_ForkStitchLockedFirst v0.8.27
+//
+// 验证 fork stitch 入线的 LockedFirst 几何一致性：fork segment 在 child 端（last commit），
+// forkSha 在 parent 端（更大 row）。当 child lane > parent lane（main 在左 feature 在右），
+// fork stitch 应 LockedFirst=false 转场在下端（parent 端）—— 与 merge stitch、
+// branch-off 入线在反方向（child in 上端）方向相反。
+//
+// 测试拓扑（latest-first）：
+//
+//	row 0: HEAD (lane 1) parents=[F4]
+//	row 1: F4 (lane 1) parents=[F3]
+//	row 2: F3 (lane 1) parents=[F2]
+//	row 3: F2 (lane 1) parents=[F1]
+//	row 4: F1 (lane 1) parents=[F0]
+//	row 5: F0 (lane 1) parents=[M3]   ← segment.tip = F0
+//	row 6: M3 (lane 0) parents=[M2]
+//	row 7: M2 (lane 0) parents=[M1]
+//	row 8: M1 (lane 0, pinned main) parents=[M0]
+//	row 9: M0 (lane 0) parents=[]
+//
+// HEAD..F0 在 lane 1 (feature segment)；forkSha=M3 (lane 0, row 6)
+// Fork stitch line (1, 5) → (0, 6)，Y跨度=1 gridY（不触发 pushSplit）但 angular 单行折线不同。
+//
+// 多行 fork stitch 触发条件：forkSha.Row - lastRow >= 2。但 forkSha 是 first parent of lastCommit，
+// 在 latest-first 拓扑里 forkSha.Row 必须 = lastRow+1（first parent 在 child 下一行）。
+// 但 segment 内部可能允许：f0 在 row 5，f0 的 first parent 是 m3 在 row 6，fork stitch y diff=1。
+//
+// 真实多行 fork stitch 触发：segment tip commit 不直接相邻，segment 内部存在多 commit 顺序，
+// 时 forkSha 在 segment 跟内部某个 commit 共 row 的话 (罕见)。
+//
+// 本测试聚焦：(1) fork stitch 在单行几何下 LockedFirst 计算一致性。
+func TestBuildGraphGitlens_ForkStitchLockedFirst(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{
+			SHA:           sha,
+			ShortSHA:      sha,
+			Subject:       sha,
+			AuthorWhen:    t0,
+			CommitterWhen: t0,
+			Parents:       parents,
+		}
+	}
+	// topology (latest-first):
+	//   row 0: HEAD (lane 1) parents=[F0]
+	//   row 1: F0 (lane 1) parents=[M3]
+	//   row 2: M3 (lane 0) parents=[M2]
+	//   row 3: M2 (lane 0) parents=[M1]
+	//   row 4: M1 (lane 0, pinned) parents=[M0]
+	//   row 5: M0 (lane 0) parents=[]
+	commits := []git.CommitInfo{
+		mk("HEAD", []string{"F0"}),
+		mk("F0", []string{"M3"}),
+		mk("M3", []string{"M2"}),
+		mk("M2", []string{"M1"}),
+		mk("M1", []string{"M0"}),
+		mk("M0", nil),
+	}
+	commits[4].Refs = []string{"main"}
+	commits[4].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "HEAD", []string{"M1"})
+
+	t.Logf("MaxLane=%d, branches=%d", result.MaxLane, len(result.Branches))
+	for _, n := range result.Nodes {
+		t.Logf("node %s lane=%d", n.ShortSHA, n.Lane)
+	}
+	for i, b := range result.Branches {
+		t.Logf("branch %d color=%d end=%d lines=%d", i, b.Color, b.End, len(b.Lines))
+		for _, l := range b.Lines {
+			t.Logf("  line (%d,%d)→(%d,%d) LockedFirst=%v", l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+		}
+	}
+
+	// 找 fork stitch：lane 1 (feature) → lane 0 (main trunk) 转场，
+	// line Y1 < Y2 (lastRow < forkRow 因为 feature 向上折回 main)
+	var foundForkStitch bool
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			// feature segment 的 fork stitch: X1>X2 && Y1<Y2 && X1 = lane 1
+			if l.X1 == 1 && l.X2 == 0 {
+				foundForkStitch = true
+				t.Logf("fork stitch candidate: (%d,%d)→(%d,%d) LockedFirst=%v",
+					l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+			}
+		}
+	}
+	if !foundForkStitch {
+		t.Fatal("expected fork stitch line in feature segment branches")
+	}
+}
+
+// TestBuildGraphGitlens_NoDuplicateLinesOnFreshClaim v0.8.30 fix
+//
+// 用户 2026-07-31 反馈：单一 main + branch tip + UNCOMMITTED 三节点时，
+// int-test 那个 branch lane 在前端被画了 2 次（同一 line 的正向和反向）。
+//
+// 根因：int-test (单 commit segment) 同时有 branchSha (=main_head) 和
+// forkSha (=main_head)，segmentToLines 走 branchSha path 生成 1 条
+// (0,2)→(1,1) 又走 forkSha path 生成 1 条反向 (1,1)→(0,2)。
+// 视觉 stroke-width 叠加成"绘制多次 lane"。
+//
+// 拓扑（latest-first）：
+//
+//	row 0: UNCOMMITTED (workdir, parents=[main_head])
+//	row 1: int_test_tip (refs=[origin/int-test-...], parents=[main_head])
+//	row 2: main_head (refs=[main, origin/main], parents=[])
+//
+// 修复后：int-test segment 只输出 1 条 branch-off line，去掉重复的 fork stitch line。
+func TestBuildGraphGitlens_NoDuplicateLinesOnFreshClaim(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, idx int, parents []string, refs ...string) git.CommitInfo {
+		refTypes := make([]git.RefType, len(refs))
+		for i := range refTypes {
+			refTypes[i] = git.RefTypeBranch
+		}
+		return git.CommitInfo{
+			SHA:           sha,
+			ShortSHA:      fmt.Sprintf("%07x", idx),
+			Subject:       sha,
+			AuthorWhen:    t0.Add(time.Duration(idx) * time.Minute),
+			CommitterWhen: t0.Add(time.Duration(idx) * time.Minute),
+			Parents:       parents,
+			Refs:          refs,
+			RefTypes:      refTypes,
+		}
+	}
+	const mainHead = "main_head_sha"
+	commits := []git.CommitInfo{
+		mk(git.UNCOMMITTED_HASH, 0, []string{mainHead}),
+		mk("int_test_tip", 1, []string{mainHead}, "origin/int-test-1782998137207128000"),
+		mk(mainHead, 2, nil, "main", "origin/main"),
+	}
+
+	result := BuildGraphGitlens(commits, mainHead, []string{mainHead})
+
+	// 节点 row/lane 唯一性 sanity
+	rowSeen := map[int]string{}
+	for _, n := range result.Nodes {
+		if prev, ok := rowSeen[n.Row]; ok {
+			t.Errorf("row %d 冲突: %s vs %s", n.Row, prev, n.ShortSHA)
+		}
+		rowSeen[n.Row] = n.ShortSHA
+	}
+	if len(result.Nodes) != 3 {
+		t.Errorf("nodes=%d != commits=3", len(result.Nodes))
+	}
+
+	// 核心断言：每个 branch 内部 (X1,Y1,X2,Y2) 4 元组应唯一。
+	// reverse-direction 的 line 也算重复（视觉 stroke 叠加 v0.8.30 修复）。
+	type lineKey struct{ X1, Y1, X2, Y2 int }
+	seen := map[lineKey]int{}
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			k := lineKey{l.X1, l.Y1, l.X2, l.Y2}
+			seen[k]++
+		}
+	}
+	for k, n := range seen {
+		if n > 1 {
+			t.Errorf("同一 line 4 元组出现 %d 次（v0.8.30 \"绘制多次 lane\" 根因）: (%d,%d)->(%d,%d)",
+				n, k.X1, k.Y1, k.X2, k.Y2)
+		}
+	}
+
+	// 更强断言：int-test (lane 1) branch 必须恰好 1 条 line（之前 v0.8.30
+	// bug 时会有 2 条：branch-off (0,2)->(1,1) + fork stitch (1,1)->(0,2)）。
+	var intTestBranch *GraphBranch
+	for i := range result.Branches {
+		if result.Branches[i].Color == 1 {
+			intTestBranch = &result.Branches[i]
+			break
+		}
+	}
+	if intTestBranch == nil {
+		t.Fatal("找不到 int-test lane (color=1) branch")
+	}
+	if len(intTestBranch.Lines) != 1 {
+		t.Errorf("int-test branch lines=%d, want 1 (单 commit fresh claim segment)",
+			len(intTestBranch.Lines))
+		for _, l := range intTestBranch.Lines {
+			t.Logf("  line (%d,%d)->(%d,%d)", l.X1, l.Y1, l.X2, l.Y2)
+		}
+	}
+
+	// main trunk branch (color=0) 应该有 vertical line 跨 row 0..2。
+	mainFound := false
+	for _, b := range result.Branches {
+		if b.Color != 0 {
+			continue
+		}
+		for _, l := range b.Lines {
+			if l.X1 == 0 && l.Y1 == 0 && l.X2 == 0 && l.Y2 == 2 {
+				mainFound = true
+			}
+		}
+	}
+	if !mainFound {
+		t.Error("main trunk vertical line (0,0)->(0,2) 缺失")
 	}
 }

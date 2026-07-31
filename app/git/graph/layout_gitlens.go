@@ -9,7 +9,9 @@
 //   - commit kind 含 'stash' / 'workdir' / 'commit' / 'merge'；date 用于 stash tie-break
 //
 // 入口契约：
-//   BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult
+//
+//	BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult
+//
 // 输出复用 GraphResult（前端 vscode-render.ts 兼容，DTO 见 types.go）。
 //
 // v0.8.26：layout_vscode.go / layout.go / pickGraphBuilder env 开关全删，
@@ -50,7 +52,7 @@ const (
 // gitlensRowEdge 对齐 GitLens engine/types.ts RowEdges（单条 edge）
 type gitlensRowEdge struct {
 	toSha string
-	kind gitlensEdgeKind
+	kind  gitlensEdgeKind
 }
 
 // gitlensReserverInfo 对齐 layout.ts:11-16 ReserverInfo
@@ -70,11 +72,11 @@ type gitlensSegmentBuilder struct {
 
 // gitlensLaneSegment 对齐 layout.ts LaneSegment（finalizeSegment 输出）
 type gitlensLaneSegment struct {
-	id         string   // tipSha
+	id         string // tipSha
 	tipSha     string
-	forkSha    string   // 空字符串表示 end-of-rows 收尾
+	forkSha    string // 空字符串表示 end-of-rows 收尾
 	mergeSha   string
-	branchSha  string   // v0.8.25.3 新增：branch-off 源 commit sha
+	branchSha  string // v0.8.25.3 新增：branch-off 源 commit sha
 	column     int
 	commitShas []string
 }
@@ -289,9 +291,9 @@ func (s *gitlensLayoutState) assignColumnForRow(row *gitlensGraphRow) int {
 	}
 
 	// 3) ensure segment exists for this column (always create when missing)
-// v0.8.25.2 fix：原版 if isOwnRowFreshClaim 漏了 pinned / own-reservation 路径
-// ——pinned head 不会进 segment，lane 0 上的 pinned head 没有 line 渲染，
-// 导致 main chain 在前端显示成"孤立 commit"。
+	// v0.8.25.2 fix：原版 if isOwnRowFreshClaim 漏了 pinned / own-reservation 路径
+	// ——pinned head 不会进 segment，lane 0 上的 pinned head 没有 line 渲染，
+	// 导致 main chain 在前端显示成"孤立 commit"。
 	if _, ok := s.segmentByColumn[column]; !ok {
 		// v0.8.25.3 fix：新开的 segment 如果当前 row 有 first parent 且 first parent
 		// 不在同一 column，记录 branchSha（branch-off 源 commit sha），后续
@@ -601,13 +603,17 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 		branchRow, branchRowOk := rowOf[seg.branchSha]
 		firstRow, firstRowOk := rowOf[seg.commitShas[0]]
 		if branchRowOk && firstRowOk {
-			// branch-off 线：从 branchSha 行 (X=branchCol) 到 firstRow (X=firstCol)
-			// 方向：Y 从小到大（branchRow 通常 > firstRow，因为 branchSha 是祖先，
-			// 在 latest-first 拓扑序中祖先 row 更大）
+			// v0.8.27 fix：branch-off 入线（HEAD/tip 从某条 lane 分离出来）——
+			// 几何与 merge stitch 完全等价：parent 在上端（branchSha row），
+			// child 在下端（firstCol commit row）。LockedFirst 用 branchCol<firstCol
+			// 计算，与 merge stitch `mergeCol<firstCol` 同语义，与 GitLens 实测一致
+			// （main 在左 feature 在右 → 转场在上端 / child 端 LockedFirst=true）。
+			// v0.8.25.3 写死 false 与 merge stitch 几何相反，已被实测对标修复。
+			lockedFirst := branchCol < firstCol
 			lines = append(lines, GraphBranchLine{
 				X1: branchCol, Y1: branchRow,
 				X2: firstCol, Y2: firstRow,
-				LockedFirst: false,
+				LockedFirst: lockedFirst,
 				IsCommitted: true,
 			})
 		}
@@ -648,26 +654,45 @@ func segmentToLines(seg gitlensLaneSegment, rowOf map[string]int, colOf map[stri
 	// LockedFirst=false：转场在下端 —— 线沿本 lane 竖直下行，在 parent 行上方
 	// 一个行高内斜切到 parent lane（GitLens「先竖后斜」形态）。
 	if seg.forkSha != "" && len(seg.commitShas) > 0 {
-		last := seg.commitShas[len(seg.commitShas)-1]
-		lastRow, okLast := rowOf[last]
-		forkRow, okFork := rowOf[seg.forkSha]
-		if okLast && okFork && forkRow > lastRow {
-			lastCol := seg.column
-			if c, ok := colOf[last]; ok {
-				lastCol = c
+		// v0.8.30 fix：跳过自指 / 重复情况。单 commit segment + forkSha 与
+		// branchSha 双重存在时（int-test 这种 fresh claim：parent=main_head
+		// 同时是 branch-off 源 + fork 汇入目标）会重复画同一坐标的两条反向 line
+		// （branch-off + fork stitch 视觉叠加 stroke 2 倍），导致用户反馈
+		// "绘制多次 lane 的 bug"。
+		//
+		// 跳过条件：
+		//   - forkSha == branchSha（branch-off 起点与 fork 汇入目标重合）
+		//   - forkSha == tipSha（fork 自己）
+		//   - forkSha == tip commit（单 commit segment 时是该 fork 等于 tip commit
+		//     自身任何父项，即 tip = branchSha = forkSha 同时成立）
+		//
+		// 真实场景：fresh claim segment 只该画 1 条 branch-off line，fork stitch
+		// 等真正 merge 入主线时才有意义。
+		isSelfRef := seg.forkSha == seg.branchSha ||
+			seg.forkSha == seg.tipSha ||
+			seg.forkSha == seg.commitShas[0]
+		if !isSelfRef {
+			last := seg.commitShas[len(seg.commitShas)-1]
+			lastRow, okLast := rowOf[last]
+			forkRow, okFork := rowOf[seg.forkSha]
+			if okLast && okFork && forkRow > lastRow {
+				lastCol := seg.column
+				if c, ok := colOf[last]; ok {
+					lastCol = c
+				}
+				forkCol := 0
+				if c, ok := colOf[seg.forkSha]; ok {
+					forkCol = c
+				}
+				lines = append(lines, GraphBranchLine{
+					X1:          lastCol,
+					Y1:          lastRow,
+					X2:          forkCol,
+					Y2:          forkRow,
+					LockedFirst: false,
+					IsCommitted: true,
+				})
 			}
-			forkCol := 0
-			if c, ok := colOf[seg.forkSha]; ok {
-				forkCol = c
-			}
-			lines = append(lines, GraphBranchLine{
-				X1:          lastCol,
-				Y1:          lastRow,
-				X2:          forkCol,
-				Y2:          forkRow,
-				LockedFirst: false,
-				IsCommitted: true,
-			})
 		}
 	}
 
