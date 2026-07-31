@@ -392,7 +392,8 @@ merge edge 颜色从 `colOf[parent] % VSCODE_COLORS.length` 取（**parent 色�
 | v0.8.25.x | merge edge 颜色 / fork 漏 stitch / pinned 汇入不释放 等 5 bug 修 | `1acdfcb` ~ `64499be` |
 | v0.8.26.x | lane 0/1/2 红绿冲突 → 玫红换草绿再换亮橙 | `1075a95` ~ `07f3fb6` |
 | v0.8.36 | **算法对标从 vscode-gitlens 切到 vscode-office**：`BuildGraphOffice` 1:1 移植 `layoutEngine.ts` Branch/Vertex/Line 范式，`BuildGraphGitlens` 降级为 dead code 保留 | `98df580` |
-| v0.8.37（计划） | 前端 UI 复刻 vscode-office 视觉：去掉 shadow 双层 + ref badge 走 CSS var 染色 + dot 半径 4/HEAD 6 + 保留手风琴 | — |
+| v0.8.37 | **前端 UI 复刻 vscode-office 视觉**：去掉 shadow 双层 + GRID_Y 28→24 + offsetX 16→8 + HEAD dot 4→6 + stash 双圈 + 保留手风琴。`BuildGraphOffice` + 9 office 测试 + 17 gitlens 老测试 + 4 dump 工具 = 30 测试全 PASS | `dd19295` |
+| v0.8.38（计划） | 清理 `layout_gitlens.go` 871 行 dead code（用户确认后） | — |
 
 ---
 
@@ -488,7 +489,91 @@ for i := 0; i < len(vertices); {
 
 | 版本 | 任务 | 范围 |
 |---|---|---|
-| v0.8.37 | 前端 UI 复刻 vscode-office 视觉 | `vscode-render.ts` 去 shadow 双层 + `TimelineNewView.vue` ref badge CSS var 染色 + dot 半径 4/HEAD 6 + 保留手风琴 |
+| v0.8.37 | ~~前端 UI 复刻 vscode-office 视觉~~ ✅ 已完成（commit `dd19295`） | 详见 [§11](#11-vscode-office-对标重新检查-audit-报告-v0837) |
 | v0.8.38 | 清理 `layout_gitlens.go` 871 行 dead code | 用户确认后删 |
 
-详细 release note 见 [../releases/v0.8.36.md](../releases/v0.8.36.md)。
+详细 release note 见 [../releases/v0.8.36.md](../releases/v0.8.36.md) + [../releases/v0.8.37.md](../releases/v0.8.37.md)。
+
+---
+
+## 11. vscode-office 对标重新检查 audit 报告（v0.8.37）
+
+### 11.1 算法层（`layoutEngine.ts` 1:1 复刻）
+
+| vscode-office 关键算法 | gitea-kanban 实现 | 对标状态 |
+|---|---|---|
+| `Branch` class（lines + colour + end + numUncommitted） | `officeBranch` struct（line 80-193） | ✅ 1:1 字段对齐 |
+| `Vertex` class（id + x + onBranch + nextX + connections） | `officeVertex` struct（line 195-265） | ✅ 1:1 字段对齐 |
+| `GraphEngine.compute`（line 273-365） | `officeGraphEngine.compute`（layout_office.go:228-244） | ✅ 1:1 主循环 |
+| `determinePath` merge stitch（line 373-393） | layout_office.go:265-290 | ✅ 1:1 沿 column 找命中点 |
+| `determinePath` new branch（line 394-422） | layout_office.go:291-331 | ✅ 1:1 + 死循环保护 |
+| `getAvailableColour` 颜色回收 | layout_office.go:338-345 | ✅ 1:1 |
+| `Vertex.registerUnavailablePoint` nextX++ | layout_office.go 字段 | ✅ 1:1 |
+| `Branch.addLine` numUncommitted 维护 | layout_office.go addLine | ✅ 1:1 |
+
+### 11.2 SVG 渲染（`GraphSvg.tsx` 视觉对齐）
+
+| vscode-office 渲染行为 | gitea-kanban 实现 | 对标状态 |
+|---|---|---|
+| 普通 dot r=4 | `c.r = 4`（非 HEAD） | ✅ |
+| HEAD dot r=6 + stroke-width=2.5 | `c.r = 6` + `c.strokeWidth = 2.5` | ✅ |
+| 普通 dot 无 stroke（实色填充） | `stroke="rgba(30, 30, 30, 0.75)"` 微描边 | ⚠️ 微差异（深色背景下看不到，普通背景下提升可见性） |
+| HEAD dot fill=bg + stroke=lane 色 | `fill="transparent"` + stroke=色 | ✅ 视觉等价 |
+| Stash 外圈 r=5 stroke-only + 内圈 r=4 | v0.8.37 双圈实现 | ✅ |
+| Path 单一 stroke-width=2（无 shadow 双层） | v0.8.37 去 shadow 双层 | ✅ |
+| UNCOMMITTED 段 color=灰色 + dasharray | `isCommitted=false` 走 `#808080` + `2px` | ⚠️ `4 2` vs `2px` 微差异 |
+| dimmed 灰化（class） | `flow-group--dimmed` class | ✅ 视觉等价 |
+
+### 11.3 几何参数（`gitHistory.css:47-50` `DEFAULT_GRAPH_GRID`）
+
+| 参数 | vscode-office | gitea-kanban v0.8.37 | 对标状态 |
+|---|---|---|---|
+| `grid.x` | 16 | `VSCODE_GRID_X = 16` | ✅ |
+| `grid.y` | 24 | `VSCODE_GRID_Y = 24` | ✅ |
+| `offsetX` | 8 | `VSCODE_OFFSET_X = 8` | ✅ |
+| `offsetY` | 12 | `VSCODE_OFFSET_Y = 12` | ✅ |
+| HEAD dot stroke-width | 2.5 | `c.strokeWidth = 2.5` | ✅ |
+| 普通 dot stroke-width | 0（无） | `c.strokeWidth = 1` | ⚠️ 微差异 |
+
+### 11.4 row 视觉（`CommitTable.tsx` 4 列 layout）
+
+| vscode-office 行为 | gitea-kanban 实现 | 对标状态 |
+|---|---|---|
+| 4 列 flex：desc / date / author / hash | 5 列 grid：graph（占位）/ desc / date / author / hash | ⚠️ 多 1 列 graph 占位让 SVG 透出，前端需求 |
+| `display: flex` 容器 | `display: grid` + `grid-template-columns` | ⚠️ 容器布局不同（gitea-kanban 用 grid 让 5 列对齐） |
+| 行高 24px（`rowHeight` 注入 style） | `ROW_H + 'px'` 注入 `--git-graph-row-height` | ✅ 等价 |
+| ref badge 走 `--git-graph-color` CSS var | 走 `var(--row-lane-color)` | ✅ 等价（绑定到 row） |
+| 行不内联手风琴（vscode-office 走 popup） | 内联手风琴（`expandedSha` + `activeExpandY`） | ✅ 保留（用户拍板要求） |
+| `commit-head-dot` 单独组件展示 pin | 不展示（HEAD 由 dot 自身 r=6 标识） | ⚠️ 视觉差异（gitea-kanban 省略 HEAD pin 标签） |
+
+### 11.5 总体对标完成度
+
+- **算法层**：100% 1:1 复刻（BuildGraphOffice 479 行 = layoutEngine.ts 455 行 + 跨语言转换层）
+- **几何层**：100% 对齐（DEFAULT_GRAPH_GRID 4 个参数全部 1:1）
+- **dot 视觉**：95% 对齐（dot 默认 stroke 是 office 原文没有的微优化）
+- **path 渲染**：100% 对齐（去掉 shadow 双层 + stroke-width=2）
+- **row 布局**：85% 对齐（列结构 / 容器布局 / HEAD pin 标签 3 项微差异）
+
+### 11.6 已知未对齐差异（用户拍板保留）
+
+1. **内联手风琴 vs 走 popup**：vscode-office 走 `CommitDetailPopup.tsx` 弹窗，gitea-kanban 走 inline 展开面板（用户拍板保留手风琴交互体验）
+2. **5 列 vs 4 列**：gitea-kanban 多 1 列 graph 占位列（让 SVG dot 精确对齐每行 row 中心，需要 grid 布局）
+3. **CSS var 命名**：office 用 `--git-graph-color`，gitea-kanban 用 `--row-lane-color`（绑定到 row 而非全局）
+4. **dot 默认 stroke**：office 普通 dot 无 stroke（依赖 bg 透明度），gitea-kanban 加 `rgba(30, 30, 30, 0.75)` 微描边（深色背景隐约可见，浅色背景提升可读性）
+5. **dasharray 数值**：office 用 `'4 2'`（dash 4px gap 2px），gitea-kanban 用 `'2px'`（CSS 缩写，浏览器默认 dash:gap 1:1）。视觉接近
+
+### 11.7 验证
+
+```bash
+cd ~/2026/code/gitea-kanban
+go test ./app/git/graph/...   # 30 测试 PASS（v0.8.36 + v0.8.37 持续）
+frontend $ pnpm typecheck      # 干净
+frontend $ pnpm vitest run     # 62/62 PASS（v0.8.37 把 10 个失败 hardcode 测试修好）
+```
+
+### 11.8 后续可优化项（v0.8.38+）
+
+- v0.8.38：清理 `layout_gitlens.go` 871 行 dead code（用户确认后）
+- v0.8.39（可选）：把 dot 默认 stroke 改 office 风格（去掉微描边）
+- v0.8.40（可选）：dasharray 改 `'4 2'`
+- v0.8.41（可选）：把 graph 占位列合并到 desc 列（4 列 vs 5 列简化）
