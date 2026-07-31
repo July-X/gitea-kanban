@@ -330,8 +330,11 @@ func (a *GitHubAdapter) LogGraph(ctx context.Context, localPath string, opts pla
 	if opts.Head != "" && (len(pinned) == 0 || pinned[0] != opts.Head) {
 		pinned = append(pinned, opts.Head)
 	}
+	// v0.8.36：GitGraph 算法入口切换——layout 算法对标从 vscode-gitlens 改成
+	// vscode-office（layoutEngine.ts Branch/Vertex/Line 范式）。
+	//
 	// v0.8.34：truncated 信号透传（之前 graph 层硬编码 false 导致前端永远显示"已到全部"）
-	graphResult := graph.BuildGraphGitlens(logResult.Commits, opts.Head, pinned, logResult.Truncated)
+	graphResult := graph.BuildGraphOffice(logResult.Commits, opts.Head, pinned, logResult.Truncated)
 	graphResult.LocalExhausted = logResult.LocalExhausted
 	graphResult.DeepenTriggered = logResult.DeepenTriggered
 	return graphResultToDTO(graphResult), nil

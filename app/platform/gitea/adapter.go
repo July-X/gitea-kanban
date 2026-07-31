@@ -232,8 +232,14 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 	if head != "" && (len(pinned) == 0 || pinned[0] != head) {
 		pinned = append(pinned, head)
 	}
+	// v0.8.36：GitGraph 算法入口切换——layout 算法对标从 vscode-gitlens 改成
+	// vscode-office（layoutEngine.ts Branch/Vertex/Line 范式）。
+	// 切之前是 gitlens GKC（columnsUsed + columnsToFreeWhenFound 复杂算法），
+	// 切之后是 office 简单类（getAvailableColour 回收 + connections[] 跟踪 nextX）。
+	// 两个算法输出 DTO 都是 GraphResult，前端 vscode-render.ts 兼容。
+	//
 	// v0.8.34：truncated 信号透传——之前 Truncated 字段在 graph 层被硬编码 false 丢失
-	graphResult := graph.BuildGraphGitlens(logResult.Commits, head, pinned, logResult.Truncated)
+	graphResult := graph.BuildGraphOffice(logResult.Commits, head, pinned, logResult.Truncated)
 	graphResult.LocalExhausted = logResult.LocalExhausted
 	graphResult.DeepenTriggered = logResult.DeepenTriggered
 
