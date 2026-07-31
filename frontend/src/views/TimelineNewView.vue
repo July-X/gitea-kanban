@@ -2762,13 +2762,13 @@ function refBadgeClass(refType?: string): string {
                       >
                         <Tag
                           v-if="r.commit.refTypes?.[idx] === 'tag'"
-                          :size="12"
+                          :size="14"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
                         <GitBranch
                           v-else
-                          :size="12"
+                          :size="14"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
@@ -3799,10 +3799,10 @@ function refBadgeClass(refType?: string): string {
   white-space: nowrap;
   background-color: rgba(128, 128, 128, 0.15);
   color: #E6EDF3;
-  /* v0.8.35.1：badge 整体高度 37 → 18（跟 row 高度 24 对齐），回到 v0.7.x 紧凑设计。 */
-  line-height: 18px;
-  height: 18px;
-  padding: 0 6px;
+  /* v0.8.35.2：badge 高度 18 → 22（跟 row 28 对齐，badge 占 79% 行高），font-size 12 → 13，padding 0 6px → 0 8px 0 0（色块贴左缘、右侧 8px 跟后面文字间距，对齐示意图）。 */
+  line-height: 22px;
+  height: 22px;
+  padding: 0 8px 0 0;
   background-color: transparent;
   border-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
   overflow: hidden;
@@ -3817,11 +3817,14 @@ function refBadgeClass(refType?: string): string {
  * dot hover 时通过 .commit-row--dot-active .ref-badge 变 border-color */
 .ref-badge__icon {
   flex: 0 0 auto;
-  /* v0.8.35.1：图标容器 30x30 → 16x16，padding 0，margin-right 0 → 4（icon 跟 label 间距） */
-  width: 16px;
-  height: 16px;
+  /* v0.8.35.2：图标容器 16x16 → 22x22（撑满 badge 高度），margin-right 4 → 6（色块 + 文字间距，示意图色块贴左缘、6px 到文字） */
+  width: 22px;
+  height: 22px;
   padding: 0;
-  margin-right: 4px;
+  margin-right: 6px;
+  /* 紧贴 badge 左缘 + badge border-radius=5px 衔接：左两圆角 5px、右两圆角 0 */
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
   background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
   stroke: currentColor;
   stroke-width: 1.5;

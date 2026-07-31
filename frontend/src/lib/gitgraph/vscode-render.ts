@@ -29,14 +29,11 @@ import type { GraphNodeDto, GraphResultDto } from '@renderer/types/dto';
 // vscode-git-graph config.ts:278 默认值
 export const VSCODE_GRID_X = 16;
 /**
- * v0.8.35.1：行高回退 50 → 24（v0.8.35 的 37px badge + 50px row 撑爆 layout，
- * 用户反馈 "UI 太丑"——badge 跟 row 视觉重心不匹配；改回 24px row + 紧凑 badge）。
- * 设计权衡：
- * - 早期 v0.7.x 用 24px row + 18px badge（紧凑、不撑爆）
- * - v0.8.35 改成 50px row + 37px badge（对齐 vscode-gitlens 但太笨重）
- * - v0.8.35.1 回到 24px row + 18px badge，跟 commit 文字基线对齐
+ * v0.8.35.2：行高 24 → 28（+17%），给 ref badge 22px 色块更多垂直呼吸空间，
+ * 又不撑爆 commit row 文字基线。用户截图反馈 v0.8.35.1 (badge 18px)
+ * 略小，示意图显示色块明显更高——选 28 + badge 22 平衡两者。
  */
-export const VSCODE_GRID_Y = 24;
+export const VSCODE_GRID_Y = 28;
 export const VSCODE_OFFSET_X = 16;
 export const VSCODE_OFFSET_Y = 12;
 export const VSCODE_VERTEX_RADIUS = 4;
