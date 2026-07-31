@@ -328,8 +328,16 @@ type branchInfo struct {
 //   - 限制遍历分支数（最多 20 个）
 //   - 优先级顺序：HEAD > 主分支(main/master/develop等) > 本地分支 > 远程分支
 //   - 超大仓库（如 UnrealEngine）可能有几十上百个分支，全遍历会非常慢
+//
+// v0.8.37.1 修复：上限 20 → 200。
+// 历史 bug：用户截图显示「fix: 对齐 Git Graph 行高和圆点线位」这种 commit
+// 整体缺少分支 badge（不是单个 commit 缺，是整段分支全没遍历到）。原因 20
+// 上限硬切后，第 21+ 个分支的 head commit 不会进入 commits 列表，
+// `collectRefNamesByHash` 维护的 map[SHA]refData 全量但 commit 不在 → badge 显示空。
+// 200 覆盖 99% 实际仓库（上百分支的 monorepo），保留兜底防极端仓库性能退化。
+// 极端仓库兜底：每 head candidateLimit = opts.MaxCount 仍生效，单分支不会全量扫。
 func collectLimitedBranchHeads(repo *git.Repository, maxCount int) ([]plumbing.Hash, error) {
-	const maxBranches = 20 // 最多遍历 20 个分支（覆盖绝大部分使用场景）
+	const maxBranches = 200 // 最多遍历 200 个分支（v0.8.37.1: 20 → 200 修分支 badge 缺失）
 
 	branches := make([]branchInfo, 0)
 	seen := make(map[plumbing.Hash]bool)
@@ -565,7 +573,19 @@ func collectRefNamesByHash(repo *git.Repository) map[string]refData {
 			return nil
 		}
 
+		// v0.8.37.1 修复：annotated tag peel。
+		// go-git ref.Hash() 对 annotated tag 返回 tag object 的 hash，不是 commit hash；
+		// 这样挂到 byHash[sha] 后查 commit refs 永远拿不到这个 tag（badge 缺失）。
+		// 对齐 GitHub 链路 listRefsByCommit 的 %(*objectname) peel 语义：
+		//   - annotated tag: tag object → 解析 tag.Target → commit hash
+		//   - lightweight tag: tag 直接指向 commit → ref.Hash() 就是 commit hash
+		// 容错：tag object 解析失败（罕见）退回 ref.Hash() 轻量语义。
 		sha := ref.Hash().String()
+		if refType == RefTypeTag {
+			if tagObj, err := repo.TagObject(ref.Hash()); err == nil {
+				sha = tagObj.Target.String()
+			}
+		}
 		byHash[sha] = append(byHash[sha], entry{name: shortName, refType: refType})
 		return nil
 	})

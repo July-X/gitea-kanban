@@ -211,6 +211,37 @@ func createTestRepoWithRefs(t *testing.T) string {
 	return dir
 }
 
+// createTestRepoWithAnnotatedTag 创建一个有 annotated tag 的测试仓库
+// （v0.8.37.1 修复：annotated tag 必须 peel 到 commit，否则 badge 挂不上）
+func createTestRepoWithAnnotatedTag(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test User")
+
+	// 1 个 commit
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "release commit")
+
+	// 打 annotated tag（-a 强制执行 annotated tag，含 tag object）
+	// lightweight tag (git tag v1.0) 直接指 commit 没 peel 问题，这里必须
+	// 走 -a + -m 走 annotated tag 路径才能验证 peel 修复
+	runGit("tag", "-a", "v1.0.0", "-m", "release v1.0.0")
+
+	return dir
+}
+
 // currentDefaultBranch 返回 git 默认分支名（master / main 兼容）
 func currentDefaultBranch(t *testing.T, dir string) string {
 	t.Helper()
@@ -295,6 +326,56 @@ func TestLogCommits_RefsAttached(t *testing.T) {
 	}
 }
 
+// TestLogCommits_AnnotatedTagPeeled 验证 v0.8.37.1 annotated tag peel 修复
+//
+// Gitea 链路 collectRefNamesByHash（app/git/log.go:526）之前直接用 ref.Hash()
+// 拿 tag hash，挂到 byHash[sha] 上时 sha 是 tag object hash 而非 commit hash，
+// commit 永远查不到这个 tag → badge 缺失（GitHub 链路 listRefsByCommit 用
+// %(*objectname) peel 早已对齐）。
+//
+// 验证：annotated tag (-a -m) 指向 "release commit" → 该 commit 的 Refs 必须
+// 包含 "v1.0.0"。修复前 commit.Refs 不含 "v1.0.0"（peel 缺失）。
+func TestLogCommits_AnnotatedTagPeeled(t *testing.T) {
+	repoPath := createTestRepoWithAnnotatedTag(t)
+
+	result, err := LogCommits(LogOptions{
+		LocalPath: repoPath,
+	})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+
+	// 找 "release commit"
+	var releaseCommit *CommitInfo
+	for i := range result.Commits {
+		if result.Commits[i].Subject == "release commit" {
+			releaseCommit = &result.Commits[i]
+			break
+		}
+	}
+	if releaseCommit == nil {
+		t.Fatalf("expected to find 'release commit' in results")
+	}
+
+	// v0.8.37.1：annotated tag peel 必须让 commit.Refs 包含 "v1.0.0"
+	if !contains(releaseCommit.Refs, "v1.0.0") {
+		t.Errorf("expected 'v1.0.0' in 'release commit' Refs (annotated tag peel), got %v",
+			releaseCommit.Refs)
+	}
+	// 验证 refType 也正确（tag 类型，不是 branch）
+	hasTagType := false
+	for _, rt := range releaseCommit.RefTypes {
+		if rt == RefTypeTag {
+			hasTagType = true
+			break
+		}
+	}
+	if !hasTagType {
+		t.Errorf("expected RefTypeTag in 'release commit' RefTypes, got %v",
+			releaseCommit.RefTypes)
+	}
+}
+
 // TestLogCommits_NoRefsOnEmpty 验证没有任何 ref 的 commit Refs 为空 slice（不是 nil）
 func TestLogCommits_NoRefsOnEmpty(t *testing.T) {
 	repoPath := createTestRepoWithCommits(t)
@@ -324,13 +405,14 @@ func contains(slice []string, target string) bool {
 	return false
 }
 
-// TestLogCommits_ManyBranches 验证超大仓库分支限制功能
+// TestLogCommits_ManyBranches 验证 v0.8.37.1 maxBranches=200 修复
 //
-// v2.7 优化：超大仓库（如 UnrealEngine）可能有几十上百个分支，
-// 全遍历会导致性能问题。验证分支限制逻辑：
-//   - 创建 30 个分支（远超默认限制 20）
-//   - 验证只遍历有限数量的分支（应该 < 30）
-//   - 验证主分支（main/master）被优先遍历
+// 历史：v2.7 引入 maxBranches=20 限制超大仓库（UnrealEngine）性能，
+// 但副作用是 20+ 分支的仓库会裁掉 10+ 个分支的 head commit，对应 branch badge 缺失
+// （用户截图 2026-08-01 06:52 反馈）。v0.8.37.1 上限 20 → 200。
+//
+// 验证：30 个分支（< 200）应该全部遍历到，1 initial + 30 = 31 commits，
+// 每个分支的 head commit 都必须在结果里（保证 branch badge 完整）。
 func TestLogCommits_ManyBranches(t *testing.T) {
 	dir := t.TempDir()
 
@@ -371,7 +453,7 @@ func TestLogCommits_ManyBranches(t *testing.T) {
 	// 切回默认分支
 	runGit("checkout", defaultBranch)
 
-	// 调用 LogCommits（应该限制分支遍历数量）
+	// 调用 LogCommits（v0.8.37.1：maxBranches=200 应当覆盖 30 分支仓库）
 	result, err := LogCommits(LogOptions{
 		LocalPath: dir,
 		MaxCount:  200, // 请求 200 个 commit
@@ -380,11 +462,11 @@ func TestLogCommits_ManyBranches(t *testing.T) {
 		t.Fatalf("LogCommits failed: %v", err)
 	}
 
-	// 验证：不应该遍历所有 31 个 commit（1 个初始 + 30 个分支）
-	// 因为分支限制，应该只遍历部分分支的 commit
-	// 注：每个分支有 2 个 commit（initial + 分支自己的），但去重后 initial 只算一次
-	if len(result.Commits) == 31 {
-		t.Errorf("expected less than 31 commits due to branch limit, got %d", len(result.Commits))
+	// v0.8.37.1：30 分支 < 200 上限 → 全部遍历 → 1 initial + 30 分支 = 31 commits
+	wantLen := 31
+	if len(result.Commits) != wantLen {
+		t.Errorf("expected %d commits (30 branches + 1 initial), got %d (maxBranches 可能截断分支)",
+			wantLen, len(result.Commits))
 	}
 
 	// 验证至少有一些 commit（不应该为空）
@@ -404,7 +486,24 @@ func TestLogCommits_ManyBranches(t *testing.T) {
 		t.Errorf("expected to find initial commit")
 	}
 
-	t.Logf("Created 30 branches, got %d commits (branch limiting working)", len(result.Commits))
+	// 验证每个分支的 head commit 都在结果里（v0.8.37.1 修复要点：>20 分支不能丢）
+	seenSubjects := make(map[string]bool)
+	for _, c := range result.Commits {
+		seenSubjects[c.Subject] = true
+	}
+	for i := 1; i <= 30; i++ {
+		branchName := "feature-" + string(rune('a'+i-1))
+		if i > 26 {
+			branchName = "feature-extra-" + string(rune('0'+i-27))
+		}
+		wantSubject := "add " + branchName
+		if !seenSubjects[wantSubject] {
+			t.Errorf("branch %s head commit (subject=%q) missing from result (maxBranches 截断?)",
+				branchName, wantSubject)
+		}
+	}
+
+	t.Logf("Created 30 branches, got %d commits (maxBranches=200 覆盖)", len(result.Commits))
 }
 
 func TestLogCommits_IncludesRecentRemoteBranchWithinMaxCount(t *testing.T) {
