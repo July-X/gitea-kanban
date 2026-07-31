@@ -3,6 +3,7 @@ package graph
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 
 	"gitea-kanban/app/git"
@@ -11,14 +12,25 @@ import (
 // TestDumpRealRepoLanes 临时 debug 工具（不随 CI 跑）：用真实仓库数据跑
 // GitLens 布局算法，打印每行的 lane 分配 + parents，用于和 GitLens 截图逐行对照。
 //
-// 用法：GRAPH_DEBUG_REPO=<repo path> go test -v -run TestDumpRealRepoLanes ./app/git/graph/
+// 用法：
+//
+//	GRAPH_DEBUG_REPO=<repo path> GRAPH_DEBUG_MAX_COUNT=<n> go test -v -run TestDumpRealRepoLanes ./app/git/graph/
+//	GRAPH_DEBUG_JSON=<output path> GRAPH_DEBUG_REPO=<repo path> GRAPH_DEBUG_MAX_COUNT=<n> go test -v -run TestDumpRealRepoLanes
+//
+// GRAPH_DEBUG_MAX_COUNT 默认 40；DeepSeek-Reasonix 截图覆盖 301 条，需要设 301。
 func TestDumpRealRepoLanes(t *testing.T) {
 	repoPath := os.Getenv("GRAPH_DEBUG_REPO")
 	if repoPath == "" {
 		t.Skip("GRAPH_DEBUG_REPO 未设置，跳过")
 	}
 
-	logResult, err := git.LogCommits(git.LogOptions{LocalPath: repoPath, MaxCount: 40})
+	maxCount := 40
+	if v := os.Getenv("GRAPH_DEBUG_MAX_COUNT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxCount = n
+		}
+	}
+	logResult, err := git.LogCommits(git.LogOptions{LocalPath: repoPath, MaxCount: maxCount})
 	if err != nil {
 		t.Fatalf("LogCommits failed: %v", err)
 	}

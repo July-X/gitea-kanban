@@ -70,10 +70,9 @@ Go 移植代码位于 `app/git/graph/layout_gitlens.go`（896 行，含 60+ 个�
    │
    ├─ BuildGraphGitlens(commits, head, pinnedHeadShas)
    │     1. assignPinnedColumns     ─→ 主干 head 显式锁定 lane
-   │     2. gitlensAssignColumns(rows, pinned, compact=true)  ─→ 视觉 lane
-   │     3. gitlensAssignColumns(rows, pinned, compact=false) ─→ 颜色 lane（取色语义）
-   │     4. segmentToLines(seg)     ─→ fork / merge 转场线 (LockedFirst)
-   │     5. DTO 转换（rows + edges + branches + pinned）→ Wails binding
+   │     2. gitlensAssignColumns(rows, pinned)  ─→ 唯一 lane（位置 + 颜色）
+   │     3. segmentToLines(seg)     ─→ fork / merge 转场线 (LockedFirst)
+   │     4. DTO 转换（rows + edges + branches + pinned）→ Wails binding
    │
    ▼
 [frontend/src/lib/gitgraph/vscode-render.ts]
@@ -120,32 +119,34 @@ type gitlensLayoutState struct {
 }
 ```
 
-### 2.2 双跑：为啥要算两遍
+### 2.2 单跑：v0.8.33 取消双跑，对齐 GitLens 原版 lane 分配
 
 ```go
-columns, segments, maxCol := gitlensAssignColumns(rows, pinned, true)   // compressed
-colorCols, _, _        := gitlensAssignColumns(rows, pinned, false)     // uncompressed
+columns, segments, maxCol := gitlensAssignColumns(rows, pinned)   // 唯一一次：位置 = 颜色
 ```
 
-**根因**:GitLens compact 模式（`compact=true`）在 `assignColumnForRow` 末尾会调 `compactLanes(freedLane)` 把右侧活跃 lane 左移——同一 SHA 在 compact 前后可能 lane 编号不同。但 segment 的颜色是按 segment **首次 claim column 时**的 column 绑定的（`colorColOf[seg.tipSha]` 在 segment 第一次写入时记录）。
+**v0.8.33 决策**：实测 DeepSeek-Reasonix 301 commits 与 GitLens commit-graph 截图对比，发现 v0.8.25.7 引入的「lane 左移压缩」与 GitLens 原版算法不符——GitLens 真实行为：
 
-| 现象 | compact=true | compact=false |
+- lane 释放后**只**从 `columnsUsed` 集合中移除空 column
+- **不动**现有 reservation/segment 的 column
+- 后续 commit 走 `claimNextColumn()` 复用**最低空** column
+
+v0.8.25.7 的 compact 模式（`compact=true`）错误地假设 GitLens 在 lane 释放后会做"立即填坑"——右侧所有 reservation/segment 整体左移一格。DeepSeek-Reasonix 301 commits 实测显示该假设导致长分支链被挤到左侧少数 lane、右侧 lane 几乎全空，与 GitLens 截图不一致。
+
+v0.8.25.7 同窗口期引入的"位置用压缩 lane + 颜色用未压缩逻辑 lane"双轨也随之证伪——既然压缩本身是错的，颜色的"未压缩逻辑 lane"概念就没有意义。位置和颜色现在用同一套 lane 分配（`colOf[c.SHA] % 16`）。
+
+| 指标 | v0.8.25.7 双跑 | v0.8.33 单跑 |
 |---|---|---|
-| lane 编号 | 视觉紧凑，连空隙都填 | 严格按 GitLens 原版 claim 顺序 |
-| 用途 | 前端渲染 X 坐标 | segment 颜色（要按 claim 顺序才有意义的「链条色」） |
-| 同 segment 内 commit X | 全部用紧凑 lane | 全部用未压缩 lane |
-| 颜色 | 按未压缩 lane % 16 取 `VSCODE_COLORS` | 同 |
+| BuildGraphGitlens 主跑次数 | 2 次（compact + non-compact） | 1 次 |
+| Color 字段语义 | 未压缩逻辑 lane（与位置不同） | 位置 lane（Color == Lane%16） |
+| Lane 编号稳定性 | lane 释放后右侧整体左移 | lane 释放后保留空位，由后续 commit 复用 |
+| Long branch chain 渲染 | 跨 lane 斜线（被挤到左侧） | 稳定 lane 竖线（保留原 lane） |
+| DeepSeek-Reasonix maxLane | 14（巧合） | 14 |
+| DeepSeek-Reasonix lane 1 commits | 115 | 128（释放 lane 被后续 commit 复用） |
+| DeepSeek-Reasonix lane 7 commits | 26 | 2（长分支链不再被压到 lane 7） |
+| DeepSeek-Reasonix lane 9 commits | 4 | 28（长分支链回到原 lane） |
 
-实测数据（用 gitea-kanban 自己 8 月份 commit 库，pinned=[f46d0d0]）：
-
-```text
-                       compact=true    compact=false    差
-全图最大 lane 编号        8              14             +6（uncompressed 多 6）
-前 12 行平均 lane 数      4.2            5.8            +1.6
-视觉 lane 占用            ~50 px         ~80 px         -
-```
-
-**取舍**:性能成本 = 双跑 = `O(rows × maxColumn)` ×2。当前仓库（< 3000 commits）实测 < 80ms。如果未来 columns 数爆炸可以改成「segment 首次 claim 时记 color，全图渲染时按 compact 后 lane 找最近 segment claim」——单跑方案，但实现复杂度高。当前阶段不值得。
+**取舍**：取消双跑后 `Color == Lane%16`（v0.8.25.7 之前就是这样），v0.8.25.7 的"位置与颜色分离"特殊视觉效果（"b2139fe 视觉在 lane 2、颜色 lane 1"那种矛盾情况）消失。`segmentsToBranches` 内部仍接受 `colorColOf` 参数（但调用方传 `colOf`，行为等价），保留函数签名减少 diff 噪音。
 
 ---
 
@@ -285,9 +286,9 @@ type GraphResult struct {
 }
 ```
 
-`Commits[i].Lane` = 双跑中 **compact=true** 的 lane（视觉坐标）。
-`Branches[i].Lines[*].X1/X2/Y1/Y2` 全部基于 compact=true 视觉 lane。
-merge edge 颜色从 `colorColOf[parent] % VSCODE_COLORS.length` 取（**parent 色，不是 child 色**）。
+`Commits[i].Lane` = 唯一一次 `gitlensAssignColumns` 产出的 lane（位置 = 颜色）。
+`Branches[i].Lines[*].X1/X2/Y1/Y2` 全部基于此 lane。
+merge edge 颜色从 `colOf[parent] % VSCODE_COLORS.length` 取（**parent 色，不是 child 色**）。
 
 ### 5.2 行为契约
 

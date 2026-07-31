@@ -317,10 +317,11 @@ func TestBuildGraphGitlens_ColorIsColumnMod16(t *testing.T) {
 	}
 
 	// 验证：每个 node 的 Color == Lane % 16
-	// 注意（v0.8.25.7）：双轨布局下 Color 语义是「未压缩逻辑 lane」、Lane 是「压缩后视觉 lane」。
-	// 本拓扑没有 lane 释放事件（S1→S0 的 lane 1 永不 free），compact 不触发，
-	// 两轨输出相同，Color == Lane%16 恰好成立。有 lane 释放的场景见
-	// TestBuildGraphGitlens_LaneCompactMatchesGitlens 的专门断言。
+	// v0.8.33：删除双轨布局后，Color 直接由 colOf[c.SHA] % 16 计算，
+	// 与 Lane 一致。本测试拓扑没有 lane 释放事件（S1→S0 的 lane 1
+	// 永不 free），无需 lane 复用，Color == Lane%16 恒成立。
+	// （lane 释放 + 复用场景下颜色仍等于位置，验证见
+	// TestBuildGraphGitlens_MatchesGitLensLaneReuse。）
 	for _, n := range result.Nodes {
 		wantColor := n.Lane % 16
 		if n.Color != wantColor {
@@ -437,27 +438,32 @@ func TestBuildGraphGitlens_MergeStitchColumnNotZero(t *testing.T) {
 	}
 }
 
-// TestBuildGraphGitlens_LaneCompactMatchesGitlens v0.8.25.7
+// TestBuildGraphGitlens_MatchesGitLensLaneReuse v0.8.33
 //
-// 「lane 左移压缩」核心测试，复刻用户 xdolphin/TRex 仓库 b2139fe/34b10d6 场景：
-// A 链 merge 释放 lane 1 后，L 链（长链，已有 reservation）左移递补 lane 1；
-// 后续的孤立 commit X1（无 first-parent 延续）只能 claim lane 2。
-// 未压缩的 GKC 原版行为相反（X1 抢 lane 1、L 链留 lane 2），与 GitLens 实测渲染相反。
-//
-// 拓扑（对齐真实仓库结构）：
+// 回归 GitLens 原版 lane 分配（取消 v0.8.25.7 的「lane 左移压缩」）。
+// 拓扑（与 v0.8.25.7 旧 TestBuildGraphGitlens_LaneCompactMatchesGitlens
+// 复刻用户 xdolphin/TRex 仓库 b2139fe/34b10d6 场景相同，但断言改写）：
 //
 //	row 0: T0 merge [T1, A1]   trunk merge
 //	row 1: A1 [A2]             A 链头（claim lane 1）
 //	row 2: T1 [T2]             trunk
 //	row 3: A2 merge [T2, L1]   A 链尾 merge 进 trunk → 冲突释放 lane 1；L1 claim lane 2
 //	row 4: L1 [L2]             L 链头（lane 2），reserve L2 → lane 2
-//	row 5: T2 [T3]             trunk；行首释放 lane 1 → compact → L2 左移到 lane 1
-//	row 6: T3 merge [T4, X1]   trunk merge；X1 只能 claim lane 2（lane 1 被 L2 占）
+//	row 5: T2 [T3]             trunk；行首释放 lane 1（不压缩）→ lane 1 留空
+//	row 6: T3 merge [T4, X1]   trunk merge；X1 claim lane 1（最低空 column）
 //	row 7: T4 [T5]             trunk
-//	row 8: X1 [T5]             孤立 commit：视觉 lane 2 / 逻辑（颜色）lane 1
-//	row 9: L2 [T5]             L 链尾：视觉 lane 1（左移）/ 逻辑（颜色）lane 2
+//	row 8: X1 [T5]             孤立 commit：视觉 + 颜色都在 lane 1
+//	row 9: L2 [T5]             L 链尾：视觉 + 颜色都在 lane 2（不左移）
 //	row 10: T5 []              trunk 根
-func TestBuildGraphGitlens_LaneCompactMatchesGitlens(t *testing.T) {
+//
+// 与 v0.8.25.7 旧版差异：
+//   - 旧：L 链左移到 lane 1；X1 在 lane 2；颜色与位置分离
+//   - 新：L 链稳定在 lane 2；X1 复用 lane 1；颜色 = 位置
+//
+// DeepSeek-Reasonix 301 commits 实测证实：取消压缩后长分支链保持原 lane，
+// 已释放的 lane 由后续 commit 通过 claimNextColumn() 复用最低空 column，
+// 与 GitLens commit-graph/src/engine/layout.ts:493-510 原版行为 1:1 对齐。
+func TestBuildGraphGitlens_MatchesGitLensLaneReuse(t *testing.T) {
 	t0 := time.Now()
 	mk := func(sha string, parents []string) git.CommitInfo {
 		return git.CommitInfo{
@@ -493,44 +499,47 @@ func TestBuildGraphGitlens_LaneCompactMatchesGitlens(t *testing.T) {
 		colorOf[n.SHA] = n.Color
 	}
 
-	// 视觉 lane（压缩后）：L 链左移到 lane 1，孤立 X1 在 lane 2
+	// v0.8.33 预期：L 链稳定在 lane 2（不左移），X1 复用 lane 1
 	wantLane := map[string]int{
 		"T0": 0, "T1": 0, "T2": 0, "T3": 0, "T4": 0, "T5": 0,
-		"A1": 1, "A2": 1, // A 链 lane 1
-		"L1": 2, "L2": 1, // L 链：L1 claim 时 lane 2，L2 被 compact 左移到 lane 1
-		"X1": 2, // 孤立 commit 被挤到 lane 2（GitLens 实测行为；未压缩原版会抢 lane 1）
+		"A1": 1, "A2": 1, // A 链 lane 1（释放后变空闲）
+		"L1": 2, "L2": 2, // L 链：稳定 lane 2，不左移
+		"X1": 1, // 孤立 commit 复用 A 链释放的 lane 1
 	}
 	for sha, want := range wantLane {
 		if laneOf[sha] != want {
-			t.Errorf("node %s: Lane=%d, want %d（GitLens 实测视觉 lane）", sha, laneOf[sha], want)
+			t.Errorf("node %s: Lane=%d, want %d（GitLens 原版 lane 分配）", sha, laneOf[sha], want)
 		}
 	}
 
-	// 颜色（未压缩逻辑 lane）：X1 原版 claim lane 1 → 橙；L 链 claim lane 2 → 绿
+	// v0.8.33：颜色 = 位置（取消双轨），L 链颜色 2，X1 颜色 1
 	wantColor := map[string]int{
 		"T0": 0, "T5": 0,
 		"A1": 1, "A2": 1,
-		"L1": 2, "L2": 2, // L 链保留 claim 时的 lane 2 颜色（视觉虽左移到 lane 1）
-		"X1": 1, // X1 原版 claim lane 1 → 颜色 1（视觉虽在 lane 2）
+		"L1": 2, "L2": 2,
+		"X1": 1, // 与位置一致（不再走未压缩逻辑 lane）
 	}
 	for sha, want := range wantColor {
 		if colorOf[sha] != want {
-			t.Errorf("node %s: Color=%d, want %d（未压缩逻辑 lane）", sha, colorOf[sha], want)
+			t.Errorf("node %s: Color=%d, want %d（颜色=位置，取消双轨）", sha, colorOf[sha], want)
 		}
 	}
 
-	// L 链 segment 的连线：L1（视觉 lane 2，row 4）→ L2（视觉 lane 1，row 9）
-	// 必须画出跨 lane 斜线（X1=2 → X2=1），对齐 GitLens 绿色斜跨渲染。
-	foundCrossLaneLine := false
+	// L 链应该是稳定的 lane 2 竖线（不再有跨 lane 斜线）
+	// 旧的"X1(lane1,row8) → L2(lane2,row9) 转场"也不存在
+	crossLaneOnL := false
 	for _, b := range result.Branches {
 		for _, l := range b.Lines {
-			if l.X1 == 2 && l.Y1 == 4 && l.X2 == 1 && l.Y2 == 9 {
-				foundCrossLaneLine = true
+			if (l.X1 == 2 && l.X2 == 1) || (l.X1 == 1 && l.X2 == 2) {
+				// L 链 row 4-9 区域出现跨 lane 1↔2 转场
+				if l.Y1 >= 4 && l.Y2 <= 9 {
+					crossLaneOnL = true
+				}
 			}
 		}
 	}
-	if !foundCrossLaneLine {
-		t.Errorf("L 链缺少 L1(lane2,row4) → L2(lane1,row9) 的跨 lane 斜线（GitLens 绿色斜跨）")
+	if crossLaneOnL {
+		t.Errorf("L 链 row 4-9 区域不应有跨 lane 1↔2 转场（取消压缩后稳定在 lane 2）")
 		for _, b := range result.Branches {
 			for _, l := range b.Lines {
 				t.Logf("line (%d,%d) → (%d,%d) color=%d", l.X1, l.Y1, l.X2, l.Y2, b.Color)

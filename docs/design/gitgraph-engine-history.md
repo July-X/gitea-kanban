@@ -463,13 +463,80 @@ app/git/graph/
 | 双跑 vs 单跑 | 双跑（visual + color） | 性能可接受（< 150ms @ 3000 commits） | 2026-07-30 | `5caa347` |
 | 排序键 | authorDate / committerDate | cherry-pick 行序 bug | 2026-07-30 | `b989f9f` |
 | lane 算法 | vscode 原版 / GitLens 移植 | GitLens 1:1 实测更好 | 2026-07-30 | `5caa347` |
+| lane 压缩 | v0.8.25.7 compactLanes / v0.8.33 回退 | DeepSeek-Reasonix 301 commits 实测证伪 | 2026-07-31 | 本版（v0.8.33） |
+
+---
+
+## 阶段 11（v0.8.33）：回退「lane 左移压缩」，对齐 GitLens 原版算法
+
+**背景**：v0.8.25.7 移植 GitLens GKC 时，凭印象加了一个"lane 释放后右侧整体左移"的 `compactLanes()` 行为。原始 PR 仅在 TRex 仓库（深度较浅）做了肉眼对比，未在长分支链仓库上量化验证。
+
+**触发问题**：用户用 `D:\2026\github\DeepSeek-Reasonix`（301 commits）做实测，发现应用 graph 与 vscode-gitlens 截图对比有明显差距：
+
+| 现象 | v0.8.25.7 我们的复刻 | vscode-gitlens 目标 |
+|---|---|---|
+| 长分支链 lane | 被挤到左侧少数 lane | 保持在原 lane |
+| 右侧 lane 占用 | 几乎全空 | 自然分布（多条并行长分支） |
+| 孤立 commit lane | 被挤到 lane 2 | 复用刚释放的最低空 lane |
+
+**根因复盘**：
+
+v0.8.25.7 的 `compactLanes()` 实现是「**liberation → 整体左移**」语义：
+
+```go
+shift := func(lane int) int {
+    if lane > freedLane { return lane - 1 }
+    return lane
+}
+```
+
+但 GitLens `commit-graph/src/engine/layout.ts:493-510` 的真实算法是「**liberation → 留空位**」语义：
+
+- `columnsUsed` 集合中删除空 column（仅此而已）
+- 现有 `reserverInfoBySha.column` / `segmentByColumn[].column` **不动**
+- 后续 commit 走 `claimNextColumn()` 复用最低空 column
+
+v0.8.25.7 同窗口期引入的"位置用压缩 lane + 颜色用未压缩逻辑 lane"双轨也随之证伪——既然压缩本身是错的，颜色的"未压缩逻辑 lane"概念就没有意义。
+
+**修法（v0.8.33）**：
+
+1. 删 `gitlensLayoutState.compact` 字段
+2. `compactLanes()` 函数体改 no-op（保留引用作历史 reference）
+3. `assignColumnForRow` 删 `if s.compact { ... }` 块
+4. `newGitlensLayoutState` / `gitlensAssignColumns` 删 `compact bool` 参数
+5. `BuildGraphGitlens` 删双跑：删 `colorCols` 第二跑 + 删 `colorColOf` 映射 + 节点/边/merge 合入线 `Color` 全部改用 `colOf[...] % 16`
+6. `segmentsToBranches` 内部 `colorColOf` 参数保留（调用方传 `colOf` 行为等价），最小化 diff
+
+**测试同步**：
+
+- `TestBuildGraphGitlens_LaneCompactMatchesGitlens` 改名 `MatchesGitLensLaneReuse`
+  - 拓扑不变，断言改写：L 链稳定 lane 2（不左移）+ X1 复用 lane 1 + 颜色=位置
+- `TestBuildGraphGitlens_ColorIsColumnMod16` 注释更新
+- `debug_dump_test.go` 加 `GRAPH_DEBUG_MAX_COUNT` 环境变量支持（默认 40，DeepSeek-Reasonix 截图用 301）
+
+**DeepSeek-Reasonix 301 commits 验证**（`GRAPH_DEBUG_REPO=D:\2026\github\DeepSeek-Reasonix GRAPH_DEBUG_MAX_COUNT=301 go test -v -run TestDumpRealRepoLanes ./app/git/graph/`）：
+
+| Lane | v0.8.25.7 旧 | v0.8.33 新 | 变化 |
+|---|---|---|---|
+| 0 | 55 | 55 | 主链不变 |
+| 1 | 115 | 128 | +13 释放 lane 被后续 commit 复用 |
+| 7 | 26 | 2 | -24 长分支链不再被压到 lane 7 |
+| 9 | 4 | 28 | +24 长分支链回到原 lane |
+| maxLane | 14 | 14 | pinned head + 长分支链右端点不变（巧合） |
+
+**踩坑教训**（AI 借鉴指南第 7 条）：
+
+1. **不要"凭印象"实现算法**：v0.8.25.7 没读过 GitLens 完整源码就拍脑袋写了一个"看起来合理"的压缩。移植时必须严格 1:1 对照原版实现，不能自由发挥。
+2. **小仓库验证不能外推到大仓库**：TRex 仓库的 lane 分布刚好不触发 compact 行为的负面表现。DeepSeek-Reasonix 301 commits 才暴露问题。
+3. **肉眼对比不能量化**：v0.8.25.7 用"看起来差不多"的口径验收。v0.8.33 用 `GRAPH_DEBUG_MAX_COUNT` + lane 分布统计量化（lane 1 115→128 / lane 7 26→2 / lane 9 4→28）后，差异一目了然。
+4. **不要为"消除双跑"以外的任何目的引入双跑**：v0.8.25.7 引入双跑的动机是"位置和颜色语义不同"——但这建立在"压缩是 GitLens 实测行为"这个错误假设上。假设错了，复杂结构全白搭。
 
 ---
 
 ## 后续工作（建议）
 
 - [x] `layout.go`（Gitea 风格 `BuildGraph`）是否真正切换到 GitLens 输出？**v0.8.26 完成**：layout.go / layout_vscode.go / pickGraphBuilder env 开关全删；`BuildGraphGitlens` 作为 graph 包唯一公开入口；DTO 共享类型迁到 `types.go`。详情见「阶段 9 算法入口统一收敛」段。
-- [ ] `compact=true` vs `compact=false` 调度改为「segment 首次 claim 时取色，全图渲染时按 compact 后 lane 找最近 segment claim」单跑方案 — 当 commit 数 > 5000 时启用
+- [x] `compact=true` vs `compact=false` 调度改为「segment 首次 claim 时取色，全图渲染时按 compact 后 lane 找最近 segment claim」单跑方案 — **v0.8.33 取消**：实测证伪 compact 概念本身，删除双跑，单跑既满足性能又对齐 GitLens
 - [ ] 给 `layout_gitlens.go` 加更全面的 property-based test（`testing/quick`）覆盖随机 DAG 形态
 
 ---

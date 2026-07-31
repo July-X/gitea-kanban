@@ -133,7 +133,7 @@ func assertColumns(t *testing.T, columns map[string]int, expected map[string]int
 // 对齐 layout.test.ts:30-36 "linear history places every commit on column 0"
 func TestGitLensLayout_LinearHistory_AllColumn0(t *testing.T) {
 	rows := fixtureLinear()
-	columns, _, _ := gitlensAssignColumns(rows, nil, false)
+	columns, _, _ := gitlensAssignColumns(rows, nil)
 	assertColumns(t, columns, map[string]int{
 		"A": 0, "B": 0, "C": 0, "D": 0,
 	})
@@ -142,7 +142,7 @@ func TestGitLensLayout_LinearHistory_AllColumn0(t *testing.T) {
 // 对齐 layout.test.ts:38-50 "merge fan puts the second-parent branch on its own lane"
 func TestGitLensLayout_MergeFan_SecondParentOwnLane(t *testing.T) {
 	rows := fixtureMergeFan()
-	columns, _, _ := gitlensAssignColumns(rows, nil, false)
+	columns, _, _ := gitlensAssignColumns(rows, nil)
 	assertColumns(t, columns, map[string]int{
 		"M": 0, "A": 0, "B": 1, "C": 0,
 	})
@@ -151,7 +151,7 @@ func TestGitLensLayout_MergeFan_SecondParentOwnLane(t *testing.T) {
 // 对齐 layout.test.ts:62-67 "a stash keeps its own lane and kind"
 func TestGitLensLayout_Stash_OwnLane(t *testing.T) {
 	rows := fixtureStashLane()
-	columns, _, _ := gitlensAssignColumns(rows, nil, false)
+	columns, _, _ := gitlensAssignColumns(rows, nil)
 	assertColumns(t, columns, map[string]int{
 		"A": 0, "S": 1, "C": 0,
 	})
@@ -160,7 +160,7 @@ func TestGitLensLayout_Stash_OwnLane(t *testing.T) {
 // 对齐 layout.test.ts:71-78 "a WIP row never drags its anchor onto its own lane"
 func TestGitLensLayout_Workdir_AnchorStays(t *testing.T) {
 	rows := fixtureWorkdirAnchorReserved()
-	columns, _, _ := gitlensAssignColumns(rows, nil, false)
+	columns, _, _ := gitlensAssignColumns(rows, nil)
 	assertColumns(t, columns, map[string]int{
 		"C": 0, "A": 0, "W": 1,
 	})
@@ -169,7 +169,7 @@ func TestGitLensLayout_Workdir_AnchorStays(t *testing.T) {
 // 对齐 layout.test.ts:80-91 "a WIP row on an unreserved anchor still shares its lane"
 func TestGitLensLayout_Workdir_AnchorFree_Shares(t *testing.T) {
 	rows := fixtureWorkdirAnchorFree()
-	columns, _, _ := gitlensAssignColumns(rows, nil, false)
+	columns, _, _ := gitlensAssignColumns(rows, nil)
 	// W 与 B 共 lane（unreserved anchor）；T 与 A 共 lane
 	wCol := columnOf(columns, "W")
 	bCol := columnOf(columns, "B")
@@ -188,7 +188,7 @@ func TestGitLensLayout_Workdir_AnchorFree_Shares(t *testing.T) {
 // 这是验证 "lowest free column + reservation-replace" 联动压缩图宽
 func TestGitLensLayout_LowestFreeLane_ChainDrag(t *testing.T) {
 	rows := fixtureLowestFreeChainDrag()
-	columns, _, _ := gitlensAssignColumns(rows, nil, false)
+	columns, _, _ := gitlensAssignColumns(rows, nil)
 	assertColumns(t, columns, map[string]int{
 		"C0": 0, "C1": 0, "C2": 1, "C3": 0, "C4": 0,
 	})
