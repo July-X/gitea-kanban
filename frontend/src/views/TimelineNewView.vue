@@ -2762,13 +2762,13 @@ function refBadgeClass(refType?: string): string {
                       >
                         <Tag
                           v-if="r.commit.refTypes?.[idx] === 'tag'"
-                          :size="14"
+                          :size="10"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
                         <GitBranch
                           v-else
-                          :size="14"
+                          :size="10"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
