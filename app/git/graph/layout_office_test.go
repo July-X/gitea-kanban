@@ -220,6 +220,24 @@ func TestBuildGraphOffice_BranchAndMerge(t *testing.T) {
 	if !foundStitch {
 		t.Errorf("merge stitch line (0,0)→(1,1) LockedFirst=true not found in branches")
 	}
+
+	// v0.8.37.1 回归：dot 颜色（node.Color）必须 = branch.color（即 edge.Color 槽位）。
+	// 之前 v0.8.37 用 v.x % 16 当 node.Color，但 office 算法里 v.x 是 lane 编号不是 colour，
+	// 跟 edge.Color = branch.colour % 16 分裂成两套色源 → 用户截图"绿 lane + 橙 dot"。
+	// BuildGraphOffice 必须用 v.onBranch.getColour() % 16（office 算法一致性约束）。
+	// 推导：每个 node 跟它的 outgoing edge（first parent）共享同一 branch.colour。
+	branchColorByLane := map[int]int{}
+	for _, e := range result.Edges {
+		if e.Type == EdgeNormal { // first parent edge 是 branch 主色
+			branchColorByLane[e.FromRow] = e.Color
+		}
+	}
+	for _, n := range result.Nodes {
+		if want, ok := branchColorByLane[n.Row]; ok && n.Color != want {
+			t.Errorf("node %s (row=%d) Color=%d, want branch.Color=%d (dot/lane 色分裂)",
+				n.ShortSHA, n.Row, n.Color, want)
+		}
+	}
 }
 
 // TestBuildGraphOffice_MultipleBranches F merge [E, C]，D 是 C 上的另一条 branch off，

@@ -400,7 +400,19 @@ func BuildGraphOffice(commits []git.CommitInfo, head string, pinnedHeadShas []st
 	for i, c := range commits {
 		v := engine.vertices[i]
 		lane := v.x
-		color := lane % 16
+		// v0.8.37.1 修复：dot 颜色 = branch.colour（office 算法的"逻辑颜色槽"），不是 v.x（lane 编号）。
+		// 之前 node.Color = v.x % 16 跟 edge.Color = branch.colour % 16 走两套色源，
+		// dot 跟 path 颜色就分裂（用户截图：绿 lane + 橙 dot，必须同 lane.color）。
+		// vscode OfficeBranch.colour = engine.getAvailableColour 回收的逻辑颜色槽（0..N 增），
+		// 同 branch 上所有 vertex + line 共享同一 colour，跟 TS 原版 setColour(branch) 一致。
+		// office Vertex.getColour() → v.onBranch.getColour()，addToBranch 后必有值。
+		// 容错：v.onBranch null 时退回 v.x%（防御性，跟旧行为对齐）。
+		var color int
+		if v.onBranch != nil {
+			color = v.onBranch.getColour() % 16
+		} else {
+			color = v.x % 16
+		}
 		nodes[i] = GraphNode{
 			Row:         i,
 			Lane:        lane,
