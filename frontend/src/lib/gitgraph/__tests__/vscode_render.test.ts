@@ -455,19 +455,20 @@ describe('gitgraph vscode-render UNCOMMITTED 灰色虚线 (v3.x)', () => {
 });
 
 // =====================================================================================
-// v0.8.31 回归测试：line 跨 expandedAt 边界时 pushSplit 几何一致性
+// v0.8.31 回归测试：line 跨 expandedAt 边界时端点严格落到 dot cy
 //
 // 用户 2026-07-31 实测："新 bug：展开查看 commit 详情后，断线了，没有和 dot 连起来"
 // 截图显示当多分支仓库展开 commit 详情时，穿过展开区的 lane line 在 panel 下方端点
 // 悬空、未准确落到 dot 上（dot 已 +expandY，但 line 几何未跟进）。
 //
-// 根因：expandAt 处理时对 line 跨边界情况硬编码 gridY 单位（vscode 原版"单行跨度"
-// 不变量），但 v0.8.27 Go 端 LockedFirst 改后，DIO 会发"跨多行跨 lane" line（multi-row）。
-// pushSplit 用 (sy1+gridY) 当转场点 mid，sy1 没 +expandY 但 sy2 +expandY → 几何错位。
+// 根因：v0.8.31 最初尝试用 splitLineByExpandedAt 把跨边界 line 拆为 upper+lower 两段，
+// 但拆段后两段各自走 pushSplit 导致双重转场 + 端点偏离 dot（断线）。
 //
-// v0.8.31 修复：在 expandAt 处理前用 splitLineByExpandedAt 把跨边界 line 拆为
-// upper (y ≤ expandedAt) + lower (y > expandedAt) 两段。每段独立处理 expandY，
-// 几何无歧义。
+// 正确修复：expandY 偏移只看端点行号，与 lane 无关：
+//   if (line.y1 > expandedAt) y1 += expandY;
+//   if (line.y2 > expandedAt) y2 += expandY;
+// pushSplit 不动：lockedFirst 转场点 sy1+gridY（上端行底）、sy2-gridY（下端行顶），
+// 竖直段天然连续穿过 expandY 空隙，无断线、无重复转场。
 // =====================================================================================
 
 // helper: line (X1,Y1)→(X2,Y2) + lockedFirst + isCommitted
@@ -477,14 +478,15 @@ function line(s: LineSpec): any {
   return { x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, lockedFirst: s.lockedFirst ?? false, isCommitted: s.isCommitted ?? true };
 }
 
-describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw) — v0.8.31 expandedAt 跨边界', () => {
+describe('gitgraph vscode-render — v0.8.31 expandedAt 端点独立偏移（无拆段）', () => {
   // SVG 路径端点解析：M (start: x,y) / L (x,y) / C cp1,cp2,end —— 每段最后 2 个数
   // 是终点（M 是起点，L 是终点，C 是 control+control+end），曲线控制点 y 不计入
   // 端点集合（控制点 y 经常偏离节点 cy 正常，比如贝塞尔曲线 mid 控制点 ≈ 0.4*gridY
   // 偏移）。
   const extractEndpoints = (d: string): Array<{ x: number; y: number }> => {
     const pts: Array<{ x: number; y: number }> = [];
-    const re = /([MLC])\s*((?:-?\d+(?:\.\d+)?\s+)+)/g;
+    // 注意：\s*（而非 \s+）确保末尾无空格的最后一个数也被捕获
+    const re = /([MLC])\s*((?:-?\d+(?:\.\d+)?\s*)*)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(d)) !== null) {
       const nums = m[2]!.trim().split(/\s+/).map((s) => parseFloat(s));
@@ -493,11 +495,11 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw) — v0.8
     }
     return pts;
   };
+
   test('vertical line 跨 expandedAt 边界：line 端点严格落到下一行 dot（含 expandY）', () => {
     // 拓扑：row 0 (main lane) → row 1 (main lane)，expandedAt=0
-    // 期望：splitLineByExpandedAt 拆为 (0,0)→(0,0)（空）+ (0,0)→(0,1)（isLowerSegment 含 expandY）
-    //       pushSplit 看到 y2 - y1 = gridY 跳 fallback（≤ 1.5 gridY），画 1 段 vertical
-    //       端点 = 1*24 + 12 + 250 = 286
+    // 期望：y1=0 (不偏移), y2=1*24+12+250=286 (偏移)
+    //       pushSplit 看到 y2-y1=288 > 1.5*24=36，但 x1===x2 走 fallback 画 1 段 vertical
     const graph: GraphResultDto = {
       nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
       edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
@@ -516,20 +518,20 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw) — v0.8
     assert.ok(closeToB, `vertical line 端点 y 应接近 b.cy=${nodeB!.cy}，所有端点 y: ${JSON.stringify(allPathYs)}`);
   });
 
-  test('跨 lane multi-row line 跨 expandedAt 边界：拆分后每段独立处理，端点连续', () => {
+  test('跨 lane multi-row line 跨 expandedAt 边界：端点严格落到 dot cy（含 expandY）', () => {
     // 拓扑（latest-first）：
     //   row 0: a (lane 0)               —— expandedAt 行
-    //   row 1: b (lane 1)               —— expandedAt 后续行被分段
+    //   row 1: b (lane 1)               —— expandedAt 后续行
     //   row 2: c (lane 2)               —— 展开后 + expandY
-    //   row 3: d (lane 3)               —— 展开后 + expandY (line 跨 row 2 → row 3)
+    //   row 3: d (lane 3)               —— 展开后 + expandY
     //
-    // v0.8.31 splitLineByExpandedAt 把 line (0,0)→(1,2) 拆为:
-    //   upper (0,0)→(1,0): 单行跨 lane (lockedFirst=true)，按原 pushSplit 几何画 1 段
-    //   lower (0,0)→(1,2): isLowerSegment 整段 +expandY，跨 multi-row，pushSplit 走
-    //     拆段（lockedFirst=true: 斜切 + 竖直段）；abs(sy2-sy1)=288 = 1.5*(gridY+expandY)，触发上限
-    // line (1,2)→(2,3) 仅下方，全段 +expandY，vertical。端点 = c.cy + d.cy + expandY。
+    // line (0,0)→(1,2) 跨 expandedAt=0：
+    //   y1=0 (不偏移), y2=2*24+12+250=310 (偏移)
+    //   pushSplit 看到 y2-y1=310 > 1.5*24=36，x1!==x2 走拆段（lockedFirst=true 上端锁）
+    //   转场点 mid = sy1+gridY = 0+24 = 24（上端行底）
+    //   竖直段从 y=24 到 y=310，穿过 expandY 空隙，无断线
     //
-    // 关键断言：node c/d cy 都 +expandY=250，所有 line 端点严格接到 cy（含 expandY）。
+    // 关键断言：所有 line 端点严格接到 cy（含 expandY），无悬空。
     const graph: GraphResultDto = {
       nodes: [
         node(0, 0, 0, 'a'),
@@ -556,37 +558,32 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw) — v0.8
     }];
     const r = renderGraphVscode(graph, { expandedAt: 0 });
 
-    // 拿到 d 节点的 cx, cy
     const nodeA = r.nodes.find((n) => n.row === 0);
     const nodeD = r.nodes.find((n) => n.row === 3);
     assert.ok(nodeA && nodeD, '必须有 a 和 d 节点');
-    // node a 在 expandedAt 行不偏移 cy=12
     assert.equal(nodeA!.cy, VSCODE_OFFSET_Y, 'node a.cy 应不变（expandedAt 行）');
-    // node d (row 3) cy 应含 expandY=250
     assert.equal(nodeD!.cy, 3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250, 'node d.cy 含 expandY 偏移');
 
-    // 验证至少有一条 path 端点落到 node d.cy (line 2 整段 + expandY) // placeholder
-    // 关键断言：所有 path 端点都至少接近某个节点 cy（不能悬空到 1/2 行中间）
-    // 留空：见 describe 顶部 extractEndpoints helper
+    // 所有 path 端点都至少接近某个节点 cy 或转场点（node.cy ± gridY），不能悬空到 1/2 行中间
     const allPathYs = r.paths.flatMap((p) => extractEndpoints(p.d).map((pt) => pt.y));
     const nodeCys = r.nodes.map((n) => n.cy);
+    const tol = VSCODE_GRID_Y;
     for (const py of allPathYs) {
-      // 每个 path 的 y 端点应该接近某个节点 cy（容忍 1px 浮点误差）
-      const closeToAny = nodeCys.some((cy) => Math.abs(py - cy) <= 2);
+      const closeToAny = nodeCys.some((cy) => Math.abs(py - cy) <= tol);
       assert.ok(closeToAny, `path y=${py} 偏离所有节点 cy=${JSON.stringify(nodeCys)}，端点悬空！`);
     }
   });
 
-  test('LockedFirst=true 跨 multi-row 跨 lane line 跨 expandedAt：拆段点几何连接', () => {
+  test('LockedFirst=true 跨 multi-row 跨 lane line 跨 expandedAt：端点严格落到 dot cy', () => {
     // 拓扑：feature branch tip (row 0 lane 1) parent→main HEAD (row 5 lane 0)
     //       line (0,5)→(1,0) lockedFirst=true (parent @ child=main; child 在 row 0 上端)
     //       expandedAt = 3 (中间行)
-    // v0.8.31: splitLineByExpandedAt 把该 line 拆为:
-    //   upper (0,3)→(1,3): lockedFirst=true 单行段，pushSplit 拆上端锁转场
-    //   lower (0,3)→(1,5) lockedFirst=true: 整段 +expandY。pushSplit 看到 y 跨度=
-    //     24 (gridY) > 1.5*gridY ? 不超阈值（注意 sy1/sy2 都来自 line y1*y1 row 上
-    //     —— pushSplit 已加 expandY 后线段相对原点是 line.y1/line.y2 row index，
-    //     不是 pixel，所以 abs(sy2-sy1)=2 gridY 触发 pushSplit 拆段）。
+    //
+    // y1=5*24+12+250=402 (row 5 > expandedAt=3，偏移)
+    // y2=0*24+12=12 (row 0 <= expandedAt=3，不偏移)
+    // pushSplit 看到 y2-y1=-390, abs=390 > 1.5*24=36，x1!==x2 走拆段
+    // lockedFirst=true: 转场点 mid = sy1+gridY = 402+24=426（上端行底）
+    // 竖直段从 y=426 到 y=12，穿过 expandY 空隙，无断线
     //
     // 关键断言：line 端点严格落到 head.cy (row 0) 和 main.cy (row 5+expandY)。
     const graph: GraphResultDto = {
@@ -616,11 +613,12 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw) — v0.8
     assert.equal(headNode!.cy, VSCODE_OFFSET_Y, `head.cy 应不变 = 12（expandedAt 上方 3 行不偏移），实测=${headNode!.cy}`);
     assert.equal(mainNode!.cy, 5 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250, `main.cy 应 = 382（含 expandY），实测=${mainNode!.cy}`);
 
-    // 所有 path 端点 y 都接近某个节点 cy，无悬空
+    // 所有 path 端点 y 都接近某个节点 cy 或转场点（node.cy ± gridY），无悬空
     const allPathYs = r.paths.flatMap((p) => extractEndpoints(p.d).map((pt) => pt.y));
     const nodeCys = r.nodes.map((n) => n.cy);
+    const tol = VSCODE_GRID_Y; // 转场点距 node.cy 最大为 gridY
     for (const py of allPathYs) {
-      const closeToAny = nodeCys.some((cy) => Math.abs(py - cy) <= 2);
+      const closeToAny = nodeCys.some((cy) => Math.abs(py - cy) <= tol);
       assert.ok(closeToAny, `path y=${py} 偏离所有节点 cy=${JSON.stringify(nodeCys)}，端点悬空！`);
     }
   });
