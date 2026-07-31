@@ -82,8 +82,9 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		};
 		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
-		// 从 (0,0) 到 (1,0), 像素 = (4, 4) → (4, 28)
-		// path d: M 16 12 L 16 36
+		// v0.8.35: VSCODE_GRID_Y 24 → 32
+		// path d: M 16 ${(VSCODE_OFFSET_Y).toFixed(1)} L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)} = M 16 12 L 16 44
+		// 从 (0,0) 到 (1,0), 像素 = (4, 4) → (4, 4+VSCODE_GRID_Y)
 		// shadow + line = 2 entries (vscode Branch.drawPath 画 2 遍)
 		assert.equal(r.paths.length, 2);
 		// shadow first, line second
@@ -92,7 +93,7 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		assert.equal(r.paths[0]?.d, r.paths[1]?.d, 'shadow / line d 必须相同');
 		const d = r.paths[0]?.d ?? '';
 		assert.ok(d.includes('M 16 12'), `path 应以 M 16 12 开头, 实际: ${d}`);
-		assert.ok(d.includes('L 16 36'), `path 应包含 L 16 36, 实际: ${d}`);
+		assert.ok(d.includes(`L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}`), `path 应包含 L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}, 实际: ${d}`);
 	});
 
 	test('branches 缺失时从 edges fallback 渲染 flow path', () => {
@@ -104,7 +105,7 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		};
 		const r = renderGraphVscode(graph);
 		assert.equal(r.paths.length, 2);
-		assert.ok(r.paths[0]?.d.includes('L 16 36'), `fallback path 应连接两行，实际: ${r.paths[0]?.d}`);
+		assert.ok(r.paths[0]?.d.includes(`L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}`), `fallback path 应连接两行，实际: ${r.paths[0]?.d}`);
 	});
 
 	test('跨 lane 转场用 C 贝塞尔 (rounded 风格)', () => {
@@ -120,10 +121,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		//   p1 = (4, 4), p2 = (20, 28)
 		//   控制点 1: (4, 4+19.2) = (4, 23.2)
 		//   控制点 2: (20, 28-19.2) = (20, 8.8)
-		//   path: M 16 12.0 C 16 31.2 32 16.8 32 36.0
+		//   path: M 16 12.0 C 16 ${(12 + VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(12 + VSCODE_GRID_Y - VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}
 		assert.ok(d.startsWith('M 16 12'), `path 应以 M 16 12 开头, 实际: ${d}`);
-		assert.ok(d.includes('C 16 31.2'), `path 应包含 C 16 31.2 (控制点 1), 实际: ${d}`);
-		assert.ok(d.includes('32 16.8'), `path 应包含 32 16.8 (控制点 2), 实际: ${d}`);
+		assert.ok(d.includes(`C 16 ${(12 + VSCODE_GRID_Y * 0.8).toFixed(1)}`), `path 应包含 C 16 ${(12 + VSCODE_GRID_Y * 0.8).toFixed(1)} (控制点 1), 实际: ${d}`);
+		assert.ok(d.includes(`32 ${(12 + VSCODE_GRID_Y - VSCODE_GRID_Y * 0.8).toFixed(1)}`), `path 应包含 32 ${(12 + VSCODE_GRID_Y - VSCODE_GRID_Y * 0.8).toFixed(1)} (控制点 2), 实际: ${d}`);
 	});
 
 	test('跨 lane 后接垂直线时保留 VSCode 的曲线转场', () => {
@@ -145,8 +146,8 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		};
 		const r = renderGraphVscode(graph);
 		const d = r.paths[0]?.d ?? '';
-		assert.ok(d.includes('C 16 31.2 32 16.8 32 36.0'), `应保留跨 lane 曲线，实际: ${d}`);
-		assert.ok(d.includes('L 32 60.0'), `曲线后应继续连接目标 lane 垂直线，实际: ${d}`);
+		assert.ok(d.includes(`C 16 ${(12 + VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(12 + VSCODE_GRID_Y - VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}`), `应保留跨 lane 曲线，实际: ${d}`);
+		assert.ok(d.includes(`L 32 ${(VSCODE_OFFSET_Y + 2 * VSCODE_GRID_Y).toFixed(1)}`), `曲线后应继续连接目标 lane 垂直线 (y=${(VSCODE_OFFSET_Y + 2 * VSCODE_GRID_Y).toFixed(1)})，实际: ${d}`);
 	});
 
 	test('angular 风格:跨 lane 用 L 折线,38% 拐点', () => {
@@ -163,9 +164,12 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		//   dy = GRID_Y * 0.38 = 9.12
 		//   lockedFirst = true (p1.x < p2.x)
 		//   midX = x2 = 20, midY = y2 - 9.12 = 18.88
-		//   path: M 16 12.0 L 32 26.9 L 32 36.0
-		assert.ok(d.includes('L 32 26.9'), `angular 拐点应在中点 18.9, 实际: ${d}`);
-		assert.ok(d.includes('L 32 36'), `angular 终点 28, 实际: ${d}`);
+		//   path: M 16 12.0 L 32 ${(12 + VSCODE_GRID_Y * 0.62).toFixed(1)} L 32 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}
+		// v0.8.35: 跟 vscode-render.ts 同步，angDy.toFixed(1) = 12.2 (32*0.38)
+		// midY = 44 - 12.2 = 31.8 (lockedFirst=true)
+		const expectedMidY = ((12 + VSCODE_GRID_Y) - VSCODE_GRID_Y * 0.38).toFixed(1);
+		assert.ok(d.includes(`L 32 ${expectedMidY}`), `angular 拐点应在中点 ${expectedMidY}, 实际: ${d}`);
+		assert.ok(d.includes(`L 32 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}`), `angular 终点 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}, 实际: ${d}`);
 		// 必须不包含 C
 		assert.ok(!d.includes('C '), `angular 不应有 C 命令, 实际: ${d}`);
 	});
@@ -229,9 +233,9 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		// 展开 row 0 后, row 1 的 y 加 EXPAND_Y (250, vscode config.ts:278)
 		// 节点 b 的 cy = 1*24 + 12 + 250 = 286
 		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250);
-		// path 终点 = 36 + 250 = 286
+		// path 终点 = VSCODE_OFFSET_Y + VSCODE_GRID_Y + 250 = 44 + 250 = 294
 		const d = r.paths[0]?.d ?? '';
-		assert.ok(d.includes('L 16 286'), `展开后 path 终点应为 286, 实际: ${d}`);
+		assert.ok(d.includes(`L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y + 250).toFixed(1)}`), `展开后 path 终点应为 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y + 250).toFixed(1)}, 实际: ${d}`);
 	});
 
 	test('自定义 expandY 同时作用于 dot、path 和 SVG 高度', () => {
@@ -246,7 +250,7 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		const r = renderGraphVscode(graph, { expandedAt: 0, expandY: 120 });
 
 		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 120);
-		assert.ok(r.paths[0]?.d.includes('L 16 156'), `path 应使用自定义 expandY，实际: ${r.paths[0]?.d}`);
+		assert.ok(r.paths[0]?.d.includes(`L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y + 120).toFixed(1)}`), `path 应使用自定义 expandY（y=${(VSCODE_OFFSET_Y + VSCODE_GRID_Y + 120).toFixed(1)}），实际: ${r.paths[0]?.d}`);
 		assert.equal(r.height, 2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2 + 120);
 	});
 
@@ -361,10 +365,10 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		};
 		const r1 = renderGraphVscode(mergeLike);
 		const d1 = r1.paths[0]?.d ?? '';
-		// 转场段 (0,0)→(1,1)：贝塞尔 M 16 12 C 16 31.2 32 16.8 32 36.0
-		assert.ok(d1.includes('C 16 31.2 32 16.8 32 36.0'), `转场段应集中在首行，实际: ${d1}`);
-		// 竖直段 (1,1)→(1,3)：L 32 84（y = 3*24+12）
-		assert.ok(d1.includes('L 32 84'), `转场后应为纯竖直段到目标行，实际: ${d1}`);
+		// 转场段 (0,0)→(1,1)：贝塞尔 M 16 12 C 16 ${(12 + VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(12 + VSCODE_GRID_Y - VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}
+		assert.ok(d1.includes(`C 16 ${(12 + VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(12 + VSCODE_GRID_Y - VSCODE_GRID_Y * 0.8).toFixed(1)} 32 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}`), `转场段应集中在首行，实际: ${d1}`);
+		// 竖直段 (1,1)→(1,3)：L 32 ${(3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y).toFixed(1)}（y = 3*${VSCODE_GRID_Y}+${VSCODE_OFFSET_Y}）
+		assert.ok(d1.includes(`L 32 ${(3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y).toFixed(1)}`), `转场后应为纯竖直段到目标行 (y=${(3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y).toFixed(1)})，实际: ${d1}`);
 
 		// lockedFirst=false（fork 汇入边）：竖直段先行，斜切段在下端
 		const forkLike: GraphResultDto = {
@@ -383,9 +387,9 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		const r2 = renderGraphVscode(forkLike);
 		const d2 = r2.paths[0]?.d ?? '';
 		// 竖直段 (1,0)→(1,2)：M 32 12.0 L 32 60.0（y = 2*24+12）
-		assert.ok(d2.includes('M 32 12.0 L 32 60.0'), `fork 线应先竖直到末段前，实际: ${d2}`);
+		assert.ok(d2.includes(`M 32 12.0 L 32 ${(2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y).toFixed(1)}`), `fork 线应先竖直到末段前 (y=${(2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y).toFixed(1)})，实际: ${d2}`);
 		// 转场段 (1,2)→(0,3)：贝塞尔 C 32 79.2 16 64.8 16 84.0
-		assert.ok(d2.includes('C 32 79.2 16 64.8 16 84.0'), `fork 转场段应集中在末行，实际: ${d2}`);
+		assert.ok(d2.includes(`C 32 ${(3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y * 0.2).toFixed(1)} 16 ${(2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + VSCODE_GRID_Y * 0.2).toFixed(1)} 16 ${(3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y).toFixed(1)}`), `fork 转场段应集中在末行，实际: ${d2}`);
 	});
 });
 
@@ -610,8 +614,8 @@ describe('gitgraph vscode-render — v0.8.31 expandedAt 端点独立偏移（无
     const headNode = r.nodes.find((n) => n.row === 0);
     const mainNode = r.nodes.find((n) => n.row === 5);
     assert.ok(headNode && mainNode, '必有 head 和 main 节点');
-    assert.equal(headNode!.cy, VSCODE_OFFSET_Y, `head.cy 应不变 = 12（expandedAt 上方 3 行不偏移），实测=${headNode!.cy}`);
-    assert.equal(mainNode!.cy, 5 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250, `main.cy 应 = 382（含 expandY），实测=${mainNode!.cy}`);
+    assert.equal(headNode!.cy, VSCODE_OFFSET_Y, `head.cy 应不变 = 12（expandedAt 上方 3 行不偏移），实测=${(headNode!.cy).toFixed(1)}`);
+    assert.equal(mainNode!.cy, 5 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250, `main.cy 应 = 382（含 expandY），实测=${(mainNode!.cy).toFixed(1)}`);
 
     // 所有 path 端点 y 都接近某个节点 cy 或转场点（node.cy ± gridY），无悬空
     const allPathYs = r.paths.flatMap((p) => extractEndpoints(p.d).map((pt) => pt.y));
@@ -636,6 +640,6 @@ describe('gitgraph vscode-render — v0.8.31 expandedAt 端点独立偏移（无
     (graph as any).branches = [{ color: 0, lines: [line({ x1: 0, y1: 0, x2: 0, y2: 1 })], end: 2, colorIndex: 0 }];
     const r = renderGraphVscode(graph);
     const d = r.paths[0]?.d ?? '';
-    assert.ok(d.includes(`L 16 36`), `默认状态回归: path 应有 L 16 36（y2=1*24+12=36），实测: ${d}`);
+    assert.ok(d.includes(`L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}`), `默认状态回归: path 应有 L 16 ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}（y2=1*${(VSCODE_GRID_Y).toFixed(1)}+${(VSCODE_OFFSET_Y).toFixed(1)}=${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}），实测: ${d}`);
   });
 });

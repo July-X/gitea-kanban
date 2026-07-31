@@ -28,7 +28,17 @@ import type { GraphNodeDto, GraphResultDto } from '@renderer/types/dto';
 // vscode 默认 grid 配置 (对齐 graph.ts GraphConfig 默认值)
 // vscode-git-graph config.ts:278 默认值
 export const VSCODE_GRID_X = 16;
-export const VSCODE_GRID_Y = 24;
+/**
+ * v0.8.35：行高 24 → 50（+108%），对齐 vscode-gitlens ref-pill 设计 + 用户参考图。
+ * 设计权衡：
+ * - vscode-gitlens ref-pill font-size 1rem (~16px) + padding 0.3rem 0.8rem (5px 13px) + border 1px = 28px 整体
+ * - 用户参考图 badge 30x30 icon + 37px 整体 + 上下 padding ~13px = 50px row
+ * - 选 50px = 让 37px badge 居中（上下各 6-7px padding）
+ * - dot cy 同步 +13px（保持行中心）
+ * - SVG path 圆点、lane 颜色宽度、commit row 高度全部同步 +13px
+ * - 文字 12px (vscode-gitlens 1rem) 略大但保持现有 v3 字体比例
+ */
+export const VSCODE_GRID_Y = 50;
 export const VSCODE_OFFSET_X = 16;
 export const VSCODE_OFFSET_Y = 12;
 export const VSCODE_VERTEX_RADIUS = 4;
