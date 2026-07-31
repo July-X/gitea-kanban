@@ -95,7 +95,7 @@ func TestBuildGraphGitlens_RealWorldScenario(t *testing.T) {
 	commits[len(commits)-1].RefTypes = []git.RefType{git.RefTypeBranch}
 
 	pinned := []string{commits[0].SHA, headSHA} // trunk head + HEAD（base-first）
-	result := BuildGraphGitlens(commits, headSHA, pinned)
+	result := BuildGraphGitlens(commits,  headSHA,  pinned, false)
 
 	// 断言 1：MaxLane ≤ 4（GitLens 风格）
 	if result.MaxLane > 4 {
@@ -215,7 +215,7 @@ func TestBuildGraphGitlens_VsVscodeGitGraph_LaneConvergence(t *testing.T) {
 	pinned := []string{commits[0].SHA}
 
 	// GitLens 算法
-	glResult := BuildGraphGitlens(commits, commits[0].SHA, pinned)
+	glResult := BuildGraphGitlens(commits,  commits[0].SHA,  pinned, false)
 
 	t.Logf("DAG: M0(merge [M1,S1]) -> M1 -> M2; S1 -> S0")
 	t.Logf("GitLens          MaxLane=%d", glResult.MaxLane)

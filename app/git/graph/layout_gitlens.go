@@ -10,7 +10,14 @@
 //
 // 入口契约：
 //
-//	BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult
+//	BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string, truncated bool) *GraphResult
+//
+// 参数 truncated：
+//   - 由 caller（adapter LogGraph）传入 logResult.Truncated（LogCommits 计算的截断标志）
+//   - 透传到 GraphResult.Truncated → DTO GraphResultDto.truncated → 前端 allLoaded 判断
+//   - **v0.8.34 修复**：之前硬编码 Truncated: false 导致 LogCommits 计算的截断信号丢失，
+//     前端 maxCommits=300 截断后永远显示"已到全部提交记录的末尾"，用户无法触发 loadMore。
+//     修复后 graph 层如实透传 truncated，前端 sentinel 在 truncated=true 时保留可见状态触发滚动加载。
 //
 // 输出复用 GraphResult（前端 vscode-render.ts 兼容，DTO 见 types.go）。
 //
@@ -693,7 +700,7 @@ func segmentsToBranches(segments []gitlensLaneSegment, rowOf map[string]int, col
 // BuildGraphGitlens graph 包公共入口（v0.8.26 唯一）
 // pinnedHeadShas 由 caller 提供（base-first：trunk head 最先）。
 // 典型用法：trunk head (main/master) + 当前 branch head。
-func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string) *GraphResult {
+func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []string, truncated bool) *GraphResult {
 	if len(commits) == 0 {
 		return &GraphResult{}
 	}
@@ -859,6 +866,6 @@ func BuildGraphGitlens(commits []git.CommitInfo, head string, pinnedHeadShas []s
 		Branches:  branches,
 		MaxLane:   maxCol,
 		MaxColor:  16,
-		Truncated: false,
+		Truncated: truncated, // v0.8.34：透传 LogCommits 的截断标志（之前硬编码 false 丢失信号）
 	}
 }

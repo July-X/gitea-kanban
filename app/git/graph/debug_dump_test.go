@@ -62,7 +62,7 @@ func TestDumpRealRepoLanes(t *testing.T) {
 		pinned = append(pinned, head)
 	}
 
-	result := BuildGraphGitlens(logResult.Commits, head, pinned)
+	result := BuildGraphGitlens(logResult.Commits,  head,  pinned, logResult.Truncated)
 
 	// 导出 rows JSON 供 GitLens 原版 TS 算法对照（D:\2026\github\vscode-gitlens）
 	if outPath := os.Getenv("GRAPH_DEBUG_JSON"); outPath != "" {
@@ -94,7 +94,7 @@ func TestDumpRealRepoLanes(t *testing.T) {
 		t.Logf("exported %d rows to %s", len(jsonRows), outPath)
 	}
 
-	t.Logf("head=%s pinned=%v nodes=%d maxLane=%d", head[:7], pinned, len(result.Nodes), result.MaxLane)
+	t.Logf("head=%s pinned=%v nodes=%d maxLane=%d truncated=%v", head[:7], pinned, len(result.Nodes), result.MaxLane, result.Truncated)
 	for i, node := range result.Nodes {
 		parents := make([]string, len(node.Parents))
 		for j, p := range node.Parents {

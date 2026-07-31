@@ -232,7 +232,8 @@ func (a *GiteaAdapter) LogGraph(ctx context.Context, localPath string, opts plat
 	if head != "" && (len(pinned) == 0 || pinned[0] != head) {
 		pinned = append(pinned, head)
 	}
-	graphResult := graph.BuildGraphGitlens(logResult.Commits, head, pinned)
+	// v0.8.34：truncated 信号透传——之前 Truncated 字段在 graph 层被硬编码 false 丢失
+	graphResult := graph.BuildGraphGitlens(logResult.Commits, head, pinned, logResult.Truncated)
 	graphResult.LocalExhausted = logResult.LocalExhausted
 	graphResult.DeepenTriggered = logResult.DeepenTriggered
 

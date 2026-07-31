@@ -41,7 +41,7 @@ func TestDumpBranches(t *testing.T) {
 		pinned = append(pinned, head)
 	}
 
-	result := BuildGraphGitlens(logResult.Commits, head, pinned)
+	result := BuildGraphGitlens(logResult.Commits,  head,  pinned, false)
 	rowOf := map[string]int{}
 	for i, n := range result.Nodes {
 		rowOf[n.SHA] = i
@@ -97,7 +97,7 @@ func TestDumpGraphResultJSON(t *testing.T) {
 	if head != "" && (len(pinned) == 0 || pinned[0] != head) {
 		pinned = append(pinned, head)
 	}
-	result := BuildGraphGitlens(logResult.Commits, head, pinned)
+	result := BuildGraphGitlens(logResult.Commits,  head,  pinned, false)
 	data, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
