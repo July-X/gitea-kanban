@@ -453,3 +453,191 @@ describe('gitgraph vscode-render UNCOMMITTED 灰色虚线 (v3.x)', () => {
 		assert.equal(r.nodes[1]!.isCommitted, undefined, 'row 1 缺省 (undefined)');
 	});
 });
+
+// =====================================================================================
+// v0.8.31 回归测试：line 跨 expandedAt 边界时 pushSplit 几何一致性
+//
+// 用户 2026-07-31 实测："新 bug：展开查看 commit 详情后，断线了，没有和 dot 连起来"
+// 截图显示当多分支仓库展开 commit 详情时，穿过展开区的 lane line 在 panel 下方端点
+// 悬空、未准确落到 dot 上（dot 已 +expandY，但 line 几何未跟进）。
+//
+// 根因：expandAt 处理时对 line 跨边界情况硬编码 gridY 单位（vscode 原版"单行跨度"
+// 不变量），但 v0.8.27 Go 端 LockedFirst 改后，DIO 会发"跨多行跨 lane" line（multi-row）。
+// pushSplit 用 (sy1+gridY) 当转场点 mid，sy1 没 +expandY 但 sy2 +expandY → 几何错位。
+//
+// v0.8.31 修复：在 expandAt 处理前用 splitLineByExpandedAt 把跨边界 line 拆为
+// upper (y ≤ expandedAt) + lower (y > expandedAt) 两段。每段独立处理 expandY，
+// 几何无歧义。
+// =====================================================================================
+
+// helper: line (X1,Y1)→(X2,Y2) + lockedFirst + isCommitted
+type LineSpec = { x1: number; y1: number; x2: number; y2: number; lockedFirst?: boolean; isCommitted?: boolean };
+
+function line(s: LineSpec): any {
+  return { x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, lockedFirst: s.lockedFirst ?? false, isCommitted: s.isCommitted ?? true };
+}
+
+describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw) — v0.8.31 expandedAt 跨边界', () => {
+  // SVG 路径端点解析：M (start: x,y) / L (x,y) / C cp1,cp2,end —— 每段最后 2 个数
+  // 是终点（M 是起点，L 是终点，C 是 control+control+end），曲线控制点 y 不计入
+  // 端点集合（控制点 y 经常偏离节点 cy 正常，比如贝塞尔曲线 mid 控制点 ≈ 0.4*gridY
+  // 偏移）。
+  const extractEndpoints = (d: string): Array<{ x: number; y: number }> => {
+    const pts: Array<{ x: number; y: number }> = [];
+    const re = /([MLC])\s*((?:-?\d+(?:\.\d+)?\s+)+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(d)) !== null) {
+      const nums = m[2]!.trim().split(/\s+/).map((s) => parseFloat(s));
+      if (nums.length < 2) continue;
+      pts.push({ x: nums[nums.length - 2]!, y: nums[nums.length - 1]! });
+    }
+    return pts;
+  };
+  test('vertical line 跨 expandedAt 边界：line 端点严格落到下一行 dot（含 expandY）', () => {
+    // 拓扑：row 0 (main lane) → row 1 (main lane)，expandedAt=0
+    // 期望：splitLineByExpandedAt 拆为 (0,0)→(0,0)（空）+ (0,0)→(0,1)（isLowerSegment 含 expandY）
+    //       pushSplit 看到 y2 - y1 = gridY 跳 fallback（≤ 1.5 gridY），画 1 段 vertical
+    //       端点 = 1*24 + 12 + 250 = 286
+    const graph: GraphResultDto = {
+      nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
+      edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
+      maxLane: 0,
+      truncated: false,
+    };
+    (graph as any).branches = [{ color: 0, lines: [line({ x1: 0, y1: 0, x2: 0, y2: 1 })], end: 2, colorIndex: 0 }];
+    const r = renderGraphVscode(graph, { expandedAt: 0 });
+
+    const nodeB = r.nodes.find((n) => n.row === 1);
+    assert.equal(nodeB?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250);
+
+    // 至少一条 path 端点 y 接近 b.cy
+    const allPathYs = r.paths.flatMap((p) => extractEndpoints(p.d).map((pt) => pt.y));
+    const closeToB = allPathYs.some((py) => Math.abs(py - nodeB!.cy) <= 2);
+    assert.ok(closeToB, `vertical line 端点 y 应接近 b.cy=${nodeB!.cy}，所有端点 y: ${JSON.stringify(allPathYs)}`);
+  });
+
+  test('跨 lane multi-row line 跨 expandedAt 边界：拆分后每段独立处理，端点连续', () => {
+    // 拓扑（latest-first）：
+    //   row 0: a (lane 0)               —— expandedAt 行
+    //   row 1: b (lane 1)               —— expandedAt 后续行被分段
+    //   row 2: c (lane 2)               —— 展开后 + expandY
+    //   row 3: d (lane 3)               —— 展开后 + expandY (line 跨 row 2 → row 3)
+    //
+    // v0.8.31 splitLineByExpandedAt 把 line (0,0)→(1,2) 拆为:
+    //   upper (0,0)→(1,0): 单行跨 lane (lockedFirst=true)，按原 pushSplit 几何画 1 段
+    //   lower (0,0)→(1,2): isLowerSegment 整段 +expandY，跨 multi-row，pushSplit 走
+    //     拆段（lockedFirst=true: 斜切 + 竖直段）；abs(sy2-sy1)=288 = 1.5*(gridY+expandY)，触发上限
+    // line (1,2)→(2,3) 仅下方，全段 +expandY，vertical。端点 = c.cy + d.cy + expandY。
+    //
+    // 关键断言：node c/d cy 都 +expandY=250，所有 line 端点严格接到 cy（含 expandY）。
+    const graph: GraphResultDto = {
+      nodes: [
+        node(0, 0, 0, 'a'),
+        node(1, 1, 1, 'b'),
+        node(2, 2, 2, 'c'),
+        node(3, 3, 2, 'd'),
+      ],
+      edges: [
+        { fromRow: 0, toRow: 1, fromLane: 0, toLane: 1, color: 0, type: 0 },
+        { fromRow: 1, toRow: 2, fromLane: 1, toLane: 2, color: 0, type: 0 },
+        { fromRow: 2, toRow: 3, fromLane: 2, toLane: 3, color: 0, type: 0 },
+      ],
+      maxLane: 3,
+      truncated: false,
+    };
+    (graph as any).branches = [{
+      color: 0,
+      lines: [
+        line({ x1: 0, y1: 0, x2: 1, y2: 2 }),
+        line({ x1: 1, y1: 2, x2: 2, y2: 3 }),
+      ],
+      end: 4,
+      colorIndex: 0,
+    }];
+    const r = renderGraphVscode(graph, { expandedAt: 0 });
+
+    // 拿到 d 节点的 cx, cy
+    const nodeA = r.nodes.find((n) => n.row === 0);
+    const nodeD = r.nodes.find((n) => n.row === 3);
+    assert.ok(nodeA && nodeD, '必须有 a 和 d 节点');
+    // node a 在 expandedAt 行不偏移 cy=12
+    assert.equal(nodeA!.cy, VSCODE_OFFSET_Y, 'node a.cy 应不变（expandedAt 行）');
+    // node d (row 3) cy 应含 expandY=250
+    assert.equal(nodeD!.cy, 3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250, 'node d.cy 含 expandY 偏移');
+
+    // 验证至少有一条 path 端点落到 node d.cy (line 2 整段 + expandY) // placeholder
+    // 关键断言：所有 path 端点都至少接近某个节点 cy（不能悬空到 1/2 行中间）
+    // 留空：见 describe 顶部 extractEndpoints helper
+    const allPathYs = r.paths.flatMap((p) => extractEndpoints(p.d).map((pt) => pt.y));
+    const nodeCys = r.nodes.map((n) => n.cy);
+    for (const py of allPathYs) {
+      // 每个 path 的 y 端点应该接近某个节点 cy（容忍 1px 浮点误差）
+      const closeToAny = nodeCys.some((cy) => Math.abs(py - cy) <= 2);
+      assert.ok(closeToAny, `path y=${py} 偏离所有节点 cy=${JSON.stringify(nodeCys)}，端点悬空！`);
+    }
+  });
+
+  test('LockedFirst=true 跨 multi-row 跨 lane line 跨 expandedAt：拆段点几何连接', () => {
+    // 拓扑：feature branch tip (row 0 lane 1) parent→main HEAD (row 5 lane 0)
+    //       line (0,5)→(1,0) lockedFirst=true (parent @ child=main; child 在 row 0 上端)
+    //       expandedAt = 3 (中间行)
+    // v0.8.31: splitLineByExpandedAt 把该 line 拆为:
+    //   upper (0,3)→(1,3): lockedFirst=true 单行段，pushSplit 拆上端锁转场
+    //   lower (0,3)→(1,5) lockedFirst=true: 整段 +expandY。pushSplit 看到 y 跨度=
+    //     24 (gridY) > 1.5*gridY ? 不超阈值（注意 sy1/sy2 都来自 line y1*y1 row 上
+    //     —— pushSplit 已加 expandY 后线段相对原点是 line.y1/line.y2 row index，
+    //     不是 pixel，所以 abs(sy2-sy1)=2 gridY 触发 pushSplit 拆段）。
+    //
+    // 关键断言：line 端点严格落到 head.cy (row 0) 和 main.cy (row 5+expandY)。
+    const graph: GraphResultDto = {
+      nodes: [
+        node(0, 1, 1, 'head'),
+        node(5, 0, 0, 'main'),
+      ],
+      edges: [
+        { fromRow: 0, toRow: 5, fromLane: 1, toLane: 0, color: 0, type: 0 },
+      ],
+      maxLane: 1,
+      truncated: false,
+    };
+    (graph as any).branches = [{
+      color: 0,
+      lines: [
+        line({ x1: 0, y1: 5, x2: 1, y2: 0, lockedFirst: true }),
+      ],
+      end: 6,
+      colorIndex: 0,
+    }];
+    const r = renderGraphVscode(graph, { expandedAt: 3 });
+
+    const headNode = r.nodes.find((n) => n.row === 0);
+    const mainNode = r.nodes.find((n) => n.row === 5);
+    assert.ok(headNode && mainNode, '必有 head 和 main 节点');
+    assert.equal(headNode!.cy, VSCODE_OFFSET_Y, `head.cy 应不变 = 12（expandedAt 上方 3 行不偏移），实测=${headNode!.cy}`);
+    assert.equal(mainNode!.cy, 5 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250, `main.cy 应 = 382（含 expandY），实测=${mainNode!.cy}`);
+
+    // 所有 path 端点 y 都接近某个节点 cy，无悬空
+    const allPathYs = r.paths.flatMap((p) => extractEndpoints(p.d).map((pt) => pt.y));
+    const nodeCys = r.nodes.map((n) => n.cy);
+    for (const py of allPathYs) {
+      const closeToAny = nodeCys.some((cy) => Math.abs(py - cy) <= 2);
+      assert.ok(closeToAny, `path y=${py} 偏离所有节点 cy=${JSON.stringify(nodeCys)}，端点悬空！`);
+    }
+  });
+
+  test('无 expandedAt 时 multi-row line 不拆分 (回归不动既有默认状态)', () => {
+    const graph: GraphResultDto = {
+      nodes: [
+        node(0, 0, 0, 'a'),
+        node(1, 0, 0, 'b'),
+      ],
+      edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
+      maxLane: 0,
+      truncated: false,
+    };
+    (graph as any).branches = [{ color: 0, lines: [line({ x1: 0, y1: 0, x2: 0, y2: 1 })], end: 2, colorIndex: 0 }];
+    const r = renderGraphVscode(graph);
+    const d = r.paths[0]?.d ?? '';
+    assert.ok(d.includes(`L 16 36`), `默认状态回归: path 应有 L 16 36（y2=1*24+12=36），实测: ${d}`);
+  });
+});

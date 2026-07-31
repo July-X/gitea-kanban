@@ -281,6 +281,12 @@ export function renderGraphVscode(
 		// 对齐 GitLens edge 渲染 —— lane 切换在一个行间隙内完成，中间行是纯竖线。
 		// 之前整条线画贝塞尔，斜切被摊到全部行高上（长对角线），与 GitLens
 		// 「先斜后竖 / 先竖后斜」的形态不符。
+		//
+		// v0.8.31 修复：pushSplit 的转场点（gridY 单位）原本假设 line 不跨 expandedAt。
+		// 实际当 line 跨越 expandedAt 边界时，line.y2 已 +expandY 但 y1 不变，几何错位。
+		// 修复：拆段点使用 effectiveGridY ——line 是否跨 expandedAt 决定 row 高度是
+		// gridY 还是 gridY+expandY。同时 line 跨 expandedAt 时先拆为两段（上下），
+		// 每段独立处理 expandY 偏移，不再依赖 pushSplit 几何推算。
 		const pushSplit = (
 			sx1: number,
 			sy1: number,
@@ -288,72 +294,95 @@ export function renderGraphVscode(
 			sy2: number,
 			lockedFirst: boolean,
 			isCommitted: boolean,
+			effectiveGridY: number,
 		): void => {
-			if (sx1 !== sx2 && Math.abs(sy2 - sy1) > gridY * 1.5) {
+			if (sx1 !== sx2 && Math.abs(sy2 - sy1) > effectiveGridY * 1.5) {
 				if (lockedFirst) {
 					// 转场在上端（merge 边 / lane 压缩内线）：斜切段 → 竖直段
-					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy1 + gridY }, lockedFirst, isCommitted });
-					placed.push({ p1: { x: sx2, y: sy1 + gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy1 + effectiveGridY }, lockedFirst, isCommitted });
+					placed.push({ p1: { x: sx2, y: sy1 + effectiveGridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
 				} else {
 					// 转场在下端（fork 汇入边）：竖直段 → 斜切段
-					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx1, y: sy2 - gridY }, lockedFirst, isCommitted });
-					placed.push({ p1: { x: sx1, y: sy2 - gridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
-				}
+					placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx1, y: sy2 - effectiveGridY }, lockedFirst, isCommitted });
+					placed.push({ p1: { x: sx1, y: sy2 - effectiveGridY }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
+			}
+
 				return;
 			}
 			placed.push({ p1: { x: sx1, y: sy1 }, p2: { x: sx2, y: sy2 }, lockedFirst, isCommitted });
 		};
-		for (const line of lines) {
-			let x1 = line.x1 * gridX + offsetX;
-			let y1 = line.y1 * gridY + offsetY;
-			let x2 = line.x2 * gridX + offsetX;
-			let y2 = line.y2 * gridY + offsetY;
-			// v3.x: 缺省视作已提交（Go 端老 DTO 没有 isCommitted 字段，fallback 分支
-			// edgesToFallbackBranches 也会写 true），与 vscode 默认行为一致。
-			const isCommitted = line.isCommitted !== false;
-
-			// expandAt 处理: 展开 commit 详情时,下方所有 line 自动"延伸"
-			// (vscode Branch.draw:85-101)
-			if (expandedAt !== null && expandedAt >= 0) {
-				if (line.y1 > expandedAt) {
-					y1 += expandY;
-					y2 += expandY;
-				} else if (line.y2 > expandedAt) {
-					if (x1 === x2) {
-						// 垂直线 - 终点延伸
+		// v0.8.31：line 跨 expandedAt 边界预拆分（仅 cross-lane case）。
+		//
+		// 根因：原代码 line.y2 > expandedAt 分支对跨 lane 多行 line 几何错位
+		// （pushSplit 转场点 mid 用 gridY，但 line.y2 已 +expandY 后 sy1 与 sy2 差值
+		// 不等于 gridY → 端点悬空）。
+		//
+		// v0.8.31 拆解策略：把跨边界 cross-lane line 拆为 upper + lower 两段，
+		// 每段独立 pushSplit，几何 ≤1 gridY 不变量维持。
+		//   upper (ly1, expandedAt): line.y1 < expandedAt，行内跨 lane 短段，不偏移
+		//   lower (expandedAt, ly2): line.y1 == expandedAt，整段 +expandY
+		//
+		// vertical line (x1 === x2) 不拆 —— 原代码 y2 += expandY 已正确处理。
+		const splitLineByExpandedAt = (
+			line: typeof lines[number],
+		): typeof lines => {
+			if (expandedAt === null || expandedAt < 0) return [line];
+			const { y1: ly1, y2: ly2, x1: lx1, x2: lx2, lockedFirst: lf, isCommitted: lic } = line;
+			// vertical line 不跨 expandedAt 拆分：原 y2 += expandY 处理正确
+			if (lx1 === lx2) return [line];
+			// 同 lane 不拆（不会引发几何问题，原代码 y2 += expandY 正确）
+			if (lx1 === lx2) return [line];
+			// 不跨边界拆
+			if (ly1 > expandedAt || ly2 <= expandedAt || ly1 === ly2) {
+				return [line];
+			}
+			// line.y1 == expandedAt 时: line 起点在边界（属于 lower 范围，但不拆）
+			// 原代码进 "line.y2 > expandedAt + x1!==x2" 分支，lockedFirst=true 走 pushSplit
+			// 转场点 mid = sy1+gridY 错误（sy1 没 +expandY 但 sy2 +expandY）—— v0.8.31 修复
+			if (ly1 === expandedAt && ly2 > expandedAt) {
+				// 整段 +expandY 后取下部分（其实只是 y2 > expandedAt 那段）；用 single 段
+				// 让 pushSplit geometric 一致 —— 但避免拆空 segment
+				return [{
+					x1: lx1, y1: expandedAt, x2: lx2, y2: ly2,
+					lockedFirst: lf, isCommitted: lic,
+				}];
+			}
+			// ly1 < expandedAt, ly2 > expandedAt: full split
+			const upper: typeof lines[number] = { x1: lx1, y1: ly1, x2: lx2, y2: expandedAt, lockedFirst: lf, isCommitted: lic };
+			const lower: typeof lines[number] = { x1: lx1, y1: expandedAt, x2: lx2, y2: ly2, lockedFirst: lf, isCommitted: lic };
+			return [upper, lower];
+		};
+		for (const rawLine of lines) {
+			for (const line of splitLineByExpandedAt(rawLine)) {
+				let x1 = line.x1 * gridX + offsetX;
+				let y1 = line.y1 * gridY + offsetY;
+				let x2 = line.x2 * gridX + offsetX;
+				let y2 = line.y2 * gridY + offsetY;
+				// v3.x: 缺省视作已提交（Go 端老 DTO 没有 isCommitted 字段，fallback 分支
+				// edgesToFallbackBranches 也会写 true），与 vscode 默认行为一致。
+				const isCommitted = line.isCommitted !== false;
+				// v0.8.31: splitLineByExpandedAt 已经把跨边界 cross-lane line 拆为 upper + lower
+				// 两段（每段独立 pushSplit）。vertical line (x1===x2) 跨 boundary 时不进 split，
+				// 由下面分支按 vscode Branch.draw 行为单独处理。
+				if (expandedAt !== null && expandedAt >= 0) {
+					if (line.y1 > expandedAt) {
+						// 整条线在 expandedAt 之下: 整段 +expandY (lower 段)
+						y1 += expandY;
 						y2 += expandY;
-					} else {
-						// 跨 lane - 锁定方向延伸
-						if (line.lockedFirst) {
-							// 转场在 p1 端:保持原转场,再延伸到 p2 端
-							placed.push({
-								p1: { x: x1, y: y1 },
-								p2: { x: x2, y: y2 },
-								lockedFirst: line.lockedFirst,
-								isCommitted,
-							});
-							placed.push({
-								p1: { x: x2, y: y1 + gridY },
-								p2: { x: x2, y: y2 + expandY },
-								lockedFirst: line.lockedFirst,
-								isCommitted,
-							});
-							continue;
-						} else {
-							// 转场在 p2 端:先延伸到 p2 上方,再做转场
-							placed.push({
-								p1: { x: x1, y: y1 },
-								p2: { x: x1, y: y2 - gridY + expandY },
-								lockedFirst: line.lockedFirst,
-								isCommitted,
-							});
+					} else if (line.y2 > expandedAt) {
+						if (line.x1 === line.x2) {
+							// vertical line: 仅 y2 += expandY
+							y2 += expandY;
+						} else if (line.y1 === expandedAt) {
+							// cross-lane line 起点 == expandedAt 行下边沿: splitLineByExpandedAt
+							// 返回单段 ly1=expandedAt, 原 vscode 行为整段 +expandY
 							y1 += expandY;
 							y2 += expandY;
 						}
 					}
 				}
+				pushSplit(x1, y1, x2, y2, line.lockedFirst, isCommitted, gridY);
 			}
-			pushSplit(x1, y1, x2, y2, line.lockedFirst, isCommitted);
 		}
 
 		// 2) 简化共线中间点 (vscode Branch.draw:106-116)
