@@ -2762,13 +2762,13 @@ function refBadgeClass(refType?: string): string {
                       >
                         <Tag
                           v-if="r.commit.refTypes?.[idx] === 'tag'"
-                          :size="24"
+                          :size="12"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
                         <GitBranch
                           v-else
-                          :size="24"
+                          :size="12"
                           class="ref-badge__icon"
                           aria-hidden="true"
                         />
@@ -3799,17 +3799,15 @@ function refBadgeClass(refType?: string): string {
   white-space: nowrap;
   background-color: rgba(128, 128, 128, 0.15);
   color: #E6EDF3;
-  /* v0.8.35：badge 整体高度 30 → 37（+23%），对齐 vscode-gitlens ref-pill + 用户参考图：30x30 icon 容器 / 37px 整体高度（icon 紧贴 label 0 gap） */
-  line-height: 37px;
-  height: 37px;
-  padding: 0 12px;
-  /* v0.8.35：ref pill 走 vscode-gitlens 风格 - rest 透明 + 灰边 + 圆角 5px；hover 时填充 lane 色 + 文字色变 lane-on-color */
+  /* v0.8.35.1：badge 整体高度 37 → 18（跟 row 高度 24 对齐），回到 v0.7.x 紧凑设计。 */
+  line-height: 18px;
+  height: 18px;
+  padding: 0 6px;
   background-color: transparent;
   border-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
   overflow: hidden;
 }
 .ref-badge:hover {
-  /* v0.8.35：hover 填充 lane 色 + 文字色变 contrastColor(lane)（跟 vscode-gitlens --ref-on-color 一致） */
   background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
   color: var(--color-shell-main-bg, #0f1115);
 }
@@ -3819,16 +3817,14 @@ function refBadgeClass(refType?: string): string {
  * dot hover 时通过 .commit-row--dot-active .ref-badge 变 border-color */
 .ref-badge__icon {
   flex: 0 0 auto;
-  /* v0.8.35：图标容器 28x28 → 30x30，padding 0，margin-right 6 → 0（icon 紧贴 label 0 gap，对齐 vscode-gitlens） */
-  width: 30px;
-  height: 30px;
+  /* v0.8.35.1：图标容器 30x30 → 16x16，padding 0，margin-right 0 → 4（icon 跟 label 间距） */
+  width: 16px;
+  height: 16px;
   padding: 0;
-  margin-right: 0;
-  /* v0.8.35：图标的代码 icon 背景 = lane 色，对齐 vscode-gitlens .gl-graph__ref-pill-icon（color: var(--ref-color)） */
+  margin-right: 4px;
   background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
-  /* v0.8.35：SVG 图形在 ref pill hover 时跟随 badge 颜色变（之前是 --color-shell-main-bg 写死） */
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 1.5;
   fill: none;
   box-sizing: content-box;
   display: inline-flex;
