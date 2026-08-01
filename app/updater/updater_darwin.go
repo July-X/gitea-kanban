@@ -10,6 +10,11 @@ import (
 	"strings"
 )
 
+// macBundleID 是构建产物的 CFBundleIdentifier（build/darwin/Info.plist 模板
+// com.wails.{{.Name}} + wails.json name=gitea-kanban → com.wails.gitea-kanban）。
+// 用于 verifyMacApp 检查下载的 .app bundle 身份，防止用同名 .app 鱼目混珠。
+const macBundleID = "com.wails.gitea-kanban"
+
 // applyMacOS macOS dmg 自动安装：挂载 dmg → 提取 .app → 生成 helper 脚本
 // 等待当前进程退出后原位替换 .app bundle 并重启。
 //
@@ -72,7 +77,21 @@ func applyMacOS(dmgPath string, logger func(level, format string, args ...any), 
 		logger("warn", "update: hdiutil detach %s 失败: %v", mountPoint, err)
 	}
 
-	// 3. 启动 detached helper 脚本：等旧进程退出 → 替换 → 重启
+	// 3. 验证 .app bundle 身份 + 代码签名（v0.8.39 新增，对齐 DeepSeek-Reasonix verifyMacApp）
+	//
+	// 安全要求：下载的 dmg 可能被中间人篡改或 release 被劫持。不验证直接替换 .app
+	// 等于让任意代码以当前用户权限运行。验证链：
+	//   a. CFBundleIdentifier 匹配（防止用同名 .app 鱼目混珠）
+	//   b. codesign --verify --deep --strict（防止二进制被篡改）
+	//   c. spctl --assess --type execute（Gatekeeper 公证检查，best-effort：
+	//      当前 build 未 Developer ID 签名+公证，spctl 会失败但不阻断——
+	//      只记日志警告，等将来签名后再改为强制）
+	if err := verifyMacApp(stagedApp, logger); err != nil {
+		_ = os.RemoveAll(staging)
+		return err
+	}
+
+	// 4. 启动 detached helper 脚本：等旧进程退出 → 替换 → 重启
 	backupApp := currentApp + ".gitea-kanban-update-backup"
 	script := filepath.Join(staging, "install-gitea-kanban-update.sh")
 	logPath := filepath.Join(staging, "update-helper.log")
@@ -196,6 +215,47 @@ func findMacAppBundle(root string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: dmg 挂载点里找不到 .app bundle", ErrApplyFailed)
+}
+
+// verifyMacApp 验证下载的 .app bundle 身份和完整性（v0.8.39 新增，对齐 DeepSeek-Reasonix）。
+//
+// 三层验证：
+//  1. CFBundleIdentifier 匹配 macBundleID（防止用同名 .app 鱼目混珠）
+//  2. codesign --verify --deep --strict（防止二进制被篡改，ad-hoc 签名也能过）
+//  3. spctl --assess --type execute（Gatekeeper 公证检查，best-effort：
+//     当前 build 未 Developer ID 签名+公证，spctl 会失败但不阻断——
+//     只记日志警告，等将来签名后再改为强制）
+//
+// 参考：DeepSeek-Reasonix desktop/updater_mac.go:verifyMacApp
+func verifyMacApp(appPath string, logger func(level, format string, args ...any)) error {
+	// 1. CFBundleIdentifier 检查
+	info := filepath.Join(appPath, "Contents", "Info.plist")
+	out, err := exec.Command("/usr/libexec/PlistBuddy", "-c", "Print :CFBundleIdentifier", info).Output()
+	if err != nil {
+		return fmt.Errorf("%w: 读取 Bundle Identifier: %v", ErrApplyFailed, err)
+	}
+	if got := strings.TrimSpace(string(out)); got != macBundleID {
+		return fmt.Errorf("%w: Bundle Identifier %q 不匹配期望值 %q", ErrApplyFailed, got, macBundleID)
+	}
+
+	// 2. codesign 验证（必须通过——即使 ad-hoc 签名也需要完整性校验）
+	if err := exec.Command("codesign", "--verify", "--deep", "--strict", appPath).Run(); err != nil {
+		return fmt.Errorf("%w: 代码签名校验失败: %v", ErrApplyFailed, err)
+	}
+
+	// 3. spctl 公证检查（best-effort，当前未签名 build 会失败但不阻断）
+	if err := exec.Command("spctl", "--assess", "--type", "execute", appPath).Run(); err != nil {
+		if logger != nil {
+			logger("warn", "update: spctl 公证检查未通过（当前 build 可能未签名/未公证）: %v", err)
+		}
+	} else if logger != nil {
+		logger("info", "update: spctl 公证检查通过")
+	}
+
+	if logger != nil {
+		logger("info", "update: macOS .app bundle 验证通过 (bundleID=%s, codesign=OK)", macBundleID)
+	}
+	return nil
 }
 
 // applyWindows darwin 平台的 stub，返 ErrUnsupportedOS

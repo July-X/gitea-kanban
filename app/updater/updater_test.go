@@ -356,7 +356,8 @@ func TestManualUpdateReason(t *testing.T) {
 }
 
 // TestApplyWindowsMock 验证 NSIS installer 启动参数构造（windows-only）。
-// applyWindows 末尾 os.Exit(0)，所以只测试参数构造逻辑，不实际启动安装器。
+// v0.8.39 起 applyWindows 返回 ErrInstallerLaunched 而非 os.Exit(0)，
+// 但本测试仍只验证路径解析逻辑，不实际启动安装器。
 func TestApplyWindowsMock(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-only test")
@@ -372,6 +373,8 @@ func TestApplyWindowsMock(t *testing.T) {
 		t.Fatalf("stat installer: %v", err)
 	}
 	// 验证路径解析不报错
+	// v0.8.39 起 applyWindows 返回 ErrInstallerLaunched 不再 os.Exit，
+	// 但这里仍不直接调 applyWindows（会弹 UAC）
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("executable: %v", err)

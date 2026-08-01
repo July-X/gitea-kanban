@@ -50,7 +50,6 @@
  */
 import NavRail from './NavRail.vue';
 import StatusBar from './StatusBar.vue';
-import UpdateBanner from './UpdateBanner.vue';
 import { onMounted } from 'vue';
 import { useUpdate } from '@renderer/composables/useUpdate';
 
@@ -87,11 +86,10 @@ const CACHEABLE_VIEWS = [
 <template>
   <div class="shell" :class="{ 'shell--mac': isMac }">
     <!--
-      v0.8.0：自动更新 banner（顶部一行）
-      仅在 useUpdate().status.kind === 'available' / 'downloading' / 'verifying' / 'downloaded'
-      时渲染（UpdateBanner 内部 v-if 控制）。不影响其它布局。
+      v0.8.40：更新提示已从顶部 UpdateBanner 整合到 StatusBar 右侧（user 需求：
+      重用 StatusBar 做提示/下载/重启，适配主题颜色）。onMounted 仍在这里触发
+      自动检查更新（StatusBar useUpdate singleton 共享 status）。
     -->
-    <UpdateBanner />
     <!--
       v1.7 拍板 2026-07-04：.shell__row = flex row, 包裹 navrail + main
       (v1.5 旧的 .shell grid + .shell 100vh 不分上下布局 在 v1.7 重写为 flex column)

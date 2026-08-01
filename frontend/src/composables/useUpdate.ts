@@ -200,7 +200,8 @@ export function useUpdate() {
     status.value = { kind: 'installing' };
     try {
       await b.InstallUpdate();
-      // 多数情况下 applyWindows 末尾 os.Exit(0)，走不到这里
+      // v0.8.39 起 applyWindows 返回 ErrInstallerLaunched 哨兵错误，
+      // app_updater_app.go 走 graceful shutdown 后退出，这里可能走到。
       status.value = { kind: 'done' };
     } catch (e: any) {
       const msg = String(e?.message ?? e ?? '');

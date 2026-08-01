@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -186,16 +185,14 @@ func (u *Updater) Check(ctx context.Context) (*UpdateInfo, error) {
 // Download 流式下载最新 manifest 对应当前平台的 asset 到 ${CacheDir}/，下载 .sig 校验通过后写到 downloaded.json。
 //
 // 调用方需确保 Check 已经返回 Available=true。
+//
+// v0.8.39：消除重复 manifest 请求——旧实现先调 Check（内部 fetchLatestManifest），
+// 再调 fetchLatestManifest，总共 2 次网络请求。改为直接 fetchLatestManifest 一次，
+// 在本地做版本比较 + manualOnly 判断，减少 GitHub API 配额消耗 + 慢网等待。
 func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
-	info, err := u.Check(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Available {
-		return nil, fmt.Errorf("%w: no update available", ErrManifestFetch)
-	}
-	if info.ManualOnly {
-		return nil, fmt.Errorf("%w: %s", ErrManualUpdateOnly, info.ManualReason)
+	// dev build 不支持下载
+	if NormalizeVersion(u.cfg.RunningVersion) == "" {
+		return nil, fmt.Errorf("%w: dev build does not support download", ErrManualUpdateOnly)
 	}
 
 	m, err := u.fetchLatestManifest(ctx)
@@ -204,12 +201,23 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 		return nil, err
 	}
 
+	// 本地版本比较（不发网络请求）
+	cmp := CompareVersion(u.cfg.RunningVersion, m.Version)
+	if cmp >= 0 {
+		return nil, fmt.Errorf("%w: no update available", ErrManifestFetch)
+	}
+
 	plat := CurrentPlatform()
 	asset, ok := m.Assets[plat]
 	if !ok {
 		err := &ErrNoAssetForPlatform{Platform: plat}
 		u.emitProgress("error", 0, 0, err.Error())
 		return nil, err
+	}
+
+	// canSelfUpdate 判断（不发网络请求）
+	if !u.canSelfUpdate() {
+		return nil, fmt.Errorf("%w: %s", ErrManualUpdateOnly, u.manualUpdateReason())
 	}
 
 	if err := os.MkdirAll(u.cfg.CacheDir, 0o755); err != nil {
@@ -456,9 +464,13 @@ func (u *Updater) fetchManifestFrom(ctx context.Context, url string) (*Manifest,
 	return m, nil
 }
 
-// downloadWithRetry HTTP GET with retry + Range 续传 + size cap.
+// downloadWithRetry HTTP GET with retry + size cap.
 //
-// start 是已下载字节数（0 = 全量下载）。
+// start 是已下载字节数（0 = 全量下载），用于 HTTP Range header 续传。
+//
+// v0.8.39：修正注释——旧注释声称"Range 续传"但 Download 调用时 start=0
+// 且 retry 时不追踪已下载字节数，实际不支持断点续传。保留 start 参数供
+// 未来改为流式下载后使用，当前文档如实标注限制。
 func (u *Updater) downloadWithRetry(ctx context.Context, url string, start int64, maxSize int64) ([]byte, error) {
 	var lastErr error
 	for attempt := 1; attempt <= defaultMaxRetries; attempt++ {
@@ -544,6 +556,11 @@ func (u *Updater) readDownloadedRecord(version, channel, platform string) (*down
 	return nil, fmt.Errorf("no matching record")
 }
 
+// maxDownloadedRecords downloaded.json 保留的最大记录数。
+// v0.8.39：旧版每次下载 append 不删除，长期使用后文件无限增长。
+// 保留最近 5 条足够覆盖 "当前版本 + 上一个版本" 场景。
+const maxDownloadedRecords = 5
+
 func (u *Updater) writeDownloadedRecord(rec downloadedRecord) error {
 	path := filepath.Join(u.cfg.CacheDir, "downloaded.json")
 	var records []downloadedRecord
@@ -551,6 +568,19 @@ func (u *Updater) writeDownloadedRecord(rec downloadedRecord) error {
 		_ = json.Unmarshal(data, &records)
 	}
 	records = append(records, rec)
+
+	// v0.8.39：GC 旧记录——保留最近 maxDownloadedRecords 条，更老的记录对应的
+	// 安装包文件也一并删除（释放磁盘空间）。
+	if len(records) > maxDownloadedRecords {
+		toRemove := records[:len(records)-maxDownloadedRecords]
+		for _, old := range toRemove {
+			if old.Path != "" && old.Path != rec.Path {
+				_ = os.Remove(old.Path) // best-effort，失败不阻断
+			}
+		}
+		records = records[len(records)-maxDownloadedRecords:]
+	}
+
 	body, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		return err
@@ -627,6 +657,3 @@ const GitHubLatestReleaseAPI = "https://api.github.com/repos/July-X/gitea-kanban
 
 // GitHubReleasePageURL 同上。
 const GitHubReleasePageURL = "https://github.com/July-X/gitea-kanban/releases/latest"
-
-// 抑制 unused 警告
-var _ = errors.New

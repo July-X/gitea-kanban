@@ -1,6 +1,11 @@
 <script setup lang="ts">
 /**
- * UpdateBanner.vue —— AppShell 顶部 banner
+ * UpdateBanner.vue —— 【v0.8.40 已废弃】原 AppShell 顶部 banner
+ *
+ * v0.8.40 起，更新提示已整合到 StatusBar.vue 右侧紧凑指示器（user 需求：
+ * 重用 StatusBar 做提示/下载/重启，适配主题颜色）。本组件不再被 AppShell 引用。
+ *
+ * 文件保留供 git blame 参考；如需恢复顶部 banner 布局可重新引用。
  *
  * v0.8.0 引入。当 useUpdate().status.kind === 'available' / 'downloading' / 'downloaded'
  * 时显示一行 banner + 按钮。
@@ -17,10 +22,12 @@
  *   - 不要阻塞 mount（check 在 AppShell onMounted 异步调用）
  *   - 用户点「下载」后按钮立即变「下载中...（不可点）」，符合 AGENTS §14.3
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useUpdate, formatBytes } from '@renderer/composables/useUpdate';
 
 const { status, check, download, install, openDownloadPage, dismiss } = useUpdate();
+
+const showReleaseNotes = ref(false);
 
 // 只在 available / downloading / verifying / downloaded 时显示 banner
 const showBanner = computed(() => {
@@ -86,6 +93,10 @@ function onDismissClick(): void {
   dismiss();
 }
 
+function onShowNotesClick(): void {
+  showReleaseNotes.value = !showReleaseNotes.value;
+}
+
 function onRefreshClick(): void {
   void check();
 }
@@ -115,7 +126,7 @@ function onRefreshClick(): void {
         <button class="update-banner__btn" @click="onDismissClick">
           稍后提醒
         </button>
-        <button v-if="info?.notes" class="update-banner__btn update-banner__btn--ghost">
+        <button v-if="info?.notes" class="update-banner__btn update-banner__btn--ghost" @click="onShowNotesClick">
           查看更新日志
         </button>
       </template>
@@ -146,6 +157,13 @@ function onRefreshClick(): void {
       >
         ↻
       </button>
+    </div>
+
+    <div
+      v-if="showReleaseNotes && info?.notes"
+      class="update-banner__notes"
+    >
+      <pre class="update-banner__notes-text">{{ info.notes }}</pre>
     </div>
 
     <div
@@ -260,5 +278,22 @@ function onRefreshClick(): void {
     transform: translateY(0);
     opacity: 1;
   }
+}
+
+.update-banner__notes {
+  padding: 8px 16px 12px;
+  background: rgba(0, 0, 0, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.update-banner__notes-text {
+  margin: 0;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

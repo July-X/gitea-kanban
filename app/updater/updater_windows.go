@@ -247,11 +247,16 @@ func openInstallerInExplorer(installerPath string) {
 //	改走 ShellExecuteExW + lpVerb="runas" 触发 UAC 弹窗，用户点确认后
 //	NSIS 才能以管理员权限写 C:\Program Files\gitea-kanban\。
 //
+// v0.8.39 修复（对齐 DeepSeek-Reasonix）：不再在 applyWindows 内直接 os.Exit(0)，
+// 改为返回 ErrInstallerLaunched 信号，让调用方 (app_updater_app.go) 先执行
+// graceful shutdown（持久化数据 / 关闭 DB / 停止子进程）再退出。
+// 旧实现直接 os.Exit(0) 会跳过 Wails OnShutdown 回调，可能丢失未保存数据。
+//
 // 流程：
 //  1. 拿当前 exe 路径（解析 symlink）+ installDir
 //  2. 短路径化 installDir（NSIS /D= 不支持引号且遇空格截断）
 //  3. ShellExecuteExW 弹 UAC → 用户点确认 → installer 拉起
-//  4. os.Exit(0) 让旧进程退出，NSIS 才能覆盖文件
+//  4. 返回 ErrInstallerLaunched，调用方负责退出
 //
 // UAC 取消（错误 1223）→ 静默返回 nil（不算错误）。
 // 其他 ShellExecuteExW 失败 → fallback 到 explorer.exe 打开下载目录，
@@ -276,9 +281,10 @@ func applyWindows(installerPath string, logger func(level, format string, args .
 	err = launchElevated(installerPath, shortDir)
 	switch {
 	case err == nil:
-		// installer 已拉起，旧进程必须退出让 NSIS 覆盖文件
-		os.Exit(0)
-		return nil // unreachable
+		// installer 已拉起，调用方需退出让 NSIS 覆盖文件。
+		// v0.8.39：返回 ErrInstallerLaunched 而非 os.Exit(0)，让 app_updater_app.go
+		// 先执行 graceful shutdown（对齐 DeepSeek-Reasonix 的 a.shutdown → os.Exit 流程）。
+		return ErrInstallerLaunched
 	case errors.Is(err, errElevationCancelled):
 		// UAC 用户点了"否"，不算 bug。日志记一下，前端无感知。
 		if logger != nil {

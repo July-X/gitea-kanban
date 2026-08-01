@@ -50,6 +50,10 @@ import {
   // 但 import 漏了，devtool console 一直报 "Failed to resolve component: ExternalLink"
   // at <StatusBar>" 警告（每次渲染 10 条 × isMac 2 种状态 = 20 条）
   ExternalLink,
+  // v0.8.40：更新提示整合到 StatusBar —— 下载 / 重启 icon
+  Download,
+  RotateCw,
+  X,
 } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
@@ -63,11 +67,88 @@ import EmptyState from '@renderer/components/EmptyState.vue';
 import AccountManagerDialog from '@renderer/components/AccountManagerDialog.vue';
 import StatusBarPulse from '@renderer/components/StatusBarPulse.vue';
 import type { RepoDto } from '@renderer/types/dto';
+// v0.8.40：更新提示从独立 UpdateBanner 整合到 StatusBar（user 需求：重用 StatusBar 做提示/下载/重启）
+import { useUpdate, formatBytes } from '@renderer/composables/useUpdate';
 
 const auth = useAuthStore();
 const repo = useRepoStore();
 const settings = useSettingsStore();
 const ui = useUiStore();
+
+// v0.8.40：更新提示整合到 StatusBar
+// useUpdate 是 singleton（status ref 全局共享），这里取 check/download/install/openDownloadPage/dismiss
+const { status: updateStatus, check: checkUpdate, download: downloadUpdate, install: installUpdate, openDownloadPage, dismiss: dismissUpdate } = useUpdate();
+
+/** 是否显示更新指示器（available / downloading / verifying / downloaded 时显示） */
+const showUpdateIndicator = computed(() => {
+  const k = updateStatus.value.kind;
+  return k === 'available' || k === 'downloading' || k === 'verifying' || k === 'downloaded';
+});
+
+/** 更新信息（available / downloading / verifying / downloaded 都有 info） */
+const updateInfo = computed(() => {
+  const k = updateStatus.value.kind;
+  if (k === 'available' || k === 'downloading' || k === 'verifying' || k === 'downloaded') {
+    return updateStatus.value.info;
+  }
+  return null;
+});
+
+/** macOS 未签名 build 走手动下载路径 */
+const isMacUnsignedUpdate = computed(() => updateInfo.value?.manualOnly === true);
+
+/** 下载进度百分比（0-100） */
+const updateProgressPercent = computed(() => {
+  const k = updateStatus.value.kind;
+  if (k !== 'downloading') return 0;
+  const { received, total } = updateStatus.value;
+  if (total <= 0) return 0;
+  return Math.min(100, Math.round((received / total) * 100));
+});
+
+/** 下载进度文本 */
+const updateProgressText = computed(() => {
+  const k = updateStatus.value.kind;
+  if (k === 'downloading') {
+    const { received, total } = updateStatus.value;
+    if (total > 0) return `${formatBytes(received)} / ${formatBytes(total)}`;
+    return formatBytes(received);
+  }
+  if (k === 'verifying') return '校验中…';
+  return '';
+});
+
+/** 更新指示器文案 */
+const updateLabel = computed(() => {
+  const k = updateStatus.value.kind;
+  const i = updateInfo.value;
+  if (!i) return '';
+  if (k === 'available') {
+    return `新版本 ${i.latest}`;
+  }
+  if (k === 'downloading') {
+    return `下载中 ${updateProgressPercent.value}%`;
+  }
+  if (k === 'verifying') return '校验中…';
+  if (k === 'downloaded') return '已就绪';
+  return '';
+});
+
+function onDownloadClick(): void {
+  if (isMacUnsignedUpdate.value) {
+    void openDownloadPage();
+    return;
+  }
+  void downloadUpdate();
+}
+
+function onInstallClick(): void {
+  void installUpdate();
+}
+
+function onDismissUpdateClick(): void {
+  dismissUpdate();
+}
 
 /**
  * 仓库切换：addProject（如未加入）→ selectProject → 持久化 → 路由刷新
@@ -647,6 +728,93 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
         </button>
       </div>
       <div class="statusbar__right">
+        <!--
+          v0.8.40：更新提示整合到 StatusBar（user 需求：重用 StatusBar 做提示/下载/重启）
+          原 AppShell 顶部 UpdateBanner 已移除，所有更新交互收敛到此处。
+          紧凑布局：icon + 文案 + 按钮（下载/重启），全部用主题 CSS 变量适配 dark/light。
+          状态机：
+            available  → [Download icon] "新版本 vX.Y.Z" [下载] [×]
+            downloading → [Loader2 spin] "下载中 45%" + mini progress bar
+            verifying  → [Loader2 spin] "校验中…"
+            downloaded → [RotateCw icon] "已就绪" [重启以安装] [×]
+          macOS 未签名 build：[下载] 按钮变 [前往下载页]
+        -->
+        <div v-if="showUpdateIndicator" class="statusbar__update">
+          <!-- 状态 icon + 文案 -->
+          <span class="statusbar__update-info" :title="updateProgressText">
+            <Loader2
+              v-if="updateStatus.kind === 'downloading' || updateStatus.kind === 'verifying'"
+              :size="12"
+              :stroke-width="2"
+              class="statusbar__spin"
+            />
+            <Download
+              v-else-if="updateStatus.kind === 'available'"
+              :size="12"
+              :stroke-width="2"
+            />
+            <RotateCw
+              v-else-if="updateStatus.kind === 'downloaded'"
+              :size="12"
+              :stroke-width="2"
+            />
+            <span class="statusbar__update-label">{{ updateLabel }}</span>
+          </span>
+
+          <!-- mini 进度条（downloading 时显示） -->
+          <div
+            v-if="updateStatus.kind === 'downloading'"
+            class="statusbar__update-progress"
+            :title="updateProgressText"
+          >
+            <div
+              class="statusbar__update-progress-bar"
+              :style="{ width: updateProgressPercent + '%' }"
+            />
+          </div>
+
+          <!-- 操作按钮 -->
+          <template v-if="updateStatus.kind === 'available'">
+            <button
+              type="button"
+              class="statusbar__update-btn statusbar__update-btn--primary"
+              :title="isMacUnsignedUpdate ? '在浏览器打开下载页' : '下载更新'"
+              @click="onDownloadClick"
+            >
+              <Download :size="11" :stroke-width="2.5" />
+              <span>{{ isMacUnsignedUpdate ? '下载页' : '下载' }}</span>
+            </button>
+            <button
+              type="button"
+              class="statusbar__update-btn statusbar__update-btn--ghost"
+              title="稍后提醒"
+              @click="onDismissUpdateClick"
+            >
+              <X :size="11" :stroke-width="2.5" />
+            </button>
+          </template>
+
+          <template v-else-if="updateStatus.kind === 'downloaded'">
+            <button
+              type="button"
+              class="statusbar__update-btn statusbar__update-btn--primary"
+              :title="isMacUnsignedUpdate ? '在浏览器打开下载页' : '退出并安装更新'"
+              @click="onInstallClick"
+            >
+              <RotateCw :size="11" :stroke-width="2.5" />
+              <span>{{ isMacUnsignedUpdate ? '下载页' : '重启以安装' }}</span>
+            </button>
+            <button
+              type="button"
+              class="statusbar__update-btn statusbar__update-btn--ghost"
+              title="稍后"
+              @click="onDismissUpdateClick"
+            >
+              <X :size="11" :stroke-width="2.5" />
+            </button>
+          </template>
+        </div>
+
         <span v-if="repo.repos.length" class="statusbar__repo-count">
           <Package :size="12" :stroke-width="2" aria-hidden="true" />
           <span>共 {{ repo.repos.length }} 个</span>
@@ -824,6 +992,106 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 240px;
+}
+
+/* ===== v0.8.40 更新指示器（整合到 StatusBar，替代顶部 UpdateBanner）=====
+ * 紧凑布局：icon + 文案 + [可选进度条] + 按钮
+ * 全部用主题 CSS 变量（--color-primary / --color-primary-soft / --color-text 等），
+ * dark / light 自动适配，不再用硬编码 #1a73e8 蓝色
+ */
+.statusbar__update {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.statusbar__update-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-primary);
+  font-size: var(--font-xs);
+  font-weight: 500;
+}
+.statusbar__update-info :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.statusbar__update-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+/* mini 进度条（downloading 状态）*/
+.statusbar__update-progress {
+  position: relative;
+  width: 60px;
+  height: 3px;
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.statusbar__update-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-primary);
+  border-radius: 2px;
+  transition: width 300ms ease-out;
+}
+
+/* 按钮：用主题变量，不用硬编码颜色 */
+.statusbar__update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+.statusbar__update-btn :deep(svg) {
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* primary 按钮：主色填充 + 白字（--color-text-inverse 在 dark/light 两个主题都是 #fff） */
+.statusbar__update-btn--primary {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-color: var(--color-primary);
+}
+.statusbar__update-btn--primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+/* ghost 按钮：透明底，hover 高亮 */
+.statusbar__update-btn--ghost {
+  background: transparent;
+  color: var(--color-primary);
+  border-color: transparent;
+  padding: 2px 4px;
+}
+.statusbar__update-btn--ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
 }
 
 .statusbar__repo-count {

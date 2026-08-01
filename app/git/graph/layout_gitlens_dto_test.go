@@ -1024,3 +1024,118 @@ func TestBuildGraphGitlens_TruncatedPassesThrough(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildGraphGitlens_NoDuplicateLinesMultiBranch 多分支/多PR场景下重复线检测
+//
+// 构造 3 个 PR 同时 merge 到 main 的拓扑，验证：
+// 1. 不存在同方向重复线（同一 (X1,Y1,X2,Y2) 出现多次）
+// 2. 不存在反方向重复线（(A,B,C,D) 和 (D,C,B,A) 同时出现 — 视觉 stroke 叠加）
+// 3. 同 lane 竖直线 row 范围不重叠
+//
+// 拓扑（latest-first）：
+//
+//	row 0: M3 (merge [M2, F3_tip])   ← PR3 merge
+//	row 1: M2 (merge [M1, F2_tip])   ← PR2 merge
+//	row 2: M1 (merge [B1, F1_tip])   ← PR1 merge
+//	row 3: F3_tip (parents=[B3])     ← PR3 branch tip
+//	row 4: F2_tip (parents=[B2])     ← PR2 branch tip
+//	row 5: F1_tip (parents=[B1])     ← PR1 branch tip
+//	row 6: B3 (parents=[B2])         ← PR3 branch point (main)
+//	row 7: B2 (parents=[B1])         ← PR2 branch point (main)
+//	row 8: B1 (parents=[Root])       ← PR1 branch point (main)
+//	row 9: Root (parents=[])
+func TestBuildGraphGitlens_NoDuplicateLinesMultiBranch(t *testing.T) {
+	t0 := time.Now()
+	mk := func(sha string, parents []string) git.CommitInfo {
+		return git.CommitInfo{
+			SHA:        sha,
+			ShortSHA:   sha,
+			Subject:    sha,
+			AuthorWhen: t0,
+			Parents:    parents,
+		}
+	}
+
+	commits := []git.CommitInfo{
+		mk("M3", []string{"M2", "F3_tip"}), // row 0
+		mk("M2", []string{"M1", "F2_tip"}), // row 1
+		mk("M1", []string{"B1", "F1_tip"}), // row 2
+		mk("F3_tip", []string{"B3"}),       // row 3
+		mk("F2_tip", []string{"B2"}),       // row 4
+		mk("F1_tip", []string{"B1"}),       // row 5
+		mk("B3", []string{"B2"}),           // row 6
+		mk("B2", []string{"B1"}),           // row 7
+		mk("B1", []string{"Root"}),         // row 8
+		mk("Root", nil),                    // row 9
+	}
+	commits[0].Refs = []string{"main"}
+	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
+
+	result := BuildGraphGitlens(commits, "M3", []string{"M3"}, false)
+
+	t.Logf("=== nodes ===")
+	for _, n := range result.Nodes {
+		t.Logf("  node %s row=%d lane=%d color=%d", n.ShortSHA, n.Row, n.Lane, n.Color)
+	}
+
+	t.Logf("=== branches (%d) ===", len(result.Branches))
+	for bi, b := range result.Branches {
+		t.Logf("  branch[%d] color=%d end=%d lines=%d", bi, b.Color, b.End, len(b.Lines))
+		for _, l := range b.Lines {
+			t.Logf("    line (%d,%d)->(%d,%d) lockedFirst=%v", l.X1, l.Y1, l.X2, l.Y2, l.LockedFirst)
+		}
+	}
+
+	// 核心断言 1：同方向重复检测
+	type lineKey struct{ X1, Y1, X2, Y2 int }
+	seen := map[lineKey]int{}
+	for _, b := range result.Branches {
+		for _, l := range b.Lines {
+			k := lineKey{l.X1, l.Y1, l.X2, l.Y2}
+			seen[k]++
+		}
+	}
+	for k, n := range seen {
+		if n > 1 {
+			t.Errorf("同方向重复线: (%d,%d)->(%d,%d) 出现 %d 次", k.X1, k.Y1, k.X2, k.Y2, n)
+		}
+	}
+
+	// 核心断言 2：反方向重复检测（视觉 stroke 叠加成"线条变粗"）
+	for k := range seen {
+		rev := lineKey{k.X2, k.Y2, k.X1, k.Y1}
+		if rev == k {
+			continue
+		}
+		if seen[rev] > 0 {
+			t.Errorf("反方向重复线: (%d,%d)->(%d,%d) 与 (%d,%d)->(%d,%d) 同时存在（视觉 stroke 叠加）",
+				k.X1, k.Y1, k.X2, k.Y2, rev.X1, rev.Y1, rev.X2, rev.Y2)
+		}
+	}
+
+	// 核心断言 3：同 lane 竖直线 row 范围不重叠
+	type vLine struct{ y1, y2, branchIdx int }
+	byLane := map[int][]vLine{}
+	for bi, b := range result.Branches {
+		for _, l := range b.Lines {
+			if l.X1 == l.X2 {
+				y1, y2 := l.Y1, l.Y2
+				if y1 > y2 {
+					y1, y2 = y2, y1
+				}
+				byLane[l.X1] = append(byLane[l.X1], vLine{y1, y2, bi})
+			}
+		}
+	}
+	for lane, lines := range byLane {
+		for i := 0; i < len(lines); i++ {
+			for j := i + 1; j < len(lines); j++ {
+				a, b := lines[i], lines[j]
+				if a.y1 < b.y2 && b.y1 < a.y2 {
+					t.Errorf("lane %d 竖直线重叠: branch[%d] (%d-%d) 与 branch[%d] (%d-%d)",
+						lane, a.branchIdx, a.y1, a.y2, b.branchIdx, b.y1, b.y2)
+				}
+			}
+		}
+	}
+}

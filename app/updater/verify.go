@@ -97,11 +97,16 @@ var (
 	ErrPublicKeyInvalid = errors.New("update:public key not configured")
 	ErrSHA256Mismatch   = errors.New("update:sha256 mismatch")
 	ErrManifestFetch    = errors.New("update:manifest fetch failed")
-	ErrManifestParse    = errors.New("update:manifest parse failed")
 	ErrDownloadFailed   = errors.New("update:download failed")
 	ErrApplyFailed      = errors.New("update:apply failed")
 	ErrPermissionDenied = errors.New("update:permission denied")
-	ErrCodesignRejected = errors.New("update:codesign rejected (macOS Gatekeeper)")
 	ErrManualUpdateOnly = errors.New("update:manual update only (no auto-apply)")
 	ErrUnsupportedOS    = errors.New("update:unsupported OS")
+
+	// ErrInstallerLaunched 表示 NSIS installer 已成功拉起，调用方应执行 graceful shutdown
+	// 后退出进程（v0.8.39 新增，对齐 DeepSeek-Reasonix updater_app.go:installPortableUpdate
+	// 的 a.shutdown → os.Exit 流程，而非在 applyWindows 内直接 os.Exit）。
+	// 跨平台定义：macOS applyMacOS 不返回此错误（走 wruntime.Quit 路径），但
+	// app_updater_app.go 用 errors.Is 统一判断，所以必须在所有平台可见。
+	ErrInstallerLaunched = errors.New("update:installer launched, please exit")
 )

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -69,22 +70,31 @@ func (a *App) DownloadUpdate() (*updater.UpdateDownloadResult, error) {
 
 // InstallUpdate Wails binding — 把缓存的 binary 应用到当前平台
 //
-// 注意：
-//   - applyWindows 末尾调 os.Exit(0)，调用方拿不到返回值。
+// v0.8.39 重构（对齐 DeepSeek-Reasonix）：
+//   - applyWindows 不再在内部调 os.Exit(0)（旧实现跳过 OnShutdown 回调，
+//     可能丢失未保存数据）。改为返回 updater.ErrInstallerLaunched 哨兵错误，
+//     本方法收到后走 graceful shutdown 流程。
 //   - macOS（v0.8.23.2 起）applyMacOS 启动 detached helper 脚本后立即返回 nil；
-//     helper 轮询等待当前进程退出后替换 .app 并 open 重启。因此本方法返回后
-//     由 Go 侧主动 Quit 退出，前端无需（也无法）再操作。
+//     helper 轮询等待当前进程退出后替换 .app 并 open 重启。
+//   - 两平台统一流程：Install → 延迟 300ms（让前端拿完 RPC 响应）→
+//     wruntime.Quit（触发 OnShutdown 回调正常清理）→ 进程退出 →
+//     installer/helper 接管替换文件。
 func (a *App) InstallUpdate() error {
 	if a.updater == nil {
 		return fmt.Errorf("updater not initialized")
 	}
 	a.logger.Info("update install start", "version", a.updaterRunningVersion())
 	if err := a.updater.Install(); err != nil {
-		return err
+		// Windows 成功拉起 NSIS installer 后返回 ErrInstallerLaunched 哨兵，
+		// 不算错误，继续走 graceful shutdown 流程让进程退出。
+		if !errors.Is(err, updater.ErrInstallerLaunched) {
+			return err
+		}
+		a.logger.Info("update: NSIS installer launched, proceeding to graceful shutdown")
 	}
 	// macOS：helper 已在后台等待，主进程退出触发替换。
-	// Windows：applyWindows 已 os.Exit(0)，走不到这里。
-	// wruntime.Quit 触发 OnShutdown 正常清理后退出进程。
+	// Windows：NSIS installer 已拉起等当前进程退出。
+	// 两平台都需要 wruntime.Quit 触发 OnShutdown 正常清理后退出进程。
 	go func() {
 		// 给前端留一点时间把 RPC 响应发完（否则会报 connection lost）。
 		// Quit 是异步关闭窗口，300ms 足够 IPC 往返。
