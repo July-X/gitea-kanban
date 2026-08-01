@@ -3862,13 +3862,12 @@ function refBadgeClass(refType?: string): string {
   font-weight: 500;
   flex-shrink: 0;
   white-space: nowrap;
-  /* v0.8.37.4（mid-turn steer #7）：去掉 hover 反相效果
-   * - 用户：「不要hover效果」→ 默认态 = 唯一态，没有 hover 反相、没有 .commit-row--dot-active 反相
-   * - 默认态：withAlpha(lane-color, 0.20) 暗色 alpha tint 底 + #E6EDF3 浅字
-   * - icon 块：lane 色实色 + 1px lane 色 darker 边框 + 白色 fill icon（视觉锚点）
-   * - 之前 v0.8.37.4 hover 反相 → 白底 + 深字 + box-shadow（v0.8.37.4 最终版）已被本轮撤回 */
+  /* v0.8.38：icon 块保持 lane 色实色背景 + 白色 SVG，文字部分用主题 muted 色
+   * - badge 底：lane 色 20% alpha tint（保留）
+   * - icon 块：lane 色实色背景 + 白色 fill icon（视觉锚点）
+   * - 文字：dark 主题 #b4c6d4（略暗灰白，不是纯白刺眼）；light 主题 #475569（深灰，类似黑字） */
   background-color: var(--row-lane-color-bg, rgba(128, 128, 128, 0.2));
-  color: var(--color-text-muted, #E6EDF3);
+  color: var(--color-text-muted, #b4c6d4);
   /* v0.8.37.1（mid-turn steer）：badge 高度从 22px → 20px（内容 18px + 1px border-top + 1px border-bottom = 20px 总高）
    * 之前 22px badge 装在 24px row + border-box 下，底边线在 row 第 22px 位置，距 row 底 24px 还有 2px，
    * 但 col overflow:hidden + sub-pixel 抗锯齿下底边 1px 会被裁掉，看起来"丢失了一样"。
@@ -3907,21 +3906,21 @@ function refBadgeClass(refType?: string): string {
   height: 20px;
   padding: 3px;
   margin-right: 0;
-  /* squircle 圆角：左边圆角跟父 badge 5px 衔接避免接缝白线、右边 0 让 icon 块紧贴文字 */
+  /* 圆角跟父 badge 5px 衔接 */
   border-top-left-radius: 5px;
   border-bottom-left-radius: 5px;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
-  /* lane 色实色背景（保持 v0.8.37.4 锚点，不随父 badge 反相） */
+  /* lane 色实色背景（视觉锚点） */
   background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
-  /* 1px lane 色 darker border + box-shadow 双保险（避免 squircle 接缝白线） */
-  border: 1px solid var(--row-lane-color-border, rgba(0, 0, 0, 0.45));
+  border: none;
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* 白色 fill icon（hover 父 .ref-badge 反相时 icon 仍白色，跟图 008/010 一致） */
-  fill: #ffffff;
+  /* SVG path 有 fill="currentColor"，需改 color 而非 fill 才能生效 */
+  color: #000000;
+  fill: #000000;
   stroke: none;
 }
 /* v0.8.37.5：对齐 vscode-office .git-graph-ref-name
@@ -3941,7 +3940,8 @@ function refBadgeClass(refType?: string): string {
  * CSS 仍 fill 白色（跟 branch icon 颜色一致），模板见 line 2800-2811 内联 SVG
  * （路径 v0.8.37.4 之前用 lucide Tag stroke 模式，已统一为 octicons 实色 fill 模式，对齐 branch icon） */
 .ref-badge__icon--tag {
-  fill: #ffffff;
+  color: #000000;
+  fill: #000000;
   stroke: none;
 }
 /* v0.8.37.1 恢复 .commit-row--dot-active .ref-badge 视觉变化（对齐 VSCode .gitRef.active）：
