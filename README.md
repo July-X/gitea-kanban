@@ -322,3 +322,9 @@ Third-party attributions in [NOTICE](NOTICE).
 - [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix) — v0.8.0 自动更新架构设计参考
 - [Gitea Web UI](https://github.com/go-gitea/gitea) — timeline / review_request 渲染对齐对象
 - [lucide](https://lucide.dev) — 图标库
+
+---
+
+<p align="center">
+  <img src="docs/images/MiniMax_TokenPlan.png" alt="MiniMax Token Plan" width="720">
+</p>
