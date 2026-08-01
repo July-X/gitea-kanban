@@ -144,16 +144,30 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 	// v2.8：返回名称 + 类型，且按「本地分支 → 远程跟踪分支 → tag」稳定排序
 	refDataByHash := collectRefNamesByHash(repo)
 
+	// v0.8.37.3 修复：branch HEAD 指向的 commit 只能挂 1 个 ref（HEAD 自身），
+	// 但 branch 中间 commit 也应该被识别为该 branch 的成员（badge 显示）。
+	// 解决：在 `for each branch head` 遍历 commit 时，每个 visited commit 都
+	// 追加 branch name 到本地 map（独立于 refDataByHash，因为后者只装 ref 自身 HEAD commit）。
+	branchCommitMap := make(map[string][]branchRefEntry)
+
 	commits := make([]CommitInfo, 0)
 	seen := make(map[string]bool)
+	// v0.8.37.3 修复：candidateLimit 默认是 opts.MaxCount（用户视角的"加载上限"）。
+	// 但这个 candidateLimit 同时也是每个 branch head 遍历 commit 的硬上限——
+	// 当某个 branch 独有历史超过 MaxCount 时，那部分 commit 永远拿不到 refs 挂载。
+	// 用户截图 2026-08-01 07:18 反馈：88d9b92 在 master 第 650 行，
+	// MaxCount=300 时被 candidateLimit 截断 → branch badge 缺失。
+	// 修法：candidateLimit 至少 1000（覆盖 99% 仓库），让分支独有历史可被遍历。
+	// 最终排序后仍用 opts.MaxCount 截断（前端控制 UI 性能），多看到的 commits 走 seen 去重。
 	candidateLimit := opts.MaxCount
 	if candidateLimit <= 0 {
 		candidateLimit = 0
-	} else if candidateLimit < 50 {
-		candidateLimit = 50
+	} else if candidateLimit < 1000 {
+		candidateLimit = 1000
 	}
 
-	for _, headHash := range allHeads {
+	for _, branch := range allHeads {
+		headHash := branch.hash
 		gitLogOpts := &git.LogOptions{
 			From:  headHash,
 			Order: git.LogOrderCommitterTime,
@@ -168,6 +182,14 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				return storer.ErrStop
 			}
 			visitedForHead++
+
+			// v0.8.37.3：为 branch 中间 commit 挂 branch name 到本地 map
+			// 独立于 refDataByHash（后者只装 ref 自身 HEAD commit）
+			branchCommitMap[c.Hash.String()] = append(branchCommitMap[c.Hash.String()], branchRefEntry{
+				Name: branch.name,
+				Type: branchRefTypeFromLocal(branch.isLocal),
+			})
+
 			if seen[c.Hash.String()] {
 				return nil
 			}
@@ -177,6 +199,12 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 			for i, h := range c.ParentHashes {
 				parents[i] = h.String()
 			}
+
+			// v0.8.37.3：refs 合并（refDataByHash 优先 + branchCommitMap 追加）
+			mergedRefs := mergeRefsForCommit(
+				refDataByHash[c.Hash.String()],
+				branchCommitMap[c.Hash.String()],
+			)
 
 			commits = append(commits, CommitInfo{
 				SHA:           c.Hash.String(),
@@ -188,8 +216,8 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				CommitterWhen: c.Committer.When,
 				Parents:       parents,
 				IsMerge:       len(parents) >= 2,
-				Refs:          refDataByHash[c.Hash.String()].Names,
-				RefTypes:      refDataByHash[c.Hash.String()].Types,
+				Refs:          mergedRefs.Names,
+				RefTypes:      mergedRefs.Types,
 			})
 			return nil
 		})
@@ -203,6 +231,11 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				for i, h := range commit.ParentHashes {
 					parents[i] = h.String()
 				}
+				// v0.8.37.3：refs 合并 fallback
+				mergedRefs := mergeRefsForCommit(
+					refDataByHash[commit.Hash.String()],
+					branchCommitMap[commit.Hash.String()],
+				)
 				commits = append(commits, CommitInfo{
 					SHA:           commit.Hash.String(),
 					ShortSHA:      commit.Hash.String()[:7],
@@ -213,8 +246,8 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 					CommitterWhen: commit.Committer.When,
 					Parents:       parents,
 					IsMerge:       len(parents) >= 2,
-					Refs:          refDataByHash[commit.Hash.String()].Names,
-					RefTypes:      refDataByHash[commit.Hash.String()].Types,
+					Refs:          mergedRefs.Names,
+					RefTypes:      mergedRefs.Types,
 				})
 			}
 			continue
@@ -336,7 +369,12 @@ type branchInfo struct {
 // `collectRefNamesByHash` 维护的 map[SHA]refData 全量但 commit 不在 → badge 显示空。
 // 200 覆盖 99% 实际仓库（上百分支的 monorepo），保留兜底防极端仓库性能退化。
 // 极端仓库兜底：每 head candidateLimit = opts.MaxCount 仍生效，单分支不会全量扫。
-func collectLimitedBranchHeads(repo *git.Repository, maxCount int) ([]plumbing.Hash, error) {
+//
+// v0.8.37.3 修复：返回 branchInfo 切片（含 hash + name + refType），
+// 而不是只返回 hash 列表。LogCommits 现在在每个 branch head 遍历 commit 时
+// 同时把 branch name 挂到 byHash[commit.SHA]（之前只挂 ref 自身的 HEAD commit，
+// branch 中间 commit 拿不到 refs → badge 缺失）。
+func collectLimitedBranchHeads(repo *git.Repository, maxCount int) ([]branchInfo, error) {
 	const maxBranches = 200 // 最多遍历 200 个分支（v0.8.37.1: 20 → 200 修分支 badge 缺失）
 
 	branches := make([]branchInfo, 0)
@@ -493,13 +531,9 @@ func collectLimitedBranchHeads(repo *git.Repository, maxCount int) ([]plumbing.H
 		branches = branches[:limit]
 	}
 
-	// 6. 提取 hash 列表
-	heads := make([]plumbing.Hash, len(branches))
-	for i, b := range branches {
-		heads[i] = b.hash
-	}
-
-	return heads, nil
+	// 6. 提取 branch info 列表（v0.8.37.3：返回完整 branchInfo 而不是只 hash，
+	// 让 LogCommits 在每个 branch head 遍历 commit 时能为中间 commit 挂 branch name）
+	return branches, nil
 }
 
 // min 返回两个整数中的较小值
@@ -508,6 +542,83 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// max 返回两个整数中的较大值
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// branchRefEntry v0.8.37.3：在 branch head 遍历 commit 时为每个 visited commit
+// 记录的 branch 名称 + 类型。它独立于 refDataByHash（后者只装 ref 自身 HEAD commit），
+// 实现"branch 中间 commit 也能识别为该 branch 成员"。
+type branchRefEntry struct {
+	Name string
+	Type RefType
+}
+
+// branchRefTypeFromLocal 把 branchInfo.isLocal 转 RefType（本地分支 → branch，远程分支 → remoteBranch）
+func branchRefTypeFromLocal(isLocal bool) RefType {
+	if isLocal {
+		return RefTypeBranch
+	}
+	return RefTypeRemoteBranch
+}
+
+// mergeRefsForCommit 合并 refDataByHash（ref 自身 HEAD）和 branchCommitMap（branch 中间 commit）
+// 去重 + 排序（按统一 refOrder：本地分支 → 远程分支 → tag），返回完整 refData
+func mergeRefsForCommit(static refData, branchEntries []branchRefEntry) refData {
+	// 合并到 map[string]RefType 去重
+	seen := make(map[string]int) // name|prefix -> index in Names
+	refOrder := map[RefType]int{
+		RefTypeBranch:       0,
+		RefTypeRemoteBranch: 1,
+		RefTypeTag:          2,
+	}
+	var names []string
+	var types []RefType
+	add := func(name string, t RefType) {
+		key := name + "|" + string(t)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = len(names)
+		names = append(names, name)
+		types = append(types, t)
+	}
+	// 优先 static（refDataByHash 已是 ref 自身 HEAD，含完整 type）
+	for i, name := range static.Names {
+		add(name, static.Types[i])
+	}
+	// 追加 branch entries（可能含远程分支类型）
+	for _, e := range branchEntries {
+		add(e.Name, e.Type)
+	}
+	// 按 (类型优先级, 名称) 排序
+	type pair struct {
+		name string
+		t    RefType
+	}
+	pairs := make([]pair, len(names))
+	for i := range names {
+		pairs[i] = pair{names[i], types[i]}
+	}
+	for i := 1; i < len(pairs); i++ {
+		for j := i; j > 0 && (refOrder[pairs[j].t] < refOrder[pairs[j-1].t] ||
+			(refOrder[pairs[j].t] == refOrder[pairs[j-1].t] && pairs[j].name < pairs[j-1].name)); j-- {
+			pairs[j], pairs[j-1] = pairs[j-1], pairs[j]
+		}
+	}
+	names = names[:0]
+	types = types[:0]
+	for _, p := range pairs {
+		names = append(names, p.name)
+		types = append(types, p.t)
+	}
+	return refData{Names: names, Types: types}
 }
 
 // refData 单个 SHA 对应的 ref 名称 + 类型（顺序一一对应）
