@@ -16,7 +16,7 @@
 
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { GitCommit, RotateCw, Tag, Search } from 'lucide-vue-next';
+import { GitCommit, RotateCw, Search } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { logError } from '@renderer/lib/frontend-log';
@@ -2797,15 +2797,29 @@ function refBadgeClass(refType?: string): string {
                         :class="refBadgeClass(r.commit.refTypes?.[idx])"
                         :title="ref"
                       >
-                        <Tag
+                        <!-- v0.8.37.5：替换 lucide Tag → GitHub Octicons tag SVG (用户 mid-turn 提供精确 SVG path)
+                             - viewBox 15x16, evenodd fill, 实色 tag 形态（lucide Tag 是 stroke 线条）
+                             - 对齐 v0.8.37.4 branch icon 模式：fill="currentColor"（被父 .ref-badge__icon--tag CSS 覆盖为 #ffffff）
+                             - 高度 16px 撑满 18px icon 容器，宽度按 viewBox 原始比例 = 15px（15:16 = 15:x → x=15），
+                               flex 居中在 18x18 icon 容器内 -->
+                        <svg
                           v-if="r.commit.refTypes?.[idx] === 'tag'"
-                          :size="9"
                           class="ref-badge__icon ref-badge__icon--tag"
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="15"
+                          height="16"
+                          viewBox="0 0 15 16"
                           aria-hidden="true"
-                        />
+                        >
+                          <path
+                            fill="currentColor"
+                            fill-rule="evenodd"
+                            d="M7.73 1.73C7.26 1.26 6.62 1 5.96 1H3.5C2.13 1 1 2.13 1 3.5v2.47c0 .66.27 1.3.73 1.77l6.06 6.06c.39.39 1.02.39 1.41 0l4.59-4.59a.996.996 0 0 0 0-1.41L7.73 1.73zM2.38 7.09c-.31-.3-.47-.7-.47-1.13V3.5c0-.88.72-1.59 1.59-1.59h2.47c.42 0 .83.16 1.13.47l6.14 6.13-4.73 4.73-6.13-6.15zM3.01 3h2v2H3V3h.01z"
+                          ></path>
+                        </svg>
                         <!-- v0.8.37.4：替换 lucide GitBranch → GitHub Octicons git-branch-fill (用户 mid-turn 提供 SVG path)
                              - viewBox 10x16, evenodd fill, 3 圆点 + 1 曲线形态，比 lucide 2 叉描边明显
-                             - fill: currentColor（被父 .ref-badge__icon CSS fill 覆盖为深色 #0f1115）
+                             - fill: currentColor（被父 .ref-badge__icon CSS fill 覆盖为白色 #ffffff）
                              - 高度 16px 撑满 18px icon 容器，宽度按 viewBox 比例 = 10px（10:16 = 10:x → x=10），
                                flex 居中在 18x18 icon 容器内 -->
                         <svg
@@ -3902,8 +3916,9 @@ function refBadgeClass(refType?: string): string {
   fill: #ffffff;
   stroke: none;
 }
-/* v0.8.37.4：.ref-badge__icon--tag 走 lucide Tag 形态（用户未指明 tag icon，保留 lucide Tag）
- * 同样 fill 白色（跟 branch icon 颜色一致） */
+/* v0.8.37.5：.ref-badge__icon--tag 已替换为 inline Octicons tag SVG（用户 mid-turn 提供精确 11 节点 path）
+ * CSS 仍 fill 白色（跟 branch icon 颜色一致），模板见 line 2800-2811 内联 SVG
+ * （路径 v0.8.37.4 之前用 lucide Tag stroke 模式，已统一为 octicons 实色 fill 模式，对齐 branch icon） */
 .ref-badge__icon--tag {
   fill: #ffffff;
   stroke: none;
