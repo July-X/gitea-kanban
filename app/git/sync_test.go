@@ -1,14 +1,11 @@
 package git
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
-
-	"gitea-kanban/app/ipc"
 
 	gogit "github.com/go-git/go-git/v5"
 )
@@ -256,7 +253,13 @@ func TestCountCommitsWithLimit_TreatsShallowBoundaryAsStop(t *testing.T) {
 //   - 前端捕获后展示"打开安装页"按钮
 //
 // 测试方法：临时清空 PATH 中的 gh（通过 t.Setenv 隔离，不影响主进程）
-func TestFetchWithFilter_GhNotInstalled(t *testing.T) {
+// TestFetchWithFilter_NoGhRequired v0.8.27+ 回归测试：
+//
+//   - FetchWithFilter 不再依赖 gh（改用 env-based extraHeader 注入鉴权）
+//   - gh 未安装时 FetchWithFilter 应正常执行（不返回 gh_not_installed 错误）
+//
+// 测试方法：临时清空 PATH 中的 gh（通过 t.Setenv 隔离，不影响主进程）
+func TestFetchWithFilter_NoGhRequired(t *testing.T) {
 	barePath, localPath := createBareAndClone(t)
 	origPath := os.Getenv("PATH")
 
@@ -271,29 +274,18 @@ func TestFetchWithFilter_GhNotInstalled(t *testing.T) {
 
 	// 先检查 git 是否在 cleanPath 中——不在则 skip (Windows CI 等环境可能缺少 git)
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not in clean PATH, cannot test gh-not-found path: " + err.Error())
+		t.Skip("git is not in clean PATH, cannot test: " + err.Error())
 	}
+	// gh 不在 cleanPath 中是预期场景（测试目的就是验证无 gh 时正常工作）
 	if _, err := exec.LookPath("gh"); err == nil {
-		t.Skip("gh is in clean PATH, cannot test gh-not-found path")
+		t.Skip("gh is in clean PATH, cannot test no-gh scenario")
 	}
 
+	// v0.8.27+：FetchWithFilter 不再依赖 gh，无 token 时走普通 fetch（无鉴权头注入）
+	// 本地 bare 仓库 fetch 不需要鉴权，应该成功
 	err := FetchWithFilter(localPath, 0, "")
-	if err == nil {
-		t.Fatal("FetchWithFilter should return error when gh is not found")
-	}
-
-	var ipcErr *ipc.IpcError
-	if !errors.As(err, &ipcErr) {
-		t.Fatalf("expected *ipc.IpcError, got %T: %v", err, err)
-	}
-	if ipcErr.Code != ipc.CodeGhNotInstalled {
-		t.Errorf("error code = %q, want %q", ipcErr.Code, ipc.CodeGhNotInstalled)
-	}
-	if ipcErr.Message == "" {
-		t.Error("error message should not be empty")
-	}
-	if ipcErr.Hint == "" {
-		t.Error("error hint should not be empty")
+	if err != nil {
+		t.Fatalf("FetchWithFilter should succeed without gh (v0.8.27+ uses env-based extraHeader): %v", err)
 	}
 
 	t.Cleanup(func() { os.Setenv("PATH", origPath) })
