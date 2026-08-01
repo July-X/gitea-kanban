@@ -77,7 +77,7 @@ const ui = useUiStore();
 
 // v0.8.40：更新提示整合到 StatusBar
 // useUpdate 是 singleton（status ref 全局共享），这里取 check/download/install/openDownloadPage/dismiss
-const { status: updateStatus, check: checkUpdate, download: downloadUpdate, install: installUpdate, openDownloadPage, dismiss: dismissUpdate } = useUpdate();
+const { status: updateStatus, download: downloadUpdate, install: installUpdate, openDownloadPage, dismiss: dismissUpdate } = useUpdate();
 
 /** 是否显示更新指示器（available / downloading / verifying / downloaded 时显示） */
 const showUpdateIndicator = computed(() => {
