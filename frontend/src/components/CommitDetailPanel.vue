@@ -888,7 +888,9 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
    * 3. overflow:hidden 裁剪溢出，配合 min-width:0 让内部子元素被迫换行 */
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  /* overflow-y:visible 让换行后的 title/body 完整可见，
+   * 超出左栏高度时由 .cd-panel__left 的 overflow-y:auto 滚动接管 */
+  overflow: hidden visible;
 }
 .cd-panel--panel .cd-panel__meta {
   border-bottom: none;
@@ -972,10 +974,12 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   padding: var(--space-2, 8px) var(--space-3, 12px) 3px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  /* 关键：overflow:hidden 让 flex column 约束子元素宽度，
-   * 配合 min-width:0，让 title 在 grid 列宽内被强制压缩换行。*/
+  /* min-width:0 让 flex/grid 子元素可以收缩到 content 宽度以下，
+   * 配合 title 的 word-break:break-word 实现文本自动换行。
+   * overflow-x:hidden 防止超长无空格文本撑出横向滚动条；
+   * overflow-y:visible 让换行后的文本完整可见（左栏 overflow-y:auto 接管滚动）。*/
   min-width: 0;
-  overflow: hidden;
+  overflow: hidden visible;
 }
 .cd-panel--dialog .cd-panel__message {
   padding: var(--space-3, 12px) var(--space-4, 16px) 3px;
@@ -985,14 +989,14 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.4;
-  /* 强制换行的最小宽度约束：width:100% 让标题宽度等于父容器，
-   * min-width:0 接受收缩（覆盖 flex item 默认 min-width:auto），
-   * max-width:100% 明确不超过父容器，word-break:break-word 实现文本换行。*/
+  /* 强制换行：width:100% + min-width:0 + word-break:break-word + overflow-wrap:anywhere
+   * 确保超长无空格文本（如 SHA 串、URL）也能在列宽内自动换行 */
   width: 100%;
   min-width: 0;
   max-width: 100%;
   word-break: break-word;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 .cd-panel--dialog .cd-message__title {
   font-size: var(--font-md, 14px);
@@ -1001,8 +1005,10 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   font-size: 13px;
   color: var(--color-text-secondary);
   margin: 4px 0 0;
+  /* pre-wrap 保留 commit message 原始换行 + 超长行自动折行 */
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   line-height: 18px;
   font-family: inherit;
   max-height: 120px;

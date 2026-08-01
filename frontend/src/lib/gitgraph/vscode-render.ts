@@ -29,12 +29,12 @@ import type { GraphNodeDto, GraphResultDto } from '@renderer/types/dto';
 // vscode-git-graph config.ts:278 默认值
 export const VSCODE_GRID_X = 16;
 /**
- * v0.8.37：GRID_Y 28 → 24（对齐 vscode-office defaultGrid `{ x: 16, y: 24, offsetX: 8, offsetY: 12 }`，
- * gitHistory.css:47-50 DEFAULT_GRAPH_GRID）。28 是 v0.8.35.2 给 ref badge 22px 色块
- * 留垂直呼吸空间引入的，跟 vscode-office 不一致；24 紧凑 row 模型 + 22px badge
- * 视觉上 badge 略压 row，但跟 office 1:1 对齐更重要。
+ * v0.8.37.5：GRID_Y 24 → 28（对齐 vscode-office GitHistory.tsx:62 ROW_HEIGHT=28）。
+ * vscode-office 的 DEFAULT_GRAPH_GRID.grid.y 虽然是 24，但 computeGraphLayout 接收
+ * rowHeight 参数并覆盖 grid.y → 实际行高 = ROW_HEIGHT = 28。
+ * 24 是 v0.8.37 为了对齐 DEFAULT_GRAPH_GRID 引入的，但漏看了 rowHeight 覆盖逻辑。
  */
-export const VSCODE_GRID_Y = 24;
+export const VSCODE_GRID_Y = 28;
 /**
  * v0.8.37：offsetX 16 → 8（vscode-office offsetX=8）。原 16 是为了"dot 居中在 graph 列中央"，
  * 但 8 让 dot 更靠左缘，跟 office defaultGraph 1:1 对齐。
@@ -51,6 +51,7 @@ export const VSCODE_EXPAND_Y = 250; // vscode config.ts:278 expandY 默认值
 //   原 #d9008f（玫红）  → #e8890c（亮橙，与 lane 0 蓝互补 / lane 2 绿强对比，
 //                          对齐 GitLens 蓝-橙-绿高区分效果；曾用草绿 #7cb342 但与
 //                          lane 2 亮绿 hue 仅差 22° 分不开，用户拍板再换）
+// v0.8.37.5 曾改为 vscode-office fallback 10 色（含红色），用户反馈"红色依然排除"恢复。
 // 其余 9 色与 vscode-git-graph 默认一致。
 export const VSCODE_COLORS = [
 	'#0085d9', // 0

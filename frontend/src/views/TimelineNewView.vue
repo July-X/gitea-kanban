@@ -2670,9 +2670,9 @@ function refBadgeClass(refType?: string): string {
                           :cy="c.cy"
                           :r="c.r"
                           :fill="c.isCurrent ? 'transparent' : (c.colorHex ?? '#888')"
-                          :stroke="c.isCommitted === false ? '#808080' : (c.isCurrent ? (c.colorHex ?? '#888') : 'rgba(30, 30, 30, 0.75)')"
-                          :stroke-width="c.strokeWidth"
-                          :stroke-opacity="c.isCurrent ? 1 : (c.isDimmed ? 0.35 : 0.75)"
+                          :stroke="c.isCommitted === false ? '#808080' : (c.isCurrent ? (c.colorHex ?? '#888') : 'none')"
+                          :stroke-width="c.isCurrent ? 2.5 : 0"
+                          :stroke-opacity="c.isCurrent ? 1 : (c.isDimmed ? 0.35 : 1)"
                           :fill-opacity="c.isDimmed && !c.isCurrent ? 0.35 : 1"
                         >
                           <title>{{ c.title }}</title>
@@ -2837,7 +2837,7 @@ function refBadgeClass(refType?: string): string {
                             d="M10 5c0-1.11-.89-2-2-2a1.993 1.993 0 0 0-1 3.72v.3c-.02.52-.23.98-.63 1.38-.4.4-.86.61-1.38.63-.83.02-1.48.16-2 .45V4.72a1.993 1.993 0 0 0-1-3.72C.88 1 0 1.89 0 3a2 2 0 0 0 1 1.72v6.56c-.59.35-1 .99-1 1.72 0 1.11.89 2 2 2 1.11 0 2-.89 2-2 0-.53-.2-1-.53-1.36.09-.06.48-.41.59-.47.25-.11.56-.17.94-.17 1.05-.05 1.95-.45 2.75-1.25S8.95 7.77 9 6.73h-.02C9.59 6.37 10 5.73 10 5zM2 1.8c.66 0 1.2.55 1.2 1.2 0 .65-.55 1.2-1.2 1.2C1.35 4.2.8 3.65.8 3c0-.65.55-1.2 1.2-1.2zm0 12.41c-.66 0-1.2-.55-1.2-1.2 0-.65.55-1.2 1.2-1.2.65 0 1.2.55 1.2 1.2 0 .65-.55 1.2-1.2 1.2zm6-8c-.66 0-1.2-.55-1.2-1.2 0-.65.55-1.2 1.2-1.2.65 0 1.2.55 1.2 1.2 0 .65-.55 1.2-1.2 1.2z"
                           ></path>
                         </svg>
-                        <span>{{ ref }}</span>
+                        <span class="ref-badge__label">{{ ref }}</span>
                       </span>
                     </span>
                     <span
@@ -3471,7 +3471,7 @@ function refBadgeClass(refType?: string): string {
    *   - 之前 display: flex 是为了 bg(sticky) + rows 并列，现在 bg absolute 脱离文档流 */
   position: relative;
   display: block;
-  min-height: var(--git-graph-row-height, 24px);
+  min-height: var(--git-graph-row-height, 28px);
 }
 
 /* v0.x：本仓库本地 0 提交时把空状态画在表格内部（表头下方的表体区）。
@@ -3723,11 +3723,11 @@ function refBadgeClass(refType?: string): string {
    *   gridTemplateColumns = graphPx 1fr datePx authorPx commitPx
    *   之前 v2.48 移除了 graph 占位列导致 commit-row 4 列 vs header 5/6 列错位 */
   grid-template-columns: var(--grid-template-columns, 96px 1fr 128px 128px 80px);
-  grid-template-rows: var(--git-graph-row-height, 24px) auto;
+  grid-template-rows: var(--git-graph-row-height, 28px) auto;
   align-items: stretch;
   gap: 0;
-  /* VSCode row model：commit line 固定 24px；dot cy = row*24+12。 */
-  height: 24px; /* fallback（被 inline style 覆盖） */
+  /* VSCode row model：commit line 固定 28px；dot cy = row*28+12。 */
+  height: 28px; /* fallback（被 inline style 覆盖） */
   /* v2.31 revert：恢复 v2.27 的"行透明 + 内容列自身背景"机制
      用户原意："只需要表头是非透明的背景即可"——表头 .git-graph-header 使用实色主内容背景，
      内容区 .commit-row 仍保持透明 + 4 个内容列各自用 var(--color-shell-main-bg) 遮罩 SVG 路径 */
@@ -3749,8 +3749,8 @@ function refBadgeClass(refType?: string): string {
    * 行不再有"最小 920px 撑大"行为。超长内容（长 ref badge / 长 author 名）
    * 走 .commit-row__col 的 overflow:hidden + ellipsis 截断，不撑列宽。*/
   font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: var(--git-graph-row-height, 24px);
+  font-size: 14px;
+  line-height: var(--git-graph-row-height, 28px);
   color: var(--color-text);
   white-space: nowrap;
   /* v2.66：去掉 overflow: hidden —— 嵌入 .commit-accordion 后需要让它溢出显示。
@@ -3822,7 +3822,7 @@ function refBadgeClass(refType?: string): string {
 .commit-row--relation {
   pointer-events: none;
   background: transparent;
-  height: 24px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
+  height: 28px; /* 与 commit-row 一致（= ROW_HEIGHT），dot overlay 行节奏对齐 */
 }
 .commit-row--relation:hover {
   background: transparent;
@@ -3858,7 +3858,7 @@ function refBadgeClass(refType?: string): string {
   padding: 0;
   border-radius: 5px;
   border: 1px solid var(--row-lane-color, rgba(128, 128, 128, 0.5));
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   flex-shrink: 0;
   white-space: nowrap;
@@ -3874,10 +3874,15 @@ function refBadgeClass(refType?: string): string {
    * 但 col overflow:hidden + sub-pixel 抗锯齿下底边 1px 会被裁掉，看起来"丢失了一样"。
    * 现 20px badge 给 row 上下各留 2px 缓冲，border 不会再被裁。
    * padding 0 8px 0 0 保持（色块贴左缘、右侧 8px 跟后面文字间距）。 */
-  line-height: 18px;
-  height: 20px;
-  padding: 0 8px 0 0;
-  box-sizing: border-box;
+  /* v0.8.37.5：对齐 vscode-office .git-graph-ref
+   * line-height 20px（之前 18px），height auto（之前固定 20px）
+   * padding 改 0（之前 0 8px 0 0），文字 padding 走 .ref-badge__label
+   * margin-top 2px + margin-right 6px 对齐 vscode-office */
+  line-height: 20px;
+  height: auto;
+  padding: 0;
+  margin-top: 2px;
+  margin-right: 6px;
   overflow: hidden;
 }
 /* v0.8.37.4（mid-turn steer #7）：去掉 hover / dot-active 反相效果
@@ -3893,15 +3898,18 @@ function refBadgeClass(refType?: string): string {
  *  - icon 块 hover 态不变（保持 lane 色实色 + 白色 icon，因为图 010 显示 icon 块永远 lane 色）
  *  - squircle 圆角 6px（之前 4px 偏方），左边圆角跟父 .ref-badge 5px 衔接
  *  - icon 尺寸 18x18（保持 v0.8.37.1 不变），SVG 高度 16 + flex 居中（垂直对齐 row 中心） */
+/* v0.8.37.5：对齐 vscode-office .git-graph-ref-icon
+ * width 20px height 20px（之前 18x18），padding 3px
+ * margin-right 0（之前 5px，文字 padding 走 .ref-badge__label 的 1px 8px） */
 .ref-badge__icon {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  margin-right: 5px;
+  width: 20px;
+  height: 20px;
+  padding: 3px;
+  margin-right: 0;
   /* squircle 圆角：左边圆角跟父 badge 5px 衔接避免接缝白线、右边 0 让 icon 块紧贴文字 */
-  border-top-left-radius: 6px;
-  border-bottom-left-radius: 6px;
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
   /* lane 色实色背景（保持 v0.8.37.4 锚点，不随父 badge 反相） */
@@ -3916,6 +3924,19 @@ function refBadgeClass(refType?: string): string {
   fill: #ffffff;
   stroke: none;
 }
+/* v0.8.37.5：对齐 vscode-office .git-graph-ref-name
+ * padding 1px 8px（之前文字无 padding，靠 badge 整体 padding）
+ * line-height 20px + font-size 13px */
+.ref-badge__label {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  line-height: 20px;
+  font-size: 14px;
+  color: inherit;
+  white-space: nowrap;
+}
+
 /* v0.8.37.5：.ref-badge__icon--tag 已替换为 inline Octicons tag SVG（用户 mid-turn 提供精确 11 节点 path）
  * CSS 仍 fill 白色（跟 branch icon 颜色一致），模板见 line 2800-2811 内联 SVG
  * （路径 v0.8.37.4 之前用 lucide Tag stroke 模式，已统一为 octicons 实色 fill 模式，对齐 branch icon） */
@@ -4084,27 +4105,41 @@ function refBadgeClass(refType?: string): string {
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   white-space: nowrap;
-  overflow: hidden;
+  /* overflow: hidden visible —— x=hidden 截断超长文字（ellipsis），y=visible 让 ref-badge 底边线不被裁切
+   * 之前写成 visible hidden（写反了）导致：
+   *   - x=visible → 超长文字不被截断 → 横向滚动条
+   *   - y=hidden → 文字下半部分被裁 → commit-subject 只显示一半
+   * badge margin-top:2px + line-height:20px + border 1px*2 = 24px 总高，row 28px 够放 */
+  overflow: hidden visible;
   text-overflow: ellipsis;
-  line-height: var(--git-graph-row-height, 24px);
+  line-height: var(--git-graph-row-height, 28px);
 }
 .commit-row__col--author {
   font-size: inherit;
   color: inherit;
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .commit-row__col--date {
   font-size: inherit;
   color: inherit;
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .commit-row__col--sha {
   font-size: inherit;
   color: inherit;
   /* 右侧间距由 commit-row 的 padding-right 提供，避免叠加 */
   padding: 0 0 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .commit-meta {
@@ -4121,19 +4156,22 @@ function refBadgeClass(refType?: string): string {
   object-fit: cover;
   flex-shrink: 0;
 }
+/* v0.8.37.5：对齐 vscode-office .git-graph-muted font-size: 12px */
 .commit-author {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: inherit;
+  font-size: 13px;
 }
 .commit-time {
   white-space: nowrap;
-  font-size: inherit;
+  /* v0.8.37.5：对齐 vscode-office .git-graph-muted font-size: 12px */
+  font-size: 13px;
 }
 
+/* v0.8.37.5：对齐 vscode-office .git-graph-hash font-size: 11px */
 .commit-sha {
-  font-size: inherit;
+  font-size: 12px;
   color: inherit;
   flex-shrink: 0;
 }
