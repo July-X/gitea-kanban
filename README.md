@@ -326,5 +326,5 @@ Third-party attributions in [NOTICE](NOTICE).
 ---
 
 <p align="center">
-  <img src="docs/images/MiniMax_TokenPlan.png" alt="MiniMax Token Plan" width="720">
+  <img src="docs/images/MiniMax_TokenPlan.png" alt="MiniMax Token Plan" width="240">
 </p>

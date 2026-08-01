@@ -246,3 +246,53 @@ func TestLogCommitsVscode_NoUncommittedWhenClean(t *testing.T) {
 		t.Errorf("clean worktree 不应 prepend UNCOMMITTED，但 commits[0].SHA = %q", result.Commits[0].SHA)
 	}
 }
+
+// TestDetectUncommittedChanges_NoCheckoutRepo 验证 NoCheckout 仓库不报告 uncommitted。
+//
+// 应用用 NoCheckout:true clone 仓库（只拉元信息，不 checkout 文件到 worktree）。
+// 这种仓库 worktree 为空，index 也为空 → git status 对比 HEAD vs index 发现
+// 所有文件在 HEAD 中存在但 index 中不存在 → 全部报告 "D  filename"（X='D' Y=' '）。
+// 修复前：dirtyCount = 文件总数 > 0 → 误触发 UNCOMMITTED 灰色线。
+// 修复后：检测到所有行都是 "D " 前缀 → 判定为 NoCheckout 仓库 → 不报告 uncommitted。
+func TestDetectUncommittedChanges_NoCheckoutRepo(t *testing.T) {
+	// 用 clone --no-checkout 模拟真实 workspace 克隆
+	// 1. 创建源仓库（有文件 checkout）
+	srcDir := t.TempDir()
+	runGitSrc := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = srcDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGitSrc("init")
+	runGitSrc("config", "user.email", "test@test.com")
+	runGitSrc("config", "user.name", "Test User")
+	os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("a"), 0o644)
+	runGitSrc("add", ".")
+	runGitSrc("commit", "-m", "initial commit")
+
+	// 2. clone --no-checkout（模拟 workspace 克隆）
+	dir := t.TempDir()
+	cloneCmd := exec.Command("git", "clone", "--no-checkout", srcDir, dir)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone --no-checkout: %v\n%s", err, out)
+	}
+
+	// 验证 status 输出确实是 "D " 前缀（X='D' Y=' '）
+	statusOut := runGitOutput(t, dir, "status", "--porcelain=v1", "--untracked-files=all")
+	if len(statusOut) < 2 || statusOut[0] != 'D' || statusOut[1] != ' ' {
+		t.Fatalf("expected 'D ' prefix, got: %q", string(statusOut))
+	}
+
+	// 验证：NoCheckout 模式 → 不报告 uncommitted
+	headSHA, count, found, err := detectUncommittedChanges(dir)
+	if err != nil {
+		t.Fatalf("detectUncommittedChanges err: %v", err)
+	}
+	if found {
+		t.Errorf("NoCheckout repo should NOT report uncommitted (allDeleted=true), but found=true count=%d headSHA=%s",
+			count, headSHA)
+	}
+	t.Logf("NoCheckout repo correctly skipped: found=%v count=%d", found, count)
+}

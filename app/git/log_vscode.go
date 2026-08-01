@@ -301,8 +301,6 @@ func detectUncommittedChanges(localPath string) (headSHA string, dirtyCount int,
 	// 2. `git status --porcelain` 输出行数 = dirty 文件数。
 	//    --untracked-files=all 让 ??. 类的 untracked 也计入。
 	//    --porcelain=v1 走稳定的 machine-readable 格式，v2 在 git 2.36+ 才稳定。
-	//    NoCheckout 模式 worktree 是空的，但 index 有所有文件 → status 全部报告 D
-	//    → dirtyCount = 文件总数，语义仍然成立（worktree 与 index 不一致 = uncommitted）。
 	//
 	//    --porcelain=v1 走稳定的 machine-readable 格式（v2 在 git 2.36+ 才稳定，
 	//    这里统一锁 v1 保证跨平台输出格式一致）。
@@ -322,20 +320,36 @@ func detectUncommittedChanges(localPath string) (headSHA string, dirtyCount int,
 	}
 
 	count := 0
+	// allDeleted 标记 status 输出是否全为 "D " 前缀（X='D' Y=' '，index deleted, worktree unmodified）。
+	// NoCheckout 模式 clone 的仓库不 checkout 文件到 worktree，index 也没有文件
+	// → git status 对比 HEAD vs index 发现所有文件在 HEAD 中存在但 index 中不存在
+	// → 全部报告 "D  filename"（X='D' = index deleted, Y=' ' = worktree unmodified）。
+	// 这不是用户真正的未提交修改，应跳过 UNCOMMITTED 虚拟 commit。
+	allDeleted := true
+	hasAny := false
 	scanner := bufio.NewScanner(bytes.NewReader(statusOut))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		if scanner.Text() == "" {
+		line := scanner.Text()
+		if line == "" {
 			continue
+		}
+		hasAny = true
+		// porcelain v1 格式：XY <file>，X=index status vs HEAD, Y=worktree status vs index
+		// NoCheckout 仓库：X='D' Y=' ' → "D  filename"
+		if len(line) < 2 || line[0] != 'D' || line[1] != ' ' {
+			allDeleted = false
 		}
 		count++
 		if count > dirtyFileCap {
-			// 超过 cap 仍算 dirty，但不再精确计数（避免大仓库内存爆炸）
-			// 后续 UI 可以展示 ">5000 files" 之类的描述
 			break
 		}
 	}
-	if count == 0 {
+	if !hasAny {
+		return headSHA, 0, false, nil
+	}
+	// NoCheckout 仓库：所有文件都是 "D " → 不是真正的 uncommitted changes
+	if allDeleted {
 		return headSHA, 0, false, nil
 	}
 	return headSHA, count, true, nil

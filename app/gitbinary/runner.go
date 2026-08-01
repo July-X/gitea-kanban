@@ -643,9 +643,9 @@ func releaseHelpers(target string, toolsDir string, logger *slog.Logger) bool {
 // v0.8.27+ 引入：Windows 内嵌 git 是 MinGit 单文件布局，git 主进程 fork
 // `git remote-https` 时按以下顺序查找 helper：
 //
-//	1. <argv0>/../mingw64/libexec/git-core/  ← 单文件布局不存在
-//	2. GIT_EXEC_PATH env（如果设置）        ← 我们注入
-//	3. execvp("git") in PATH                  ← 我们把 tools/git 加到 PATH 前置
+//  1. <argv0>/../mingw64/libexec/git-core/  ← 单文件布局不存在
+//  2. GIT_EXEC_PATH env（如果设置）        ← 我们注入
+//  3. execvp("git") in PATH                  ← 我们把 tools/git 加到 PATH 前置
 //
 // 修法（双保险）：当 binPath 位于 ${dataDir}/tools/git/ 下时（即内嵌二进制），强制
 // 注入 GIT_EXEC_PATH=<binPath dir>，并把 <binPath dir> 追加到 PATH 最前面，让 OS

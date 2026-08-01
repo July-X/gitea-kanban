@@ -144,12 +144,6 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 	// v2.8：返回名称 + 类型，且按「本地分支 → 远程跟踪分支 → tag」稳定排序
 	refDataByHash := collectRefNamesByHash(repo)
 
-	// v0.8.37.3 修复：branch HEAD 指向的 commit 只能挂 1 个 ref（HEAD 自身），
-	// 但 branch 中间 commit 也应该被识别为该 branch 的成员（badge 显示）。
-	// 解决：在 `for each branch head` 遍历 commit 时，每个 visited commit 都
-	// 追加 branch name 到本地 map（独立于 refDataByHash，因为后者只装 ref 自身 HEAD commit）。
-	branchCommitMap := make(map[string][]branchRefEntry)
-
 	commits := make([]CommitInfo, 0)
 	seen := make(map[string]bool)
 	// v0.8.37.3 修复：candidateLimit 默认是 opts.MaxCount（用户视角的"加载上限"）。
@@ -183,13 +177,6 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 			}
 			visitedForHead++
 
-			// v0.8.37.3：为 branch 中间 commit 挂 branch name 到本地 map
-			// 独立于 refDataByHash（后者只装 ref 自身 HEAD commit）
-			branchCommitMap[c.Hash.String()] = append(branchCommitMap[c.Hash.String()], branchRefEntry{
-				Name: branch.name,
-				Type: branchRefTypeFromLocal(branch.isLocal),
-			})
-
 			if seen[c.Hash.String()] {
 				return nil
 			}
@@ -200,11 +187,14 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				parents[i] = h.String()
 			}
 
-			// v0.8.37.3：refs 合并（refDataByHash 优先 + branchCommitMap 追加）
-			mergedRefs := mergeRefsForCommit(
-				refDataByHash[c.Hash.String()],
-				branchCommitMap[c.Hash.String()],
-			)
+			// refs 只来自 refDataByHash（ref HEAD → commit 映射），与 GitHub 路径
+			// listRefsByCommit + vscode-git-graph 行为对齐：badge 只出现在 ref
+			// 直接指向的 commit 上，不给中间 commit 挂分支名。
+			refs := refDataByHash[c.Hash.String()]
+			if refs.Names == nil {
+				refs.Names = []string{}
+				refs.Types = []RefType{}
+			}
 
 			commits = append(commits, CommitInfo{
 				SHA:           c.Hash.String(),
@@ -216,8 +206,8 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				CommitterWhen: c.Committer.When,
 				Parents:       parents,
 				IsMerge:       len(parents) >= 2,
-				Refs:          mergedRefs.Names,
-				RefTypes:      mergedRefs.Types,
+				Refs:          refs.Names,
+				RefTypes:      refs.Types,
 			})
 			return nil
 		})
@@ -231,11 +221,12 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 				for i, h := range commit.ParentHashes {
 					parents[i] = h.String()
 				}
-				// v0.8.37.3：refs 合并 fallback
-				mergedRefs := mergeRefsForCommit(
-					refDataByHash[commit.Hash.String()],
-					branchCommitMap[commit.Hash.String()],
-				)
+				// refs 只来自 refDataByHash（与主路径一致）
+				refs := refDataByHash[commit.Hash.String()]
+				if refs.Names == nil {
+					refs.Names = []string{}
+					refs.Types = []RefType{}
+				}
 				commits = append(commits, CommitInfo{
 					SHA:           commit.Hash.String(),
 					ShortSHA:      commit.Hash.String()[:7],
@@ -246,8 +237,8 @@ func LogCommits(opts LogOptions) (*LogResult, error) {
 					CommitterWhen: commit.Committer.When,
 					Parents:       parents,
 					IsMerge:       len(parents) >= 2,
-					Refs:          mergedRefs.Names,
-					RefTypes:      mergedRefs.Types,
+					Refs:          refs.Names,
+					RefTypes:      refs.Types,
 				})
 			}
 			continue
@@ -404,11 +395,14 @@ func collectLimitedBranchHeads(repo *git.Repository, maxCount int) ([]branchInfo
 				headHash = targetRef.Hash()
 			}
 		}
-		if headHash != plumbing.ZeroHash && !seen[headHash] {
-			seen[headHash] = true
+		// v0.8.37.4：HEAD 不占用 seen map，让后续真实分支（与 HEAD 同 hash 的 master/main）
+		// 也能加入遍历列表。之前 HEAD 占用 seen[headHash] 后，master 被跳过 →
+		// branchCommitMap 里只有 "HEAD"，没有 "master" → 中间 commit 的 Refs 为空
+		// 或只有 "HEAD"（用户反馈 Gitea 数据源每个 commit 前面都有 HEAD badge）。
+		if headHash != plumbing.ZeroHash {
 			branches = append(branches, branchInfo{
 				hash:     headHash,
-				name:     "HEAD",
+				name:     "", // HEAD 不是真实分支名，留空避免渲染成 badge
 				isLocal:  true,
 				priority: 0, // 最高优先级
 			})

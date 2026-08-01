@@ -376,12 +376,11 @@ func TestLogCommits_AnnotatedTagPeeled(t *testing.T) {
 	}
 }
 
-// TestLogCommits_NoRefsOnEmpty 验证没有任何 ref 的 commit Refs 为空 slice（不是 nil）
+// TestLogCommits_NoRefsOnEmpty 验证没有任何 ref 直接指向的 commit 的 Refs 为空 slice（不是 nil）。
 //
-// v0.8.37.3 行为变更：branch 中间 commit 现在也会拿到 refs（branchCommitMap 兜底），
-// 因为每个 commit 实际属于某个 branch（HEAD 指向的 branch 的历史成员）。
-// 之前测试期望"middle/root commit Refs 应为空"是基于旧行为，v0.8.37.3 修复后
-// 改为验证 "refs 类型正确（branch 而非空）"。
+// v0.8.37.4 行为变更：移除 branchCommitMap 后，只有 ref HEAD 直接指向的 commit
+// 才会有 badge（与 GitHub 路径 + vscode-git-graph 对齐）。
+// 中间 commit（是某个 branch 历史成员但不是任何 ref HEAD）的 Refs 应为空。
 func TestLogCommits_NoRefsOnEmpty(t *testing.T) {
 	repoPath := createTestRepoWithCommits(t)
 
@@ -390,17 +389,15 @@ func TestLogCommits_NoRefsOnEmpty(t *testing.T) {
 		t.Fatalf("LogCommits failed: %v", err)
 	}
 
-	// v0.8.37.3：所有 commit 现在都应至少挂 1 个 ref（默认分支名），因为 branchCommitMap
-	// 在每个 branch head 遍历时给 visited commit 挂 branch name
+	// 验证 Refs slice 不是 nil（避免 nil deref）
 	for i, c := range result.Commits {
-		if len(c.Refs) == 0 {
-			t.Errorf("commit[%d] %s Refs should not be empty (v0.8.37.3 branch 中间 commit 也有 ref)",
-				i, c.ShortSHA)
+		if c.Refs == nil {
+			t.Errorf("commit[%d] %s Refs should not be nil", i, c.ShortSHA)
 		}
 	}
-	// 验证 Refs slice 不是 nil（避免 nil deref）
-	if result.Commits[0].Refs == nil {
-		t.Errorf("head commit Refs should not be nil")
+	// head commit（默认分支 HEAD 指向）应该有 ref
+	if len(result.Commits[0].Refs) == 0 {
+		t.Errorf("head commit Refs should not be empty (default branch HEAD points here)")
 	}
 }
 
@@ -515,21 +512,12 @@ func TestLogCommits_ManyBranches(t *testing.T) {
 	t.Logf("Created 30 branches, got %d commits (maxBranches=200 覆盖)", len(result.Commits))
 }
 
-// TestLogCommits_BranchMidCommitsHaveRefs 验证 v0.8.37.3 branch 中间 commit 挂 refs 修复
+// TestLogCommits_BranchHeadHasRefs 验证 branch HEAD commit 的 Refs 包含该分支名。
 //
-// 历史：之前 LogCommits 只挂 refDataByHash = ref 自身 HEAD commit 的 refs。
-// 但 branch 中间 commit（不是 HEAD 自身）也需要显示 badge → 之前错误地只显示 HEAD 自身 badge。
-//
-// 用户截图 2026-08-01 07:18 反馈：88d9b92 在 master log index 650，是
-// feat/gitgraph-vscode-recheck 分支 HEAD 自身的 commit → 该 commit 拿到 refs 没问题。
-// 但测试 fixture 验证更广：500 commit 独有 feature 分支，feature commit 100 应该
-// 也能拿到 refs（作为 branch "feature" 的成员），修复前 refs=[]。
-//
-// v0.8.37.3 修法：collectLimitedBranchHeads 返回 []branchInfo（含 branch name + refType），
-// 不是只 []plumbing.Hash。LogCommits 在 for-each branch head 遍历 commit 时，把
-// branch name 同时记到 branchCommitMap（独立于 refDataByHash）。每个 commit 的
-// 最终 refs = refDataByHash + branchCommitMap 去重合并。
-func TestLogCommits_BranchMidCommitsHaveRefs(t *testing.T) {
+// v0.8.37.4 行为变更：移除 branchCommitMap 后，只有 ref HEAD 直接指向的 commit
+// 才有 badge（与 vscode-git-graph 对齐）。feature 分支的 HEAD commit 应包含
+// "feature" 分支名，但中间 commit 不含。
+func TestLogCommits_BranchHeadHasRefs(t *testing.T) {
 	dir := t.TempDir()
 
 	runGit := func(args ...string) {
@@ -549,49 +537,47 @@ func TestLogCommits_BranchMidCommitsHaveRefs(t *testing.T) {
 	runGit("add", ".")
 	runGit("commit", "-m", "initial commit")
 
-	// 切回默认分支前先记下当前 branch（fixture init 完后是默认 master/main）
+	// 切回默认分支前先记下当前 branch
 	defaultBranch := currentDefaultBranch(t, dir)
-	// 创建 feature 分支，提交 500 个独有 commit
+	// 创建 feature 分支，提交 3 个独有 commit
 	runGit("checkout", "-b", "feature")
-	for i := 1; i <= 500; i++ {
+	for i := 1; i <= 3; i++ {
 		os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.txt", i)), []byte("f"), 0o644)
 		runGit("add", ".")
 		runGit("commit", "-m", fmt.Sprintf("feature commit %d", i))
 	}
-	// 切回默认分支（master/main）
+	// 切回默认分支
 	runGit("checkout", defaultBranch)
 
-	// v0.8.37.3 验证：candidateLimit 1000 + branchCommitMap 让所有 feature 分支 commit 拿到 refs
-	result, err := LogCommits(LogOptions{
-		LocalPath: dir,
-		MaxCount:  300, // < 500 截断
-	})
+	result, err := LogCommits(LogOptions{LocalPath: dir})
 	if err != nil {
 		t.Fatalf("LogCommits failed: %v", err)
 	}
 
-	// 验证：feature 分支的所有独有 commit 都拿到 refs（branchCommitMap 兜底）
-	featureCommitCount := 0
-	featureCommitWithRefCount := 0
+	// feature 分支 HEAD（feature commit 3）应包含 "feature" 分支名
+	featureHeadCount := 0
 	for _, c := range result.Commits {
-		if strings.HasPrefix(c.Subject, "feature commit ") {
-			featureCommitCount++
+		if c.Subject == "feature commit 3" {
+			if !contains(c.Refs, "feature") {
+				t.Errorf("feature HEAD commit Refs should contain 'feature', got %v", c.Refs)
+			}
+			featureHeadCount++
+		}
+	}
+	if featureHeadCount == 0 {
+		t.Fatalf("feature HEAD commit not found in results")
+	}
+
+	// feature 中间 commit（feature commit 1, 2）不应包含 "feature"（不是 ref HEAD）
+	for _, c := range result.Commits {
+		if c.Subject == "feature commit 1" || c.Subject == "feature commit 2" {
 			if contains(c.Refs, "feature") {
-				featureCommitWithRefCount++
+				t.Errorf("feature mid commit '%s' should NOT have 'feature' ref (only ref HEAD gets badge): %v",
+					c.Subject, c.Refs)
 			}
 		}
 	}
-	if featureCommitCount == 0 {
-		t.Fatalf("expected feature commits in results, found 0")
-	}
-	// v0.8.37.3 修复：每个 feature 分支 commit 都拿到 refs
-	// 修复前只有 feature 分支 HEAD (feature commit 500) 拿到 refs
-	if featureCommitWithRefCount < featureCommitCount {
-		t.Errorf("feature commits: %d total, %d with refs (branch 中间 commit 缺 refs?)",
-			featureCommitCount, featureCommitWithRefCount)
-	}
-	t.Logf("MaxCount=300 + 500 feature commits: %d feature commits, %d with refs (branchCommitMap 兜底)",
-		featureCommitCount, featureCommitWithRefCount)
+	t.Logf("Branch HEAD badge only: feature HEAD has 'feature', mid commits don't")
 }
 
 func TestLogCommits_IncludesRecentRemoteBranchWithinMaxCount(t *testing.T) {
@@ -816,4 +802,129 @@ func subjectsOf(commits []CommitInfo) []string {
 		subjects[i] = c.Subject
 	}
 	return subjects
+}
+
+// TestLogCommits_SharedAncestorGetsAllBranchRefs 验证：
+// 当多个分支的 HEAD 直接指向同一个 commit 时，该 commit 的 Refs 包含所有分支名。
+// （refDataByHash 收集所有 ref → commit 映射，多个 ref 指向同一 commit 时全部列出。）
+//
+// v0.8.37.4 行为变更：移除 branchCommitMap 后，只有 ref HEAD 直接指向的 commit
+// 才有 badge。中间 commit（不是任何 ref HEAD）的 Refs 为空。
+func TestLogCommits_SharedAncestorGetsAllBranchRefs(t *testing.T) {
+	dir := t.TempDir()
+
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test User")
+
+	// main: A → B → C
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "commit A")
+
+	os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "commit B")
+
+	os.WriteFile(filepath.Join(dir, "c.txt"), []byte("c"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "commit C")
+
+	defaultBranch := currentDefaultBranch(t, dir)
+
+	// feature: B → D（从 B 分叉）
+	runGit("checkout", "-b", "feature", "HEAD~1") // 回到 commit B
+	os.WriteFile(filepath.Join(dir, "d.txt"), []byte("d"), 0o644)
+	runGit("add", ".")
+	runGit("commit", "-m", "commit D")
+
+	// 切回 main
+	runGit("checkout", defaultBranch)
+
+	result, err := LogCommits(LogOptions{LocalPath: dir})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+
+	// commit B 不是任何 branch HEAD（main HEAD=C, feature HEAD=D）
+	// → Refs 应为空（不是任何 ref 直接指向它）
+	var commitB *CommitInfo
+	for i := range result.Commits {
+		if result.Commits[i].Subject == "commit B" {
+			commitB = &result.Commits[i]
+			break
+		}
+	}
+	if commitB == nil {
+		t.Fatalf("commit B not found in results: %v", subjectsOf(result.Commits))
+	}
+	if len(commitB.Refs) != 0 {
+		t.Errorf("commit B (not a ref HEAD) should have empty Refs, got %v", commitB.Refs)
+	}
+
+	// commit C 是 main HEAD → 应包含 defaultBranch 名
+	var commitC *CommitInfo
+	for i := range result.Commits {
+		if result.Commits[i].Subject == "commit C" {
+			commitC = &result.Commits[i]
+			break
+		}
+	}
+	if commitC == nil {
+		t.Fatalf("commit C not found in results")
+	}
+	if !contains(commitC.Refs, defaultBranch) {
+		t.Errorf("commit C (main HEAD) Refs should contain '%s', got %v", defaultBranch, commitC.Refs)
+	}
+
+	// commit D 是 feature HEAD → 应包含 "feature"
+	var commitD *CommitInfo
+	for i := range result.Commits {
+		if result.Commits[i].Subject == "commit D" {
+			commitD = &result.Commits[i]
+			break
+		}
+	}
+	if commitD == nil {
+		t.Fatalf("commit D not found in results")
+	}
+	if !contains(commitD.Refs, "feature") {
+		t.Errorf("commit D (feature HEAD) Refs should contain 'feature', got %v", commitD.Refs)
+	}
+	t.Logf("commit B Refs: %v (empty - not a ref HEAD)", commitB.Refs)
+	t.Logf("commit C Refs: %v (main HEAD)", commitC.Refs)
+	t.Logf("commit D Refs: %v (feature HEAD)", commitD.Refs)
+}
+
+// TestLogCommits_NoHEADBadge 验证 "HEAD" 不出现在任何 commit 的 Refs 里。
+//
+// v0.8.37.4 修复前：collectLimitedBranchHeads 把 HEAD 当作 name="HEAD" 的分支加入
+// 遍历列表，遍历时每个 commit 都被挂 "HEAD" → 前端渲染成 branch badge。
+// 用户反馈 Gitea 数据源每个 commit 前面都有 HEAD badge。
+//
+// 修复后：HEAD 的 name 改为空字符串，遍历时跳过空 name，"HEAD" 不出现在 Refs 里。
+func TestLogCommits_NoHEADBadge(t *testing.T) {
+	repoPath := createTestRepoWithCommits(t)
+
+	result, err := LogCommits(LogOptions{LocalPath: repoPath})
+	if err != nil {
+		t.Fatalf("LogCommits failed: %v", err)
+	}
+
+	for i, c := range result.Commits {
+		for _, ref := range c.Refs {
+			if ref == "HEAD" {
+				t.Errorf("commit[%d] %s Refs contains 'HEAD' (should not render as badge): %v",
+					i, c.ShortSHA, c.Refs)
+			}
+		}
+	}
 }

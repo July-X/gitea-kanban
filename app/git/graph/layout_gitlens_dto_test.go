@@ -37,7 +37,7 @@ func TestBuildGraphGitlens_FreshClaimBranchOffLine(t *testing.T) {
 	commits[1].Refs = []string{"main"}
 	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "A",  []string{"A"}, false)
+	result := BuildGraphGitlens(commits, "A", []string{"A"}, false)
 
 	t.Logf("=== branches ===")
 	for _, b := range result.Branches {
@@ -99,7 +99,7 @@ func TestBuildGraphGitlens_MergeStitchLineUsesRealColumn(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "M0",  []string{"M0"}, false)
+	result := BuildGraphGitlens(commits, "M0", []string{"M0"}, false)
 
 	// 找 S1 segment 对应的 branch（S1 lane=1，merge stitch X1=0 对应 M0 在 lane 0）
 	var foundMergeStitch bool
@@ -187,7 +187,7 @@ func TestBuildGraphGitlens_UncommittedSharesHeadLane(t *testing.T) {
 	commits[1].Refs = []string{"main"}
 	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "M0",  []string{"M0"}, false)
+	result := BuildGraphGitlens(commits, "M0", []string{"M0"}, false)
 
 	laneOf := make(map[string]int, len(result.Nodes))
 	for _, n := range result.Nodes {
@@ -257,7 +257,7 @@ func TestBuildGraphGitlens_BranchEndIsRowNumberPlusOne(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "M0",  []string{"M0"}, false)
+	result := BuildGraphGitlens(commits, "M0", []string{"M0"}, false)
 
 	// 关键断言：每个 branch 的 End 必须 == 该 branch 最后 commit 的行号 + 1
 	// 我们直接验证：如果某 branch 有 line Y2=3（连到 M3 row=3），那 branch.End ≥ 4
@@ -308,7 +308,7 @@ func TestBuildGraphGitlens_ColorIsColumnMod16(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "M0",  []string{"M0"}, false)
+	result := BuildGraphGitlens(commits, "M0", []string{"M0"}, false)
 
 	// 打印
 	t.Logf("=== nodes ===")
@@ -396,7 +396,7 @@ func TestBuildGraphGitlens_MergeStitchColumnNotZero(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "M5",  []string{"M5"}, false)
+	result := BuildGraphGitlens(commits, "M5", []string{"M5"}, false)
 
 	// 找 S2 segment 对应的 branch——它的 merge stitch line X1 应 = colOf[M4]（lane 2）
 	t.Logf("=== branches ===")
@@ -490,7 +490,7 @@ func TestBuildGraphGitlens_MatchesGitLensLaneReuse(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "T0",  []string{"T0"}, false)
+	result := BuildGraphGitlens(commits, "T0", []string{"T0"}, false)
 
 	laneOf := make(map[string]int)
 	colorOf := make(map[string]int)
@@ -578,7 +578,7 @@ func TestBuildGraphGitlens_ForkStitchIntoPinnedTrunk(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "H",  []string{"H"}, false)
+	result := BuildGraphGitlens(commits, "H", []string{"H"}, false)
 
 	// 断言 fork stitch (1,2)→(0,4) 存在，且 LockedFirst=false（转场在下端）
 	var forkFound bool
@@ -626,7 +626,7 @@ func TestBuildGraphGitlens_MergeIncomingLineToExistingLane(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "H",  []string{"H"}, false)
+	result := BuildGraphGitlens(commits, "H", []string{"H"}, false)
 
 	// 断言 merge 合入线 (1,1)→(0,2) 存在：LockedFirst=true（转场在上端）、
 	// 所在 branch.Color=0（parent 主线色，而非 child 的 lane 1 色）
@@ -673,7 +673,7 @@ func TestBuildGraphGitlens_MergeEdgeUsesParentColor(t *testing.T) {
 	commits[0].Refs = []string{"main"}
 	commits[0].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "H",  []string{"H"}, false)
+	result := BuildGraphGitlens(commits, "H", []string{"H"}, false)
 
 	// M(row 1, lane 1) → P1(row 2, lane 0) 是 second-parent 边：颜色应为 P1 的 0
 	var mergeEdge *GraphEdge
@@ -743,7 +743,7 @@ func TestBuildGraphGitlens_BranchOffLockedFirstMatchesMergeStitch(t *testing.T) 
 	commits[1].Refs = []string{"main"}
 	commits[1].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "HEAD",  []string{"M0", "HEAD"}, false)
+	result := BuildGraphGitlens(commits, "HEAD", []string{"M0", "HEAD"}, false)
 
 	// dump
 	for _, n := range result.Nodes {
@@ -839,7 +839,7 @@ func TestBuildGraphGitlens_ForkStitchLockedFirst(t *testing.T) {
 	commits[4].Refs = []string{"main"}
 	commits[4].RefTypes = []git.RefType{git.RefTypeBranch}
 
-	result := BuildGraphGitlens(commits,  "HEAD",  []string{"M1"}, false)
+	result := BuildGraphGitlens(commits, "HEAD", []string{"M1"}, false)
 
 	t.Logf("MaxLane=%d, branches=%d", result.MaxLane, len(result.Branches))
 	for _, n := range result.Nodes {
@@ -912,7 +912,7 @@ func TestBuildGraphGitlens_NoDuplicateLinesOnFreshClaim(t *testing.T) {
 		mk(mainHead, 2, nil, "main", "origin/main"),
 	}
 
-	result := BuildGraphGitlens(commits,  mainHead,  []string{mainHead}, false)
+	result := BuildGraphGitlens(commits, mainHead, []string{mainHead}, false)
 
 	// 节点 row/lane 唯一性 sanity
 	rowSeen := map[int]string{}

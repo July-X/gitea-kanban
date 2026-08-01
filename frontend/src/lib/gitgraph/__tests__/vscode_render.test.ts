@@ -82,7 +82,7 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		};
 		(graph as any).branches = edgesToBranches(graph.edges);
 		const r = renderGraphVscode(graph);
-		// v0.8.37: VSCODE_GRID_Y 28 → 24
+		// v0.8.37.5: VSCODE_GRID_Y 24 → 28（对齐 vscode-office ROW_HEIGHT=28）
 		// path d: M ${VSCODE_OFFSET_X} ${(VSCODE_OFFSET_Y).toFixed(1)} L ${VSCODE_OFFSET_X} ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y).toFixed(1)}
 		// 例如 offsetX=8, GRID_Y=24, offsetY=12: M 8 12 L 8 36
 		// 从 (0,0) 到 (1,0), 像素 = (offsetX, offsetY) → (offsetX, offsetY+VSCODE_GRID_Y)

@@ -239,7 +239,7 @@ func TestBuildGraphGitlens_FullPipeline_LinearHistory(t *testing.T) {
 		{SHA: "C", ShortSHA: "C", Subject: "C", Parents: []string{"D"}},
 		{SHA: "D", ShortSHA: "D", Subject: "D", Parents: nil},
 	}
-	result := BuildGraphGitlens(commits,  "A",  nil, false)
+	result := BuildGraphGitlens(commits, "A", nil, false)
 	if result.MaxLane != 0 {
 		t.Errorf("linear history MaxLane=%d, want 0", result.MaxLane)
 	}
@@ -257,7 +257,7 @@ func TestBuildGraphGitlens_FullPipeline_MergeFan(t *testing.T) {
 		{SHA: "B", ShortSHA: "B", Subject: "B", Parents: []string{"C"}},
 		{SHA: "C", ShortSHA: "C", Subject: "C", Parents: nil},
 	}
-	result := BuildGraphGitlens(commits,  "M",  nil, false)
+	result := BuildGraphGitlens(commits, "M", nil, false)
 	expected := map[string]int{"M": 0, "A": 0, "B": 1, "C": 0}
 	for _, n := range result.Nodes {
 		want, ok := expected[n.ShortSHA]
