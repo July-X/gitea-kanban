@@ -16,7 +16,7 @@
 
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { GitCommit, RotateCw, GitBranch, Tag, Search } from 'lucide-vue-next';
+import { GitCommit, RotateCw, Tag, Search } from 'lucide-vue-next';
 import { useAuthStore } from '@renderer/stores/auth';
 import { useRepoStore } from '@renderer/stores/repo';
 import { logError } from '@renderer/lib/frontend-log';
@@ -48,6 +48,19 @@ import {
   VSCODE_COLORS,
   type VscodeSvgRenderResult,
 } from '@renderer/lib/gitgraph/vscode-render';
+
+/**
+ * v0.8.37.4：hex 颜色 + 2 位 alpha 后缀（参考 vscode-gitlens `packages/plus/commit-graph/src/colors.ts:137`）
+ * 用于派生 lane 色 20% alpha 给 ref badge 做底色（不是实色铺满，是 tint 模式让黑字清晰可见）
+ * @param hex 6 位 hex（如 '#0085d9'），无效则原样返回
+ * @param alpha 0..1
+ */
+function withAlpha(hex: string, alpha: number): string {
+  if (!hex || hex[0] !== '#' || hex.length < 7) return hex;
+  const clamped = Math.max(0, Math.min(1, alpha));
+  const byte = Math.round(clamped * 255).toString(16).padStart(2, '0');
+  return `${hex}${byte}`;
+}
 import GitCommitHeatmap from '@renderer/components/GitCommitHeatmap.vue';
 
 // ============================================================
@@ -2755,6 +2768,8 @@ function refBadgeClass(refType?: string): string {
                   /* v3.13：绑定该 commit 所在 lane 的颜色，供 ref badge 和 dot stroke 使用。
                    * ref badge 的 border/text/icon fill 用它（不依赖 hover） */
                   '--row-lane-color': r.commit ? r.commit.colorHex : 'transparent',
+                  /* v0.8.37.4：lane 色 20% alpha 派生，ref badge 底色用（不是实色铺满，是 tint） */
+                  '--row-lane-color-bg': r.commit ? withAlpha(r.commit.colorHex, 0.2) : 'transparent',
                 }"
                 :role="r.commit ? 'button' : undefined"
                 :tabindex="r.commit ? 0 : undefined"
@@ -2785,15 +2800,29 @@ function refBadgeClass(refType?: string): string {
                         <Tag
                           v-if="r.commit.refTypes?.[idx] === 'tag'"
                           :size="9"
-                          class="ref-badge__icon"
+                          class="ref-badge__icon ref-badge__icon--tag"
                           aria-hidden="true"
                         />
-                        <GitBranch
+                        <!-- v0.8.37.4：替换 lucide GitBranch → GitHub Octicons git-branch-fill (用户 mid-turn 提供 SVG path)
+                             - viewBox 10x16, evenodd fill, 3 圆点 + 1 曲线形态，比 lucide 2 叉描边明显
+                             - fill: currentColor（被父 .ref-badge__icon CSS fill 覆盖为深色 #0f1115）
+                             - 高度 16px 撑满 18px icon 容器，宽度按 viewBox 比例 = 10px（10:16 = 10:x → x=10），
+                               flex 居中在 18x18 icon 容器内 -->
+                        <svg
                           v-else
-                          :size="9"
-                          class="ref-badge__icon"
+                          class="ref-badge__icon ref-badge__icon--branch"
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="10"
+                          height="16"
+                          viewBox="0 0 10 16"
                           aria-hidden="true"
-                        />
+                        >
+                          <path
+                            fill="currentColor"
+                            fill-rule="evenodd"
+                            d="M10 5c0-1.11-.89-2-2-2a1.993 1.993 0 0 0-1 3.72v.3c-.02.52-.23.98-.63 1.38-.4.4-.86.61-1.38.63-.83.02-1.48.16-2 .45V4.72a1.993 1.993 0 0 0-1-3.72C.88 1 0 1.89 0 3a2 2 0 0 0 1 1.72v6.56c-.59.35-1 .99-1 1.72 0 1.11.89 2 2 2 1.11 0 2-.89 2-2 0-.53-.2-1-.53-1.36.09-.06.48-.41.59-.47.25-.11.56-.17.94-.17 1.05-.05 1.95-.45 2.75-1.25S8.95 7.77 9 6.73h-.02C9.59 6.37 10 5.73 10 5zM2 1.8c.66 0 1.2.55 1.2 1.2 0 .65-.55 1.2-1.2 1.2C1.35 4.2.8 3.65.8 3c0-.65.55-1.2 1.2-1.2zm0 12.41c-.66 0-1.2-.55-1.2-1.2 0-.65.55-1.2 1.2-1.2.65 0 1.2.55 1.2 1.2 0 .65-.55 1.2-1.2 1.2zm6-8c-.66 0-1.2-.55-1.2-1.2 0-.65.55-1.2 1.2-1.2.65 0 1.2.55 1.2 1.2 0 .65-.55 1.2-1.2 1.2z"
+                          ></path>
+                        </svg>
                         <span>{{ ref }}</span>
                       </span>
                     </span>
@@ -3819,11 +3848,13 @@ function refBadgeClass(refType?: string): string {
   font-weight: 500;
   flex-shrink: 0;
   white-space: nowrap;
-  /* v0.8.37.1：恢复"默认透明 + hover 填充"模式（对齐图二 vscode-gitlens 风格）。
-   * v0.8.35.3 763e0ad 改成"默认 lane 色填充 + 深色文字"（图一），用户反馈这是 hover 后的样子，
-   * 取消 hover 变体。本版回退 763e0ad 但保留 v0.8.35.2 的 22px badge + v0.8.35.4 的 20px icon。 */
-  background-color: transparent;
-  color: #E6EDF3;
+  /* v0.8.37.4（mid-turn steer #7）：去掉 hover 反相效果
+   * - 用户：「不要hover效果」→ 默认态 = 唯一态，没有 hover 反相、没有 .commit-row--dot-active 反相
+   * - 默认态：withAlpha(lane-color, 0.20) 暗色 alpha tint 底 + #E6EDF3 浅字
+   * - icon 块：lane 色实色 + 1px lane 色 darker 边框 + 白色 fill icon（视觉锚点）
+   * - 之前 v0.8.37.4 hover 反相 → 白底 + 深字 + box-shadow（v0.8.37.4 最终版）已被本轮撤回 */
+  background-color: var(--row-lane-color-bg, rgba(128, 128, 128, 0.2));
+  color: var(--color-text-muted, #E6EDF3);
   /* v0.8.37.1（mid-turn steer）：badge 高度从 22px → 20px（内容 18px + 1px border-top + 1px border-bottom = 20px 总高）
    * 之前 22px badge 装在 24px row + border-box 下，底边线在 row 第 22px 位置，距 row 底 24px 还有 2px，
    * 但 col overflow:hidden + sub-pixel 抗锯齿下底边 1px 会被裁掉，看起来"丢失了一样"。
@@ -3835,36 +3866,47 @@ function refBadgeClass(refType?: string): string {
   box-sizing: border-box;
   overflow: hidden;
 }
-/* v0.8.37.1：恢复 hover 填充变体（对齐 vscode-gitlens .gl-graph__ref-pill:hover）
- * 用户圆点 hover / dot-active → badge 填充 lane 色 + 文字变深（0f1115 接近黑，跟图二反相） */
-.ref-badge:hover {
-  background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
-  color: var(--color-shell-main-bg, #0f1115);
-}
-/* 图标容器（VSCode .gitRef > svg）：
- * - 图标背景 = lane 色（--row-lane-color，来自 commit 所在 lane）
- * - 图标 SVG 图形 = 深色（fill = editor-background）
- * dot hover 时通过 .commit-row--dot-active .ref-badge 变 border-color */
+/* v0.8.37.4（mid-turn steer #7）：去掉 hover / dot-active 反相效果
+ *  - 之前 .ref-badge:hover, .commit-row--dot-active .ref-badge 会反相成白底 + 深字 + box-shadow
+ *  - 用户：「不要hover效果」→ 整个反相规则删除，badge 始终保持默认态
+ *  - 这里不写任何 :hover / .commit-row--dot-active 规则 → 视觉恒定 */
+/* v0.8.37.4：ref-badge__icon 升级为 squircle + lane 色边框 + 白色 Octicons git-branch-fill
+ *  - 用户两张示意图对齐：
+ *    - 图 008（默认）：绿色 squircle icon 块 + 白色分支 icon（dark theme 风格）
+ *    - 图 010（dot-active）：同绿色 squircle + 白色 icon（icon 块永远不变，只是 pill 主体反相）
+ *  - icon 块始终 lane 色实色 + 白色 icon = 视觉锚点
+ *  - 父 .ref-badge 默认：暗色 alpha tint 底 + 浅字 → hover 反相成白底 + 深字
+ *  - icon 块 hover 态不变（保持 lane 色实色 + 白色 icon，因为图 010 显示 icon 块永远 lane 色）
+ *  - squircle 圆角 6px（之前 4px 偏方），左边圆角跟父 .ref-badge 5px 衔接
+ *  - icon 尺寸 18x18（保持 v0.8.37.1 不变），SVG 高度 16 + flex 居中（垂直对齐 row 中心） */
 .ref-badge__icon {
   flex: 0 0 auto;
-  /* v0.8.37.1（mid-turn steer）：icon 容器 20 → 18px（跟 badge 缩 2px 同步），margin-right 5 保持，stroke-width 1.4 保持。
-   * 之前 20px icon 装在 22px badge 内容 20px 空间刚好顶满，配合 24px row center 对齐下 icon 顶/底各 1px 被 align-items: center 隐藏。
-   * 现在 18px icon 装在 18px badge 内容空间 100% 匹配，center 对齐后无像素裁剪。 */
   width: 18px;
   height: 18px;
   padding: 0;
   margin-right: 5px;
-  /* 紧贴 badge 左缘 + badge border-radius=5px 衔接：左两圆角 4px、右两圆角 0 */
-  border-top-left-radius: 4px;
-  border-bottom-left-radius: 4px;
+  /* squircle 圆角：左边圆角跟父 badge 5px 衔接避免接缝白线、右边 0 让 icon 块紧贴文字 */
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  /* lane 色实色背景（保持 v0.8.37.4 锚点，不随父 badge 反相） */
   background-color: var(--row-lane-color, rgba(128, 128, 128, 0.5));
-  stroke: currentColor;
-  stroke-width: 1.4;
-  fill: none;
+  /* 1px lane 色 darker border + box-shadow 双保险（避免 squircle 接缝白线） */
+  border: 1px solid var(--row-lane-color-border, rgba(0, 0, 0, 0.45));
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* 白色 fill icon（hover 父 .ref-badge 反相时 icon 仍白色，跟图 008/010 一致） */
+  fill: #ffffff;
+  stroke: none;
+}
+/* v0.8.37.4：.ref-badge__icon--tag 走 lucide Tag 形态（用户未指明 tag icon，保留 lucide Tag）
+ * 同样 fill 白色（跟 branch icon 颜色一致） */
+.ref-badge__icon--tag {
+  fill: #ffffff;
+  stroke: none;
 }
 /* v0.8.37.1 恢复 .commit-row--dot-active .ref-badge 视觉变化（对齐 VSCode .gitRef.active）：
  *  - 默认态 border = lane 色（已在 .ref-badge 默认样式里）
