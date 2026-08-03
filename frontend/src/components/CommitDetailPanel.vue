@@ -969,11 +969,14 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  /* v3.8：限制 body 最大高度 —— 超出时 body 自身滚动，不把左栏撑爆。
-   * 150px 给多行 commit message 留足阅读空间；单行消息不受影响。*/
-  max-height: 150px;
-  /* v0.9.x：底部 8px padding，避免滚到底时最后一行文字贴 <pre> 边缘被遮挡 */
-  padding-bottom: 8px;
+  /* v0.9.x：限制 body 最大高度 —— 超出时 body 自身滚动，不把左栏撑爆。
+   * 200px 给多行 commit message + bullet list 留足阅读空间（修复 150px 时末尾最后一行
+   * 文字 glyph 被 panel 圆角底边切掉的用户反馈）。*/
+  max-height: 200px;
+  /* v0.9.x：底部 20px padding，避免滚到底时最后一行文字贴 <pre> 边缘被遮挡。
+   * 8px 不够覆盖 <pre> 默认 line-height + 半截 glyph 的下溢出（实测 8px 文字尾部
+   * 约 2-3px 被 panel 底圆角切到）。*/
+  padding-bottom: 20px;
 }
 .cd-panel__header-left {
   display: flex;
@@ -1069,10 +1072,13 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   overflow-wrap: anywhere;
   line-height: 18px;
   font-family: inherit;
-  max-height: 120px;
+  /* v0.9.x：max-height 200px + padding-bottom 20px，与 .cd-panel--panel 变体一致。
+   * 之前 120px + 8px 太苛刻，多行 message + bullet list 频繁触发内嵌滚动；
+   * 滚到底时 padding-bottom 8px 盖不住 line-height 半截，导致最后一行文字
+   * glyph 被 panel 圆角底边切掉。*/
+  max-height: 200px;
   overflow-y: auto;
-  /* v0.9.x：底部 8px padding，避免滚到底时最后一行文字贴 <pre> 边缘被遮挡 */
-  padding-bottom: 8px;
+  padding-bottom: 20px;
 }
 
 /* v3.7：紧凑 inline meta（panel 变体专用，替代 .cd-panel__meta 独立区块）
