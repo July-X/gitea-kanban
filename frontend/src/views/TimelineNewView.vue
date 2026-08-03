@@ -25,6 +25,7 @@ import {
   commitsGitgraphCloneRepo,
   commitsGitgraphPull,
   commitsGetMeta,
+  commitsGetFiles,
   pullsList,
   getIpcClient,
 } from '@renderer/lib/ipc-client';
@@ -1005,14 +1006,14 @@ async function loadGraph(_offset = 0): Promise<void> {
     // - 错误静默：灰化是视觉特效，不应阻塞 / 上报错误
     void fetchMergedPullsAsync(activeProjectId.value);
 
-    // v0.9.x：预取 viewport 可见的 commit meta（≈5ms O(1) go-git）—— 让 CommitDetailPanel
-    // watch immediate 路径同步命中 metaResolvedCache（不显示骨架屏）。
-    // 不预取 files（subprocess ~60ms，且仅在用户真正点开 commit 时才需要 — 列表阶段看不到），
-    // 不预取 deeper 老 commit（用户点不到就不预取）。
-    // 错误静默：失败时仅 committed cache 没命中，watch 走后台 fire commitsGetMeta 兜底，不阻断主流程。
-    void prefetchCommitMeta(activeProjectId.value, nodes);
+    // v0.9.x：预取 viewport 可见的 commit meta + files（双路并发）——
+    //   meta（O(1) go-git，≈5ms）+ files（subprocess diff-tree，≈60ms）并发 fire，
+    //   各自独立 cache。让 CommitDetailPanel watch immediate 路径同步命中两个 cache，
+    //   整体（含右栏文件区）零骨架屏零延迟。
+    // 错误静默：失败时仅 cache miss，watch 走后台 fire 兜底，不阻断主流程。
+    void prefetchCommitDetails(activeProjectId.value, nodes);
 
-    // v0.8.x 已删除完整 prefetch（commit 详情 11 字段），现在只预取 meta（8 字段，O(1)）。
+    // v0.8.x 已删除完整 prefetch（commit 详情 11 字段），现在只预取 meta + files 两路轻量数据。
   } catch (e: unknown) {
     const err = e as {
       code?: string;
@@ -1104,22 +1105,36 @@ async function fetchMergedPullsAsync(projectId: string | null): Promise<void> {
 }
 
 /**
- * v0.9.x：预取 graph viewport 可见的 commit meta（O(1) go-git，≈5ms / call）
+ * v0.9.x：预取 graph viewport 可见的 commit meta + files（双路并发）
  *
  * 设计要点：
  *  - 取前 PREFETCH_LIMIT 行（默认 20），覆盖初始 viewport；用户滚动到下面，第二次由
  *    sentinel IntersectionObserver + loadMoreGraph 触发，再预取新一批。
- *  - 不预取 files（subprocess ~60ms，仅在用户点开 commit 展开手风琴时才需要 —— 列表阶段看不到）。
- *  - 不 await：fire-and-forget，不阻塞 graph 主流程（AGENTS §14.3 非阻塞铁律）。
- *  - 错误静默：单个 commit 失败仅该条 cache miss，watch 走后台 fire commitsGetMeta 兜底。
- *  - 已 dedup：ipc-client.metaSuccessCache 命中 pending 不重发。
+ *  - 每个 commit 同时 fire commitsGetMeta（O(1) go-git，≈5ms）+ commitsGetFiles
+ *    （2× git diff-tree subprocess，≈60ms）。两条路径走独立 IPC / 独立 cache：
+ *    - metaPromise 命中 metaResolvedCache → CommitDetailPanel 主体立即渲染
+ *    - filesPromise 命中 filesResolvedCache → 右栏文件区跳过"加载文件列表…"骨架屏
+ *    - 不依赖其中一条先到：先到先 merge 到 detail.value（CommitDetailPanel.vue merge 函数保证）。
+ *  - 不 await：fire-and-forget + Promise.allSettled，不阻塞 graph 主流程（AGENTS §14.3 非阻塞铁律）。
+ *  - 错误静默：单条/单 path 失败仅该 cache miss，CommitDetailPanel watch 走后台 fire 兜底。
+ *  - 已 dedup：ipc-client.{meta,files}SuccessCache 命中 pending 不重发；同 sha 多次 fire 自动合并。
  *  - 用户切 repo 时旧 prefetch 仍会跑完，但 cache key 含 projectId，跨 repo 不串味。
  *
- * PREFETCH_LIMIT 取值依据：28px 行高 × 20 = 560px ≈ 1080p 屏 viewport 总高度，
- * 刚好覆盖首批可见 commit + 一些下方 buffer。20 行 × 5ms O(1) = 100ms 总 IPC 耗时（可接受）。
+ * PREFETCH_LIMIT 取值依据：28px 行高 × 20 = 560px ≈ 1080p 屏 viewport 总高度。
+ * 性能估算（首屏，未命中 cache 时）：
+ *   - meta 路径：20 × 5ms = 100ms（并发最长链）
+ *   - files 路径：20 × 60ms = 1.2s（subprocess 串行受限于 git binary + flock，但每行可并发）
+ *   - 真实场景：files IPC 后台跑，不阻塞 graph UI；用户点开 commit 时 files cache
+ *     通常已命中（除非点得太快，IPC 还没返回）。
+ * 风险控制：
+ *   - go-git CommitObject 不持文件锁，并发安全
+ *   - subprocess diff-tree 走 per-repo flock（app/git/repo.go lock.go），但 20 个并发
+ *     是不同 SHA 各自一个 commit；不会出现死锁
+ *   - 不加重 Wails IPC channel 拥堵：fire-and-forget 立即返回，channel 满时自然会塞住
+ *     一两个（用户切 repo / scroll 触发），但不影响主线程
  */
 const PREFETCH_LIMIT = 20;
-async function prefetchCommitMeta(
+async function prefetchCommitDetails(
   projectId: string | null,
   nodes: ReadonlyArray<{ sha: string }>,
 ): Promise<void> {
@@ -1127,13 +1142,17 @@ async function prefetchCommitMeta(
   const targets = nodes.slice(0, PREFETCH_LIMIT);
   if (targets.length === 0) return;
 
-  // 并发 fire（不 await 单独 promise；Promise.allSettled 兜底防单点错误）
+  // 双路并发：每行 fire meta + files 两个 IPC，Promise.allSettled 兜底防单点错误。
+  // 不 await 单个 promise——整体当作后台 fire-and-forget。
   await Promise.allSettled(
-    targets.map((node) =>
+    targets.flatMap((node) => [
       commitsGetMeta({ projectId, sha: node.sha }).catch(() => {
-        /* 单条失败静默 */
+        /* meta 单条失败静默 */
       }),
-    ),
+      commitsGetFiles({ projectId, sha: node.sha }).catch(() => {
+        /* files 单条失败静默 */
+      }),
+    ]),
   );
 }
 
