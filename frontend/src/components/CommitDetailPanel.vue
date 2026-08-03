@@ -826,18 +826,26 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
 }
 
 /* panel 变体（inline 手风琴）：
- *   - v3.7：改 flex: 1 1 auto → display: block
- *     之前 flex:1 撑满 accordion 容器（=300px），导致 cd-panel__left/right 强制撑到容器高度，
- *     内容 < 容器时空滚动条出现。现在 accordion 自己 max-height + overflow: auto 控制滚动，
- *     panel 用 block 让内容自然撑高。
- *   - v0.9.x：加 padding-bottom: 6px，accordion 的圆角 border + box-shadow 区域
- *     不要切到 panel 最后一行内容（之前底部贴边线有遮挡）*/
+ *   - v0.9.x：display: block → display: flex; flex-direction: column;
+ *     加 height: 100% + flex: 1 的子元素，让 panel 像 accordion 一样整体受限 max-height，
+ *     给 .cd-panel__body { height:100% } 一个明确的父级高度（之前 .cd-panel--panel
+ *     display:block 让 parent height:auto，body height:100% 解析为 auto，
+ *     grid container 高度不被约束，.cd-panel__left { overflow-y: auto } 永远不触发，
+ *     长 commit message 被截切）。
+ *   - 加 padding-bottom: 6px，accordion 的圆角 border + box-shadow 区域
+ *     不要切到 panel 最后一行内容 */
 .cd-panel--panel {
   background: transparent;
   border-top: none;
   padding: 0 0 6px;
-  display: block;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  /* v0.9.x：height: 100% 让 panel 撑满 .commit-accordion (flex column) 内容 box。
+   * accordion max-height: min(70vh, 610px) - header height ~32px = 可用 ~580px 减去 padding
+   * 6px 得 panel 内容 ~574px。这一约束让 grid container height 100% 落地为 580px 不
+   * 再 fallback 到 auto。 */
+  height: 100%;
 }
 
 /* dialog 变体：弹窗内，padding 更宽松 */
@@ -933,22 +941,26 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
  * - .cd-message__body：flex:1 + min-height:0 + overflow-y:auto，
  *   body 填满 message 区余下空间，超出时 body 自身滚动（不是 message 区滚动）
  * - 标题固定不滚，body 内容滚动 —— 跟 vscode cdvSummary 一致 */
+/* v0.9.x：去掉 flex:1 + overflow:hidden。
+ * 之前 flex:1 撑满左栏 580px，加上 overflow:hidden visible（WebKit 实际解析为
+ * hidden auto），message body 内容超出 message 容器时仍然触发容器内嵌滚动 + padding
+ * 把最后一行遮挡。改为自然撑高 + overflow:visible 后，body 内容溢出到左栏，
+ * 由 .cd-panel__left { overflow-y:auto } 整体接管滚动 —— 对齐 vscode-git-graph
+ * 的"整 panel 单层滚动"体验。 */
 .cd-panel--panel .cd-panel__message {
   border-bottom: none;
   flex-shrink: 0;
-  flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  /* 强制换行的三层约束：
+  /* 强制换行的三层约束（注释保留，以防 visual 回归）：
    * 1. width:100% 让 flex item 宽度等于父容器（左栏/grid 列宽）
    * 2. min-width:0 让 flex item 接受收缩，不以内容宽度为最小值
    * 3. overflow:hidden 裁剪溢出，配合 min-width:0 让内部子元素被迫换行 */
   width: 100%;
   min-width: 0;
-  /* overflow-y:visible 让换行后的 title/body 完整可见，
-   * 超出左栏高度时由 .cd-panel__left 的 overflow-y:auto 滚动接管 */
-  overflow: hidden visible;
+  /* v0.9.x：去掉 hidden visible（实际是 hidden auto）—— 不让 message 容器自身
+   * 出现内嵌滚动；让内容溢出到 .cd-panel__left 的 overflow-y:auto 那里。 */
+  overflow: visible;
 }
 .cd-panel--panel .cd-panel__meta {
   border-bottom: none;
@@ -966,17 +978,16 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   padding: 6px var(--space-3, 12px) 3px;
 }
 .cd-panel--panel .cd-message__body {
+  /* v0.9.x：去掉 <pre> 自身的 max-height + overflow-y + padding-bottom。
+   * 之前 200px + 20px 仍不够装长 message（截图里 release notes + bullet list
+   * 内容超 200px，滚到底时最后一行被底圆角切掉 / panel 整体溢出有遮挡感）。
+   * 取消内嵌滚动后，commit message body 占自然高度，由父级 .cd-panel__left
+   * (overflow-y: auto) 接管滚动 —— 对齐 vscode-git-graph 的整 panel 滚动体验。
+   * 保留 flex:1 配合 message 容器内 flex column 让 body 自然撑满父级（左栏
+   * flex column 内），不再依赖 max-height 限制。*/
+  /* padding/margin 全部清掉避免左侧规则累计 ≤ 8px <pre> 默认还要让 left border 切 */
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  /* v0.9.x：限制 body 最大高度 —— 超出时 body 自身滚动，不把左栏撑爆。
-   * 200px 给多行 commit message + bullet list 留足阅读空间（修复 150px 时末尾最后一行
-   * 文字 glyph 被 panel 圆角底边切掉的用户反馈）。*/
-  max-height: 200px;
-  /* v0.9.x：底部 20px padding，避免滚到底时最后一行文字贴 <pre> 边缘被遮挡。
-   * 8px 不够覆盖 <pre> 默认 line-height + 半截 glyph 的下溢出（实测 8px 文字尾部
-   * 约 2-3px 被 panel 底圆角切到）。*/
-  padding-bottom: 20px;
 }
 .cd-panel__header-left {
   display: flex;
@@ -1037,10 +1048,12 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   flex-shrink: 0;
   /* min-width:0 让 flex/grid 子元素可以收缩到 content 宽度以下，
    * 配合 title 的 word-break:break-word 实现文本自动换行。
-   * overflow-x:hidden 防止超长无空格文本撑出横向滚动条；
-   * overflow-y:visible 让换行后的文本完整可见（左栏 overflow-y:auto 接管滚动）。*/
+   * v0.9.x：去掉 overflow: hidden visible（WebKit 实际解析为 hidden auto —— 让
+   * message 容器内部出现内嵌滚动条 + padding-bottom 把最后一行遮挡）→ 改 visible。
+   * 改 visible 后内容溢出 message 容器到 .cd-panel__left，由 .cd-panel__left
+   * { overflow-y: auto } 统一接管滚动，对齐 vscode-git-graph 的整 panel 单层滚动。 */
   min-width: 0;
-  overflow: hidden visible;
+  overflow: visible;
 }
 .cd-panel--dialog .cd-panel__message {
   padding: var(--space-3, 12px) var(--space-4, 16px) 3px;
@@ -1072,13 +1085,11 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
   overflow-wrap: anywhere;
   line-height: 18px;
   font-family: inherit;
-  /* v0.9.x：max-height 200px + padding-bottom 20px，与 .cd-panel--panel 变体一致。
-   * 之前 120px + 8px 太苛刻，多行 message + bullet list 频繁触发内嵌滚动；
-   * 滚到底时 padding-bottom 8px 盖不住 line-height 半截，导致最后一行文字
-   * glyph 被 panel 圆角底边切掉。*/
-  max-height: 200px;
-  overflow-y: auto;
-  padding-bottom: 20px;
+  /* v0.9.x：去掉 max-height / overflow-y / padding-bottom。commit message 内容
+   * 自然撑高，由父级 .cd-panel__left (overflow-y: auto) 接管滚动 —— 对齐
+   * vscode-git-graph 整 panel 单层滚动体验（不再有 body 内嵌 + panel 外层两层
+   * scroll 切换，也杜绝 150/200px 阈值不够长 message 时最后一行被底部 panel 圆
+   * 角遮挡的用户反馈）。*/
 }
 
 /* v3.7：紧凑 inline meta（panel 变体专用，替代 .cd-panel__meta 独立区块）
