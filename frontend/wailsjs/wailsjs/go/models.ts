@@ -515,6 +515,88 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class CommitFilesDTO {
+	    files: FileChangeDTO[];
+	    additions: number;
+	    deletions: number;
+	    filesChanged: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CommitFilesDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.files = this.convertValues(source["files"], FileChangeDTO);
+	        this.additions = source["additions"];
+	        this.deletions = source["deletions"];
+	        this.filesChanged = source["filesChanged"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CommitMetaDTO {
+	    sha: string;
+	    shortSha: string;
+	    subject: string;
+	    authorName: string;
+	    authorEmail: string;
+	    authorWhen: string;
+	    message: string;
+	    parents: string[];
+	    gpg?: git.CommitGpgStatus;
+	
+	    static createFrom(source: any = {}) {
+	        return new CommitMetaDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sha = source["sha"];
+	        this.shortSha = source["shortSha"];
+	        this.subject = source["subject"];
+	        this.authorName = source["authorName"];
+	        this.authorEmail = source["authorEmail"];
+	        this.authorWhen = source["authorWhen"];
+	        this.message = source["message"];
+	        this.parents = source["parents"];
+	        this.gpg = this.convertValues(source["gpg"], git.CommitGpgStatus);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ConnectArgs {
 	    platform: string;
 	    giteaUrl: string;
@@ -772,6 +854,34 @@ export namespace main {
 	
 	    static createFrom(source: any = {}) {
 	        return new GetCommitDetailArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.sha = source["sha"];
+	    }
+	}
+	export class GetCommitFilesArgs {
+	    projectId: string;
+	    sha: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetCommitFilesArgs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectId = source["projectId"];
+	        this.sha = source["sha"];
+	    }
+	}
+	export class GetCommitMetaArgs {
+	    projectId: string;
+	    sha: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetCommitMetaArgs(source);
 	    }
 	
 	    constructor(source: any = {}) {

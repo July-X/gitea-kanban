@@ -33,8 +33,14 @@ import {
   ShieldQuestion,
   KeyRound,
 } from 'lucide-vue-next';
-import { commitsGet, getCachedCommit } from '@renderer/lib/ipc-client';
-import type { CommitGpgDto, CommitFileChangeDto } from '@renderer/types/dto';
+import {
+  commitsGet,
+  commitsGetMeta,
+  commitsGetFiles,
+  getCachedCommitMeta,
+  getCachedCommitFiles,
+} from '@renderer/lib/ipc-client';
+import type { CommitGpgDto, CommitFileChangeDto, CommitMetaDto } from '@renderer/types/dto';
 import { showToast } from '@renderer/lib/toast';
 // Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL（window.open 在 Wails
 // WebView 下不可靠——v1 Electron 时代的 setWindowOpenHandler 拦截已不存在）。
@@ -75,9 +81,12 @@ const props = withDefaults(defineProps<Props>(), {
   variant: 'panel',
 });
 
-// ===== 懒加载详情 =====
-// 缓存放在 module 作用域 → 多个 CommitDetailPanel 实例共享（弹窗 + 手风琴不重复请求同一 SHA）
+// ===== v0.9.x 懒加载详情 =====
+/** 模块作用域缓存：CommitDetailPanel 实例共享 IPC 结果（meta + files），
+ *  watch 同步读命中后立即渲染面板主体（零骨架屏）。
+ *  实际 cache 在 ipc-client.ts 里维护（metaSuccessCache / metaResolvedCache / filesSuccessCache / filesResolvedCache） */
 interface CommitDetail {
+  /** commit message / full body（multiline 时由模板切分 title + body） */
   message: string;
   additions?: number;
   deletions?: number;
@@ -87,75 +96,124 @@ interface CommitDetail {
   // 还会被 vue-tsc 推成 never → v-for f in detail.files 报 f is never）
   files?: CommitFileChangeDto[];
   linkedCards?: Array<{ cardId: string; columnName: string }>;
-  /** GPG 签名状态（commitsGet 单条详情才有） */
+  /** GPG 签名状态（GetCommitMeta 也带，单条详情返回） */
   gpg?: CommitGpgDto;
 }
-const loading = ref(false);
+
+/** v0.9.x 双路 IPC 状态：
+ *  - metaLoading：watch 触发后立刻 false（subject placeholder 让面板零骨架屏）；
+ *    旧版的整体 loading 移除。
+ *  - filesLoading：右栏 files 区独立控制。命中 getCachedCommitFiles 同步读则 false，
+ *    未命中则 await commitsGetFiles → false。
+ *  - detailSha：watch P2 防止 stale data 覆盖最新 commit（快速切换 commit 时
+ *    旧 IPC 晚到不污染当前显示）。 */
+const metaLoading = ref(false);
 const filesLoading = ref(false);
 const detail = ref<CommitDetail | null>(null);
+const detailSha = ref<string | null>(null);
 
-/** 已删除本地 detailCache，改用 ipc-client 的 resolvedCache（watcher 同步读） */
-
-/** 加载 commit 详情。失败回退到 subject 作为 message */
-async function loadDetail(): Promise<void> {
-  if (!props.commit) return;
-  const sha = props.commit.sha;
-
-  if (!props.projectId) {
-    detail.value = null;
-    return;
-  }
-
-  loading.value = true;
-  filesLoading.value = true;
-  try {
-    const dto = await commitsGet({ projectId: props.projectId, sha });
-    detail.value = {
-      message: dto.message,
-      additions: dto.additions,
-      deletions: dto.deletions,
-      filesChanged: dto.filesChanged,
-      files: dto.files,
-      linkedCards: dto.linkedCards,
-    };
-    filesLoading.value = false;
-  } catch {
-    detail.value = { message: props.commit.subject };
-    filesLoading.value = false;
-  } finally {
-    loading.value = false;
-  }
+/** P0：把 row 已有基础元数据塞进 detail（subject 作 message placeholder）。
+ *  这样 watch 触发瞬间面板就有内容显示，不会因 IPC 未到而空白。 */
+function applyRowMetaPlaceholder(rowSubject: string): void {
+  detail.value = {
+    message: rowSubject,
+  };
 }
 
-// commit 切换 → 重新加载（优先读 ipc-client resolvedCache，同步命中 → 零骨架屏）
+/** IPC meta 到达后合并到现有 detail，保留 files 区不被覆盖。 */
+function mergeMetaIntoDetail(meta: CommitMetaDto): void {
+  detail.value = {
+    ...(detail.value ?? { message: meta.subject }),
+    message: meta.message || meta.subject,
+    gpg: meta.gpg,
+  };
+}
+
+/** IPC files 到达后合并到现有 detail。 */
+function mergeFilesIntoDetail(filesDto: CommitFilesDto): void {
+  detail.value = {
+    ...(detail.value ?? { message: '' }),
+    additions: filesDto.additions,
+    deletions: filesDto.deletions,
+    filesChanged: filesDto.filesChanged,
+    files: filesDto.files,
+  };
+}
+
+/** v0.9.x：commit 切换 → 双路加载（meta + files 并发 fire）
+ *  - 命中 metaResolvedCache → 同步填 detail.message 等主体字段
+ *  - 命中 filesResolvedCache → 同步填 files 等文件区
+ *  - 未命中：并发 fire commitsGetMeta + commitsGetFiles → 各自 awaited 后 merge
+ *  - P0：始终先用 row.subject 填 message placeholder，再走 IPC → 零骨架屏
+ *  - P2：每次切换 commit 记录 detailSha，新数据到达时若 detailSha 已变更说明 stale，丢弃。
+ */
 watch(
   () => props.commit?.sha,
   (newSha, oldSha) => {
     if (!props.commit || !newSha) {
       detail.value = null;
+      detailSha.value = null;
+      metaLoading.value = false;
+      filesLoading.value = false;
       return;
     }
     if (newSha === oldSha) return;
 
-    // v0.9.x：同步读 resolvedCache（prefetch 已写好 → 命中则零骨架屏）
-    const cached = getCachedCommit(props.projectId, newSha);
-    if (cached) {
-      detail.value = {
-        message: cached.message,
-        additions: cached.additions,
-        deletions: cached.deletions,
-        filesChanged: cached.filesChanged,
-        files: cached.files,
-        linkedCards: cached.linkedCards,
-      };
-      loading.value = false;
-      filesLoading.value = false;
+    detailSha.value = newSha;
+
+    // P0：watch 触发瞬间，用 row 已有数据立刻填 placeholder。面板马上有内容（subject 当 message）。
+    applyRowMetaPlaceholder(props.commit.subject);
+
+    const projectId = props.projectId ?? '';
+    if (!projectId) {
+      // 无 projectId 时只显示 row 基础信息，不再走 IPC。
       return;
     }
 
-    // 未命中 → 后台异步走 IPC
-    detail.value = null;
-    void loadDetail();
+    // meta 路径：同步读 cache → 未命中则 fire IPC（≈5ms O(1) 拉 meta）
+    const cachedMeta = getCachedCommitMeta(projectId, newSha);
+    if (cachedMeta) {
+      mergeMetaIntoDetail(cachedMeta);
+      metaLoading.value = false;
+    } else {
+      metaLoading.value = true;
+      void commitsGetMeta({ projectId, sha: newSha })
+        .then((meta) => {
+          if (detailSha.value !== newSha) return; // P2：stale 跳过
+          mergeMetaIntoDetail(meta);
+        })
+        .catch(() => {
+          // meta 失败不回退（subject 已 placeholder），但清掉 loading 让 UI 不卡
+          if (detailSha.value !== newSha) return;
+        })
+        .finally(() => {
+          if (detailSha.value === newSha) metaLoading.value = false;
+        });
+    }
+
+    // files 路径：同样 sync 读 cache → 未命中 fire（subprocess ~60ms）
+    const cachedFiles = getCachedCommitFiles(projectId, newSha);
+    if (cachedFiles) {
+      mergeFilesIntoDetail(cachedFiles);
+      filesLoading.value = false;
+    } else {
+      filesLoading.value = true;
+      void commitsGetFiles({ projectId, sha: newSha })
+        .then((filesDto) => {
+          if (detailSha.value !== newSha) return; // P2：stale 跳过
+          mergeFilesIntoDetail(filesDto);
+        })
+        .catch(() => {
+          if (detailSha.value !== newSha) return;
+          // files 失败显示空占位（v-if 守卫已有，留 detail.files = [] 占位）
+          if (detail.value && detail.value.files === undefined) {
+            detail.value = { ...detail.value, files: [] };
+          }
+        })
+        .finally(() => {
+          if (detailSha.value === newSha) filesLoading.value = false;
+        });
+    }
   },
   { immediate: true },
 );
@@ -498,7 +556,7 @@ function onPanelWheel(e: WheelEvent, el: HTMLElement): void {
           </div>
           <div class="cd-message__title">{{ messageTitle }}</div>
           <pre v-if="messageBody" class="cd-message__body">{{ messageBody }}</pre>
-          <div v-if="loading" class="cd-loading">加载详情中…</div>
+          <!-- v0.9.x：移除整体骨架屏「加载详情中…」（P0 已用 row.subject placeholder 填充） -->
         </div>
       </div>
 

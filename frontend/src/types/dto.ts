@@ -260,6 +260,36 @@ export interface CommitGpgDto {
 
 export type CommitDetailDTO = CommitDto;
 
+/** v0.9.x：commit 元信息（拆 binding 后轻量 DTO，不含 files/stats）
+ *
+ * Go 端 app_repo.go GetCommitMeta 返回。CommitDetailPanel watch immediate 路径
+ * 直接 await 这个，让面板主体在 ~5ms 内拿到 message/SHA/author/gpg 并渲染；
+ * 文件列表走独立的 GetCommitFiles（subprocess 路径，独立 loading）。
+ */
+export interface CommitMetaDto {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  authorName: string;
+  authorEmail: string;
+  authorWhen: string;
+  message: string;
+  parents: string[];
+  gpg?: CommitGpgDto;
+}
+
+/** v0.9.x：commit 文件变更 + +/- 行数统计（拆 binding 后重量 DTO）
+ *
+ * Go 端 app_repo.go GetCommitFiles 返回。CommitDetailPanel 后台 fire 这个
+ * 路径，独立 loading state，失败时降级"无文件变更"占位。
+ */
+export interface CommitFilesDto {
+  files: CommitFileChangeDto[];
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+}
+
 export interface ListCommitsArgs {
   projectId: string;
   sha?: string;

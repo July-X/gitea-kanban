@@ -32,6 +32,8 @@ import type {
   ListMembersResp,
   ListMilestonesResp,
   CommitDetailDTO,
+  CommitMetaDto,
+  CommitFilesDto,
   IssueCommentDto,
   TimelineItemDto,
   LabelDto,
@@ -522,22 +524,133 @@ export function commitsList(args: {
 }
 
 /**
- * commit 详情的缓存（module 级，跨 CommitDetailPanel / CommitDetailDialog 共享）。
+ * v0.9.x：commit 详情的双路缓存（module 级，跨 CommitDetailPanel / 对话框共享）
  *
- * 三缓存设计：
- *   - successCache：缓存 pending Promise（dedup 并发请求 + 自动缓存 resolved value）
- *   - failureCache：缓存失败时间戳（30s TTL，期内直接抛错不发 IPC，防 noise）
- *   - resolvedCache：缓存已 resolved 的 DTO（含 files）→ watcher 同步读，零骨架屏
+ * 拆 binding 后，meta 和 files 走独立的 IPC，缓存也分两个独立 cache。
+ *
+ * 三缓存设计（每个 cache 都有这一套）：
+ *   - {kind}SuccessCache：缓存 pending Promise（dedup 并发请求 + 失败时缓存 failure）
+ *   - {kind}FailureCache：缓存失败时间戳（30s TTL，期内直接抛错不发 IPC，防 noise）
+ *   - {kind}ResolvedCache：缓存已 resolved 的 DTO → watcher 同步读，零骨架屏
  *
  * key = `${projectId}::${sha}`（防跨项目串味）
+ *
+ * 旧 commitsGet 同步缓存（successCache/failureCache/resolvedCache）保留向后兼容，
+ * 当前 CommitDetailPanel 已切到双路 API，旧 cache 由 GC 自清理。
  */
+const metaSuccessCache = new Map<string, Promise<CommitMetaDto>>();
+const metaFailureCache = new Map<string, number>();
+const metaResolvedCache = new Map<string, CommitMetaDto>();
+
+const filesSuccessCache = new Map<string, Promise<CommitFilesDto>>();
+const filesFailureCache = new Map<string, number>();
+const filesResolvedCache = new Map<string, CommitFilesDto>();
+
+// 旧 commitsGet 缓存（向后兼容，不消费但保留）
 const successCache = new Map<string, Promise<CommitDetailDTO>>();
 const failureCache = new Map<string, number>();
-/** 已 resolved 的 DTO 缓存（prefetch 写入，watcher 同步读 → 零骨架屏） */
 const resolvedCache = new Map<string, CommitDetailDTO>();
 const FAILURE_TTL_MS = 30_000;
 
-/** 拿单个 commit 详情（gitea /repos/{owner}/{repo}/git/commits/{sha}，含 stats） */
+/** v0.9.x：拿 commit 元信息（O(1) go-git CommitObject，不跑 subprocess）
+ *
+ * 双路拆分后的轻量路径。CommitDetailPanel watch immediate 优先读缓存（getCachedCommitMeta），
+ * miss 才走这个 IPC。dedup + failure TTL 用通用模板（metaSuccessCache / metaFailureCache）。
+ */
+export function commitsGetMeta(args: {
+  projectId: string;
+  sha: string;
+}): Promise<CommitMetaDto> {
+  const key = `${args.projectId}::${args.sha}`;
+
+  const existing = metaSuccessCache.get(key);
+  if (existing) return existing;
+
+  const failedAt = metaFailureCache.get(key);
+  if (failedAt !== undefined && Date.now() - failedAt < FAILURE_TTL_MS) {
+    return Promise.reject(
+      new Error(`commit ${args.sha} 元信息加载失败，已缓存，${Math.ceil((FAILURE_TTL_MS - (Date.now() - failedAt)) / 1000)}s 后重试`),
+    );
+  }
+
+  const rawPromise = getIpcClient().invoke('commits', 'getMeta', args) as Promise<CommitMetaDto>;
+  const p = rawPromise
+    .then((dto) => {
+      metaSuccessCache.delete(key);
+      metaFailureCache.delete(key);
+      metaResolvedCache.set(key, dto);
+      return dto;
+    })
+    .catch((err) => {
+      metaSuccessCache.delete(key);
+      metaFailureCache.set(key, Date.now());
+      throw err;
+    });
+
+  metaSuccessCache.set(key, p);
+  return p;
+}
+
+/** v0.9.x：拿 commit 文件变更（subprocess diff-tree，跟 meta 解耦） */
+export function commitsGetFiles(args: {
+  projectId: string;
+  sha: string;
+}): Promise<CommitFilesDto> {
+  const key = `${args.projectId}::${args.sha}`;
+
+  const existing = filesSuccessCache.get(key);
+  if (existing) return existing;
+
+  const failedAt = filesFailureCache.get(key);
+  if (failedAt !== undefined && Date.now() - failedAt < FAILURE_TTL_MS) {
+    return Promise.reject(
+      new Error(`commit ${args.sha} 文件列表加载失败，已缓存，${Math.ceil((FAILURE_TTL_MS - (Date.now() - failedAt)) / 1000)}s 后重试`),
+    );
+  }
+
+  const rawPromise = getIpcClient().invoke('commits', 'getFiles', args) as Promise<CommitFilesDto>;
+  const p = rawPromise
+    .then((dto) => {
+      filesSuccessCache.delete(key);
+      filesFailureCache.delete(key);
+      filesResolvedCache.set(key, dto);
+      return dto;
+    })
+    .catch((err) => {
+      filesSuccessCache.delete(key);
+      filesFailureCache.set(key, Date.now());
+      throw err;
+    });
+
+  filesSuccessCache.set(key, p);
+  return p;
+}
+
+/** 同步读已缓存的 CommitMetaDto — CommitDetailPanel watcher immediate 命中后零骨架屏 */
+export function getCachedCommitMeta(
+  projectId: string | null,
+  sha: string,
+): CommitMetaDto | undefined {
+  if (!projectId) return undefined;
+  const key = `${projectId}::${sha}`;
+  return metaResolvedCache.get(key);
+}
+
+/** 同步读已缓存的 CommitFilesDto — files 区独立命中 */
+export function getCachedCommitFiles(
+  projectId: string | null,
+  sha: string,
+): CommitFilesDto | undefined {
+  if (!projectId) return undefined;
+  const key = `${projectId}::${sha}`;
+  return filesResolvedCache.get(key);
+}
+
+/** 拿单个 commit 详情（gitea /repos/{owner}/{repo}/git/commits/{sha}，含 stats）
+ *
+ * v0.9.x 起不推荐：commit 详情双路拆分后用 commitsGetMeta + commitsGetFiles。
+ * 保留向后兼容 + 旧 cache（successCache / resolvedCache）继续服务于老调用方。
+ */
 export function commitsGet(args: { projectId: string; sha: string }): Promise<CommitDetailDTO> {
   const key = `${args.projectId}::${args.sha}`;
 
@@ -574,8 +687,8 @@ export function commitsGet(args: { projectId: string; sha: string }): Promise<Co
 /**
  * 同步读已缓存的 CommitDetailDTO（含 files）。
  * 用于 watcher immediate 路径，避免组件挂载瞬间出现骨架屏。
- * - prefetch 已经写过 key → 直接返 DTO，前端同步赋值
- * - 没写过 → 返 undefined，由 panel 走 loadDetail 异步路径
+ *
+ * v0.9.x 保留向后兼容；新代码优先用 getCachedCommitMeta + getCachedCommitFiles。
  */
 export function getCachedCommit(
   projectId: string | null,
@@ -595,6 +708,13 @@ export function clearCommitCache(): void {
   successCache.clear();
   failureCache.clear();
   resolvedCache.clear();
+  // v0.9.x：双路拆分后也清掉 meta + files cache
+  metaSuccessCache.clear();
+  metaFailureCache.clear();
+  metaResolvedCache.clear();
+  filesSuccessCache.clear();
+  filesFailureCache.clear();
+  filesResolvedCache.clear();
 }
 
 /** 拿结构化 Git Graph（Go 端基于 go-git commit DAG 生成 nodes + edges） */

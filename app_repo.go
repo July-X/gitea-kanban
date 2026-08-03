@@ -357,6 +357,36 @@ type FileChangeDTO struct {
 	Binary           bool   `json:"binary,omitempty"` // v2.15 暂不支持（go-git 无标记）
 }
 
+// v0.9.x：GetCommitMeta DTO（拆分 binding：高代价的 files/diff 字段分离出来）
+//
+// 设计动机：原 GetCommitDetail 一次性返回 13 个字段（含 Files/Additions/Deletions/FilesChanged），
+// 但前端 CommitDetailPanel watch immediate 路径只为了 message/SHA/author 等元信息
+// 走骨架屏 + IPC round-trip ≥50ms（go-git + 2×git diff-tree subprocess）。
+// 拆出 GetCommitMeta 后，前端可先用 row 内已有的 subject 当 placeholder 渲染主体，
+// 后台 async fire 元信息 IPC（O(1) go-git CommitObject），到点后再精准替换。
+// Files 单独走 IPC（subprocess 不可压缩，跟 meta 解耦后可按需独立 loading state）。
+type CommitMetaDTO struct {
+	SHA         string               `json:"sha"`
+	ShortSHA    string               `json:"shortSha"`
+	Subject     string               `json:"subject"`
+	AuthorName  string               `json:"authorName"`
+	AuthorEmail string               `json:"authorEmail"`
+	AuthorWhen  string               `json:"authorWhen"`
+	Message     string               `json:"message"`
+	Parents     []string             `json:"parents"`
+	Gpg         *git.CommitGpgStatus `json:"gpg,omitempty"`
+}
+
+// CommitFilesDTO — commit 文件变更 + stats 统计
+//
+// 跟 CommitDetailDTO 的 files 字段 + 3 个 stat 字段对齐，但解耦元信息路径。
+type CommitFilesDTO struct {
+	Files        []FileChangeDTO `json:"files"`
+	Additions    int             `json:"additions"`
+	Deletions    int             `json:"deletions"`
+	FilesChanged int             `json:"filesChanged"`
+}
+
 // GetCommitDetailArgs 获取 commit 详情参数
 type GetCommitDetailArgs struct {
 	ProjectID string `json:"projectId"`
@@ -438,6 +468,130 @@ func (a *App) GetCommitDetail(args GetCommitDetailArgs) (CommitDetailDTO, error)
 			dto.Deletions += f.Deletions
 		}
 		dto.FilesChanged = len(files)
+	}
+
+	return dto, nil
+}
+
+// ===== v0.9.x：commit 详情双路拆分 =====
+//
+// 把原 GetCommitDetail 拆成 GetCommitMeta + GetCommitFiles 两个 binding，
+// 让前端 CommitDetailPanel 先 fire-and-forget meta（O(1) go-git CommitObject），
+// 主体立即渲染；再 fire files（subprocess diff-tree）异步补充文件列表。
+// 旧 GetCommitDetail 保留向后兼容——已有调用方不需要立刻切换。
+//
+// 性能对比（基准仓库：gitea-kanban 1126 commit）：
+//   - 旧 GetCommitDetail：GetCommit (≈5ms) + GetCommitDiff (2× subprocess, ≈60ms) = ≈65ms
+//   - 新 GetCommitMeta：单独走 GetCommit (≈5ms)
+//     用户点开 commit 手风琴时，message/author/gpg 等元信息 ≈5ms 返回，
+//     files 走后台 ≈60ms 不阻塞主体渲染
+
+// GetCommitMetaArgs 获取 commit 元信息参数
+type GetCommitMetaArgs struct {
+	ProjectID string `json:"projectId"`
+	SHA       string `json:"sha"`
+}
+
+// GetCommitMeta 获取 commit 元信息（O(1) go-git CommitObject，不跑 subprocess）
+//
+// 设计意图：让前端 watch immediate 路径直接 await 这个轻量 RPC，
+// 拿到 sha/subject/message/author/gpg 等字段后立刻渲染面板主体；
+// 文件列表（subprocess 慢）走独立的 GetCommitFiles 后台并行拉。
+func (a *App) GetCommitMeta(args GetCommitMetaArgs) (CommitMetaDTO, error) {
+	if args.ProjectID == "" {
+		return CommitMetaDTO{}, ipc.NewValidationFailed("projectId 不能为空", "")
+	}
+
+	project, account, err := a.findProjectAndAccount(args.ProjectID)
+	if err != nil {
+		return CommitMetaDTO{}, err
+	}
+	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
+
+	repo, err := git.OpenRepo(localPath)
+	if err != nil {
+		return CommitMetaDTO{}, err
+	}
+
+	commit, err := repo.GetCommit(args.SHA)
+	if err != nil {
+		// 降级：commit 对象本地找不到（shallow / force-push 抹掉），返空 meta 让前端走 row fallback。
+		// 与 GetCommitDetail 行为对齐：避免 dialog 弹错。
+		if errors.Is(err, plumbing.ErrObjectNotFound) {
+			a.logger.Warn("GetCommitMeta: commit not found locally, returning empty DTO",
+				"sha", args.SHA, "projectID", args.ProjectID)
+			return CommitMetaDTO{
+				SHA:     args.SHA,
+				Subject: "（该提交详情暂不可用）",
+				Parents: []string{},
+			}, nil
+		}
+		return CommitMetaDTO{}, err
+	}
+
+	return CommitMetaDTO{
+		SHA:         commit.SHA,
+		ShortSHA:    commit.ShortSHA,
+		Subject:     commit.Subject,
+		AuthorName:  commit.AuthorName,
+		AuthorEmail: commit.AuthorEmail,
+		AuthorWhen:  commit.AuthorWhen,
+		Message:     commit.Message,
+		Parents:     commit.Parents,
+		Gpg:         commit.Gpg,
+	}, nil
+}
+
+// GetCommitFilesArgs 获取 commit 文件变更参数
+type GetCommitFilesArgs struct {
+	ProjectID string `json:"projectId"`
+	SHA       string `json:"sha"`
+}
+
+// GetCommitFiles 获取 commit 的文件变更 + +/- 行数统计（subprocess diff-tree）
+//
+// 这个路径必然慢：2 次 `git diff-tree` subprocess 调用、blob 数 N 决定耗时。
+// v0.9.x 起跟 meta 拆开后，前端可以：
+//   - 后台 fire-and-forget 批量预取（preload viewport 内可见 commit 的 files）
+//   - 文件区独立 loading state（只有 filesLoading=true 时显示骨架屏，不影响 message 主区）
+//   - meta 不到时不阻塞 files，反之亦然
+func (a *App) GetCommitFiles(args GetCommitFilesArgs) (CommitFilesDTO, error) {
+	if args.ProjectID == "" {
+		return CommitFilesDTO{}, ipc.NewValidationFailed("projectId 不能为空", "")
+	}
+
+	project, account, err := a.findProjectAndAccount(args.ProjectID)
+	if err != nil {
+		return CommitFilesDTO{}, err
+	}
+	localPath := git.RepoLocalPathForAccount(a.workspacePath, account.Username, project.Owner, project.Name)
+
+	repo, err := git.OpenRepo(localPath)
+	if err != nil {
+		return CommitFilesDTO{}, err
+	}
+
+	files, diffErr := repo.GetCommitDiff(args.SHA)
+	if diffErr != nil {
+		// diff 失败降级：返空 files（前端走 "无文件变更" 占位）
+		a.logger.Warn("GetCommitFiles: GetCommitDiff failed", "sha", args.SHA, "err", diffErr)
+		return CommitFilesDTO{Files: []FileChangeDTO{}}, nil
+	}
+
+	dto := CommitFilesDTO{
+		Files:        make([]FileChangeDTO, 0, len(files)),
+		FilesChanged: len(files),
+	}
+	for _, f := range files {
+		dto.Files = append(dto.Files, FileChangeDTO{
+			Filename:         f.Path,
+			PreviousFilename: f.OldPath,
+			Status:           f.Action,
+			Additions:        f.Additions,
+			Deletions:        f.Deletions,
+		})
+		dto.Additions += f.Additions
+		dto.Deletions += f.Deletions
 	}
 
 	return dto, nil

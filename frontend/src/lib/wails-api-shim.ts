@@ -118,6 +118,10 @@ type WailsApp = {
   }>;
   /** v2.15：按本地仓库路径读取 commit 详情（含 files / +/- stats） */
   GetCommitDetail?: (args: { projectId: string; sha: string }) => Promise<unknown>;
+  /** v0.9.x：commit 元信息（O(1) go-git CommitObject）—— 双路拆分后的轻量路径 */
+  GetCommitMeta?: (args: { projectId: string; sha: string }) => Promise<unknown>;
+  /** v0.9.x：commit 文件变更（2× git diff-tree subprocess）—— 双路拆分后的重量路径 */
+  GetCommitFiles?: (args: { projectId: string; sha: string }) => Promise<unknown>;
   /** v2.4 按 projectId 拉取 Git Graph（反查 localPath + token）
    *
    * v0.6.3 修复：补 `offset` 字段（之前 shim 漏传导致滚动加载更多每次都拉首屏）。
@@ -529,6 +533,69 @@ const apiShim = {
             });
           }
           return app.GetCommitDetail({
+            projectId: a.projectId ?? '',
+            sha: a.sha ?? '',
+          });
+        },
+      );
+    },
+    /**
+     * v0.9.x：commits.getMeta —— commit 元信息（O(1) go-git CommitObject）
+     *
+     * GetCommitDetail 拆分后的轻量路径：只拿 sha/subject/message/author/gpg，
+     * 不跑 subprocess。前端 CommitDetailPanel 用这个让主体立即渲染，
+     * 文件列表再走独立的 commits.getFiles 并行拉。
+     *
+     * 行为同 commits.get：找不到时返回空 DTO（不抛错），强制走前端 fallback（用 row subject）。
+     */
+    getMeta: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId?: string; sha?: string };
+      return forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'commits.getMeta 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        async (app) => {
+          if (!app.GetCommitMeta) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 GetCommitMeta',
+              hint: '请重新构建应用',
+            });
+          }
+          return app.GetCommitMeta({
+            projectId: a.projectId ?? '',
+            sha: a.sha ?? '',
+          });
+        },
+      );
+    },
+    /**
+     * v0.9.x：commits.getFiles —— commit 文件变更（subprocess diff-tree）
+     *
+     * 跟 GetCommitMeta 配对：files 独立 loading，独立报错，失败时前端降级
+     * 显示「无文件变更」占位而不是阻塞面板。
+     */
+    getFiles: (args: unknown): Promise<unknown> => {
+      const a = (args ?? {}) as { projectId?: string; sha?: string };
+      return forwardToWails(
+        () =>
+          Promise.reject({
+            code: 'internal',
+            message: 'commits.getFiles 尚未连接到 Go 后端',
+            hint: '请在 Wails 桌面窗口中操作',
+          }),
+        async (app) => {
+          if (!app.GetCommitFiles) {
+            return Promise.reject({
+              code: 'internal',
+              message: 'Wails 绑定缺失 GetCommitFiles',
+              hint: '请重新构建应用',
+            });
+          }
+          return app.GetCommitFiles({
             projectId: a.projectId ?? '',
             sha: a.sha ?? '',
           });

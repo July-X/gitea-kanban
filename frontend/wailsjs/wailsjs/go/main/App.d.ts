@@ -50,6 +50,10 @@ export function GetCheckUpdatesPref():Promise<boolean>;
 
 export function GetCommitDetail(arg1:main.GetCommitDetailArgs):Promise<main.CommitDetailDTO>;
 
+export function GetCommitFiles(arg1:main.GetCommitFilesArgs):Promise<main.CommitFilesDTO>;
+
+export function GetCommitMeta(arg1:main.GetCommitMetaArgs):Promise<main.CommitMetaDTO>;
+
 export function GetGhBinaryConfig():Promise<gitbinary.GhBinaryResult>;
 
 export function GetGitBinaryConfig():Promise<main.GitBinaryConfig>;

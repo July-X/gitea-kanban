@@ -90,6 +90,14 @@ export function GetCommitDetail(arg1) {
   return window['go']['main']['App']['GetCommitDetail'](arg1);
 }
 
+export function GetCommitFiles(arg1) {
+  return window['go']['main']['App']['GetCommitFiles'](arg1);
+}
+
+export function GetCommitMeta(arg1) {
+  return window['go']['main']['App']['GetCommitMeta'](arg1);
+}
+
 export function GetGhBinaryConfig() {
   return window['go']['main']['App']['GetGhBinaryConfig']();
 }

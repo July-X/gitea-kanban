@@ -24,6 +24,7 @@ import {
   commitsGitgraphLines,
   commitsGitgraphCloneRepo,
   commitsGitgraphPull,
+  commitsGetMeta,
   pullsList,
   getIpcClient,
 } from '@renderer/lib/ipc-client';
@@ -1004,10 +1005,14 @@ async function loadGraph(_offset = 0): Promise<void> {
     // - 错误静默：灰化是视觉特效，不应阻塞 / 上报错误
     void fetchMergedPullsAsync(activeProjectId.value);
 
-    // v0.8.x 已删除 prefetch，不再批量预加载 commit 详情。
-    // 触发条件：用户点开具体的 commit 时，才按需调 commitsGet。
-    // 好处：消除首屏报错噪声（"object not found" 因为 commit 对象本地没有）。
-    // 代价：点开 commit 时走骨架屏过渡（已优化为不阻塞 UI）。 
+    // v0.9.x：预取 viewport 可见的 commit meta（≈5ms O(1) go-git）—— 让 CommitDetailPanel
+    // watch immediate 路径同步命中 metaResolvedCache（不显示骨架屏）。
+    // 不预取 files（subprocess ~60ms，且仅在用户真正点开 commit 时才需要 — 列表阶段看不到），
+    // 不预取 deeper 老 commit（用户点不到就不预取）。
+    // 错误静默：失败时仅 committed cache 没命中，watch 走后台 fire commitsGetMeta 兜底，不阻断主流程。
+    void prefetchCommitMeta(activeProjectId.value, nodes);
+
+    // v0.8.x 已删除完整 prefetch（commit 详情 11 字段），现在只预取 meta（8 字段，O(1)）。
   } catch (e: unknown) {
     const err = e as {
       code?: string;
@@ -1096,6 +1101,40 @@ async function fetchMergedPullsAsync(projectId: string | null): Promise<void> {
       mergedPulls.value = [];
     }
   }
+}
+
+/**
+ * v0.9.x：预取 graph viewport 可见的 commit meta（O(1) go-git，≈5ms / call）
+ *
+ * 设计要点：
+ *  - 取前 PREFETCH_LIMIT 行（默认 20），覆盖初始 viewport；用户滚动到下面，第二次由
+ *    sentinel IntersectionObserver + loadMoreGraph 触发，再预取新一批。
+ *  - 不预取 files（subprocess ~60ms，仅在用户点开 commit 展开手风琴时才需要 —— 列表阶段看不到）。
+ *  - 不 await：fire-and-forget，不阻塞 graph 主流程（AGENTS §14.3 非阻塞铁律）。
+ *  - 错误静默：单个 commit 失败仅该条 cache miss，watch 走后台 fire commitsGetMeta 兜底。
+ *  - 已 dedup：ipc-client.metaSuccessCache 命中 pending 不重发。
+ *  - 用户切 repo 时旧 prefetch 仍会跑完，但 cache key 含 projectId，跨 repo 不串味。
+ *
+ * PREFETCH_LIMIT 取值依据：28px 行高 × 20 = 560px ≈ 1080p 屏 viewport 总高度，
+ * 刚好覆盖首批可见 commit + 一些下方 buffer。20 行 × 5ms O(1) = 100ms 总 IPC 耗时（可接受）。
+ */
+const PREFETCH_LIMIT = 20;
+async function prefetchCommitMeta(
+  projectId: string | null,
+  nodes: ReadonlyArray<{ sha: string }>,
+): Promise<void> {
+  if (!projectId) return;
+  const targets = nodes.slice(0, PREFETCH_LIMIT);
+  if (targets.length === 0) return;
+
+  // 并发 fire（不 await 单独 promise；Promise.allSettled 兜底防单点错误）
+  await Promise.allSettled(
+    targets.map((node) =>
+      commitsGetMeta({ projectId, sha: node.sha }).catch(() => {
+        /* 单条失败静默 */
+      }),
+    ),
+  );
 }
 
 async function loadMoreGraph(): Promise<void> {
