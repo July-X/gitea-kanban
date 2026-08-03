@@ -3876,11 +3876,15 @@ function refBadgeClass(refType?: string): string {
   /* v0.8.37.5：对齐 vscode-office .git-graph-ref
    * line-height 20px（之前 18px），height auto（之前固定 20px）
    * padding 改 0（之前 0 8px 0 0），文字 padding 走 .ref-badge__label
-   * margin-top 2px + margin-right 6px 对齐 vscode-office */
+   * margin-right 6px 对齐 vscode-office
+   * margin-top: 取消（之前 2px）—— badge 实际高度 = icon 容器 26px（含 padding 3*2）+
+   * badge border 2px = 28px，超过 commit-row 28px 行高；
+   * 取消 margin-top 让 badge 用 inline-flex 的 align-items: center 在 desc 列内居中，
+   * 避免被 desc 列 overflow: hidden 裁切顶部像素 */
   line-height: 20px;
   height: auto;
   padding: 0;
-  margin-top: 2px;
+  margin-top: 0;
   margin-right: 6px;
   overflow: hidden;
 }
@@ -4105,12 +4109,15 @@ function refBadgeClass(refType?: string): string {
   padding: 0 12px;
   border-right: 1px solid var(--color-divider, rgba(0, 0, 0, 0.2));
   white-space: nowrap;
-  /* overflow: hidden visible —— x=hidden 截断超长文字（ellipsis），y=visible 让 ref-badge 底边线不被裁切
-   * 之前写成 visible hidden（写反了）导致：
-   *   - x=visible → 超长文字不被截断 → 横向滚动条
-   *   - y=hidden → 文字下半部分被裁 → commit-subject 只显示一半
-   * badge margin-top:2px + line-height:20px + border 1px*2 = 24px 总高，row 28px 够放 */
-  overflow: hidden visible;
+  /* 修复：原 `overflow: hidden visible` 写法在 webview 里被错误解析成 auto，
+   * 导致 desc 列实际内容（ref-badge + commit-subject）超过 commit-row 28px 行高时
+   * 渲出纵向滚动条。改为单一 `overflow: hidden` —— x/y 都裁切，
+   * x 方向维持 ellipsis 截断超长文字，y 方向裁切超高的 badge / subject。
+   * 历史注释里 `hidden visible`（y=visible）是 v0.8.35 故意保留用来"防裁切 badge 底边线"，
+   * 但实测在 webview 里 y=visible 直接导致 scrollbar 出现，且 ref-badge 当前实际高度
+   * ≤ 28px 行高（v0.8.37.5 后 badge line-height 20px + border 2px + icon 容器 20px = 22-26px），
+   * 没有超高的现实风险，统一 hidden 更安全。 */
+  overflow: hidden;
   text-overflow: ellipsis;
   line-height: var(--git-graph-row-height, 28px);
 }
