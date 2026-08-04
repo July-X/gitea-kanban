@@ -1414,13 +1414,16 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px 3px 6px;
+  /* v0.9.x：padding 3px → 5px（上下多加 2px），让 button 高度从 18px 提到 22px，
+   * 文字（--font-xs 11px 默认）在 22px 容器内上下各有 5.5px 内边距，不再贴边被遮挡。 */
+  padding: 5px 8px 5px 6px;
   /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
   line-height: 1;
   border: 1px solid transparent;
   background: var(--color-bg-elevated);
+  /* v0.9.x：font-size 11px → 12px 让仓库名更易读；StatusBar 39px 容器内 12px + 5px padding = 22px 高，宽留 17px buffer */
   color: var(--color-text-secondary);
-  font-size: var(--font-xs);
+  font-size: 12px;
   font-weight: 500;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1532,7 +1535,9 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: 8px 10px;
+  /* v0.9.x：padding 8px 10px → 10px 12px，单行高度从 50px 提到 ~54px，
+   * 让 fullName 行 + tag chip + 同步按钮视觉更舒展，不再贴边被遮挡 */
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
   text-align: left;
   font-size: var(--font-sm);
@@ -1545,7 +1550,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
     color var(--t-fast) var(--ease);
 }
 .statusbar__row + .statusbar__row {
-  margin-top: 2px;
+  /* v0.9.x：margin-top 2px → 3px，行间隔也加 1px，跟 padding 加宽同步 */
+  margin-top: 3px;
 }
 .statusbar__row:hover {
   background: var(--color-bg-hover);
@@ -1632,13 +1638,15 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  /* v0.9.x：padding 4px → 6px（上下多加 2px），按钮高度 20px → 24px，更易点；横向 10 → 12px 让"同步""更新"文字更舒展 */
+  padding: 6px 12px;
   /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
   line-height: 1;
   border: 1px solid var(--color-divider);
   background: var(--color-bg-elevated);
   color: var(--color-text);
-  font-size: var(--font-xs);
+  /* v0.9.x：font-size 11px → 12px 与 trigger button 统一，"同步/更新"按钮文字在 24px 容器内清晰 */
+  font-size: 12px;
   font-weight: 500;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1646,7 +1654,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
     background var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease);
-  min-width: 64px;
+  /* v0.9.x：min-width 64px → 72px 给"同步中…""加载中"长文案预留位，避免按钮在 loading 状态下宽度跳动 */
+  min-width: 72px;
   justify-content: center;
 }
 /* v2.54：svg 显式 vertical-align: middle 防止与文本 baseline 对齐导致 icon 顶部空隙 */
