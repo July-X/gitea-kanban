@@ -86,6 +86,18 @@ export const useRepoStore = defineStore('repo', () => {
   const currentProject = ref<RepoProjectDto | null>(null);
   const loading = ref(false);
   const error = ref<UserFacingError | null>(null);
+  /**
+   * v0.9.x：跨视图失效信号 —— 仓库状态变化（addProject / selectProject / cloneRepo /
+   * pullRepo / removeProject 等）成功后 touch() 一次，时间戳递增。
+   * 下游视图（GitGraph TimelineNewView 等）watch 它主动重新拉数据。
+   *
+   * 必要性：watch(currentProjectId) 只能在 projectId 变化时响应，但"同一个项目从
+   * 未 clone → 已 clone"（commit 详情面板显示「Git Graph 功能暂未启用」）不会触发
+   * projectId 变化 —— 必须有另一条 signal 让 GitGraph 主动 retry。 */
+  const repoStoreChanged = ref(0);
+  function touch(): void {
+    repoStoreChanged.value = Date.now();
+  }
 
   // ===== getters =====
   /** 给 IPC 用的 uuid —— 看板/时间轴/分支/合并的 projectId 参数都走这个 */
@@ -159,6 +171,9 @@ export const useRepoStore = defineStore('repo', () => {
    */
   function selectProject(project: RepoProjectDto | null): void {
     currentProject.value = project;
+    /* v0.9.x：不再 touch()。currentProjectId 变化会通过 TimelineNewView 的
+     * watch(activeProjectId) 自动重载 GitGraph；这里 touch() 会双触发
+     * watch(activeProjectId) + watch(repoStoreChanged) 各跑一次 loadGraph 浪费 IPC。 */
   }
 
   /**
@@ -190,6 +205,8 @@ export const useRepoStore = defineStore('repo', () => {
       await loadRepos('', true);
       // 选中新加的 project（uuid 源）
       currentProject.value = project;
+      /* v0.9.x：不再 touch()。currentProjectId 变化由 TimelineNewView 的
+       * watch(activeProjectId) 自动 reload GitGraph；这里 touch() 会双触发。 */
       return project;
     } catch (e) {
       error.value = normalizeError(e);
@@ -219,6 +236,8 @@ export const useRepoStore = defineStore('repo', () => {
       await reposRemoveProject({ projectId: uuid });
       if (currentProject.value?.id === uuid) {
         currentProject.value = null;
+        // v0.9.x：当前 project 被删 → 强制 timeline 重置（清空 graphDto 让 UI 显示 EmptyState 而不是 stale 数据）
+        touch();
       }
       await loadRepos('', true);
     } catch (e) {
@@ -533,6 +552,8 @@ export const useRepoStore = defineStore('repo', () => {
         // 走新协议：Go 端 App.CloneRepo 按 projectId 反查 account → 正确 adapter
         const r = await commitsGitgraphCloneRepo({ projectId });
         clonedMap.value[cloneKey(owner, repo)] = true;
+        // v0.9.x：clone 完成 → 通知 GitGraph 主动重载（解决"新仓库 clone 完仍显示 Git Graph 不可用"bug）
+        touch();
         return r.localPath;
       }
       // Fallback：旧协议，按当前已连账号传 platform/hostUrl/username
@@ -546,6 +567,8 @@ export const useRepoStore = defineStore('repo', () => {
         repo,
       });
       clonedMap.value[cloneKey(owner, repo)] = true;
+      // v0.9.x：同上 — clone fallback 路径也触发失效信号
+      touch();
       return r.localPath;
     } catch (e) {
       error.value = normalizeError(e);
@@ -608,6 +631,8 @@ export const useRepoStore = defineStore('repo', () => {
     error,
     guideOnConnect,
     clonedMap,
+    // v0.9.x：跨视图失效信号（clone 成功 / project 切换 / pull 完成后 touch()）
+    repoStoreChanged,
     // getters
     currentRepo,
     projects,
@@ -623,7 +648,6 @@ export const useRepoStore = defineStore('repo', () => {
     // v2.3
     refreshClonedStatus,
     cloneRepo,
-
     // v2.4
     pullRepoByProjectId,
     // v2.6 同步进度（StatusBar 行末进度条）

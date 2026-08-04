@@ -871,7 +871,46 @@ watch(
   async (id) => {
     // v0.7.3：切换仓库时重置 maxCommits，对齐 vscode-git-graph 切换仓库后重新从 0 拉取
     maxCommits.value = INITIAL_GRAPH_LIMIT;
+    /* v0.9.x：清空 graphDto 强制走 firstLoad 路径（避免之前仓库 commit 数据残留
+     * 误导用户以为"切换后没刷新"）。watch(activeProjectId) 是项目切换触发器；
+     * 同一项目的状态变化（clone 成功 / pull 成功）由下面 watch(repoStoreChanged)
+     * 兜底，避免用户感知"切了但图不变"。*/
+    graphDto.value = null;
+    featureDisabled.value = false;
+    localError.value = null;
+    allLoaded.value = false;
+    expandedSha.value = null;
+    pendingFocusSha.value = null;
     if (id) await loadGraph();
+  },
+);
+
+/**
+ * v0.9.x：仓库状态失效信号 —— 当 project 状态变化但 activeProjectId 不变时仍需要重载。
+ *
+ * 典型场景：
+ *  - 用户点 StatusBar 行末"同步"按钮 → onSyncClick → repo.cloneRepo() success
+ *    → activeProjectId 不变（同一 project）→ 第一行 watch 不触发
+ *    → 但用户期待"clone 完后 GitGraph 自动显示 commit" → 一直没刷新
+ *  - 用户点 StatusBar 行末"更新"按钮 → onUpdateClick → repo.pullRepoByProjectId()
+ *    success → 同上问题
+ *
+ * 信号由 repo store 在所有"成功变更"后调 touch() 递增（addProject / selectProject /
+ * cloneRepo / removeProject）。
+ *
+ * 行为：清 graphDto + loadGraph，让 disable state / stale cache 全部重置。
+ */
+watch(
+  () => repo.repoStoreChanged,
+  async () => {
+    if (!activeProjectId.value) return;
+    maxCommits.value = INITIAL_GRAPH_LIMIT;
+    graphDto.value = null;
+    featureDisabled.value = false;
+    localError.value = null;
+    allLoaded.value = false;
+    expandedSha.value = null;
+    await loadGraph();
   },
 );
 

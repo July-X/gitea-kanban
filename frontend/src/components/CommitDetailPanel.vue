@@ -34,13 +34,12 @@ import {
   KeyRound,
 } from 'lucide-vue-next';
 import {
-  commitsGet,
   commitsGetMeta,
   commitsGetFiles,
   getCachedCommitMeta,
   getCachedCommitFiles,
 } from '@renderer/lib/ipc-client';
-import type { CommitGpgDto, CommitFileChangeDto, CommitMetaDto } from '@renderer/types/dto';
+import type { CommitGpgDto, CommitFileChangeDto, CommitFilesDto, CommitMetaDto } from '@renderer/types/dto';
 import { showToast } from '@renderer/lib/toast';
 // Wails 运行时：BrowserOpenURL 在系统默认浏览器打开 URL（window.open 在 Wails
 // WebView 下不可靠——v1 Electron 时代的 setWindowOpenHandler 拦截已不存在）。
