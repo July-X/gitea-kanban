@@ -1535,8 +1535,23 @@ const svgWidth = computed(() => {
 });
 
 const svgHeight = computed(() => {
-  const r = svgRender.value;
-  return r ? `${r.height}px` : '0px';
+  /* v0.9.x patch：原来 = r.height + 'px' 依赖 renderGraphVscode 内部 height 字段，
+   * 但 renderGraphVscode 的 expandY fallback 到 VSCODE_EXPAND_Y=250（accordion mount
+   * 瞬间 / ResizeObserver 异步到位前）。r.height 因此可能比 DOM commit-row 总高矮
+   * 100+px，展开行下面的 commits 在 SVG 范围外 → 视觉上"展开后下方 commits 的 Graph
+   * 整体错位消失"。
+   *
+   * 修复：svgHeight 自己算——跟 graphDto.nodes.length × ROW_H + offsetY - gridY/2
+   * 再叠 expandedHeight.value（accordion DOM scrollHeight，已由 ResizeObserver
+   * 持续测量，含 margin）。不依赖 r.height → 即使 vscode-render 内部 height 算式
+   * 暂时偏小，svgHeight 始终覆盖到 commit-row DOM 真实底沿。 */
+  const dto = graphDto.value;
+  if (!dto) return '0px';
+  const nodeCount = dto.nodes.length;
+  const gridY = dynamicGridY.value;
+  const offsetY = dynamicOffsetY.value;
+  const basePx = nodeCount * gridY + offsetY - gridY / 2;
+  return `${basePx + expandedHeight.value}px`;
 });
 
 // ============================================================
