@@ -964,9 +964,14 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  /* v0.9.x：padding 2 → 5px（上下），line-height: 1 → 1.4 —— 之前 line-height: 1 + 2px padding
+   * 让 11px font 的 descender 紧贴容器底圆角被切。改成 1.4 line-box = 15.4px + padding 5+5 = 25px
+   * 高度，descender 永远不被截。 */
+  padding: 5px 8px 5px 6px;
+  line-height: 1.4;
   border-radius: var(--radius-pill);
   font-weight: 500;
+  font-size: 12px;
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
 }
@@ -987,6 +992,12 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
 }
 
 .statusbar__url {
+  /* v0.9.x：加 display: inline-flex + align-items: center + padding 5px 上下 + line-height 1.4
+   * —— 跟 chip / picker trigger 对称，11px mono URL 文字底沿不再贴 statusbar 边 */
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px 5px 6px;
+  line-height: 1.4;
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1137,12 +1148,10 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  /* v0.9.x：padding 2px → 5px（上下），按钮高度 14 → 22px，文字不再贴底被遮挡 */
+  /* v0.9.x：padding 2px → 5px（上下），line-height: 1 → 1.4 —— 与 picker trigger 对称，
+   * 让 12px font descender 永远不被容器底圆角切 */
   padding: 5px 8px 5px 6px;
-  /* v2.54：显式重置 line-height —— button 默认 line-height 加上 svg 文本基线对齐
-     会让 User 图标被挤到容器顶部（icon 上方出现空隙）。统一 line-height: 1
-     + svg vertical-align: middle 解决垂直对齐问题。 */
-  line-height: 1;
+  line-height: 1.4;
   border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
@@ -1380,10 +1389,9 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   align-items: center;
   gap: 4px;
   /* v0.9.x：padding 2px 6px → 5px 8px 5px 6px（跟账户 trigger 对齐），
-   * 让顶部刷新 / 主题切换等小按钮高度从 14 提到 22px，文字 / svg 上下各有 ~5px buffer */
+   * line-height: 1 → 1.4 —— 跟 picker / chip / account 一致，descender 永远不被切 */
   padding: 5px 8px 5px 6px;
-  /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
-  line-height: 1;
+  line-height: 1.4;
   border: none;
   background: transparent;
   color: var(--color-text-muted);
@@ -1432,11 +1440,13 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   /* v0.9.x：padding 3px → 5px（上下多加 2px），让 button 高度从 18px 提到 22px，
    * 文字（--font-xs 11px 默认）在 22px 容器内上下各有 5.5px 内边距，不再贴边被遮挡。 */
   padding: 5px 8px 5px 6px;
-  /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
-  line-height: 1;
+  /* v0.9.x：line-height: 1 → 1.4 —— 之前 line-height: 1 让 11px font 的 descender
+   * （"g"、"y"、"Dock" 底部下沉）紧贴 line-box 底沿，超出容器 padding 被切。
+   * 改成 1.4 line-box = 15.4px + padding 5+5 = ~25px 高，descender 永远有 buffer。 */
+  line-height: 1.4;
   border: 1px solid transparent;
   background: var(--color-bg-elevated);
-  /* v0.9.x：font-size 11px → 12px 让仓库名更易读；StatusBar 39px 容器内 12px + 5px padding = 22px 高，宽留 17px buffer */
+  /* v0.9.x：font-size 11px → 12px 让仓库名更易读；StatusBar 39px 容器内 12px + line-height 1.4 = 17px 高，再加 10px padding = 27px 容器，紧凑居中 */
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 500;
