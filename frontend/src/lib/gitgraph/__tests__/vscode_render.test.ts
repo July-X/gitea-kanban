@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
 	VSCODE_COLORS,
+	VSCODE_EXPAND_Y,
 	VSCODE_GRID_X,
 	VSCODE_GRID_Y,
 	VSCODE_OFFSET_X,
@@ -250,6 +251,52 @@ describe('gitgraph vscode-render (1:1 复刻 web/graph.ts::Branch.draw)', () => 
 		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 120);
 		assert.ok(r.paths[0]?.d.includes(`L ${VSCODE_OFFSET_X} ${(VSCODE_OFFSET_Y + VSCODE_GRID_Y + 120).toFixed(1)}`), `path 应使用自定义 expandY（y=${(VSCODE_OFFSET_Y + VSCODE_GRID_Y + 120).toFixed(1)}），实际: ${r.paths[0]?.d}`);
 		assert.equal(r.height, 2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2 + 120);
+	});
+
+	/* v0.9.x 回归：commit-row 展开后 accordion 实际 scrollHeight 用 expandedHeight 传入，
+	 * 必须替换默认 VSCODE_EXPAND_Y=250，让 SVG 容器 + dot cy + path 端点偏移全都用 actual 值。
+	 * 修复 commit-row 展开后左侧 Graph 与 DOM row 错位的 bug。 */
+	test('expandedHeight 实际 accordion 高度替换默认 expandY=250', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b'), node(2, 0, 0, 'c')],
+			edges: [
+				{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 },
+				{ fromRow: 1, toRow: 2, fromLane: 0, toLane: 0, color: 0, type: 0 },
+			],
+			maxLane: 0,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+
+		const actualAccordionH = 350;
+		const r = renderGraphVscode(graph, {
+			expandedAt: 0,
+			expandY: VSCODE_EXPAND_Y,
+			expandedHeight: actualAccordionH,
+		});
+
+		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + actualAccordionH);
+		assert.equal(r.nodes[2]?.cy, 2 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + actualAccordionH);
+		assert.equal(r.height, 3 * VSCODE_GRID_Y + VSCODE_OFFSET_Y - VSCODE_GRID_Y / 2 + actualAccordionH);
+	});
+
+	/* v0.9.x 回归：expandedHeight < expandY 时仍用 expandY（fallback）。 */
+	test('expandedHeight < expandY 时 fallback 到 expandY', () => {
+		const graph: GraphResultDto = {
+			nodes: [node(0, 0, 0, 'a'), node(1, 0, 0, 'b')],
+			edges: [{ fromRow: 0, toRow: 1, fromLane: 0, toLane: 0, color: 0, type: 0 }],
+			maxLane: 0,
+			truncated: false,
+		};
+		(graph as any).branches = edgesToBranches(graph.edges);
+
+		const r = renderGraphVscode(graph, {
+			expandedAt: 0,
+			expandY: 250,
+			expandedHeight: 100,
+		});
+
+		assert.equal(r.nodes[1]?.cy, 1 * VSCODE_GRID_Y + VSCODE_OFFSET_Y + 250);
 	});
 
 	// ============================================================

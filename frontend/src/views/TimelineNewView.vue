@@ -706,6 +706,11 @@ const svgRender = computed<VscodeSvgRenderResult | null>(() => {
   return renderGraphVscode(dto, {
     expandedAt: expandedRow.value,
     expandY: activeExpandY.value || undefined,
+    /* v0.9.x：传 commit-row accordion 实际 scrollHeight 替换默认 expandY=250。
+     * SVG height + dot cy + line 端点偏移全部用 actual 值，跟 DOM commit-row
+     * 总高 (ROW_H + actualHeight) 严格一致 —— 解决「展开行后面 commit 的
+     * SVG Graph 跟 DOM row 错位」bug。 */
+    expandedHeight: expandedHeight.value || undefined,
     maxWidth: svgMaxWidth.value, // 使用正确的 maxWidth（包含 padding）
     // v3.4：动态行高对齐（vscode main.ts:801,804）
     gridY: dynamicGridY.value,

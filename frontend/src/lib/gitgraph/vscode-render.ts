@@ -166,6 +166,18 @@ export function renderGraphVscode(
 		expandedAt?: number | null;
 		expandY?: number;
 		/**
+		 * v0.9.x：commit-row 展开后 accordion 实际 scrollHeight（px）。
+		 *
+		 * 旧实现只用固定 expandY=250（VSCODE_EXPAND_Y 默认值），但真实 accordion 高度由
+		 * DOM content 决定（commit message 长度 + files 数量 + GPG 签名块等），典型 250-450px。
+		 * 用固定值会跟真实 DOM commit-row 高（ROW_H + actualHeight）错位，**展开行后面所有
+		 * commit 的 SVG dot 位置跟 DOM commit-row 顶对不齐**。
+		 *
+		 * 修法：传入真实 scrollHeight 给 SVG height + dot cy + line 端点偏移，确保 SVG 容器
+		 * 与 commit-row DOM 总高严格一致。
+		 */
+		expandedHeight?: number;
+		/**
 		 * graph 列最大可见宽度（对齐 vscode-git-graph Graph.limitMaxWidth）。
 		 * - 默认 -1：不限制，SVG 完整渲染 contentWidth
 		 * - 传入 px：SVG 渲染宽度被截短到 min(contentWidth, maxWidth)，
@@ -191,7 +203,12 @@ export function renderGraphVscode(
 ): VscodeSvgRenderResult {
 	const style = options?.style ?? 'rounded';
 	const expandedAt = options?.expandedAt ?? null;
-	const expandY = options?.expandY ?? VSCODE_EXPAND_Y;
+	// v0.9.x：优先用 actual expandedHeight（DOM scrollHeight），fallback 到 expandY=250。
+	// 这样 SVG 容器 + dot cy + line 端点 都跟 commit-row DOM 实际总高（ROW_H + actualHeight）严格一致，
+	// 解决「展开行后面的 commit 的 SVG Graph 跟 DOM row 对不齐」bug。
+	const expandY = options?.expandedHeight && options.expandedHeight > (options.expandY ?? VSCODE_EXPAND_Y)
+		? options.expandedHeight
+		: (options?.expandY ?? VSCODE_EXPAND_Y);
 	const maxWidth = options?.maxWidth ?? -1;
 	// v3.4：动态行高对齐（vscode main.ts:801,804）
 	const gridY = options?.gridY ?? VSCODE_GRID_Y;
