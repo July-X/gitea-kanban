@@ -1137,7 +1137,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px;
+  /* v0.9.x：padding 2px → 5px（上下），按钮高度 14 → 22px，文字不再贴底被遮挡 */
+  padding: 5px 8px 5px 6px;
   /* v2.54：显式重置 line-height —— button 默认 line-height 加上 svg 文本基线对齐
      会让 User 图标被挤到容器顶部（icon 上方出现空隙）。统一 line-height: 1
      + svg vertical-align: middle 解决垂直对齐问题。 */
@@ -1145,11 +1146,14 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: var(--font-xs);
+  /* v0.9.x：font-size --font-xs (11px) → 12px，与仓库 picker trigger 一致 */
+  font-size: 12px;
   font-weight: 500;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  max-width: 220px;
+  /* v0.9.x：max-width 220 → 360 让用户名自适应撑开。span white-space nowrap + 内 padding
+   * 算入 button 宽度。超长（GitHub 用户名 39 字符）仍 ellipsis 兜底不挤爆其他兄弟按钮 */
+  max-width: 360px;
   min-width: 0;
   transition:
     background var(--t-fast) var(--ease),
@@ -1162,6 +1166,10 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   flex-shrink: 0;
 }
 .statusbar__account-trigger span {
+  /* v0.9.x：保留 overflow + text-overflow: ellipsis 让超长（>360px）用户名
+   * 仍能 ellipsis 兜底（statusbar 总宽度有限，URL + repo picker 也占空间），
+   * 但 < 360px 范围内自适应撑开，不再像 220px 那样频繁截断。
+   * 自适应长度规则：button width = 内容真实宽，不写死 min-width。 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1203,7 +1211,9 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px;
+  /* v0.9.x：padding 12px 一致 (顶部 / 左侧 / 右侧)，底部 12px → 14px 让"当前账号"卡
+   * 上下对齐仓库 detail 卡视觉，避免底部 link 按钮贴边 */
+  padding: 12px 12px 14px;
   background: var(--color-primary-soft);
   border-bottom: 1px solid var(--color-divider);
 }
@@ -1287,7 +1297,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  /* v0.9.x：padding 8px 10px → 10px 12px 与仓库 dropdown row 对齐 */
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition:
@@ -1295,7 +1306,8 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
     color var(--t-fast) var(--ease);
 }
 .statusbar__account-row + .statusbar__account-row {
-  margin-top: 2px;
+  /* v0.9.x：margin-top 2px → 3px 跟仓库 dropdown row 对齐 */
+  margin-top: 3px;
 }
 .statusbar__account-row:hover {
   background: var(--color-bg-hover);
@@ -1367,13 +1379,16 @@ async function pickAccount(account: (typeof auth.accounts)[number]): Promise<voi
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px;
+  /* v0.9.x：padding 2px 6px → 5px 8px 5px 6px（跟账户 trigger 对齐），
+   * 让顶部刷新 / 主题切换等小按钮高度从 14 提到 22px，文字 / svg 上下各有 ~5px buffer */
+  padding: 5px 8px 5px 6px;
   /* v2.54：line-height: 1 修复 button 默认行高让 svg baseline 推 icon 到顶部的问题 */
   line-height: 1;
   border: none;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: var(--font-xs);
+  /* v0.9.x：font-size --font-xs (11px) → 12px，与 picker / account trigger 一致 */
+  font-size: 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition:
